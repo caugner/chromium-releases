@@ -31,8 +31,8 @@ class EntropyProviders;
 // Trial and group names for the seed file experiment.
 const char kSeedFileTrial[] = "SeedFileTrial";
 const char kDefaultGroup[] = "Default";
-const char kControlGroup[] = "Control_V8";
-const char kSeedFilesGroup[] = "SeedFiles_V8";
+const char kControlGroup[] = "Control_V9";
+const char kSeedFilesGroup[] = "SeedFiles_V9";
 
 // A sentinel value that may be stored as the latest variations seed value in
 // to indicate that the latest seed is identical to the safe seed. Used to avoid
@@ -418,6 +418,14 @@ class COMPONENT_EXPORT(VARIATIONS) SeedReaderWriter
 
   // Suffix to be used for histograms, either "Latest" or "Safe".
   const std::string histogram_suffix_;
+
+  // Whether to check for the presence of the seed file before reading it. This
+  // is done to distinguish between a missing seed file and read errors. It may
+  // affect performance due to extra IO, so it's only used in pre-stable
+  // channels.
+  // TODO(crbug.com/445615330): Remove this once we have verified that the
+  // reason for the error is that the seed file is missing.
+  bool check_missing_seed_file_ = false;
 
   SEQUENCE_CHECKER(sequence_checker_);
 

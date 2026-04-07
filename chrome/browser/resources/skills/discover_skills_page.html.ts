@@ -20,11 +20,12 @@ ${this.topSkills_().length > 0 ? html`
 <div class="skill-cards-container">
   ${this.topSkills_().map(skill => html`
     <skill-card .skill="${skill}" .cardType="${CardType.DISCOVER_SKILL_CARD}"
+        class="${skill.imageUrl ? 'skill-with-image' : ''}"
         .saveDisabled="${this.shouldDisableSave_(skill)}">
     </skill-card>`)}
 </div>` : ''}
 ${this.getOtherCategories_().length > 0 ? html`
-<h2 class="page-title">$i18n{browseSkillsTitle}</h2>
+<h2 class="page-title" id="browseSkillsTitle">$i18n{browseSkillsTitle}</h2>
 <div id="discoverCategories">
   ${this.getOtherCategories_().map(category => html`
     <cr-chip ?selected="${this.isCategorySelected_(category)}"
@@ -38,6 +39,7 @@ ${this.getOtherCategories_().length > 0 ? html`
 <div class="skill-cards-container">
   ${this.getSelectedSkills_().map(skill => html`
     <skill-card .skill="${skill}" .cardType="${CardType.DISCOVER_SKILL_CARD}"
+        class="${skill.imageUrl ? 'skill-with-image' : ''}"
         .saveDisabled="${this.shouldDisableSave_(skill)}">
     </skill-card>`)}
 </div>` : ''}

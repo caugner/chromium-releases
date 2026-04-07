@@ -252,6 +252,8 @@ class OmniboxEditModel {
                       AutocompleteMatch* match,
                       GURL* alternate_nav_url) const;
 
+  void RecordAiModeButtonClick();
+
   // Navigates to AI Mode, with the contents of the currently selected match, if
   // any.
   // `via_keyboard` is set to `true` if AI Mode was invoked via keyboard event
@@ -645,6 +647,15 @@ class OmniboxEditModel {
                  const GURL& alternate_nav_url,
                  const std::u16string& pasted_text,
                  base::TimeTicks match_selection_timestamp = base::TimeTicks());
+
+  void OnDefaultSearchExtensionDialogDone(
+      OmniboxPopupSelection selection,
+      AutocompleteMatch match,
+      WindowOpenDisposition disposition,
+      const GURL& alternate_nav_url,
+      const std::u16string& pasted_text,
+      base::TimeTicks match_selection_timestamp,
+      bool proceed);
 
   // Updates the feedback type on the match at the given index and schedules a
   // repaint to update the suggestion view. On negative feedback, also shows the

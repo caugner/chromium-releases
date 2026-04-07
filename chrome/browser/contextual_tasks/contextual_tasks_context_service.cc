@@ -27,8 +27,8 @@
 #include "components/optimization_guide/proto/features/contextual_tasks_context.pb.h"
 #include "components/page_content_annotations/content/page_content_annotations_web_contents_observer.h"
 #include "components/page_content_annotations/content/page_content_extraction_service.h"
+#include "components/page_content_annotations/content/page_embeddings_service.h"
 #include "components/page_content_annotations/core/page_content_extraction_types.h"
-#include "components/passage_embeddings/content/page_embeddings_service.h"
 #include "components/passage_embeddings/core/passage_embeddings_types.h"
 #include "components/tabs/public/tab_interface.h"
 #include "content/public/browser/web_contents.h"
@@ -55,9 +55,8 @@ struct TabSimilarityScores {
 };
 
 std::optional<TabSimilarityScores> GetEmbeddingScores(
-    content::WebContents* web_contents,
     const passage_embeddings::Embedding& query_embedding,
-    const std::vector<passage_embeddings::PassageEmbedding>&
+    const std::vector<page_content_annotations::PassageEmbedding>&
         web_contents_embeddings) {
   if (web_contents_embeddings.empty()) {
     return std::nullopt;
@@ -66,7 +65,8 @@ std::optional<TabSimilarityScores> GetEmbeddingScores(
   TabSimilarityScores similarity_scores;
   for (const auto& embedding : web_contents_embeddings) {
     if (kOnlyUseTitlesForSimilarity.Get() &&
-        embedding.passage.second != passage_embeddings::PassageType::kTitle) {
+        embedding.passage.second !=
+            page_content_annotations::EmbeddingPassageType::kTitle) {
       continue;
     }
     float similarity_score = embedding.embedding.ScoreWith(query_embedding);
@@ -134,7 +134,7 @@ double GetTabScore(const TabSelectionOptions& options,
 
 ContextualTasksContextService::ContextualTasksContextService(
     Profile* profile,
-    passage_embeddings::PageEmbeddingsService* page_embeddings_service,
+    page_content_annotations::PageEmbeddingsService* page_embeddings_service,
     passage_embeddings::EmbedderMetadataProvider* embedder_metadata_provider,
     passage_embeddings::Embedder* embedder,
     OptimizationGuideKeyedService* optimization_guide_keyed_service,
@@ -183,13 +183,27 @@ void ContextualTasksContextService::GetRelevantTabsForQuery(
   page_embeddings_service_->ProcessEmbeddingsOnDemand();
 
   AUTO_CONTEXT_LOG("Submitted query to embedder");
+  int64_t request_id = next_request_id_++;
+
+  if (options.tab_selection_timeout &&
+      options.tab_selection_timeout->is_positive()) {
+    base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
+        FROM_HERE,
+        base::BindOnce(&ContextualTasksContextService::OnRequestTimedOut,
+                       weak_ptr_factory_.GetWeakPtr(), request_id),
+        *options.tab_selection_timeout);
+  }
+
   // TODO: crbug.com/452036470 - De-couple embeddings and recency signal
   // computation.
-  embedder_->ComputePassagesEmbeddings(
-      passage_embeddings::PassagePriority::kUrgent, {query},
-      base::BindOnce(&ContextualTasksContextService::OnQueryEmbeddingReady,
-                     weak_ptr_factory_.GetWeakPtr(), query, options, now,
-                     explicit_urls, std::move(callback)));
+  passage_embeddings::Embedder::TaskId task_id =
+      embedder_->ComputePassagesEmbeddings(
+          passage_embeddings::PassagePriority::kUrgent, {query},
+          base::BindOnce(&ContextualTasksContextService::OnQueryEmbeddingReady,
+                         weak_ptr_factory_.GetWeakPtr(), query, options, now,
+                         explicit_urls, request_id));
+  pending_requests_[request_id] =
+      std::make_unique<PendingRequest>(task_id, std::move(callback));
 }
 
 void ContextualTasksContextService::EmbedderMetadataUpdated(
@@ -199,9 +213,9 @@ void ContextualTasksContextService::EmbedderMetadataUpdated(
                                 : std::nullopt;
 }
 
-passage_embeddings::PageEmbeddingsService::Priority
+page_content_annotations::PageEmbeddingsService::Priority
 ContextualTasksContextService::GetDefaultPriority() const {
-  return passage_embeddings::PageEmbeddingsService::Priority::kBackground;
+  return page_content_annotations::PageEmbeddingsService::Priority::kBackground;
 }
 
 void ContextualTasksContextService::OnQueryEmbeddingReady(
@@ -209,13 +223,23 @@ void ContextualTasksContextService::OnQueryEmbeddingReady(
     const TabSelectionOptions& options,
     base::TimeTicks start_time,
     const std::vector<GURL>& explicit_urls,
-    base::OnceCallback<void(std::vector<content::WebContents*>)> callback,
+    int64_t request_id,
     std::vector<std::string> passages,
     std::vector<passage_embeddings::Embedding> embeddings,
     passage_embeddings::Embedder::TaskId task_id,
     passage_embeddings::ComputeEmbeddingsStatus status) {
   base::UmaHistogramTimes("ContextualTasks.Context.QueryEmbeddingLatency",
                           tick_clock_->NowTicks() - start_time);
+
+  auto request_it = pending_requests_.find(request_id);
+  if (request_it == pending_requests_.end()) {
+    // We had timed out already and the callback was already invoked.
+    return;
+  }
+
+  base::OnceCallback<void(std::vector<content::WebContents*>)> callback =
+      std::move(request_it->second->callback);
+  pending_requests_.erase(request_id);
 
   // Query embedding was not successfully generated.
   if (status != passage_embeddings::ComputeEmbeddingsStatus::kSuccess) {
@@ -293,6 +317,23 @@ void ContextualTasksContextService::OnQueryEmbeddingReady(
   std::move(callback).Run(std::move(relevant_tabs));
 }
 
+void ContextualTasksContextService::OnRequestTimedOut(int64_t request_id) {
+  auto request_it = pending_requests_.find(request_id);
+  if (request_it == pending_requests_.end()) {
+    // We had already completed the request and the callback was already
+    // invoked.
+    return;
+  }
+
+  passage_embeddings::Embedder::TaskId task_id = request_it->second->task_id;
+  embedder_->TryCancel(task_id);
+  base::OnceCallback<void(std::vector<content::WebContents*>)> callback =
+      std::move(request_it->second->callback);
+  pending_requests_.erase(request_id);
+  RecordContextDeterminationStatus(ContextDeterminationStatus::kTimedOut);
+  std::move(callback).Run({});
+}
+
 std::vector<content::WebContents*>
 ContextualTasksContextService::GetAllEligibleTabs() {
   std::vector<content::WebContents*> all_tabs;
@@ -351,8 +392,8 @@ ContextualTasksContextService::SelectRelevantTabs(
     TabSignals tab_signals;
     tab_signals.web_contents = web_contents;
     std::optional<TabSimilarityScores> similarity_scores = GetEmbeddingScores(
-        web_contents, query_embedding,
-        page_embeddings_service_->GetEmbeddings(web_contents));
+        query_embedding, page_embeddings_service_->GetEmbeddings(
+                             web_contents->GetPrimaryPage()));
     tab_signals.embedding_score =
         similarity_scores
             ? std::make_optional(similarity_scores->best_similarity_score.first)
@@ -483,5 +524,11 @@ bool ContextualTasksContextService::ShouldAddTabToSelection(
 
   return is_eligible_for_server_upload && !is_sensitive;
 }
+
+ContextualTasksContextService::PendingRequest::PendingRequest(
+    passage_embeddings::Embedder::TaskId task_id,
+    base::OnceCallback<void(std::vector<content::WebContents*>)> callback)
+    : task_id(task_id), callback(std::move(callback)) {}
+ContextualTasksContextService::PendingRequest::~PendingRequest() = default;
 
 }  // namespace contextual_tasks

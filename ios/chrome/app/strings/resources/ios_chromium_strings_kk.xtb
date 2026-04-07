@@ -89,6 +89,7 @@
 <translation id="2517624234762908348">Chromium деректерін синхрондау</translation>
 <translation id="2575968074225731646">iPhone-ның бекіту аймағынан Chromium-ге жылдам кіріңіз.</translation>
 <translation id="2592940277904433508">Chromium-ді пайдалана беру</translation>
+<translation id="2601766165676560303">iPhone және iPad құрылғыларына арналған Chromium тақырыбы</translation>
 <translation id="2607609479243848905">Құпия фразаны ұмытып қалған болсаңыз немесе осы параметрді өзгерту керек болса, <ph name="BEGIN_LINK" />аккаунтыңыздағы Chromium деректерін жойыңыз<ph name="END_LINK" />.</translation>
 <translation id="2640367368802736659">Chromium кеңесі: көрген нәрсеңізді Google Lens көмегімен іздеңіз</translation>
 <translation id="2650312721222849884">Chromium браузерін пайдаланатын кез келген жерден қойындыларды көру үшін синхрондауды қосыңыз.</translation>
@@ -102,6 +103,7 @@
 Chromium тәжірибесін жақсарту үшін деректерді қолданатын басқа параметрлерді <ph name="BEGIN_LINK" />Google қызметтерінен<ph name="END_LINK" /> қараңыз.</translation>
 <translation id="2832168932648876507">Chromium-де дауыспен іздеу.</translation>
 <translation id="2843571538056574338">Chromium-нің автотолтыру параметрлерін орнатыңыз</translation>
+<translation id="2899085719655668655">Chromium-ды әдепкі браузер ретінде орнату жолы көрсетілген "суреттегі сурет" режиміндегі бейне нұсқаулары</translation>
 <translation id="2918709798697875261">Ұйымыңыз Chromium аккаунтыңыздан шығуыңызды талап етеді.</translation>
 <translation id="2942241131342758843">Сілтемелерді ашу, виджеттерден іздеу және басқа қолданбаларда құпия сөздерді автотолтыру үшін Chromium браузерін әдепкісінше пайдаланыңыз.</translation>
 <translation id="2977470724722393594">Chromium жаңартылған</translation>
@@ -374,4 +376,5 @@ Chromium тәжірибесін жақсарту үшін деректерді �
 <translation id="924957577793602335">Chromium браузерін өз талғамыңызға сай реттеңіз</translation>
 <translation id="981812233959540767">Chromium Dino ойынын ойнау</translation>
 <translation id="985602178874221306">The Chromium Authors</translation>
+<translation id="986520777495807752">Chromium-ді әдепкі браузер ретінде орнату</translation>
 </translationbundle>

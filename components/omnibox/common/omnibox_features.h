@@ -56,6 +56,11 @@ BASE_DECLARE_FEATURE(kDocumentProviderNoSyncRequirement);
 BASE_DECLARE_FEATURE(kShowPopupOnMouseReleased);
 BASE_DECLARE_FEATURE(kMostVisitedTilesHorizontalRenderGroup);
 BASE_DECLARE_FEATURE(kRichAutocompletion);
+BASE_DECLARE_FEATURE(kOmniboxAimDeferShowUntilVisualStateReady);
+inline constexpr base::FeatureParam<int>
+    kOmniboxAimDeferShowUntilVisualStateReadyTimeoutMs{
+        &kOmniboxAimDeferShowUntilVisualStateReady,
+        "omnibox_aim_defer_show_until_visual_state_ready_timeout_ms", 250};
 
 // Omnibox UI - these affect the UI or function of the location bar (not the
 // popup).
@@ -83,9 +88,6 @@ BASE_DECLARE_FEATURE(kMlUrlScoring);
 BASE_DECLARE_FEATURE(kMlUrlSearchBlending);
 BASE_DECLARE_FEATURE(kUrlScoringModel);
 
-// Animate appearance of suggestions list.
-BASE_DECLARE_FEATURE(kAnimateSuggestionsListAppearance);
-
 // Allows for touch down events to send a signal to |SearchPrefetchService| to
 // start prefetching the suggestion. The feature only applies to search
 // suggestions and only controls whether the signal is sent.
@@ -106,6 +108,7 @@ BASE_DECLARE_FEATURE(kUseFusedLocationProvider);
 
 BASE_DECLARE_FEATURE(kOmniboxMobileParityUpdate);
 BASE_DECLARE_FEATURE(kOmniboxMobileParityUpdateV2);
+BASE_DECLARE_FEATURE(kOmniboxXGeoPermissionGranularity);
 
 // Omnibox suggestions tuning
 BASE_DECLARE_FEATURE(kNumNtpZpsRecentSearches);

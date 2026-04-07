@@ -88,6 +88,7 @@ Zkuste s odhlášením několik minut počkat. Pokud se teď odhlásíte, tato 
 <translation id="2517624234762908348">Synchronizovat data prohlížeče Chromium</translation>
 <translation id="2575968074225731646">Otevírejte Chromium rychleji přímo z Docku iPhonu.</translation>
 <translation id="2592940277904433508">Pokračovat v používání prohlížeče Chromium</translation>
+<translation id="2601766165676560303">Motiv Chromium pro iPhone a iPad</translation>
 <translation id="2607609479243848905">Pokud heslovou frázi zapomenete nebo toto nastavení budete chtít změnit, <ph name="BEGIN_LINK" />vymažte data prohlížeče Chromium ve svém účtu<ph name="END_LINK" />.</translation>
 <translation id="2640367368802736659">Tip pro Chromium: Vyhledávejte pomocí Google Lens cokoli, co vidíte</translation>
 <translation id="2650312721222849884">Chcete-li mít své karty k dispozici všude, kde používáte Chromium, zapněte synchronizaci</translation>
@@ -101,6 +102,7 @@ Zkuste s odhlášením několik minut počkat. Pokud se teď odhlásíte, tato 
 Další nastavení využití dat ke zlepšení prostředí v prohlížeči Chromium najdete v sekci <ph name="BEGIN_LINK" />Služby Google<ph name="END_LINK" />.</translation>
 <translation id="2832168932648876507">Vyhledávat hlasem v prohlížeči Chromium.</translation>
 <translation id="2843571538056574338">Používejte Chromium pro automatické vyplňování</translation>
+<translation id="2899085719655668655">Obraz v obraze s videonávodem, jak nastavit Chromium jako výchozí prohlížeč</translation>
 <translation id="2918709798697875261">Organizace vyžaduje, abyste zůstali odhlášeni z Chromia.</translation>
 <translation id="2942241131342758843">Používejte Chromium jako výchozí prohlížeč k otevírání odkazů, vyhledávání z widgetů a automatickému vyplňování hesel v jiných aplikacích</translation>
 <translation id="2977470724722393594">Chromium je aktuální</translation>
@@ -373,4 +375,5 @@ Zkuste s odhlášením několik minut počkat. Pokud se teď odhlásíte, tato 
 <translation id="924957577793602335">Přizpůsobte si Chromium</translation>
 <translation id="981812233959540767">Hrát dinosauří hru v prohlížeči Chromium</translation>
 <translation id="985602178874221306">Autoři prohlížeče Chromium</translation>
+<translation id="986520777495807752">Nastavte si Chromium jako výchozí prohlížeč</translation>
 </translationbundle>

@@ -18,6 +18,7 @@
 #include "chrome/browser/glic/glic_pref_names.h"
 #include "chrome/browser/glic/host/context/glic_sharing_utils.h"
 #include "chrome/browser/glic/public/context/glic_sharing_manager.h"
+#include "chrome/browser/glic/public/features.h"
 #include "chrome/browser/glic/public/glic_enabling.h"
 #include "chrome/browser/glic/service/metrics/metrics_types.h"
 #include "chrome/browser/glic/widget/glic_window_controller.h"
@@ -344,6 +345,33 @@ GlicMetrics::GlicMetrics(Profile* profile, GlicEnabling* enabling)
 
 GlicMetrics::~GlicMetrics() = default;
 
+void GlicMetrics::RecordGlicProfilePreferences() {
+  PrefService* profile_prefs = profile_->GetPrefs();
+  PrefService* local_state = g_browser_process->local_state();
+
+  base::UmaHistogramBoolean(
+      "Glic.Preferences.PinnedToTabstrip",
+      profile_prefs->GetBoolean(prefs::kGlicPinnedToTabstrip));
+  base::UmaHistogramBoolean(
+      "Glic.Preferences.LauncherEnabled",
+      local_state->GetBoolean(prefs::kGlicLauncherEnabled));
+  base::UmaHistogramBoolean(
+      "Glic.Preferences.KeepSidepanelOpenOnNewTabsEnabled",
+      profile_prefs->GetBoolean(prefs::kGlicKeepSidepanelOpenOnNewTabsEnabled));
+  base::UmaHistogramBoolean(
+      "Glic.Preferences.GeolocationEnabled",
+      profile_prefs->GetBoolean(prefs::kGlicGeolocationEnabled));
+  base::UmaHistogramBoolean(
+      "Glic.Preferences.MicrophoneEnabled",
+      profile_prefs->GetBoolean(prefs::kGlicMicrophoneEnabled));
+  base::UmaHistogramBoolean(
+      "Glic.Preferences.DefaultTabContextEnabled",
+      profile_prefs->GetBoolean(prefs::kGlicDefaultTabContextEnabled));
+  base::UmaHistogramBoolean(
+      "Glic.Preferences.ActuationOnWeb",
+      profile_prefs->GetBoolean(prefs::kGlicUserEnabledActuationOnWeb));
+}
+
 void GlicMetrics::OnTrustFirstOnboardingAccept() {
   OnFreAccepted();
   base::RecordAction(base::UserMetricsAction("Glic.Fre.Accept"));
@@ -392,6 +420,7 @@ void GlicMetrics::OnInstanceClosed() {
 void GlicMetrics::OnFreAccepted() {
   // Store the current time in a instance variable.
   fre_accepted_time_ = base::TimeTicks::Now();
+  onboarding_invocation_source_ = invocation_source_;
 }
 
 void GlicMetrics::OnUserInputSubmitted(mojom::WebClientMode mode) {
@@ -400,8 +429,17 @@ void GlicMetrics::OnUserInputSubmitted(mojom::WebClientMode mode) {
     base::UmaHistogramLongTimes("Glic.FreToFirstQueryTime", delta);
     base::UmaHistogramCustomTimes("Glic.FreToFirstQueryTimeMax24H", delta,
                                   base::Milliseconds(1), base::Hours(24), 50);
+    base::UmaHistogramEnumeration(
+        "Glic.Fre.UserInput.Entrypoint",
+        glic::GetEntrypointFromInvocationSource(onboarding_invocation_source_));
     fre_accepted_time_ = base::TimeTicks();
   }
+
+  if (base::FeatureList::IsEnabled(
+          features::kGlicFixTimeToFirstQueryKillSwitch)) {
+    return;
+  }
+
   base::UmaHistogramEnumeration(
       "Glic.Session.InputSubmit.BrowserActiveState",
       browser_activity_observer_->GetBrowserActiveState());
@@ -747,14 +785,14 @@ void GlicMetrics::OnGlicWindowClose(Browser* last_active_browser,
   session_start_time_ = base::TimeTicks();
 
   InputModesUsed modes_used = InputModesUsed::kNone;
-  if (!inputs_modes_used_.empty()) {
-    if (inputs_modes_used_.size() == 2) {
-      modes_used = InputModesUsed::kTextAndAudio;
-    } else {
-      modes_used = inputs_modes_used_.contains(mojom::WebClientMode::kAudio)
-                       ? InputModesUsed::kOnlyAudio
-                       : InputModesUsed::kOnlyText;
-    }
+  bool has_audio = inputs_modes_used_.contains(mojom::WebClientMode::kAudio);
+  bool has_text = inputs_modes_used_.contains(mojom::WebClientMode::kText);
+  if (has_audio && has_text) {
+    modes_used = InputModesUsed::kTextAndAudio;
+  } else if (has_audio) {
+    modes_used = InputModesUsed::kOnlyAudio;
+  } else if (has_text) {
+    modes_used = InputModesUsed::kOnlyText;
   }
   inputs_modes_used_.clear();
   base::UmaHistogramEnumeration("Glic.Session.InputModesUsed", modes_used);
@@ -844,10 +882,10 @@ void GlicMetrics::LogGetContextForActorFromTabError(
 
 void GlicMetrics::OnActivateTabFromInstance(tabs::TabInterface* tab) {
 #if !BUILDFLAG(IS_ANDROID)
-  actor::TaskId task_id =
+  const actor::ActorTask* task =
       actor::ActorKeyedService::Get(profile_)->GetTaskFromTab(*tab);
   // Record user action if the tab is associated with an ActorTask.
-  if (!task_id.is_null()) {
+  if (task) {
     base::RecordAction(
         base::UserMetricsAction("Glic.Instance.TaskTabForegrounded"));
   }
@@ -875,8 +913,10 @@ void GlicMetrics::SetDelegateForTesting(std::unique_ptr<Delegate> delegate) {
 }
 
 void GlicMetrics::DidRequestContextFromTab(tabs::TabInterface& tab) {
-  last_tab_context_source_id_ =
-      tab.GetContents()->GetPrimaryMainFrame()->GetPageUkmSourceId();
+  if (content::WebContents* contents = tab.GetContents()) {
+    last_tab_context_source_id_ =
+        contents->GetPrimaryMainFrame()->GetPageUkmSourceId();
+  }
 }
 
 void GlicMetrics::SetWebClientMode(mojom::WebClientMode mode) {

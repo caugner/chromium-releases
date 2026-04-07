@@ -14,6 +14,7 @@ source_set("lens") {
     "lens_composebox_controller.h",
     "lens_keyed_service.h",
     "lens_keyed_service_factory.h",
+    "lens_overlay_colors.h",
     "lens_overlay_controller.h",
     "lens_overlay_entry_point_controller.h",
     "lens_overlay_gen204_controller.h",
@@ -38,7 +39,6 @@ source_set("lens") {
     "lens_keyed_service_factory.h",
     "lens_media_link_handler.h",
     "lens_overlay_blur_layer_delegate.h",
-    "lens_overlay_colors.h",
     "lens_overlay_event_handler.h",
     "lens_overlay_image_helper.h",
     "lens_overlay_languages_controller.h",
@@ -66,9 +66,11 @@ source_set("lens") {
     "//chrome/browser/search_engines",
     "//chrome/browser/themes",
     "//chrome/browser/ui/contextual_search",
+    "//chrome/browser/ui/desktop_to_mobile_promos:service",
     "//chrome/browser/ui/exclusive_access",
     "//chrome/browser/ui/omnibox",
-    "//chrome/browser/ui/promos:service",
+    "//chrome/browser/ui/side_panel",
+    "//chrome/browser/ui/side_panel:side_panel_views_dependent",
     "//chrome/browser/ui/views/frame:immersive_mode_controller",
     "//chrome/browser/ui/views/side_panel",
     "//chrome/browser/ui/webui/cr_components/searchbox",
@@ -372,6 +374,7 @@ source_set("interactive_ui_tests") {
     "//components/user_education/views",
     "//content/test:test_support",
     "//testing/gtest",
+    "//ui/base/clipboard:clipboard_test_support",
   ]
   if (enable_pdf) {
     deps += [ "//components/pdf/browser" ]

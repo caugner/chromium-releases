@@ -77,13 +77,6 @@ bool IsComposeboxAIMNudgeEnabled();
 // Whether the composebox + menu should show the title.
 bool IsComposeboxMenuTitleEnabled();
 
-// Used to check if we should display contextual suggestions for an image
-// attachment.
-BASE_DECLARE_FEATURE(kComposeboxFetchContextualSuggestionsForImage);
-
-// Whether or not we should display contextual suggestions for an image.
-bool IsComposeboxFetchContextualSuggestionsForImageEnabled();
-
 // Used to check if we should display contextual suggestions for multiple
 // attachments.
 BASE_DECLARE_FEATURE(
@@ -92,5 +85,27 @@ BASE_DECLARE_FEATURE(
 // Whether or not we should display contextual suggestions for multiple
 // attachments;
 bool IsComposeboxFetchContextualSuggestionsForMultiAttachmentsEnabled();
+
+// Used to conditionally show the + button in the composebox input plate.
+BASE_DECLARE_FEATURE(kComposeboxConditionalPlusButton);
+
+// Parameter name to determine the variant behavior of the conditional plus
+// button.
+extern const char kComposeboxConditionalPlusButtonParam[];
+
+// Represents the variant behaviors available for conditionally showing the plus
+// button.
+enum class ComposeboxConditionalPlusButtonVariant {
+  kDefault = 0,
+  // Hides the plus button entirely while in the pre-edit state.
+  kHideInPreEdit = 1,
+};
+
+// Returns the active variant for the conditional plus button logic.
+ComposeboxConditionalPlusButtonVariant
+GetComposeboxConditionalPlusButtonVariant();
+
+// Whether the composebox + button should be conditionally hidden.
+bool IsComposeboxConditionalPlusButtonEnabled();
 
 #endif  // IOS_CHROME_BROWSER_COMPOSEBOX_PUBLIC_FEATURES_H_

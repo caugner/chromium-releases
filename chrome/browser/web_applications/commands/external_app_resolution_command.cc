@@ -21,6 +21,7 @@
 #include "chrome/browser/web_applications/commands/web_app_uninstall_command.h"
 #include "chrome/browser/web_applications/external_install_options.h"
 #include "chrome/browser/web_applications/externally_managed_app_manager.h"
+#include "chrome/browser/web_applications/jobs/finalize_install_job.h"
 #include "chrome/browser/web_applications/jobs/install_from_info_job.h"
 #include "chrome/browser/web_applications/jobs/install_placeholder_job.h"
 #include "chrome/browser/web_applications/jobs/uninstall/remove_install_url_job.h"
@@ -43,7 +44,6 @@
 #include "chrome/browser/web_applications/web_app_ui_manager.h"
 #include "chrome/browser/web_applications/web_contents/web_app_data_retriever.h"
 #include "chrome/browser/web_applications/web_contents/web_contents_manager.h"
-#include "chrome/common/chrome_features.h"
 #include "components/services/app_service/public/cpp/app_launch_util.h"
 #include "components/webapps/browser/install_result_code.h"
 #include "components/webapps/browser/installable/installable_metrics.h"
@@ -462,7 +462,7 @@ void ExternalAppResolutionCommand::OnLockUpgradedFinalizeInstall(
     std::move(on_lock_upgraded_callback_for_testing_).Run();
   }
 
-  WebAppInstallFinalizer::FinalizeOptions finalize_options(install_surface_);
+  FinalizeJobOptions finalize_options(install_surface_);
   finalize_options.overwrite_existing_manifest_fields =
       install_params_->force_reinstall;
 
@@ -488,8 +488,11 @@ void ExternalAppResolutionCommand::OnLockUpgradedFinalizeInstall(
     finalize_options.skip_icon_writes_on_download_failure =
         icon_download_failed;
   }
-  apps_lock_->install_finalizer().FinalizeInstall(
-      *web_app_info_, finalize_options,
+
+  install_job_.emplace(*profile_, apps_lock_.get(), apps_lock_.get(),
+                       *web_app_info_, finalize_options);
+
+  install_job_->Start(
       base::BindOnce(&ExternalAppResolutionCommand::OnInstallFinalized,
                      weak_ptr_factory_.GetWeakPtr()));
 }
@@ -497,6 +500,7 @@ void ExternalAppResolutionCommand::OnLockUpgradedFinalizeInstall(
 void ExternalAppResolutionCommand::OnInstallFinalized(
     const webapps::AppId& app_id,
     webapps::InstallResultCode code) {
+  install_job_.reset();
   CHECK(web_contents_ && !web_contents_->IsBeingDestroyed());
   install_code_ = code;
 
@@ -757,7 +761,7 @@ void ExternalAppResolutionCommand::OnInstallFromInfoAppLockAcquired() {
       install_surface_, *install_params_,
       base::BindOnce(&ExternalAppResolutionCommand::OnInstallFromInfoCompleted,
                      weak_ptr_factory_.GetWeakPtr()));
-  install_from_info_job_->Start(apps_lock_.get());
+  install_from_info_job_->Start(apps_lock_.get(), apps_lock_.get());
 }
 
 void ExternalAppResolutionCommand::OnInstallFromInfoCompleted(

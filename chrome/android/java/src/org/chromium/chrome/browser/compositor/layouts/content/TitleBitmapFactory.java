@@ -139,6 +139,17 @@ public class TitleBitmapFactory {
                     Bitmap.createBitmap(
                             mFaviconDimension, mFaviconDimension, Bitmap.Config.ARGB_8888);
             Canvas c = new Canvas(b);
+
+            // Disable density scaling on the canvas so bitmaps are drawn at their exact pixel
+            // dimensions. This prevents any automatic DPI-based scaling by the canvas.
+            c.setDensity(Bitmap.DENSITY_NONE);
+
+            // Smooth edges and apply bilinear filtering when the bitmap is scaled to prevent
+            // pixelation.
+            Paint paint = new Paint();
+            paint.setAntiAlias(true);
+            paint.setFilterBitmap(true);
+
             if (favicon.getWidth() > mFaviconDimension || favicon.getHeight() > mFaviconDimension) {
                 float scale =
                         (float) mFaviconDimension
@@ -149,7 +160,7 @@ public class TitleBitmapFactory {
                         Math.round((mFaviconDimension - favicon.getWidth()) / 2.0f),
                         Math.round((mFaviconDimension - favicon.getHeight()) / 2.0f));
             }
-            c.drawBitmap(favicon, 0, 0, null);
+            c.drawBitmap(favicon, 0, 0, paint);
             return b;
         } catch (OutOfMemoryError ex) {
             Log.e(TAG, "OutOfMemoryError while building favicon texture.");
@@ -188,6 +199,14 @@ public class TitleBitmapFactory {
                 TabGroupColorPickerUtils.getTabGroupColorPickerItemTextColor(
                         context, colorId, mIncognito);
         mGroupTextPaint.setColor(color);
+        return getTitleBitmap(mGroupTextPaint, mGroupTextHeight, mGroupTextYOffset, title);
+    }
+
+    /** Generates a generic button text bitmap using the smaller group text style. */
+    public @Nullable Bitmap getButtonTextBitmap(String title) {
+        // TODO(crbug.com/488156860): Based on UX decision, either reuse group styling and rename
+        // the variables, or create new text styling.
+        mGroupTextPaint.setColor(mTabTextPaint.getColor());
         return getTitleBitmap(mGroupTextPaint, mGroupTextHeight, mGroupTextYOffset, title);
     }
 
@@ -247,10 +266,10 @@ public class TitleBitmapFactory {
     }
 
     /**
-     * @param titleString The title of the tab group.
+     * @param titleString The title to measure.
      * @return The width in px of the title.
      */
-    public int getGroupTitleWidth(String titleString) {
+    public int getTitleWidth(String titleString) {
         return getTitleWidth(titleString, mGroupTextPaint);
     }
 

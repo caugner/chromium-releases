@@ -9,7 +9,6 @@ import {html} from '//resources/lit/v3_0/lit.rollup.js';
 import type {ComposeboxElement} from './composebox.js';
 import {getHtml as getContextMenuHtml} from './composebox_context_menu.html.js';
 import {getHtml as getSubmitButtonHtml} from './composebox_submit_button.html.js';
-import {getHtml as getToolChipsHtml} from './composebox_tool_chips.html.js';
 
 export function getHtml(this: ComposeboxElement) {
   // clang-format off
@@ -24,71 +23,41 @@ export function getHtml(this: ComposeboxElement) {
         exportparts="composebox-background">
     </search-animated-glow>
   ` : ''}
-  <ntp-error-scrim id="errorScrim" part="error-scrim"
-    ?compact-mode="${this.searchboxLayoutMode === 'Compact' &&
-                     this.files_.size === 0}"
-    .errorMessage="${this.errorMessage_}"
-    @dismiss-error-scrim="${this.onErrorScrimDismissed_}">
-  </ntp-error-scrim>
-  <div id="composebox" part="composebox" ?inert="${!!this.errorMessage_}"
-      @keydown="${this.onKeydown_}"
-      @focusin="${this.handleComposeboxFocusIn_}"
-      @focusout="${this.handleComposeboxFocusOut_}"
-      @dragenter="${this.dragAndDropHandler_.handleDragEnter}"
-      @dragover="${this.dragAndDropHandler_.handleDragOver}"
-      @dragleave="${this.dragAndDropHandler_.handleDragLeave}"
-      @drop="${this.dragAndDropHandler_.handleDrop}"
-      @paste="${this.onPaste_}">
+    <ntp-error-scrim id="errorScrim" part="error-scrim"
+        ?compact-mode="${this.searchboxLayoutMode === 'Compact' &&
+                         this.files.size === 0}"
+        .errorMessage="${this.errorMessage}"
+        @dismiss-error-scrim="${this.onDismissErrorScrim_}">
+    </ntp-error-scrim>
+    <div id="composebox" part="composebox" ?inert="${!!this.errorMessage}"
+        @keydown="${this.onKeydown_}"
+        @focusin="${this.onComposeboxFocusin_}"
+        @focusout="${this.onComposeboxFocusout_}"
+        @dragenter="${this.dragAndDropHandler_.handleDragEnter}"
+        @dragover="${this.dragAndDropHandler_.handleDragOver}"
+        @dragleave="${this.dragAndDropHandler_.handleDragLeave}"
+        @drop="${this.dragAndDropHandler_.handleDrop}"
+        @paste="${this.onPaste_}">
     <div id="inputContainer" part="input-container">
-      <div id="textContainer" part="text-container">
-        <div id="iconContainer" part="icon-container">
-          <div id="aimIcon"></div>
-        </div>
-        <div id="inputWrapper">
-          ${!this.disableCaretColorAnimation ? html`
-            <div id="mirror" part="mirror" aria-hidden="true"></div>
-            <div id="caret"></div>
-          ` : ''}
-          <textarea
-            aria-expanded="${this.showDropdown_}" aria-controls="matches"
-            role="combobox" autocomplete="off" id="input"
-            type="search" spellcheck="false"
-            placeholder="${this.inputPlaceholder_}"
-            part="input"
-            .value="${this.input_}"
-            @click="${this.updateCaret_}"
-            @keyup="${this.updateCaret_}"
-            @input="${this.handleInput_}"
-            @scroll="${this.handleScroll_}"
-            @focusin="${this.handleInputFocusIn_}"></textarea>
-          ${this.shouldShowSmartComposeInlineHint_() ? html`
-            <div id="smartCompose" part="smart-compose">
-              <!-- Comments in between spans to eliminate spacing between
-                   spans -->
-              <span id="invisibleText">${this.input_}</span><!--
-              --><span id="ghostText">${this.smartComposeInlineHint_}</span><!--
-              --><span id="tabChip">${this.i18n('composeboxSmartComposeTabTitle')}</span>
-            </div>
-          `: ''}
-        </div>
-      </div>
-      <!-- A seperate container is needed for the submit button so the
-      expand/collapse animation can be applied without affecting the submit
-      button enabled/disabled state. -->
-      <div id="cancelContainer" class="icon-fade" part="cancel">
-        <cr-icon-button
-            class="action-icon icon-clear"
-            id="cancelIcon"
-            part="action-icon cancel-icon"
-            title="${this.computeCancelButtonTitle_()}"
-            @click="${this.onCancelClick_}"
-            ?disabled="${this.isCollapsible && !this.submitEnabled_}">
-        </cr-icon-button>
-      </div>
+      <cr-composebox-input id="composeboxInput"
+          exportparts="text-container, icon-container, mirror, input, smart-compose, cancel, action-icon, cancel-icon"
+          .disableCaretColorAnimation="${this.disableCaretColorAnimation}"
+          .showDropdown="${this.showDropdown_}"
+          .inputPlaceholder="${this.inputPlaceholder}"
+          .input="${this.input}"
+          .smartComposeInlineHint="${this.smartComposeInlineHint_}"
+          .isCollapsible="${this.isCollapsible}"
+          .submitEnabled="${this.submitEnabled_}"
+          .entrypointName="${this.entrypointName}"
+          .cancelButtonTitle="${this.computeCancelButtonTitle_()}"
+          @input-input="${this.onInputInput_}"
+          @input-focusin="${this.onInputFocusin_}"
+          @cancel-click="${this.onCancelClick_}">
+      </cr-composebox-input>
       <div id="context" part="context-entrypoint"
           class="${this.carouselOnTop_ && this.isCollapsible ? 'icon-fade' : ''}">
         <cr-composebox-file-inputs id="fileInputs"
-            @on-file-change="${this.onFileChange_}"
+            @file-change="${this.onFileChange_}"
             .disableFileInputs="${this.shouldDisableFileInputs_()}">
           ${this.searchboxLayoutMode === 'Compact' && !this.isOmniboxInCompactMode_ ?
             getContextMenuHtml.bind(this)()
@@ -101,14 +70,19 @@ export function getHtml(this: ComposeboxElement) {
                   exportparts="thumbnail, thumbnail-title"
                   id="carousel"
                   class="${this.carouselOnTop_ ? 'top' : ''}"
-                  .files="${Array.from(this.files_.values())}"
+                  .files="${Array.from(this.files.values())}"
                   ?enable-scrolling="${this.enableCarouselScrolling}"
                   @delete-file="${this.onDeleteFile_}">
                 </cr-composebox-file-carousel> ` : ''}
-                ${this.searchboxLayoutMode === 'Compact' && this.inToolMode_ && !this.showDropdown_ ? html`
+                ${this.searchboxLayoutMode === 'Compact' && this.inToolMode_ ? html`
                 <div class="context-menu-container" id="toolChipsContainer"
                     part="tool-chips-container">
-                  ${getToolChipsHtml.bind(this)()}
+                    <cr-composebox-tool-chip
+                      exportparts="tool-chip-label"
+                      .inputState="${this.inputState}"
+                      .isCanvasQuerySubmitted="${this.isCanvasQuerySubmitted}"
+                      @tool-click="${this.onToolClick_}">
+                    </cr-composebox-tool-chip>
                 </div>
                 ` : ''}
             </div>
@@ -130,25 +104,19 @@ export function getHtml(this: ComposeboxElement) {
               .result="${this.result_}"
               .selectedMatchIndex="${this.selectedMatchIndex_}"
               .maxSuggestions="${this.maxSuggestions}"
-              .toolMode="${this.activeToolMode_}"
+              .toolMode="${this.inputState?.activeTool}"
               @selected-match-index-changed="${this.onSelectedMatchIndexChanged_}"
               @match-focusin="${this.onMatchFocusin_}"
               @match-click="${this.onMatchClick_}"
-              ?hidden="${!this.showDropdown_}"
+              ?hidden="${!this.showDropdown_ || !this.dropdownNeeded}"
               .lastQueriedInput="${this.lastQueriedInput_}">
           </cr-composebox-dropdown>
-          ${this.searchboxLayoutMode === 'Compact' && this.inToolMode_ && this.showDropdown_ ? html`
-            <div class="context-menu-container" id="toolChipsContainer"
-                part="tool-chips-container">
-              ${getToolChipsHtml.bind(this)()}
-            </div>
-          ` : ''}
           ${this.searchboxLayoutMode === 'TallBottomContext' || this.searchboxLayoutMode === '' || this.isOmniboxInCompactMode_ ? html`
             ${this.contextMenuEnabled_ ? getContextMenuHtml.bind(this)() : ''}
           `: ''}
           ${this.shouldShowVoiceSearchAtBottom_() ? html`
             <cr-icon-button id="voiceSearchButton" class="voice-icon" part="voice-icon"
-                iron-icon="cr:mic" @click="${this.openAimVoiceSearch_}"
+                iron-icon="cr:mic" @click="${this.onVoiceSearchButtonClick_}"
                 title="${this.i18n('voiceSearchButtonLabel')}">
             </cr-icon-button>
           ` : ''}
@@ -165,7 +133,7 @@ export function getHtml(this: ComposeboxElement) {
         title="${this.i18n('lensSearchButtonLabel')}"
         @click="${this.onLensClick_}"
         ?disabled="${this.lensButtonDisabled}"
-        @mousedown="${this.onLensIconMouseDown_}">
+        @mousedown="${this.onLensIconMousedown_}">
     </cr-icon-button>` : ''}
     <!-- Elements rendered under the input container. -->
     <!-- TODO: Move the submit button and Lens icon into this slot. -->
@@ -177,7 +145,7 @@ export function getHtml(this: ComposeboxElement) {
   </div>
   ${this.shouldShowVoiceSearch_() ? html`
     <cr-composebox-voice-search id="voiceSearch"
-        @voice-search-cancel="${this.onVoiceSearchClose_}"
+        @voice-search-cancel="${this.onVoiceSearchCancel_}"
         @voice-search-final-result="${this.onVoiceSearchFinalResult_}"
         @voice-search-error="${this.onVoiceSearchError_}"
         @transcript-update="${this.onTranscriptUpdate_}"

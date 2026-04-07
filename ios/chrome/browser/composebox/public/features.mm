@@ -93,18 +93,29 @@ bool IsComposeboxMenuTitleEnabled() {
   return base::FeatureList::IsEnabled(kComposeboxMenuTitle);
 }
 
-BASE_FEATURE(kComposeboxFetchContextualSuggestionsForImage,
-             base::FEATURE_ENABLED_BY_DEFAULT);
-
-bool IsComposeboxFetchContextualSuggestionsForImageEnabled() {
-  return base::FeatureList::IsEnabled(
-      kComposeboxFetchContextualSuggestionsForImage);
-}
-
 BASE_FEATURE(kComposeboxFetchContextualSuggestionsForMultipleAttachments,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
 bool IsComposeboxFetchContextualSuggestionsForMultiAttachmentsEnabled() {
   return base::FeatureList::IsEnabled(
       kComposeboxFetchContextualSuggestionsForMultipleAttachments);
+}
+
+BASE_FEATURE(kComposeboxConditionalPlusButton,
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
+const char kComposeboxConditionalPlusButtonParam[] =
+    "ComposeboxConditionalPlusButtonParam";
+
+ComposeboxConditionalPlusButtonVariant
+GetComposeboxConditionalPlusButtonVariant() {
+  return static_cast<ComposeboxConditionalPlusButtonVariant>(
+      base::GetFieldTrialParamByFeatureAsInt(
+          kComposeboxConditionalPlusButton,
+          kComposeboxConditionalPlusButtonParam,
+          static_cast<int>(ComposeboxConditionalPlusButtonVariant::kDefault)));
+}
+
+bool IsComposeboxConditionalPlusButtonEnabled() {
+  return base::FeatureList::IsEnabled(kComposeboxConditionalPlusButton);
 }

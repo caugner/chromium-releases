@@ -6,6 +6,8 @@
 
 #include "base/base64.h"
 #include "base/base64url.h"
+#include "base/containers/fixed_flat_map.h"
+#include "base/feature_list.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
@@ -27,7 +29,6 @@
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/omnibox/omnibox_controller.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
-#include "chrome/browser/ui/tabs/tab_renderer_data.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/new_tab_page/composebox/variations/composebox_fieldtrial.h"
 #include "chrome/browser/ui/webui/webui_embedding_context.h"
@@ -87,8 +88,6 @@ const char* kAnswerSunriseIconResourceName =
     "//resources/cr_components/searchbox/icons/sunrise.svg";
 const char* kAnswerTranslationIconResourceName =
     "//resources/cr_components/searchbox/icons/translation.svg";
-const char* kAnswerWhenIsIconResourceName =
-    "//resources/cr_components/searchbox/icons/when_is.svg";
 const char* kBookmarkIconResourceName = "//resources/images/icon_bookmark.svg";
 const char* kCalculatorIconResourceName =
     "//resources/cr_components/searchbox/icons/calculator.svg";
@@ -188,8 +187,6 @@ static void DefineChromeRefreshRealboxIcons() {
       "//resources/cr_components/searchbox/icons/sunrise_cr23.svg";
   kAnswerTranslationIconResourceName =
       "//resources/cr_components/searchbox/icons/translation_cr23.svg";
-  kAnswerWhenIsIconResourceName =
-      "//resources/cr_components/searchbox/icons/when_is_cr23.svg";
   kBookmarkIconResourceName =
       "//resources/cr_components/searchbox/icons/bookmark_cr23.svg";
   kCalculatorIconResourceName =
@@ -300,13 +297,16 @@ std::string GetBase64UrlVariations(Profile* profile) {
   return variations_base64url;
 }
 
+BASE_FEATURE(kDropMismatchedSelections, base::FEATURE_ENABLED_BY_DEFAULT);
+
 }  // namespace
 
 // static
 void SearchboxHandler::SetupWebUIDataSource(content::WebUIDataSource* source,
                                             Profile* profile,
                                             bool enable_voice_search,
-                                            bool enable_lens_search) {
+                                            bool enable_lens_search,
+                                            bool session_allows_drag_and_drop) {
   // The WebUI Omnibox code will override this to `true` to adjust various
   // color and layout options.
   source->AddBoolean("isTopChromeSearchbox", false);
@@ -397,6 +397,14 @@ void SearchboxHandler::SetupWebUIDataSource(content::WebUIDataSource* source,
       {"canvas", IDS_NTP_COMPOSE_CANVAS},
       {"geminiModelAuto", IDS_NTP_COMPOSE_AUTO_MODEL},
       {"geminiModelThinking", IDS_NTP_COMPOSE_THINKING_3_PRO},
+      {"composeboxHintTextAskAboutThese",
+       IDS_COMPOSE_HINT_TEXT_ASK_ABOUT_THESE},
+      {"composeboxHintTextAskAboutThisImage",
+       IDS_COMPOSE_HINT_TEXT_ASK_ABOUT_THIS_IMAGE},
+      {"composeboxHintTextAskAboutThisTab",
+       IDS_COMPOSE_HINT_TEXT_ASK_ABOUT_THIS_TAB},
+      {"composeboxHintTextAskAboutThisDoc",
+       IDS_COMPOSE_HINT_TEXT_ASK_ABOUT_THIS_DOC},
   };
   source->AddLocalizedStrings(kStrings);
   source->AddString("searchboxComposePlaceholder",
@@ -411,15 +419,7 @@ void SearchboxHandler::SetupWebUIDataSource(content::WebUIDataSource* source,
                                  u"aim&utm_campaign=aim_str"));
 
   DefineChromeRefreshRealboxIcons();
-  source->AddString(
-      "searchboxDefaultIcon",
-      base::FeatureList::IsEnabled(ntp_features::kRealboxUseGoogleGIcon)
-#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
-          ? kGoogleGIconResourceName
-#else
-          ? kSearchIconResourceName
-#endif
-          : kSearchIconResourceName);
+  source->AddString("searchboxDefaultIcon", kSearchIconResourceName);
 
   source->AddBoolean("searchboxVoiceSearch", enable_voice_search);
   source->AddBoolean("searchboxLensSearch", enable_lens_search);
@@ -430,15 +430,13 @@ void SearchboxHandler::SetupWebUIDataSource(content::WebUIDataSource* source,
   source->AddBoolean("searchboxCr23SteadyStateShadow",
                      ntp_features::kNtpRealboxCr23SteadyStateShadow.Get());
 
-  auto composebox_config = ntp_composebox::FeatureConfig::Get().config;
-  int max_images = 0;
-  int max_pdfs = 0;
-  int max_files = 0;
+  int max_files = 10;
+  int max_images = max_files;
+  int max_pdfs = max_files;
   AimEligibilityService* service =
       AimEligibilityServiceFactory::GetForProfile(profile);
   const omnibox::SearchboxConfig* config =
       service ? service->GetSearchboxConfig() : nullptr;
-
   if (config && config->has_rule_set()) {
     max_files = config->rule_set().max_total_inputs();
     for (const auto& rule : config->rule_set().input_type_rules()) {
@@ -449,33 +447,29 @@ void SearchboxHandler::SetupWebUIDataSource(content::WebUIDataSource* source,
       }
     }
   }
+  source->AddInteger("composeboxFileMaxCount", max_files);
+  source->AddString("composeboxDragAndDropHint",
+                    l10n_util::GetPluralStringFUTF16(
+                        IDS_NTP_COMPOSE_DRAG_AND_DROP_HINT, max_files));
+  source->AddString("maxFilesReachedError",
+                    l10n_util::GetPluralStringFUTF16(
+                        IDS_NTP_COMPOSE_MAX_FILES_REACHED_ERROR, max_files));
+  source->AddString("maxImagesReachedError",
+                    l10n_util::GetPluralStringFUTF16(
+                        IDS_NTP_COMPOSE_MAX_IMAGES_REACHED_ERROR, max_images));
+  source->AddString("maxPdfsReachedError",
+                    l10n_util::GetPluralStringFUTF16(
+                        IDS_NTP_COMPOSE_MAX_PDFS_REACHED_ERROR, max_pdfs));
 
-  source->AddString(
-      "composeboxDragAndDropHint",
-      l10n_util::GetPluralStringFUTF16(
-          IDS_NTP_COMPOSE_DRAG_AND_DROP_HINT,
-          max_files > 0 ? max_files
-                        : composebox_config.composebox().max_num_files()));
-  source->AddString(
-      "maxFilesReachedError",
-      l10n_util::GetPluralStringFUTF16(
-          IDS_NTP_COMPOSE_MAX_FILES_REACHED_ERROR,
-          max_files > 0 ? max_files
-                        : composebox_config.composebox().max_num_files()));
-  // TODO(crbug.com/483852166): Update the error messages to be more specific to
-  // the input type.
-  source->AddString(
-      "maxImagesReachedError",
-      l10n_util::GetPluralStringFUTF16(
-          IDS_NTP_COMPOSE_MAX_FILES_REACHED_ERROR,
-          max_images > 0 ? max_images
-                         : composebox_config.composebox().max_num_files()));
-  source->AddString(
-      "maxPdfsReachedError",
-      l10n_util::GetPluralStringFUTF16(
-          IDS_NTP_COMPOSE_MAX_FILES_REACHED_ERROR,
-          max_pdfs > 0 ? max_pdfs
-                       : composebox_config.composebox().max_num_files()));
+  source->AddBoolean("composeboxContextDragAndDropEnabled",
+                     session_allows_drag_and_drop);
+
+  // TODO(b/477969358): Consolidate voice search booleans.
+  source->AddBoolean("steadyComposeboxShowVoiceSearch", enable_voice_search);
+  source->AddBoolean("expandedComposeboxShowVoiceSearch", enable_voice_search);
+
+  // TODO(b/481663895): Remove "ConfigParam" from Next studies.
+  auto composebox_config = ntp_composebox::FeatureConfig::Get().config;
   source->AddBoolean(
       "searchboxShowComposeAnimation",
       profile->GetPrefs()->GetInteger(
@@ -638,7 +632,7 @@ SearchboxHandler::CreateAutocompleteResult(
     const PrefService* prefs,
     const TemplateURLService* turl_service) const {
   return searchbox::mojom::AutocompleteResult::New(
-      input,
+      result.sequence_id(), input,
       CreateSuggestionGroupsMap(result, edit_model, prefs,
                                 result.suggestion_groups_map()),
       CreateAutocompleteMatches(result, edit_model, bookmark_model,
@@ -883,8 +877,8 @@ void SearchboxHandler::AddFileContextFromBrowser(
 
 void SearchboxHandler::OnContextualInputStatusChanged(
     base::UnguessableToken token,
-    contextual_search::FileUploadStatus status,
-    std::optional<contextual_search::FileUploadErrorType> error_type) {
+    contextual_search::ContextUploadStatus status,
+    std::optional<contextual_search::ContextUploadErrorType> error_type) {
   if (page_ && IsRemoteBound()) {
     page_->OnContextualInputStatusChanged(token, status, error_type);
   }
@@ -1039,9 +1033,31 @@ void SearchboxHandler::SetPopupSelection(
 }
 
 void SearchboxHandler::OpenPopupSelection(
+    uint32_t result_sequence_id,
     searchbox::mojom::OmniboxPopupSelectionPtr selection,
     WindowOpenDisposition disposition) {
-  edit_model()->OpenSelection(ConvertSelection(std::move(selection)));
+  const OmniboxPopupSelection popup_selection =
+      ConvertSelection(std::move(selection));
+  // OmniboxEditModel does not properly select the AIM button in all cases,
+  // for example when there are no matches in the list. The webui popup
+  // selection control fixes this bug, so AIM button selection is excepted.
+  const bool selection_matched =
+      popup_selection == edit_model()->GetPopupSelection() ||
+      popup_selection.state == OmniboxPopupSelection::FOCUSED_BUTTON_AIM;
+  const bool sequence_id_matched =
+      result_sequence_id == autocomplete_controller()->result().sequence_id();
+
+  base::UmaHistogramBoolean("Omnibox.WebUI.SelectionMatched",
+                            selection_matched);
+  base::UmaHistogramBoolean("Omnibox.WebUI.AutocompleteResultSequenceIdMatched",
+                            sequence_id_matched);
+
+  if ((!selection_matched || !sequence_id_matched) &&
+      base::FeatureList::IsEnabled(kDropMismatchedSelections)) {
+    return;
+  }
+
+  edit_model()->OpenSelection(popup_selection);
 }
 
 void SearchboxHandler::OnNavigationLikely(
@@ -1119,49 +1135,41 @@ void SearchboxHandler::ExecuteAction(uint8_t line,
 
 void SearchboxHandler::GetPlaceholderConfig(
     GetPlaceholderConfigCallback callback) {
-  const auto placeholder_config = ntp_composebox::FeatureConfig::Get()
-                                      .config.composebox()
-                                      .placeholder_config();
-  std::vector<std::u16string> placeholders = {};
-  for (auto& text : placeholder_config.placeholders()) {
-    switch (text) {
-      case omnibox::NTPComposeboxConfig_PlaceholderConfig_Placeholder_ASK:
-        placeholders.emplace_back(l10n_util::GetStringUTF16(
-            IDS_NTP_SEARCH_BOX_DYNAMIC_PLACEHOLDER_ASK_GOOGLE));
-        break;
-      case omnibox::NTPComposeboxConfig_PlaceholderConfig_Placeholder_PLAN:
-        placeholders.emplace_back(l10n_util::GetStringUTF16(
-            IDS_NTP_SEARCH_BOX_DYNAMIC_PLACEHOLDER_PLAN));
-        break;
-      case omnibox::NTPComposeboxConfig_PlaceholderConfig_Placeholder_COMPARE:
-        placeholders.emplace_back(l10n_util::GetStringUTF16(
-            IDS_NTP_SEARCH_BOX_DYNAMIC_PLACEHOLDER_COMPARE));
-        break;
-      case omnibox::NTPComposeboxConfig_PlaceholderConfig_Placeholder_RESEARCH:
-        placeholders.emplace_back(l10n_util::GetStringUTF16(
-            IDS_NTP_SEARCH_BOX_DYNAMIC_PLACEHOLDER_RESEARCH));
-        break;
-      case omnibox::NTPComposeboxConfig_PlaceholderConfig_Placeholder_TEACH:
-        placeholders.emplace_back(l10n_util::GetStringUTF16(
-            IDS_NTP_SEARCH_BOX_DYNAMIC_PLACEHOLDER_TEACH));
-        break;
-      case omnibox::NTPComposeboxConfig_PlaceholderConfig_Placeholder_WRITE:
-        placeholders.emplace_back(l10n_util::GetStringUTF16(
-            IDS_NTP_SEARCH_BOX_DYNAMIC_PLACEHOLDER_WRITE));
-        break;
-      case omnibox::NTPComposeboxConfig_PlaceholderConfig_Placeholder_IMAGE:
-        placeholders.emplace_back(l10n_util::GetStringUTF16(
-            IDS_NTP_SEARCH_BOX_DYNAMIC_PLACEHOLDER_IMAGE));
-        break;
-      case omnibox::NTPComposeboxConfig_PlaceholderConfig_Placeholder_ASK_TAB:
-        placeholders.emplace_back(l10n_util::GetStringUTF16(
-            IDS_NTP_SEARCH_BOX_DYNAMIC_PLACEHOLDER_TAB));
-        break;
-      default:
-        NOTREACHED();
+  std::vector<std::u16string> placeholders;
+
+  // Try PEC API first to get the dynamic placeholder text.
+  AimEligibilityService* service =
+      AimEligibilityServiceFactory::GetForProfile(profile_);
+
+  const omnibox::SearchboxConfig* searchbox_config =
+      service ? service->GetSearchboxConfig() : nullptr;
+
+  if (searchbox_config) {
+    // Non-tool-dependent: always first per UX spec.
+    placeholders.emplace_back(l10n_util::GetStringUTF16(
+        IDS_NTP_SEARCH_BOX_DYNAMIC_PLACEHOLDER_ASK_GOOGLE));
+
+    static constexpr auto kToolPlaceholderMap =
+        base::MakeFixedFlatMap<omnibox::ToolMode, int>({
+            {omnibox::TOOL_MODE_IMAGE_GEN,
+             IDS_NTP_SEARCH_BOX_DYNAMIC_PLACEHOLDER_IMAGE},
+            {omnibox::TOOL_MODE_DEEP_SEARCH,
+             IDS_NTP_SEARCH_BOX_DYNAMIC_PLACEHOLDER_RESEARCH},
+            {omnibox::TOOL_MODE_CANVAS,
+             IDS_NTP_SEARCH_BOX_DYNAMIC_PLACEHOLDER_CANVAS},
+        });
+
+    for (const auto& tool_config : searchbox_config->tool_configs()) {
+      auto it = kToolPlaceholderMap.find(tool_config.tool());
+      if (it != kToolPlaceholderMap.end()) {
+        placeholders.emplace_back(l10n_util::GetStringUTF16(it->second));
+      }
     }
   }
 
+  const auto placeholder_config = ntp_composebox::FeatureConfig::Get()
+                                      .config.composebox()
+                                      .placeholder_config();
   searchbox::mojom::PlaceholderConfigPtr config =
       searchbox::mojom::PlaceholderConfig::New();
   config->texts = std::move(placeholders);

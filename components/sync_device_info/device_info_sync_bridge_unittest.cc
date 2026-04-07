@@ -89,6 +89,16 @@ const DeviceInfo::OsType kLocalDeviceOS = DeviceInfo::OsType::kLinux;
 const DeviceInfo::FormFactor kLocalDeviceFormFactor =
     DeviceInfo::FormFactor::kDesktop;
 
+MobilePromoOnDesktopPromoTypeSet SpecificsToPromoTypes(
+    const DeviceInfoSpecifics& specifics) {
+  MobilePromoOnDesktopPromoTypeSet types;
+  for (const auto& type :
+       specifics.feature_fields().desktop_to_ios_promo_receiving_types()) {
+    types.Put(static_cast<MobilePromoOnDesktopPromoType>(type));
+  }
+  return types;
+}
+
 MATCHER_P(HasDeviceInfo, expected, "") {
   return arg.device_info().SerializeAsString() == expected.SerializeAsString();
 }
@@ -148,6 +158,8 @@ MATCHER_P(ModelEqualsSpecifics, expected_specifics, "") {
          expected_specifics.feature_fields()
                  .desktop_to_ios_promo_receiving_enabled() ==
              arg.desktop_to_ios_promo_receiving_enabled() &&
+         SpecificsToPromoTypes(expected_specifics) ==
+             arg.desktop_to_ios_promo_receiving_types() &&
          expected_specifics.invalidation_fields().instance_id_token() ==
              arg.fcm_registration_token();
 }
@@ -456,6 +468,10 @@ class TestLocalDeviceInfoProvider : public MutableLocalDeviceInfoProvider {
         auto copy = *paask_info_;
         local_device_info_->set_paask_info(std::move(copy));
       }
+      if (promo_types_) {
+        local_device_info_->set_desktop_to_ios_promo_receiving_types(
+            *promo_types_);
+      }
     }
     return local_device_info_.get();
   }
@@ -479,11 +495,17 @@ class TestLocalDeviceInfoProvider : public MutableLocalDeviceInfoProvider {
     paask_info_ = paask_info;
   }
 
+  void UpdateDesktopToIOSPromoReceivingTypes(
+      const MobilePromoOnDesktopPromoTypeSet& promo_types) {
+    promo_types_ = promo_types;
+  }
+
  private:
   std::unique_ptr<DeviceInfo> local_device_info_;
   std::optional<std::string> fcm_registration_token_;
   std::optional<DataTypeSet> interested_data_types_;
   std::optional<DeviceInfo::PhoneAsASecurityKeyInfo> paask_info_;
+  std::optional<MobilePromoOnDesktopPromoTypeSet> promo_types_;
 };  // namespace
 
 class DeviceInfoSyncBridgeTest : public testing::Test,
@@ -844,6 +866,49 @@ TEST_F(DeviceInfoSyncBridgeTest, GetAllData) {
                   Pair(local_device()->GetLocalDeviceInfo()->guid(), _),
                   Pair(specifics1.cache_guid(), HasDeviceInfo(specifics1)),
                   Pair(specifics2.cache_guid(), HasDeviceInfo(specifics2))));
+}
+
+TEST_F(DeviceInfoSyncBridgeTest, LegacyDesktopToIOSPromoReceivingEnabled) {
+  InitializeAndMergeInitialData(SyncMode::kFull);
+
+  // If Lens is the only granular type enabled, the legacy boolean should be
+  // false, because Lens is not a legacy promo.
+  local_device()->UpdateDesktopToIOSPromoReceivingTypes(
+      MobilePromoOnDesktopPromoTypeSet{
+          MobilePromoOnDesktopPromoType::kLensPromo});
+  ForcePulse();
+  auto data = GetAllData();
+  ASSERT_EQ(1u, data.size());
+  EXPECT_FALSE(data.begin()
+                   ->second.device_info()
+                   .feature_fields()
+                   .desktop_to_ios_promo_receiving_enabled());
+
+  // If a legacy type (e.g. Autofill) is enabled, the legacy boolean should be
+  // true.
+  local_device()->UpdateDesktopToIOSPromoReceivingTypes(
+      MobilePromoOnDesktopPromoTypeSet{
+          MobilePromoOnDesktopPromoType::kLensPromo,
+          MobilePromoOnDesktopPromoType::kAutofillPromo});
+  ForcePulse();
+  data = GetAllData();
+  ASSERT_EQ(1u, data.size());
+  EXPECT_TRUE(data.begin()
+                  ->second.device_info()
+                  .feature_fields()
+                  .desktop_to_ios_promo_receiving_enabled());
+
+  // If kAllPromos is enabled, the legacy boolean should be true.
+  local_device()->UpdateDesktopToIOSPromoReceivingTypes(
+      MobilePromoOnDesktopPromoTypeSet{
+          MobilePromoOnDesktopPromoType::kAllPromos});
+  ForcePulse();
+  data = GetAllData();
+  ASSERT_EQ(1u, data.size());
+  EXPECT_TRUE(data.begin()
+                  ->second.device_info()
+                  .feature_fields()
+                  .desktop_to_ios_promo_receiving_enabled());
 }
 
 TEST_F(DeviceInfoSyncBridgeTest, ApplyIncrementalSyncChangesEmpty) {
@@ -1357,36 +1422,11 @@ TEST_F(DeviceInfoSyncBridgeTest, RefreshLocalDeviceInfo) {
   EXPECT_EQ(4, change_count());
 }
 
-// Implicit signin doesn't exist on mobile.
-#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
-TEST_F(DeviceInfoSyncBridgeTest,
-       DeviceNameForTransportOnlySyncModeWithImplicitSignin) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndDisableFeature(
-      syncer::kReplaceSyncPromosWithSignInPromos);
-
+TEST_F(DeviceInfoSyncBridgeTest, DeviceNameForTransportOnlySyncMode) {
   InitializeAndMergeInitialData(SyncMode::kTransportOnly);
   ASSERT_EQ(1, change_count());
   ASSERT_TRUE(local_device()->GetLocalDeviceInfo());
 
-  // With implicit signin, only the model name is allowed, not the
-  // personalizable name.
-  EXPECT_EQ(local_device_model_name(),
-            local_device()->GetLocalDeviceInfo()->client_name());
-}
-#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
-
-TEST_F(DeviceInfoSyncBridgeTest,
-       DeviceNameForTransportOnlySyncModeWithExplicitSignin) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(syncer::kReplaceSyncPromosWithSignInPromos);
-
-  InitializeAndMergeInitialData(SyncMode::kTransportOnly);
-  ASSERT_EQ(1, change_count());
-  ASSERT_TRUE(local_device()->GetLocalDeviceInfo());
-
-  // With explicit signin, the personalizable name (not just the model name) is
-  // supported.
   EXPECT_EQ(local_personalizable_name(),
             local_device()->GetLocalDeviceInfo()->client_name());
 }
@@ -1400,46 +1440,11 @@ TEST_F(DeviceInfoSyncBridgeTest, DeviceNameForFullSyncMode) {
             local_device()->GetLocalDeviceInfo()->client_name());
 }
 
-// Implicit signin doesn't exist on mobile.
-#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
 // Tests local client name when device is initially synced with transport only
 // sync mode, but the sync mode is not available after restart since it is not
 // persisted.
 TEST_F(DeviceInfoSyncBridgeTest,
-       DeviceNameForTransportOnlySyncModeWithImplicitSignin_RestartBridge) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndDisableFeature(
-      syncer::kReplaceSyncPromosWithSignInPromos);
-
-  // With implicit signin, only the model name is allowed, not the
-  // personalizable name.
-  std::string expected_device_name = local_device_model_name();
-  InitializeAndMergeInitialData(SyncMode::kTransportOnly);
-
-  ASSERT_TRUE(local_device()->GetLocalDeviceInfo());
-  ASSERT_EQ(expected_device_name,
-            local_device()->GetLocalDeviceInfo()->client_name());
-
-  EXPECT_CALL(*processor(),
-              Put(local_device()->GetLocalDeviceInfo()->guid(), _, _))
-      .Times(0);
-  RestartBridge();
-  ASSERT_TRUE(local_device()->GetLocalDeviceInfo());
-  EXPECT_EQ(expected_device_name,
-            local_device()->GetLocalDeviceInfo()->client_name());
-}
-#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
-
-// Tests local client name when device is initially synced with transport only
-// sync mode, but the sync mode is not available after restart since it is not
-// persisted.
-TEST_F(DeviceInfoSyncBridgeTest,
-       DeviceNameForTransportOnlySyncModeWithExplicitSignin_RestartBridge) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(syncer::kReplaceSyncPromosWithSignInPromos);
-
-  // With explicit signin, the personalizable name (not just the model name) is
-  // supported.
+       DeviceNameForTransportOnlySyncMode_RestartBridge) {
   std::string expected_device_name = local_personalizable_name();
   InitializeAndMergeInitialData(SyncMode::kTransportOnly);
 
@@ -1474,42 +1479,6 @@ TEST_F(DeviceInfoSyncBridgeTest, DeviceNameForFullSyncMode_RestartBridge) {
   EXPECT_EQ(expected_device_name,
             local_device()->GetLocalDeviceInfo()->client_name());
 }
-
-// Implicit signin doesn't exist on mobile.
-#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
-TEST_F(DeviceInfoSyncBridgeTest, RefreshLocalDeviceNameForSyncModeToggle) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndDisableFeature(
-      syncer::kReplaceSyncPromosWithSignInPromos);
-
-  std::string expected_device_name_full_sync = local_personalizable_name();
-  std::string expected_device_name_transport_only = local_device_model_name();
-
-  // Initialize with full sync mode.
-  InitializeAndMergeInitialData(SyncMode::kFull);
-  const syncer::DeviceInfo* device = local_device()->GetLocalDeviceInfo();
-
-  ASSERT_TRUE(device);
-  ASSERT_EQ(expected_device_name_full_sync, device->client_name());
-
-  // Toggle to transport only sync mode.
-  bridge()->OnSyncPaused();  // No-op, but for the sake of a realistic sequence.
-  bridge()->OnSyncStarting(
-      TestDataTypeActivationRequest(SyncMode::kTransportOnly));
-
-  device = local_device()->GetLocalDeviceInfo();
-  ASSERT_TRUE(device);
-  ASSERT_EQ(expected_device_name_transport_only, device->client_name());
-
-  // Toggle to full sync mode.
-  bridge()->OnSyncPaused();  // No-op, but for the sake of a realistic sequence.
-  bridge()->OnSyncStarting(TestDataTypeActivationRequest(SyncMode::kFull));
-
-  device = local_device()->GetLocalDeviceInfo();
-  ASSERT_TRUE(device);
-  ASSERT_EQ(expected_device_name_full_sync, device->client_name());
-}
-#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
 
 TEST_F(DeviceInfoSyncBridgeTest, ShouldSendInvalidationFields) {
   EXPECT_CALL(*processor(),

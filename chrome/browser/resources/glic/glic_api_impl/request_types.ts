@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 import type {WebClientInitialState} from '../glic.mojom-webui.js';
-import type {ActorTaskPauseReason, ActorTaskState, ActorTaskStopReason, AdditionalContext, AdditionalContextPart, AnnotatedPageData, AutofillSuggestion, CancelActionsResult, CaptureRegionErrorReason, CaptureRegionResult, ChromeVersion, ConversationInfo, CreateSkillRequest, Credential, DraggableArea, ErrorReasonTypes, ErrorWithReason, FocusedTabDataHasFocus, FocusedTabDataHasNoFocus, FormFillingRequest, GetPinCandidatesOptions, HostCapability, InvokeOptions, Journal, MetricUserInputReactionType, NavigationConfirmationRequest, NavigationConfirmationResponse, OnResponseStoppedDetails, OpenPanelInfo, OpenSettingsOptions, PageMetadata, PanelOpeningData, PanelState, PdfDocumentData, PinCandidate, PinTabsOptions, Platform, ResumeActorTaskResult, Screenshot, ScrollToParams, SelectAutofillSuggestionsDialogRequest, SelectAutofillSuggestionsDialogResponse, SelectCredentialDialogRequest, SelectCredentialDialogResponse, Skill, SkillPreview, TabContextOptions, TabContextResult, TabData, TaskOptions, UnpinTabsOptions, UpdateSkillRequest, UserConfirmationDialogRequest, UserConfirmationDialogResponse, UserProfileInfo, ViewChangedNotification, ViewChangeRequest, WebClientMode, ZeroStateSuggestions, ZeroStateSuggestionsOptions, ZeroStateSuggestionsV2} from '../glic_api/glic_api.js';
+import type {ActorTaskPauseReason, ActorTaskState, ActorTaskStopReason, AdditionalContext, AdditionalContextPart, AnnotatedPageData, AutofillSuggestion, CancelActionsResult, CaptureRegionErrorReason, CaptureRegionResult, ChromeVersion, ConversationInfo, CreateSkillRequest, Credential, DraggableArea, ErrorReasonTypes, ErrorWithReason, FocusedTabDataHasFocus, FocusedTabDataHasNoFocus, FormFactor, FormFillingRequest, FormFillingResponse, GetPinCandidatesOptions, HostCapability, InvokeOptions, Journal, MetricUserInputReactionType, MicrophoneStatus, NavigationConfirmationRequest, NavigationConfirmationResponse, OnResponseStoppedDetails, OpenPanelInfo, OpenSettingsOptions, PageMetadata, PanelOpeningData, PanelState, PdfDocumentData, PinCandidate, PinTabsOptions, Platform, ResumeActorTaskResult, Screenshot, ScrollToParams, SelectAutofillSuggestionsDialogRequest, SelectAutofillSuggestionsDialogResponse, SelectCredentialDialogRequest, SelectCredentialDialogResponse, Skill, SkillPreview, SkillsWebClientEvent, TabContextOptions, TabContextResult, TabData, TaskOptions, UnpinTabsOptions, UpdateSkillRequest, UserConfirmationDialogRequest, UserConfirmationDialogResponse, UserProfileInfo, WebClientMode, ZeroStateSuggestions, ZeroStateSuggestionsOptions, ZeroStateSuggestionsV2} from '../glic_api/glic_api.js';
 
 /*
 This file defines messages sent over postMessage in-between the Glic WebUI
@@ -509,6 +509,12 @@ export declare type HostRequestTypes = ValidateRequestMap<{
       skill?: Skill,
     },
   },
+  glicBrowserRecordSkillsWebClientEvent: {
+    request: {
+      event: SkillsWebClientEvent,
+    },
+    backgroundAllowed: true,
+  },
   glicBrowserSubscribeToPinCandidates: {
     backgroundAllowed: false,
     request: {
@@ -534,6 +540,13 @@ export declare type HostRequestTypes = ValidateRequestMap<{
     },
     backgroundAllowed: true,
   },
+  glicBrowserDeleteCapturedRegion: {
+    request: {
+      tabId: string,
+      regionId: string,
+    },
+    backgroundAllowed: true,
+  },
 
   glicBrowserGetZeroStateSuggestionsForFocusedTab: {
     request: {
@@ -556,12 +569,6 @@ export declare type HostRequestTypes = ValidateRequestMap<{
     response: {
       suggestions?: ZeroStateSuggestionsV2,
     },
-  },
-  glicBrowserOnViewChanged: {
-    request: {
-      notification: ViewChangedNotification,
-    },
-    backgroundAllowed: true,
   },
   glicBrowserSubscribeToPageMetadata: {
     request: {
@@ -600,6 +607,39 @@ export declare type HostRequestTypes = ValidateRequestMap<{
     },
     backgroundAllowed: true,
   },
+  glicBrowserAutofillSuggestionDialogOnFormPresented: {
+    request: {
+      taskId: number,
+      params: {formFillingRequestIndex: number},
+    },
+    backgroundAllowed: true,
+  },
+  glicBrowserAutofillSuggestionDialogOnFormPreviewChanged: {
+    request: {
+      taskId: number,
+      params: {
+        formFillingRequestIndex: number,
+        response?: FormFillingResponse,
+      },
+    },
+    backgroundAllowed: true,
+  },
+  glicBrowserAutofillSuggestionDialogOnFormConfirmed: {
+    request: {
+      taskId: number,
+      params: {
+        formFillingRequestIndex: number,
+        response: FormFillingResponse,
+      },
+    },
+    backgroundAllowed: true,
+  },
+  glicBrowserOnMicrophoneStatusChange: {
+    request: {
+      status: MicrophoneStatus,
+    },
+    backgroundAllowed: true,
+  },
 }>;
 
 // Types of requests to the GlicWebClient.
@@ -616,15 +656,12 @@ export declare type WebClientRequestTypes = ValidateRequestMap<{
   glicWebClientNotifyPanelWasClosed: {
     backgroundAllowed: true,
   },
+  glicWebClientStopMicrophone: {
+    backgroundAllowed: true,
+  },
   glicWebClientPanelStateChanged: {
     request: {
       panelState: PanelState,
-    },
-    backgroundAllowed: true,
-  },
-  glicWebClientRequestViewChange: {
-    request: {
-      request: ViewChangeRequest,
     },
     backgroundAllowed: true,
   },
@@ -688,6 +725,9 @@ export declare type WebClientRequestTypes = ValidateRequestMap<{
     backgroundAllowed: true,
   },
   glicWebClientCheckResponsive: {
+    response: {
+      clientSendMessageQueueLength: number,
+    },
     backgroundAllowed: true,
   },
   glicWebClientNotifyManualResizeChanged: {
@@ -924,7 +964,7 @@ export const HOST_REQUEST_TYPES: HostRequestEnumNamesType&{MAX_VALUE: number} =
         OnClosedCaptionsShown: 59,
         CreateTask: 60,
         PerformActions: 61,
-        OnViewChanged: 62,
+        // Do not reuse deleted request ID: 62,
         SubscribeToPageMetadata: 63,
         SwitchConversation: 64,
         RegisterConversation: 65,
@@ -949,6 +989,12 @@ export const HOST_REQUEST_TYPES: HostRequestEnumNamesType&{MAX_VALUE: number} =
         GetSkill: 84,
         CancelActions: 85,
         ShowManageSkillsUi: 86,
+        AutofillSuggestionDialogOnFormPresented: 87,
+        AutofillSuggestionDialogOnFormPreviewChanged: 88,
+        AutofillSuggestionDialogOnFormConfirmed: 89,
+        OnMicrophoneStatusChange: 90,
+        RecordSkillsWebClientEvent: 91,
+        DeleteCapturedRegion: 92,
       };
       return {...result, MAX_VALUE: Math.max(...Object.values(result))};
     })();
@@ -1035,8 +1081,11 @@ export type WebClientInitialStatePrivate =
       panelState: PanelState,
       chromeVersion: ChromeVersion,
       platform: Platform,
+      formFactor: FormFactor,
       focusedTabData: FocusedTabDataPrivate,
       loggingEnabled: boolean,
+      maxInFlightRequests: number,
+      sendResponsesForAllRequests: boolean,
       enableZeroStateSuggestions: boolean,
       enableCachedGetUserProfileInfo: boolean,
       hostCapabilities: HostCapability[],
@@ -1131,7 +1180,9 @@ export declare interface InvokeOptionsPrivate extends
   context?: AdditionalContextPrivate;
 }
 
-export declare interface CredentialPrivate extends Omit<Credential, 'getIcon'> {
+export declare interface CredentialPrivate extends
+    Omit<Credential, 'getIcon'|'getAccountPicture'> {
+  accountPicture?: RgbaImage;
 }
 
 export declare interface SelectCredentialDialogRequestPrivate extends Omit<
@@ -1165,7 +1216,8 @@ export declare interface FormFillingRequestPrivate extends
 export declare interface SelectAutofillSuggestionsDialogRequestPrivate extends
     Omit<
         SelectAutofillSuggestionsDialogRequest,
-        'onDialogClosed'|'formFillingRequests'> {
+        'onDialogClosed'|'onFormPresented'|'onFormPreviewChanged'|
+        'onFormConfirmed'|'formFillingRequests'> {
   taskId: number;
   formFillingRequests: FormFillingRequestPrivate[];
 }

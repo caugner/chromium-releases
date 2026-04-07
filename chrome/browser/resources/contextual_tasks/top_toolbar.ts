@@ -9,6 +9,7 @@ import '//resources/cr_elements/cr_action_menu/cr_action_menu.js';
 import '//resources/cr_elements/cr_lazy_render/cr_lazy_render_lit.js';
 import '//resources/cr_elements/icons.html.js';
 import './favicon_group.js';
+import './reopen_tabs.js';
 import './sources_menu.js';
 
 import {AnchorAlignment} from '//resources/cr_elements/cr_action_menu/cr_action_menu.js';
@@ -16,6 +17,7 @@ import type {CrActionMenuElement} from 'chrome://resources/cr_elements/cr_action
 import type {CrLazyRenderLitElement} from 'chrome://resources/cr_elements/cr_lazy_render/cr_lazy_render_lit.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 import {CrLitElement} from 'chrome://resources/lit/v3_0/lit.rollup.js';
+import type {PropertyValues} from 'chrome://resources/lit/v3_0/lit.rollup.js';
 
 import type {ContextInfo} from './contextual_tasks.mojom-webui.js';
 import type {BrowserProxy} from './contextual_tasks_browser_proxy.js';
@@ -27,12 +29,10 @@ import {getHtml} from './top_toolbar.html.js';
 export interface TopToolbarElement {
   $: {
     closeButton: HTMLImageElement,
-    contextButton: HTMLImageElement,
     menu: CrLazyRenderLitElement<CrActionMenuElement>,
     newThreadButton: HTMLImageElement,
     sourcesMenu: CrLazyRenderLitElement<SourcesMenuElement>,
     threadHistoryButton: HTMLImageElement,
-    topToolbarLogo: HTMLImageElement,
   };
 }
 
@@ -62,8 +62,14 @@ export class TopToolbarElement extends CrLitElement {
         reflect: true,
         attribute: 'is-ai-page',
       },
+      enableOpenInNewTabButton: {
+        type: Boolean,
+        reflect: true,
+      },
       logoImageUrl_: {type: String},
       title: {type: String},
+      hideMenuButton_: {type: Boolean},
+      showReopenTabs_: {type: Boolean},
     };
   }
 
@@ -71,18 +77,28 @@ export class TopToolbarElement extends CrLitElement {
   accessor contextInfos: ContextInfo[] = [];
   accessor darkMode: boolean = false;
   accessor isAiPage: boolean = false;
+  accessor enableOpenInNewTabButton: boolean = false;
+  accessor showReopenTabs_: boolean = false;
   private browserProxy_: BrowserProxy = BrowserProxyImpl.getInstance();
   private listenerIds_: number[] = [];
   protected isExpandButtonEnabled: boolean =
       loadTimeData.getBoolean('expandButtonEnabled');
+  private hideMenuOnAiPageEnabled_: boolean =
+      loadTimeData.getBoolean('hideMenuOnAiPageEnabled');
+  accessor hideMenuButton_: boolean = this.hideMenuOnAiPageEnabled_;
 
   override connectedCallback() {
     super.connectedCallback();
     const callbackRouter = this.browserProxy_.callbackRouter;
-    this.listenerIds_ = [callbackRouter.onContextUpdated.addListener(
-        (contextInfos: ContextInfo[]) => {
-          this.contextInfos = contextInfos;
-        })];
+    this.listenerIds_ = [
+      callbackRouter.onContextUpdated.addListener(
+          (contextInfos: ContextInfo[]) => {
+            this.contextInfos = contextInfos;
+          }),
+      callbackRouter.setShowReopenTabs.addListener((show: boolean) => {
+        this.showReopenTabs_ = show;
+      }),
+    ];
   }
 
   override disconnectedCallback() {
@@ -90,6 +106,14 @@ export class TopToolbarElement extends CrLitElement {
     this.listenerIds_.forEach(
         id => this.browserProxy_.callbackRouter.removeListener(id));
     this.listenerIds_ = [];
+  }
+
+  override updated(changedProperties: PropertyValues<this>) {
+    super.updated(changedProperties);
+
+    if (changedProperties.has('isAiPage')) {
+      this.hideMenuButton_ = this.isAiPage && this.hideMenuOnAiPageEnabled_;
+    }
   }
 
   protected shouldShowSourcesMenuButton_(): boolean {
@@ -156,6 +180,14 @@ export class TopToolbarElement extends CrLitElement {
     chrome.metricsPrivate.recordBoolean(
         'ContextualTasks.WebUI.UserAction.OpenHelp', true);
     this.browserProxy_.handler.openHelpUi();
+  }
+
+  protected onReopenTabsReopenClick_() {
+    this.browserProxy_.handler.reopenTabs();
+  }
+
+  protected onReopenTabsDismissClick_() {
+    this.showReopenTabs_ = false;
   }
 }
 

@@ -11,6 +11,11 @@ namespace features {
 // Enables an extra set of concrete sensors classes based on Generic Sensor API,
 // which expose previously unexposed platform features, e.g. ALS or Magnetometer
 BASE_FEATURE(kGenericSensorExtraClasses, base::FEATURE_DISABLED_BY_DEFAULT);
+
+// Enables an Allow/Ask/Block set of default permissions for sensors.
+BASE_FEATURE(kSensorsAllowAskBlockPermissionModel,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 // Expose serial port logical connection state and dispatch connection events
 // for Bluetooth serial ports when the Bluetooth device connection state
 // changes.
@@ -43,6 +48,10 @@ BASE_FEATURE(kWebHidAttributeAllowsBackForwardCache,
 #if BUILDFLAG(IS_WIN)
 // Enable integration with the Windows system-level location permission.
 BASE_FEATURE(kWinSystemLocationPermission, base::FEATURE_ENABLED_BY_DEFAULT);
+// Enables the event-based approach for monitoring the Windows system-level
+// location permission. If disabled, the polling approach is used.
+BASE_FEATURE(kWinSystemLocationPermissionEventBased,
+             base::FEATURE_ENABLED_BY_DEFAULT);
 // Enables a fix for a HID issue where feature reports read from devices that
 // do not use report IDs would incorrectly include an extra zero byte at the
 // start of the report and truncate the last byte of the report.
@@ -129,6 +138,12 @@ BASE_FEATURE(kAutomaticUsbDetach, base::FEATURE_ENABLED_BY_DEFAULT);
 #elif BUILDFLAG(IS_LINUX)
 BASE_FEATURE(kAutomaticUsbDetach, base::FEATURE_DISABLED_BY_DEFAULT);
 #endif  // BUILDFLAG(IS_ANDROID)
+
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+// Controls whether we report the product name (like macOS and Win)
+// over the HID_NAME in the WebHID API.
+BASE_FEATURE(kProductNameOverHidName, base::FEATURE_ENABLED_BY_DEFAULT);
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 
 #if !BUILDFLAG(IS_WIN)
 // Splits DTR and RTS control signals. See crbug.com/420689824.

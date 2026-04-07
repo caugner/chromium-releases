@@ -7,6 +7,7 @@
 #include <array>
 
 #include "ash/constants/ash_features.h"
+#include "ash/constants/url_constants.h"
 #include "ash/webui/settings/public/constants/routes.mojom-forward.h"
 #include "base/byte_count.h"
 #include "base/byte_size.h"
@@ -438,13 +439,13 @@ void CrostiniSection::AddLoadTimeData(content::WebUIDataSource* html_source) {
       "crostiniSubtext",
       l10n_util::GetStringFUTF16(
           IDS_OS_SETTINGS_CROSTINI_SUBTEXT,
-          GetHelpUrlWithBoard(chrome::kLinuxAppsLearnMoreURL)));
+          GetHelpUrlWithBoard(ash::external_urls::kLinuxAppsLearnMoreURL)));
   html_source->AddString(
       "crostiniSubtextNotSupported",
       l10n_util::GetStringFUTF16(
           IDS_SETTINGS_CROSTINI_SUBTEXT_NOT_SUPPORTED,
           ui::GetChromeOSDeviceName(),
-          GetHelpUrlWithBoard(chrome::kLinuxAppsLearnMoreURL)));
+          GetHelpUrlWithBoard(ash::external_urls::kLinuxAppsLearnMoreURL)));
   html_source->AddString(
       "crostiniArcAdbPowerwashRequiredSublabel",
       l10n_util::GetStringFUTF16(

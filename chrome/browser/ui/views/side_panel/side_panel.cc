@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "base/callback_list.h"
 #include "base/functional/bind.h"
 #include "base/i18n/number_formatting.h"
 #include "base/i18n/rtl.h"
@@ -14,16 +15,17 @@
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/color/chrome_color_id.h"
+#include "chrome/browser/ui/side_panel/side_panel_entry.h"
+#include "chrome/browser/ui/side_panel/side_panel_enums.h"
+#include "chrome/browser/ui/side_panel/side_panel_metrics.h"
+#include "chrome/browser/ui/side_panel/side_panel_ui.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/themed_background.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_animation_coordinator.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_animation_ids.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_entry.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_enums.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_resize_area.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_ui.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
@@ -84,12 +86,10 @@ SidePanel::HorizontalAlignment GetHorizontalAlignment(
     bool use_default_horizontal_alignment) {
   bool is_right_aligned =
       pref_service->GetBoolean(prefs::kSidePanelHorizontalAlignment);
-  is_right_aligned = type == SidePanelEntry::PanelType::kToolbar
-                         ? !is_right_aligned
-                         : is_right_aligned;
-  return is_right_aligned == use_default_horizontal_alignment
-             ? SidePanel::HorizontalAlignment::kRight
-             : SidePanel::HorizontalAlignment::kLeft;
+  is_right_aligned =
+      use_default_horizontal_alignment ? is_right_aligned : !is_right_aligned;
+  return is_right_aligned ? SidePanel::HorizontalAlignment::kRight
+                          : SidePanel::HorizontalAlignment::kLeft;
 }
 
 // This border paints the toolbar color around the side panel content and draws
@@ -288,20 +288,58 @@ class ContentParentView : public views::View, public views::ViewObserver {
 
   void OnChildViewAdded(views::View* observed_view,
                         views::View* child) override {
-    // We must use ViewObserver::OnChildViewAdded instead of
-    // View::ViewHierarchyChanged here because setting rounded corners on a
-    // WebView's holder requires the NativeViewHost's native_wrapper_ to be set
-    // and this gets set in View::ViewHierarchyChanged which OnChildViewAdded
-    // will be called after View::ViewHierarchyChanged.
+    // Setting rounded corners on a WebView's holder requires the
+    // NativeViewHost's native_wrapper_ to be set. For a WebView, this is set in
+    // View::ViewHierarchyChanged, specifically after
+    // WebView::AttachWebContentsNativeView is called. Therefore, to round the
+    // corners initially, set them in OnChildViewAdded, which is called after
+    // View::ViewHierarchyChanged.
     // If the child is a WebView or paints to a layer, round its corners.
     if (views::IsViewClass<views::WebView>(child)) {
       views::AsViewClass<views::WebView>(child)->holder()->SetCornerRadii(
           GetRoundedCorners());
     }
+    // Try to detect if the child is a views::View wrapper of a WebView. If so,
+    // round its corners.
+    if (child->children().size() == 1 &&
+        views::IsViewClass<views::WebView>(child->children()[0])) {
+      views::AsViewClass<views::WebView>(child->children()[0])
+          ->holder()
+          ->SetCornerRadii(GetRoundedCorners());
+    }
     if (child->layer()) {
       child->layer()->SetIsFastRoundedCorner(true);
       child->layer()->SetRoundedCornerRadius(GetRoundedCorners());
     }
+  }
+
+  void OnWebContentsAttached(views::WebView* web_view) {
+    CHECK(web_view);
+    CHECK(web_view->holder());
+
+    // Native View Host doesn't always get reused, so ensure a nested Native
+    // View's corners are always rounded.
+    web_view->holder()->SetCornerRadii(GetRoundedCorners());
+    // Temporary subscription. We only need to round the corners once.
+    web_contents_attached_callback_ = {};
+  }
+
+  void OnViewHierarchyChanged(
+      views::View* observed_view,
+      const views::ViewHierarchyChangedDetails& details) override {
+    // TODO(b/490050482): Certain features that provide a wrapping parent View
+    // can swap the child View in-place without triggering OnChildViewAdded or
+    // OnChildViewRemoved, causing non-rounded corners on the child after
+    // the swap occurs (reference b/344626785).
+    if (!views::IsViewClass<views::WebView>(details.child) ||
+        details.parent == this) {
+      return;
+    }
+    web_contents_attached_callback_ =
+        views::AsViewClass<views::WebView>(details.child)
+            ->AddWebContentsAttachedCallback(
+                base::BindRepeating(&ContentParentView::OnWebContentsAttached,
+                                    base::Unretained(this)));
   }
 
   gfx::RoundedCornersF GetRoundedCorners() {
@@ -322,6 +360,7 @@ class ContentParentView : public views::View, public views::ViewObserver {
   SidePanelEntry::PanelType type_;
   base::ScopedObservation<views::View, views::ViewObserver> view_observation_{
       this};
+  base::CallbackListSubscription web_contents_attached_callback_;
 };
 
 BEGIN_METADATA(ContentParentView)
@@ -679,9 +718,8 @@ double SidePanel::GetAnimationValue() const {
   return GetAnimationValueFor(kSidePanelBoundsAnimation);
 }
 
-void SidePanel::OnAnimationSequenceProgressed(
-    const SidePanelAnimationCoordinator::SidePanelAnimationId& animation_id,
-    double animation_value) {
+void SidePanel::OnAnimationSequenceProgressed(SidePanelAnimationId animation_id,
+                                              double animation_value) {
   if (animation_id == kSidePanelBoundsAnimation) {
     if (last_animation_values_[animation_id] != animation_value) {
       last_animation_values_[animation_id] = animation_value;
@@ -787,7 +825,7 @@ void SidePanel::RecordMetricsIfResized() {
 
     int side_panel_contents_width = width() - GetBorderInsets().width();
     int browser_window_width = browser_view_->width();
-    SidePanelUtil::RecordSidePanelResizeMetrics(
+    SidePanelMetrics::RecordSidePanelResizeMetrics(
         type_, id.value(), side_panel_contents_width, browser_window_width);
     did_resize_ = false;
   }
@@ -903,8 +941,7 @@ void SidePanel::UpdateVisibility(bool should_be_open, bool animate_transition) {
 }
 
 double SidePanel::GetAnimationValueFor(
-    const SidePanelAnimationCoordinator::SidePanelAnimationId& animation_id)
-    const {
+    SidePanelAnimationId animation_id) const {
   if (ShouldShowAnimation()) {
     return animation_coordinator_->GetAnimationValueFor(animation_id);
   } else {
@@ -919,7 +956,8 @@ bool SidePanel::ShouldShowAnimation() const {
   // Don't show open/close animations for the toolbar height panel on Windows
   // due to jank. The "show from" animation should still run which is the only
   // time |content_starting_bounds_| has a value.
-  if (type_ == SidePanelEntry::PanelType::kToolbar) {
+  if (type_ == SidePanelEntry::PanelType::kToolbar &&
+      !features::UseSidePanelFlyoverAnimation()) {
     should_show_animations &= content_starting_bounds_.has_value();
   }
 #endif

@@ -27,6 +27,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/bind.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/repeating_test_future.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/with_feature_override.h"
@@ -37,14 +38,18 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/devtools/features.h"
+#include "chrome/browser/glic/public/features.h"
+#include "chrome/browser/glic/public/glic_enabling.h"
 #include "chrome/browser/lens/region_search/lens_region_search_controller.h"
 #include "chrome/browser/pdf/pdf_extension_test_base.h"
 #include "chrome/browser/pdf/pdf_extension_test_util.h"
 #include "chrome/browser/pdf/test_pdf_viewer_stream_manager.h"
 #include "chrome/browser/policy/developer_tools_policy_handler.h"
+#include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/preloading/scoped_prewarm_feature_list.h"
 #include "chrome/browser/profiles/profile_attributes_entry.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
+#include "chrome/browser/profiles/profile_impl.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/renderer_context_menu/render_view_context_menu_browsertest_util.h"
@@ -62,6 +67,8 @@
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
 #include "chrome/browser/ui/omnibox/omnibox_next_features.h"
+#include "chrome/browser/ui/side_panel/side_panel_entry_id.h"
+#include "chrome/browser/ui/side_panel/side_panel_ui.h"
 #include "chrome/browser/ui/startup/startup_types.h"
 #include "chrome/browser/ui/tabs/public/tab_features.h"
 #include "chrome/browser/ui/tabs/split_tab_metrics.h"
@@ -69,8 +76,6 @@
 #include "chrome/browser/ui/toasts/toast_controller.h"
 #include "chrome/browser/ui/toasts/toast_features.h"
 #include "chrome/browser/ui/ui_features.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_entry_id.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_ui.h"
 #include "chrome/browser/ui/web_applications/test/web_app_browsertest_util.h"
 #include "chrome/browser/web_applications/os_integration/os_integration_manager.h"
 #include "chrome/browser/web_applications/test/os_integration_test_override_impl.h"
@@ -99,6 +104,7 @@
 #include "components/lens/lens_testing_utils.h"
 #include "components/pdf/browser/pdf_frame_util.h"
 #include "components/policy/core/common/policy_pref_names.h"
+#include "components/policy/core/common/policy_service.h"
 #include "components/prefs/pref_service.h"
 #include "components/search_engines/template_url_data.h"
 #include "components/search_engines/template_url_service.h"
@@ -463,18 +469,14 @@ class ContextMenuBrowserTest
     if (IsPreviewEnabled()) {
       scoped_feature_list_.InitWithFeatures(
           {blink::features::kLinkPreview,
-#if BUILDFLAG(ENABLE_GLIC)
            features::kGlic,
-#endif  // BUILDFLAG(ENABLE_GLIC)
            media::kContextMenuSaveVideoFrameAs,
            media::kContextMenuSearchForVideoFrame},
           {omnibox::kWebUIOmniboxPopup});
     } else {
       scoped_feature_list_.InitWithFeatures(
           {
-#if BUILDFLAG(ENABLE_GLIC)
               features::kGlic,
-#endif  // BUILDFLAG(ENABLE_GLIC)
               media::kContextMenuSaveVideoFrameAs,
               media::kContextMenuSearchForVideoFrame},
           {blink::features::kLinkPreview, omnibox::kWebUIOmniboxPopup});
@@ -741,6 +743,85 @@ IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest,
   EXPECT_TRUE(menu3->IsCommandIdVisible(IDC_CONTENT_CONTEXT_COPYLINKTEXT));
 }
 
+class GlicContextMenuMetricsBrowserTest : public ContextMenuBrowserTestBase {
+ protected:
+  GlicContextMenuMetricsBrowserTest() {
+    scoped_feature_list_.InitWithFeatures(
+        {features::kGlic, features::kGlicContextMenu,
+         features::kGlicTrustFirstOnboarding},
+        {});
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(GlicContextMenuMetricsBrowserTest,
+                       GlicContextMenuMetrics) {
+  glic::GlicEnabling::SetBypassEnablementChecksForTesting(true);
+
+  base::HistogramTester histogram_tester;
+
+  // 1. Test Page level menu (Ignored)
+  {
+    std::unique_ptr<TestRenderViewContextMenu> menu_page =
+        CreateContextMenuMediaTypeNone(GURL(), GURL());
+    menu_page->OnMenuWillShow(
+        const_cast<ui::SimpleMenuModel*>(&menu_page->menu_model()));
+    menu_page->MenuClosed(
+        const_cast<ui::SimpleMenuModel*>(&menu_page->menu_model()));
+  }
+  histogram_tester.ExpectUniqueSample("Glic.WebContentsContextMenu.Page", 0, 1);
+
+  // 2. Test Text selection without link (Ignored)
+  {
+    std::unique_ptr<TestRenderViewContextMenu> menu_text =
+        CreateContextMenuForTextInWebContents(u"some text");
+    menu_text->OnMenuWillShow(
+        const_cast<ui::SimpleMenuModel*>(&menu_text->menu_model()));
+    menu_text->MenuClosed(
+        const_cast<ui::SimpleMenuModel*>(&menu_text->menu_model()));
+  }
+  histogram_tester.ExpectUniqueSample(
+      "Glic.WebContentsContextMenu.TextSelection", 0, 1);
+
+  // 3. Test Text selection with link (Ignored)
+  {
+    content::ContextMenuParams params;
+    params.media_type = blink::mojom::ContextMenuDataMediaType::kNone;
+    params.selection_text = u"some text";
+    params.link_url = GURL("http://example.com/");
+    params.unfiltered_link_url = GURL("http://example.com/");
+    params.page_url = GURL("http://www.google.com/");
+
+    std::unique_ptr<TestRenderViewContextMenu> menu_link =
+        CreateContextMenuFromParams(params);
+    menu_link->OnMenuWillShow(
+        const_cast<ui::SimpleMenuModel*>(&menu_link->menu_model()));
+    menu_link->MenuClosed(
+        const_cast<ui::SimpleMenuModel*>(&menu_link->menu_model()));
+  }
+  histogram_tester.ExpectUniqueSample(
+      "Glic.WebContentsContextMenu.TextSelectionWithLink", 0, 1);
+
+  // 4. Test Executed metric (Should NOT log ShownAndIgnored)
+  {
+    std::unique_ptr<TestRenderViewContextMenu> menu_page2 =
+        CreateContextMenuMediaTypeNone(GURL(), GURL());
+    menu_page2->OnMenuWillShow(
+        const_cast<ui::SimpleMenuModel*>(&menu_page2->menu_model()));
+    menu_page2->ExecuteCommand(IDC_CONTENT_CONTEXT_GLIC, 0);
+    menu_page2->SetGlicItemExecutedForTesting(true);
+    menu_page2->MenuClosed(
+        const_cast<ui::SimpleMenuModel*>(&menu_page2->menu_model()));
+  }
+  // Expect kExecuted (1) in the Page histogram.
+  histogram_tester.ExpectBucketCount("Glic.WebContentsContextMenu.Page", 1, 1);
+  // Expect kShownAndIgnored (0) to still be 1 (from case 1, not incremented by
+  // case 4).
+  histogram_tester.ExpectBucketCount("Glic.WebContentsContextMenu.Page", 0, 1);
+}
+
 // TODO(crbug.com/455524503): De-flake and re-enable on ChromeOS.
 #if BUILDFLAG(IS_CHROMEOS)
 #define MAYBE_SaveLinkAsEntryIsDisabledForBlockedUrls \
@@ -756,7 +837,14 @@ IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest,
   list.Append("google.com");
   browser()->profile()->GetPrefs()->SetList(policy::policy_prefs::kUrlBlocklist,
                                             std::move(list));
-  base::RunLoop().RunUntilIdle();
+  base::RunLoop run_loop;
+  browser()
+      ->profile()
+      ->GetProfilePolicyConnector()
+      ->policy_service()
+      ->RefreshPolicies(run_loop.QuitClosure(),
+                        policy::PolicyFetchReason::kTest);
+  run_loop.Run();
 
   std::unique_ptr<TestRenderViewContextMenu> menu =
       CreateContextMenuMediaTypeNone(GURL("http://www.google.com/"),
@@ -824,7 +912,14 @@ IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest,
   list.Append("url.com");
   browser()->profile()->GetPrefs()->SetList(policy::policy_prefs::kUrlBlocklist,
                                             std::move(list));
-  base::RunLoop().RunUntilIdle();
+  base::RunLoop run_loop;
+  browser()
+      ->profile()
+      ->GetProfilePolicyConnector()
+      ->policy_service()
+      ->RefreshPolicies(run_loop.QuitClosure(),
+                        policy::PolicyFetchReason::kTest);
+  run_loop.Run();
 
   std::unique_ptr<TestRenderViewContextMenu> menu =
       CreateContextMenuMediaTypeImage(GURL("http://url.com/image.png"));
@@ -1680,7 +1775,7 @@ IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest,
 
   browser()->tab_strip_model()->CloseWebContentsAt(/*index=*/0,
                                                    TabCloseTypes::CLOSE_NONE);
-  web_app::CloseAndWait(browser());
+  CloseBrowserSynchronously(browser());
   EXPECT_FALSE(web_app::IsBrowserOpen(browser()));
   EXPECT_EQ(chrome::GetTotalBrowserCount(), 1u);
 
@@ -2238,10 +2333,10 @@ IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest, OpenLinkInProfileEntryPresent) {
     ASSERT_TRUE(menu->IsItemPresent(IDC_CONTENT_CONTEXT_OPENLINKSPLITVIEW));
     ASSERT_TRUE(menu->IsItemPresent(IDC_CONTENT_CONTEXT_COPYLINKLOCATION));
     // With at least two secondary profiles, they are displayed in a submenu.
-    raw_ptr<ui::MenuModel> model = nullptr;
-    size_t index = 0;
-    ASSERT_TRUE(menu->GetMenuModelAndItemIndex(IDC_OPEN_LINK_IN_PROFILE_FIRST,
-                                               &model, &index));
+    std::optional<std::pair<ui::MenuModel*, size_t>> model_and_index =
+        menu->GetMenuModelAndItemIndex(IDC_OPEN_LINK_IN_PROFILE_FIRST);
+    ASSERT_TRUE(model_and_index);
+    ui::MenuModel* model = model_and_index->first;
     ASSERT_EQ(2u, model->GetItemCount());
     ASSERT_FALSE(menu->IsItemInRangePresent(IDC_OPEN_LINK_IN_PROFILE_FIRST,
                                             IDC_OPEN_LINK_IN_PROFILE_LAST));
@@ -2314,10 +2409,10 @@ IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest, MAYBE_OpenLinkInProfile) {
       CreateContextMenuMediaTypeNone(url, url));
 
   // Verify that the size of the menu is correct.
-  raw_ptr<ui::MenuModel> model = nullptr;
-  size_t index = 0;
-  ASSERT_TRUE(menu->GetMenuModelAndItemIndex(IDC_OPEN_LINK_IN_PROFILE_FIRST,
-                                             &model, &index));
+  std::optional<std::pair<ui::MenuModel*, size_t>> model_and_index =
+      menu->GetMenuModelAndItemIndex(IDC_OPEN_LINK_IN_PROFILE_FIRST);
+  ASSERT_TRUE(model_and_index);
+  ui::MenuModel* model = model_and_index->first;
   ASSERT_EQ(profiles_in_menu.size(), model->GetItemCount());
 
   // Open the menu items. They should match their corresponding profiles in
@@ -2372,10 +2467,9 @@ IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest, OpenProfileNoneReferrer) {
   auto menu = CreateContextMenuFromParams(params);
 
   // Verify that the Open in Profile option is shown.
-  raw_ptr<ui::MenuModel> model = nullptr;
-  size_t index = 0;
-  ASSERT_TRUE(menu->GetMenuModelAndItemIndex(IDC_OPEN_LINK_IN_PROFILE_FIRST,
-                                             &model, &index));
+  std::optional<std::pair<ui::MenuModel*, size_t>> model_and_index =
+      menu->GetMenuModelAndItemIndex(IDC_OPEN_LINK_IN_PROFILE_FIRST);
+  ASSERT_TRUE(model_and_index);
 
   ui_test_utils::AllBrowserTabAddedWaiter add_tab;
   int command_id = menu->GetCommandIDByProfilePath(profile->GetPath());
@@ -3757,10 +3851,12 @@ IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest, OpenLinkInExistingSplitTab) {
       CreateContextMenuMediaTypeNone(test_url, test_url);
 
   EXPECT_TRUE(menu->IsItemPresent(IDC_CONTENT_CONTEXT_OPENLINKSPLITVIEW));
-  size_t index = 0;
-  raw_ptr<ui::MenuModel> model = nullptr;
-  ASSERT_TRUE(menu->GetMenuModelAndItemIndex(
-      IDC_CONTENT_CONTEXT_OPENLINKSPLITVIEW, &model, &index));
+  std::optional<std::pair<ui::MenuModel*, size_t>> model_and_index =
+      menu->GetMenuModelAndItemIndex(IDC_CONTENT_CONTEXT_OPENLINKSPLITVIEW);
+  ASSERT_TRUE(model_and_index);
+  ui::MenuModel* model = model_and_index->first;
+  size_t index = model_and_index->second;
+
   EXPECT_EQ(model->GetLabelAt(index),
             l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_OPENLINKRIGHTVIEW));
   menu->ExecuteCommand(IDC_CONTENT_CONTEXT_OPENLINKSPLITVIEW, 0);
@@ -3783,10 +3879,11 @@ IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest, OpenLinkInExistingSplitTabRTL) {
   std::unique_ptr<TestRenderViewContextMenu> menu =
       CreateContextMenuMediaTypeNone(test_url, test_url);
 
-  size_t index = 0;
-  raw_ptr<ui::MenuModel> model = nullptr;
-  ASSERT_TRUE(menu->GetMenuModelAndItemIndex(
-      IDC_CONTENT_CONTEXT_OPENLINKSPLITVIEW, &model, &index));
+  std::optional<std::pair<ui::MenuModel*, size_t>> model_and_index =
+      menu->GetMenuModelAndItemIndex(IDC_CONTENT_CONTEXT_OPENLINKSPLITVIEW);
+  ASSERT_TRUE(model_and_index);
+  ui::MenuModel* model = model_and_index->first;
+  size_t index = model_and_index->second;
   EXPECT_EQ(model->GetLabelAt(index),
             l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_OPENLINKLEFTVIEW));
 }

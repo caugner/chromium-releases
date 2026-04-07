@@ -27,7 +27,6 @@ BASE_DECLARE_FEATURE(kCustomizeChromeWallpaperSearchButton);
 BASE_DECLARE_FEATURE(kCustomizeChromeWallpaperSearchInspirationCard);
 BASE_DECLARE_FEATURE(kRealboxCr23Theming);
 BASE_DECLARE_FEATURE(kRealboxMatchOmniboxTheme);
-BASE_DECLARE_FEATURE(kRealboxUseGoogleGIcon);
 BASE_DECLARE_FEATURE(kNtpAlphaBackgroundCollections);
 BASE_DECLARE_FEATURE(kNtpAnimatedCaret);
 BASE_DECLARE_FEATURE(kNtpBackgroundImageErrorDetection);
@@ -85,6 +84,7 @@ BASE_DECLARE_FEATURE(kNtpTabGroupsModuleZeroState);
 BASE_DECLARE_FEATURE(kNtpFeatureOptimizationModuleRemoval);
 BASE_DECLARE_FEATURE(kNtpFeatureOptimizationShortcutsRemoval);
 BASE_DECLARE_FEATURE(kNtpFeatureOptimizationDismissModulesRemoval);
+BASE_DECLARE_FEATURE(kLightningTakeoverEdition);
 
 // Parameter for controlling the luminosity difference for NTP elements on light
 // backgrounds.
@@ -264,6 +264,9 @@ extern const base::FeatureParam<bool> kNtpNextClientSensitivityCheckParam;
 extern const base::FeatureParam<bool>
     kNtpNextSuggestionsFromNewSearchSuggestionsEndpointParam;
 
+// Parameter determining if the Canvas action chip should be enabled.
+extern const base::FeatureParam<bool> kNtpNextEnableCanvasChipParam;
+
 // Parameter determining if a recent tab chip/row should be generated in the
 // steady state in NTP. If false, one is NOT generated in the steady state,
 // while one is still generated in the deep-dive state.
@@ -276,6 +279,10 @@ extern const base::FeatureParam<bool> kNtpNextShowSimplificationUIParam;
 // Parameter determining if the Action Chips on the NTP should display the
 // dismissal UI.
 extern const base::FeatureParam<bool> kNtpNextShowDismissalUIParam;
+
+// Parameter determining if right-clicking an action chip should display the
+// disablement context menu.
+extern const base::FeatureParam<bool> kNtpNextDisablementContextMenuParam;
 
 // Parameter determining if the tab upload should be delayed when tab context is
 // added from an action chip.

@@ -8,6 +8,7 @@ import '//resources/cr_components/localized_link/localized_link.js';
 
 import type {ComposeboxElement} from '//resources/cr_components/composebox/composebox.js';
 import type {PageHandlerRemote} from '//resources/cr_components/composebox/composebox.mojom-webui.js';
+import {LensOverlayDismissalSource} from '//resources/cr_components/composebox/composebox.mojom-webui.js';
 import type {ComposeboxDropdownElement} from '//resources/cr_components/composebox/composebox_dropdown.js';
 import {ComposeboxProxyImpl, createAutocompleteMatch} from '//resources/cr_components/composebox/composebox_proxy.js';
 import {GlowAnimationState} from '//resources/cr_components/search/constants.js';
@@ -16,15 +17,19 @@ import {assert} from '//resources/js/assert.js';
 import {EventTracker} from '//resources/js/event_tracker.js';
 import {loadTimeData} from '//resources/js/load_time_data.js';
 import type {AutocompleteMatch, AutocompleteResult, PageCallbackRouter as SearchboxPageCallbackRouter, PageHandlerRemote as SearchboxPageHandlerRemote} from '//resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
-import {ToolMode} from '//resources/mojo/components/omnibox/composebox/composebox_query.mojom-webui.js';
+import type {InputState, ToolMode} from '//resources/mojo/components/omnibox/composebox/composebox_query.mojom-webui.js';
+import {InputType} from '//resources/mojo/components/omnibox/composebox/composebox_query.mojom-webui.js';
 import type {UnguessableToken} from '//resources/mojo/mojo/public/mojom/base/unguessable_token.mojom-webui.js';
 import {CrLitElement} from 'chrome://resources/lit/v3_0/lit.rollup.js';
 import type {PropertyValues} from 'chrome://resources/lit/v3_0/lit.rollup.js';
+import {WindowOpenDisposition} from 'chrome://resources/mojo/ui/base/mojom/window_open_disposition.mojom-webui.js';
 
 import {getCss} from './composebox.css.js';
 import {getHtml} from './composebox.html.js';
 import {VoiceSearchState} from './constants.js';
 import {IconType} from './contextual_tasks.mojom-webui.js';
+import type {PageHandlerInterface} from './contextual_tasks.mojom-webui.js';
+import {BrowserProxyImpl} from './contextual_tasks_browser_proxy.js';
 
 const ICON_TYPE_TO_NAME: {[id: number]: string} = {
   [IconType.kUnspecified]: 'unspecified',
@@ -92,7 +97,7 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
         type: Boolean,
         reflect: true,
       },
-      maybeShowOverlayHintText: {
+      isOverlayOpenForAimVisualSearch: {
         type: Boolean,
         reflect: true,
       },
@@ -107,8 +112,8 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
         value: loadTimeData.getBoolean('composeboxShowContextMenu'),
       },
       zeroStateSuggestions_: {type: Object},
-      activeToolMode_: {
-        type: Number,
+      inputState_: {
+        type: Object,
       },
       isLoading_: {
         type: Boolean,
@@ -122,7 +127,14 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
         type: Boolean,
         reflect: true,
       },
+      inVoiceSearchMode_: {
+        type: Boolean,
+        reflect: true,
+      },
       selectedMatchIndex_: {type: Number},
+      enableFileHint_: {type: Boolean},
+      lensButtonDisabled_: {type: Boolean},
+      isCanvasQuerySubmitted: {type: Boolean},
     };
   }
 
@@ -130,17 +142,16 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
   accessor isZeroState: boolean = false;
   accessor isSidePanel: boolean = false;
   accessor isLensOverlayShowing: boolean = false;
-  accessor maybeShowOverlayHintText: boolean = false;
+  accessor isOverlayOpenForAimVisualSearch: boolean = false;
   accessor inputEnabled: boolean = true;
+  accessor isCanvasQuerySubmitted: boolean = false;
 
   protected accessor zeroStateSuggestions_: AutocompleteResult = {
     input: '',
-
     suggestionGroupsMap: {},
-
     matches: Array(5).fill(null).map(() => createGhostMatch()),
-
     smartComposeInlineHint: null,
+    sequenceId: 0,
   };
   /* If suggestions are loading. Set this any time that should hide suggestions
    * while load next set of suggestions (after attaching image, etc.)
@@ -151,12 +162,17 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
   protected accessor isComposeboxFocused_: boolean = false;
   protected accessor showContextMenu_: boolean =
       loadTimeData.getBoolean('composeboxShowContextMenu');
-  protected accessor activeToolMode_: ToolMode = ToolMode.kUnspecified;
+  protected accessor inputState_: InputState|null = null;
   protected accessor showSuggestionsActivityLink_: boolean = false;
+  protected accessor inVoiceSearchMode_: boolean = false;
   protected accessor selectedMatchIndex_: number = -1;
+  protected accessor enableFileHint_: boolean =
+      loadTimeData.getBoolean('enableFileHint');
+  protected accessor lensButtonDisabled_: boolean = false;
   protected searchboxHandler_: SearchboxPageHandlerRemote;
   private eventTracker_: EventTracker = new EventTracker();
   private pageHandler_: PageHandlerRemote;
+  private contextualTasksHandler_: PageHandlerInterface;
   private searchboxCallbackRouter_: SearchboxPageCallbackRouter;
   private searchboxListenerIds_: number[] = [];
   // Tracks the resize of the composebox to provide height updates.
@@ -167,6 +183,7 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
   constructor() {
     super();
     this.pageHandler_ = ComposeboxProxyImpl.getInstance().handler;
+    this.contextualTasksHandler_ = BrowserProxyImpl.getInstance().handler;
     this.searchboxCallbackRouter_ =
         ComposeboxProxyImpl.getInstance().searchboxCallbackRouter;
     this.searchboxHandler_ = ComposeboxProxyImpl.getInstance().searchboxHandler;
@@ -174,7 +191,11 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
 
   override connectedCallback() {
     super.connectedCallback();
-
+    this.searchboxListenerIds_.push(
+        this.searchboxCallbackRouter_.onInputStateChanged.addListener(
+            (inputState: InputState) => {
+              this.inputState_ = inputState;
+            }));
     const composebox = this.$.composebox;
     if (composebox) {
       this.eventTracker_.add(composebox, 'composebox-focus-in', () => {
@@ -192,7 +213,7 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
         this.clearInputAndFocus(/* querySubmitted= */ true);
       });
       this.eventTracker_.add(
-          composebox, 'carousel-resize', (e: CustomEvent) => {
+          composebox, 'carousel-resize', (e: CustomEvent<{height: number}>) => {
             if (e.detail.height !== undefined) {
               composebox.style.setProperty(
                   '--carousel-height', `${e.detail.height}px`);
@@ -200,7 +221,8 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
             }
           });
       this.eventTracker_.add(
-          composebox, 'composebox-resize', (e: CustomEvent) => {
+          composebox, 'composebox-resize',
+          (e: CustomEvent<{height: number}>) => {
             if (e.detail.height !== undefined) {
               this.composeboxHeight_ = e.detail.height;
             }
@@ -213,12 +235,14 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
 
       this.eventTracker_.add(
           composebox, 'composebox-voice-search-start', () => {
+            this.startVoiceSearch();
             recordVoiceSearchAction(
                 VoiceSearchState.VOICE_SEARCH_BUTTON_CLICKED);
           });
 
       this.eventTracker_.add(
           composebox, 'composebox-voice-search-transcription-success', () => {
+            this.endVoiceSearch();
             recordVoiceSearchAction(VoiceSearchState.SUCCESSFUL_TRANSCRIPT);
           });
 
@@ -228,29 +252,21 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
           });
       this.eventTracker_.add(
           composebox, 'composebox-voice-search-error-and-canceled', () => {
+            this.endVoiceSearch();
             recordVoiceSearchAction(
                 VoiceSearchState.VOICE_SEARCH_ERROR_AND_CANCELED);
           });
       this.eventTracker_.add(
-          composebox, 'active-tool-mode-changed',
-          (e: CustomEvent<{value: ToolMode}>) => {
-            this.activeToolMode_ = e.detail.value;
-          });
-      this.eventTracker_.add(
           composebox, 'composebox-voice-search-user-canceled', () => {
+            this.endVoiceSearch();
             recordVoiceSearchAction(VoiceSearchState.VOICE_SEARCH_CANCELED);
           });
-      this.activeToolMode_ = composebox.activeToolMode;
 
       this.fire('update-tooltip-visibility', {height: composebox.offsetHeight});
 
       this.resizeObserver_ = new ResizeObserver(() => {
         this.composeboxHeight_ = composebox.offsetHeight;
-        this.dispatchEvent(new CustomEvent('composebox-height-update', {
-          bubbles: true,
-          composed: true,
-          detail: {height: this.composeboxHeight_},
-        }));
+        this.fire('composebox-height-update', {height: this.composeboxHeight_});
       });
       this.resizeObserver_.observe(composebox);
     }
@@ -274,6 +290,9 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
   override updated(changedProperties: PropertyValues<this>) {
     super.updated(changedProperties);
     if (changedProperties.has('isZeroState')) {
+      if (this.isZeroState) {
+        this.isCanvasQuerySubmitted = false;
+      }
       if (this.isZeroState && !this.isSidePanel) {
         // Get zero state autocomplete matches. In the side panel, we wait for
         // an update about whether an auto-chip will be added before querying
@@ -283,17 +302,29 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
     }
   }
 
+  protected startVoiceSearch() {
+    this.inVoiceSearchMode_ = true;
+  }
+
+  protected endVoiceSearch() {
+    this.inVoiceSearchMode_ = false;
+  }
+
   protected get showSuggestions_() {
     return this.isZeroState;
   }
 
+  protected get dropdownNeeded_() {
+    return !this.showSuggestions_;
+  }
+
   get showLensButton_() {
-    // Lens should be hidden in the side panel if deep search is enabled.
-    return this.isSidePanel && this.activeToolMode_ !== ToolMode.kDeepSearch;
+    return this.isSidePanel;
   }
 
   protected getInputPlaceholder_() {
-    return this.maybeShowOverlayHintText ?
+    return this.isOverlayOpenForAimVisualSearch &&
+            !this.$.composebox.hasFiles() ?
         loadTimeData.getString('composeboxHintTextLensOverlay') :
         '';
   }
@@ -305,7 +336,27 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
     this.showSuggestionsActivityLink_ = e.detail;
   }
 
-  protected onSuggestionsResultReceived_(e: CustomEvent<AutocompleteResult>) {
+  protected onSuggestionActivityLinkClicked_(e: CustomEvent<{event: Event}>) {
+    e.detail.event.preventDefault();
+    const anchor = e.detail.event.target as HTMLAnchorElement;
+    if (anchor && anchor.href) {
+      this.contextualTasksHandler_.openUrl(
+          anchor.href, WindowOpenDisposition.NEW_FOREGROUND_TAB);
+    }
+  }
+
+  protected onInputStateChanged_(e: CustomEvent<{inputState: InputState}>) {
+    const disabledTypes = e.detail.inputState?.disabledInputTypes || [];
+    if (disabledTypes.includes(InputType.kLensImage)) {
+      this.pageHandler_.closeLensOverlayFromWebUI(
+          LensOverlayDismissalSource.kContextualTasksImageUploadsDisabled);
+      this.lensButtonDisabled_ = true;
+      return;
+    }
+    this.lensButtonDisabled_ = false;
+  }
+
+  protected onSuggestionsResultChanged_(e: CustomEvent<AutocompleteResult>) {
     this.isLoading_ = false;
     this.zeroStateSuggestions_ = e.detail;
   }
@@ -317,14 +368,17 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
       e.preventDefault();
       e.stopPropagation();
     }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      e.stopPropagation();
+    }
   }
 
-  private updateSelection_(index: number) {
-    this.selectedMatchIndex_ = index;
-  }
-
+  // TODO(crbug.com/:494603388): This function definition should be updated: It should be
+  // `FocusIn` and use `CustomEvent<number>`. However, this means `composebox_match.ts`
+  // and its event needs to be updated, too.
   protected onMatchFocusin_(e: CustomEvent<{index: number}>) {
-    this.updateSelection_(e.detail.index);
+    this.selectedMatchIndex_ = e.detail.index;
   }
 
   private navigateToMatch_(index: number) {
@@ -346,11 +400,33 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
   }
 
   clearInputAndFocus(querySubmitted: boolean = false): void {
+    const hadContent = this.$.composebox.getInputText().trim().length > 0 ||
+        this.$.composebox.hasFiles();
+
     // Clear text from composebox and focus.
     this.$.composebox.clearAllInputs(
         querySubmitted, /* shouldBlockAutoSuggestedTabs= */ false);
     this.$.composebox.focusInput();
-    this.$.composebox.clearAutocompleteMatches();
+
+    // Unconditionally clearing matches wipes out the zero state suggestions
+    // when transitioning into or updating the zero state. Therefore, only clear
+    // matches if the query was submitted or if the composebox is not in zero
+    // state.
+    if (querySubmitted || !this.isZeroState) {
+      this.$.composebox.clearAutocompleteMatches();
+      return;
+    }
+
+    // Since the composebox is being rendered in zero state, fetch new zero
+    // state suggestions IFF there weren't already suggestions to prevent a
+    // flicker.
+    if (hadContent) {
+      this.$.composebox.queryAutocomplete(/*clearMatches=*/ true);
+    }
+  }
+
+  setIsLoadingForTesting(isLoading: boolean) {
+    this.isLoading_ = isLoading;
   }
 
   async startExpandAnimation() {
@@ -362,11 +438,11 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
     composebox.animationState = GlowAnimationState.EXPANDING;
   }
 
-  protected handleImageUpload_() {
+  protected onOpenImageUpload_() {
     this.pageHandler_.handleFileUpload(true);
   }
 
-  protected handleFileUpload_() {
+  protected onOpenFileUpload_() {
     this.pageHandler_.handleFileUpload(false);
   }
 
@@ -391,6 +467,33 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
 
   getComposebox() {
     return this.$.composebox;
+  }
+
+  setActiveTool(toolMode: ToolMode) {
+    this.searchboxHandler_.setActiveToolMode(toolMode);
+  }
+  setToolFromUrl(urlString: string) {
+    const urlObj = new URL(urlString);
+    const inputState = this.inputState_;
+    if (inputState && inputState.toolConfigs) {
+      for (const config of inputState.toolConfigs) {
+        if (config.aimUrlParams && config.aimUrlParams.length > 0) {
+          const hasParam = config.aimUrlParams.some(p => {
+            const value = urlObj.searchParams.get(p.paramKey);
+            return value === p.paramValue;
+          });
+          if (hasParam) {
+            if (config.tool === 2 /* ToolMode.kCanvas */) {
+              this.isCanvasQuerySubmitted = true;
+            }
+            if (inputState.activeTool !== config.tool) {
+              this.setActiveTool(config.tool);
+            }
+            break;
+          }
+        }
+      }
+    }
   }
 
   get isComposeboxFocusedForTesting() {

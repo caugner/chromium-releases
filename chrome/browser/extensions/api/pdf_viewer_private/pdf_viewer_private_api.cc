@@ -52,6 +52,8 @@ namespace SetPdfPluginAttributes =
 
 namespace SetPdfDocumentTitle = api::pdf_viewer_private::SetPdfDocumentTitle;
 
+constexpr char kSummarizePrompt[] = "Summarize this document";
+
 // Check if the current URL is allowed based on a list of allowlisted domains.
 bool IsUrlAllowedToEmbedLocalFiles(const GURL& current_url,
                                    const base::ListValue& allowlisted_domains) {
@@ -322,7 +324,7 @@ ExtensionFunction::ResponseAction PdfViewerPrivateGlicSummarizeFunction::Run() {
 
   glic::GlicInvokeOptions options{
       glic::mojom::InvocationSource::kPdfSummarizeButton};
-  options.prompts.push_back("Summarize this document");
+  options.prompts.push_back(kSummarizePrompt);
   options.conversation = glic::NewConversation();
 
   if (has_consented) {

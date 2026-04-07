@@ -33,7 +33,7 @@ import org.chromium.base.ContextUtils;
 import org.chromium.base.supplier.ObservableSuppliers;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider.ControlsPosition;
-import org.chromium.chrome.browser.omnibox.ShadowUrlBarData;
+import org.chromium.chrome.browser.omnibox.UrlBarData;
 import org.chromium.chrome.browser.omnibox.styles.OmniboxDrawableState;
 import org.chromium.chrome.browser.omnibox.styles.OmniboxImageSupplier;
 import org.chromium.chrome.browser.omnibox.styles.OmniboxResourceProvider;
@@ -50,6 +50,7 @@ import org.chromium.components.omnibox.AutocompleteMatch;
 import org.chromium.components.omnibox.AutocompleteMatchBuilder;
 import org.chromium.components.omnibox.OmniboxSuggestionType;
 import org.chromium.components.omnibox.SuggestTemplateInfoProto.SuggestTemplateInfo;
+import org.chromium.components.omnibox.action.OmniboxActionDelegate;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.url.GURL;
 import org.chromium.url.JUnitTestGURLs;
@@ -61,9 +62,7 @@ import java.util.function.Supplier;
 
 /** Tests for {@link BasicSuggestionProcessor}. */
 @RunWith(BaseRobolectricTestRunner.class)
-@Config(
-        manifest = Config.NONE,
-        shadows = {ShadowUrlBarData.class})
+@Config(manifest = Config.NONE)
 public class BasicSuggestionProcessorUnitTest {
     private static final @DrawableRes int ICON_BOOKMARK = R.drawable.ic_star_24dp;
     private static final @DrawableRes int ICON_GLOBE = R.drawable.ic_globe_24dp;
@@ -119,6 +118,7 @@ public class BasicSuggestionProcessorUnitTest {
     private @Mock OmniboxImageSupplier mImageSupplier;
     private @Mock Supplier<Tab> mTabSupplier;
     private @Mock Supplier<ShareDelegate> mShareDelegateSupplier;
+    private @Mock OmniboxActionDelegate mActionDelegate;
 
     private BasicSuggestionProcessor mProcessor;
     private AutocompleteMatch mSuggestion;
@@ -147,7 +147,8 @@ public class BasicSuggestionProcessorUnitTest {
                         mIsBookmarked,
                         mTabSupplier,
                         mShareDelegateSupplier,
-                        ObservableSuppliers.createNonNull(ControlsPosition.TOP));
+                        ObservableSuppliers.createNonNull(ControlsPosition.TOP),
+                        mActionDelegate);
         mProcessor = new BasicSuggestionProcessor(uiContext);
         mInput = new AutocompleteInput();
         OmniboxResourceProvider.disableCachesForTesting();
@@ -489,7 +490,7 @@ public class BasicSuggestionProcessorUnitTest {
     public void internalUrlSuggestions_doNotPresentInternalScheme() {
         mProcessor.onNativeInitialized();
         // URLs that are rejected by UrlBarData should not be presented to the User.
-        ShadowUrlBarData.sShouldShowNextUrl = false;
+        UrlBarData.setShouldShowUrlForTesting(false);
         createUrlSuggestion(OmniboxSuggestionType.URL_WHAT_YOU_TYPED, "", JUnitTestGURLs.URL_1);
         Assert.assertNull(mModel.get(SuggestionViewProperties.TEXT_LINE_2_TEXT));
     }

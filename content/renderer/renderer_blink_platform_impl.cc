@@ -121,7 +121,7 @@
 #include "content/child/child_process_sandbox_support_impl_win.h"
 #endif
 
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 #include "content/child/font_data/font_data_manager.h"
 #include "skia/ext/font_utils.h"
 #include "third_party/blink/public/web/win/web_font_rendering.h"
@@ -219,7 +219,7 @@ RendererBlinkPlatformImpl::RendererBlinkPlatformImpl(
     SkFontConfigInterface::SetGlobal(font_loader);
 #endif
 
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
     // Create a FontDataManager if it's enabled, and if we're not in a
     // single-process environment. In single process, the SkFontMgr is already
     // installed by browser process code at this point.
@@ -778,12 +778,20 @@ RendererBlinkPlatformImpl::CreateRasterGraphicsContextProvider(
   constexpr bool support_locking = false;
   constexpr bool lose_context_when_out_of_memory = false;
 
+  gpu::SchedulingPriority stream_priority =
+      (base::FeatureList::IsEnabled(features::kInitialWebUI) &&
+       features::kInitialWebUIHighStreamPriority.Get() &&
+       base::CommandLine::ForCurrentProcess()->HasSwitch(
+           switches::kTopChromeWebUI))
+          ? kGpuStreamPriorityUI
+          : kGpuStreamPriorityDefault;
+
   return std::make_unique<WebGraphicsContext3DProviderImpl>(
       viz::ContextProviderCommandBuffer::CreateForRaster(
-          std::move(gpu_channel_host), kGpuStreamIdDefault,
-          kGpuStreamPriorityDefault, GURL(document_url), automatic_flushes,
-          support_locking, gpu::SharedMemoryLimits(),
-          ToVizContextType(context_type), lose_context_when_out_of_memory));
+          std::move(gpu_channel_host), kGpuStreamIdDefault, stream_priority,
+          GURL(document_url), automatic_flushes, support_locking,
+          gpu::SharedMemoryLimits(), ToVizContextType(context_type),
+          lose_context_when_out_of_memory));
 }
 
 //------------------------------------------------------------------------------

@@ -108,11 +108,13 @@ class SkillsServiceChecker : public StatusChangeChecker,
   }
 
   // skills::SkillsService::Observer overrides.
-  void OnSkillUpdated(
-      std::string_view skill_id,
-      skills::SkillsService::UpdateSource update_source) override {
+  void OnSkillUpdated(std::string_view skill_id,
+                      skills::SkillsService::UpdateSource update_source,
+                      bool is_position_changed) override {
     CheckExitCondition();
   }
+
+  bool Require1PSkillRefresh() override { return false; }
 
   // StatusChangeChecker overrides.
   bool IsExitConditionSatisfied(std::ostream* os) override {
@@ -173,6 +175,10 @@ class SingleClientSkillsSyncTest
       enabled_features.push_back(syncer::kReplaceSyncPromosWithSignInPromos);
     }
     feature_overrides_.InitWithFeatures(enabled_features, {});
+  }
+
+  SyncTest::SetupSyncMode GetSetupSyncMode() const override {
+    return GetParam();
   }
 
   skills::SkillsService& GetSkillsService() const {

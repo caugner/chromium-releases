@@ -82,8 +82,6 @@ ci/chromeos-amd64-generic-rel-gtest
 ci/chromeos-amd64-generic-rel-tast
 ci/chromeos-arm-generic-rel
 ci/chromeos-arm64-generic-rel
-ci/chromeos-jacuzzi-rel
-ci/chromeos-octopus-rel
 ci/fuchsia-arm64-cast-receiver-rel
 ci/fuchsia-x64-cast-receiver-dbg
 ci/fuchsia-x64-cast-receiver-rel
@@ -146,8 +144,6 @@ try/chromeos-amd64-generic-rel-gtest
 try/chromeos-amd64-generic-rel-gtest-and-tast
 try/chromeos-arm-generic-rel
 try/chromeos-arm64-generic-rel
-try/chromeos-jacuzzi-rel
-try/chromeos-octopus-rel
 try/fuchsia-arm64-cast-receiver-rel
 try/fuchsia-binary-size
 try/fuchsia-x64-cast-receiver-dbg
@@ -171,6 +167,7 @@ try/linux_chromium_asan_rel_ng
 try/linux_chromium_compile_dbg_ng
 try/linux_chromium_dbg_ng
 try/linux_chromium_tsan_rel_ng
+try/mac-gpu-rel
 try/mac-official
 try/mac-rel
 try/mac-x64-compile-dbg

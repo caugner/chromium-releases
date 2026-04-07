@@ -6,14 +6,15 @@ import {html, nothing} from '//resources/lit/v3_0/lit.rollup.js';
 
 import type {SearchboxElement} from './searchbox.js';
 
-export function getHtml(this: SearchboxElement) {
+export function getHtml(
+    this: SearchboxElement, realboxNextEnabled: boolean = false) {
   // clang-format off
   return html`
 <cr-searchbox-dropdown id="matches" part="searchbox-dropdown"
-    class="${!this.ntpRealboxNextEnabled ? 'dropdownContainer' : nothing}"
+    class="${!realboxNextEnabled ? 'dropdownContainer' : nothing}"
     exportparts="dropdown-content"
-    role="listbox" .result="${this.result_}"
-    selected-match-index="${this.selectedMatchIndex_}"
+    role="listbox" .result="${this.result}"
+    selected-match-index="${this.selectedMatchIndex}"
     @selected-match-index-changed="${this.onSelectedMatchIndexChanged_}"
     ?can-show-secondary-side="${this.canShowSecondarySide}"
     ?had-secondary-side="${this.hadSecondarySide}"

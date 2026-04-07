@@ -76,6 +76,7 @@ public class UrlBarCoordinator
         PropertyModel model =
                 new PropertyModel.Builder(UrlBarProperties.ALL_KEYS)
                         .with(UrlBarProperties.ACTION_MODE_CALLBACK, actionModeCallback)
+                        .with(UrlBarProperties.ALLOW_MULTILINE_INPUT, false)
                         .with(UrlBarProperties.DELEGATE, delegate)
                         .with(UrlBarProperties.INCOGNITO_COLORS_ENABLED, isIncognitoBranded)
                         .with(UrlBarProperties.LONG_CLICK_LISTENER, onLongClickListener)
@@ -124,19 +125,6 @@ public class UrlBarCoordinator
         for (Callback<Boolean> listener : mTextWrapListeners) {
             listener.onResult(isWrapped);
         }
-    }
-
-    /**
-     * Install a listener called when the user begins typing in the Omnibox for the first time.
-     *
-     * <p>This callback is particularly relevant on Tablet devices, where the New Tab Page shows
-     * focused Omnibox, but the suggestions list is delayed until after user starts typing.
-     *
-     * <p>This callback gets invoked both when the user types text, and when content is pasted using
-     * keyboard shortcuts (Ctrl+V, Shift+Insert, Paste key etc).
-     */
-    public void setTypingStartedListener(Runnable listener) {
-        mMediator.setTypingStartedListener(listener);
     }
 
     /** Set the callback that will be invoked each time the content of the Omnibox changes. */
@@ -202,10 +190,10 @@ public class UrlBarCoordinator
     }
 
     /**
-     * @see UrlBarMediator#setSelectAllOnFocus(boolean)
+     * @see UrlBarMediator#setAllowMultilineInput(boolean)
      */
-    public void setSelectAllOnFocus(boolean selectAllOnFocus) {
-        mMediator.setSelectAllOnFocus(selectAllOnFocus);
+    public void setAllowMultilineInput(boolean allowMultilineInput) {
+        mMediator.setAllowMultilineInput(allowMultilineInput);
     }
 
     /**
@@ -219,12 +207,11 @@ public class UrlBarCoordinator
      * @see UrlBarMediator#setIsInCct(boolean)
      */
     public void setIsInCct(boolean isInCct) {
-        mMediator.setIsInCct(isInCct);
-    }
-
-    /** Selects all of the text of the UrlBar. */
-    public void selectAll() {
-        mUrlBar.selectAll();
+        // TODO(crbug.com/495455140): remove this entirely when the ALLOW_MULTILINE_INPUT is
+        // updated from the Fusebox. This is already redundant as-is, because text wrapping
+        // is only applied when the UrlBar has focus.
+        if (!isInCct) return;
+        setAllowMultilineInput(false);
     }
 
     @Override
@@ -257,15 +244,9 @@ public class UrlBarCoordinator
         return mUrlBar.getTextWithoutAutocomplete();
     }
 
-    /**
-     * Sets the selection anchor to startPos and the selection edge to endPos. When startPos is same
-     * as endPos, no text is selected and the cursor moves to startPos/EndPos.
-     *
-     * @param startPos The start position of the selection.
-     * @param endPos The end position of the selection
-     */
-    public void setSelection(int startPos, int endPos) {
-        mUrlBar.setSelection(startPos, endPos);
+    @Override
+    public void setSiteSearchChip(@Nullable String keyword) {
+        mUrlBar.setSiteSearchChip(keyword);
     }
 
     /** Returns the {@link ViewRectProvider} for the UrlBar. */

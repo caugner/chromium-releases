@@ -41,7 +41,7 @@
 #import "ios/chrome/browser/drive/model/drive_service_factory.h"
 #import "ios/chrome/browser/drive/model/upload_task.h"
 #import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_controller.h"
-#import "ios/chrome/browser/intelligence/bwg/utils/bwg_constants.h"
+#import "ios/chrome/browser/intelligence/bwg/utils/gemini_constants.h"
 #import "ios/chrome/browser/intelligence/features/features.h"
 #import "ios/chrome/browser/overlays/model/public/common/confirmation/confirmation_overlay_response.h"
 #import "ios/chrome/browser/overlays/model/public/overlay_callback_manager.h"
@@ -65,6 +65,8 @@
 #import "ios/chrome/browser/shared/public/commands/save_to_drive_commands.h"
 #import "ios/chrome/browser/shared/public/commands/scene_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
+#import "ios/chrome/browser/signin/model/authentication_service.h"
+#import "ios/chrome/browser/signin/model/authentication_service_factory.h"
 #import "ios/chrome/browser/signin/model/identity_manager_factory.h"
 #import "ios/chrome/browser/store_kit/model/store_kit_coordinator.h"
 #import "ios/chrome/browser/store_kit/model/store_kit_coordinator_delegate.h"
@@ -150,6 +152,8 @@
   _mediator.SetIdentityManager(IdentityManagerFactory::GetForProfile(profile));
   _mediator.SetDriveService(drive::DriveServiceFactory::GetForProfile(profile));
   _mediator.SetPrefService(profile->GetPrefs());
+  _mediator.SetAuthenticationService(
+      AuthenticationServiceFactory::GetForProfile(profile));
   if (IsDownloadListEnabled()) {
     _mediator.SetDownloadRecordService(
         DownloadRecordServiceFactory::GetForProfile(profile));
@@ -185,6 +189,7 @@
 
   _mediator.SetDriveService(nullptr);
   _mediator.SetPrefService(nullptr);
+  _mediator.SetAuthenticationService(nullptr);
   _mediator.SetIdentityManager(nullptr);
   if (IsDownloadListEnabled()) {
     _mediator.SetDownloadRecordService(nullptr);

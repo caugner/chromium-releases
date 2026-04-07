@@ -8,6 +8,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.clearInvocations;
@@ -43,7 +44,6 @@ import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.robolectric.Shadows;
 import org.robolectric.annotation.Config;
-import org.robolectric.shadows.ShadowLooper;
 import org.robolectric.shadows.ShadowPackageManager;
 
 import org.chromium.base.ContextUtils;
@@ -52,6 +52,7 @@ import org.chromium.base.supplier.ObservableSuppliers;
 import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
 import org.chromium.base.supplier.SettableNonNullObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.RobolectricUtil;
 import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.base.test.util.HistogramWatcher;
@@ -65,6 +66,7 @@ import org.chromium.chrome.browser.browser_controls.BrowserControlsSizer;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider.ControlsPosition;
 import org.chromium.chrome.browser.browser_controls.BrowserStateBrowserControlsVisibilityDelegate;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.layouts.LayoutType;
 import org.chromium.chrome.browser.preferences.Pref;
 import org.chromium.chrome.browser.prefs.LocalStatePrefs;
 import org.chromium.chrome.browser.prefs.LocalStatePrefsJni;
@@ -83,6 +85,7 @@ import org.chromium.components.user_prefs.UserPrefsJni;
 import org.chromium.ui.KeyboardVisibilityDelegate;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.display.DisplayAndroid;
+import org.chromium.ui.insets.InsetObserver;
 import org.chromium.url.GURL;
 import org.chromium.url.JUnitTestGURLs;
 
@@ -98,6 +101,7 @@ public class ToolbarPositionControllerTest {
 
     private static final int TOOLBAR_HEIGHT = 56;
     private static final int CONTROL_CONTAINER_ID = 12356;
+    private static final int STATUS_BAR_HEIGHT = 10;
 
     private final BrowserControlsSizer mBrowserControlsSizer =
             new BrowserControlsSizer() {
@@ -282,6 +286,7 @@ public class ToolbarPositionControllerTest {
     @Mock private PrefService mLocalPrefService;
     @Mock private WindowAndroid mWindowAndroid;
     @Mock private DisplayAndroid mDisplayAndroid;
+    @Mock private InsetObserver mInsetObserver;
 
     private Context mContext;
     private final SettableNonNullObservableSupplier<Boolean> mIsNtpShowing =
@@ -309,9 +314,9 @@ public class ToolbarPositionControllerTest {
             ObservableSuppliers.createNonNull(TOOLBAR_HEIGHT);
     private final SettableNonNullObservableSupplier<Integer> mKeyboardHeightSupplier =
             ObservableSuppliers.createNonNull(0);
+    private SettableNonNullObservableSupplier<Profile> mProfileSupplier;
     private final SettableMonotonicObservableSupplier<Tab> mActivityTabSupplier =
             ObservableSuppliers.createMonotonic();
-    private SettableNonNullObservableSupplier<Profile> mProfileSupplier;
     private HistogramWatcher mStartupExpectation;
 
     public static class FakeKeyboardVisibilityDelegate extends KeyboardVisibilityDelegate {
@@ -357,6 +362,7 @@ public class ToolbarPositionControllerTest {
         mProfileSupplier = ObservableSuppliers.createNonNull(mProfile);
         UserPrefsJni.setInstanceForTesting(mUserPrefsNatives);
         when(mUserPrefsNatives.get(mProfile)).thenReturn(mPrefs);
+        doReturn(mInsetObserver).when(mWindowAndroid).getInsetObserver();
 
         ResettersForTesting.register(
                 ToolbarPositionController::resetCachedToolbarConfigurationForTesting);
@@ -388,9 +394,9 @@ public class ToolbarPositionControllerTest {
                         mContext,
                         mToolbarPosition,
                         mProfileSupplier,
+                        mActivityTabSupplier,
                         mKeyboardHeightSupplier,
-                        mWindowAndroid,
-                        mActivityTabSupplier);
+                        mWindowAndroid);
 
         LocalStatePrefs.setNativePrefsLoadedForTesting(true);
         LocalStatePrefsJni.setInstanceForTesting(mLocalStatePrefsNatives);
@@ -426,7 +432,7 @@ public class ToolbarPositionControllerTest {
                             ? ToolbarPositionAndSource.TOP_LONG_PRESS
                             : ToolbarPositionAndSource.BOTTOM_LONG_PRESS);
         }
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
     }
 
     @Test
@@ -1006,22 +1012,50 @@ public class ToolbarPositionControllerTest {
         assertEquals(View.NO_ID, mProgressBarLayoutParams.getAnchorId());
 
         // Run the posted task to complete changing the progress bar layout params.
-        ShadowLooper.idleMainLooper();
+        RobolectricUtil.runAllBackgroundAndUi();
         assertControlsAtTop();
     }
 
     @Test
     public void testOnToEdgeChange() {
+        mActivityTabSupplier.set(mock(Tab.class));
         int topInset = 50;
 
         // Test case to apply the top inset.
-        mController.onToEdgeChange(topInset, /* consumeTopInset= */ true);
+        mController.onToEdgeChange(topInset, /* consumeTopInset= */ true, LayoutType.BROWSING);
         // Verifies that the topInset is sent to toolbar as a top padding.
         verify(mToolbarLayout).onToEdgeChange(eq(topInset));
 
         // Test case to remove the top inset.
-        mController.onToEdgeChange(topInset, /* consumeTopInset= */ false);
+        mController.onToEdgeChange(topInset, /* consumeTopInset= */ false, LayoutType.BROWSING);
         verify(mToolbarLayout).onToEdgeChange(eq(0));
+    }
+
+    @Test
+    public void testOnToEdgeChange_NullTab_ReturnEarly() {
+        // mActivityTabSupplier is not set, so the active tab is null.
+        int topInset = 50;
+
+        boolean result =
+                mController.onToEdgeChange(
+                        topInset, /* consumeTopInset= */ true, LayoutType.BROWSING);
+
+        assertFalse(result);
+        verify(mToolbarLayout, never()).onToEdgeChange(anyInt());
+    }
+
+    @Test
+    public void testOnToEdgeChange_NullTab_ToolbarSwipe() {
+        // mActivityTabSupplier is not set, so the active tab is null.
+        int topInset = 50;
+
+        boolean result =
+                mController.onToEdgeChange(
+                        topInset, /* consumeTopInset= */ true, LayoutType.TOOLBAR_SWIPE);
+
+        // Toolbar swipe should NOT return early even with a null tab.
+        assertTrue(result);
+        verify(mToolbarLayout).onToEdgeChange(eq(topInset));
     }
 
     @Test
@@ -1040,21 +1074,9 @@ public class ToolbarPositionControllerTest {
     @Config(qualifiers = "sw400dp", sdk = 30)
     @EnableFeatures(ChromeFeatureList.ANDROID_BOTTOM_TOOLBAR_V2)
     public void testBottomAnchoredFocusedOmnibox() {
-        doReturn(mDisplayAndroid).when(mWindowAndroid).getDisplay();
-        doReturn(1000).when(mDisplayAndroid).getDisplayHeight();
-        doReturn(mRootView).when(mControlContainerView).getRootView();
-        int statusBarHeight = 10;
-        WindowInsets rootViewInsets =
-                new WindowInsets.Builder()
-                        .setInsets(WindowInsets.Type.ime(), Insets.of(0, 0, 0, 400))
-                        .setInsets(
-                                WindowInsets.Type.statusBars(), Insets.of(0, statusBarHeight, 0, 0))
-                        .build();
-        doReturn(rootViewInsets).when(mControlContainerView).getRootWindowInsets();
-
-        setUserToolbarAnchorPreference(/* showToolbarOnTop= */ false);
-        mIsOmniboxFocused.set(true);
-        assertControlsAtBottom();
+        // Null InsetObserver, should fallback to keyboard's overlay mode.
+        doReturn(null).when(mWindowAndroid).getInsetObserver();
+        setupBottomAnchoredFocusedOmniboxTest();
 
         mKeyboardHeightSupplier.set(400);
         verify(mControlContainerView).setTranslationY(-400f);
@@ -1063,8 +1085,32 @@ public class ToolbarPositionControllerTest {
         // the toolbar should be translated up to the top of the screen but no further.
         doReturn(430).when(mDisplayAndroid).getDisplayHeight();
         mKeyboardHeightSupplier.set(401);
-        verify(mControlContainerView).setTranslationY(-(430f - TOOLBAR_HEIGHT - statusBarHeight));
+        verify(mControlContainerView)
+                .setTranslationY(-(430f - TOOLBAR_HEIGHT - STATUS_BAR_HEIGHT));
         verify(mControlContainer, atLeast(1)).setMaxHeight(20);
+    }
+
+    @Test
+    @Config(qualifiers = "sw400dp", sdk = 30)
+    @EnableFeatures(ChromeFeatureList.ANDROID_BOTTOM_TOOLBAR_V2)
+    public void testBottomAnchoredFocusedOmnibox_whenOverlayKeyboardMode() {
+        doReturn(true).when(mInsetObserver).isKeyboardInOverlayMode();
+        setupBottomAnchoredFocusedOmniboxTest();
+
+        mKeyboardHeightSupplier.set(400);
+        verify(mControlContainerView, atLeast(1)).setTranslationY(-400f);
+    }
+
+    @Test
+    @Config(qualifiers = "sw400dp", sdk = 30)
+    @EnableFeatures(ChromeFeatureList.ANDROID_BOTTOM_TOOLBAR_V2)
+    public void testBottomAnchoredFocusedOmnibox_whenResizeKeyboardMode() {
+        doReturn(false).when(mInsetObserver).isKeyboardInOverlayMode();
+        setupBottomAnchoredFocusedOmniboxTest();
+
+        mKeyboardHeightSupplier.set(400);
+        // In resize mode, keyboard height should be ignored for translation.
+        verify(mControlContainerView, atLeast(1)).setTranslationY(0f);
     }
 
     @Test
@@ -1072,6 +1118,25 @@ public class ToolbarPositionControllerTest {
         mController.destroy();
         setUserToolbarAnchorPreference(/* showToolbarOnTop= */ false);
         assertControlsAtTop();
+    }
+
+    private void setupBottomAnchoredFocusedOmniboxTest() {
+        doReturn(mDisplayAndroid).when(mWindowAndroid).getDisplay();
+        doReturn(1000).when(mDisplayAndroid).getDisplayHeight();
+        doReturn(mRootView).when(mControlContainerView).getRootView();
+
+        WindowInsets rootViewInsets =
+                new WindowInsets.Builder()
+                        .setInsets(WindowInsets.Type.ime(), Insets.of(0, 0, 0, 400))
+                        .setInsets(
+                                WindowInsets.Type.statusBars(),
+                                Insets.of(0, STATUS_BAR_HEIGHT, 0, 0))
+                        .build();
+        doReturn(rootViewInsets).when(mControlContainerView).getRootWindowInsets();
+
+        setUserToolbarAnchorPreference(/* showToolbarOnTop= */ false);
+        mIsOmniboxFocused.set(true);
+        assertControlsAtBottom();
     }
 
     @Test
@@ -1098,11 +1163,12 @@ public class ToolbarPositionControllerTest {
 
         // 3. Test active tab is not NTP, and layout changed.
         // We need onToEdgeChange to return true.
-        // maybeForceToolbarLayoutUpdateAndCapture calls onToEdgeChange(0, false).
+        // maybeForceToolbarLayoutUpdateAndCapture calls onToEdgeChange(0, false,
+        // LayoutType.BROWSING).
         // Set mTopInset to something non-zero first.
         when(mTab.getUrl()).thenReturn(JUnitTestGURLs.URL_1);
         mActivityTabSupplier.set(mTab);
-        mController.onToEdgeChange(50, true);
+        mController.onToEdgeChange(50, true, LayoutType.BROWSING);
         mController.maybeForceBottomToolbarLayoutUpdateAndCapture(/* isNtpShowing= */ false);
         verify(mControlContainer).doSynchronousLayoutAndCapture();
 

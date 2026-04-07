@@ -14,7 +14,6 @@
 #include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/scoped_observation.h"
-#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ui/autofill/autofill_context_menu_manager.h"
@@ -117,12 +116,15 @@ class RenderViewContextMenu
                               blink::mojom::PluginActionType)>;
 
   RenderViewContextMenu(content::RenderFrameHost& render_frame_host,
-                        const content::ContextMenuParams& params);
+                        const content::ContextMenuParams& params,
+                        bool is_paste_enabled);
 
   RenderViewContextMenu(const RenderViewContextMenu&) = delete;
   RenderViewContextMenu& operator=(const RenderViewContextMenu&) = delete;
 
   ~RenderViewContextMenu() override;
+
+  void MenuClosed(ui::SimpleMenuModel* source) override;
 
   // Adds the spell check service item to the context menu.
   static void AddSpellCheckServiceItem(ui::SimpleMenuModel* menu,
@@ -569,6 +571,9 @@ class RenderViewContextMenu
   // Responsible for handling autofill related context menu items.
   autofill::AutofillContextMenuManager autofill_context_menu_manager_;
 
+  // Whether the "Paste" menu item should be enabled.
+  const bool is_paste_enabled_;
+
   // Fenced frame can disable its untrusted network in exchange for access to
   // unpartitioned cross-site data. To prevent cross-site data from leaking out
   // of fenced frame, context menu commands should be gated on untrusted network
@@ -609,8 +614,15 @@ class RenderViewContextMenu
            IDC_CONTENT_CONTEXT_OPEN_ORIGINAL_IMAGE_NEW_TAB,
 
            // Opening Glic
-           IDC_CONTENT_CONTEXT_GLIC});
+           IDC_CONTENT_CONTEXT_GLIC,
+
+           // Autofill commands.
+           IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_AT_MEMORY});
   // LINT.ThenChange(//chrome/app/chrome_command_ids.h:ChromeCommandIds)
+
+  //  Used for CTR metrics of menu item for opening Glic.
+  bool glic_item_shown_ = false;
+  bool glic_item_executed_ = false;
 
   base::WeakPtrFactory<RenderViewContextMenu> weak_pointer_factory_{this};
 };

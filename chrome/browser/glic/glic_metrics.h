@@ -185,14 +185,18 @@ enum class ResponseSegmentation {
   kActorTaskIconAttachedAudio = 50,
   kActorTaskIconDetachedText = 51,
   kActorTaskIconDetachedAudio = 52,
-  kHandoffButtonAttachedText = 53,
-  kHandoffButtonAttachedAudio = 54,
-  kHandoffButtonDetachedText = 55,
-  kHandoffButtonDetachedAudio = 56,
-  kSkillsAttachedText = 57,
-  kSkillsAttachedAudio = 58,
-  kSkillsDetachedText = 59,
-  kSkillsDetachedAudio = 60,
+  kSharedImageAttachedText = 53,
+  kSharedImageAttachedAudio = 54,
+  kSharedImageDetachedText = 55,
+  kSharedImageDetachedAudio = 56,
+  kHandoffButtonAttachedText = 57,
+  kHandoffButtonAttachedAudio = 58,
+  kHandoffButtonDetachedText = 59,
+  kHandoffButtonDetachedAudio = 60,
+  kSkillsAttachedText = 61,
+  kSkillsAttachedAudio = 62,
+  kSkillsDetachedText = 63,
+  kSkillsDetachedAudio = 64,
   kAutoOpenedByContextualCueAttachedText = 65,
   kAutoOpenedByContextualCueAttachedAudio = 66,
   kAutoOpenedByContextualCueDetachedText = 67,
@@ -209,6 +213,18 @@ enum class ResponseSegmentation {
   kAutoOpenedForPdfAttachedAudio = 78,
   kAutoOpenedForPdfDetachedText = 79,
   kAutoOpenedForPdfDetachedAudio = 80,
+  kCaptureRegionHotkeyAttachedText = 81,
+  kCaptureRegionHotkeyAttachedAudio = 82,
+  kCaptureRegionHotkeyDetachedText = 83,
+  kCaptureRegionHotkeyDetachedAudio = 84,
+  kIphAttachedText = 85,
+  kIphAttachedAudio = 86,
+  kIphDetachedText = 87,
+  kIphDetachedAudio = 88,
+  kAnchoredContextualCueAttachedText = 89,
+  kAnchoredContextualCueAttachedAudio = 90,
+  kAnchoredContextualCueDetachedText = 91,
+  kAnchoredContextualCueDetachedAudio = 92,
   kWebContentsContextMenuAttachedText = 93,
   kWebContentsContextMenuAttachedAudio = 94,
   kWebContentsContextMenuDetachedText = 95,
@@ -395,6 +411,10 @@ class GlicMetrics : public GlicInstanceMetricsBackwardsCompatibility {
                                   GlicSharingManager* sharing_manager);
   void ClearControllers();
 
+  // Records user preferences for the profile. Called when the GlicKeyedService
+  // for each profile is created.
+  void RecordGlicProfilePreferences();
+
   void SetDelegateForTesting(std::unique_ptr<Delegate> delegate);
 
   // Sets the input mode of the web client. Should be called when the panel is
@@ -480,7 +500,9 @@ class GlicMetrics : public GlicInstanceMetricsBackwardsCompatibility {
   int session_responses_ = 0;
   base::TimeTicks session_start_time_;
   mojom::InvocationSource invocation_source_ =
-      mojom::InvocationSource::kOsButton;
+      mojom::InvocationSource::kUnsupported;
+  mojom::InvocationSource onboarding_invocation_source_ =
+      mojom::InvocationSource::kUnsupported;
 
   // Used to record impressions of glic entry points.
   base::RepeatingTimer impression_timer_;

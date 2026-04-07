@@ -485,6 +485,17 @@ public class OmniboxResourceProvider {
     }
 
     /**
+     * Returns the background color for the toolbar pill for tablets. Because tablets always ignore
+     * any branded theme, can collapse to if incog or not.
+     */
+    public static @ColorInt int getTabletToolbarTextBoxBackgroundColor(
+            Context context, @BrandedColorScheme int brandedColorScheme) {
+        return brandedColorScheme == BrandedColorScheme.INCOGNITO
+                ? context.getColor(R.color.toolbar_text_box_background_incognito)
+                : context.getColor(R.color.toolbar_text_box_bg_color);
+    }
+
+    /**
      * Resolves the attribute based on the current theme.
      *
      * @param context The {@link Context} used to retrieve resources.
@@ -632,8 +643,7 @@ public class OmniboxResourceProvider {
      * @param context The context to retrieve the resources from.
      * @return the color for the additional text.
      */
-    @ColorInt
-    public static int getAdditionalTextColor(Context context) {
+    public static @ColorInt int getAdditionalTextColor(Context context) {
         return SemanticColorUtils.getDefaultTextColorSecondary(context);
     }
 
@@ -788,6 +798,14 @@ public class OmniboxResourceProvider {
         boolean isIncognito =
                 convertBrandedColorSchemeToIncognitoOrDayNightAdaptive(brandedColorScheme);
         return IncognitoColors.getTextMediumPrimary(isIncognito);
+    }
+
+    /** Resolves the text appearance for header visibility text in the popup. */
+    public static @StyleRes int getPopupHeaderVisibilityTextRes(
+            @BrandedColorScheme int brandedColorScheme) {
+        boolean isIncognito =
+                convertBrandedColorSchemeToIncognitoOrDayNightAdaptive(brandedColorScheme);
+        return IncognitoColors.getTextSmallSecondary(isIncognito);
     }
 
     /** Returns the drawable that is to go behind the + button in the search box. */

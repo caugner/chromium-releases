@@ -111,14 +111,7 @@ struct TabInfo {
   mojo_base.mojom.TimeTicks last_active;
 };
 
-// See also:
-// https://crsrc.org/c/third_party/omnibox_proto/aim_tools.proto
-enum ToolMode {
-  kDefault = 0,
-  kDeepSearch = 1,
-  kCanvas = 2,
-  kCreateImage = 4,
-};
+
 
 // Represents a file attachment who's upload was started browser-side (currently
 // an image or PDF only).
@@ -161,7 +154,7 @@ struct SearchContext {
   // A list of attachments to the search context.
   array<SearchContextAttachment> attachments;
   // The mode of the search query.
-  ToolMode tool_mode;
+  composebox_query.mojom.ToolMode tool_mode;
 };
 
 // Information about a contextual input.
@@ -200,6 +193,7 @@ struct SuggestionGroup {
 };
 
 struct AutocompleteResult {
+  uint32 sequence_id;
   mojo_base.mojom.String16 input;
   // Map of suggestion group IDs to their respective info.
   map<int32, SuggestionGroup> suggestion_groups_map;
@@ -283,7 +277,8 @@ interface PageHandler {
   SetPopupSelection(OmniboxPopupSelection selection);
 
   // Opens a specified popup selection.
-  OpenPopupSelection(OmniboxPopupSelection selection,
+  OpenPopupSelection(uint32 result_sequence_id,
+                     OmniboxPopupSelection selection,
                      ui.mojom.WindowOpenDisposition disposition);
 
   // Informs the browser that the user has changed the selected suggestion. The
@@ -389,11 +384,18 @@ interface PageHandler {
 
   // Called when a user enables a tool.
   SetActiveToolMode(composebox_query.mojom.ToolMode tool);
+
   // Called when a user enables a model.
   SetActiveModelMode(composebox_query.mojom.ModelMode model);
 
   // Activates a metrics funnel for the session.
   ActivateMetricsFunnel(string funnel_name);
+
+  // Called when a user interacts with a tool selection button explicitly.
+  RecordToolSelectionAction(composebox_query.mojom.ToolMode tool);
+
+  // Called when a user interacts with a model selection button explicitly.
+  RecordModelSelectionAction(composebox_query.mojom.ModelMode model);
 };
 
 // WebUI-side handler for requests from the browser.

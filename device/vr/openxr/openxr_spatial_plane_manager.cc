@@ -214,21 +214,23 @@ void OpenXrSpatialPlaneManager::OnSnapshotChanged() {
   query_result.entityStateCapacityInput = entity_states.size();
   query_result.entityStates = entity_states.data();
 
+  XrNextChainBuilder next_chain(&query_result);
+
   std::vector<XrSpatialPlaneAlignmentEXT> plane_alignments(
       query_result.entityIdCountOutput);
   XrSpatialComponentPlaneAlignmentListEXT plane_alignment_list{
       .type = XR_TYPE_SPATIAL_COMPONENT_PLANE_ALIGNMENT_LIST_EXT,
       .planeAlignmentCount = static_cast<uint32_t>(plane_alignments.size()),
       .planeAlignments = plane_alignments.data()};
+  next_chain.Add(&plane_alignment_list);
 
   std::vector<XrSpatialBounded2DDataEXT> bounded_2d_data(
       query_result.entityIdCountOutput);
   XrSpatialComponentBounded2DListEXT bounded_2d_list{
       .type = XR_TYPE_SPATIAL_COMPONENT_BOUNDED_2D_LIST_EXT,
-      .next = &plane_alignment_list,
       .boundCount = static_cast<uint32_t>(bounded_2d_data.size()),
       .bounds = bounded_2d_data.data()};
-  query_result.next = &bounded_2d_list;
+  next_chain.Add(&bounded_2d_list);
 
   std::vector<XrSpatialPolygon2DDataEXT> polygons;
   XrSpatialComponentPolygon2DListEXT polygon_list{
@@ -237,8 +239,7 @@ void OpenXrSpatialPlaneManager::OnSnapshotChanged() {
     polygons.resize(query_result.entityIdCountOutput);
     polygon_list.polygonCount = static_cast<uint32_t>(polygons.size());
     polygon_list.polygons = polygons.data();
-    polygon_list.next = query_result.next;
-    query_result.next = &polygon_list;
+    next_chain.Add(&polygon_list);
   }
 
   std::vector<XrSpatialPlaneSemanticLabelEXT> semantic_labels;
@@ -249,8 +250,7 @@ void OpenXrSpatialPlaneManager::OnSnapshotChanged() {
     semantic_label_list.semanticLabelCount =
         static_cast<uint32_t>(semantic_labels.size());
     semantic_label_list.semanticLabels = semantic_labels.data();
-    semantic_label_list.next = query_result.next;
-    query_result.next = &semantic_label_list;
+    next_chain.Add(&semantic_label_list);
   }
 
   if (XR_FAILED(
@@ -325,8 +325,18 @@ bool OpenXrSpatialPlaneManager::GetPolygonFromBuffer(
     XrSpatialSnapshotEXT snapshot,
     const XrSpatialPolygon2DDataEXT& polygon_data,
     mojom::XRPlaneDataPtr& plane_data) const {
+  // There is currently a runtime error where some runtimes may report the
+  // presence of a polygon, but not actually have populated the buffer yet.
+  // Before querying for the spatial buffer, ensure we have a valid buffer id.
+  if (polygon_data.vertexBuffer.bufferId == XR_NULL_SPATIAL_BUFFER_ID_EXT) {
+    DLOG(ERROR) << __func__
+                << " Runtime reported polygon, but returned invalid buffer id";
+    return false;
+  }
+
   XrSpatialBufferGetInfoEXT buffer_info{XR_TYPE_SPATIAL_BUFFER_GET_INFO_EXT};
   buffer_info.bufferId = polygon_data.vertexBuffer.bufferId;
+
   uint32_t buffer_count_output = 0;
   if (XR_FAILED(
           extension_helper_->ExtensionMethods().xrGetSpatialBufferVector2fEXT(

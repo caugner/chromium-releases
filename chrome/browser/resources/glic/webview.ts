@@ -5,11 +5,15 @@
 import {EventTracker} from '//resources/js/event_tracker.js';
 import {loadTimeData} from '//resources/js/load_time_data.js';
 import {GlicRequestHeaderInjector} from '/shared/glic_request_headers.js';
-import {createWebView, isFullWebView} from '/shared/web_view_type.js';
+import {isFullWebView} from '/shared/web_view_type.js';
 import type {WebViewType} from '/shared/web_view_type.js';
 import type {ChromeEvent} from '/tools/typescript/definitions/chrome_event.js';
+// <if expr="not is_android">
+import {getInstance as getAnnouncerInstance} from 'chrome://resources/cr_elements/cr_a11y_announcer/cr_a11y_announcer.js';
+// </if>
 
 import type {BrowserProxyImpl} from './browser_proxy.js';
+import {ZoomAction} from './glic.mojom-webui.js';
 import type {Subscriber} from './glic_api/glic_api.js';
 import {DetailedWebClientState, GlicApiCommunicator, GlicApiHost, WebClientState} from './glic_api_impl/host/glic_api_host.js';
 import type {ApiHostEmbedder} from './glic_api_impl/host/glic_api_host.js';
@@ -121,6 +125,7 @@ export class WebviewController {
   private hostSubscriber?: Subscriber;
   private onDestroy: Array<() => void> = [];
   private eventTracker = new EventTracker();
+  private hasPendingCrossDocumentNavigation = false;
   private webClientState =
       ObservableValue.withValue(WebClientState.UNINITIALIZED);
   private oneMinuteTimer = new OneShotTimer(1000 * 60);
@@ -133,14 +138,14 @@ export class WebviewController {
       private hostEmbedder: ApiHostEmbedder,
       private persistentState: WebviewPersistentState,
   ) {
-    this.webview = createWebView();
+    this.webview = document.createElement('webview');
+
+    this.glicRequestHeaderInjector = new GlicRequestHeaderInjector(
+        this.webview, loadTimeData.getString('chromeVersion'),
+        loadTimeData.getString('chromeChannel'),
+        loadTimeData.getString('glicHeaderRequestTypes'));
 
     if (isFullWebView(this.webview)) {
-      this.glicRequestHeaderInjector = new GlicRequestHeaderInjector(
-          this.webview, loadTimeData.getString('chromeVersion'),
-          loadTimeData.getString('chromeChannel'),
-          loadTimeData.getString('glicHeaderRequestTypes'));
-
       // Intercept all main frame requests, and block them if they are not
       // allowed origins.
       const onBeforeRequest = this.onBeforeRequest.bind(this);
@@ -175,12 +180,23 @@ export class WebviewController {
     this.eventTracker.add(
         this.webview, 'unresponsive', this.onUnresponsive.bind(this));
     this.eventTracker.add(this.webview, 'exit', this.onExit.bind(this));
+    // <if expr="not is_android">
+    this.eventTracker.add(this.webview, 'zoomchange', (e: any) => {
+      const percentage = Math.round(e.newZoomFactor * 100);
+      const message = loadTimeData.getStringF('zoomLabel', percentage + '%');
+      getAnnouncerInstance().announce(message);
+    });
+    // </if>
+    this.eventTracker.add(
+        this.webview, 'loadstart', this.onLoadStart.bind(this));
+    this.eventTracker.add(
+        this.webview, 'loadabort', this.onLoadAbort.bind(this));
 
     this.webview.src = this.persistentState.useLoadUrl();
 
     this.oneMinuteTimer.start(() => {
       if (this.host) {
-        chrome.metricsPrivate.recordEnumerationValue(
+        chrome.histograms.recordEnumerationValue(
             'Glic.Host.WebClientState.AtOneMinute',
             this.host.getDetailedWebClientState(),
             DetailedWebClientState.MAX_VALUE + 1);
@@ -199,7 +215,7 @@ export class WebviewController {
     }
     this.oneMinuteTimer.reset();
     if (this.host) {
-      chrome.metricsPrivate.recordEnumerationValue(
+      chrome.histograms.recordEnumerationValue(
           'Glic.Host.WebClientState.OnDestroy',
           this.host.getDetailedWebClientState(),
           DetailedWebClientState.MAX_VALUE + 1);
@@ -230,16 +246,69 @@ export class WebviewController {
     this.webClientState.assignAndSignal(webClientState);
   }
 
+  zoom(zoomAction: ZoomAction) {
+    // `WebViewType` is a union of `chrome.webviewTag.WebView` and
+    // `SlimWebViewElement`. Only full webviews support zoom.
+    if (!isFullWebView(this.webview)) {
+      return;
+    }
+
+    // Cast to any because the WebView type definition seems to be missing
+    // `getZoom` and `setZoom`. We've already checked that this.webview is a
+    // full WebView so this should be safe.
+    const webview = this.webview as any;
+
+    if (zoomAction === ZoomAction.kReset) {
+      webview.setZoom(1.0);
+      return;
+    }
+
+    const zoomFactors = [
+      1.0,
+      1.1,
+      1.25,
+      1.5,
+      1.75,
+      2.0,
+    ];
+
+    webview.getZoom((currentZoom: number) => {
+      // Find the closest standard zoom level to move to given the current zoom
+      // level and zoom action.
+      const newFactor = zoomAction === ZoomAction.kZoomIn ?
+          zoomFactors.find(f => f - currentZoom >= 0.01) :
+          zoomFactors.findLast(f => currentZoom - f >= 0.01);
+
+      if (newFactor !== undefined) {
+        webview.setZoom(newFactor);
+      }
+    });
+  }
+
   waitingOnPanelWillOpen(): boolean {
     return this.host?.waitingOnPanelWillOpen() ?? false;
   }
 
   onLoadTimeOut(): void {
     if (this.host) {
-      chrome.metricsPrivate.recordEnumerationValue(
+      chrome.histograms.recordEnumerationValue(
           'Glic.Host.WebClientState.OnLoadTimeOut',
           this.host.getDetailedWebClientState(),
           DetailedWebClientState.MAX_VALUE + 1);
+    }
+  }
+
+  private onLoadStart(e: chrome.webviewTag.LoadStartEvent): void {
+    // This event is only called for document navigations, not for fragment
+    // navigations.
+    if (e.isTopLevel) {
+      this.hasPendingCrossDocumentNavigation = true;
+    }
+  }
+
+  private onLoadAbort(e: chrome.webviewTag.LoadAbortEvent): void {
+    if (e.isTopLevel) {
+      this.hasPendingCrossDocumentNavigation = false;
     }
   }
 
@@ -291,13 +360,13 @@ export class WebviewController {
   }
 
   private onExit(event: chrome.webviewTag.ExitEvent): void {
-    chrome.metricsPrivate.recordEnumerationValue(
+    chrome.histograms.recordEnumerationValue(
         'Glic.Session.WebClientCrash.ExitReason',
         webviewExitReasonStringToEnum(event.reason),
         Object.keys(WEBVIEW_EXIT_REASON_MAP).length);
     if (event.reason !== 'normal') {
       this.destroyHost(WebClientState.ERROR);
-      chrome.metricsPrivate.recordUserAction('GlicSessionWebClientCrash');
+      chrome.histograms.recordUserAction('GlicSessionWebClientCrash');
       console.warn(`webview exit. processId: ${event.processId}, reason: ${
           event.reason}`);
     }
@@ -307,8 +376,16 @@ export class WebviewController {
     if (!isTopLevel) {
       return;
     }
+
+    const isCrossDocumentNavigation = this.hasPendingCrossDocumentNavigation;
+    this.hasPendingCrossDocumentNavigation = false;
+
+    if (!isCrossDocumentNavigation) {
+      return;
+    }
+
     if (this.host) {
-      chrome.metricsPrivate.recordEnumerationValue(
+      chrome.histograms.recordEnumerationValue(
           'Glic.Host.WebClientState.OnCommit',
           this.host.getDetailedWebClientState(),
           DetailedWebClientState.MAX_VALUE + 1);
@@ -331,6 +408,7 @@ export class WebviewController {
         this.webClientState.assignAndSignal(state);
       });
     }
+
     this.browserProxy.pageHandler.webviewCommitted(url);
 
     if (!this.host) {
@@ -338,25 +416,25 @@ export class WebviewController {
       return;
     }
 
-    // TODO(https://crbug.com/388328847): Remove when login issues are
-    // resolved.
     if (url.startsWith('https://login.corp.google.com/') ||
         url.startsWith('https://accounts.google.com/') ||
         url.startsWith('https://accounts.googlers.com/') ||
         url.startsWith('https://gaiastaging.corp.google.com/')) {
       this.delegate.webviewPageCommit('login');
-    } else if (new URL(url).pathname.startsWith('/sorry/')) {
-      this.delegate.webviewPageCommit('guestError');
-    } else {
-      if (wasResponsive) {
-        this.persistentState.onCommitAfterConnect(url);
-      }
+      return;
+    }
 
-      // This forces the page to reload after navigation.
-      // TODO(b/439718538): revisit overall logic, this may be buggy.
-      if (loadTimeData.getBoolean('reloadAfterNavigation')) {
-        this.delegate.webviewPageCommit('regular');
-      }
+    if (new URL(url).pathname.startsWith('/sorry/')) {
+      this.delegate.webviewPageCommit('guestError');
+      return;
+    }
+
+    if (wasResponsive) {
+      this.persistentState.onCommitAfterConnect(url);
+    }
+
+    if (loadTimeData.getBoolean('reloadAfterNavigation')) {
+      this.delegate.webviewPageCommit('regular');
     }
   }
 

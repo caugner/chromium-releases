@@ -16,7 +16,7 @@
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service_factory.h"
 #include "chrome/browser/page_content_annotations/page_content_annotations_service_factory.h"
 #include "chrome/browser/page_content_annotations/page_content_extraction_service_factory.h"
-#include "chrome/browser/passage_embeddings/page_embeddings_service_factory.h"
+#include "chrome/browser/page_content_annotations/page_embeddings_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_list/tab_list_interface.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -26,10 +26,10 @@
 #include "components/contextual_tasks/public/features.h"
 #include "components/optimization_guide/core/model_quality/test_model_quality_logs_uploader_service.h"
 #include "components/page_content_annotations/content/page_content_extraction_service.h"
+#include "components/page_content_annotations/content/page_embeddings_service.h"
 #include "components/page_content_annotations/core/page_content_annotations_service.h"
 #include "components/page_content_annotations/core/page_content_extraction_types.h"
 #include "components/page_content_annotations/core/test_page_content_annotator.h"
-#include "components/passage_embeddings/content/page_embeddings_service.h"
 #include "components/passage_embeddings/core/passage_embeddings_features.h"
 #include "components/passage_embeddings/core/passage_embeddings_test_util.h"
 #include "components/tabs/public/tab_interface.h"
@@ -81,12 +81,26 @@ class FakeEmbedder : public passage_embeddings::TestEmbedder {
       std::vector<std::string> passages,
       ComputePassagesEmbeddingsCallback callback) override {
     if (status_ == passage_embeddings::ComputeEmbeddingsStatus::kSuccess) {
+      if (timeout_) {
+        base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
+            FROM_HERE,
+            base::BindOnce(
+                std::move(callback), passages,
+                passage_embeddings::ComputeEmbeddingsForPassages(passages), 0,
+                status_),
+            *timeout_);
+        return 0;
+      }
+
       passage_embeddings::TestEmbedder::ComputePassagesEmbeddings(
-          priority, passages, std::move(callback));
+          priority, std::move(passages), std::move(callback));
       return 0;
     }
 
-    std::move(callback).Run(passages, {}, 0, status_);
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, base::BindOnce(std::move(callback), std::move(passages),
+                                  std::vector<passage_embeddings::Embedding>(),
+                                  0, status_));
     return 0;
   }
 
@@ -94,13 +108,16 @@ class FakeEmbedder : public passage_embeddings::TestEmbedder {
     status_ = status;
   }
 
+  void set_timeout(base::TimeDelta timeout) { timeout_ = timeout; }
+
  private:
   passage_embeddings::ComputeEmbeddingsStatus status_ =
       passage_embeddings::ComputeEmbeddingsStatus::kSuccess;
+  std::optional<base::TimeDelta> timeout_;
 };
 
 class MockPageEmbeddingsService
-    : public passage_embeddings::PageEmbeddingsService {
+    : public page_content_annotations::PageEmbeddingsService {
  public:
   explicit MockPageEmbeddingsService(
       page_content_annotations::PageContentExtractionService*
@@ -108,20 +125,22 @@ class MockPageEmbeddingsService
       : PageEmbeddingsService(page_content_extraction_service) {}
   ~MockPageEmbeddingsService() override = default;
 
-  MOCK_METHOD(std::vector<passage_embeddings::PassageEmbedding>,
+  MOCK_METHOD(std::vector<page_content_annotations::PassageEmbedding>,
               GetEmbeddings,
-              (content::WebContents * web_contents),
+              (content::Page & page),
               (const override));
 
   MOCK_METHOD(void, ProcessEmbeddingsOnDemand, (), (override));
 
   MOCK_METHOD(void,
               AddObserver,
-              (passage_embeddings::PageEmbeddingsService::Observer * observer),
+              (page_content_annotations::PageEmbeddingsService::Observer *
+               observer),
               (override));
   MOCK_METHOD(void,
               RemoveObserver,
-              (passage_embeddings::PageEmbeddingsService::Observer * observer),
+              (page_content_annotations::PageEmbeddingsService::Observer *
+               observer),
               (override));
 };
 
@@ -187,7 +206,7 @@ class ContextualTasksContextServiceTest : public InProcessBrowserTest {
               return std::make_unique<
                   testing::NiceMock<MockPageContentExtractionService>>();
             }));
-    passage_embeddings::PageEmbeddingsServiceFactory::GetInstance()
+    page_content_annotations::PageEmbeddingsServiceFactory::GetInstance()
         ->SetTestingFactoryAndUse(
             browser_context,
             base::BindRepeating([](content::BrowserContext* browser_context)
@@ -212,7 +231,7 @@ class ContextualTasksContextServiceTest : public InProcessBrowserTest {
                   auto service = std::make_unique<
                       ContextualTasksContextService>(
                       profile,
-                      passage_embeddings::PageEmbeddingsServiceFactory::
+                      page_content_annotations::PageEmbeddingsServiceFactory::
                           GetForProfile(profile),
                       embedder_metadata_provider, embedder,
                       OptimizationGuideKeyedServiceFactory::GetForProfile(
@@ -233,7 +252,7 @@ class ContextualTasksContextServiceTest : public InProcessBrowserTest {
 
   MockPageEmbeddingsService* page_embeddings_service() {
     return static_cast<MockPageEmbeddingsService*>(
-        passage_embeddings::PageEmbeddingsServiceFactory::GetForProfile(
+        page_content_annotations::PageEmbeddingsServiceFactory::GetForProfile(
             browser()->profile()));
   }
 
@@ -272,6 +291,10 @@ class ContextualTasksContextServiceTest : public InProcessBrowserTest {
   void UpdateEmbedderStatus(
       passage_embeddings::ComputeEmbeddingsStatus status) {
     embedder_.set_status(status);
+  }
+
+  void UpdateEmbedderTimeout(base::TimeDelta timeout) {
+    embedder_.set_timeout(timeout);
   }
 
   passage_embeddings::Embedding CreateFakeEmbedding(float value) {
@@ -383,19 +406,22 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksContextServiceTest, Success) {
 
   NotifyEmbedderMetadata();
 
-  std::vector<passage_embeddings::PassageEmbedding> fake_page_embeddings = {
-      // Not match.
-      {std::make_pair("passage 1",
-                      passage_embeddings::PassageType::kPageContent),
-       CreateFakeEmbedding(0.1f)},
-      // Match - active tab is added.
-      {std::make_pair("passage 2",
-                      passage_embeddings::PassageType::kPageContent),
-       CreateFakeEmbedding(1.0f)},
-      // Match - should be skipped.
-      {std::make_pair("passage 3",
-                      passage_embeddings::PassageType::kPageContent),
-       CreateFakeEmbedding(1.0f)}};
+  std::vector<page_content_annotations::PassageEmbedding> fake_page_embeddings =
+      {// Not match.
+       {std::make_pair(
+            "passage 1",
+            page_content_annotations::EmbeddingPassageType::kPageContent),
+        CreateFakeEmbedding(0.1f)},
+       // Match - active tab is added.
+       {std::make_pair(
+            "passage 2",
+            page_content_annotations::EmbeddingPassageType::kPageContent),
+        CreateFakeEmbedding(1.0f)},
+       // Match - should be skipped.
+       {std::make_pair(
+            "passage 3",
+            page_content_annotations::EmbeddingPassageType::kPageContent),
+        CreateFakeEmbedding(1.0f)}};
   EXPECT_CALL(*page_embeddings_service(), GetEmbeddings(_))
       .WillOnce(Return(fake_page_embeddings));
 
@@ -421,6 +447,84 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksContextServiceTest, Success) {
       "ContextualTasks.Context.TabOverlapPercentage", 100, 1);
   histogram_tester.ExpectUniqueSample("ContextualTasks.Context.TabExcessCount",
                                       0, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(ContextualTasksContextServiceTest,
+                       SuccessWithTimeoutSpecified) {
+  base::HistogramTester histogram_tester;
+
+  NavigateToValidURL();
+
+  NotifyEmbedderMetadata();
+  // Set timeout shorter than the request timeout.
+  UpdateEmbedderTimeout(base::Milliseconds(100));
+
+  std::vector<page_content_annotations::PassageEmbedding> fake_page_embeddings =
+      {// Not match.
+       {std::make_pair(
+            "passage 1",
+            page_content_annotations::EmbeddingPassageType::kPageContent),
+        CreateFakeEmbedding(0.1f)},
+       // Match - active tab is added.
+       {std::make_pair(
+            "passage 2",
+            page_content_annotations::EmbeddingPassageType::kPageContent),
+        CreateFakeEmbedding(1.0f)},
+       // Match - should be skipped.
+       {std::make_pair(
+            "passage 3",
+            page_content_annotations::EmbeddingPassageType::kPageContent),
+        CreateFakeEmbedding(1.0f)}};
+  EXPECT_CALL(*page_embeddings_service(), GetEmbeddings(_))
+      .WillOnce(Return(fake_page_embeddings));
+
+  base::test::TestFuture<std::vector<content::WebContents*>> future;
+  service()->GetRelevantTabsForQuery(
+      {.tab_selection_mode = mojom::TabSelectionMode::kEmbeddingsMatch,
+       .tab_selection_timeout = base::Seconds(1)},
+      "some text",
+      /*explicit_urls=*/{valid_url()}, future.GetCallback());
+  EXPECT_EQ(1u, future.Get().size());
+
+  histogram_tester.ExpectUniqueSample(
+      "ContextualTasks.Context.RelevantTabsCount", 1, 1);
+  histogram_tester.ExpectTotalCount(
+      "ContextualTasks.Context.ContextCalculationLatency", 1);
+  histogram_tester.ExpectUniqueSample(
+      "ContextualTasks.Context.ContextDeterminationStatus",
+      ContextDeterminationStatus::kSuccess, 1);
+  histogram_tester.ExpectUniqueSample(
+      "ContextualTasks.Context.ExplicitTabsCount", 1, 1);
+  histogram_tester.ExpectUniqueSample("ContextualTasks.Context.TabOverlapCount",
+                                      1, 1);
+  histogram_tester.ExpectUniqueSample(
+      "ContextualTasks.Context.TabOverlapPercentage", 100, 1);
+  histogram_tester.ExpectUniqueSample("ContextualTasks.Context.TabExcessCount",
+                                      0, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(ContextualTasksContextServiceTest, TimedOut) {
+  base::HistogramTester histogram_tester;
+
+  NavigateToValidURL();
+
+  NotifyEmbedderMetadata();
+  // Set timeout longer than the request timeout.
+  UpdateEmbedderTimeout(base::Milliseconds(200));
+
+  EXPECT_CALL(*page_embeddings_service(), GetEmbeddings(_)).Times(0);
+
+  base::test::TestFuture<std::vector<content::WebContents*>> future;
+  service()->GetRelevantTabsForQuery(
+      {.tab_selection_mode = mojom::TabSelectionMode::kEmbeddingsMatch,
+       .tab_selection_timeout = base::Milliseconds(100)},
+      "some text",
+      /*explicit_urls=*/{valid_url()}, future.GetCallback());
+  EXPECT_TRUE(future.Get().empty());
+
+  histogram_tester.ExpectUniqueSample(
+      "ContextualTasks.Context.ContextDeterminationStatus",
+      ContextDeterminationStatus::kTimedOut, 1);
 }
 
 IN_PROC_BROWSER_TEST_F(ContextualTasksContextServiceTest,
@@ -492,19 +596,22 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksContextServiceTest,
 
   NotifyEmbedderMetadata();
 
-  std::vector<passage_embeddings::PassageEmbedding> fake_page_embeddings = {
-      // Not match.
-      {std::make_pair("passage 1",
-                      passage_embeddings::PassageType::kPageContent),
-       CreateFakeEmbedding(0.1f)},
-      // Match - active tab is added.
-      {std::make_pair("passage 2",
-                      passage_embeddings::PassageType::kPageContent),
-       CreateFakeEmbedding(1.0f)},
-      // Match - should be skipped.
-      {std::make_pair("passage 3",
-                      passage_embeddings::PassageType::kPageContent),
-       CreateFakeEmbedding(1.0f)}};
+  std::vector<page_content_annotations::PassageEmbedding> fake_page_embeddings =
+      {// Not match.
+       {std::make_pair(
+            "passage 1",
+            page_content_annotations::EmbeddingPassageType::kPageContent),
+        CreateFakeEmbedding(0.1f)},
+       // Match - active tab is added.
+       {std::make_pair(
+            "passage 2",
+            page_content_annotations::EmbeddingPassageType::kPageContent),
+        CreateFakeEmbedding(1.0f)},
+       // Match - should be skipped.
+       {std::make_pair(
+            "passage 3",
+            page_content_annotations::EmbeddingPassageType::kPageContent),
+        CreateFakeEmbedding(1.0f)}};
   EXPECT_CALL(*page_embeddings_service(), GetEmbeddings(_))
       .WillOnce(Return(fake_page_embeddings));
   // Test Page is the title of valid_url().
@@ -547,13 +654,15 @@ IN_PROC_BROWSER_TEST_P(ContextualTasksContextServiceParameterizedTest,
 
   NotifyEmbedderMetadata();
 
-  std::vector<passage_embeddings::PassageEmbedding> fake_page_embeddings = {
-      {std::make_pair("passage 1",
-                      passage_embeddings::PassageType::kPageContent),
-       CreateFakeEmbedding(0.1f)},
-      {std::make_pair("passage 2",
-                      passage_embeddings::PassageType::kPageContent),
-       CreateFakeEmbedding(1.0f)}};
+  std::vector<page_content_annotations::PassageEmbedding> fake_page_embeddings =
+      {{std::make_pair(
+            "passage 1",
+            page_content_annotations::EmbeddingPassageType::kPageContent),
+        CreateFakeEmbedding(0.1f)},
+       {std::make_pair(
+            "passage 2",
+            page_content_annotations::EmbeddingPassageType::kPageContent),
+        CreateFakeEmbedding(1.0f)}};
   EXPECT_CALL(*page_embeddings_service(), GetEmbeddings(_))
       .WillOnce(Return(fake_page_embeddings));
 
@@ -639,13 +748,15 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksContextServiceTest,
   NotifyEmbedderMetadata();
 
   // Passage 2 has high embeddings score.
-  std::vector<passage_embeddings::PassageEmbedding> fake_page_embeddings = {
-      {std::make_pair("passage 1",
-                      passage_embeddings::PassageType::kPageContent),
-       CreateFakeEmbedding(0.1f)},
-      {std::make_pair("passage 2",
-                      passage_embeddings::PassageType::kPageContent),
-       CreateFakeEmbedding(1.0f)}};
+  std::vector<page_content_annotations::PassageEmbedding> fake_page_embeddings =
+      {{std::make_pair(
+            "passage 1",
+            page_content_annotations::EmbeddingPassageType::kPageContent),
+        CreateFakeEmbedding(0.1f)},
+       {std::make_pair(
+            "passage 2",
+            page_content_annotations::EmbeddingPassageType::kPageContent),
+        CreateFakeEmbedding(1.0f)}};
   EXPECT_CALL(*page_embeddings_service(), GetEmbeddings(_))
       .WillOnce(Return(fake_page_embeddings));
 
@@ -685,13 +796,15 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksContextServiceTest,
   NotifyEmbedderMetadata();
 
   // None of the passages have high embeddings score.
-  std::vector<passage_embeddings::PassageEmbedding> fake_page_embeddings = {
-      {std::make_pair("passage 1",
-                      passage_embeddings::PassageType::kPageContent),
-       CreateFakeEmbedding(-1.0f)},
-      {std::make_pair("passage 2",
-                      passage_embeddings::PassageType::kPageContent),
-       CreateFakeEmbedding(-1.0f)}};
+  std::vector<page_content_annotations::PassageEmbedding> fake_page_embeddings =
+      {{std::make_pair(
+            "passage 1",
+            page_content_annotations::EmbeddingPassageType::kPageContent),
+        CreateFakeEmbedding(-1.0f)},
+       {std::make_pair(
+            "passage 2",
+            page_content_annotations::EmbeddingPassageType::kPageContent),
+        CreateFakeEmbedding(-1.0f)}};
   EXPECT_CALL(*page_embeddings_service(), GetEmbeddings(_))
       .WillOnce(Return(fake_page_embeddings));
 
@@ -721,13 +834,15 @@ IN_PROC_BROWSER_TEST_F(
   NotifyEmbedderMetadata();
 
   // None of the passages have high embeddings score.
-  std::vector<passage_embeddings::PassageEmbedding> fake_page_embeddings = {
-      {std::make_pair("passage 1",
-                      passage_embeddings::PassageType::kPageContent),
-       CreateFakeEmbedding(-1.0f)},
-      {std::make_pair("passage 2",
-                      passage_embeddings::PassageType::kPageContent),
-       CreateFakeEmbedding(-1.0f)}};
+  std::vector<page_content_annotations::PassageEmbedding> fake_page_embeddings =
+      {{std::make_pair(
+            "passage 1",
+            page_content_annotations::EmbeddingPassageType::kPageContent),
+        CreateFakeEmbedding(-1.0f)},
+       {std::make_pair(
+            "passage 2",
+            page_content_annotations::EmbeddingPassageType::kPageContent),
+        CreateFakeEmbedding(-1.0f)}};
   EXPECT_CALL(*page_embeddings_service(), GetEmbeddings(_))
       .WillOnce(Return(fake_page_embeddings));
 
@@ -785,13 +900,15 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksContextServiceTest,
   NotifyEmbedderMetadata();
 
   // None of the passages have high embeddings score.
-  std::vector<passage_embeddings::PassageEmbedding> fake_page_embeddings = {
-      {std::make_pair("passage 1",
-                      passage_embeddings::PassageType::kPageContent),
-       CreateFakeEmbedding(-1.0f)},
-      {std::make_pair("passage 2",
-                      passage_embeddings::PassageType::kPageContent),
-       CreateFakeEmbedding(-1.0f)}};
+  std::vector<page_content_annotations::PassageEmbedding> fake_page_embeddings =
+      {{std::make_pair(
+            "passage 1",
+            page_content_annotations::EmbeddingPassageType::kPageContent),
+        CreateFakeEmbedding(-1.0f)},
+       {std::make_pair(
+            "passage 2",
+            page_content_annotations::EmbeddingPassageType::kPageContent),
+        CreateFakeEmbedding(-1.0f)}};
   EXPECT_CALL(*page_embeddings_service(), GetEmbeddings(_))
       .WillOnce(Return(fake_page_embeddings));
 
@@ -843,18 +960,21 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksContextServiceTitlesOnlyTest, Success) {
 
   NavigateToValidURL();
 
-  std::vector<passage_embeddings::PassageEmbedding> fake_page_embeddings = {
-      // Not match.
-      {std::make_pair("passage 1",
-                      passage_embeddings::PassageType::kPageContent),
-       CreateFakeEmbedding(0.1f)},
-      // Not added - page content skipped.
-      {std::make_pair("passage 2",
-                      passage_embeddings::PassageType::kPageContent),
-       CreateFakeEmbedding(1.0f)},
-      // Added - title passage matches.
-      {std::make_pair("passage 3", passage_embeddings::PassageType::kTitle),
-       CreateFakeEmbedding(1.0f)}};
+  std::vector<page_content_annotations::PassageEmbedding> fake_page_embeddings =
+      {// Not match.
+       {std::make_pair(
+            "passage 1",
+            page_content_annotations::EmbeddingPassageType::kPageContent),
+        CreateFakeEmbedding(0.1f)},
+       // Not added - page content skipped.
+       {std::make_pair(
+            "passage 2",
+            page_content_annotations::EmbeddingPassageType::kPageContent),
+        CreateFakeEmbedding(1.0f)},
+       // Added - title passage matches.
+       {std::make_pair("passage 3",
+                       page_content_annotations::EmbeddingPassageType::kTitle),
+        CreateFakeEmbedding(1.0f)}};
   EXPECT_CALL(*page_embeddings_service(), GetEmbeddings(_))
       .WillOnce(Return(fake_page_embeddings));
 

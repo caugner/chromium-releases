@@ -8,6 +8,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/task/sequenced_task_runner.h"
 #include "chrome/browser/autocomplete/aim_eligibility_service_factory.h"
+#include "chrome/browser/contextual_tasks/contextual_tasks_service_factory.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service_factory.h"
@@ -57,18 +58,17 @@ ThrottleCheckResult ContextualTasksNavigationThrottle::ProcessNavigation() {
   // other places.
   if (base::FeatureList::IsEnabled(
           contextual_tasks::kContextualTasksUrlRedirectToAimUrl)) {
-    AimEligibilityService* aim_service =
-        AimEligibilityServiceFactory::GetForProfile(
+    ContextualTasksService* service =
+        ContextualTasksServiceFactory::GetForProfile(
             Profile::FromBrowserContext(web_contents->GetBrowserContext()));
     bool is_cobrowse_eligible =
-        aim_service && aim_service->IsCobrowseEligible();
-
+        service && service->GetFeatureEligibility().IsEligible();
     if ((!base::FeatureList::IsEnabled(contextual_tasks::kContextualTasks) ||
          !is_cobrowse_eligible) &&
         ContextualTasksUiService::IsContextualTasksUrl(url_params.url)) {
       // Redirect contextual tasks URL to aim page URL.
-      GURL url = ContextualTasksUiService::GetAimUrlFromContextualTasksUrl(
-          url_params.url);
+      GURL url = ContextualTasksUiService::CopyParamsFromWebUIUrl(
+          GURL(GetContextualTasksAiPageUrl()), url_params.url);
       if (url.is_empty()) {
         url = GURL(GetContextualTasksAiPageUrl());
       }
@@ -110,8 +110,11 @@ ThrottleCheckResult ContextualTasksNavigationThrottle::ProcessNavigation() {
 // static
 void ContextualTasksNavigationThrottle::MaybeCreateAndAdd(
     content::NavigationThrottleRegistry& registry) {
-  // Ignore navigations that aren't in the outermost main frame.
-  if (!registry.GetNavigationHandle().IsInOutermostMainFrame()) {
+  // Ignore navigations that aren't in the outermost main frame and not in a
+  // prerender frame.
+  content::NavigationHandle& nav_handle = registry.GetNavigationHandle();
+  if (!nav_handle.IsInOutermostMainFrame() ||
+      nav_handle.IsInPrerenderedMainFrame()) {
     return;
   }
 

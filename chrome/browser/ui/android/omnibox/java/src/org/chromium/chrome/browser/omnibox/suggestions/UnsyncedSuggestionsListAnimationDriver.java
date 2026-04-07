@@ -12,7 +12,6 @@ import android.content.Context;
 
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
-import org.chromium.components.omnibox.OmniboxFeatures;
 import org.chromium.ui.interpolators.Interpolators;
 import org.chromium.ui.modelutil.PropertyModel;
 
@@ -73,9 +72,7 @@ public class UnsyncedSuggestionsListAnimationDriver
 
     @Override
     public boolean isAnimationEnabled() {
-        return !sAnimationsDisabledForTesting
-                && (mIsToolbarBottomAnchoredSupplier.getAsBoolean()
-                        || OmniboxFeatures.shouldAnimateSuggestionsListAppearance());
+        return !sAnimationsDisabledForTesting;
     }
 
     static void setAnimationsDisabledForTesting(boolean disabledForTesting) {
@@ -128,6 +125,10 @@ public class UnsyncedSuggestionsListAnimationDriver
 
     @Override
     public void onAnimationRepeat(Animator animator) {}
+
+    public boolean isRunning() {
+        return mAnimator != null && mAnimator.isRunning();
+    }
 
     private int getStartingVerticalOffset() {
         if (mIsToolbarBottomAnchoredSupplier.getAsBoolean()) {

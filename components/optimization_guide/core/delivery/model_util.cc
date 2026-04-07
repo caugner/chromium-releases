@@ -172,6 +172,10 @@ std::string GetStringNameForOptimizationTarget(
       return "OnDeviceSpeechRecognition";
     case proto::OPTIMIZATION_TARGET_WEBRTC_NEURAL_RESIDUAL_ECHO_ESTIMATOR:
       return "WebRTCNeuralResidualEchoEstimator";
+    case proto::OPTIMIZATION_TARGET_MODEL_EXECUTION_FEATURE_CLASSIFIER:
+      return "ModelExecutionFeatureClassifier";
+    case proto::OPTIMIZATION_TARGET_SHOPPING_CLASSIFIER:
+      return "ShoppingClassifier";
       // Whenever a new value is added, make sure to add it to the OptTarget
       // variant list in
       // //tools/metrics/histograms/metadata/optimization/histograms.xml.

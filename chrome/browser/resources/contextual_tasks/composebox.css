@@ -14,7 +14,9 @@
   --aim-header-height: 66px;
   --cancel-button-inline-end: 16px;
   --cancel-button-top: 12px;
+  /* LINT.IfChange(ComposeboxBorderRadius) */
   --composebox-border-radius: 24px;
+  /* LINT.ThenChange(//depot/chromium/chrome/browser/resources/contextual_tasks/app.ts:ComposeboxBorderRadius) */
   --composebox-collapsed-height: 90px;
   --composebox-margin-bottom: 30px;
   --context-carousel-inline-end-spacing: 56px;
@@ -46,6 +48,7 @@
    */
   --pdf-icon-border-radius: 12px;
   --pdf-icon-size: 16px;
+  --document-icon-size: 16px;
   --injected-input-icon-size: 24px;
 }
 
@@ -120,14 +123,19 @@
   border-radius: var(--composebox-border-radius);
   box-sizing: border-box;
   pointer-events: none;
+  transition: opacity 2s cubic-bezier(0.4, 0, 0.2, 1);
   z-index: 2;
+}
+
+:host([in-voice-search-mode_]) #composebox::after {
+  opacity: 0;
 }
 
 #composebox {
   --cr-composebox-font-size: 16px;
   --expanded-border-radius: var(--composebox-border-radius);
   --input-bottom-spacing: 16px;
-  --text-input-left-spacing: 24px;
+  --text-input-inline-start-spacing: 20px;
   --text-input-top-spacing: 16px;
   --composebox-context-menu-entrypoint-button-color:
       var(--color-composebox-voice-lens-button);
@@ -224,7 +232,12 @@
 
 #composebox::part(input),
 #composebox::part(smart-compose) {
+  min-height: 48px;
   padding-inline-start: var(--g-input-left-spacing);
+}
+
+#composebox::part(context-menu-and-tools) {
+  min-height: var(--cr-icon-button-size);
 }
 
 #composebox::part(input)::placeholder {
@@ -234,6 +247,7 @@
 #composebox::part(context-menu-entrypoint-icon) {
   --cr-icon-button-fill-color: var(--composebox-context-menu-entrypoint-button-color);
   --cr-icon-button-icon-size: var(--icon-menu-icon-size);
+  --cr-icon-button-margin-start: 4px;
   --cr-icon-button-size: var(--icon-menu-button-size);
 }
 
@@ -273,7 +287,7 @@
   transition: ease-out 100ms;
 }
 
-:host([is-lens-overlay-showing]) #composebox::part(lens-icon) {
+:host([is-overlay-open-for-aim-visual-search]) #composebox::part(lens-icon) {
   background-color: var(--color-composebox-lens-active-background);
   border-radius: 50%;
 }
@@ -579,6 +593,7 @@
   padding-inline-start: 20px;
   padding-top: 8px;
   position: relative;
+  pointer-events: auto;
 }
 
 :host:has(#composebox:not([show-dropdown_])) #contextualTasksSuggestionsContainer {
@@ -586,6 +601,6 @@
 }
 
 /* Needed for space between header and composebox. */
-:host([is-side-panel]) #composebox:not([show-dropdown_]) #composebox {
+:host([is-side-panel]) #composebox:not([show-dropdown_]) {
   margin-top: 24px;
 }

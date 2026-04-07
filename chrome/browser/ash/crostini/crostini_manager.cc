@@ -74,7 +74,6 @@
 #include "chrome/browser/ui/webui/ash/system_web_dialog/system_web_dialog_delegate.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/webui_url_constants.h"
 #include "chromeos/ash/components/dbus/anomaly_detector/anomaly_detector_client.h"
 #include "chromeos/ash/components/dbus/session_manager/session_manager_client.h"
 #include "chromeos/ash/components/dbus/vm_applications/apps.pb.h"
@@ -1122,9 +1121,8 @@ void CrostiniManager::CrostiniRestarter::LogRestarterResult(
   }
 }
 
-// TODO(drmasquatch): MaybeUpdateCrostini was removed, does this now fail?
 // Unit tests need these to be initialized to sensible values. In Browser tests
-// and real life, they are updated via MaybeUpdateCrostini.
+// and real life, they are updated via MaybeResumeFromChromeCrash.
 bool CrostiniManager::is_dev_kvm_present_ = true;
 bool CrostiniManager::is_vm_launch_allowed_ = true;
 
@@ -1397,6 +1395,35 @@ bool CrostiniManager::IsDevKvmPresent() {
 // static
 bool CrostiniManager::IsVmLaunchAllowed() {
   return is_vm_launch_allowed_;
+}
+
+void CrostiniManager::MaybeResumeFromChromeCrash() {
+  // This is a new user session, perhaps using an old CrostiniManager.
+  base::ThreadPool::PostTaskAndReply(
+      FROM_HERE, {base::MayBlock()},
+      base::BindOnce(&CrostiniManager::CheckPaths),
+      base::BindOnce(&CrostiniManager::CheckConciergeAvailable,
+                     weak_ptr_factory_.GetWeakPtr()));
+
+  // Probe Concierge - if it's still running after an unclean shutdown, a
+  // success response will be received.
+  vm_tools::concierge::GetVmInfoRequest concierge_request;
+  concierge_request.set_owner_id(owner_id_);
+  concierge_request.set_name(kCrostiniDefaultVmName);
+  GetConciergeClient()->GetVmInfo(
+      std::move(concierge_request),
+      base::BindOnce(
+          [](base::WeakPtr<CrostiniManager> weak_this,
+             std::optional<vm_tools::concierge::GetVmInfoResponse> reply) {
+            if (weak_this) {
+              weak_this->is_unclean_startup_ =
+                  reply.has_value() && reply->success();
+              if (weak_this->is_unclean_startup_) {
+                weak_this->RemoveUncleanSshfsMounts();
+              }
+            }
+          },
+          weak_ptr_factory_.GetWeakPtr()));
 }
 
 // static
@@ -3765,7 +3792,7 @@ void CrostiniManager::SuspendImminent(
     return;
   }
 
-  // Block suspend and try to unmount sshfs (https://crbug.com/968060).
+  // Block suspend and try to unmount sshfs (https://crbug.com/40629613).
   auto token = base::UnguessableToken::Create();
   chromeos::PowerManagerClient::Get()->BlockSuspend(token, "CrostiniManager");
   crostini_sshfs_->UnmountCrostiniFiles(
@@ -3775,7 +3802,7 @@ void CrostiniManager::SuspendImminent(
 }
 
 void CrostiniManager::SuspendDone(base::TimeDelta sleep_duration) {
-  // https://crbug.com/968060.  Sshfs is unmounted before suspend,
+  // https://crbug.com/40629613.  Sshfs is unmounted before suspend,
   // call RestartCrostini to force remount if container is running.
   guest_os::GuestId container_id = DefaultContainerId();
   guest_os::GuestOsSessionTracker* tracker =

@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_SEARCHBOX_CONTEXTUAL_SEARCHBOX_TEST_UTILS_H_
 #define CHROME_BROWSER_UI_WEBUI_SEARCHBOX_CONTEXTUAL_SEARCHBOX_TEST_UTILS_H_
 
+#include "base/observer_list.h"
 #include "base/test/bind.h"
 #include "base/test/gmock_move_support.h"
 #include "base/test/metrics/histogram_tester.h"
@@ -16,6 +17,7 @@
 #include "components/contextual_search/contextual_search_metrics_recorder.h"
 #include "components/contextual_search/internal/test_composebox_query_controller.h"
 #include "components/lens/contextual_input.h"
+#include "components/lens/lens_overlay_mime_type.h"
 #include "components/variations/scoped_variations_ids_provider.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "mojo/public/cpp/test_support/test_utils.h"
@@ -79,6 +81,32 @@ class MockQueryController
     TestComposeboxQueryController::CreateSearchUrl(
         std::move(search_url_request_info), std::move(callback));
   }
+
+  void AddObserver(contextual_search::ContextualSearchContextController::
+                       ContextUploadStatusObserver* obs) override {
+    observers_.AddObserver(obs);
+    TestComposeboxQueryController::AddObserver(obs);
+  }
+
+  void RemoveObserver(contextual_search::ContextualSearchContextController::
+                          ContextUploadStatusObserver* obs) override {
+    observers_.RemoveObserver(obs);
+    TestComposeboxQueryController::RemoveObserver(obs);
+  }
+
+  void NotifySuccess(const base::UnguessableToken& file_token) {
+    for (auto& observer : observers_) {
+      observer.OnContextUploadStatusChanged(
+          file_token, lens::MimeType::kHtml,
+          contextual_search::ContextUploadStatus::kUploadSuccessful,
+          std::nullopt);
+    }
+  }
+
+ private:
+  base::ObserverList<contextual_search::ContextualSearchContextController::
+                         ContextUploadStatusObserver>
+      observers_;
 };
 
 class TestWebContentsDelegate : public content::WebContentsDelegate {
@@ -106,21 +134,25 @@ class MockContextualSearchMetricsRecorder
               (override));
   MOCK_METHOD(void,
               NotifyQuerySubmitted,
-              (bool has_tab_context, bool has_non_tab_context),
+              (bool has_tab_context,
+               bool has_non_tab_context,
+               int query_text_length,
+               int file_count),
               (override));
   MOCK_METHOD(void, ActivateMetricsFunnel, (const std::string&), (override));
-  MOCK_METHOD(void,
-              RecordToolMode,
-              (composebox_query::mojom::ToolMode tool_mode),
-              (override));
+  MOCK_METHOD(void, RecordToolMode, (omnibox::ToolMode tool_mode), (override));
   MOCK_METHOD(void,
               RecordModelMode,
-              (composebox_query::mojom::ModelMode model_mode),
+              (omnibox::ModelMode model_mode),
               (override));
   MOCK_METHOD(void,
               RecordModesOnSubmission,
-              (composebox_query::mojom::ToolMode tool_mode,
-               composebox_query::mojom::ModelMode model_mode),
+              (omnibox::ToolMode tool_mode, omnibox::ModelMode model_mode),
+              (override));
+  MOCK_METHOD(void, RecordZeroSuggestClick, (bool is_contextual), (override));
+  MOCK_METHOD(void,
+              RecordTypedSuggestNavigation,
+              (bool is_verbatim),
               (override));
 
   void NotifySessionStateChangedBase(
@@ -129,24 +161,33 @@ class MockContextualSearchMetricsRecorder
   }
 
   void NotifyQuerySubmittedBase(bool has_tab_context,
-                                bool has_non_tab_context) {
-    ContextualSearchMetricsRecorder::NotifyQuerySubmitted(has_tab_context,
-                                                          has_non_tab_context);
+                                bool has_non_tab_context,
+                                int query_text_length,
+                                int file_count) {
+    ContextualSearchMetricsRecorder::NotifyQuerySubmitted(
+        has_tab_context, has_non_tab_context, query_text_length, file_count);
   }
 
-  void RecordToolModeBase(composebox_query::mojom::ToolMode tool_mode) {
+  void RecordToolModeBase(omnibox::ToolMode tool_mode) {
     ContextualSearchMetricsRecorder::RecordToolMode(tool_mode);
   }
 
-  void RecordModelModeBase(composebox_query::mojom::ModelMode model_mode) {
+  void RecordModelModeBase(omnibox::ModelMode model_mode) {
     ContextualSearchMetricsRecorder::RecordModelMode(model_mode);
   }
 
-  void RecordModesOnSubmissionBase(
-      composebox_query::mojom::ToolMode tool_mode,
-      composebox_query::mojom::ModelMode model_mode) {
+  void RecordModesOnSubmissionBase(omnibox::ToolMode tool_mode,
+                                   omnibox::ModelMode model_mode) {
     ContextualSearchMetricsRecorder::RecordModesOnSubmission(tool_mode,
                                                              model_mode);
+  }
+
+  void RecordZeroSuggestClickBase(bool is_contextual) {
+    ContextualSearchMetricsRecorder::RecordZeroSuggestClick(is_contextual);
+  }
+
+  void RecordTypedSuggestNavigationBase(bool is_verbatim) {
+    ContextualSearchMetricsRecorder::RecordTypedSuggestNavigation(is_verbatim);
   }
 };
 

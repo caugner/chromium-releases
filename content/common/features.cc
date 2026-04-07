@@ -13,6 +13,11 @@ namespace features {
 
 // Please keep features in alphabetical order.
 
+// When enabled, the full accessibility tree will be exposed for non-atomic
+// text fields, such as contenteditables.
+BASE_FEATURE(kAccessibilityExposeNonAtomicTextFieldChildren,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 // Enables content-initiated, main frame navigations to data URLs.
 // TODO(meacer): Remove when the deprecation is complete.
 //               https://www.chromestatus.com/feature/5669602927312896
@@ -62,8 +67,6 @@ BASE_FEATURE(kAvoidUnnecessaryBeforeUnloadCheckSync,
 
 constexpr base::FeatureParam<AvoidUnnecessaryBeforeUnloadCheckSyncMode>::Option
     kAvoidUnnecessaryBeforeUnloadCheckSyncModeOption[] = {
-        {AvoidUnnecessaryBeforeUnloadCheckSyncMode::kDumpWithoutCrashing,
-         "DumpWithoutCrashing"},
         {AvoidUnnecessaryBeforeUnloadCheckSyncMode::kWithSendBeforeUnload,
          "WithSendBeforeUnload"},
         {AvoidUnnecessaryBeforeUnloadCheckSyncMode::kWithoutSendBeforeUnload,
@@ -116,16 +119,6 @@ BASE_FEATURE(kCancelCompositionWhenWindowLosesFocus,
 
 #endif  // BUILDFLAG(IS_MAC)
 
-// If Canvas2D Image Chromium is allowed, this feature controls whether it is
-// enabled.
-BASE_FEATURE(kCanvas2DImageChromium,
-#if BUILDFLAG(IS_APPLE)
-             base::FEATURE_ENABLED_BY_DEFAULT
-#else
-             base::FEATURE_DISABLED_BY_DEFAULT
-#endif
-);
-
 // When enabled, CDP method Page.captureScreenshot will increment
 // the LocalSurfaceId instead of waiting for ForceRedraw to complete.
 // This should avoid a possible stall due to frames not being presented.
@@ -163,6 +156,21 @@ BASE_FEATURE(kCriticalClientHint, base::FEATURE_ENABLED_BY_DEFAULT);
 // This feature controls whether Dev Tools supports debugging Device Bound
 // Sessions.
 BASE_FEATURE(kDeviceBoundSessionsDevTools, base::FEATURE_ENABLED_BY_DEFAULT);
+
+// This feature enables the fix for double releases of
+// WorkerOrWorkletDevToolsAgentHost to prevent UAF.
+BASE_FEATURE(kWorkerOrWorkletAgentDoubleReleaseFix,
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
+// This feature gates the entry to ServiceWorkerDevToolsAgentHost to ensure
+// it is only accessible when DevTools is actually attached.
+BASE_FEATURE(kServiceWorkerDevToolsWorkerReadyCheck,
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
+// This feature gates the entry to SharedWorkerDevToolsAgentHost to ensure
+// it is only accessible when DevTools is actually attached.
+BASE_FEATURE(kSharedWorkerDevToolsWorkerReadyCheck,
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 #if BUILDFLAG(IS_ANDROID)
 // Disables the auto_resize_output_surface feature in the Viz process.
@@ -288,26 +296,38 @@ BASE_FEATURE_ENUM_PARAM(FontDataServiceTypefaceType,
                         FontDataServiceTypefaceType::kDwrite,
                         &font_data_service_typeface);
 #endif  // BUILDFLAG(IS_WIN)
-#if BUILDFLAG(IS_LINUX)
-BASE_FEATURE(kFontDataServiceLinux, base::FEATURE_DISABLED_BY_DEFAULT);
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 const base::FeatureParam<FontDataServiceTypefaceType>::Option
     font_data_service_typeface[] = {
         {FontDataServiceTypefaceType::kFreetype, "Freetype"},
         {FontDataServiceTypefaceType::kFontations, "Fontations"}};
+#if BUILDFLAG(IS_LINUX)
+BASE_FEATURE(kFontDataServiceLinux, base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE_ENUM_PARAM(FontDataServiceTypefaceType,
                         kFontDataServiceTypefaceType,
                         &kFontDataServiceLinux,
                         "typeface",
                         FontDataServiceTypefaceType::kFontations,
                         &font_data_service_typeface);
+#else
+BASE_FEATURE(kFontDataServiceChromeOS, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE_ENUM_PARAM(FontDataServiceTypefaceType,
+                        kFontDataServiceTypefaceType,
+                        &kFontDataServiceChromeOS,
+                        "typeface",
+                        FontDataServiceTypefaceType::kFontations,
+                        &font_data_service_typeface);
 #endif  // BUILDFLAG(IS_LINUX)
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 bool IsFontDataServiceEnabled() {
 #if BUILDFLAG(IS_WIN)
   return base::FeatureList::IsEnabled(features::kFontDataServiceAllWebContents);
 #elif BUILDFLAG(IS_LINUX)
   return base::FeatureList::IsEnabled(features::kFontDataServiceLinux);
+#elif BUILDFLAG(IS_CHROMEOS)
+  return base::FeatureList::IsEnabled(features::kFontDataServiceChromeOS);
 #else
   return false;
 #endif
@@ -638,7 +658,7 @@ BASE_FEATURE(kServiceWorkerSrcdocSupport, base::FEATURE_ENABLED_BY_DEFAULT);
 //
 // crbug.com/340949948 for more details.
 BASE_FEATURE(kServiceWorkerStaticRouterRaceRequestFix2,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // (crbug.com/497302265): When enabled, the main script response fetching is
 // consolidated into ServiceWorkerVersion.
@@ -664,19 +684,13 @@ BASE_FEATURE(kServiceWorkerSuppressTimeoutWhenPaymentWindowOpen,
 BASE_FEATURE(kServiceWorkerClientUrlIsCreationUrl,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
-// Kill switch for crbug.com/499449324.
-BASE_FEATURE(kServiceWorkerOptionalTimeoutIterator,
+BASE_FEATURE(kServiceWorkerWindowClientInitiator,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Enables skipping the early call to CommitPending when navigating away from a
 // crashed frame.
 BASE_FEATURE(kSkipEarlyCommitPendingForCrashedFrame,
              base::FEATURE_DISABLED_BY_DEFAULT);
-
-// Feature to skip a redundant NotifyNavigationStateChanged call during
-// RendererDidNavigate.
-BASE_FEATURE(kSkipRedundantNavigationStateNotification,
-             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // When enabled, skips registration of RendererCancellationThrottle and instead
 // keeps navigation cancellation behavior by reusing the requester
@@ -688,7 +702,7 @@ BASE_FEATURE(kSkipRendererCancellationThrottle,
 // When enabled, ensure high-rank processes are on the LRU list while app is in
 // background or the effective binding state is in conflict with low rank
 // processes.
-BASE_FEATURE(kStrictHighRankProcessLRU, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kStrictHighRankProcessLRU, base::FEATURE_ENABLED_BY_DEFAULT);
 #endif
 
 #if BUILDFLAG(IS_MAC)
@@ -698,11 +712,13 @@ BASE_FEATURE_PARAM(base::TimeDelta,
                    &kTextInputClient,
                    "ipc_timeout",
                    base::Milliseconds(1500));
+
+BASE_FEATURE(kTextInputClientUseNestedLoop, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE_PARAM(bool,
-                   kTextInputClientUseNestedLoop,
-                   &kTextInputClient,
-                   "use_nested_loop",
-                   false);
+                   kTextInputClientNestedLoopEventMask,
+                   &kTextInputClientUseNestedLoop,
+                   "enable_event_mask",
+                   true);
 #endif
 
 // Allows swipe left/right from touchpad change browser navigation. Currently
@@ -724,7 +740,7 @@ BASE_FEATURE(kTrustedTypesFromLiteral, base::FEATURE_DISABLED_BY_DEFAULT);
 // optimization.
 #if BUILDFLAG(IS_WIN)
 BASE_FEATURE(kUpdateDirectManipulationHelperOnParentChange,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 #endif
 
 // Validate the code signing identity of the network process before establishing

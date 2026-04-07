@@ -51,7 +51,8 @@ class SearchboxHandler : public searchbox::mojom::PageHandler,
   static void SetupWebUIDataSource(content::WebUIDataSource* source,
                                    Profile* profile,
                                    bool enable_voice_search = false,
-                                   bool enable_lens_search = false);
+                                   bool enable_lens_search = false,
+                                   bool session_allows_drag_and_drop = false);
 
   // Maps all icons returned from either `AutocompleteMatch::GetVectorIcon()` or
   // `OmniboxAction::GetIconImage()` to svg resource strings.
@@ -69,8 +70,8 @@ class SearchboxHandler : public searchbox::mojom::PageHandler,
   // Notifies the WebUI that the contextual input status has changed.
   void OnContextualInputStatusChanged(
       base::UnguessableToken token,
-      contextual_search::FileUploadStatus status,
-      std::optional<contextual_search::FileUploadErrorType> error_type);
+      contextual_search::ContextUploadStatus status,
+      std::optional<contextual_search::ContextUploadErrorType> error_type);
 
   // AutocompleteController::Observer:
   void OnResultChanged(AutocompleteController* controller,
@@ -93,7 +94,8 @@ class SearchboxHandler : public searchbox::mojom::PageHandler,
                              bool shift_key) override;
   void SetPopupSelection(
       searchbox::mojom::OmniboxPopupSelectionPtr selection) override;
-  void OpenPopupSelection(searchbox::mojom::OmniboxPopupSelectionPtr selection,
+  void OpenPopupSelection(uint32_t result_sequence_id,
+                          searchbox::mojom::OmniboxPopupSelectionPtr selection,
                           WindowOpenDisposition disposition) override;
   void OnNavigationLikely(
       uint8_t line,
@@ -136,7 +138,9 @@ class SearchboxHandler : public searchbox::mojom::PageHandler,
                    bool shift_key) override {}
   void OpenLensSearch() override {}
   void SetActiveToolMode(omnibox::ToolMode tool) override {}
+  void RecordToolSelectionAction(omnibox::ToolMode tool) override {}
   void SetActiveModelMode(omnibox::ModelMode model) override {}
+  void RecordModelSelectionAction(omnibox::ModelMode model) override {}
   void ActivateMetricsFunnel(const std::string& funnel_name) override {}
 
   // Stores `callback` to be run when the page remote is bound and ready to

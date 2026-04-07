@@ -47,11 +47,19 @@
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "ui/base/l10n/l10n_util.h"
 
-#if BUILDFLAG(ENABLE_GLIC)
-
 class FakeGlicNudgeDelegate : public GlicNudgeDelegate {
  public:
   void OnTriggerGlicNudgeUI(std::string label) override {
+    last_nudge_label_ = label;
+    if (!last_nudge_label_.empty()) {
+      is_showing_nudge_ = true;
+      future_.SetValue();
+    }
+  }
+  void OnTriggerAnchoredMessage(
+      std::string label,
+      std::string anchored_message_text,
+      std::optional<std::string> prompt_suggestion) override {
     last_nudge_label_ = label;
     if (!last_nudge_label_.empty()) {
       is_showing_nudge_ = true;
@@ -121,7 +129,7 @@ class ContextualCueingHelperBrowserTest
   }
 
   void SwapToFakeDelegate(FakeGlicNudgeDelegate& nudge_delegate) {
-    glic_nudge_controller()->SetDelegate(&nudge_delegate);
+    glic_nudge_controller()->SetTabStripDelegate(&nudge_delegate);
   }
 
   glic::TabStripGlicButton* GetGlicButtonForBrowser(Browser* browser) {
@@ -761,6 +769,7 @@ class ContextualCueingBypassNudgeCapsTest
            {"UseDynamicCues", "true"}}},
          {contextual_cueing::kEnableAutoOpenGlicSidePanel, {}},
          {features::kAutoOpenGlicForPdf, {}},
+         {features::kGlicTrustFirstOnboarding, {}},
          {page_content_annotations::features::kAnnotatedPageContentExtraction,
           {}},
          {contextual_tasks::kContextualTasks, {}}},
@@ -820,5 +829,3 @@ IN_PROC_BROWSER_TEST_F(ContextualCueingBypassNudgeCapsTest,
   ASSERT_TRUE(glic_service);
   EXPECT_TRUE(glic_service->IsWindowShowing());
 }
-
-#endif  // BUILDFLAG(ENABLE_GLIC)

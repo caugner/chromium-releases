@@ -18,14 +18,18 @@
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service_factory.h"
+#include "chrome/browser/contextual_tasks/mock_contextual_tasks_ui_service.h"
 #include "chrome/browser/global_features.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "components/application_locale_storage/application_locale_storage.h"
+#include "content/public/test/navigation_simulator.h"
+#include "content/public/test/web_contents_tester.h"
 #include "components/contextual_tasks/public/contextual_task.h"
 #include "components/contextual_tasks/public/features.h"
 #include "components/contextual_tasks/public/mock_contextual_tasks_service.h"
 #include "components/lens/lens_url_utils.h"
 #include "content/public/test/test_web_ui.h"
+#include "net/base/url_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/lens_server_proto/aim_communication.pb.h"
@@ -51,12 +55,7 @@ class MockPage : public mojom::Page {
   }
 
   MOCK_METHOD(void, SetThreadTitle, (const std::string& title), (override));
-  MOCK_METHOD(void,
-              SetTaskDetails,
-              (const base::Uuid& uuid,
-               const std::string& thread_id,
-               const std::string& turn_id),
-              (override));
+  MOCK_METHOD(void, SetTaskDetails, (const base::Uuid& uuid), (override));
   MOCK_METHOD(void, SetAimUrl, (const GURL& url), (override));
   MOCK_METHOD(void, OnSidePanelStateChanged, (), (override));
   MOCK_METHOD(void,
@@ -112,48 +111,6 @@ class MockPage : public mojom::Page {
   mojo::Receiver<mojom::Page> receiver_{this};
 };
 
-class MockUiService : public ContextualTasksUiService {
- public:
-  MockUiService(Profile* profile, ContextualTasksService* service)
-      : ContextualTasksUiService(profile, service, nullptr, nullptr) {}
-
-  MOCK_METHOD(GURL, GetDefaultAiPageUrl, (), (override));
-  MOCK_METHOD(GURL,
-              GetDefaultAiPageUrlForTask,
-              (const base::Uuid& task_id),
-              (override));
-  MOCK_METHOD(void,
-              SetInitialEntryPointForTask,
-              (const base::Uuid&, omnibox::ChromeAimEntryPoint),
-              (override));
-  MOCK_METHOD(std::optional<GURL>,
-              GetInitialUrlForTask,
-              (const base::Uuid&),
-              (override));
-  MOCK_METHOD(void,
-              GetThreadUrlFromTaskId,
-              (const base::Uuid&, base::OnceCallback<void(GURL)>),
-              (override));
-  MOCK_METHOD(void,
-              MoveTaskUiToNewTab,
-              (const base::Uuid&, BrowserWindowInterface*, const GURL&),
-              (override));
-  MOCK_METHOD(void,
-              OnTabClickedFromSourcesMenu,
-              (int32_t, const GURL&, BrowserWindowInterface*),
-              (override));
-  MOCK_METHOD(void,
-              OnFileClickedFromSourcesMenu,
-              (const GURL&, BrowserWindowInterface*),
-              (override));
-  MOCK_METHOD(void,
-              OnImageClickedFromSourcesMenu,
-              (const GURL&, BrowserWindowInterface*),
-              (override));
-  MOCK_METHOD(bool, IsAiUrl, (const GURL&), (override));
-  MOCK_METHOD(bool, IsPendingErrorPage, (const base::Uuid&), (override));
-};
-
 class TestContextualTasksUI : public ContextualTasksUI {
  public:
   explicit TestContextualTasksUI(content::WebUI* web_ui)
@@ -166,6 +123,8 @@ class TestContextualTasksUI : public ContextualTasksUI {
               GetOrCreateContextualSessionHandle,
               (),
               (override));
+  MOCK_METHOD(GURL, GetWebUiUrl, (), (override));
+  MOCK_METHOD(content::WebContents*, GetInnerWebContents, (), (const, override));
 };
 
 class ContextualTasksPageHandlerTest : public BrowserWithTestWindowTest {
@@ -184,7 +143,7 @@ class ContextualTasksPageHandlerTest : public BrowserWithTestWindowTest {
         profile(), base::BindOnce([](content::BrowserContext* context) {
           Profile* profile = Profile::FromBrowserContext(context);
           return std::unique_ptr<KeyedService>(
-              std::make_unique<NiceMock<MockUiService>>(
+              std::make_unique<NiceMock<MockContextualTasksUiService>>(
                   profile,
                   ContextualTasksServiceFactory::GetForProfile(profile)));
         }));
@@ -200,8 +159,9 @@ class ContextualTasksPageHandlerTest : public BrowserWithTestWindowTest {
 
     mock_contextual_tasks_service_ = static_cast<MockContextualTasksService*>(
         ContextualTasksServiceFactory::GetForProfile(profile()));
-    mock_contextual_tasks_ui_service_ = static_cast<MockUiService*>(
-        ContextualTasksUiServiceFactory::GetForBrowserContext(profile()));
+    mock_contextual_tasks_ui_service_ =
+        static_cast<MockContextualTasksUiService*>(
+            ContextualTasksUiServiceFactory::GetForBrowserContext(profile()));
 
     page_handler_ = std::make_unique<ContextualTasksPageHandler>(
         mojo::PendingReceiver<mojom::PageHandler>(), contextual_tasks_ui_.get(),
@@ -224,7 +184,7 @@ class ContextualTasksPageHandlerTest : public BrowserWithTestWindowTest {
   std::unique_ptr<NiceMock<TestContextualTasksUI>> contextual_tasks_ui_;
   std::unique_ptr<ContextualTasksPageHandler> page_handler_;
   raw_ptr<MockContextualTasksService> mock_contextual_tasks_service_;
-  raw_ptr<MockUiService> mock_contextual_tasks_ui_service_;
+  raw_ptr<MockContextualTasksUiService> mock_contextual_tasks_ui_service_;
   NiceMock<MockPage> page_;
   base::test::ScopedFeatureList feature_list_;
 };
@@ -251,6 +211,61 @@ TEST_F(ContextualTasksPageHandlerTest, IsPendingErrorPage_TaskNotPending) {
   page_handler_->IsPendingErrorPage(
       task_id, base::BindLambdaForTesting([&](bool is_pending_error_page) {
         EXPECT_FALSE(is_pending_error_page);
+        run_loop.Quit();
+      }));
+  run_loop.Run();
+}
+
+TEST_F(ContextualTasksPageHandlerTest, IsEmbeddedPageErrorDocument_True) {
+  std::unique_ptr<content::WebContents> inner_web_contents =
+      content::WebContentsTester::CreateTestWebContents(profile(), nullptr);
+
+  // Navigate and fail to create an error document.
+  content::NavigationSimulator::NavigateAndFailFromBrowser(
+      inner_web_contents.get(), GURL("http://example.com"),
+      net::ERR_CONNECTION_RESET);
+
+  EXPECT_CALL(*contextual_tasks_ui_, GetInnerWebContents())
+      .WillOnce(Return(inner_web_contents.get()));
+
+  base::RunLoop run_loop;
+  page_handler_->IsEmbeddedPageErrorDocument(
+      base::BindLambdaForTesting([&](bool is_error_document) {
+        EXPECT_TRUE(is_error_document);
+        run_loop.Quit();
+      }));
+  run_loop.Run();
+}
+
+TEST_F(ContextualTasksPageHandlerTest, IsEmbeddedPageErrorDocument_False) {
+  std::unique_ptr<content::WebContents> inner_web_contents =
+      content::WebContentsTester::CreateTestWebContents(profile(), nullptr);
+
+  // Normal successful navigation.
+  content::NavigationSimulator::NavigateAndCommitFromBrowser(
+      inner_web_contents.get(), GURL("http://example.com"));
+
+  EXPECT_CALL(*contextual_tasks_ui_, GetInnerWebContents())
+      .WillOnce(Return(inner_web_contents.get()));
+
+  base::RunLoop run_loop;
+  page_handler_->IsEmbeddedPageErrorDocument(
+      base::BindLambdaForTesting([&](bool is_error_document) {
+        EXPECT_FALSE(is_error_document);
+        run_loop.Quit();
+      }));
+  run_loop.Run();
+}
+
+TEST_F(ContextualTasksPageHandlerTest,
+       IsEmbeddedPageErrorDocument_NoInnerContents) {
+  EXPECT_CALL(*contextual_tasks_ui_, GetInnerWebContents())
+      .WillOnce(Return(nullptr));
+
+  base::RunLoop run_loop;
+  page_handler_->IsEmbeddedPageErrorDocument(
+      base::BindLambdaForTesting([&](bool is_error_document) {
+        EXPECT_FALSE(is_error_document);
         run_loop.Quit();
       }));
   run_loop.Run();
@@ -303,6 +318,37 @@ TEST_F(ContextualTasksPageHandlerTest, GetUrlForTask_FetchFromService) {
                                  EXPECT_EQ(url, expected_url);
                                  run_loop.Quit();
                                }));
+  run_loop.Run();
+}
+
+TEST_F(ContextualTasksPageHandlerTest, GetUrlForTask_CopiesWebUiParams) {
+  base::Uuid task_id = base::Uuid::GenerateRandomV4();
+  GURL thread_url("https://google.com/search?mtid=123");
+  GURL webui_url("chrome://contextual-tasks/?chrome_task_id=" +
+                 task_id.AsLowercaseString() + "&p1=1&p2=2");
+
+  EXPECT_CALL(*contextual_tasks_ui_, GetWebUiUrl())
+      .WillRepeatedly(Return(webui_url));
+  EXPECT_CALL(*mock_contextual_tasks_ui_service_, GetInitialUrlForTask(task_id))
+      .WillRepeatedly(Return(std::nullopt));
+  EXPECT_CALL(*mock_contextual_tasks_ui_service_,
+              GetThreadUrlFromTaskId(task_id, _))
+      .WillOnce(
+          [&](const base::Uuid&, base::OnceCallback<void(GURL)> callback) {
+            std::move(callback).Run(thread_url);
+          });
+
+  base::RunLoop run_loop;
+  page_handler_->GetUrlForTask(
+      task_id, base::BindLambdaForTesting([&](const GURL& url) {
+        std::string value;
+        EXPECT_TRUE(net::GetValueForKeyInQuery(url, "p1", &value));
+        EXPECT_EQ(value, "1");
+        EXPECT_TRUE(net::GetValueForKeyInQuery(url, "p2", &value));
+        EXPECT_EQ(value, "2");
+        EXPECT_FALSE(net::GetValueForKeyInQuery(url, "chrome_task_id", &value));
+        run_loop.Quit();
+      }));
   run_loop.Run();
 }
 

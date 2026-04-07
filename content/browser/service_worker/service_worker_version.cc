@@ -466,8 +466,9 @@ ServiceWorkerVersionInfo ServiceWorkerVersion::GetInfo() {
     router_rules = router_evaluator_->ToString();
   }
   ServiceWorkerVersionInfo info(
-      running_status(), status(), fetch_handler_type_, script_url(), scope(),
-      key(), registration_id(), version_id(), embedded_worker()->process_id(),
+      running_status(), status(), fetch_handler_type_,
+      navigation_preload_state_, script_url(), scope(), key(),
+      registration_id(), version_id(), embedded_worker()->process_id(),
       embedded_worker()->thread_id(),
       embedded_worker()->worker_devtools_agent_route_id(), ukm_source_id(),
       ancestor_frame_type_, router_rules);
@@ -830,15 +831,7 @@ bool ServiceWorkerVersion::FinishRequestWithFetchCount(int request_id,
   // ServiceWorkerVersion::Request
   TRACE_EVENT_END("ServiceWorker", perfetto::Track::FromPointer(request),
                   "Handled", was_handled);
-  if (base::FeatureList::IsEnabled(
-          features::kServiceWorkerOptionalTimeoutIterator)) {
-    if (request->timeout_iter.has_value()) {
-      request_timeouts_.erase(*request->timeout_iter);
-    }
-  } else {
-    // Equivalent to the previous, non-optional iterator behavior. Maybe unsafe.
-    request_timeouts_.erase(request->timeout_iter.value_or({}));
-  }
+  request_timeouts_.erase(request->timeout_iter);
   inflight_requests_.Remove(request_id);
   // TODO(crbug.com/40864997): remove the following DCHECK when the cause
   // identified.
@@ -2027,7 +2020,8 @@ void ServiceWorkerVersion::NavigateClient(const std::string& client_uuid,
 
   service_worker_client_utils::NavigateClient(
       url, script_url_, key_, service_worker_client->GetRenderFrameHostId(),
-      context_, base::BindOnce(&DidNavigateClient, std::move(callback), url));
+      BuildClientSecurityState(), context_,
+      base::BindOnce(&DidNavigateClient, std::move(callback), url));
 
   NotifyClientNavigated(script_url_, url);
 }
@@ -2518,6 +2512,7 @@ void ServiceWorkerVersion::StartWorkerInternal() {
   worker_host_ = std::make_unique<content::ServiceWorkerHost>(
       provider_info->host_remote.InitWithNewEndpointAndPassReceiver(), *this,
       context());
+  start_worker_token_ = worker_host_->token();
 
   auto params = blink::mojom::EmbeddedWorkerStartParams::New();
   params->service_worker_version_id = version_id_;
@@ -2719,14 +2714,6 @@ void ServiceWorkerVersion::OnTimeoutTimer() {
       break;
     }
     timed_out_infos.push_back(*it);
-    // Erase the entry from `request_timeouts_` and update `InflightRequest`
-    // accordingly.
-    if (base::FeatureList::IsEnabled(
-            features::kServiceWorkerOptionalTimeoutIterator)) {
-      InflightRequest* request = inflight_requests_.Lookup(it->id);
-      CHECK(request);
-      request->timeout_iter = std::nullopt;
-    }
     it = request_timeouts_.erase(it);
   }
 
@@ -3062,6 +3049,8 @@ void ServiceWorkerVersion::OnStoppedInternal(
   for (auto& observer : observers_) {
     observer.OnRunningStateChanged(this);
   }
+
+  start_worker_token_.reset();
   if (should_restart) {
     StartWorkerInternal();
   } else if (!HasWorkInBrowser()) {

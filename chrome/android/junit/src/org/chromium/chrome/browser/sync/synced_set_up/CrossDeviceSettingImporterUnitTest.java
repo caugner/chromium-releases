@@ -41,8 +41,8 @@ import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.shared_preferences.SharedPreferencesManager;
 import org.chromium.base.supplier.ObservableSuppliers;
 import org.chromium.base.supplier.SettableNullableObservableSupplier;
-import org.chromium.base.test.BaseRobolectricTestRule;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.RobolectricUtil;
 import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.base.test.util.UserActionTester;
@@ -159,7 +159,7 @@ public class CrossDeviceSettingImporterUnitTest {
         when(mLibraryLoader.isInitialized()).thenReturn(true);
 
         mUserActionTester = new UserActionTester();
-        BaseRobolectricTestRule.runAllBackgroundAndUi();
+        RobolectricUtil.runAllBackgroundAndUi();
     }
 
     private CrossDeviceSettingImporter initializeCrossDeviceSettingImporter() {
@@ -210,7 +210,7 @@ public class CrossDeviceSettingImporterUnitTest {
 
         initializeCrossDeviceSettingImporter()
                 .askToApplyNtpSettingImportIfNeeded(
-                        preferencesToApply, /* onlyOmniboxPosition= */ false);
+                        mProfile, preferencesToApply, /* onlyOmniboxPosition= */ false);
 
         verify(mSnackbarManager).showSnackbar(mSnackbarCaptor.capture());
         Snackbar snackbar = mSnackbarCaptor.getValue();
@@ -259,7 +259,7 @@ public class CrossDeviceSettingImporterUnitTest {
 
         initializeCrossDeviceSettingImporter()
                 .askToApplyNtpSettingImportIfNeeded(
-                        preferencesToApply, /* onlyOmniboxPosition= */ false);
+                        mProfile, preferencesToApply, /* onlyOmniboxPosition= */ false);
 
         verify(mSnackbarManager, times(0)).showSnackbar(mSnackbarCaptor.capture());
     }
@@ -274,7 +274,7 @@ public class CrossDeviceSettingImporterUnitTest {
 
         initializeCrossDeviceSettingImporter()
                 .askToApplyNtpSettingImportIfNeeded(
-                        preferencesToApply, /* onlyOmniboxPosition= */ false);
+                        mProfile, preferencesToApply, /* onlyOmniboxPosition= */ false);
 
         verify(mSnackbarManager).showSnackbar(mSnackbarCaptor.capture());
         Snackbar snackbar = mSnackbarCaptor.getValue();
@@ -321,7 +321,7 @@ public class CrossDeviceSettingImporterUnitTest {
 
         initializeCrossDeviceSettingImporter()
                 .askToApplyNtpSettingImportIfNeeded(
-                        preferencesToApply, /* onlyOmniboxPosition= */ false);
+                        mProfile, preferencesToApply, /* onlyOmniboxPosition= */ false);
 
         verify(mSnackbarManager).showSnackbar(mSnackbarCaptor.capture());
         Snackbar snackbar = mSnackbarCaptor.getValue();
@@ -363,7 +363,7 @@ public class CrossDeviceSettingImporterUnitTest {
 
         initializeCrossDeviceSettingImporter()
                 .askToApplyNtpSettingImportIfNeeded(
-                        preferencesToApply, /* onlyOmniboxPosition= */ true);
+                        mProfile, preferencesToApply, /* onlyOmniboxPosition= */ true);
 
         verify(mSnackbarManager).showSnackbar(mSnackbarCaptor.capture());
         Snackbar snackbar = mSnackbarCaptor.getValue();
@@ -390,7 +390,7 @@ public class CrossDeviceSettingImporterUnitTest {
 
         initializeCrossDeviceSettingImporter()
                 .askToApplyNtpSettingImportIfNeeded(
-                        preferencesToApply, /* onlyOmniboxPosition= */ true);
+                        mProfile, preferencesToApply, /* onlyOmniboxPosition= */ true);
 
         verify(mSnackbarManager, never()).showSnackbar(any(Snackbar.class));
     }
@@ -408,20 +408,20 @@ public class CrossDeviceSettingImporterUnitTest {
 
         initializeCrossDeviceSettingImporter()
                 .askToApplyNtpSettingImportIfNeeded(
-                        preferencesToApply, /* onlyOmniboxPosition= */ false);
+                        mProfile, preferencesToApply, /* onlyOmniboxPosition= */ false);
 
         verify(mSnackbarManager).showSnackbar(any(Snackbar.class));
     }
 
     @Test
-    public void testRecordUma_UndoRedo() {
+    public void testRecordAction_UndoRedo() {
         Map<String, Object> preferencesToApply = new HashMap<>();
         preferencesToApply.put(Pref.IS_OMNIBOX_IN_BOTTOM_POSITION, false);
         when(mLocalPrefService.getBoolean(Pref.IS_OMNIBOX_IN_BOTTOM_POSITION)).thenReturn(true);
 
         initializeCrossDeviceSettingImporter()
                 .askToApplyNtpSettingImportIfNeeded(
-                        preferencesToApply, /* onlyOmniboxPosition= */ true);
+                        mProfile, preferencesToApply, /* onlyOmniboxPosition= */ true);
 
         verify(mSnackbarManager).showSnackbar(mSnackbarCaptor.capture());
         Snackbar snackbar = mSnackbarCaptor.getValue();
@@ -599,7 +599,7 @@ public class CrossDeviceSettingImporterUnitTest {
                         false));
         Map<String, Object> result =
                 initializeCrossDeviceSettingImporter()
-                        .getPrefsFromRemoteDevice(mCrossDevicePrefTracker, mProfile);
+                        .getPrefsFromRemoteDevice(mProfile, mCrossDevicePrefTracker);
 
         assertEquals("The result map should contain two preferences.", 2, result.size());
         assertTrue(
@@ -735,7 +735,7 @@ public class CrossDeviceSettingImporterUnitTest {
 
         initializeCrossDeviceSettingImporter()
                 .askToApplyNtpSettingImportIfNeeded(
-                        preferencesToApply, /* onlyOmniboxPosition= */ true);
+                        mProfile, preferencesToApply, /* onlyOmniboxPosition= */ true);
 
         verify(mSnackbarManager).showSnackbar(mSnackbarCaptor.capture());
         Snackbar snackbar = mSnackbarCaptor.getValue();
@@ -758,13 +758,13 @@ public class CrossDeviceSettingImporterUnitTest {
     @Test
     public void testTabObserverManagement() {
         initializeCrossDeviceSettingImporter();
-        BaseRobolectricTestRule.runAllBackgroundAndUi();
+        RobolectricUtil.runAllBackgroundAndUi();
 
         verify(mTab).addObserver(any(TabObserver.class));
 
         // Simulate tab change.
         mActivityTabSupplier.set(mTab2);
-        BaseRobolectricTestRule.runAllBackgroundAndUi();
+        RobolectricUtil.runAllBackgroundAndUi();
         verify(mTab).removeObserver(any(TabObserver.class));
         verify(mTab2).addObserver(any(TabObserver.class));
 
@@ -772,5 +772,39 @@ public class CrossDeviceSettingImporterUnitTest {
         mCrossDeviceSettingImporter.destroy();
         verify(mTab2).removeObserver(any(TabObserver.class));
         assertTrue(!mActivityTabSupplier.hasObservers());
+    }
+
+    @Test
+    public void testOnServiceStatusChanged_TabBecomesNull_NoCrash() {
+        when(mCrossDevicePrefTracker.getServiceStatus())
+                .thenReturn(ServiceStatus.DEVICE_INFO_TRACKER_MISSING);
+
+        initializeCrossDeviceSettingImporter().onTabChangeOrGainFocus(mTab);
+
+        verify(mCrossDevicePrefTracker).addObserver(mTrackerObserverCaptor.capture());
+
+        // Simulate tab becoming null.
+        mActivityTabSupplier.set(null);
+
+        // Simulate tracker becoming ready.
+        // This should NOT crash even though mActivityTabSupplier.get() is null.
+        mTrackerObserverCaptor.getValue().onServiceStatusChanged(ServiceStatus.AVAILABLE);
+    }
+
+    @Test
+    public void testOnServiceStatusChanged_ProfileBecomesNull_NoCrash() {
+        when(mCrossDevicePrefTracker.getServiceStatus())
+                .thenReturn(ServiceStatus.DEVICE_INFO_TRACKER_MISSING);
+
+        initializeCrossDeviceSettingImporter().onTabChangeOrGainFocus(mTab);
+
+        verify(mCrossDevicePrefTracker).addObserver(mTrackerObserverCaptor.capture());
+
+        // Simulate profile becoming null on the tab.
+        when(mTab.getProfile()).thenReturn(null);
+
+        // Simulate tracker becoming ready.
+        // This should NOT crash even though tab.getProfile() is null.
+        mTrackerObserverCaptor.getValue().onServiceStatusChanged(ServiceStatus.AVAILABLE);
     }
 }

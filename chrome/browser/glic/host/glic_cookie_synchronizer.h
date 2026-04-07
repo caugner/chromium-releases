@@ -27,7 +27,6 @@ enum class SetAccountsInCookieResult;
 }  // namespace signin
 
 namespace glic {
-BASE_DECLARE_FEATURE(kGlicClearCookiesOnFirstSync);
 
 // Helper to sync cookies to the webview storage partition.
 class GlicCookieSynchronizer

@@ -247,6 +247,9 @@ COMPONENT_EXPORT(UI_BASE_FEATURES)
 BASE_DECLARE_FEATURE(kPlatformClipboardMonitor);
 
 COMPONENT_EXPORT(UI_BASE_FEATURES)
+BASE_DECLARE_FEATURE(kNonBlockingOsClipboardReads);
+
+COMPONENT_EXPORT(UI_BASE_FEATURES)
 BASE_DECLARE_FEATURE(kEnablePixelCanvasRecording);
 
 bool COMPONENT_EXPORT(UI_BASE_FEATURES) IsPixelCanvasRecordingEnabled();
@@ -269,6 +272,27 @@ BASE_DECLARE_FEATURE(kStringWidthCache);
 // (not just advertises it) before treating files as real.
 COMPONENT_EXPORT(UI_BASE_FEATURES)
 BASE_DECLARE_FEATURE(kUseClipboardStrictVirtualFileCheck);
+
+COMPONENT_EXPORT(UI_BASE_FEATURES)
+BASE_DECLARE_FEATURE(kAsyncVirtualFileExtraction);
+
+COMPONENT_EXPORT(UI_BASE_FEATURES)
+BASE_DECLARE_FEATURE(kVirtualFileChunkedRead);
+
+// When enabled, compensates for latency of handling the first blocking touch
+// move in the renderer by dampening the corresponding gesture scroll updates.
+COMPONENT_EXPORT(UI_BASE_FEATURES)
+BASE_DECLARE_FEATURE(kCompensateGestureScrollUpdateLatency);
+
+// The latency (in milliseconds) for acknowledging blocking touch moves that is
+// considered expected by the `CompensateGestureScrollUpdateLatency` feature.
+COMPONENT_EXPORT(UI_BASE_FEATURES)
+BASE_DECLARE_FEATURE_PARAM(int, kCompensationExpectedLatencyMs);
+
+// The latency (in milliseconds) for acknowledging blocking touch moves that is
+// considered acceptable by the `CompensateGestureScrollUpdateLatency` feature.
+COMPONENT_EXPORT(UI_BASE_FEATURES)
+BASE_DECLARE_FEATURE_PARAM(int, kCompensationAcceptableLatencyMs);
 
 }  // namespace features
 

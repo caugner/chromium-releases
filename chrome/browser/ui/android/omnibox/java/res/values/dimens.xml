@@ -86,9 +86,6 @@ found in the LICENSE file.
     <dimen name="fake_search_box_end_padding">12dp</dimen>
     <dimen name="fake_search_box_start_padding">24dp</dimen>
     <dimen name="fake_search_box_start_padding_with_dse_logo">16dp</dimen>
-    <dimen name="fake_search_box_with_composeplate_button_end_padding">
-        8dp
-    </dimen>
     <dimen name="incognito_badge_lateral_padding_start">4dp</dimen>
     <dimen name="incognito_badge_lateral_padding_end">4dp</dimen>
     <dimen name="location_bar_status_icon_width">24dp</dimen>
@@ -189,6 +186,7 @@ found in the LICENSE file.
     <dimen name="fusebox_attachment_visible_height">40dp</dimen>
     <dimen name="fusebox_vertical_space_above_popup">32dp</dimen>
     <dimen name="fusebox_min_tablet_width">504dp</dimen>
+    <dimen name="fusebox_url_bar_translation_y">4dp</dimen>
 
     <!-- Search engine logo. -->
     <dimen name="omnibox_search_engine_logo_composed_size">24dp</dimen>
@@ -198,4 +196,12 @@ found in the LICENSE file.
     <dimen name="status_view_verbose_highlight_height">40dp</dimen>
     <dimen name="location_bar_status_icon_margin">4dp</dimen>
     <dimen name="omnibox_verbose_text_negative_start_margin">-4dp</dimen>
+
+    <!-- Omnibox chip. -->
+    <dimen name="omnibox_chip_min_expanded_width">80dp</dimen>
+    <dimen name="omnibox_chip_max_expanded_width">160dp</dimen>
+    <dimen name="omnibox_chip_padding">4dp</dimen>
+    <dimen name="omnibox_chip_padding_horizontal_collapsed">12dp</dimen>
+    <dimen name="omnibox_chip_padding_horizontal_expanded_start">8dp</dimen>
+    <dimen name="omnibox_chip_padding_horizontal_expanded_end">12dp</dimen>
 </resources>

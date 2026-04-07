@@ -56,12 +56,12 @@ net::CertStatus TestLocationBarModel::GetCertStatus() const {
 
 metrics::OmniboxEventProto::PageClassification
 TestLocationBarModel::GetPageClassification(bool is_prefetch) const {
-  return metrics::OmniboxEventProto::OTHER;
+  return page_classification_;
 }
 
 metrics::OmniboxEventProto::PageClassification
 TestLocationBarModel::GetOmniboxComposeboxPageClassification() const {
-  return metrics::OmniboxEventProto::OTHER;
+  return page_classification_;
 }
 
 const gfx::VectorIcon& TestLocationBarModel::GetVectorIcon() const {

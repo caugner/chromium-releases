@@ -5,7 +5,10 @@
 #include "ui/base/accelerators/global_accelerator_listener/global_accelerator_listener.h"
 
 #include <memory>
+#include <set>
+#include <string>
 
+#include "base/functional/callback_helpers.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/accelerators/accelerator.h"
@@ -40,13 +43,16 @@ class BaseGlobalAcceleratorListenerForTesting final
     registered_accelerators_.erase(accelerator);
   }
 
+  using ui::GlobalAcceleratorListener::accelerator_map_size;
+
   MOCK_CONST_METHOD0(IsRegistrationHandledExternally, bool());
   MOCK_METHOD5(OnCommandsChanged,
                void(const std::string&,
                     const std::string&,
                     const ui::CommandMap&,
                     gfx::AcceleratedWidget,
-                    Observer*));
+                    base::RepeatingCallback<void(const std::string&,
+                                                 const std::string&)>));
 
  private:
   std::set<ui::Accelerator> registered_accelerators_;
@@ -78,6 +84,8 @@ class GlobalAcceleratorListenerTest : public testing::Test {
     observer_ = nullptr;
     ui_listener_ = nullptr;
   }
+
+  size_t accelerator_map_size() { return ui_listener_->accelerator_map_size(); }
 
   GlobalAcceleratorListener::Observer* GetObserver() { return observer_.get(); }
 
@@ -124,6 +132,22 @@ TEST_F(GlobalAcceleratorListenerTest, SuspendsShortcutHandling) {
   listener->UnregisterAccelerator(accelerator_b, GetObserver());
 }
 
+TEST_F(GlobalAcceleratorListenerTest, SuspendsShortcutHandlingUnregister) {
+  GlobalAcceleratorListener* listener = GetUIListener();
+  const ui::Accelerator accelerator_b(ui::VKEY_B, ui::EF_NONE);
+
+  EXPECT_TRUE(listener->RegisterAccelerator(accelerator_b, GetObserver()));
+
+  listener->SetShortcutHandlingSuspended(true);
+  EXPECT_TRUE(listener->IsShortcutHandlingSuspended());
+  EXPECT_EQ(accelerator_map_size(), 1u);
+
+  listener->UnregisterAccelerator(accelerator_b, GetObserver());
+  EXPECT_EQ(accelerator_map_size(), 0u);
+
+  listener->SetShortcutHandlingSuspended(false);
+}
+
 TEST_F(GlobalAcceleratorListenerTest, IsRegistrationHandledExternally) {
   GlobalAcceleratorListener* listener = GetUIListener();
   BaseGlobalAcceleratorListenerForTesting* ui_listener = GetUIListener();
@@ -144,7 +168,7 @@ TEST_F(GlobalAcceleratorListenerTest, OnCommandsChanged) {
               OnCommandsChanged(kAcceleratorGroupId, kProfileId, testing::_,
                                 testing::_, testing::_));
   listener->OnCommandsChanged(kAcceleratorGroupId, kProfileId, kCommands,
-                              gfx::kNullAcceleratedWidget, GetObserver());
+                              gfx::kNullAcceleratedWidget, base::DoNothing());
 }
 
 #if !BUILDFLAG(IS_WIN)
@@ -160,7 +184,7 @@ TEST_F(GlobalAcceleratorListenerTest, OnCommandsChangedWithWidget) {
   EXPECT_CALL(*ui_listener, OnCommandsChanged(kAcceleratorGroupId, kProfileId,
                                               testing::_, kWidget, testing::_));
   listener->OnCommandsChanged(kAcceleratorGroupId, kProfileId, kCommands,
-                              kWidget, GetObserver());
+                              kWidget, base::DoNothing());
 }
 #endif
 

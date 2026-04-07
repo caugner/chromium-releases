@@ -53,7 +53,7 @@ using ResultCallback =
     collaboration::CollaborationControllerDelegate::ResultCallback;
 using collaboration::CollaborationControllerDelegate;
 
-@interface BaseGridCoordinator ()
+@interface BaseGridCoordinator () <TabGroupsCommands>
 
 // Callback invoked upon confirming leaving or deleting a shared group.
 @property(nonatomic, copy) void (^leaveOrDeleteCompletion)
@@ -345,12 +345,10 @@ using collaboration::CollaborationControllerDelegate;
   _tabGroupCreator = nil;
 }
 
-- (void)showTabGroupEditionForGroup:(base::WeakPtr<const TabGroup>)tabGroup {
+- (void)showTabGroupEditionForGroup:(const TabGroup*)tabGroup {
   CHECK(!_tabGroupCreator) << "There is an attempt to edit a tab group when a "
                               "creation process is still running.";
-  if (!tabGroup) {
-    return;
-  }
+  CHECK(tabGroup) << "To edit a tab group you should pass a group.";
 
   UIViewController* backgroundView = _tabGroupCoordinator
                                          ? _tabGroupCoordinator.viewController
@@ -358,7 +356,7 @@ using collaboration::CollaborationControllerDelegate;
   _tabGroupCreator = [[CreateTabGroupCoordinator alloc]
       initTabGroupEditionWithBaseViewController:backgroundView
                                         browser:self.browser
-                                       tabGroup:tabGroup.get()];
+                                       tabGroup:tabGroup];
   _tabGroupCreator.delegate = self;
   [_tabGroupCreator start];
 }
