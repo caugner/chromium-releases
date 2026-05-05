@@ -46,6 +46,14 @@ class InputStateModel {
       contextual_search::ContextualSearchSessionHandle& new_session_handle);
   virtual ~InputStateModel();
 
+  base::WeakPtr<InputStateModel> AsWeakPtr() {
+    return weak_ptr_factory_.GetWeakPtr();
+  }
+
+  // Returns the current input types from the session handle.
+  static std::vector<InputType> GetCurrentInputTypes(
+      const contextual_search::ContextualSearchSessionHandle* session_handle);
+
   // Add a subscriber to this model.
   base::CallbackListSubscription subscribe(Subscriber callback);
 
@@ -126,6 +134,8 @@ class InputStateModel {
   // Stores input_types that are permanently disabled by an external trigger and
   // must persist through state updates. Persists after Initialize() is called.
   std::vector<InputType> permanently_disabled_input_types_;
+
+  base::WeakPtrFactory<InputStateModel> weak_ptr_factory_{this};
 };
 
 }  // namespace contextual_search

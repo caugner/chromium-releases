@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "base/auto_reset.h"
+#include "base/check_op.h"
 #include "base/containers/to_vector.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
@@ -23,6 +24,8 @@
 #include "base/memory/weak_ptr.h"
 #include "base/not_fatal_until.h"
 #include "base/notreached.h"
+#include "base/numerics/safe_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/favicon/large_icon_service_factory.h"
@@ -36,6 +39,7 @@
 #include "chrome/browser/ui/autofill/autofill_suggestion_controller_utils.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/passwords/ui_utils.h"
 #include "chrome/browser/ui/views/autofill/popup/popup_base_view.h"
 #include "chrome/browser/ui/views/autofill/popup/popup_bnpl_footnote_view.h"
@@ -57,6 +61,7 @@
 #include "components/autofill/core/browser/suggestions/suggestion_hiding_reason.h"
 #include "components/autofill/core/browser/suggestions/suggestion_type.h"
 #include "components/autofill/core/browser/ui/autofill_resource_utils.h"
+#include "components/autofill/core/browser/ui/tabbed_pane_enums.h"
 #include "components/autofill/core/common/aliases.h"
 #include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/autofill_payments_features.h"
@@ -90,6 +95,7 @@
 #include "ui/views/bubble/bubble_border.h"
 #include "ui/views/bubble/bubble_border_arrow_utils.h"
 #include "ui/views/controls/scroll_view.h"
+#include "ui/views/controls/tabbed_pane/tabbed_pane.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/box_layout_view.h"
 #include "ui/views/layout/flex_layout.h"
@@ -185,7 +191,7 @@ std::vector<views::BubbleArrowSide> GetPreferredPopupSides(
 }
 
 void DefaultA11yAnnouncer(const std::u16string& message, bool polite) {
-  Browser* browser = chrome::FindLastActive();
+  BrowserWindowInterface* browser = chrome::FindLastActive();
   if (!browser) {
     return;
   }
@@ -226,7 +232,8 @@ PopupViewViews::PopupViewViews(
 
 PopupViewViews::PopupViewViews(
     base::WeakPtr<AutofillPopupController> controller,
-    std::optional<const AutofillPopupView::SearchBarConfig> search_bar_config)
+    std::optional<const AutofillPopupView::SearchBarConfig> search_bar_config,
+    std::optional<const AutofillPopupView::TabbedPaneConfig> tabbed_pane_config)
     : PopupBaseView(controller,
                     views::Widget::GetTopLevelWidgetForNativeView(
                         controller->container_view()),
@@ -234,7 +241,8 @@ PopupViewViews::PopupViewViews(
                         ? views::Widget::InitParams::Activatable::kYes
                         : views::Widget::InitParams::Activatable::kDefault),
       controller_(controller),
-      search_bar_config_(std::move(search_bar_config)) {
+      search_bar_config_(std::move(search_bar_config)),
+      tabbed_pane_config_(std::move(tabbed_pane_config)) {
   InitViews();
 
   GetViewAccessibility().SetRole(ax::mojom::Role::kListBox);
@@ -320,8 +328,12 @@ bool PopupViewViews::Show(
     }
   }
 
+  MaybeAnnounceCurrentTabAndFootnote();
   MaybeAnnouncePasswordRecoveryPopup();
-  MaybeA11yFocusInformationalSuggestion();
+  MaybeAnnounceLoadingState();
+  if (!MaybeA11yFocusInformationalSuggestion()) {
+    return false;
+  }
 
   return !CanActivate() || (GetWidget() && GetWidget()->IsActive());
 }
@@ -590,7 +602,8 @@ bool PopupViewViews::HandleKeyPressEventForAtMemory(
       }
       if (search_bar_) {
         controller_->SetFilter(
-            AutofillPopupController::SuggestionFilter(search_bar_->GetText()));
+            AutofillPopupController::StringFilter(search_bar_->GetText()),
+            AutofillPopupController::FilterSource::kSearchSubmitted);
         return true;
       }
       return false;
@@ -678,6 +691,15 @@ bool PopupViewViews::SelectNextHorizontalCell() {
       return true;
     }
   }
+
+  if (tabbed_pane_) {
+    const size_t current_tab = tabbed_pane_->GetSelectedTabIndex();
+    if (current_tab + 1 < tabbed_pane_->GetTabCount()) {
+      tabbed_pane_->SelectTabAt(current_tab + 1);
+      return true;
+    }
+  }
+
   return false;
 }
 
@@ -691,6 +713,15 @@ bool PopupViewViews::SelectPreviousHorizontalCell() {
         PopupCellSelectionSource::kKeyboard);
     return true;
   }
+
+  if (tabbed_pane_) {
+    const size_t current_tab = tabbed_pane_->GetSelectedTabIndex();
+    if (current_tab > 0) {
+      tabbed_pane_->SelectTabAt(current_tab - 1);
+      return true;
+    }
+  }
+
   return false;
 }
 
@@ -744,7 +775,10 @@ void PopupViewViews::OnSuggestionsChanged(bool prefer_prev_arrow_side) {
   }
 
   MaybeAnnouncePasswordRecoveryPopup();
-  MaybeA11yFocusInformationalSuggestion();
+  MaybeAnnounceLoadingState();
+  if (!MaybeA11yFocusInformationalSuggestion()) {
+    return;
+  }
   ShowIPHFeaturePromos();
 }
 
@@ -803,8 +837,9 @@ void PopupViewViews::SearchBarOnInputChanged(std::u16string_view query) {
   if (controller_) {
     controller_->SetFilter(
         query.empty() ? std::nullopt
-                      : std::optional(AutofillPopupController::SuggestionFilter(
-                            std::u16string(query))));
+                      : std::optional(AutofillPopupController::StringFilter(
+                            std::u16string(query))),
+        AutofillPopupController::FilterSource::kInputChanged);
   }
 }
 
@@ -836,6 +871,12 @@ bool PopupViewViews::SearchBarHandleKeyPressed(const ui::KeyEvent& event) {
   return controller_->HandleKeyPressEvent(input::NativeWebKeyboardEvent(event));
 }
 
+void PopupViewViews::TabSelectedAt(int index) {
+  CHECK_LT(base::checked_cast<size_t>(index), tabbed_pane_config_->tabs.size());
+  controller_->OnTabSelected(index, tabbed_pane_config_->tabs[index].type);
+  MaybeAnnounceCurrentTabAndFootnote();
+}
+
 void PopupViewViews::SetSelectedCell(
     std::optional<CellIndex> cell_index,
     PopupCellSelectionSource source,
@@ -851,7 +892,11 @@ void PopupViewViews::SetSelectedCell(
   }
 
   if (old_index) {
-    GetPopupRowViewAt(old_index->first).SetSelectedCell(std::nullopt);
+    if (!TrackAndRun(this, [this, old_index]() {
+          GetPopupRowViewAt(old_index->first).SetSelectedCell(std::nullopt);
+        })) {
+      return;
+    }
   }
 
   // New selected cell invalidates this scheduling (if it's running), cancel it.
@@ -865,7 +910,11 @@ void PopupViewViews::SetSelectedCell(
 
     row_with_selected_cell_ = cell_index->first;
     PopupRowView& new_selected_row = GetPopupRowViewAt(cell_index->first);
-    new_selected_row.SetSelectedCell(cell_index->second);
+    if (!TrackAndRun(&new_selected_row, [&new_selected_row, cell_index]() {
+          new_selected_row.SetSelectedCell(cell_index->second);
+        })) {
+      return;
+    }
     new_selected_row.ScrollViewToVisible();
 
     if (!controller_) {
@@ -940,6 +989,56 @@ void PopupViewViews::MaybeAnnouncePasswordRecoveryPopup() {
   }
 }
 
+void PopupViewViews::MaybeAnnounceLoadingState() {
+  if (!controller_ || controller_->GetSuggestions().empty()) {
+    return;
+  }
+
+  if (controller_->GetSuggestionAt(0).type ==
+      SuggestionType::kLoadingThrobber) {
+    a11y_announcer_.Run(l10n_util::GetStringUTF16(
+                            IDS_AUTOFILL_BNPL_PROGRESS_DIALOG_LOADING_MESSAGE),
+                        /*polite=*/true);
+  }
+}
+
+void PopupViewViews::MaybeAnnounceCurrentTabAndFootnote() {
+  std::u16string announcement;
+
+  if (tabbed_pane_) {
+    size_t index = tabbed_pane_->GetSelectedTabIndex();
+    size_t total = tabbed_pane_->GetTabCount();
+    std::u16string tab_title(tabbed_pane_->GetTabAt(index)->GetTitleText());
+
+    announcement = l10n_util::GetStringFUTF16(
+        IDS_AUTOFILL_PAY_NOW_PAY_LATER_TAB_ACCESSIBILITY_ANNOUNCEMENT,
+        tab_title, base::NumberToString16(index + 1),
+        base::NumberToString16(total));
+  }
+
+  std::u16string footnote_text;
+  for (const RowPointer& row : rows_) {
+    if (const auto* footnote = std::get_if<PopupBnplFootnoteView*>(&row)) {
+      footnote_text = (*footnote)->GetFullText();
+      break;
+    }
+  }
+
+  if (!footnote_text.empty()) {
+    if (!announcement.empty()) {
+      announcement = l10n_util::GetStringFUTF16(
+          IDS_AUTOFILL_A11Y_ANNOUNCEMENT_CONCATENATE_TWO_STRINGS, announcement,
+          footnote_text);
+    } else {
+      announcement = footnote_text;
+    }
+  }
+
+  if (!announcement.empty()) {
+    a11y_announcer_.Run(announcement, /*polite=*/true);
+  }
+}
+
 void PopupViewViews::UpdateAccessibleStates() const {
   if (controller_) {
     GetViewAccessibility().SetIsExpanded();
@@ -969,6 +1068,10 @@ void PopupViewViews::InitViews() {
     search_bar_->SetProperty(views::kMarginsKey,
                              gfx::Insets::VH(GetContentsVerticalPadding(), 0));
     AddChildView(std::make_unique<PopupSeparatorView>(/*vertical_padding=*/0));
+  }
+
+  if (tabbed_pane_config_) {
+    CreateTabbedPaneView();
   }
 
   suggestions_container_ =
@@ -1011,16 +1114,8 @@ void PopupViewViews::CreateSuggestionViews() {
   rows_.reserve(suggestions.size());
   size_t current_line_number = 0u;
 
-  // No suggestions (or only footer ones, which are not filterable) with
-  // a non-empty filter query means that there are no results matching
-  // the query. Show a corresponding message.
-  if ((suggestions.empty() ||
-       std::ranges::all_of(suggestions,
-                           [](const Suggestion& suggestion) {
-                             return suggestion.filtration_policy ==
-                                    Suggestion::FiltrationPolicy::kStatic;
-                           })) &&
-      search_bar_ && controller_->HasFilteredOutSuggestions()) {
+  // Show the "no results" message if the controller identifies this state.
+  if (search_bar_ && controller_->ShouldShowNoSuggestionsMessage()) {
     suggestions_container_->AddChildView(
         std::make_unique<PopupNoSuggestionsView>(
             search_bar_config_->no_results_message));
@@ -1190,8 +1285,17 @@ void PopupViewViews::CreateSuggestionViews() {
 
     footer_container_ =
         suggestions_container_->AddChildView(std::move(footer_container));
+
+    // If the last item in the footer is a BNPL footnote, then we don't need
+    // any extra padding at the bottom. The BNPL footnote has its own bottom
+    // padding to ensure it is properly shaded.
+    int footer_bottom_padding =
+        suggestions.back().type == SuggestionType::kBnplFootnote
+            ? 0
+            : kInterItemsPadding;
     footer_container_->SetInsideBorderInsets(
-        gfx::Insets::VH(kInterItemsPadding, 0));
+        gfx::Insets::TLBR(kInterItemsPadding, 0, footer_bottom_padding, 0));
+
     suggestions_container_->SetFlexForView(footer_container_, 0);
   }
 
@@ -1222,17 +1326,26 @@ void PopupViewViews::CreateSuggestionViews() {
 
 gfx::Size PopupViewViews::CalculatePreferredSize(
     const views::SizeBounds& available_size) const {
-  gfx::Size size = views::View::CalculatePreferredSize(available_size);
-  if (size.width() > kAutofillPopupMaxWidth) {
-    // TODO(crbug.com/40232718): When we set the vertical axis to stretch,
-    // BoxLayout will occupy the entire vertical axis size. Two calculations are
-    // needed to correct this.
-    //
-    // Following crrev.com/c/5828724, the dialog box will fit the text more
-    // closely. But this will break the pixel test, so make it a fixed size.
+  gfx::Size size;
+  // Use the original popup width if a tabbed pane is present to maintain the
+  // same popup width during tab switches.
+  if (tabbed_pane_initial_width_.has_value()) {
     size = views::View::CalculatePreferredSize(
-        views::SizeBounds(kAutofillPopupMaxWidth, {}));
-    size.set_width(kAutofillPopupMaxWidth);
+        views::SizeBounds(tabbed_pane_initial_width_.value(), {}));
+    size.set_width(tabbed_pane_initial_width_.value());
+  } else {
+    size = views::View::CalculatePreferredSize(available_size);
+    if (size.width() > kAutofillPopupMaxWidth) {
+      // TODO(crbug.com/40232718): When we set the vertical axis to stretch,
+      // BoxLayout will occupy the entire vertical axis size. Two calculations
+      // are needed to correct this.
+      //
+      // Following crrev.com/c/5828724, the dialog box will fit the text more
+      // closely. But this will break the pixel test, so make it a fixed size.
+      size = views::View::CalculatePreferredSize(
+          views::SizeBounds(kAutofillPopupMaxWidth, {}));
+      size.set_width(kAutofillPopupMaxWidth);
+    }
   }
 
   if (controller_ &&
@@ -1250,12 +1363,54 @@ gfx::Size PopupViewViews::CalculatePreferredSize(
   return size;
 }
 
+void PopupViewViews::CreateTabbedPaneView() {
+  auto tabbed_pane = std::make_unique<views::TabbedPane>();
+
+  auto create_empty_pane = []() {
+    auto pane = std::make_unique<views::View>();
+    pane->SetBorder(
+        views::CreateEmptyBorder(ChromeLayoutProvider::Get()->GetInsetsMetric(
+            views::INSETS_DIALOG_SUBSECTION)));
+    return pane;
+  };
+
+  const int kCustomTabHeight = 52;
+  for (const auto& tab_config : tabbed_pane_config_->tabs) {
+    tabbed_pane->AddTab(tab_config.title, create_empty_pane());
+
+    views::TabbedPaneTab* tab_view =
+        tabbed_pane->GetTabAt(tabbed_pane->GetTabCount() - 1);
+    tab_view->SetHeight(kCustomTabHeight);
+  }
+
+  // TODO(crbug.com/477689220): Investigate better approaches (e.g., layout
+  // management) for sizing the tabbed pane so it doesn't overlap the
+  // suggestions container.
+  // Calculate and set the preferred size for the tabbed pane based on its
+  // contents.
+  tabbed_pane->SetPreferredSize(tabbed_pane->GetPreferredSize());
+  tabbed_pane->SetListener(this);
+
+  // Filter suggestions for the default tab.
+  controller_->SetFilter(kDefaultSuggestionTabIndex,
+                         AutofillPopupController::FilterSource::kTabSelected);
+
+  tabbed_pane_ = AddChildView(std::move(tabbed_pane));
+}
+
 bool PopupViewViews::DoUpdateBoundsAndRedrawPopup() {
   return DoUpdateBoundsAndRedrawPopup(/*prefer_prev_arrow_side=*/false);
 }
 
 bool PopupViewViews::DoUpdateBoundsAndRedrawPopup(bool prefer_prev_arrow_side) {
   gfx::Size preferred_size = CalculatePreferredSize({});
+
+  // Store the original width if a tabbed pane is present to maintain the same
+  // popup width during tab switches.
+  if (tabbed_pane_ && !tabbed_pane_initial_width_) {
+    tabbed_pane_initial_width_ = preferred_size.width();
+  }
+
   gfx::Rect popup_bounds;
 
   const gfx::Rect content_area_bounds = GetContentAreaBounds();
@@ -1493,17 +1648,23 @@ bool PopupViewViews::SelectParentPopupContentCell() {
   return true;
 }
 
-void PopupViewViews::MaybeA11yFocusInformationalSuggestion() {
+bool PopupViewViews::MaybeA11yFocusInformationalSuggestion() {
   if (rows_.size() != 1) {
-    return;
+    return true;
   }
 
   if (auto* warning_view = std::get_if<PopupWarningView*>(&rows_[0]);
       warning_view && *warning_view) {
-    NotifyAXSelection(**warning_view);
-    (*warning_view)
-        ->NotifyAccessibilityEventDeprecated(ax::mojom::Event::kFocus, true);
+    PopupWarningView* view_ptr = *warning_view;
+    return TrackAndRun(
+        view_ptr, [this, view_ptr]() { NotifyAXSelection(*view_ptr); },
+        [view_ptr]() {
+          view_ptr->NotifyAccessibilityEventDeprecated(ax::mojom::Event::kFocus,
+                                                       true);
+        });
   }
+
+  return true;
 }
 
 base::WeakPtr<AutofillPopupView> PopupViewViews::GetWeakPtr() {
@@ -1544,7 +1705,9 @@ DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(
 // static
 base::WeakPtr<AutofillPopupView> AutofillPopupView::Create(
     base::WeakPtr<AutofillSuggestionController> controller,
-    std::optional<const AutofillPopupView::SearchBarConfig> search_bar_config) {
+    std::optional<const AutofillPopupView::SearchBarConfig> search_bar_config,
+    std::optional<const AutofillPopupView::TabbedPaneConfig>
+        tabbed_pane_config) {
   if (!controller || !CanShowRootPopup(*controller)) {
     return nullptr;
   }
@@ -1552,7 +1715,7 @@ base::WeakPtr<AutofillPopupView> AutofillPopupView::Create(
   // On Desktop, all controllers are `AutofillPopupController`s.
   return (new PopupViewViews(
               static_cast<AutofillPopupController&>(*controller).GetWeakPtr(),
-              std::move(search_bar_config)))
+              std::move(search_bar_config), std::move(tabbed_pane_config)))
       ->GetWeakPtr();
 }
 

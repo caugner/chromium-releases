@@ -12,6 +12,7 @@
 #include "base/files/file_path.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/path_service.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_split.h"
@@ -56,15 +57,32 @@ using mojom::OnDeviceTranslationServiceConfigPtr;
 
 // Prefix for the display name of the on-device translation service. The origin
 // is appended to the prefix.
-const char kOnDeviceTranslationServiceDisplayNamePrefix[] =
+constexpr std::string_view kOnDeviceTranslationServiceDisplayNamePrefix =
     "On-device Translation Service: ";
 
-constexpr char kCreateTranslatorMetricActionName[] = "CreateTranslator";
-constexpr char kCanTranslateMetricActionName[] = "CanTranslate";
+constexpr std::string_view kCreateTranslatorMetricActionName =
+    "CreateTranslator";
+constexpr std::string_view kCanTranslateMetricActionName = "CanTranslate";
+
+constexpr std::string_view
+    kCreateTranslatorSourceLanguageIsSupportedMetricName =
+        "Translate.OnDeviceTranslation.CreateTranslator."
+        "IsSourceLanguageSupported";
+constexpr std::string_view
+    kCreateTranslatorTargetLanguageIsSupportedMetricName =
+        "Translate.OnDeviceTranslation.CreateTranslator."
+        "IsTargetLanguageSupported";
+constexpr std::string_view kCanTranslateSourceLanguageIsSupportedMetricName =
+    "Translate.OnDeviceTranslation.CanTranslate.IsSourceLanguageSupported";
+constexpr std::string_view kCanTranslateTargetLanguageIsSupportedMetricName =
+    "Translate.OnDeviceTranslation.CanTranslate.IsTargetLanguageSupported";
 
 // TODO(crbug.com/419848973): This is a workaround until the "he" language code
 // is fully supported.
 std::string SwitchLanguageCodeToIwIfHe(std::string_view language_code) {
+  if (language_code == "he") {
+    return "iw";
+  }
   auto split = base::SplitStringOnce(language_code, "-");
   if (!split || split->first != "he") {
     return std::string(language_code);
@@ -204,17 +222,18 @@ void OnDeviceTranslationServiceController::CreateTranslator(
     const std::string& source_lang,
     const std::string& target_lang,
     base::OnceCallback<
-        void(base::expected<mojo::PendingRemote<mojom::Translator>,
+        void(base::expected<mojo::PendingRemote<mojom::OnDeviceTranslator>,
                             CreateTranslatorError>)> callback) {
   std::optional<std::string> best_fit_source_language =
       GetBestFitLanguageCode(source_lang);
   std::optional<std::string> best_fit_target_language =
       GetBestFitLanguageCode(target_lang);
-
-  RecordOnDeviceTranslationSupportedSourceLanguage(
-      "CreateTranslator", best_fit_source_language.has_value());
-  RecordOnDeviceTranslationSupportedTargetLanguage(
-      "CreateTranslator", best_fit_target_language.has_value());
+  base::UmaHistogramBoolean(
+      kCreateTranslatorSourceLanguageIsSupportedMetricName,
+      best_fit_source_language.has_value());
+  base::UmaHistogramBoolean(
+      kCreateTranslatorTargetLanguageIsSupportedMetricName,
+      best_fit_target_language.has_value());
   if (!best_fit_source_language.has_value() ||
       !best_fit_target_language.has_value()) {
     std::move(callback).Run(
@@ -274,9 +293,9 @@ void OnDeviceTranslationServiceController::CreateTranslatorImpl(
     const std::string& source_lang,
     const std::string& target_lang,
     base::OnceCallback<
-        void(base::expected<mojo::PendingRemote<mojom::Translator>,
+        void(base::expected<mojo::PendingRemote<mojom::OnDeviceTranslator>,
                             CreateTranslatorError>)> callback) {
-  mojo::PendingRemote<mojom::Translator> pending_remote;
+  mojo::PendingRemote<mojom::OnDeviceTranslator> pending_remote;
   auto pending_receiver = pending_remote.InitWithNewPipeAndPassReceiver();
 
   if (!MaybeStartService()) {
@@ -293,9 +312,10 @@ void OnDeviceTranslationServiceController::CreateTranslatorImpl(
       mojo::WrapCallbackWithDropHandler(
           base::BindOnce(
               [](base::OnceCallback<void(
-                     base::expected<mojo::PendingRemote<mojom::Translator>,
-                                    CreateTranslatorError>)> callback,
-                 mojo::PendingRemote<mojom::Translator> pending_remote,
+                     base::expected<
+                         mojo::PendingRemote<mojom::OnDeviceTranslator>,
+                         CreateTranslatorError>)> callback,
+                 mojo::PendingRemote<mojom::OnDeviceTranslator> pending_remote,
                  CreateTranslatorResult result) {
                 if (result == CreateTranslatorResult::kSuccess) {
                   std::move(callback).Run(std::move(pending_remote));
@@ -318,10 +338,10 @@ void OnDeviceTranslationServiceController::CanTranslate(
       GetBestFitLanguageCode(source_lang_arg);
   std::optional<std::string> best_fit_target_language =
       GetBestFitLanguageCode(target_lang_arg);
-  RecordOnDeviceTranslationSupportedSourceLanguage(
-      "CanTranslate", best_fit_source_language.has_value());
-  RecordOnDeviceTranslationSupportedTargetLanguage(
-      "CanTranslate", best_fit_target_language.has_value());
+  base::UmaHistogramBoolean(kCanTranslateSourceLanguageIsSupportedMetricName,
+                            best_fit_source_language.has_value());
+  base::UmaHistogramBoolean(kCanTranslateTargetLanguageIsSupportedMetricName,
+                            best_fit_target_language.has_value());
   if (!best_fit_source_language.has_value() ||
       !best_fit_target_language.has_value()) {
     std::move(callback).Run(CanTranslateResult::kNoNotSupportedLanguage);

@@ -12,6 +12,7 @@
 #include "third_party/blink/renderer/modules/xr/xr_joint_space.h"
 #include "third_party/blink/renderer/modules/xr/xr_light_estimate.h"
 #include "third_party/blink/renderer/modules/xr/xr_light_probe.h"
+#include "third_party/blink/renderer/modules/xr/xr_mesh_set.h"
 #include "third_party/blink/renderer/modules/xr/xr_plane_set.h"
 #include "third_party/blink/renderer/modules/xr/xr_reference_space.h"
 #include "third_party/blink/renderer/modules/xr/xr_session.h"
@@ -42,6 +43,9 @@ const char kSpacesSequenceTooLarge[] =
     "Insufficient buffer capacity for pose results.";
 
 const char kMismatchedBufferSizes[] = "Buffer sizes must be equal";
+
+const char kTransformsDetached[] =
+    "The transforms array was detached during fillPoses().";
 
 std::optional<device::PlaneId> GetPlaneId(
     const device::mojom::blink::XRNativeOriginInformation& native_origin) {
@@ -146,6 +150,18 @@ XRPlaneSet* XRFrame::detectedPlanes(ExceptionState& exception_state) const {
   }
 
   return session_->GetDetectedPlanes();
+}
+
+XRMeshSet* XRFrame::detectedMeshes(ExceptionState& exception_state) const {
+  DVLOG(3) << __func__;
+
+  if (!is_active_) {
+    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
+                                      kInactiveFrame);
+    return nullptr;
+  }
+
+  return session_->GetDetectedMeshes();
 }
 
 XRLightEstimate* XRFrame::getLightEstimate(
@@ -557,7 +573,16 @@ bool XRFrame::fillPoses(const HeapVector<Member<XRSpace>>& spaces,
   auto transforms_data = transforms->AsSpan();
   for (const auto& space : spaces) {
     auto current_transform = transforms_data.take_first<kFloatsPerTransform>();
-    if (const XRPose* pose = space->getPose(base_space)) {
+    const XRPose* pose = space->getPose(base_space);
+    // getPose() can synchronously dispatch a reset event if the space requires
+    // updating, which could detach the buffer in a JavaScript listener.
+    if (transforms->IsDetached()) {
+      exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
+                                        kTransformsDetached);
+      return false;
+    }
+
+    if (pose) {
       current_transform.copy_from(pose->transform()->matrix()->AsSpan());
     } else {
       std::ranges::fill(current_transform, NAN);

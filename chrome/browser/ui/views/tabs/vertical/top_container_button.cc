@@ -49,7 +49,7 @@ void TopContainerButton::UpdateIcon(const ui::ImageModel& icon_image) {
 
   const ui::ImageModel image_model = ui::ImageModel::FromVectorIcon(
       *icon_image.GetVectorIcon().vector_icon(), GetForegroundColor(),
-      GetLayoutConstant(LayoutConstant::kVerticalTabStripTopButtonIconSize));
+      GetLayoutConstant(LayoutConstant::kVerticalTabStripButtonIconSize));
 
   SetImageModel(views::Button::STATE_NORMAL, image_model);
   SetImageModel(views::Button::STATE_HOVERED, image_model);
@@ -71,6 +71,13 @@ ui::ColorId TopContainerButton::GetForegroundColor() const {
   return GetWidget() && GetWidget()->ShouldPaintAsActive()
              ? kColorTabForegroundInactiveFrameActive
              : kColorTabForegroundInactiveFrameInactive;
+}
+
+gfx::Size TopContainerButton::CalculatePreferredSize(
+    const views::SizeBounds& available_size) const {
+  const int size =
+      GetLayoutConstant(LayoutConstant::kVerticalTabStripCollapseButtonSize);
+  return gfx::Size(size, size);
 }
 
 std::unique_ptr<views::ActionViewInterface>

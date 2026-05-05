@@ -10,6 +10,7 @@
 
 #include "base/feature_list.h"
 #include "base/metrics/field_trial_params.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 
 namespace password_manager::features {
@@ -18,18 +19,22 @@ namespace password_manager::features {
 
 #if !BUILDFLAG(IS_IOS)
 BASE_DECLARE_FEATURE(kActorLogin);
-// Enables FedCM support for Actor Login.
-BASE_DECLARE_FEATURE(kActorLoginFederatedLoginSupport);
+// Killswitch for the conflicting permission cleanup. Conflicting permissions
+// are the ones granted for 2 different accounts on the same website.
+BASE_DECLARE_FEATURE(kActorLoginConflictingPermissionCleanup);
 // Enables Actor Login form finding with async check
 BASE_DECLARE_FEATURE(kActorLoginFieldVisibilityCheck);
-// Ensures that `GetCredentials` differentiates between no saved credentials
-// and no signin form found on the page.
-BASE_DECLARE_FEATURE(kActorLoginGetCredentialsNoLoginForm);
 BASE_DECLARE_FEATURE(kActorLoginLocalClassificationModel);
 // Enables the usage of temporary permissions across affiliated origins for
 // Actor Login.
 BASE_DECLARE_FEATURE(kActorLoginPermissionsUseStrongAffiliations);
 BASE_DECLARE_FEATURE(kActorLoginReauthTaskRefocus);
+#endif  // !BUILDFLAG(IS_IOS)
+
+// Enables syncing password permissions.
+BASE_DECLARE_FEATURE(kActorLoginSyncsPasswordPermissions);
+
+#if !BUILDFLAG(IS_IOS)
 // Enables logging quality for actor login.
 BASE_DECLARE_FEATURE(kActorLoginQualityLogs);
 // Enables finding and filling forms in same-site iframes for actor login.
@@ -58,12 +63,23 @@ BASE_DECLARE_FEATURE(kAutoApproveSharedPasswordUpdatesFromSameSender);
 // across quarters.
 BASE_DECLARE_FEATURE(kAutofillPasswordUserPerceptionSurvey);
 
+// Waits for the page to reach stability before triggering any password change
+// actions.
+BASE_DECLARE_FEATURE(kAwaitPageStabilityForPasswordChange);
+extern const base::FeatureParam<base::TimeDelta> kAwaitPageStabilityTimeout;
+
 // Undoes the effect of WebAuthnUsePasskeyFromAnotherDeviceInContextMenu by
 // adding the hybrid item back into the dropdown. It also adds the entry point
 // to autofill dropdowns.
 // Needs autofill::features::AutofillAndPasswordsInSameSurface to be enabled.
 BASE_DECLARE_FEATURE(kAutofillReintroduceHybridPasskeyDropdownItem);
 #endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+
+// Retries capturing annotated page context during automated password change if
+// capturing failed for some reason.
+BASE_DECLARE_FEATURE(kRetryCapturePageContent);
+extern const base::FeatureParam<base::TimeDelta> kCapturePageContentDelay;
+extern const base::FeatureParam<int> kCapturePageContentRetryCount;
 
 // Enables Biometrics for the Touch To Fill feature. This only effects Android.
 BASE_DECLARE_FEATURE(kBiometricTouchToFill);
@@ -148,10 +164,6 @@ BASE_DECLARE_FEATURE(kOtpPhishGuard);
 // Populate the `date_last_filled` timestamp for passwords.
 BASE_DECLARE_FEATURE(kPasswordDateLastFilled);
 
-// When enabled, the callback in `OnButtonClicked` will be invoked immediately
-// with the result.
-BASE_DECLARE_FEATURE(kPasswordChangeImmediateSubmission);
-
 // Enables running the clientside form classifier to parse password forms.
 BASE_DECLARE_FEATURE(kPasswordFormClientsideClassifier);
 
@@ -186,7 +198,8 @@ BASE_DECLARE_FEATURE(kProactivelyDownloadModelForPasswordChange);
 BASE_DECLARE_FEATURE(kReduceRequirementsForPasswordChange);
 
 // Triggers password change glow invoking Glic from settings.
-BASE_DECLARE_FEATURE(kPasswordCheckup);
+// This flag is only for the prototype version.
+BASE_DECLARE_FEATURE(kPasswordCheckupPrototype);
 
 #if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
 // Enables "Needs access to keychain, restart chrome" bubble and banner.

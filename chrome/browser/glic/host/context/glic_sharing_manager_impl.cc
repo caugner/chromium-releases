@@ -70,24 +70,6 @@ GlicGetContextResult TransformFetcherResult(
 }
 }  // namespace
 
-#if !BUILDFLAG(IS_ANDROID)
-GlicSharingManagerImpl::GlicSharingManagerImpl(
-    Profile* profile,
-    GlicWindowControllerInterface* window_controller,
-    GlicMetrics* metrics)
-    : focused_browser_manager_(
-          std::make_unique<GlicFocusedBrowserManagerImpl>(window_controller,
-                                                          profile)),
-      focused_tab_manager_(std::make_unique<GlicFocusedTabManager>(
-          focused_browser_manager_.get())),
-      pinned_tab_manager_(
-          std::make_unique<GlicPinnedTabManagerImpl>(profile,
-                                                     window_controller,
-                                                     metrics)),
-      profile_(profile),
-      metrics_(metrics) {}
-#endif
-
 GlicSharingManagerImpl::GlicSharingManagerImpl(
     std::unique_ptr<GlicFocusedTabManagerInterface> focused_tab_manager,
     std::unique_ptr<GlicFocusedBrowserManager> focused_browser_manager,
@@ -142,14 +124,12 @@ GlicSharingManagerImpl::AddTabPinningStatusEventCallback(
 bool GlicSharingManagerImpl::PinTabs(
     base::span<const tabs::TabHandle> tab_handles,
     GlicPinTrigger trigger) {
-  CHECK(base::FeatureList::IsEnabled(mojom::features::kGlicMultiTab));
   return pinned_tab_manager()->PinTabs(tab_handles, trigger);
 }
 
 bool GlicSharingManagerImpl::UnpinTabs(
     base::span<const tabs::TabHandle> tab_handles,
     GlicUnpinTrigger trigger) {
-  CHECK(base::FeatureList::IsEnabled(mojom::features::kGlicMultiTab));
   return pinned_tab_manager()->UnpinTabs(tab_handles, trigger);
 }
 
@@ -172,6 +152,10 @@ int32_t GlicSharingManagerImpl::GetNumPinnedTabs() const {
 
 bool GlicSharingManagerImpl::IsTabPinned(tabs::TabHandle tab_handle) const {
   return pinned_tab_manager()->IsTabPinned(tab_handle);
+}
+
+bool GlicSharingManagerImpl::IsTabFocused(tabs::TabHandle tab_handle) const {
+  return focused_tab_manager_->IsTabFocused(tab_handle);
 }
 
 namespace {
@@ -252,33 +236,43 @@ int32_t GlicSharingManagerImpl::SetMaxPinnedTabs(uint32_t max_pinned_tabs) {
   return pinned_tab_manager()->SetMaxPinnedTabs(max_pinned_tabs);
 }
 
-void GlicSharingManagerImpl::GetContextFromTab(
-    tabs::TabHandle tab_handle,
-    const mojom::GetTabContextOptions& options,
-    base::OnceCallback<void(GlicGetContextResult)> callback) {
+std::optional<GlicGetContextError>
+GlicSharingManagerImpl::CheckPreliminaryContextSharingEligibility(
+    tabs::TabHandle tab_handle) const {
   tabs::TabInterface* tab = tab_handle.Get();
   if (!tab) {
-    std::move(callback).Run(base::unexpected(GlicGetContextError{
-        GlicGetContextFromTabError::kTabNotFound, "tab not found"}));
-    return;
+    return GlicGetContextError{GlicGetContextFromTabError::kTabNotFound,
+                               "tab not found"};
   }
 
-  const bool is_pinned = pinned_tab_manager()->IsTabPinned(tab_handle);
+  const bool is_pinned = IsTabPinned(tab_handle);
   if (!is_pinned && !IsGlicTabContextEnabled(profile_->GetPrefs())) {
-    std::move(callback).Run(base::unexpected(GlicGetContextError{
+    return GlicGetContextError{
         GlicGetContextFromTabError::
             kPermissionDeniedContextPermissionNotEnabled,
-        "permission denied: context permission not enabled"}));
-    return;
+        "permission denied: context permission not enabled"};
   }
 
   const bool is_focused = focused_tab_manager_->IsTabFocused(tab_handle);
   const bool is_shared = is_focused || is_pinned;
   if (!is_shared || !IsTabValidForSharing(tab->GetContents())) {
-    std::move(callback).Run(base::unexpected(GlicGetContextError{
-        GlicGetContextFromTabError::kPermissionDenied, "permission denied"}));
+    return GlicGetContextError{GlicGetContextFromTabError::kPermissionDenied,
+                               "permission denied"};
+  }
+
+  return std::nullopt;
+}
+
+void GlicSharingManagerImpl::GetContextFromTab(
+    tabs::TabHandle tab_handle,
+    const mojom::GetTabContextOptions& options,
+    base::OnceCallback<void(GlicGetContextResult)> callback) {
+  if (auto error = CheckPreliminaryContextSharingEligibility(tab_handle)) {
+    std::move(callback).Run(base::unexpected(*error));
     return;
   }
+  tabs::TabInterface* tab = tab_handle.Get();
+  CHECK(tab);
 
   // If tab context was allowed to be extracted, report to metrics.
   // Instance-level metrics for context requests are recorded by the caller

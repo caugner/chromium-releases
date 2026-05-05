@@ -554,7 +554,7 @@ public class SearchEngineUtilsUnitTest {
         configureSearchEngine("google", "Google");
         SearchEngineUtils searchEngineUtils = new SearchEngineUtils(mProfile, mFaviconHelper);
         String searchEngineHint = "Search Google or type URL";
-        String aiModeHint = "Ask Google anything";
+        String aiModeHint = "Ask anything";
         String imageGenHint = "Image Gen Tool Hint";
         String deepSearchHint = "Deep Search Tool Hint";
         String canvasHint = "Canvas Tool Hint";
@@ -565,6 +565,11 @@ public class SearchEngineUtilsUnitTest {
                 .when(mComposeboxQueryControllerBridge)
                 .getInputStateSupplier();
 
+        ToolConfig aiModeConfig =
+                ToolConfig.newBuilder()
+                        .setTool(ToolMode.TOOL_MODE_UNSPECIFIED)
+                        .setHintText(aiModeHint)
+                        .build();
         ToolConfig imageGenConfig =
                 ToolConfig.newBuilder()
                         .setTool(ToolMode.TOOL_MODE_IMAGE_GEN)
@@ -582,6 +587,7 @@ public class SearchEngineUtilsUnitTest {
                         .build();
         byte[][] toolConfigs =
                 new byte[][] {
+                    aiModeConfig.toByteArray(),
                     imageGenConfig.toByteArray(),
                     deepSearchConfig.toByteArray(),
                     canvasConfig.toByteArray()
@@ -642,5 +648,26 @@ public class SearchEngineUtilsUnitTest {
                 searchEngineHint,
                 searchEngineUtils.getOmniboxHintText(
                         AutocompleteRequestType.DEEP_SEARCH, mFuseboxSessionState));
+    }
+
+    @Test
+    public void testGetOmniboxHintText_ModelPickerDisabled() {
+        configureSearchEngine("google", "Google");
+        SearchEngineUtils searchEngineUtils = new SearchEngineUtils(mProfile, mFaviconHelper);
+
+        assertEquals(
+                "Search Google or type URL",
+                searchEngineUtils.getOmniboxHintText(
+                        AutocompleteRequestType.SEARCH, mFuseboxSessionState));
+
+        assertEquals(
+                "Ask anything",
+                searchEngineUtils.getOmniboxHintText(
+                        AutocompleteRequestType.AI_MODE, mFuseboxSessionState));
+
+        assertEquals(
+                "Describe your image",
+                searchEngineUtils.getOmniboxHintText(
+                        AutocompleteRequestType.IMAGE_GENERATION, mFuseboxSessionState));
     }
 }

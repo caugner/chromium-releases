@@ -161,7 +161,8 @@ void FakeIdentityRequestDialogController::ShowUrl(LinkType link_type,
 content::WebContents* FakeIdentityRequestDialogController::ShowModalDialog(
     const GURL& url,
     blink::mojom::RpMode rp_mode,
-    DismissCallback dismiss_callback) {
+    DismissCallback dismiss_callback,
+    ShownModalAsyncCallback on_shown_async) {
   if (!web_contents_) {
     return nullptr;
   }
@@ -205,7 +206,7 @@ void FakeIdentityRequestDialogController::RequestIdPRegistrationPermision(
     const url::Origin& origin,
     base::OnceCallback<void(bool accepted)> callback) {
   if (!is_interception_enabled_) {
-    PostTask(FROM_HERE, base::BindOnce(std::move(callback), false));
+    PostTask(FROM_HERE, base::BindOnce(std::move(callback), true));
   }
 }
 

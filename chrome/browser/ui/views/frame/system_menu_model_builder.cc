@@ -53,6 +53,9 @@
 
 DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(SystemMenuModelBuilder,
                                       kToggleVerticalTabsElementId);
+DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(
+    SystemMenuModelBuilder,
+    kToggleVerticalTabsExpandOnHoverElementId);
 
 SystemMenuModelBuilder::SystemMenuModelBuilder(
     ui::AcceleratorProvider* provider,
@@ -100,12 +103,21 @@ void SystemMenuModelBuilder::BuildSystemMenuForBrowserWindow(
 
   model->AddItemWithStringId(IDC_BOOKMARK_ALL_TABS, IDS_BOOKMARK_ALL_TABS);
   model->AddItemWithStringId(IDC_NAME_WINDOW, IDS_NAME_WINDOW);
+
+  if (base::FeatureList::IsEnabled(tabs::kHorizontalTabStripComboButton)) {
+    model->AddSeparator(ui::NORMAL_SEPARATOR);
+    model->AddItemWithStringId(IDC_TAB_SEARCH_TOGGLE_PIN,
+                               IDS_TAB_STRIP_PIN_TAB_SEARCH);
+  }
+
 #if BUILDFLAG(IS_WIN)
   // On Windows we can not remove an item when showing the menu. So only add
   // the glic toggle option if glic is enabled when building the menu.
   if (glic::GlicEnabling::IsEnabledForProfile(browser()->profile())) {
 #endif  // BUILDFLAG(IS_WIN)
-    model->AddSeparator(ui::NORMAL_SEPARATOR);
+    if (!base::FeatureList::IsEnabled(tabs::kHorizontalTabStripComboButton)) {
+      model->AddSeparator(ui::NORMAL_SEPARATOR);
+    }
     model->AddItemWithStringId(IDC_GLIC_TOGGLE_PIN, IDS_GLIC_PIN);
 #if BUILDFLAG(IS_WIN)
   }
@@ -121,6 +133,21 @@ void SystemMenuModelBuilder::BuildSystemMenuForBrowserWindow(
       if (controller->ShouldDisplayVerticalTabs()) {
         model->AddItemWithStringId(IDC_TOGGLE_VERTICAL_TABS,
                                    IDS_SWITCH_TO_HORIZONTAL_TAB);
+
+        if (tabs::IsVerticalTabsExpandOnHoverFeatureEnabled() &&
+            controller->ShouldDisplayVerticalTabs()) {
+          model->AddItemWithStringId(
+              IDC_TOGGLE_VERTICAL_TABS_EXPAND_ON_HOVER,
+              controller->IsExpandOnHoverEnabled()
+                  ? IDS_VERTICAL_TABS_DISABLE_EXPAND_ON_HOVER
+                  : IDS_VERTICAL_TABS_ENABLE_EXPAND_ON_HOVER);
+          model->SetElementIdentifierAt(
+              model
+                  ->GetIndexOfCommandId(
+                      IDC_TOGGLE_VERTICAL_TABS_EXPAND_ON_HOVER)
+                  .value(),
+              kToggleVerticalTabsExpandOnHoverElementId);
+        }
       } else {
         model->AddItemWithStringId(IDC_TOGGLE_VERTICAL_TABS,
                                    IDS_SWITCH_TO_VERTICAL_TAB);

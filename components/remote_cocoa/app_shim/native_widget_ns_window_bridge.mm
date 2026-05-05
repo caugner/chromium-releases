@@ -1386,6 +1386,14 @@ void NativeWidgetNSWindowBridge::OnPositionChanged() {
   UpdateWindowGeometry();
 }
 
+void NativeWidgetNSWindowBridge::OnWindowWillMove() {
+  host_->OnWindowWillMove();
+}
+
+void NativeWidgetNSWindowBridge::OnWindowDidEndMove() {
+  host_->OnWindowDidEndMove();
+}
+
 void NativeWidgetNSWindowBridge::OnWindowWillStartLiveResize() {
   host_->OnWindowWillStartLiveResize();
 }
@@ -1611,7 +1619,14 @@ void NativeWidgetNSWindowBridge::FullscreenControllerTransitionComplete(
   UpdateWindowDisplay();
 
   // Add any children that were skipped during the fullscreen transition.
+  // A weak pointer is needed because OrderChildren() can synchronously run a
+  // modal sheet animation (ShowAsModalSheet), entering a nested run-loop during
+  // which this bridge may be destroyed.
+  base::WeakPtr<NativeWidgetNSWindowBridge> weak_ptr = factory_.GetWeakPtr();
   OrderChildren();
+  if (!weak_ptr) {
+    return;
+  }
 
   host_->OnWindowFullscreenTransitionComplete(is_fullscreen);
   if (is_fullscreen && immersive_mode_controller_) {
@@ -1705,6 +1720,10 @@ bool NativeWidgetNSWindowBridge::ShouldWaitInPreCommit() {
 
 base::TimeDelta NativeWidgetNSWindowBridge::PreCommitTimeout() {
   return kUIPaintTimeout;
+}
+
+bool NativeWidgetNSWindowBridge::IsWindowInLiveResize() {
+  return [window_ inLiveResize];
 }
 
 ////////////////////////////////////////////////////////////////////////////////

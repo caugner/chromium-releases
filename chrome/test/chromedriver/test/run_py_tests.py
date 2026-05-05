@@ -4124,16 +4124,15 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
         True,
         self._driver.capabilities['fedcm:accounts'])
 
-  def testCanClickInIframesInShadow(self):
-    """Test that you can interact with a iframe within a shadow element.
-       See https://bugs.chromium.org/p/chromedriver/issues/detail?id=3445
-    """
+  def _test_click_in_shadow_iframe(self, closed):
     self._driver.SetTimeouts({'implicit': 2000})
-    self._driver.Load(self.GetHttpUrlForFile(
-        '/chromedriver/shadow_iframe.html'))
-    frame = self._driver.ExecuteScript(
-      '''return document.querySelector("#shadow")
-          .shadowRoot.querySelector("iframe")''')
+    url = self.GetHttpUrlForFile('/chromedriver/shadow_iframe.html')
+    if closed:
+      url += '?closed=true'
+    self._driver.Load(url)
+    shadow_host = self._driver.FindElement('css selector', '#shadow')
+    shadow_root = shadow_host.GetElementShadowRoot()
+    frame = shadow_root.FindElement('css selector', 'iframe')
     self._driver.SwitchToFrame(frame)
     message = self._driver.FindElement('css selector', '#message')
     self.assertTrue('clicked' not in message.GetText())
@@ -4141,6 +4140,19 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     button.Click()
     message = self._driver.FindElement('css selector', '#message.result')
     self.assertTrue('clicked' in message.GetText())
+
+  def testCanClickInIframesInShadowClosed(self):
+    """
+    Test that you can interact with a iframe within a closed shadow root.
+    https://issues.chromium.org/issues/469831357
+    """
+    self._test_click_in_shadow_iframe(closed=True)
+
+  def testCanClickInIframesInShadowOpen(self):
+    """Test that you can interact with a iframe within a open shadow root.
+       See https://bugs.chromium.org/p/chromedriver/issues/detail?id=3445
+    """
+    self._test_click_in_shadow_iframe(closed=False)
 
   def testCanClickInIframesInShadowScrolled(self):
     """Test that you can interact with a scrolled iframe
@@ -6491,6 +6503,52 @@ class ChromeDriverSiteIsolation(ChromeDriverBaseTestWithWebServer):
         self._driver.ExecuteScript(
                 'return arguments[0] === window.frames[0]',
                 frame)
+
+  def testAlertDoesntCrashBrowser(self):
+    # Regression test for crbug.com/502206631.
+    # It ensures that ExecuteAlertCommand doesn't cause a use-after-free
+    # crash when a prerender activation swap detaches the web view.
+    self._http_server.SetDataForPath('/inner.html',
+      b'<html><body><h1>Prerendered Page</h1></body></html>')
+    self._http_server.SetDataForPath('/prerender_uaf.html',
+      bytes('''<!DOCTYPE html>
+<html>
+<head>
+  <script>
+    const script = document.createElement('script');
+    script.type = 'speculationrules';
+    script.innerText = JSON.stringify({
+      "prerender": [{"source": "list", "urls": ["/inner.html"]}]
+    });
+    document.head.append(script);
+  </script>
+</head>
+<body>
+  <a id="link" href="/inner.html">navigate</a>
+  <script>
+    window._triggerPrerenderSwap = function() {
+      setTimeout(() => {
+        document.getElementById('link').click();
+        const start = Date.now();
+        while (Date.now() - start < 3000);
+      }, 100);
+    };
+  </script>
+</body>
+</html>''', 'utf-8'))
+
+    driver = self.CreateDriver()
+    try:
+      driver.Load(self.GetHttpUrlForFile('/prerender_uaf.html'))
+      time.sleep(1)
+      driver.ExecuteScript('window._triggerPrerenderSwap();')
+      time.sleep(0.15)
+      try:
+        driver.GetAlertMessage()
+      except Exception:
+        pass
+    finally:
+      pass
 
 
 class ChromeDriverPageLoadTimeoutTest(ChromeDriverBaseTestWithWebServer):

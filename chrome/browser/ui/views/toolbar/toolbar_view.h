@@ -13,9 +13,9 @@
 #include "base/scoped_observation.h"
 #include "chrome/browser/command_observer.h"
 #include "chrome/browser/glic/browser_ui/glic_button_controller_delegate.h"
+#include "chrome/browser/glic/browser_ui/glic_nudge_delegate.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/page_action/page_action_icon_type.h"
-#include "chrome/browser/ui/tabs/glic_nudge_delegate.h"
 #include "chrome/browser/ui/toolbar/app_menu_icon_controller.h"
 #include "chrome/browser/ui/toolbar/back_forward_menu_model.h"
 #include "chrome/browser/ui/views/frame/browser_root_view.h"
@@ -26,6 +26,7 @@
 #include "chrome/browser/ui/views/profiles/avatar_toolbar_button.h"
 #include "chrome/browser/ui/views/toolbar/overflow_button.h"
 #include "chrome/browser/ui/views/toolbar/pinned_action_toolbar_button.h"
+#include "chrome/browser/ui/views/toolbar/pinned_toolbar_actions.h"
 #include "chrome/browser/ui/views/toolbar/split_tabs_button.h"
 #include "components/prefs/pref_member.h"
 #include "ui/base/accelerators/accelerator.h"
@@ -94,7 +95,7 @@ class ToolbarView : public views::AccessiblePaneView,
                     public ToolbarButtonProvider,
                     public BrowserRootView::DropTarget,
                     public glic::GlicButtonControllerDelegate,
-                    public GlicNudgeDelegate {
+                    public glic::GlicNudgeDelegate {
   METADATA_HEADER(ToolbarView, views::AccessiblePaneView)
 
  public:
@@ -182,8 +183,8 @@ class ToolbarView : public views::AccessiblePaneView,
     return performance_intervention_button_;
   }
   ToolbarButton* GetCastButton() const;
-  PinnedToolbarActionsContainer* pinned_toolbar_actions_container() const {
-    return pinned_toolbar_actions_container_;
+  PinnedToolbarActions* pinned_toolbar_actions() const {
+    return pinned_toolbar_actions_;
   }
   MediaToolbarButtonView* media_button() const { return media_button_; }
   BrowserAppMenuButton* app_menu_button() const { return app_menu_button_; }
@@ -226,6 +227,7 @@ class ToolbarView : public views::AccessiblePaneView,
   void OnThemeChanged() override;
   bool AcceleratorPressed(const ui::Accelerator& acc) override;
   void ChildPreferredSizeChanged(views::View* child) override;
+  void ChildVisibilityChanged(View* child) override;
 
   friend class AvatarToolbarButtonBaseBrowserTest;
 
@@ -281,7 +283,7 @@ class ToolbarView : public views::AccessiblePaneView,
 
   // ToolbarButtonProvider:
   ExtensionsToolbarDesktop* GetExtensionsToolbarDesktop() override;
-  PinnedToolbarActionsContainer* GetPinnedToolbarActionsContainer() override;
+  PinnedToolbarActions* GetPinnedToolbarActions() override;
   gfx::Size GetToolbarButtonSize() const override;
   views::View* GetDefaultExtensionDialogAnchorView() override;
   PageActionIconView* GetPageActionIconView(PageActionIconType type) override;
@@ -309,6 +311,7 @@ class ToolbarView : public views::AccessiblePaneView,
   views::View* GetViewForDrop() override;
 
   // GlicButtonControllerDelegate:
+  void SetButtonController(glic::GlicButtonController* controller) override;
   void SetGlicShowState(bool show) override;
   void SetGlicPanelIsOpen(bool open) override;
 
@@ -328,6 +331,8 @@ class ToolbarView : public views::AccessiblePaneView,
   void OnTouchUiChanged();
 
   void NewTabButtonPressed(const ui::Event& event);
+
+  void InitGlicContainer();
 
   void OnVerticalTabStripModeChanged(
       tabs::VerticalTabStripStateController* controller);
@@ -386,6 +391,10 @@ class ToolbarView : public views::AccessiblePaneView,
       nullptr;
   raw_ptr<PinnedToolbarActionsContainer> pinned_toolbar_actions_container_ =
       nullptr;
+
+  // An alias for `pinned_toolbar_actions_container_` or
+  // `toolbar_webview_->GetPinnedActionsContainer()`.
+  raw_ptr<PinnedToolbarActions> pinned_toolbar_actions_ = nullptr;
   raw_ptr<AvatarToolbarButton> avatar_ = nullptr;
   raw_ptr<MediaToolbarButtonView> media_button_ = nullptr;
   raw_ptr<BrowserAppMenuButton> app_menu_button_ = nullptr;
@@ -398,6 +407,7 @@ class ToolbarView : public views::AccessiblePaneView,
   raw_ptr<glic::ToolbarGlicButton> glic_button_ = nullptr;
   raw_ptr<glic::ToolbarGlicActorTaskIcon> glic_actor_task_icon_ = nullptr;
   raw_ptr<ToolbarDivider> glic_button_divider_ = nullptr;
+  raw_ptr<glic::GlicButtonController> button_controller_ = nullptr;
 
   // When locked, the container is unable to change its expanded state.
   // Changes will be staged until after this is unlocked.
@@ -406,6 +416,8 @@ class ToolbarView : public views::AccessiblePaneView,
   // MouseWatcher is used to lock and unlock the expansion state of this
   // container.
   std::unique_ptr<views::MouseWatcher> mouse_watcher_;
+
+  raw_ptr<ToolbarButton> ai_overlay_dialog_button_ = nullptr;
 
   const raw_ptr<Browser> browser_;
   const raw_ptr<BrowserView> browser_view_;

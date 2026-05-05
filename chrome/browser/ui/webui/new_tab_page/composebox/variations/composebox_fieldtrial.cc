@@ -223,10 +223,6 @@ const base::FeatureParam<bool> kShowContextMenuDescription(
     &kNtpComposebox,
     "NtpComposeboxShowContextMenuDescription",
     true);
-const base::FeatureParam<bool> kEnableEphemeralContextMenuDescription(
-    &kNtpComposebox,
-    "EnableEphemeralContextMenuDescription",
-    false);
 
 const base::FeatureParam<bool> kShowContextMenuHeaders(&kNtpComposebox,
                                                        "ShowContextMenuHeaders",
@@ -311,39 +307,10 @@ const base::FeatureParam<PlaceholderText> kSteadyPlaceholder(
     PlaceholderText::ASK,
     &kSteadyPlaceholderOptions);
 
-const base::FeatureParam<bool> kCyclingPlaceholders(&kNtpRealboxNext,
-                                                    "CyclingPlaceholders",
-                                                    false);
-
-const base::FeatureParam<RealboxLayoutMode>::Option
-    kRealboxLayoutModeOptions[] = {
-        {RealboxLayoutMode::kTallBottomContext,
-         kRealboxLayoutModeTallBottomContext},
-        {RealboxLayoutMode::kTallTopContext, kRealboxLayoutModeTallTopContext},
-        {RealboxLayoutMode::kCompact, kRealboxLayoutModeCompact}};
-
-const base::FeatureParam<RealboxLayoutMode> kRealboxLayoutMode(
-    &kNtpRealboxNext,
-    "RealboxLayoutMode",
-    RealboxLayoutMode::kCompact,
-    &kRealboxLayoutModeOptions);
-
 const base::FeatureParam<bool> kMultiLineEnabled(&kNtpRealboxNext,
                                                  "MultiLineEnabled",
                                                  true);
 
-std::string_view RealboxLayoutModeToString(
-    RealboxLayoutMode realbox_layout_mode) {
-  switch (realbox_layout_mode) {
-    case RealboxLayoutMode::kTallBottomContext:
-      return kRealboxLayoutModeTallBottomContext;
-    case RealboxLayoutMode::kTallTopContext:
-      return kRealboxLayoutModeTallTopContext;
-    case RealboxLayoutMode::kCompact:
-      return kRealboxLayoutModeCompact;
-    default:
-      NOTREACHED();
-  }
-}
+BASE_FEATURE(kNtpRealboxCyclingPlaceholders, base::FEATURE_DISABLED_BY_DEFAULT);
 
 }  // namespace ntp_realbox

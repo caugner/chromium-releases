@@ -2,6 +2,7 @@
 <!DOCTYPE translationbundle>
 <translationbundle lang="et">
 <translation id="1000436330784933699">Siit saate Lensi avada.</translation>
+<translation id="1005291068154454184">Täisekraanil video Chromiumi vaikebrauseriks määramisest</translation>
 <translation id="1042296835509784301">Avab Chromiumis paroolihalduri.</translation>
 <translation id="1047130070405668746">Valige Chromium</translation>
 <translation id="1091252999271033193">See tähendab, et Chromium taotleb iga kord mobiilisaiti.</translation>
@@ -70,9 +71,6 @@ Uusi järjehoidjaid ei saa teie kontole salvestada, enne kui mõned kustutate. K
 <translation id="2313870531055795960">Kontrollib URL-e Chromiumi talletatud ohtlike saitide loendi alusel. Kui sait üritab teie parooli varastada või laadite alla kahjuliku faili, võib Chromium saata URL-id ja lehe sisu osad teenusesse Google'i ohutu sirvimine.</translation>
 <translation id="2314220608288760290">Chromium avab YouTube'i inkognito lingid automaatselt inkognito režiimis.</translation>
 <translation id="231828342043114302">Huvide põhjal loodud isikupärastatud sisu saamiseks logige Chromiumisse sisse.</translation>
-<translation id="2326738825692478496">Teatud Chromiumi andmeid pole veel teie Google’i kontole salvestatud.
-
-Oodake enne väljalogimist paar minutit. Kui logite kohe välja, siis need andmed kustutatakse.</translation>
 <translation id="2334943301233020675">Järgmisi pääsuvõtmeid ei imporditud paroolihaldurisse, kuna need ei vasta nõuetele.</translation>
 <translation id="2337722506862731008">Chromiumi jagamine</translation>
 <translation id="2340423701577464731">Lisa Chromiumi lugemisloendi üksus</translation>
@@ -103,7 +101,6 @@ Oodake enne väljalogimist paar minutit. Kui logite kohe välja, siis need andme
 Kui soovite näha veel seadeid, mis kasutavad andmeid, et parandada teie Chromiumi kasutuskogemust, avage <ph name="BEGIN_LINK" />Google'i teenused<ph name="END_LINK" />.</translation>
 <translation id="2832168932648876507">Chromiumis hääle abil otsimine.</translation>
 <translation id="2843571538056574338">Automaattäite jaoks Chromiumi kasutamine</translation>
-<translation id="2899085719655668655">Pilt pildis videojuhised Chromiumi vaikebrauseriks määramiseks</translation>
 <translation id="2918709798697875261">Teie organisatsioon nõuab, et jääksite Chromiumist väljalogituks.</translation>
 <translation id="2942241131342758843">Kasutage linkide avamiseks, vidinatest otsimiseks ja muudes rakendustes paroolide automaatselt täitmiseks vaikimisi Chromiumi</translation>
 <translation id="2977470724722393594">Chromium on ajakohane</translation>
@@ -137,6 +134,7 @@ Oodake enne konto vahetamist paar minutit. Kui vahetate kohe kontot, siis need a
 <translation id="377649297473651452">Chromiumi automaattäite laiendatud vaade</translation>
 <translation id="3780779443901618967">Hoiatab teid ohtlike saitide eest, isegi nende eest, millest Google varem ei teadnud, analüüsides standardse kaitsega võrreldes rohkem saitidelt pärinevaid andmeid. Soovi korral saate Chromiumi hoiatused vahele jätta.</translation>
 <translation id="3805899903892079518">Chromiumil pole juurdepääsu fotodele ega videotele. Lubage iOS-is juurdepääs valikutega Seaded &gt; Privaatsus &gt; Fotod.</translation>
+<translation id="3809591243528646631">Laste ohutuse funktsioonide rakendamiseks võite kasutada lapse jaoks seadistatud Google'i kontot või kasutada Chromiumi ilma kontota. <ph name="BEGIN_LINK" />Lisateave<ph name="END_LINK" /></translation>
 <translation id="3816686541346279443">Chromium pakub võimalust parool salvestada.</translation>
 <translation id="3827545470516145620">Saate selles seadmes standardse turvakaitse</translation>
 <translation id="3833326979834193417">Chromium käitab iga päev automaatselt ohutuskontrolli, et kaitsta teid andmetega seotud rikkumiste, ebaturvaliste veebisaitide ja muu eest. Ohutuskontrolli kohta leiate lisateavet jaotisest Seaded.</translation>
@@ -172,6 +170,7 @@ Teie andmed on krüpteeritud teie parooliga. Chromiumi andmete kasutamiseks ja s
 Selle seade muutmiseks <ph name="BEGIN_LINK" />kustutage oma kontol Chromiumi andmed<ph name="END_LINK" />.</translation>
 <translation id="4578500311756617174">Chromiumi nõuanne: kasutage Chromiumi vaikimisi</translation>
 <translation id="458786853569524949">Nüüd saate kasutada Chromiumi iga kord, kui puudutate linke meilides, dokumentides ja muudes rakendustes.</translation>
+<translation id="4625730353066900738">Alustamiseks õppige tundma Chromiumi kasulikke põhialuseid.</translation>
 <translation id="4633738821577273991">Hankige ka sellele Chromiumi profiilile täiustatud ohutu sirvimise funktsioon</translation>
 <translation id="4654936625574199632">Rakenduse täiustamiseks saadab Chromium Google'ile kasutus- ja krahhiandmeid. <ph name="BEGIN_LINK" />Haldamine<ph name="END_LINK" /></translation>
 <translation id="4681781466797808448">Lülitage sisse Chromiumi skanner</translation>
@@ -182,7 +181,6 @@ Selle seade muutmiseks <ph name="BEGIN_LINK" />kustutage oma kontol Chromiumi an
 <translation id="4856138222358683580">Chromiumi toimingud</translation>
 <translation id="4869706986935301458">Avage Chromium kohe, kui olete oma iPhone'is</translation>
 <translation id="4904452304169763785">Hoiatab privaatsus- või turvaprobleemidest, mille Chromium teie eest tuvastab.</translation>
-<translation id="4908570938463711775">Alustamiseks õppige tundma Chromiumi kasulikke põhialuseid</translation>
 <translation id="4962295957157529683">Lõpetage teises avatud Chromiumi aknas pooleliolev toiming.</translation>
 <translation id="4985291216379576555">Võrguühenduseta, Chromium ei saa värskendusi otsida</translation>
 <translation id="4996471330284142407">Chromium on nüüd lihtsam, turvalisem ja kiirem kui kunagi varem ning aitab teil veelgi rohkem toiminguid teha.</translation>
@@ -358,6 +356,7 @@ Teie krüpteeritud andmeid saab lugeda ainult isik, kes teab teie parooli. Paroo
 <translation id="8900052431807804054">Hankige Chromiumi parimad turvafunktsioonid</translation>
 <translation id="8908791447256515663">Avage Chromium kiiremini oma iPadi doki kaudu.</translation>
 <translation id="8925569192291721236">Püsige kursis hinnajälgimise värskenduste ja Chromiumi nõuannetega.</translation>
+<translation id="8939412301975414416">Laste ohutuse funktsioonide rakendamiseks Chromiumis võite kasutada lapse jaoks seadistatud Google'i kontot või kasutada Chromiumi ilma kontota.</translation>
 <translation id="8950326149985259075">{THRESHOLD,plural, =1{See juhtub siis, kui Chromiumi ei kasutata {THRESHOLD} minuti jooksul}other{See juhtub siis, kui Chromiumi ei kasutata {THRESHOLD} minuti jooksul}}</translation>
 <translation id="8963279154877372067">Hinnaalanduse märguannete saamiseks lubage Chromiumi märguanded</translation>
 <translation id="8975812008711371178">Chromiumis hääle abil otsimine</translation>

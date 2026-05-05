@@ -26,7 +26,6 @@ import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.NTP_C
 import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.NTP_CUSTOMIZATION_BACKGROUND_TYPE;
 import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.NTP_CUSTOMIZATION_CHROME_COLOR_DAILY_REFRESH_ENABLED;
 import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.NTP_CUSTOMIZATION_LAST_DAILY_REFRESH_TIMESTAMP;
-import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.NTP_CUSTOMIZATION_MAIN_BOTTOM_SHEET_SHOWN;
 import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.NTP_CUSTOMIZATION_PRIMARY_COLOR;
 import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.NTP_CUSTOMIZATION_PRIMARY_COLOR_FOR_DAILY_REFRESH;
 import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.NTP_CUSTOMIZATION_THEME_COLOR_ID;
@@ -66,6 +65,7 @@ import com.google.android.material.color.DynamicColorsOptions;
 
 import org.chromium.base.Callback;
 import org.chromium.base.ContextUtils;
+import org.chromium.base.DeviceInfo;
 import org.chromium.base.IntentUtils;
 import org.chromium.base.Log;
 import org.chromium.base.ResettersForTesting;
@@ -272,6 +272,11 @@ public class NtpCustomizationUtils {
                 && NtpCustomizationPolicyManager.getInstance().isNtpCustomBackgroundEnabled();
     }
 
+    /** Returns whether the NTP simplification is enabled on desktop. */
+    public static boolean isNtpSimplificationEnabledOnDesktop() {
+        return ChromeFeatureList.sNtpSimplification.isEnabled() && DeviceInfo.isDesktop();
+    }
+
     /**
      * Returns the customized primary color if set, null otherwise.
      *
@@ -446,22 +451,6 @@ public class NtpCustomizationUtils {
     static void saveDailyRefreshBackgroundImageFile(@Nullable Bitmap backgroundImageBitmap) {
         File file = createDailyRefreshBackgroundImageFile();
         saveBitmapImageToFile(backgroundImageBitmap, file);
-    }
-
-    /**
-     * Sets whether the NTP customization bottom sheet has shown.
-     *
-     * @param hasShown Whether the bottom sheet has shown.
-     */
-    public static void setNtpCustomizationBottomSheetShownToSharedPreferences(boolean hasShown) {
-        SharedPreferencesManager prefsManager = ChromeSharedPreferences.getInstance();
-        prefsManager.writeBoolean(NTP_CUSTOMIZATION_MAIN_BOTTOM_SHEET_SHOWN, hasShown);
-    }
-
-    /** Gets whether the NTP customization bottom sheet has shown. */
-    public static boolean getNtpCustomizationBottomSheetShownFromSharedPreference() {
-        SharedPreferencesManager prefsManager = ChromeSharedPreferences.getInstance();
-        return prefsManager.readBoolean(NTP_CUSTOMIZATION_MAIN_BOTTOM_SHEET_SHOWN, false);
     }
 
     /**
@@ -1433,19 +1422,13 @@ public class NtpCustomizationUtils {
      *
      * @param resources The resources to get dimens.
      * @param showSearchBoxTall Whether to show a tall search box.
-     * @param hasShadowApplied Whether a shadow is shown on the search box. Drawing shadow requires
-     *     extra paddings on top and bottom of the search box.
      */
-    public static int getSearchBoxHeightWithShadows(
-            Resources resources, boolean showSearchBoxTall, boolean hasShadowApplied) {
+    public static int getSearchBoxHeight(Resources resources, boolean showSearchBoxTall) {
         int searchBoxHeight =
                 showSearchBoxTall
                         ? resources.getDimensionPixelSize(R.dimen.ntp_search_box_height_tall)
                         : resources.getDimensionPixelSize(R.dimen.ntp_search_box_height);
-        if (!hasShadowApplied) return searchBoxHeight;
-
-        int extraPadding = getLogoVerticalPaddingForShadowPx(resources) * 2;
-        return searchBoxHeight + extraPadding;
+        return searchBoxHeight;
     }
 
     /**
@@ -1456,29 +1439,11 @@ public class NtpCustomizationUtils {
      * consistent, regardless of whether the shadow is present.
      *
      * @param resources Android resources.
-     * @param applyShadow Whether to account for the search box's shadow padding.
      * @return The final adjusted bottom margin in pixels.
      */
-    public static int getLogoViewBottomMarginPx(Resources resources, boolean applyShadow) {
+    public static int getLogoViewBottomMarginPx(Resources resources) {
         int bottomMargin = resources.getDimensionPixelSize(R.dimen.ntp_logo_margin_bottom);
-        if (applyShadow) {
-            bottomMargin -= getLogoVerticalPaddingForShadowPx(resources);
-        }
         return bottomMargin;
-    }
-
-    /**
-     * Returns the internal padding required to accommodate the search box shadow.
-     *
-     * <p>This padding provides the necessary space for the shadow to be rendered without being
-     * clipped by the view's boundaries.
-     *
-     * @param resources Android resources.
-     * @return The shadow padding in pixels.
-     */
-    private static int getLogoVerticalPaddingForShadowPx(Resources resources) {
-        return resources.getDimensionPixelSize(
-                R.dimen.composeplate_view_button_padding_for_shadow_bottom);
     }
 
     /**
@@ -1539,7 +1504,6 @@ public class NtpCustomizationUtils {
         prefsManager.removeKey(NTP_BACKGROUND_IMAGE_PORTRAIT_INFO_FOR_DAILY_REFRESH);
         prefsManager.removeKey(NTP_BACKGROUND_IMAGE_LANDSCAPE_INFO_FOR_DAILY_REFRESH);
         prefsManager.removeKey(NTP_CUSTOMIZATION_BACKGROUND_INFO_FOR_DAILY_REFRESH);
-        prefsManager.removeKey(NTP_CUSTOMIZATION_MAIN_BOTTOM_SHEET_SHOWN);
     }
 
     public static void setImageFetcherForTesting(ImageFetcher imageFetcher) {

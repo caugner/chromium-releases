@@ -24,7 +24,7 @@
   padding-inline: var(--text-input-inline-start-spacing) 0;
 }
 
-:host-context([show-model-picker_]:not([has-allowed-inputs_])) #textContainer {
+:host-context([use-pec-api]:not([has-allowed-inputs])) #textContainer {
   padding-inline-start: 10px;
 }
 
@@ -100,7 +100,9 @@
   word-break: break-word;
 }
 
-:host([entrypoint-name='ContextualTasks']) #mirror {
+:host([entrypoint-name='ContextualTasks']) #input,
+:host([entrypoint-name='ContextualTasks']) #mirror,
+:host([entrypoint-name='ContextualTasks']) #smartCompose {
   padding-block: 12px;
   padding-inline-end: var(--text-input-inline-end-spacing);
   padding-inline-start: 0;
@@ -248,17 +250,6 @@
   display: none;
 }
 
-.action-icon {
-  --cr-icon-button-focus-outline-color:
-      var(--color-searchbox-results-icon-focused-outline);
-  --cr-icon-button-hover-background-color:
-      var(--color-searchbox-results-background-hovered);
-  --cr-icon-button-margin-end: 0;
-  --cr-icon-button-size: 36px;
-  position: absolute;
-  right: 16px;
-}
-
 :host-context([dir='rtl']) .action-icon {
   left: 16px;
   right: unset;
@@ -295,22 +286,6 @@
 :host([is-collapsible]:not([submit-enabled])) #cancelIcon {
   opacity: 0;
   pointer-events: none;
-}
-
-/* Controls the opacity of the icons when the composebox is expanded/collapsed. */
-.icon-fade {
-  opacity: 0;
-  transition: var(--icon-exit-transition);
-}
-
-:host-context([expanding_]) .icon-fade {
-  opacity: 1;
-  transition: var(--icon-entry-transition);
-}
-
-:host-context([in-voice-search-mode_]) .icon-fade {
-  opacity: 0;
-  transition: var(--icon-exit-transition);
 }
 
 @media (forced-colors: active) {

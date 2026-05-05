@@ -191,13 +191,11 @@ std::unique_ptr<ImageConstraintsInfo> InitializeImageConstraintsInfo(
 bool FlatlandSysmemBufferCollection::IsNativePixmapConfigSupported(
     viz::SharedImageFormat format,
     gfx::BufferUsage usage) {
-  base::flat_set<viz::SharedImageFormat> kSupportedFormats =
-      base::MakeFlatSet<viz::SharedImageFormat>(std::vector(
-          {viz::SinglePlaneFormat::kR_8, viz::SinglePlaneFormat::kRG_88,
-           viz::SinglePlaneFormat::kRGBA_8888,
-           viz::SinglePlaneFormat::kBGRA_8888,
-           viz::SinglePlaneFormat::kRGBX_8888,
-           viz::SinglePlaneFormat::kBGRX_8888, viz::MultiPlaneFormat::kNV12}));
+  auto kSupportedFormats = base::flat_set<viz::SharedImageFormat>(
+      {viz::SinglePlaneFormat::kR_8, viz::SinglePlaneFormat::kRG_88,
+       viz::SinglePlaneFormat::kRGBA_8888, viz::SinglePlaneFormat::kBGRA_8888,
+       viz::SinglePlaneFormat::kRGBX_8888, viz::SinglePlaneFormat::kBGRX_8888,
+       viz::MultiPlaneFormat::kNV12});
   if (!kSupportedFormats.contains(format)) {
     return false;
   }
@@ -219,13 +217,11 @@ bool FlatlandSysmemBufferCollection::IsNativePixmapConfigSupported(
 bool FlatlandSysmemBufferCollection::IsNativePixmapConfigSupported(
     viz::SharedImageFormat format,
     NativePixmapUsageSet usage) {
-  base::flat_set<viz::SharedImageFormat> kSupportedFormats =
-      base::MakeFlatSet<viz::SharedImageFormat>(std::vector(
-          {viz::SinglePlaneFormat::kR_8, viz::SinglePlaneFormat::kRG_88,
-           viz::SinglePlaneFormat::kRGBA_8888,
-           viz::SinglePlaneFormat::kBGRA_8888,
-           viz::SinglePlaneFormat::kRGBX_8888,
-           viz::SinglePlaneFormat::kBGRX_8888, viz::MultiPlaneFormat::kNV12}));
+  auto kSupportedFormats = base::flat_set<viz::SharedImageFormat>(
+      {viz::SinglePlaneFormat::kR_8, viz::SinglePlaneFormat::kRG_88,
+       viz::SinglePlaneFormat::kRGBA_8888, viz::SinglePlaneFormat::kBGRA_8888,
+       viz::SinglePlaneFormat::kRGBX_8888, viz::SinglePlaneFormat::kBGRX_8888,
+       viz::MultiPlaneFormat::kNV12});
   if (!kSupportedFormats.contains(format)) {
     return false;
   }
@@ -394,6 +390,12 @@ bool FlatlandSysmemBufferCollection::CreateVkImage(
     VkDeviceSize* mem_allocation_size) {
   DCHECK_CALLED_ON_VALID_THREAD(vulkan_thread_checker_);
 
+  if (buffer_index >= num_buffers()) {
+    DLOG(ERROR) << "Invalid buffer_index=" << buffer_index
+                << " (num_buffers=" << num_buffers() << ")";
+    return false;
+  }
+
   if (vk_device_ != vk_device) {
     DLOG(FATAL) << "Tried to import NativePixmap that was created for a "
                    "different VkDevice.";
@@ -430,6 +432,12 @@ bool FlatlandSysmemBufferCollection::CreateVkImage(
 
   uint32_t viable_memory_types =
       properties.memoryTypeBits & requirements.memoryTypeBits;
+  if (viable_memory_types == 0) {
+    DLOG(ERROR) << "No viable memory types found.";
+    vkDestroyImage(vk_device_, *vk_image, nullptr);
+    *vk_image = VK_NULL_HANDLE;
+    return false;
+  }
   uint32_t memory_type = std::countr_zero(viable_memory_types);
 
   VkMemoryDedicatedAllocateInfoKHR dedicated_allocate = {

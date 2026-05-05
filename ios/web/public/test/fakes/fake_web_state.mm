@@ -19,6 +19,7 @@
 #import "ios/web/session/session_certificate_policy_cache_impl.h"
 #import "ios/web/web_state/policy_decision_state_tracker.h"
 #import "ios/web/web_state/ui/crw_content_view.h"
+#import "net/http/http_util.h"
 
 namespace web {
 
@@ -489,6 +490,21 @@ CRWWebViewProxyType FakeWebState::GetWebViewProxy() const {
   return web_view_proxy_;
 }
 
+std::optional<std::string> FakeWebState::GetUserAgentOverride() const {
+  return user_agent_override_;
+}
+
+void FakeWebState::SetUserAgentOverride(
+    std::optional<std::string> ua_override) {
+  if (ua_override && !net::HttpUtil::IsValidHeaderValue(*ua_override)) {
+    return;
+  }
+  if (ua_override && ua_override->empty()) {
+    ua_override = std::nullopt;
+  }
+  user_agent_override_ = std::move(ua_override);
+}
+
 void FakeWebState::AddPolicyDecider(WebStatePolicyDecider* decider) {
   policy_deciders_.AddObserver(decider);
 }
@@ -602,6 +618,14 @@ id<CRWFindInteraction> FakeWebState::GetFindInteraction()
 
 id FakeWebState::GetActivityItem() API_AVAILABLE(ios(16.4)) {
   return nil;
+}
+
+bool FakeWebState::IsCustomOpenPanelSupported() const {
+  return supports_custom_open_panel_;
+}
+
+void FakeWebState::SetCustomOpenPanelSupported(bool supports) {
+  supports_custom_open_panel_ = supports;
 }
 
 UIColor* FakeWebState::GetThemeColor() {

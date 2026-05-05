@@ -90,6 +90,8 @@ class FakeWebState : public WebState {
   const GURL& GetLastCommittedURL() const override;
   std::optional<GURL> GetLastCommittedURLIfTrusted() const override;
   CRWWebViewProxyType GetWebViewProxy() const override;
+  std::optional<std::string> GetUserAgentOverride() const override;
+  void SetUserAgentOverride(std::optional<std::string> ua_override) override;
 
   void AddObserver(WebStateObserver* observer) override;
 
@@ -113,6 +115,8 @@ class FakeWebState : public WebState {
   void SetFindInteractionEnabled(bool enabled) final;
   id<CRWFindInteraction> GetFindInteraction() final API_AVAILABLE(ios(16));
   id GetActivityItem() API_AVAILABLE(ios(16.4)) final;
+  bool IsCustomOpenPanelSupported() const override;
+  void SetCustomOpenPanelSupported(bool supports) override;
   UIColor* GetThemeColor() final;
   UIColor* GetUnderPageBackgroundColor() final;
 
@@ -196,6 +200,7 @@ class FakeWebState : public WebState {
   bool was_stopped_ = false;
   bool has_opener_ = false;
   bool can_take_snapshot_ = false;
+  bool supports_custom_open_panel_ = false;
   bool is_closed_ = false;
   bool is_find_interaction_enabled_ = false;
   base::Time last_active_time_ = base::Time::Now();
@@ -217,6 +222,7 @@ class FakeWebState : public WebState {
   id<CRWFindInteraction> find_interaction_ API_AVAILABLE(ios(16));
   id<CRWWebViewDownload> web_view_download_;
   id<CRWWebViewDownloadDelegate> download_delegate_;
+  std::optional<std::string> user_agent_override_;
 
   // A list of observers notified when page state changes. Weak references.
   WebStateObserverList observers_;

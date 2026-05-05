@@ -85,12 +85,20 @@ COMPONENT_EXPORT(NETWORK_CPP)
 bool IsCorsEnabledRequestMode(mojom::RequestMode mode);
 
 // Checks safelisted request parameters.
+//
+// `is_ad_auction_trusted_signals_request` should only be true for Protected
+// Audiences trusted signals requests, which allow the
+// "message/ad-auction-trusted-signals-request" Content-Type without a
+// preflight. This parameter is slated to be removed when the Protect Audiences
+// code is. It is always assumed to be false  by IsCorsSafelistedContentType().
 COMPONENT_EXPORT(NETWORK_CPP)
 bool IsCorsSafelistedMethod(const std::string& method);
 COMPONENT_EXPORT(NETWORK_CPP)
 bool IsCorsSafelistedContentType(const std::string& name);
 COMPONENT_EXPORT(NETWORK_CPP)
-bool IsCorsSafelistedHeader(const std::string& name, const std::string& value);
+bool IsCorsSafelistedHeader(const std::string& name,
+                            const std::string& value,
+                            bool is_ad_auction_trusted_signals_request = false);
 COMPONENT_EXPORT(NETWORK_CPP)
 bool IsNoCorsSafelistedHeaderName(const std::string& name);
 COMPONENT_EXPORT(NETWORK_CPP)
@@ -115,7 +123,7 @@ std::vector<std::string> PrivilegedNoCorsHeaderNames();
 
 // Checks forbidden method in the fetch spec.
 // See https://fetch.spec.whatwg.org/#forbidden-method.
-COMPONENT_EXPORT(NETWORK_CPP) bool IsForbiddenMethod(const std::string& name);
+COMPONENT_EXPORT(NETWORK_CPP) bool IsForbiddenMethod(std::string_view name);
 
 // Returns true if |type| is a response type which makes a response
 // CORS-same-origin. See https://html.spec.whatwg.org/C/#cors-same-origin.

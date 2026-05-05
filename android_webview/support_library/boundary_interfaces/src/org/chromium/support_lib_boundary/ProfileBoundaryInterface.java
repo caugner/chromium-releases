@@ -50,11 +50,32 @@ public interface ProfileBoundaryInterface {
             Executor callbackExecutor,
             /* PrefetchOperationCallback */ InvocationHandler callback);
 
+    void setMaxPrerenders(int maxPrerenders);
+
+    // Kept for compatibility. `int` version is going to be used moving forward.
     void setMaxPrerenders(@Nullable Integer maxPrerenders);
 
+    void clearMaxPrerenders();
+
+    // Kept for compatibility. `int` version is going to be used moving forward.
     void setMaxPrefetches(@Nullable Integer maxPrefetches);
 
+    // Kept for compatibility. `int` version is going to be used moving forward.
     void setPrefetchTtlSeconds(@Nullable Integer prefetchTtlSeconds);
+
+    void setMaxPrefetches(int maxPrefetches);
+
+    void setPrefetchTtlSeconds(int prefetchTtlSeconds);
+
+    void clearMaxPrefetches();
+
+    void clearPrefetchTtl();
+
+    int getMaxPrerenders();
+
+    int getMaxPrefetches();
+
+    int getPrefetchTtlSeconds();
 
     void setSpeculativeLoadingConfig(/* SpeculativeLoadingConfig */ InvocationHandler config);
 

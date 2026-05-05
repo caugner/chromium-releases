@@ -16,6 +16,7 @@
 #include "base/functional/callback_helpers.h"
 #include "base/logging.h"
 #include "base/memory/raw_ptr.h"
+#include "base/memory/weak_auto_reset.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/notimplemented.h"
 #include "base/strings/strcat.h"
@@ -579,8 +580,15 @@ RenderFrameHostImpl* RenderWidgetHostViewAura::GetFocusedFrame() const {
 void RenderWidgetHostViewAura::HandleBoundsInRootChanged() {
 #if BUILDFLAG(IS_WIN)
   if (legacy_render_widget_host_HWND_) {
+    // `SetBounds()` calls ::SetWindowPos which can spin a nested message loop
+    // on Windows, potentially destroying `this`.
+    base::WeakPtr<RenderWidgetHostViewAura> weak_this(
+        weak_ptr_factory_.GetWeakPtr());
     legacy_render_widget_host_HWND_->SetBounds(
         window_->GetBoundsInRootWindow());
+    if (!weak_this) {
+      return;
+    }
   }
 #endif
   if (!in_shutdown_) {
@@ -671,28 +679,25 @@ void RenderWidgetHostViewAura::EnsurePlatformVisibility(
 }
 
 void RenderWidgetHostViewAura::NotifyHostAndDelegateOnWasShown(
-    blink::mojom::RecordContentToVisibleTimeRequestPtr tab_switch_start_state) {
+    std::optional<blink::RecordContentToVisibleTimeRequest>
+        tab_switch_start_state) {
   CHECK(delegated_frame_host_) << "Cannot be invoked during destruction.";
   CHECK(host_->IsHidden());
   CHECK_NE(visibility_, Visibility::VISIBLE);
 
   visibility_ = Visibility::VISIBLE;
 
-  bool has_saved_frame = delegated_frame_host_->HasSavedFrame();
-
-  bool show_reason_bfcache_restore =
-      tab_switch_start_state
-          ? tab_switch_start_state->show_reason_bfcache_restore
-          : false;
-
-  // No need to check for saved frames for the case of bfcache restore.
-  if (show_reason_bfcache_restore) {
-    host()->WasShown(tab_switch_start_state.Clone());
-  } else {
-    host()->WasShown(has_saved_frame
-                         ? blink::mojom::RecordContentToVisibleTimeRequestPtr()
-                         : tab_switch_start_state.Clone());
+  // If the frame for the renderer is already available, then the tab-switching
+  // time is the presentation time for the browser-compositor.
+  std::optional<blink::RecordContentToVisibleTimeRequest>
+      delegated_visible_time_request;
+  if (tab_switch_start_state && delegated_frame_host_->HasSavedFrame()) {
+    delegated_visible_time_request =
+        tab_switch_start_state->ExtractTabSwitchEvents();
   }
+
+  host()->WasShown(std::move(tab_switch_start_state));
+
   aura::Window* root = window_->GetRootWindow();
   if (root) {
     aura::client::CursorClient* cursor_client =
@@ -702,15 +707,13 @@ void RenderWidgetHostViewAura::NotifyHostAndDelegateOnWasShown(
     }
   }
 
-  // If the frame for the renderer is already available, then the
-  // tab-switching time is the presentation time for the browser-compositor.
-  delegated_frame_host_->WasShown(
-      GetLocalSurfaceId(), window_->bounds().size(),
-      has_saved_frame ? std::move(tab_switch_start_state)
-                      : blink::mojom::RecordContentToVisibleTimeRequestPtr());
+  delegated_frame_host_->WasShown(GetLocalSurfaceId(), window_->bounds().size(),
+                                  std::move(delegated_visible_time_request));
 
 #if BUILDFLAG(IS_WIN)
   UpdateLegacyWin();
+  // WARNING: Do not add any code after this line, since the last call can
+  // potentially destroy `this`.
 #endif
 }
 
@@ -742,7 +745,13 @@ void RenderWidgetHostViewAura::HideImpl() {
       if (host && legacy_render_widget_host_HWND_) {
         // We reparent the legacy Chrome_RenderWidgetHostHWND window to the
         // global hidden window on the same lines as Windowed plugin windows.
+        // This can spin a nested event loop that could potentially delete this.
+        base::WeakPtr<RenderWidgetHostViewAura> weak_this(
+            weak_ptr_factory_.GetWeakPtr());
         legacy_render_widget_host_HWND_->UpdateParent(ui::GetHiddenWindow());
+        if (!weak_this) {
+          return;
+        }
       }
 #endif
   }
@@ -760,25 +769,24 @@ void RenderWidgetHostViewAura::WasOccluded() {
 
 void RenderWidgetHostViewAura::
     RequestSuccessfulPresentationTimeFromHostOrDelegate(
-        blink::mojom::RecordContentToVisibleTimeRequestPtr
-            visible_time_request) {
+        blink::RecordContentToVisibleTimeRequest visible_time_request) {
   CHECK(delegated_frame_host_) << "Cannot be invoked during destruction.";
   CHECK(!host_->IsHidden());
   CHECK_EQ(visibility_, Visibility::VISIBLE);
-  CHECK(visible_time_request);
 
-  bool has_saved_frame = delegated_frame_host_->HasSavedFrame();
-
-  // No need to check for saved frames for the case of bfcache restore.
-  if (visible_time_request->show_reason_bfcache_restore || !has_saved_frame) {
-    host()->RequestSuccessfulPresentationTimeForNextFrame(
-        visible_time_request.Clone());
+  // If the frame for the renderer is already available, then the tab-switching
+  // time is the presentation time for the browser-compositor.
+  if (delegated_frame_host_->HasSavedFrame()) {
+    if (std::optional<blink::RecordContentToVisibleTimeRequest>
+            delegated_visible_time_request =
+                visible_time_request.ExtractTabSwitchEvents()) {
+      delegated_frame_host_->RequestSuccessfulPresentationTimeForNextFrame(
+          std::move(*delegated_visible_time_request));
+    }
   }
 
-  // If the frame for the renderer is already available, then the
-  // tab-switching time is the presentation time for the browser-compositor.
-  if (has_saved_frame) {
-    delegated_frame_host_->RequestSuccessfulPresentationTimeForNextFrame(
+  if (!visible_time_request.events.empty()) {
+    host()->RequestSuccessfulPresentationTimeForNextFrame(
         std::move(visible_time_request));
   }
 }
@@ -1027,8 +1035,15 @@ void RenderWidgetHostViewAura::ShowWithVisibility(
   }
 
   window_->Show();
+
+  base::WeakPtr<RenderWidgetHostViewAura> weak_this(
+      weak_ptr_factory_.GetWeakPtr());
+
   ShowImpl(page_visibility);
 #if BUILDFLAG(IS_WIN)
+  if (!weak_this) {
+    return;
+  }
   if (page_visibility != PageVisibilityState::kVisible &&
       legacy_render_widget_host_HWND_) {
     legacy_render_widget_host_HWND_->Hide();
@@ -1341,9 +1356,18 @@ void RenderWidgetHostViewAura::ProcessAckedTouchEvent(
   for (size_t i = 0; i < touch.event.touches_length; ++i) {
     if (touch.event.touches[i].state == required_state) {
       CHECK(!sent_ack);
+      // ProcessedTouchEvent() triggers synchronous gesture dispatch, which can
+      // lead to focus or window activation changes. Observers of these changes
+      // may synchronously destroy the WebContents and this view. We must guard
+      // this call with a WeakPtr liveness check before dereferencing 'this'
+      // (e.g., via host() or delegate calls below).
+      auto weak_this = weak_ptr_factory_.GetWeakPtr();
       window_host->dispatcher()->ProcessedTouchEvent(
           touch.event.unique_touch_event_id, window_, result,
           input::InputEventResultStateIsSetBlocking(ack_result));
+      if (!weak_this) {
+        return;
+      }
       if (touch.event.touch_start_or_first_touch_move &&
           result == ui::ER_HANDLED && host()->delegate() &&
           host()->delegate()->GetInputEventRouter()) {
@@ -2245,7 +2269,13 @@ std::optional<gfx::Size> RenderWidgetHostViewAura::GetMaximumSize() const {
 
 void RenderWidgetHostViewAura::OnBoundsChanged(const gfx::Rect& old_bounds,
                                                const gfx::Rect& new_bounds) {
-  base::AutoReset<bool> in_bounds_changed(&in_bounds_changed_, true);
+  // OnCaretBoundsChanged() below may call out to a third-party TSF IME on
+  // Windows, which can re-entrantly destroy `this`. Use WeakAutoReset so the
+  // unwind write does not land in freed memory (AutoReset::scoped_variable_ is
+  // RAW_PTR_EXCLUSION and not BRP-protected).
+  base::WeakAutoReset in_bounds_changed(
+      weak_ptr_factory_.GetWeakPtr(),
+      &RenderWidgetHostViewAura::in_bounds_changed_, true);
   // We care about this whenever RenderWidgetHostViewAura is not owned by a
   // WebContentsViewAura since changes to the Window's bounds need to be
   // messaged to the renderer.  WebContentsViewAura invokes SetSize() or
@@ -2254,7 +2284,12 @@ void RenderWidgetHostViewAura::OnBoundsChanged(const gfx::Rect& old_bounds,
   SetSize(new_bounds.size());
 
   if (GetInputMethod()) {
+    auto weak_this = weak_ptr_factory_.GetWeakPtr();
     GetInputMethod()->OnCaretBoundsChanged(this);
+    // `this` may have been deleted inside the IME callout.
+    if (!weak_this) {
+      return;
+    }
     UpdateInsetsWithVirtualKeyboardEnabled();
   }
 }
@@ -3085,7 +3120,14 @@ void RenderWidgetHostViewAura::InternalSetBounds(const gfx::Rect& rect) {
                               window_->GetLocalSurfaceId());
 
 #if BUILDFLAG(IS_WIN)
+  // `UpdateLegacyWin()` can spin a nested message loop on Windows, potentially
+  // destroying `this`.
+  base::WeakPtr<RenderWidgetHostViewAura> weak_this(
+      weak_ptr_factory_.GetWeakPtr());
   UpdateLegacyWin();
+  if (!weak_this) {
+    return;
+  }
 
   if (IsPointerLocked()) {
     UpdateMouseLockRegion();
@@ -3115,9 +3157,19 @@ void RenderWidgetHostViewAura::UpdateLegacyWin() {
   }
 
   if (legacy_render_widget_host_HWND_) {
+    // Both UpdateParent and SetBounds can spin a nested message loop on
+    // Windows, potentially destroying `this`.
+    base::WeakPtr<RenderWidgetHostViewAura> weak_this(
+        weak_ptr_factory_.GetWeakPtr());
     legacy_render_widget_host_HWND_->UpdateParent(GetHostWindowHWND());
+    if (!weak_this) {
+      return;
+    }
     legacy_render_widget_host_HWND_->SetBounds(
         window_->GetBoundsInRootWindow());
+    if (!weak_this) {
+      return;
+    }
     // There are cases where the parent window is created, made visible and
     // the associated RenderWidget is also visible before the
     // LegacyRenderWidgetHostHWND instace is created. Ensure that it is shown
@@ -3148,7 +3200,14 @@ void RenderWidgetHostViewAura::AddedToRootWindow() {
   }
 
 #if BUILDFLAG(IS_WIN)
+  // `UpdateLegacyWin()` can spin a nested message loop on Windows, potentially
+  // destroying `this`.
+  base::WeakPtr<RenderWidgetHostViewAura> weak_this(
+      weak_ptr_factory_.GetWeakPtr());
   UpdateLegacyWin();
+  if (!weak_this) {
+    return;
+  }
 #endif
 
   delegated_frame_host_->AttachToCompositor(GetCompositor());
@@ -3168,10 +3227,12 @@ void RenderWidgetHostViewAura::RemovingFromRootWindow() {
   delegated_frame_host_->DetachFromCompositor();
 
 #if BUILDFLAG(IS_WIN)
-    // Update the legacy window's parent temporarily to the hidden window. It
-    // will eventually get reparented to the right root.
-    if (legacy_render_widget_host_HWND_)
-      legacy_render_widget_host_HWND_->UpdateParent(ui::GetHiddenWindow());
+  // Update the legacy window's parent temporarily to the hidden window. It
+  // will eventually get reparented to the right root. This can spin a nested
+  // event loop that can delete `this`, so do it last.
+  if (legacy_render_widget_host_HWND_) {
+    legacy_render_widget_host_HWND_->UpdateParent(ui::GetHiddenWindow());
+  }
 #endif
 }
 

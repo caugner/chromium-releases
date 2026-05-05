@@ -12,6 +12,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
+#include "base/scoped_observation.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/bind.h"
@@ -87,6 +88,21 @@ void FocusNextView(views::FocusManager* focus_manager) {
       focus_manager->GetNextFocusableView(focused_view, nullptr, false, false);
   focus_manager->SetFocusedView(next_view);
 }
+
+class TestLocationBarObserver : public LocationBar::Observer {
+ public:
+  explicit TestLocationBarObserver(base::OnceClosure on_bounds_changed)
+      : on_bounds_changed_(std::move(on_bounds_changed)) {}
+
+  void OnLocationBarBoundsChanged() override {
+    ASSERT_FALSE(on_bounds_changed_.is_null());
+    std::move(on_bounds_changed_).Run();
+  }
+
+ private:
+  base::OnceClosure on_bounds_changed_;
+};
+
 }  // namespace
 
 class LocationBarViewBrowserTest : public InProcessBrowserTest {
@@ -256,7 +272,7 @@ IN_PROC_BROWSER_TEST_F(LocationBarViewBrowserTest, ScriptBlockedIcon) {
 
   // Get the script blocked icon on the omnibox. It should be hidden.
   ContentSettingImageView& script_blocked_icon = GetContentSettingImageView(
-      ContentSettingImageModel::ImageType::JAVASCRIPT);
+      ContentSettingImageModel::ImageType::kJavaScript);
   EXPECT_FALSE(script_blocked_icon.GetVisible());
 
   // Disable javascript.
@@ -270,6 +286,19 @@ IN_PROC_BROWSER_TEST_F(LocationBarViewBrowserTest, ScriptBlockedIcon) {
   ASSERT_TRUE(base::test::RunUntil([&]() {
     return script_blocked_icon.GetVisible();
   })) << "Timeout waiting for the script blocked icon to become visible.";
+}
+
+IN_PROC_BROWSER_TEST_F(LocationBarViewBrowserTest, BoundsObserver) {
+  // Make sure that bounds change observer gets notified.
+  base::RunLoop run_loop;
+  TestLocationBarObserver bounds_observer(run_loop.QuitClosure());
+  base::ScopedObservation<LocationBar, LocationBar::Observer> obs(
+      &bounds_observer);
+  obs.Observe(GetLocationBarView());
+  auto* browser_view = BrowserView::GetBrowserViewForBrowser(browser());
+  browser_view->SetSize(
+      gfx::Size(browser_view->width() - 100, browser_view->height()));
+  run_loop.Run();
 }
 
 class TouchLocationBarViewBrowserTest : public LocationBarViewBrowserTest {
@@ -439,7 +468,7 @@ IN_PROC_BROWSER_TEST_F(LocationBarViewGeolocationBackForwardCacheBrowserTest,
 
   // Get the geolocation icon on the omnibox.
   ContentSettingImageView& geolocation_icon = GetContentSettingImageView(
-      ContentSettingImageModel::ImageType::GEOLOCATION);
+      ContentSettingImageModel::ImageType::kGeolocation);
 
   // Geolocation icon should be off in the beginning.
   EXPECT_FALSE(geolocation_icon.GetVisible());
@@ -666,7 +695,7 @@ class LocationBarViewAddContextButtonBrowserTest
         {{omnibox::internal::kWebUIOmniboxAimPopup,
           {{omnibox::kWebUIOmniboxAimPopupAddContextButtonVariantParam.name,
             "inline"}}},
-         {omnibox::kWebUIOmniboxPopup, {}},
+         {omnibox::internal::kWebUIOmniboxPopup, {}},
          {omnibox::kAimEnabled, {}}},
         /*disabled_features=*/{omnibox::kAimServerEligibilityEnabled,
                                omnibox::kAimFuseboxEligibilityCheckEnabled,

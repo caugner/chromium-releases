@@ -13,7 +13,6 @@
 #include "base/lazy_instance.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_functions.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/no_destructor.h"
 #include "base/notreached.h"
 #include "base/task/single_thread_task_runner.h"
@@ -51,7 +50,7 @@ void LogClassificationRetryWithinTimeout(bool success) {
       "SBClientPhishing.Classifier.ReadyAfterRetryTimeout", success);
 }
 
-std::string GetRequestTypeName(
+std::string_view GetRequestTypeName(
     safe_browsing::mojom::ClientSideDetectionType client_side_detection_type) {
   switch (client_side_detection_type) {
     case safe_browsing::mojom::ClientSideDetectionType::kForceRequest:
@@ -131,9 +130,9 @@ void PhishingClassifierDelegate::StartPhishingDetection(
   if (!callback_.is_null()) {
     std::move(callback_).Run(mojom::PhishingDetectorResult::CANCELLED,
                              std::nullopt);
-    CancelPendingClassification(
-        CancelClassificationReason::kNewRequestFromBrowser);
   }
+  CancelPendingClassification(
+      CancelClassificationReason::kNewRequestFromBrowser);
   is_phishing_detection_running_ = true;
   awaiting_retry_ = false;
   last_url_received_from_browser_ = StripRef(url);
@@ -276,8 +275,8 @@ void PhishingClassifierDelegate::CancelPendingClassification(
                                   reason);
     if (request_type_.has_value()) {
       base::UmaHistogramEnumeration(
-          "SBClientPhishing.CancelClassificationReason." +
-              GetRequestTypeName(request_type_.value()),
+          base::StrCat({"SBClientPhishing.CancelClassificationReason.",
+                        GetRequestTypeName(request_type_.value())}),
           reason);
     }
   }
@@ -292,6 +291,7 @@ void PhishingClassifierDelegate::ClassificationDone(
     const ClientPhishingRequest& verdict,
     PhishingClassifier::Result phishing_classifier_result) {
   RecordEvent(SBPhishingClassifierEvent::kClassificationComplete);
+  is_classifying_ = false;
   is_phishing_detection_running_ = false;
   if (callback_.is_null()) {
     RecordEvent(
@@ -351,7 +351,12 @@ void PhishingClassifierDelegate::MaybeStartClassification() {
   // Note that if we determine that this particular navigation should not be
   // classified at all (as opposed to deferring it until we get an IPC or
   // the load completes), we discard the page text since it won't be needed.
+
+  // We shouldn't hit this ever, but for sanity check, we should return when
+  // this hits.
   if (is_classifying_) {
+    RecordEvent(SBPhishingClassifierEvent::
+                    kOngoingClassificationAtAnotherClassificationRequest);
     return;
   }
 
@@ -408,8 +413,9 @@ void PhishingClassifierDelegate::MaybeStartClassification() {
         match_on_stripped_empty_path);
     if (request_type_.has_value()) {
       base::UmaHistogramBoolean(
-          "SBClientPhishing.PhishingClassifierMatchOnStrippedEmptyPath." +
-              GetRequestTypeName(request_type_.value()),
+          base::StrCat(
+              {"SBClientPhishing.PhishingClassifierMatchOnStrippedEmptyPath.",
+               GetRequestTypeName(request_type_.value())}),
           match_on_stripped_empty_path);
     }
     RecordEvent(SBPhishingClassifierEvent::kUrlShouldNotBeClassified);
@@ -452,9 +458,10 @@ void PhishingClassifierDelegate::OnRetryTimeout() {
 void PhishingClassifierDelegate::RecordEvent(SBPhishingClassifierEvent event) {
   base::UmaHistogramEnumeration("SBClientPhishing.Classifier.Event", event);
   if (request_type_.has_value()) {
-    base::UmaHistogramEnumeration("SBClientPhishing.Classifier.Event." +
-                                      GetRequestTypeName(request_type_.value()),
-                                  event);
+    base::UmaHistogramEnumeration(
+        base::StrCat({"SBClientPhishing.Classifier.Event.",
+                      GetRequestTypeName(request_type_.value())}),
+        event);
   }
 }
 

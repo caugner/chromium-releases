@@ -209,7 +209,9 @@ NSString* const kDefaultBrowserInstructionsViewDarkAnimationViewId =
 - (void)configureAnimationColors {
   // Custom dynamic colors for kDefaultBrowserAnimationIpad.
   if ([[self animationAssetName]
-          isEqualToString:kDefaultBrowserAnimationIpad]) {
+          isEqualToString:kDefaultBrowserAnimationIpad] ||
+      [[self animationAssetName]
+          isEqualToString:kDefaultBrowserAnimationRtlIpad]) {
     // Configure shape layers.
     ConfigureAnimationSemanticColor(self.animationViewWrapper, kSeparatorColor,
                                     kSeparatorColor);
@@ -225,9 +227,6 @@ NSString* const kDefaultBrowserInstructionsViewDarkAnimationViewId =
     ConfigureAnimationSemanticColor(self.animationViewWrapper,
                                     kGroupedSecondaryBackgroundColor,
                                     kGroupedSecondaryBackgroundColor);
-    ConfigureAnimationSemanticColor(self.animationViewWrapper,
-                                    kSecondaryBackgroundColor,
-                                    kSecondaryBackgroundColor);
     // Configure text layers.
     ConfigureAnimationSemanticColor(self.animationViewWrapper, kChromeKeypath,
                                     kTextPrimaryColor);

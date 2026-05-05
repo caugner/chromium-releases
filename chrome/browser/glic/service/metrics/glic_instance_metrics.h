@@ -18,6 +18,8 @@
 #include "chrome/browser/glic/service/metrics/glic_metrics_session_manager.h"
 #include "chrome/browser/glic/service/metrics/metrics_types.h"
 
+class PrefService;
+
 namespace content {
 class WebContents;
 }
@@ -109,7 +111,9 @@ enum class GlicInstanceEvent {
   kTurnCompleted = 45,
   kReaction = 46,
   kShown = 47,
-  kMaxValue = kShown,
+  kOpen = 48,
+  kWebUiStateWarmed = 49,
+  kMaxValue = kWebUiStateWarmed,
 };
 // LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:GlicInstanceEvent)
 
@@ -144,7 +148,8 @@ class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
   };
 
   GlicInstanceMetrics();
-  explicit GlicInstanceMetrics(GlicSharingManager* sharing_manager);
+  explicit GlicInstanceMetrics(GlicSharingManager* sharing_manager,
+                               PrefService* pref_service = nullptr);
   ~GlicInstanceMetrics() override;
 
   GlicInstanceMetrics(const GlicInstanceMetrics&) = delete;
@@ -160,6 +165,9 @@ class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
   void OnReaction(mojom::MetricUserInputReactionType reaction_type) override;
   void OnGlicScrollAttempt() override;
   void OnGlicScrollComplete(bool success) override;
+
+  // Called when the opt-in CTA is shown.
+  void OnOptinImpression();
 
   // Called when GlicInstanceImpl is destroyed.
   void OnInstanceDestroyed();
@@ -271,15 +279,27 @@ class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
   void OnUserResizeStarted(const gfx::Size& start_size);
   void OnUserResizeEnded(const gfx::Size& end_size);
 
+  void OnSelectionAreasChanged(int count);
+
+  void OnZoomLevelChange();
+
   // Records the number of tabs attached as context for a Glic response.
   void RecordAttachedContextTabCount(int tab_count);
 
   void RecordTabPinningStatusEvent(tabs::TabInterface* tab,
                                    GlicPinningStatusEvent event);
 
+  enum class PendingImpression {
+    kOptIn = 0,
+  };
+
   // Routes skills WebUI actions from the frontend to their respective
   // metrics funnels.
   void RecordSkillsWebClientEvent(mojom::SkillsWebClientEvent action);
+
+  // Called when the web client sends a browser actuation result over the
+  // network.
+  void OnActionSubmitted(bool is_retry);
 
   int GetPinnedTabCount() const;
 
@@ -289,8 +309,9 @@ class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
 
   GlicMetricsSessionManager& session_manager() { return session_manager_; }
 
-  std::optional<GlicEntrypoint> initial_entrypoint_for_testing() const {
-    return initial_entrypoint_;
+  std::optional<mojom::InvocationSource> initial_invocation_source_for_testing()
+      const {
+    return initial_invocation_source_;
   }
 
  private:
@@ -300,7 +321,11 @@ class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
   // Stores info scoped to the current turn. These members are cleared in
   // OnResponseStopped.
   struct TurnInfo {
+    TurnInfo();
+    ~TurnInfo();
+
     base::TimeTicks input_submitted_time_;
+    base::TimeTicks action_result_submitted_time_;
     // Set to true in OnResponseStarted() and set to false in
     // OnResponseStopped(). This is a workaround copied from GlicMetrics and
     // should be removed, see crbug.com/399151164.
@@ -354,7 +379,8 @@ class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
   // The last invocation source that was used to show the panel.
   mojom::InvocationSource last_invocation_source_ =
       mojom::InvocationSource::kUnsupported;
-  std::optional<GlicEntrypoint> initial_entrypoint_ = std::nullopt;
+  std::optional<mojom::InvocationSource> initial_invocation_source_ =
+      std::nullopt;
   // Timestamp of last show start.
   base::TimeTicks invocation_start_time_;
   base::TimeTicks web_ui_load_start_time_;
@@ -375,9 +401,15 @@ class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
 
   std::map<tabs::TabHandle, int> tab_depths_;
 
+  bool is_client_ready_ = false;
+  bool is_opt_in_pending_ = false;
+
+  void MaybeRecordOptInImpression();
+
   base::CallbackListSubscription pinned_tabs_changed_subscription_;
   base::CallbackListSubscription tab_pinning_status_subscription_;
   raw_ptr<GlicSharingManager> sharing_manager_ = nullptr;
+  raw_ptr<PrefService> pref_service_ = nullptr;
 
   bool first_side_panel_close_recorded_ = false;
 
@@ -386,6 +418,13 @@ class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
   // The number of scroll attempts (tracked per session and reset when the
   // session ends).
   int scroll_attempt_count_ = 0;
+
+  // Whether region selection is active.
+  int selection_areas_count_ = 0;
+
+  // The number of zoom change attempts (tracked per instance and reset when
+  // the instance is destroyed).
+  int zoom_change_count_ = 0;
 };
 
 }  // namespace glic

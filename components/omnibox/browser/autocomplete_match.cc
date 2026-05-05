@@ -232,13 +232,6 @@ bool AutocompleteMatch::DocumentTypeFromInteger(int value,
 }
 
 // static
-const char16_t AutocompleteMatch::kInvalidChars[] = {
-    '\n',   '\r', '\t',
-    0x2028,  // Line separator
-    0x2029,  // Paragraph separator
-    0};
-
-// static
 const char16_t AutocompleteMatch::kEllipsis[] = u"... ";
 
 AutocompleteMatch::AutocompleteMatch()
@@ -735,17 +728,19 @@ bool AutocompleteMatch::BetterDuplicate(const AutocompleteMatch& match1,
     }
   }
 
-  // Prefer the Entity Match over the non-entity match, if they have the same
-  // |fill_into_edit| value.
-  if (match1.type == AutocompleteMatchType::SEARCH_SUGGEST_ENTITY &&
-      match2.type != AutocompleteMatchType::SEARCH_SUGGEST_ENTITY &&
-      match1.fill_into_edit == match2.fill_into_edit) {
-    return true;
-  }
-  if (match1.type != AutocompleteMatchType::SEARCH_SUGGEST_ENTITY &&
-      match2.type == AutocompleteMatchType::SEARCH_SUGGEST_ENTITY &&
-      match1.fill_into_edit == match2.fill_into_edit) {
-    return false;
+  // Prefer entity and answer matches over non-entity & non-answer matches, if
+  // they have the same `fill_into_edit` value.
+  if (match1.fill_into_edit == match2.fill_into_edit) {
+    bool rich1 = match1.type == AutocompleteMatchType::SEARCH_SUGGEST_ENTITY ||
+                 match1.answer_type;
+    bool rich2 = match2.type == AutocompleteMatchType::SEARCH_SUGGEST_ENTITY ||
+                 match2.answer_type;
+    if (rich1 && !rich2) {
+      return true;
+    }
+    if (rich2 && !rich1) {
+      return false;
+    }
   }
 
   // Prefer open tab matches over other types of matches.
@@ -867,12 +862,7 @@ void AutocompleteMatch::AddLastClassificationIfNecessary(
 
 // static
 std::u16string AutocompleteMatch::SanitizeString(const std::u16string& text) {
-  // NOTE: This logic is mirrored by |sanitizeString()| in
-  // omnibox_custom_bindings.js.
-  std::u16string result;
-  base::TrimWhitespace(text, base::TRIM_LEADING, &result);
-  base::RemoveChars(result, kInvalidChars, &result);
-  return result;
+  return AutocompleteInput::SanitizeString(text);
 }
 
 // static
@@ -1753,7 +1743,8 @@ bool AutocompleteMatch::IsContextualSearchSuggestion() const {
 }
 
 bool AutocompleteMatch::IsThreadsHistorySuggestion() const {
-  return subtypes.contains(886 /*SUBTYPE_AI_MODE_MORE_THREADS_ENTRYPOINT*/);
+  return subtypes.contains(
+      omnibox::SuggestSubtype::SUBTYPE_AI_MODE_MORE_THREADS_ENTRYPOINT);
 }
 
 bool AutocompleteMatch::IsToolbelt() const {

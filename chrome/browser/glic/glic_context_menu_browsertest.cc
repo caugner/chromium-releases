@@ -29,10 +29,6 @@ class GlicContextMenuBrowserTestBase : public GlicBrowserTest {
     menu->Init();
     return menu;
   }
-
-  GURL GetSimpleTestUrl() {
-    return embedded_test_server()->GetURL("/glic/test_data.html");
-  }
 };
 
 class GlicContextMenuBrowserTest : public GlicContextMenuBrowserTestBase {
@@ -40,10 +36,6 @@ class GlicContextMenuBrowserTest : public GlicContextMenuBrowserTestBase {
   GlicContextMenuBrowserTest() {
     feature_list_.InitWithFeatures(
         {features::kGlic, features::kGlicContextMenu}, {});
-  }
-
-  GURL GetSimpleTestUrl() {
-    return embedded_test_server()->GetURL("/glic/test_data.html");
   }
 
  private:

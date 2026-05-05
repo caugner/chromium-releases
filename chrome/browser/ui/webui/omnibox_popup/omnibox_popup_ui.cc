@@ -17,6 +17,7 @@
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
 #include "chrome/browser/ui/webui/metrics_reporter/metrics_reporter_service.h"
 #include "chrome/browser/ui/webui/omnibox_popup/omnibox_popup_aim_handler.h"
@@ -48,8 +49,6 @@ std::string_view AddContextButtonVariantToSearchboxLayoutMode(
   switch (variant) {
     case AddContextButtonVariant::kBelowResults:
       return "TallBottomContext";
-    case AddContextButtonVariant::kAboveResults:
-      return "TallTopContext";
     case AddContextButtonVariant::kInline:
       return "Compact";
   }
@@ -63,7 +62,8 @@ bool OmniboxPopupUIConfig::IsWebUIEnabled(
     content::BrowserContext* browser_context) {
   return omnibox::IsAimPopupFeatureEnabled() ||
          base::FeatureList::IsEnabled(omnibox::kWebUIOmniboxFullPopup) ||
-         base::FeatureList::IsEnabled(omnibox::kWebUIOmniboxPopup);
+         omnibox::IsWebUIOmniboxPopupEnabled() ||
+         features::IsWebUILocationBarEnabled();
 }
 
 bool OmniboxPopupUIConfig::ShouldCrashOnJavascriptErrorInDevelopmentBuild()
@@ -85,10 +85,10 @@ OmniboxPopupUI::OmniboxPopupUI(content::WebUI* web_ui)
         session_handle->CheckSearchContentSharingSettings(profile_->GetPrefs());
   }
 
-  SearchboxHandler::SetupWebUIDataSource(source, Profile::FromWebUI(web_ui),
-                                         /*enable_voice_search=*/true,
-                                         /*enable_lens_search=*/false,
-                                         session_allows_drag_and_drop);
+  source->AddLocalizedStrings(SearchboxHandler::GetWebUIDataSourceDict(
+      Profile::FromWebUI(web_ui),
+      {.enable_voice_search = true,
+       .session_allows_drag_and_drop = session_allows_drag_and_drop}));
 
   source->AddBoolean("isTopChromeSearchbox", true);
   source->AddBoolean("omniboxAimPopupEnabled",
@@ -129,10 +129,8 @@ OmniboxPopupUI::OmniboxPopupUI(content::WebUI* web_ui)
   source->AddBoolean(
       "caretAnimationEnabled",
       base::FeatureList::IsEnabled(omnibox::kOmniboxAnimatedCaret));
-  source->AddBoolean("composeboxCloseByEscape", true);
   source->AddBoolean("composeboxContextMenuEnableMultiTabSelection",
                      omnibox::kContextMenuEnableMultiTabSelection.Get());
-  source->AddBoolean("composeboxNoFlickerSuggestionsFix", false);
   source->AddBoolean("composeboxShowContextMenu",
                      omnibox::kShowContextMenu.Get());
   source->AddBoolean(
@@ -155,7 +153,6 @@ OmniboxPopupUI::OmniboxPopupUI(content::WebUI* web_ui)
                      omnibox::kAddTabUploadDelayOnRecentTabChipClick.Get());
   source->AddBoolean("composeboxShowRecentTabChip",
                      omnibox::kShowRecentTabChip.Get());
-  source->AddBoolean("composeboxShowTypedSuggestWithContext", false);
   source->AddBoolean("composeboxShowTypedSuggest",
                      omnibox::kShowComposeboxTypedSuggest.Get());
   source->AddBoolean("composeboxShowZps", omnibox::kShowComposeboxZps.Get());
@@ -163,6 +160,8 @@ OmniboxPopupUI::OmniboxPopupUI(content::WebUI* web_ui)
                      omnibox::kShowSmartCompose.Get());
   source->AddBoolean("hideClassicContextButton",
                      omnibox::kHideClassicContextButton.Get());
+  source->AddBoolean("composeboxForkEnabled",
+                     omnibox::kUseComposeboxFork.Get());
   auto searchbox_layout_mode = AddContextButtonVariantToSearchboxLayoutMode(
       omnibox::kWebUIOmniboxAimPopupAddContextButtonVariantParam.Get());
   source->AddString("searchboxLayoutMode", searchbox_layout_mode);
@@ -171,14 +170,15 @@ OmniboxPopupUI::OmniboxPopupUI(content::WebUI* web_ui)
       contextual_search::ContextualSearchMetricsRecorder::
           ContextualSearchSourceToString(
               contextual_search::ContextualSearchSource::kOmnibox));
-  source->AddBoolean("autoSubmitVoiceSearchQuery",
-                     omnibox::kAutoSubmitVoiceSearchQuery.Get());
   source->AddBoolean("caretColorAnimationDisabled",
                      base::FeatureList::IsEnabled(
                          omnibox::kWebUIOmniboxDisableCaretColorAnimation));
   source->AddBoolean("composeboxAnimationDisabled",
                      base::FeatureList::IsEnabled(
                          omnibox::kWebUIOmniboxAimPopupDisableAnimation));
+  source->AddBoolean(
+      "energyEffectEnabled",
+      base::FeatureList::IsEnabled(omnibox::kEnergyEffectInOmnibox));
 
   webui::SetupWebUIDataSource(
       source, kOmniboxPopupResources,
@@ -200,6 +200,16 @@ WEB_UI_CONTROLLER_TYPE_IMPL(OmniboxPopupUI)
 
 void OmniboxPopupUI::BindInterface(
     content::RenderFrameHost* host,
+    mojo::PendingReceiver<searchbox::mojom::PageHandlerFactory>
+        pending_page_handler) {
+  if (searchbox_page_factory_receiver_.is_bound()) {
+    searchbox_page_factory_receiver_.reset();
+  }
+  searchbox_page_factory_receiver_.Bind(std::move(pending_page_handler));
+}
+
+void OmniboxPopupUI::CreatePageHandler(
+    mojo::PendingRemote<searchbox::mojom::Page> page,
     mojo::PendingReceiver<searchbox::mojom::PageHandler> pending_page_handler) {
   auto* omnibox_controller =
       OmniboxPopupWebContentsHelper::GetOrCreateForWebContents(
@@ -210,7 +220,7 @@ void OmniboxPopupUI::BindInterface(
   MetricsReporterService* metrics_reporter_service =
       MetricsReporterService::GetFromWebContents(web_ui()->GetWebContents());
   omnibox_handler_ = std::make_unique<WebuiOmniboxHandler>(
-      std::move(pending_page_handler),
+      std::move(pending_page_handler), std::move(page),
       metrics_reporter_service->metrics_reporter(), omnibox_controller,
       web_ui(),
       base::BindRepeating(&OmniboxPopupUI::GetOrCreateContextualSessionHandle,
@@ -264,15 +274,12 @@ void OmniboxPopupUI::CreatePageHandler(
 
   composebox_handler_ = std::make_unique<OmniboxComposeboxHandler>(
       std::move(pending_page_handler), std::move(pending_page),
-      std::move(pending_searchbox_handler), profile_,
-      web_ui()->GetWebContents(),
+      std::move(pending_searchbox_handler), std::move(pending_searchbox_page),
+      profile_, web_ui()->GetWebContents(),
       base::BindRepeating(&OmniboxPopupUI::GetOrCreateContextualSessionHandle,
                           base::Unretained(this)),
       base::BindRepeating(&OmniboxPopupUI::ClearContextualSessionHandle,
                           base::Unretained(this)));
-
-  // TODO(crbug.com/435288212): Move searchbox mojom to use factory pattern.
-  composebox_handler_->SetPage(std::move(pending_searchbox_page));
 }
 
 contextual_search::ContextualSearchSessionHandle*

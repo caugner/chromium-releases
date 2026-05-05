@@ -64,6 +64,7 @@
 <translation id="2213327331203157297">Chrome에서 잠금 모드를 사용 중지하려면 iPhone에서 사용 중지하세요</translation>
 <translation id="2242467532204595597">이제 언제든 메시지, 문서, 기타 앱에서 링크를 탭하여 Chrome을 사용하세요.</translation>
 <translation id="2256384876478573507">iPhone에서 탐색할 준비가 되면 Chrome을 더 빠르게 여세요.</translation>
+<translation id="2270691132923135296">시작하는 데 도움이 되는 Chrome 기본사항 알아보기</translation>
 <translation id="2311240109311056604">Chrome 공룡 게임을 엽니다.</translation>
 <translation id="2339201583852607431">비밀번호가 Google 계정(<ph name="EMAIL" />)에 저장됩니다.</translation>
 <translation id="2342919707875585281">Chrome은 사용자가 허용한 사이트와 위치 정보를 공유합니다.</translation>
@@ -81,9 +82,6 @@
 <translation id="2703746758996815929">유용한 Chrome 도움말을 확인하려면 iOS 설정에서 알림을 사용 설정하세요</translation>
 <translation id="2728851697704606655">Google 렌즈로 번역</translation>
 <translation id="2736805085127235148">현재 기기 설정에서 Chrome 알림이 사용 중지되어 있습니다.</translation>
-<translation id="2754428955276778271">Chrome 데이터 중 일부가 아직 Google 계정에 저장되지 않았습니다.
-
-잠시 기다렸다가 로그아웃하세요. 지금 로그아웃하면 이 데이터가 삭제됩니다.</translation>
 <translation id="2767464022270041271">저장된 비밀번호가 없습니다. 비밀번호를 저장하면 Google 비밀번호 관리자에서 확인할 수 있습니다.</translation>
 <translation id="2788811701191021538">Chrome에서 결제 수단 설정 페이지를 엽니다.</translation>
 <translation id="2876628302275096482"><ph name="BEGIN_LINK" />Chrome에서 데이터를 비공개로 유지하는 방법<ph name="END_LINK" /> 자세히 알아보기</translation>
@@ -153,7 +151,6 @@
 <translation id="4693084815234024320">Chrome 시크릿 모드 사용 중</translation>
 <translation id="4708857722625759026">iPad의 도크에서 Chrome에 더 빠르게 액세스하세요.</translation>
 <translation id="4713740144985377441">Chrome으로 돌아가 파일을 업로드합니다.</translation>
-<translation id="4713907610796204963">시작하는 데 도움이 되는 Chrome 기본사항 알아보기</translation>
 <translation id="4724297637870447613">어디서나 Chrome 사용</translation>
 <translation id="4738647308035481133">Chrome 페이지</translation>
 <translation id="4742795653798179840">Chrome 데이터 삭제됨</translation>
@@ -188,6 +185,7 @@
 <translation id="5395376160638294582">Google 계정의 Chrome 데이터를 언제든지 사용할 수 있도록 설정하세요.</translation>
 <translation id="5404252374083197467">Chrome을 기본 브라우저로 설정하시겠습니까?</translation>
 <translation id="5439191312780166229">표준 보호 모드보다 더 많은 사이트에서 데이터를 분석하여 위험한 사이트에 관해 경고합니다. Google이 이전에 몰랐던 사이트도 여기에 포함됩니다. Chrome 경고를 건너뛸 수 있습니다.</translation>
+<translation id="5453077102022695084">Chrome을 기본 브라우저로 설정하는 방법을 보여주는 전체 화면 동영상</translation>
 <translation id="5460571915754665838">4. Chrome을 선택합니다.</translation>
 <translation id="5492504007368565877">Google 비밀번호 관리자에서 내 비밀번호를 확인할 수 없습니다.</translation>
 <translation id="5525095647255982834">이 탭을 다른 기기로 보내려면 해당 기기에서 Chrome에 로그인하세요.</translation>
@@ -298,6 +296,7 @@ Chrome 환경을 개선하는 데 데이터를 사용하는 설정을 더 보려
 <translation id="7599894504325210080">Chrome 자동 완성 펼쳐 보기</translation>
 <translation id="7617512710641355143">Chrome이 관리됨</translation>
 <translation id="7626032353295482388">Chrome에 오신 것을 환영합니다</translation>
+<translation id="7634397654061173327">Chrome에서 아동 보호 기능을 사용하려면 아동용으로 설정된 Google 계정을 사용하거나 계정 없이 Chrome을 사용하면 됩니다</translation>
 <translation id="7641448682796883218">Chrome 도움말: 향상된 세이프 브라우징</translation>
 <translation id="7642373780953416937">Chrome에서 자동으로 감지한 개인 정보 보호 또는 보안 문제에 대한 알림을 받습니다.</translation>
 <translation id="7660356333829433649">이곳으로 다시 돌아와 Chrome을 최대한 활용하는 데 도움이 되는 유용한 팁을 확인하세요.</translation>
@@ -330,6 +329,7 @@ Chrome 환경을 개선하는 데 데이터를 사용하는 설정을 더 보려
 <translation id="8245080522851805544">Chrome 종료 시 기기 인증을 통해 인터넷 사용 기록을 비공개로 유지하세요</translation>
 <translation id="8248887045858762645">Chrome 도움말</translation>
 <translation id="8265730590513812063">Chrome 메뉴 열기</translation>
+<translation id="8284376267694582021">아동 보호 기능을 사용하려면 아동용으로 설정된 Google 계정을 사용하거나 계정 없이 Chrome을 사용하면 됩니다. <ph name="BEGIN_LINK" />자세히 알아보기<ph name="END_LINK" /></translation>
 <translation id="8317674518145175158">결제 수단 및 주소는 암호화되지 않습니다. Chrome 방문 기록은 동기화되지 않습니다.
 
 암호를 아는 사람만 암호화된 내 데이터를 읽을 수 있습니다. 암호는 Google로 전송되거나 Google에 저장되지 않습니다. 암호가 기억나지 않거나 이 설정을 변경하려면 <ph name="BEGIN_LINK" />계정에서 Chrome 데이터를 삭제<ph name="END_LINK" />하세요.</translation>
@@ -374,7 +374,6 @@ Chrome 환경을 개선하는 데 데이터를 사용하는 설정을 더 보려
 <translation id="9176561303811134420">Chrome에서 결제 수단 관리</translation>
 <translation id="9181628561061032322">Chrome 최근 탭을 엽니다.</translation>
 <translation id="924447568950697217">Chrome을 기본 브라우저로 지정</translation>
-<translation id="93622496651329736">Chrome을 기본 브라우저로 설정하는 방법을 보여주는 PIP 동영상 안내</translation>
 <translation id="948597495737267756">Chrome 방문 기록 페이지를 엽니다.</translation>
 <translation id="954347330803595209">Chrome에서 비밀번호, 방문 기록, 북마크, 신용카드를 사용하려면 데이터를 가져오세요</translation>
 <translation id="97300214378190234">언제든지 다른 앱에서 링크를 탭하여 Chrome을 사용하세요.</translation>

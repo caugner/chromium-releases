@@ -339,7 +339,6 @@ public class SearchActivity extends AsyncInitializationActivity
                         /*omniboxUma*/ (url, transition, isNtp) -> {},
                         /* bookmarkState= */ (url) -> false,
                         VoiceToolbarButtonController::isToolbarMicEnabled,
-                        /* merchantTrustSignalsCoordinatorSupplier= */ null,
                         new OmniboxActionDelegateImpl(
                                 this,
                                 () -> mSearchBoxDataProvider.getTab(),
@@ -389,7 +388,6 @@ public class SearchActivity extends AsyncInitializationActivity
                         /* isToolbarPositionCustomizationEnabled= */ false,
                         /* pageZoomManager= */ null,
                         TabFavicon::getBitmap,
-                        /* multiInstanceManager= */ null,
                         mSnackbarManager,
                         findViewById(R.id.bottom_container),
                         /* omniboxChipManager= */ null);
@@ -668,6 +666,10 @@ public class SearchActivity extends AsyncInitializationActivity
         }
         mSearchBoxDataProvider.destroy();
         mHandler.removeCallbacksAndMessages(null);
+        if (mSnackbarManager != null) {
+            mSnackbarManager.destroy();
+            mSnackbarManager = null;
+        }
         super.onDestroy();
     }
 

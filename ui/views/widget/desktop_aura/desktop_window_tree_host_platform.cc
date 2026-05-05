@@ -446,9 +446,17 @@ void DesktopWindowTreeHostPlatform::Show(ui::mojom::WindowShowState show_state,
 
   platform_window()->Show(DetermineInactivity(show_state));
 
+  auto weak_ptr = weak_factory_.GetWeakPtr();
+  if (!weak_ptr) {
+    return;
+  }
+
   switch (show_state) {
     case ui::mojom::WindowShowState::kMaximized:
       platform_window()->Maximize();
+      if (!weak_ptr) {
+        return;
+      }
       if (!restore_bounds.IsEmpty()) {
         // Enforce |restored_bounds_in_pixels_| since calling Maximize() could
         // have reset it.
@@ -463,6 +471,10 @@ void DesktopWindowTreeHostPlatform::Show(ui::mojom::WindowShowState show_state,
       break;
     default:
       break;
+  }
+
+  if (!weak_ptr) {
+    return;
   }
 
   if (WidgetActivationDelegate::Get()) {
@@ -644,7 +656,11 @@ bool DesktopWindowTreeHostPlatform::IsActive() const {
 }
 
 void DesktopWindowTreeHostPlatform::Maximize() {
+  auto weak_ptr = weak_factory_.GetWeakPtr();
   platform_window()->Maximize();
+  if (!weak_ptr) {
+    return;
+  }
   if (IsMinimized()) {
     Show(ui::mojom::WindowShowState::kNormal, gfx::Rect());
   }
@@ -656,7 +672,11 @@ void DesktopWindowTreeHostPlatform::Minimize() {
 }
 
 void DesktopWindowTreeHostPlatform::Restore() {
+  auto weak_ptr = weak_factory_.GetWeakPtr();
   platform_window()->Restore();
+  if (!weak_ptr) {
+    return;
+  }
   Show(ui::mojom::WindowShowState::kNormal, gfx::Rect());
 }
 
@@ -733,6 +753,11 @@ Widget::MoveLoopResult DesktopWindowTreeHostPlatform::RunMoveLoop(
     const gfx::Vector2d& drag_offset,
     Widget::MoveLoopSource source,
     Widget::MoveLoopEscapeBehavior escape_behavior) {
+  // The window-move loop runs a kNestableTasksAllowed RunLoop that pumps Mojo
+  // IPC; suppress renderer-initiated data drags for its duration so a
+  // compromised renderer in another window cannot hijack the user's gesture.
+  auto suppress_data_drag =
+      DesktopDragDropClientOzone::ScopedSuppressForWindowMove();
   auto* move_loop_handler = ui::GetWmMoveLoopHandler(*platform_window());
   if (move_loop_handler && move_loop_handler->RunMoveLoop(drag_offset)) {
     return Widget::MoveLoopResult::kSuccessful;

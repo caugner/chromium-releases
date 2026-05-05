@@ -17,6 +17,7 @@
 #include "base/feature_list.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/metrics/user_metrics.h"
 #include "base/strings/strcat.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/single_thread_task_runner.h"
@@ -28,7 +29,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
-#include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/browser/ui/contextual_search/searchbox_context_data.h"
 #include "chrome/browser/ui/omnibox/omnibox_controller.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
@@ -56,8 +56,10 @@
 #include "components/omnibox/browser/aim_eligibility_service_features.h"
 #include "components/omnibox/browser/searchbox.mojom.h"
 #include "components/omnibox/common/omnibox_features.h"
+#include "components/omnibox/common/omnibox_metrics_utils.h"
 #include "components/omnibox/composebox/composebox_query.mojom.h"
 #include "components/strings/grit/components_strings.h"
+#include "components/vector_icons/vector_icons.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
 #include "third_party/omnibox_proto/input_type.pb.h"
@@ -66,6 +68,7 @@
 #include "third_party/omnibox_proto/section_config.pb.h"
 #include "third_party/omnibox_proto/tool_config.pb.h"
 #include "third_party/omnibox_proto/tool_mode.pb.h"
+#include "ui/base/interaction/element_identifier.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/image_model.h"
 #include "ui/base/models/menu_model.h"
@@ -100,6 +103,15 @@ bool IsThinkingModel(omnibox::ModelMode model) {
 }
 
 }  // namespace
+
+DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(OmniboxContextMenuController,
+                                      kDeepResearchIdForTesting);
+DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(OmniboxContextMenuController,
+                                      kFirstTabMenuItemIdForTesting);
+DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(OmniboxContextMenuController,
+                                      kImageUploadMenuItemIdForTesting);
+DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(OmniboxContextMenuController,
+                                      kFileUploadMenuItemIdForTesting);
 
 OmniboxContextMenuController::OmniboxContextMenuController(
     OmniboxPopupFileSelector* file_selector,
@@ -212,6 +224,7 @@ void OmniboxContextMenuController::AddRecentTabItems() {
   }
   std::vector<OmniboxContextMenuController::TabInfo> tabs = GetRecentTabs();
 
+  const size_t first_tab_index = menu_model_->GetItemCount();
   for (const auto& tab : tabs) {
     AddItemWithIcon(next_command_id_, tab.title,
                     favicon::GetDefaultFaviconModel());
@@ -219,6 +232,10 @@ void OmniboxContextMenuController::AddRecentTabItems() {
     input_type_for_command_id_[next_command_id_] =
         omnibox::InputType::INPUT_TYPE_BROWSER_TAB;
     next_command_id_ += 1;
+  }
+  if (!tabs.empty()) {
+    menu_model_->SetElementIdentifierAt(first_tab_index,
+                                        kFirstTabMenuItemIdForTesting);
   }
   // Remove header if no tabs to show.
   if (tabs.empty()) {
@@ -244,6 +261,13 @@ void OmniboxContextMenuController::AddContextualInputItems() {
       auto& menu_item_info = input_type_info_[input_type];
       AddItemWithIcon(next_command_id_, menu_item_info.menu_label,
                       menu_item_info.menu_icon);
+      if (input_type == omnibox::InputType::INPUT_TYPE_LENS_IMAGE) {
+        menu_model_->SetElementIdentifierAt(menu_model_->GetItemCount() - 1,
+                                            kImageUploadMenuItemIdForTesting);
+      } else if (input_type == omnibox::InputType::INPUT_TYPE_LENS_FILE) {
+        menu_model_->SetElementIdentifierAt(menu_model_->GetItemCount() - 1,
+                                            kFileUploadMenuItemIdForTesting);
+      }
       input_type_for_command_id_[next_command_id_] = input_type;
       next_command_id_++;
     }
@@ -292,6 +316,10 @@ void OmniboxContextMenuController::AddToolItems() {
       auto& menu_item_info = tool_info_[tool];
       AddItemWithIcon(next_command_id_, menu_item_info.menu_label,
                       menu_item_info.menu_icon);
+      if (tool == omnibox::ToolMode::TOOL_MODE_DEEP_SEARCH) {
+        menu_model_->SetElementIdentifierAt(menu_model_->GetItemCount() - 1,
+                                            kDeepResearchIdForTesting);
+      }
       tool_for_command_id_[next_command_id_] = tool;
       next_command_id_++;
     }
@@ -303,6 +331,8 @@ void OmniboxContextMenuController::AddToolItems() {
 
     AddItemWithStringIdAndIcon(IDC_OMNIBOX_CONTEXT_DEEP_RESEARCH,
                                IDS_NTP_COMPOSE_DEEP_SEARCH, deep_search_icon);
+    menu_model_->SetElementIdentifierAt(menu_model_->GetItemCount() - 1,
+                                        kDeepResearchIdForTesting);
   }
 }
 
@@ -535,20 +565,22 @@ int OmniboxContextMenuController::GetMaxTabSuggestions() const {
   return omnibox::kContextMenuMaxTabSuggestions.Get();
 }
 
-OmniboxContextMenuController::ContextType
-OmniboxContextMenuController::CommandIdToEnum(int command_id) const {
+omnibox::ContextType OmniboxContextMenuController::CommandIdToEnum(
+    int command_id) const {
   if (base::FeatureList::IsEnabled(omnibox::kAimUsePecApi)) {
     if (auto it = input_type_for_command_id_.find(command_id);
         it != input_type_for_command_id_.end()) {
       switch (it->second) {
         case omnibox::InputType::INPUT_TYPE_BROWSER_TAB:
-          return OmniboxContextMenuController::ContextType::kTab;
+          return omnibox::ContextType::kTab;
         case omnibox::InputType::INPUT_TYPE_LENS_IMAGE:
-          return OmniboxContextMenuController::ContextType::kImage;
+          return omnibox::ContextType::kImage;
         case omnibox::InputType::INPUT_TYPE_LENS_FILE:
-          return OmniboxContextMenuController::ContextType::kFile;
+          return omnibox::ContextType::kFile;
+        case omnibox::InputType::INPUT_TYPE_DRIVE:
+          return omnibox::ContextType::kDrive;
         default:
-          return OmniboxContextMenuController::ContextType::kUnknown;
+          return omnibox::ContextType::kUnknown;
       }
     }
 
@@ -556,13 +588,13 @@ OmniboxContextMenuController::CommandIdToEnum(int command_id) const {
         it != tool_for_command_id_.end()) {
       switch (it->second) {
         case omnibox::ToolMode::TOOL_MODE_IMAGE_GEN:
-          return OmniboxContextMenuController::ContextType::kImageGen;
+          return omnibox::ContextType::kImageGen;
         case omnibox::ToolMode::TOOL_MODE_DEEP_SEARCH:
-          return OmniboxContextMenuController::ContextType::kDeepResearch;
+          return omnibox::ContextType::kDeepResearch;
         case omnibox::ToolMode::TOOL_MODE_CANVAS:
-          return OmniboxContextMenuController::ContextType::kCanvas;
+          return omnibox::ContextType::kCanvas;
         default:
-          return OmniboxContextMenuController::ContextType::kUnknown;
+          return omnibox::ContextType::kUnknown;
       }
     }
 
@@ -570,38 +602,54 @@ OmniboxContextMenuController::CommandIdToEnum(int command_id) const {
         it != model_for_command_id_.end()) {
       switch (it->second) {
         case omnibox::ModelMode::MODEL_MODE_GEMINI_PRO_AUTOROUTE:
-          return OmniboxContextMenuController::ContextType::kAutoModel;
+          return omnibox::ContextType::kAutoModel;
         case omnibox::ModelMode::MODEL_MODE_GEMINI_REGULAR:
-          return OmniboxContextMenuController::ContextType::kRegularModel;
+          return omnibox::ContextType::kRegularModel;
         case omnibox::ModelMode::MODEL_MODE_GEMINI_PRO:
-          return OmniboxContextMenuController::ContextType::kThinkingModel;
+          return omnibox::ContextType::kThinkingModel;
         case omnibox::ModelMode::MODEL_MODE_GEMINI_PRO_NO_GEN_UI:
-          return OmniboxContextMenuController::ContextType::kProNoGenUiModel;
+          return omnibox::ContextType::kProNoGenUiModel;
         default:
-          return OmniboxContextMenuController::ContextType::kUnknown;
+          return omnibox::ContextType::kUnknown;
       }
     }
   }
 
   switch (command_id) {
     case IDC_OMNIBOX_CONTEXT_ADD_IMAGE:
-      return OmniboxContextMenuController::ContextType::kImage;
+      return omnibox::ContextType::kImage;
     case IDC_OMNIBOX_CONTEXT_ADD_FILE:
-      return OmniboxContextMenuController::ContextType::kFile;
+      return omnibox::ContextType::kFile;
     case IDC_OMNIBOX_CONTEXT_CREATE_IMAGES:
-      return OmniboxContextMenuController::ContextType::kImageGen;
+      return omnibox::ContextType::kImageGen;
     case IDC_OMNIBOX_CONTEXT_DEEP_RESEARCH:
-      return OmniboxContextMenuController::ContextType::kDeepResearch;
+      return omnibox::ContextType::kDeepResearch;
     case IDC_OMNIBOX_CONTEXT_CANVAS:
-      return OmniboxContextMenuController::ContextType::kCanvas;
+      return omnibox::ContextType::kCanvas;
     default:
       // There is no command id for tabs due to there being multiple
       // tabs that would have the same command id.
       CHECK_GE(command_id, kMinOmniboxContextMenuRecentTabsCommandId);
       CHECK_LT(command_id, kMinOmniboxContextMenuRecentTabsCommandId +
                                GetMaxTabSuggestions());
-      return OmniboxContextMenuController::ContextType::kTab;
+      return omnibox::ContextType::kTab;
   }
+}
+
+void OmniboxContextMenuController::RecordContextMenuItemSelection(
+    const std::string& prefix,
+    omnibox::ContextType context_type) {
+  base::UmaHistogramEnumeration(prefix, context_type);
+  std::string action_name =
+      base::StrCat({prefix, ".", omnibox::GetContextTypeString(context_type)});
+
+  base::RecordAction(base::UserMetricsAction(action_name.c_str()));
+}
+
+void OmniboxContextMenuController::RecordContextMenuItemSelection(
+    const std::string& prefix,
+    int command_id) {
+  RecordContextMenuItemSelection(prefix, CommandIdToEnum(command_id));
 }
 
 const omnibox::InputTypeConfig*
@@ -637,6 +685,8 @@ std::u16string OmniboxContextMenuController::GetMenuLabelForInputType(
       return l10n_util::GetStringUTF16(IDS_NTP_COMPOSE_ADD_IMAGE);
     case omnibox::InputType::INPUT_TYPE_LENS_FILE:
       return l10n_util::GetStringUTF16(IDS_NTP_COMPOSE_ADD_FILE);
+    case omnibox::InputType::INPUT_TYPE_DRIVE:
+      return l10n_util::GetStringUTF16(IDS_NTP_COMPOSE_ADD_DRIVE);
     default:
       return u"";
   }
@@ -653,6 +703,16 @@ ui::ImageModel OmniboxContextMenuController::GetIconForInputType(
       return ui::ImageModel::FromVectorIcon(
           kAttachFileIcon, ui::kColorMenuIcon,
           ui::SimpleMenuModel::kDefaultIconSize);
+    // The Google Drive icon is only available in Google Chrome branded builds.
+    // This guard is necessary to prevent compilation errors in Chromium.
+    case omnibox::InputType::INPUT_TYPE_DRIVE:
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+      return ui::ImageModel::FromVectorIcon(
+          vector_icons::kGoogleDriveIcon, ui::kColorMenuIcon,
+          ui::SimpleMenuModel::kDefaultIconSize);
+#else
+      return ui::ImageModel();
+#endif
     default:
       return ui::ImageModel();
   }
@@ -823,7 +883,7 @@ void OmniboxContextMenuController::ExecuteCommand(int id, int event_flags) {
       const auto& tab_info = tabs[tab_index_in_menu];
       AddTabContext(tab_info);
     }
-    base::UmaHistogramEnumeration(sliced_prefix, CommandIdToEnum(id));
+    RecordContextMenuItemSelection(sliced_prefix, id);
   } else {
     auto omnibox_popup_ui = GetOmniboxPopupUI();
     auto* composebox_handler =
@@ -852,6 +912,12 @@ void OmniboxContextMenuController::ExecuteCommand(int id, int event_flags) {
     if (use_input_state_model) {
       if (auto it = input_type_for_command_id_.find(id);
           it != input_type_for_command_id_.end()) {
+        if (it->second == omnibox::InputType::INPUT_TYPE_DRIVE) {
+          // TODO: Invoke DriveHandler.<open_drive_picker>() here.
+          // Note: The first step in that method should be to check the
+          // disclaimer using go/fpop footprints.
+          return;
+        }
         file_selector_->OpenFileUploadDialog(
             web_contents_.get(),
             /*is_image=*/it->second ==
@@ -863,11 +929,12 @@ void OmniboxContextMenuController::ExecuteCommand(int id, int event_flags) {
 
       if (auto it = tool_for_command_id_.find(id);
           it != tool_for_command_id_.end()) {
-        UpdateSearchboxContext(
-            /*tab_info=*/std::nullopt,
-            /*tool_mode=*/it->second);
-        base::UmaHistogramEnumeration(sliced_prefix,
-                                      CommandIdToEnum(it->first));
+        if (composebox_handler) {
+          composebox_handler->SetActiveToolMode(it->second);
+          composebox_handler->RecordToolSelectionAction(it->second);
+        }
+
+        RecordContextMenuItemSelection(sliced_prefix, id);
         GetEditModel()->OpenAiMode(/*via_keyboard=*/false,
                                    /*via_context_menu=*/true);
         return;
@@ -877,13 +944,14 @@ void OmniboxContextMenuController::ExecuteCommand(int id, int event_flags) {
           it != model_for_command_id_.end()) {
         if (composebox_handler) {
           composebox_handler->SetActiveModelMode(it->second);
+          composebox_handler->RecordModelSelectionAction(it->second);
         }
         if (is_aim_popup_open && omnibox_popup_ui &&
             omnibox_popup_ui->popup_aim_handler()) {
           omnibox_popup_ui->popup_aim_handler()->FocusInput();
         }
-        base::UmaHistogramEnumeration(sliced_prefix,
-                                      CommandIdToEnum(it->first));
+
+        RecordContextMenuItemSelection(sliced_prefix, id);
         GetEditModel()->OpenAiMode(/*via_keyboard=*/false,
                                    /*via_context_menu=*/true);
         return;
@@ -907,26 +975,35 @@ void OmniboxContextMenuController::ExecuteCommand(int id, int event_flags) {
             /*was_ai_mode_open=*/is_aim_popup_open);
         break;
       case IDC_OMNIBOX_CONTEXT_CREATE_IMAGES:
-        UpdateSearchboxContext(
-            /*tab_info=*/std::nullopt,
-            /*tool_mode=*/omnibox::TOOL_MODE_IMAGE_GEN);
-        base::UmaHistogramEnumeration(sliced_prefix, CommandIdToEnum(id));
+        if (composebox_handler) {
+          composebox_handler->SetActiveToolMode(
+              omnibox::ToolMode::TOOL_MODE_IMAGE_GEN);
+          composebox_handler->RecordToolSelectionAction(
+              omnibox::ToolMode::TOOL_MODE_IMAGE_GEN);
+        }
+        RecordContextMenuItemSelection(sliced_prefix, id);
         GetEditModel()->OpenAiMode(/*via_keyboard=*/false,
                                    /*via_context_menu=*/true);
         break;
       case IDC_OMNIBOX_CONTEXT_DEEP_RESEARCH:
-        UpdateSearchboxContext(
-            /*tab_info=*/std::nullopt,
-            /*tool_mode=*/omnibox::TOOL_MODE_DEEP_SEARCH);
-        base::UmaHistogramEnumeration(sliced_prefix, CommandIdToEnum(id));
+        if (composebox_handler) {
+          composebox_handler->SetActiveToolMode(
+              omnibox::ToolMode::TOOL_MODE_DEEP_SEARCH);
+          composebox_handler->RecordToolSelectionAction(
+              omnibox::ToolMode::TOOL_MODE_DEEP_SEARCH);
+        }
+        RecordContextMenuItemSelection(sliced_prefix, id);
         GetEditModel()->OpenAiMode(/*via_keyboard=*/false,
                                    /*via_context_menu=*/true);
         break;
       case IDC_OMNIBOX_CONTEXT_CANVAS:
-        UpdateSearchboxContext(
-            /*tab_info=*/std::nullopt,
-            /*tool_mode=*/omnibox::TOOL_MODE_CANVAS);
-        base::UmaHistogramEnumeration(sliced_prefix, CommandIdToEnum(id));
+        if (composebox_handler) {
+          composebox_handler->SetActiveToolMode(
+              omnibox::ToolMode::TOOL_MODE_CANVAS);
+          composebox_handler->RecordToolSelectionAction(
+              omnibox::ToolMode::TOOL_MODE_CANVAS);
+        }
+        RecordContextMenuItemSelection(sliced_prefix, id);
         GetEditModel()->OpenAiMode(/*via_keyboard=*/false,
                                    /*via_context_menu=*/true);
         break;

@@ -613,8 +613,9 @@ class ActorClickToolPDFBrowserTest
 };
 
 // Ensure clicks can rotate on a PDF.
-// TODO(crbug.com/485814156): Re-enable the test.
-#if BUILDFLAG(IS_LINUX)
+// TODO(crbug.com/485814156): Re-enable the test on Linux.
+// TODO(crbug.com/500937645): Re-enable the test on Windows.
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
 #define MAYBE_Click DISABLED_Click
 #else
 #define MAYBE_Click Click
@@ -648,7 +649,9 @@ IN_PROC_BROWSER_TEST_P(ActorClickToolPDFBrowserTest, MAYBE_Click) {
     } else {
       // Sometimes it might be allowed, but it will fail eventually. Keep
       // looping until we fail.
-      const auto& result = *(future.Get<0>());
+      const auto& action_results = future.Get();
+      ASSERT_EQ(action_results.size(), 1u);
+      const auto& result = *action_results[0].result;
       if (result.code ==
           mojom::ActionResultCode::kFrameLocationChangedSinceObservation) {
         break;

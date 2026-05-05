@@ -144,6 +144,7 @@ class OnDeviceModelComponentTest : public testing::Test {
   FakeModelBroker broker_{{
       .performance_class = OnDeviceModelPerformanceClass::kUnknown,
       .preinstall_base_model = false,
+      .include_classifier = false,
   }};
   base::HistogramTester histograms_;
 };
@@ -406,6 +407,26 @@ TEST_F(OnDeviceModelComponentTest, UninstallNeeded) {
   DoStartup();
 
   ASSERT_FALSE(WaitForUnexpectedInstallerRegistered());
+}
+
+TEST_F(OnDeviceModelComponentTest, BackgroundDownloadPreventsRetentionUninstall) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(features::kOnDeviceModelBackgroundDownload);
+
+  // This pref records that the model was eligible for download previously,
+  // and hasn't been cleaned up yet.
+  broker_.local_state().SetTime(kLastTimeEligibleForOnDeviceModelDownload,
+                                base::Time::Now() - base::Minutes(1) -
+                                    features::GetOnDeviceModelRetentionTime());
+  broker_.local_state().ClearPref(kLastUsageByFeature);
+
+  // Should NOT uninstall because background download is enabled.
+  DoStartup();
+  EnsurePerformanceClassAvailable();
+
+  task_environment_.RunUntilIdle();
+  EXPECT_FALSE(broker_.component_state().uninstall_called());
+  EXPECT_TRUE(broker_.component_state().installer_registered());
 }
 
 TEST_F(OnDeviceModelComponentTest, UninstallNeededDueToDiskSpace) {

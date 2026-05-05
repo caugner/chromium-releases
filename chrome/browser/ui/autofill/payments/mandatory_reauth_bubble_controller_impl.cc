@@ -22,6 +22,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/tabs/public/tab_features.h"
 #include "chrome/browser/ui/views/page_action/page_action_controller.h"
 #include "components/tabs/public/tab_interface.h"
@@ -187,6 +188,13 @@ void MandatoryReauthBubbleControllerImpl::OnBubbleClosed(
   view_android_.reset();
 #endif
 
+  // On macOS without biometrics, the accept/cancel callbacks have the potential
+  // to destroy WebContents in a nested runloop due to OS implementations. A
+  // weak pointer must be kept to then later be checked.
+  // TODO(crbug.com/517126769): Make callbacks below asynchronous so that a weak
+  // pointer isn't needed.
+  auto weak_this = weak_ptr_factory_.GetWeakPtr();
+
   if (current_bubble_type_ == MandatoryReauthBubbleType::kOptIn) {
     if (!bubble_hide_initiated_by_bubble_manager_) {
       LogBubbleCloseOptInMetrics(closed_reason);
@@ -223,6 +231,12 @@ void MandatoryReauthBubbleControllerImpl::OnBubbleClosed(
     }
   } else {
     current_bubble_type_ = MandatoryReauthBubbleType::kInactive;
+  }
+
+  if (!weak_this) {
+    // `this` was freed inside the callback (e.g. WebContents destroyed during
+    // a nested run loop on macOS). Do not touch members.
+    return;
   }
 
   UpdatePageActionIcon();
@@ -272,9 +286,11 @@ void MandatoryReauthBubbleControllerImpl::DoShowBubble() {
   }
   SetBubbleView(*view_android_.get());
 #else
-  Browser* browser = chrome::FindBrowserWithTab(web_contents());
+  BrowserWindowInterface* browser = chrome::FindBrowserWithTab(web_contents());
   AutofillBubbleHandler* autofill_bubble_handler =
-      browser->window()->GetAutofillBubbleHandler();
+      browser->GetBrowserForMigrationOnly()
+          ->window()
+          ->GetAutofillBubbleHandler();
   SetBubbleView(*autofill_bubble_handler->ShowMandatoryReauthBubble(
       web_contents(), this, /*is_user_gesture=*/false, current_bubble_type_));
 #endif  // BUILDFLAG(IS_ANDROID)

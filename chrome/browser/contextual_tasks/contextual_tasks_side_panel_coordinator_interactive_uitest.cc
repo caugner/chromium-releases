@@ -52,6 +52,7 @@ class MockContextualTasksComposeboxHandler
       mojo::PendingRemote<composebox::mojom::Page> pending_page,
       mojo::PendingReceiver<searchbox::mojom::PageHandler>
           pending_searchbox_handler,
+      mojo::PendingRemote<searchbox::mojom::Page> pending_searchbox_page,
       GetSessionHandleCallback get_session_callback,
       ClearSessionHandleCallback clear_session_callback,
       TakeInputStateModelCallback get_inputstatemodel_callback)
@@ -62,6 +63,7 @@ class MockContextualTasksComposeboxHandler
             std::move(pending_handler),
             std::move(pending_page),
             std::move(pending_searchbox_handler),
+            std::move(pending_searchbox_page),
             std::move(get_session_callback),
             std::move(clear_session_callback),
             std::move(get_inputstatemodel_callback)) {}
@@ -682,6 +684,7 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
           std::move(composebox_handler_receiver),
           std::move(composebox_page_remote),
           std::move(searchbox_handler_receiver),
+          std::move(searchbox_page_remote),
           base::BindRepeating(
               &ContextualTasksUI::GetOrCreateContextualSessionHandle,
               base::Unretained(ui)),
@@ -967,67 +970,6 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
   coordinator->Close();
   EXPECT_EQ(content::Visibility::HIDDEN, web_contents1->GetVisibility());
   EXPECT_EQ(content::Visibility::HIDDEN, web_contents2->GetVisibility());
-}
-
-class TabScopedContextualTasksSidePanelCoordinatorInteractiveUiTest
-    : public ContextualTasksSidePanelCoordinatorInteractiveUiTest {
- public:
-  TabScopedContextualTasksSidePanelCoordinatorInteractiveUiTest() {
-    scoped_feature_list_.InitAndEnableFeatureWithParameters(
-        kContextualTasks, {{"ContextualTasksTaskScopedSidePanel", "false"}});
-  }
-  ~TabScopedContextualTasksSidePanelCoordinatorInteractiveUiTest() override =
-      default;
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-};
-
-IN_PROC_BROWSER_TEST_F(
-    TabScopedContextualTasksSidePanelCoordinatorInteractiveUiTest,
-    SwitchTabChangeSidePanelWebContents) {
-  SetUpTasks();
-
-  ContextualTasksSidePanelCoordinator* coordinator = GetCoordinator();
-  RunTestSequence(
-      Do([&]() {
-        // Open side panel.
-        coordinator->Show(
-            false, omnibox::ChromeAimEntryPoint::UNKNOWN_AIM_ENTRY_POINT);
-      }),
-      WaitForShow(kContextualTasksSidePanelWebViewElementId), Do([&]() {
-        // Verify the first side panel WebContents is created for the first tab.
-        content::WebContents* side_panel_web_contents1 =
-            coordinator->GetActiveWebContents();
-        ASSERT_NE(nullptr, side_panel_web_contents1);
-        EXPECT_EQ(true, coordinator->IsPanelOpenForContextualTask());
-
-        // Activate the second tab, verify the second side panel WebContents is
-        // created for the second tab.
-        TabListInterface* tab_list = TabListInterface::From(browser());
-        tab_list->ActivateTab(tab_list->GetTab(1)->GetHandle());
-        content::WebContents* side_panel_web_contents2 =
-            coordinator->GetActiveWebContents();
-        ASSERT_NE(nullptr, side_panel_web_contents2);
-        ASSERT_NE(side_panel_web_contents1, side_panel_web_contents2);
-        EXPECT_EQ(true, coordinator->IsPanelOpenForContextualTask());
-
-        // Activate the third tab, verify the active side panel WebContents is
-        // swapped back.
-        tab_list->ActivateTab(tab_list->GetTab(2)->GetHandle());
-        ASSERT_EQ(side_panel_web_contents1,
-                  coordinator->GetActiveWebContents());
-        EXPECT_EQ(true, coordinator->IsPanelOpenForContextualTask());
-
-        // Close the side panel for the third tab.
-        coordinator->Close();
-        EXPECT_EQ(false, coordinator->IsPanelOpenForContextualTask());
-
-        // Switch back to first tab, verify the side panel is still open because
-        // the open state is tab scoped.
-        tab_list->ActivateTab(tab_list->GetTab(0)->GetHandle());
-        EXPECT_EQ(true, coordinator->IsPanelOpenForContextualTask());
-      }));
 }
 
 }  // namespace contextual_tasks

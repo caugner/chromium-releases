@@ -37,7 +37,7 @@ GlicSkillsManagerImpl::~GlicSkillsManagerImpl() = default;
 
 void GlicSkillsManagerImpl::UpdateSkillPreviews(
     std::optional<tabs::TabInterface*> updated_tab) {
-  if (!host_->IsReady()) {
+  if (!host_->IsWebClientConnected()) {
     return;
   }
   auto* focused_tab = host_->sharing_manager().GetFocusedTabData().focus();
@@ -119,8 +119,16 @@ void GlicSkillsManagerImpl::LaunchSkillsDialog(
 }
 
 void GlicSkillsManagerImpl::ShowManageSkillsUi() {
-  const GURL skills_url = GURL(chrome::kChromeUISkillsURL)
-                              .Resolve(chrome::kChromeUISkillsYourSkillsPath);
+  ShowSkillsUiAtRelativePath(chrome::kChromeUISkillsYourSkillsPath);
+}
+
+void GlicSkillsManagerImpl::ShowBrowseSkillsUi() {
+  ShowSkillsUiAtRelativePath(chrome::kChromeUISkillsBrowsePath);
+}
+
+void GlicSkillsManagerImpl::ShowSkillsUiAtRelativePath(
+    const std::string& path) {
+  const GURL skills_url = GURL(chrome::kChromeUISkillsURL).Resolve(path);
   bool existing_skills_tab_found = false;
 
   Profile* host_profile = host_->profile();

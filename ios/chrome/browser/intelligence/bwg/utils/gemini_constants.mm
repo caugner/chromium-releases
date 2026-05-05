@@ -16,6 +16,8 @@ const char kURLOnLastInteractionDictKey[] = "url_on_last_interaction";
 const char kFirstFootnoteLinkURL[] = "https://policies.google.com/terms";
 const char kSecondFootnoteLinkURL[] =
     "https://support.google.com/gemini/answer/13594961";
+const char kKoreanTermsFootnoteLinkURL[] =
+    "https://www.google.com/intl/ko/policies/terms/location";
 const char kFootnoteLinkURLManagedAccount[] =
     "https://support.google.com/a/answer/15706919";
 const char kSecondBoxLinkURLManagedAccount[] =
@@ -28,6 +30,11 @@ const char kSecondBoxLink2URLNonManagedAccount[] =
     "https://support.google.com/gemini/answer/"
     "13594961?hl=en#location_info&zippy=%2Cwhat-location-information-do-gemini-"
     "apps-collect-why-and-how-is-it-used";
+const char kLivePrivacyNoticeLinkURL[] =
+    "https://support.google.com/gemini/answer/13594961";
+const char kLiveLearnMoreLinkURL[] =
+    "https://support.google.com/gemini/answer/13594961";
+const char kLivePrivacyPolicyLinkURL[] = "https://policies.google.com/privacy";
 
 // Accessibility identifiers for Gemini consent view.
 NSString* const kGeminiFootNoteTextViewAccessibilityIdentifier =
@@ -43,6 +50,7 @@ NSString* const kGeminiFirstFootnoteLinkAction =
     @"GeminiFirstFootnoteLinkAction";
 NSString* const kGeminiSecondFootnoteLinkAction =
     @"GeminiSecondFootnoteLinkAction";
+NSString* const kGeminiKoreanTermsLinkAction = @"GeminiKoreanTermsLinkAction";
 NSString* const kGeminiFootnoteLinkActionManagedAccount =
     @"GeminiFootnoteLinkActionManagedAccount";
 NSString* const kGeminiSecondBoxLinkActionManagedAccount =
@@ -51,6 +59,12 @@ NSString* const kGeminiSecondBoxLink1ActionNonManagedAccount =
     @"GeminiSecondBoxLink1ActionNonManagedAccount";
 NSString* const kGeminiSecondBoxLink2ActionNonManagedAccount =
     @"GeminiSecondBoxLink2ActionNonManagedAccount";
+NSString* const kGeminiLivePrivacyNoticeLinkAction =
+    @"GeminiLivePrivacyNoticeLinkAction";
+NSString* const kGeminiLiveLearnMoreLinkAction =
+    @"GeminiLiveLearnMoreLinkAction";
+NSString* const kGeminiLivePrivacyPolicyLinkAction =
+    @"GeminiLivePrivacyPolicyLinkAction";
 
 const int kGeminiContextualCueChipSlidingWindow = 2;
 

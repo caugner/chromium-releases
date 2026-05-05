@@ -54,6 +54,12 @@ namespace content {
 
 namespace {
 
+// If enabled, cancels the prerender when a navigation in the prerendered page
+// is restarted as cross-document. This feature is enabled by default as
+// a crash fix. The feature flag is kept as a kill switch.
+BASE_FEATURE(kPrerenderCancelOnCrossDocumentRestart,
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
 bool IsBackground(Visibility visibility) {
   // PrerenderHostRegistry treats HIDDEN and OCCLUDED as background.
   switch (visibility) {
@@ -232,6 +238,7 @@ PreloadingEligibility ToEligibility(PrerenderFinalStatus status) {
     case PrerenderFinalStatus::kUaChangeRequiresReload:
     case PrerenderFinalStatus::kBlockedByClient:
     case PrerenderFinalStatus::kMixedContent:
+    case PrerenderFinalStatus::kCrossDocumentRestart:
       NOTREACHED();
     case PrerenderFinalStatus::kTriggerBackgrounded:
       return PreloadingEligibility::kHidden;
@@ -305,6 +312,7 @@ PreloadingEligibility ToEligibility(PrerenderFinalStatus status) {
     case PrerenderFinalStatus::kBrowsingDataRemoved:
       NOTREACHED();
     case PrerenderFinalStatus::kPrerenderHostReused:
+    case PrerenderFinalStatus::kFormSubmitWhenPrerendering:
       NOTREACHED();
   }
 
@@ -817,7 +825,7 @@ PrerenderHostId PrerenderHostRegistry::CreateAndStartHost(
         // the head of the queue if there's no running prerender and the
         // initiator is in the foreground. If the initiator page is in the
         // background, `StartPrerendering` will return a corresponding
-        // frame_tree_node_id if allowed by
+        // PrerenderHostId if allowed by
         // `PrerenderCanBeStartedWhenInitiatorIsInBackground`.
         if (IsBackground(initiator_web_contents.GetVisibility()) &&
             !initiator_web_contents.GetPrerenderHostRegistry()
@@ -1314,12 +1322,17 @@ PrerenderHostRegistry::TakePreCreatedWebContentsForNewTabIfExists(
   // Don't serve a prerendered page if the window needs the opener or is created
   // for non-regular navigations.
   if (!create_new_window_params.opener_suppressed ||
-      create_new_window_params.is_form_submission ||
       create_new_window_params.pip_options) {
     return nullptr;
   }
 
   for (auto& iter : prerender_new_tab_handle_by_id_) {
+    // Skip those PrerenderHosts that are not for form submission if the window
+    // is created by form submission.
+    if (create_new_window_params.is_form_submission &&
+        !iter.second->form_submission()) {
+      continue;
+    }
     std::unique_ptr<WebContentsImpl> web_contents =
         iter.second->TakeWebContentsIfAvailable(create_new_window_params,
                                                 web_contents_create_params);
@@ -1607,6 +1620,19 @@ void PrerenderHostRegistry::DidFinishNavigation(
   auto* navigation_request = NavigationRequest::From(navigation_handle);
 
   if (navigation_request->IsSameDocument()) {
+    // If a navigation in the prerendered page starts as same-document but is
+    // restarted as cross-document, it can cause duplicate DidFinishNavigation
+    // calls and CHECK failures because the initial start was ignored.
+    // Since prerendering is an optimization, we cancel the prerender in this
+    // corner case to avoid complex state management.
+    // This is guarded by a kill switch feature flag.
+    if (navigation_request->was_reset_for_cross_document_restart() &&
+        base::FeatureList::IsEnabled(kPrerenderCancelOnCrossDocumentRestart)) {
+      PrerenderHostId prerender_host_id =
+          navigation_handle->GetPrerenderHostId();
+      CancelHost(prerender_host_id,
+                 PrerenderFinalStatus::kCrossDocumentRestart);
+    }
     return;
   }
 
@@ -2029,11 +2055,11 @@ void PrerenderHostRegistry::CancelHostsByOriginFilter(
 }
 
 void PrerenderHostRegistry::RecordPotentialPrerenderProcessReuse(
-    bool kHasMatchableHosts,
+    bool has_matchable_hosts,
     const GURL& navigation_url) {
   static constexpr char kPrerenderProcessReuseUMAName[] =
       "Prerender.Experimental.PrerenderProcessReuseAvailability";
-  if (kHasMatchableHosts) {
+  if (has_matchable_hosts) {
     base::UmaHistogramEnumeration(
         kPrerenderProcessReuseUMAName,
         PrerenderProcessReuseAvailability::kHasMatchableHosts);

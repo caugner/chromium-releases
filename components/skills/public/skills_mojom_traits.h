@@ -32,21 +32,16 @@ struct EnumTraits<skills::mojom::SkillSource, sync_pb::SkillSource> {
     NOTREACHED();
   }
 
-  static bool FromMojom(skills::mojom::SkillSource input,
-                        sync_pb::SkillSource* out) {
+  static sync_pb::SkillSource FromMojom(skills::mojom::SkillSource input) {
     switch (input) {
       case skills::mojom::SkillSource::kUnknown:
-        *out = sync_pb::SkillSource::SKILL_SOURCE_UNKNOWN;
-        return true;
+        return sync_pb::SkillSource::SKILL_SOURCE_UNKNOWN;
       case skills::mojom::SkillSource::kFirstParty:
-        *out = sync_pb::SkillSource::SKILL_SOURCE_FIRST_PARTY;
-        return true;
+        return sync_pb::SkillSource::SKILL_SOURCE_FIRST_PARTY;
       case skills::mojom::SkillSource::kUserCreated:
-        *out = sync_pb::SkillSource::SKILL_SOURCE_USER_CREATED;
-        return true;
+        return sync_pb::SkillSource::SKILL_SOURCE_USER_CREATED;
       case skills::mojom::SkillSource::kDerivedFromFirstParty:
-        *out = sync_pb::SkillSource::SKILL_SOURCE_DERIVED_FROM_FIRST_PARTY;
-        return true;
+        return sync_pb::SkillSource::SKILL_SOURCE_DERIVED_FROM_FIRST_PARTY;
     }
     NOTREACHED();
   }
@@ -72,6 +67,12 @@ struct StructTraits<skills::mojom::SkillDataView, skills::Skill> {
   }
   static const std::string& description(const skills::Skill& skill) {
     return skill.description;
+  }
+  static std::optional<std::string> curated_by(const skills::Skill& skill) {
+    if (skill.curated_by.empty()) {
+      return std::nullopt;
+    }
+    return skill.curated_by;
   }
   static std::optional<GURL> image_url(const skills::Skill& skill) {
     if (skill.image_url.is_empty()) {

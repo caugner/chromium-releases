@@ -10,7 +10,7 @@
 #include "base/callback_list.h"
 #include "base/memory/raw_ptr.h"
 #include "chrome/browser/glic/fre/glic_fre.mojom.h"
-#include "chrome/browser/glic/widget/glic_window_controller.h"
+#include "chrome/browser/glic/public/service/glic_instance_coordinator.h"
 #include "components/prefs/pref_change_registrar.h"
 
 class Profile;
@@ -30,6 +30,9 @@ class GlicButtonController {
                        GlicButtonControllerDelegate* toolbar_delegate,
                        GlicKeyedService* service);
   ~GlicButtonController();
+
+  bool ShouldAutoSummarize() const;
+  mojom::InvocationSource GetInvocationSource(bool is_showing_nudge) const;
 
  private:
   void UpdateButton();

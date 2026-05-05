@@ -34,6 +34,7 @@ class ComposeboxHandler : public composebox::mojom::PageHandler,
       mojo::PendingRemote<composebox::mojom::Page> pending_page,
       mojo::PendingReceiver<searchbox::mojom::PageHandler>
           pending_searchbox_handler,
+      mojo::PendingRemote<searchbox::mojom::Page> pending_searchbox_page,
       Profile* profile,
       content::WebContents* web_contents,
       GetSessionHandleCallback get_session_callback,
@@ -48,6 +49,10 @@ class ComposeboxHandler : public composebox::mojom::PageHandler,
   void NavigateUrl(const GURL& url) override;
   void CloseLensOverlayFromWebUI(
       composebox::mojom::LensOverlayDismissalSource dismissal_source) override;
+  void SetSmartTabSharingActive(bool active) override;
+  void GetSmartTabSharingActive(
+      GetSmartTabSharingActiveCallback callback) override;
+  void OnContextMenuOpened() override;
 
   // searchbox::mojom::PageHandler:
   void ExecuteAction(uint8_t line,
@@ -78,9 +83,6 @@ class ComposeboxHandler : public composebox::mojom::PageHandler,
                    WindowOpenDisposition disposition,
                    omnibox::ChromeAimEntryPoint aim_entrypoint,
                    std::map<std::string, std::string> additional_params);
-  // SearchboxHandler:
-  std::string AutocompleteIconToResourceName(
-      const gfx::VectorIcon& icon) const override;
 
   virtual void ClearSessionHandle();
 
@@ -89,6 +91,9 @@ class ComposeboxHandler : public composebox::mojom::PageHandler,
 
   FRIEND_TEST_ALL_PREFIXES(ComposeboxHandlerTest,
                            OpenUrl_ResetsContextControllerObserver);
+  FRIEND_TEST_ALL_PREFIXES(ComposeboxHandlerTest, SetSmartTabSharingEnabled);
+  FRIEND_TEST_ALL_PREFIXES(ComposeboxHandlerTest,
+                           SetSmartTabSharingEnabled_FeatureDisabled);
 
  protected:
   ComposeboxHandler(
@@ -96,6 +101,7 @@ class ComposeboxHandler : public composebox::mojom::PageHandler,
       mojo::PendingRemote<composebox::mojom::Page> pending_page,
       mojo::PendingReceiver<searchbox::mojom::PageHandler>
           pending_searchbox_handler,
+      mojo::PendingRemote<searchbox::mojom::Page> pending_searchbox_page,
       Profile* profile,
       content::WebContents* web_contents,
       std::unique_ptr<OmniboxController> omnibox_controller,
@@ -104,7 +110,6 @@ class ComposeboxHandler : public composebox::mojom::PageHandler,
 
  private:
   raw_ptr<content::WebContents> web_contents_;
-
   ClearSessionHandleCallback clear_session_callback_;
 
   // These are located at the end of the list of member variables to ensure the

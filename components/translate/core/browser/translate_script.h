@@ -19,7 +19,7 @@ class GURL;
 namespace translate {
 
 class TranslateScriptTest;
-class TranslateURLFetcher;
+class TranslateUrlFetcher;
 
 class TranslateScript {
  public:
@@ -62,9 +62,9 @@ class TranslateScript {
   static const char kRequestHeaderName[];
   static const char kRequestHeaderValue[];
 
-  // Used in kTranslateScriptURL to specify using always ssl to load resources.
-  static const char kAlwaysUseSslQueryName[];
-  static const char kAlwaysUseSslQueryValue[];
+  // Used in kTranslateScriptURL to specify the experiment filter.
+  static const char kExperimentFilterQueryName[];
+  static const char kExperimentFilterQueryValue[];
 
   // Used in kTranslateScriptURL to specify a callback function name.
   static const char kCallbackQueryName[];
@@ -83,7 +83,7 @@ class TranslateScript {
   void OnScriptFetchComplete(bool success, const std::string& data);
 
   // URL fetcher to fetch the translate script.
-  std::unique_ptr<TranslateURLFetcher> fetcher_;
+  std::unique_ptr<TranslateUrlFetcher> fetcher_;
 
   // The JS injected in the page to do the translation.
   std::string data_;

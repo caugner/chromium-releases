@@ -22,6 +22,7 @@
 #include "ui/base/class_property.h"
 #include "ui/base/models/image_model.h"
 #include "ui/base/models/menu_model.h"
+#include "url/gurl.h"
 
 class SidePanelEntryScope;
 class SidePanelEntryObserver;
@@ -90,6 +91,11 @@ class SidePanelEntry final : public ui::PropertyHandler {
   void OnEntryWillHide(SidePanelEntryHideReason reason);
   void OnEntryHideCancelled();
   void OnEntryHidden();
+#if BUILDFLAG(IS_ANDROID)
+  // TODO(crbug.com/496962614): compile OnEntryHiddenWithReason() into all
+  // platforms.
+  void OnEntryHiddenWithReason(SidePanelEntryHideReason reason);
+#endif
 
   PanelType type() const { return type_; }
   const Key& key() const { return key_; }
@@ -201,7 +207,12 @@ class SidePanelEntry final : public ui::PropertyHandler {
 
   base::TimeTicks entry_shown_timestamp_;
 
-  base::ObserverList<SidePanelEntryObserver> observers_;
+  base::ObserverList<
+      SidePanelEntryObserver,
+      /*check_empty=*/false,
+      /*reentrancy=*/
+      base::ObserverListReentrancyPolicy::kAllowReentrancyUntriaged>
+      observers_;
 
   // The last trigger that caused this side panel entry to be shown. This is
   // used for metrics.

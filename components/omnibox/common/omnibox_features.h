@@ -35,6 +35,7 @@ BASE_DECLARE_FEATURE(kHideContextualGroupHeaders);
 BASE_DECLARE_FEATURE(kHideSuggestionGroupHeaders);
 BASE_DECLARE_FEATURE(kLocalHistoryZeroSuggestBeyondNTP);
 BASE_DECLARE_FEATURE(kZeroSuggestPrefetchDebouncing);
+BASE_DECLARE_FEATURE(kZeroSuggestPrefetchingForComposebox);
 BASE_DECLARE_FEATURE(kZeroSuggestPrefetchingOnSRP);
 BASE_DECLARE_FEATURE(kZeroSuggestPrefetchingOnWeb);
 // Related, kMaxZeroSuggestMatches.
@@ -50,7 +51,6 @@ BASE_DECLARE_FEATURE(kDocumentProvider);
 BASE_DECLARE_FEATURE(kDocumentProviderPrimaryAccountRequirement);
 BASE_DECLARE_FEATURE(kDocumentProviderEnterpriseEligibility);
 BASE_DECLARE_FEATURE(kDocumentProviderEnterpriseEligibilityWhenUnknown);
-BASE_DECLARE_FEATURE(kDocumentProviderNoSyncRequirement);
 
 // Suggestions UI - these affect the UI or function of the suggestions popup.
 BASE_DECLARE_FEATURE(kShowPopupOnMouseReleased);
@@ -102,6 +102,7 @@ BASE_DECLARE_FEATURE(kAiModeStartPack);
 // Search and Suggest requests and params.
 BASE_DECLARE_FEATURE(kAblateSearchProviderWarmup);
 BASE_DECLARE_FEATURE(kReportApplicationLanguageInSearchRequest);
+BASE_DECLARE_FEATURE(kOmniboxAppendInvocationSource);
 
 BASE_DECLARE_FEATURE(kOmniboxAsyncViewInflation);
 BASE_DECLARE_FEATURE(kUseFusedLocationProvider);
@@ -109,6 +110,7 @@ BASE_DECLARE_FEATURE(kUseFusedLocationProvider);
 BASE_DECLARE_FEATURE(kOmniboxMobileParityUpdate);
 BASE_DECLARE_FEATURE(kOmniboxMobileParityUpdateV2);
 BASE_DECLARE_FEATURE(kOmniboxXGeoPermissionGranularity);
+BASE_DECLARE_FEATURE(kOmniboxItemDecoration);
 
 // Omnibox suggestions tuning
 BASE_DECLARE_FEATURE(kNumNtpZpsRecentSearches);
@@ -118,9 +120,6 @@ BASE_DECLARE_FEATURE(kNumWebZpsRelatedSearches);
 BASE_DECLARE_FEATURE(kNumWebZpsMostVisitedUrls);
 BASE_DECLARE_FEATURE(kNumSrpZpsRecentSearches);
 BASE_DECLARE_FEATURE(kNumSrpZpsRelatedSearches);
-
-// Caret animation for omnibox
-BASE_DECLARE_FEATURE(kOmniboxAnimatedCaret);
 
 // Enterprise search aggregators features.
 BASE_DECLARE_FEATURE(kEnableSearchAggregatorPolicy);
@@ -150,6 +149,13 @@ inline constexpr base::FeatureParam<std::string> kComposeboxClientOverride{
 // Controls whether or not contextual composebox should display suggestions.
 BASE_DECLARE_FEATURE(kComposeboxAttachmentsTypedState);
 
+// Whether to enable Google Drive context menu option in the composebox.
+BASE_DECLARE_FEATURE(kComposeboxDriveContextMenuOption);
+
+// Whether the composebox should show a verbatim match for context in
+// zero-suggest.
+BASE_DECLARE_FEATURE(kComposeboxVerbatimMatchZeroSuggest);
+
 // A flag that allows params from experiment configs to be passed through to
 // the AIM eligibility service to control aspects of URL interception.
 BASE_DECLARE_FEATURE(kAimUrlInterceptPassthrough);
@@ -171,7 +177,13 @@ BASE_DECLARE_FEATURE(kSuppressIntermediateACUpdatesOnLowEndDevices);
 BASE_DECLARE_FEATURE(kPostDelayedTaskFocusTab);
 BASE_DECLARE_FEATURE(kAndroidHubSearchTabGroups);
 BASE_DECLARE_FEATURE(kOmniboxImprovementForLFF);
+BASE_DECLARE_FEATURE(kResetSuggestionsScroll);
 #endif  // BUILDFLAG(IS_ANDROID)
+
+// If enabled, X-Geo headers are sent for all search navigations on all
+// platforms.
+BASE_DECLARE_FEATURE(kPlatformAgnosticXGeo);
+
 // Note: no new flags beyond this point.
 
 namespace flag_descriptions {

@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "base/metrics/statistics_recorder.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
@@ -18,6 +19,7 @@
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/color/chrome_color_id.h"
+#include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_header_view.h"
@@ -37,6 +39,7 @@
 #include "components/omnibox/browser/omnibox_prefs.h"
 #include "components/omnibox/browser/omnibox_triggered_feature_service.h"
 #include "components/omnibox/browser/suggestion_group_util.h"
+#include "components/omnibox/common/omnibox_features.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
@@ -193,6 +196,98 @@ IN_PROC_BROWSER_TEST_F(OmniboxPopupViewViewsTest, PopupAlignment) {
   EXPECT_EQ(popup_rect.y(), alignment_rect.y());
   EXPECT_EQ(popup_rect.x(), alignment_rect.x());
   EXPECT_EQ(popup_rect.right(), alignment_rect.right());
+}
+
+IN_PROC_BROWSER_TEST_F(OmniboxPopupViewViewsTest, ResultToContentReadyPerShow) {
+#if BUILDFLAG(IS_OZONE)
+  // TODO(crbug.com/505910277): This is flaky on Wayland because presentation
+  // feedback can be dropped if it arrives before the submission ACK (race
+  // condition in GbmSurfacelessWayland).
+  if (ui::OzonePlatform::RunningOnWaylandForTest()) {
+    GTEST_SKIP()
+        << "Flaky on Wayland due to presentation feedback race condition.";
+  }
+#endif
+  if (omnibox::IsWebUIOmniboxPopupEnabled()) {
+    GTEST_SKIP() << "Skipping for WebUI popup.";
+  }
+
+  base::HistogramTester histogram_tester;
+
+  // Set the start time in the model.
+  controller()->edit_model()->UpdateInput(false);
+
+  CreatePopupForTestQuery();
+
+  popup_view()->UpdatePopupAppearance();
+
+  // Wait for the asynchronous presentation callback to fire.
+  base::RunLoop run_loop;
+  GetPopupWidget()
+      ->GetCompositor()
+      ->RequestSuccessfulPresentationTimeForNextFrame(
+          base::BindOnce(base::IgnoreArgs<const viz::FrameTimingDetails&>(
+              run_loop.QuitClosure())));
+  run_loop.Run();
+
+  histogram_tester.ExpectTotalCount("Omnibox.Popup.ResultToContentReadyPerShow",
+                                    1);
+}
+
+IN_PROC_BROWSER_TEST_F(OmniboxPopupViewViewsTest,
+                       ResultToContentReadyOnFirstShow) {
+#if BUILDFLAG(IS_OZONE)
+  // TODO(crbug.com/505910277): This is flaky on Wayland because presentation
+  // feedback can be dropped if it arrives before the submission ACK (race
+  // condition in GbmSurfacelessWayland).
+  if (ui::OzonePlatform::RunningOnWaylandForTest()) {
+    GTEST_SKIP()
+        << "Flaky on Wayland due to presentation feedback race condition.";
+  }
+#endif
+  if (omnibox::IsWebUIOmniboxPopupEnabled()) {
+    GTEST_SKIP() << "Skipping for WebUI popup.";
+  }
+
+  base::HistogramTester histogram_tester;
+
+  // Set the start time in the model.
+  controller()->edit_model()->UpdateInput(false);
+
+  CreatePopupForTestQuery();
+
+  popup_view()->UpdatePopupAppearance();
+
+  // Wait for the asynchronous presentation callback to fire.
+  {
+    base::RunLoop run_loop;
+    GetPopupWidget()
+        ->GetCompositor()
+        ->RequestSuccessfulPresentationTimeForNextFrame(
+            base::BindOnce(base::IgnoreArgs<const viz::FrameTimingDetails&>(
+                run_loop.QuitClosure())));
+    run_loop.Run();
+  }
+
+  histogram_tester.ExpectTotalCount(
+      "Omnibox.Popup.ResultToContentReadyOnFirstShow", 1);
+
+  // Trigger another presentation by updating appearance again.
+  popup_view()->UpdatePopupAppearance();
+
+  {
+    base::RunLoop run_loop;
+    GetPopupWidget()
+        ->GetCompositor()
+        ->RequestSuccessfulPresentationTimeForNextFrame(
+            base::BindOnce(base::IgnoreArgs<const viz::FrameTimingDetails&>(
+                run_loop.QuitClosure())));
+    run_loop.Run();
+  }
+
+  // It should still be 1.
+  histogram_tester.ExpectTotalCount(
+      "Omnibox.Popup.ResultToContentReadyOnFirstShow", 1);
 }
 
 // Integration test for omnibox popup theming in regular.
@@ -395,7 +490,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxPopupViewViewsTest,
   EXPECT_EQ(observer.text_changed_on_listboxoption_count(), 0);
 
   edit_model()->SetUserText(u"bar");
-  edit_model()->StartAutocomplete(false, false);
+  edit_model()->StartAutocomplete(false);
   popup_view()->UpdatePopupAppearance();
   EXPECT_EQ(observer.text_changed_on_listboxoption_count(), 1);
   EXPECT_EQ(observer.selected_children_changed_count(), 1);
@@ -482,7 +577,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxPopupViewViewsTest,
       matches);
   popup_view()->UpdatePopupAppearance();
   edit_model()->SetUserText(u"bar");
-  edit_model()->StartAutocomplete(false, false);
+  edit_model()->StartAutocomplete(false);
   popup_view()->UpdatePopupAppearance();
 
   edit_model()->SetPopupSelection(OmniboxPopupSelection(1));
@@ -724,7 +819,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxPopupViewViewsTest, AccessibleResultName) {
       matches);
   popup_view()->UpdatePopupAppearance();
   edit_model()->SetUserText(u"bar");
-  edit_model()->StartAutocomplete(false, false);
+  edit_model()->StartAutocomplete(false);
   popup_view()->UpdatePopupAppearance();
 
   edit_model()->SetPopupSelection(OmniboxPopupSelection(1));
@@ -837,7 +932,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxPopupViewViewsTest,
   location_bar()->GetOmniboxController()->client()->GetPrefs()->SetBoolean(
       omnibox::kKeywordSpaceTriggeringEnabled, true);
   omnibox_view()->SetUserText(u"@bookmarks");
-  edit_model()->StartAutocomplete(false, false);
+  edit_model()->StartAutocomplete(false);
   popup_view()->UpdatePopupAppearance();
 
   EXPECT_FALSE(edit_model()->is_keyword_selected());
@@ -894,7 +989,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxPopupViewViewsTest,
 
   // Check accessibility when popup is open.
   ax_node_data_omnibox = ui::AXNodeData();
-  edit_model()->StartAutocomplete(false, false);
+  edit_model()->StartAutocomplete(false);
   omnibox_view()->GetViewAccessibility().GetAccessibleNodeData(
       &ax_node_data_omnibox);
   EXPECT_TRUE(controller()->IsPopupOpen());
@@ -936,7 +1031,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxPopupViewViewsTest, AccessibleControlIds) {
 
   // Check accessibility when popup is open.
   ax_node_data_omnibox = ui::AXNodeData();
-  edit_model()->StartAutocomplete(false, false);
+  edit_model()->StartAutocomplete(false);
   omnibox_view()->GetViewAccessibility().GetAccessibleNodeData(
       &ax_node_data_omnibox);
   EXPECT_TRUE(controller()->IsPopupOpen());
@@ -1138,4 +1233,3 @@ IN_PROC_BROWSER_TEST_F(OmniboxPopupViewViewsTest,
   histogram_tester.ExpectTotalCount(
       "TopChromeUI.OmniboxPopup.RequestToFirstContentfulPaint", 1);
 }
-

@@ -27,6 +27,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import android.animation.ObjectAnimator;
+import android.app.Activity;
 import android.content.Context;
 import android.content.res.ColorStateList;
 import android.content.res.Configuration;
@@ -72,7 +73,8 @@ import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.layouts.toolbar.ToolbarWidthConsumer;
 import org.chromium.chrome.browser.lens.LensController;
 import org.chromium.chrome.browser.locale.LocaleManager;
-import org.chromium.chrome.browser.multiwindow.MultiInstanceManager;
+import org.chromium.chrome.browser.multiwindow.MultiInstanceOrchestrator;
+import org.chromium.chrome.browser.multiwindow.MultiInstanceOrchestratorFactory;
 import org.chromium.chrome.browser.omnibox.fusebox.ComposeboxQueryControllerBridge;
 import org.chromium.chrome.browser.omnibox.fusebox.FuseboxCoordinator;
 import org.chromium.chrome.browser.omnibox.fusebox.FuseboxCoordinator.FuseboxState;
@@ -82,6 +84,7 @@ import org.chromium.chrome.browser.omnibox.suggestions.AutocompleteController;
 import org.chromium.chrome.browser.omnibox.suggestions.AutocompleteCoordinator;
 import org.chromium.chrome.browser.omnibox.suggestions.AutocompleteDelegate.AutocompleteLoadCallback;
 import org.chromium.chrome.browser.omnibox.suggestions.OmniboxLoadUrlParams;
+import org.chromium.chrome.browser.omnibox.suggestions.SiteSearchActivationSource;
 import org.chromium.chrome.browser.omnibox.test.R;
 import org.chromium.chrome.browser.omnibox.voice.VoiceRecognitionHandler;
 import org.chromium.chrome.browser.prefetch.settings.PreloadPagesSettingsBridge;
@@ -94,12 +97,15 @@ import org.chromium.chrome.browser.tab.Tab.LoadUrlResult;
 import org.chromium.chrome.browser.tab.TabLaunchType;
 import org.chromium.chrome.browser.tab.TabObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+import org.chromium.chrome.browser.ui.extensions.ExtensionUi;
+import org.chromium.chrome.browser.ui.extensions.ExtensionUiBackend;
 import org.chromium.chrome.browser.ui.theme.BrandedColorScheme;
 import org.chromium.chrome.browser.util.ChromeAccessibilityUtil;
 import org.chromium.chrome.test.util.browser.signin.AccountManagerTestRule;
 import org.chromium.components.browser_ui.accessibility.AccessibilityFeatureMap;
 import org.chromium.components.browser_ui.accessibility.PageZoomIndicatorCoordinator;
 import org.chromium.components.browser_ui.styles.ChromeColors;
+import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.components.embedder_support.util.UrlUtilities;
 import org.chromium.components.omnibox.AutocompleteInput;
 import org.chromium.components.omnibox.AutocompleteInput.SiteSearchData;
@@ -170,7 +176,7 @@ public class LocationBarMediatorTest {
     @Mock private Tab mTab;
     @Mock private WebContents mWebContents;
     @Mock private TabModelSelector mTabModelSelector;
-    @Mock private MultiInstanceManager mMultiInstanceManager;
+    @Mock private MultiInstanceOrchestrator mMultiInstanceOrchestrator;
     @Mock private LocationBarEmbedder mLocationBarEmbedder;
     @Mock private AutocompleteCoordinator mAutocompleteCoordinator;
     @Mock private UrlBarCoordinator mUrlCoordinator;
@@ -244,6 +250,7 @@ public class LocationBarMediatorTest {
 
         AutocompleteController.setInstanceForTesting(mAutocompleteController);
         ComposeboxQueryControllerBridge.setInstanceForTesting(mComposeboxBridge);
+        MultiInstanceOrchestratorFactory.setInstanceForTesting(mMultiInstanceOrchestrator);
 
         mUrlBarData = UrlBarData.create(null, "text", 0, 0, "text");
         lenient().doReturn(true).when(mSearchEngineUtils).shouldShowSearchEngineLogo();
@@ -322,7 +329,6 @@ public class LocationBarMediatorTest {
                         () -> mModalDialogManager,
                         mPageZoomIndicatorCoordinator,
                         mFuseboxCoordinator,
-                        mMultiInstanceManager,
                         mLocationBarEmbedder,
                         /* omniboxChipManager= */ null);
         mMediator.setCoordinators(mUrlCoordinator, mAutocompleteCoordinator, mStatusCoordinator);
@@ -362,7 +368,6 @@ public class LocationBarMediatorTest {
                         () -> mModalDialogManager,
                         mPageZoomIndicatorCoordinator,
                         mFuseboxCoordinator,
-                        mMultiInstanceManager,
                         mLocationBarEmbedder,
                         /* omniboxChipManager= */ null);
         tabletMediator.setCoordinators(
@@ -389,6 +394,20 @@ public class LocationBarMediatorTest {
     }
 
     @Test
+    public void testDestroyEndsInput() {
+        var state = getSession();
+        AutocompleteInput input = state.getAutocompleteInput();
+
+        mMediator.beginInput(input);
+        assertTrue(state.isSessionActive());
+        assertTrue(input.getRequestTypeSupplier().hasObservers());
+
+        mMediator.destroy();
+        assertFalse(state.isSessionActive());
+        assertFalse(input.getRequestTypeSupplier().hasObservers());
+    }
+
+    @Test
     public void testOnTabLoadingNtp() {
         mMediator.onNtpStartedLoading();
         verify(mLocationBarLayout).onNtpStartedLoading();
@@ -396,23 +415,21 @@ public class LocationBarMediatorTest {
 
     @Test
     public void testRevertChanges_focused() {
-        mMediator.onUrlFocusChange(true);
-        UrlBarData urlBarData = mock(UrlBarData.class);
-        doReturn(urlBarData).when(mLocationBarDataProvider).getUrlBarData();
-        mMediator.revertChanges();
-        verify(mUrlCoordinator)
-                .setUrlBarData(urlBarData, UrlBar.ScrollType.NO_SCROLL, UrlBarData.SELECT_ALL);
-    }
+        var state = getSession();
+        var input = state.getAutocompleteInput();
+        input.setUserText("modified text").setInitialUserText("initial text");
+        mMediator.beginInput(input);
 
-    @Test
-    public void testRevertChanges_focusedNativePage() {
-        doReturn(JUnitTestGURLs.NTP_URL).when(mLocationBarDataProvider).getCurrentGurl();
         mMediator.onUrlFocusChange(true);
         clearInvocations(mUrlCoordinator);
+
+        ArgumentCaptor<UrlBarData> captor = ArgumentCaptor.forClass(UrlBarData.class);
         mMediator.revertChanges();
-        verify(mUrlCoordinator)
-                .setUrlBarData(
-                        UrlBarData.EMPTY, UrlBar.ScrollType.NO_SCROLL, UrlBarData.SELECT_END);
+
+        verify(mUrlCoordinator).setUrlBarData(captor.capture(), anyInt(), any());
+
+        assertEquals(input.getUserText(), input.getInitialUserText());
+        assertEquals(captor.getValue().displayText, input.getInitialUserText());
     }
 
     @Test
@@ -508,6 +525,96 @@ public class LocationBarMediatorTest {
         doReturn(false).when(mUrlCoordinator).shouldAutocomplete();
         mMediator.onUrlTextChanged("test2");
         assertFalse(input.shouldAllowUserTextAutocompletion());
+    }
+
+    /** Verifies that typing a space after text triggers site search. */
+    @Test
+    public void testOnUrlTextChangedTypedSpaceTriggersSiteSearch() {
+        mMediator.onFinishNativeInitialization();
+        mProfileSupplier.set(mProfile);
+        mMediator.onUrlFocusChange(true);
+
+        doReturn(true)
+                .when(mAutocompleteCoordinator)
+                .triggerSiteSearch(SiteSearchActivationSource.SPACE);
+
+        mMediator.onUrlTextRichChanged(new UrlBarTextChangeInfo("youtube", 0, 0, 7));
+
+        // Simulate user typing space and updating cursor location.
+        mMediator.onUrlTextRichChanged(new UrlBarTextChangeInfo("youtube ", 7, 0, 1));
+
+        verify(mAutocompleteCoordinator).triggerSiteSearch(SiteSearchActivationSource.SPACE);
+    }
+
+    /** Verifies that pasting text that ends with a space does NOT trigger site search. */
+    @Test
+    public void testOnUrlTextChangedPastedTextWithSpaceDoesNotTriggerSiteSearch() {
+        mMediator.onFinishNativeInitialization();
+        mProfileSupplier.set(mProfile);
+        mMediator.onUrlFocusChange(true);
+
+        // Paste "youtube " directly.
+        mMediator.onUrlTextRichChanged(new UrlBarTextChangeInfo("youtube ", 0, 0, 8));
+
+        verify(mAutocompleteCoordinator, never())
+                .triggerSiteSearch(SiteSearchActivationSource.SPACE);
+    }
+
+    /** Verifies that backspacing from "query a" to "query " does NOT trigger site search. */
+    @Test
+    public void testOnUrlTextChangedBackspaceToSpaceDoesNotTriggerSiteSearch() {
+        mMediator.onFinishNativeInitialization();
+        mProfileSupplier.set(mProfile);
+        mMediator.onUrlFocusChange(true);
+
+        mMediator.onUrlTextRichChanged(new UrlBarTextChangeInfo("youtube a", 0, 0, 9));
+        // Backspace deleted "a", leaving "youtube ". Should not trigger.
+        mMediator.onUrlTextRichChanged(new UrlBarTextChangeInfo("youtube ", 8, 1, 0));
+
+        verify(mAutocompleteCoordinator, never())
+                .triggerSiteSearch(SiteSearchActivationSource.SPACE);
+    }
+
+    @Test
+    public void testShouldTriggerSiteSearchScenarios() {
+        mMediator.onFinishNativeInitialization();
+        mProfileSupplier.set(mProfile);
+        mMediator.onUrlFocusChange(true);
+
+        // Scenario 1: Deletion -> False
+        UrlBarTextChangeInfo deleteInfo = new UrlBarTextChangeInfo("text", 4, 1, 0);
+        assertFalse(mMediator.shouldTriggerSiteSearch(deleteInfo));
+
+        // Scenario 2: Replacement with non-space -> False
+        UrlBarTextChangeInfo replaceNonSpaceInfo = new UrlBarTextChangeInfo("texa", 3, 1, 1);
+        assertFalse(mMediator.shouldTriggerSiteSearch(replaceNonSpaceInfo));
+
+        // Scenario 3: Multiple character insertion -> False
+        UrlBarTextChangeInfo multiInsertInfo = new UrlBarTextChangeInfo("text  ", 4, 0, 2);
+        assertFalse(mMediator.shouldTriggerSiteSearch(multiInsertInfo));
+
+        // Scenario 4: Non-space character -> False
+        UrlBarTextChangeInfo nonSpaceInfo = new UrlBarTextChangeInfo("texts", 4, 0, 1);
+        assertFalse(mMediator.shouldTriggerSiteSearch(nonSpaceInfo));
+
+        // Scenario 5: Space with empty before -> False
+        UrlBarTextChangeInfo spaceEmptyBeforeInfo = new UrlBarTextChangeInfo(" ", 0, 0, 1);
+        assertFalse(mMediator.shouldTriggerSiteSearch(spaceEmptyBeforeInfo));
+
+        // Scenario 6: Space with multiple words before -> False
+        UrlBarTextChangeInfo spaceMultiWordsInfo =
+                new UrlBarTextChangeInfo("word1 word2 ", 11, 0, 1);
+        assertFalse(mMediator.shouldTriggerSiteSearch(spaceMultiWordsInfo));
+
+        // Scenario 7: Space with single word before -> True
+        UrlBarTextChangeInfo spaceSingleWordInfo = new UrlBarTextChangeInfo("word1 ", 5, 0, 1);
+        assertTrue(mMediator.shouldTriggerSiteSearch(spaceSingleWordInfo));
+
+        // Scenario 8: Replacement with space (single word before) -> True
+        UrlBarTextChangeInfo replaceWithSpaceInfo =
+                new UrlBarTextChangeInfo(
+                        "word ", 4, 1, 1); // e.g. replacing '1' in "word1" with ' '
+        assertTrue(mMediator.shouldTriggerSiteSearch(replaceWithSpaceInfo));
     }
 
     public void testLoadUrl_base() {
@@ -696,13 +803,21 @@ public class LocationBarMediatorTest {
         mProfileSupplier.set(mProfile);
 
         doReturn(mTab).when(mLocationBarDataProvider).getTab();
+        Activity sourceActivity = mock(Activity.class);
+        doReturn(sourceActivity).when(mTab).getContext();
+        doReturn(1).when(mTab).getParentId();
         mMediator.loadUrl(
                 new OmniboxLoadUrlParams.Builder(TEST_URL, PageTransition.TYPED)
                         .setOpenInNewWindow(true)
                         .build());
 
-        verify(mMultiInstanceManager)
-                .openUrlInOtherWindow(mLoadUrlParamsCaptor.capture(), anyInt(), eq(true), anyInt());
+        verify(mMultiInstanceOrchestrator)
+                .openUrlInOtherWindow(
+                        eq(sourceActivity),
+                        mLoadUrlParamsCaptor.capture(),
+                        eq(1),
+                        eq(true),
+                        eq(false));
         assertEquals(TEST_URL, mLoadUrlParamsCaptor.getValue().getUrl());
         assertEquals(
                 PageTransition.TYPED | PageTransition.FROM_ADDRESS_BAR,
@@ -839,9 +954,41 @@ public class LocationBarMediatorTest {
 
     @Test
     public void testOnKey_escape() {
-        assertTrue(mMediator.handleEscPress());
-        verify(mUrlCoordinator)
-                .setUrlBarData(mUrlBarData, UrlBar.ScrollType.SCROLL_TO_TLD, UrlBarData.SELECT_ALL);
+        mMediator.onFinishNativeInitialization();
+        mProfileSupplier.set(mProfile);
+        mMediator.onUrlFocusChange(true);
+
+        var input = getSession().getAutocompleteInput();
+        input.setUserText("some text");
+        input.setInitialUserText("initial text");
+
+        {
+            // Step 1: expect suggestions to be cleared if user presses <esc>.
+            doReturn(true).when(mAutocompleteCoordinator).isServingSuggestions();
+            assertTrue(mMediator.handleEscPress());
+            verify(mAutocompleteCoordinator).stopAutocomplete();
+            verify(mAutocompleteCoordinator, never()).endInput();
+        }
+
+        {
+            // Step 2: expect content to be reverted if suggestions are already cleared.
+            doReturn(false).when(mAutocompleteCoordinator).isServingSuggestions();
+            assertTrue(mMediator.handleEscPress());
+            assertEquals(input.getUserText(), input.getInitialUserText());
+            verify(mAutocompleteCoordinator, never()).endInput();
+        }
+
+        {
+            // Step 3: if both user text and initial user text are same, expect the input to be
+            // canceled.
+            assertTrue(mMediator.handleEscPress());
+            verify(mAutocompleteCoordinator).endInput();
+        }
+
+        {
+            // Step 4: no other actions can be taken: bail
+            assertFalse(mMediator.handleEscPress());
+        }
     }
 
     @Test
@@ -1120,7 +1267,6 @@ public class LocationBarMediatorTest {
                         () -> mModalDialogManager,
                         mPageZoomIndicatorCoordinator,
                         mFuseboxCoordinator,
-                        mMultiInstanceManager,
                         mLocationBarEmbedder,
                         /* omniboxChipManager= */ null);
         mMediator.setCoordinators(mUrlCoordinator, mAutocompleteCoordinator, mStatusCoordinator);
@@ -1658,11 +1804,13 @@ public class LocationBarMediatorTest {
 
         verify(mAutocompleteCoordinator, times(2)).beginInput(captor.capture());
         assertEquals("test query", captor.getValue().getAutocompleteInput().getUserText());
-        clearInvocations(mAutocompleteCoordinator);
+        clearInvocations(mAutocompleteCoordinator, mUrlCoordinator);
 
         mMediator.deleteButtonClicked(null);
-        verify(mAutocompleteCoordinator).beginInput(captor.capture());
         assertEquals("", captor.getValue().getAutocompleteInput().getUserText());
+        ArgumentCaptor<UrlBarData> urlBarDataCaptor = ArgumentCaptor.forClass(UrlBarData.class);
+        verify(mUrlCoordinator).setUrlBarData(urlBarDataCaptor.capture(), anyInt(), any());
+        assertTrue(urlBarDataCaptor.getValue().displayText.isEmpty());
         verify(mUrlCoordinator).requestAccessibilityFocus();
     }
 
@@ -2104,6 +2252,11 @@ public class LocationBarMediatorTest {
         mMediator.onSearchBoxHintTextChanged();
 
         verify(mUrlCoordinator).setUrlBarHintText(eq("search engine hint text"));
+
+        mMediator.onUrlFocusChange(false);
+        doReturn("search engine hint text unfocused")
+                .when(mSearchEngineUtils)
+                .getOmniboxHintText(anyInt(), any());
     }
 
     @Test
@@ -2117,6 +2270,32 @@ public class LocationBarMediatorTest {
         mMediator.onSearchBoxHintTextChanged();
 
         verify(mUrlCoordinator, never()).setUrlBarHintText(any());
+    }
+
+    @Test
+    public void testLoadUrl_chromeExtensionScheme() {
+        mMediator.onFinishNativeInitialization();
+        mProfileSupplier.set(mProfile);
+
+        ExtensionUiBackend mockExtensionUiBackend = mock(ExtensionUiBackend.class);
+        ExtensionUi.setBackendForTesting(mockExtensionUiBackend);
+
+        doReturn(mTab).when(mLocationBarDataProvider).getTab();
+
+        String url = UrlConstants.CHROME_EXTENSION_SCHEME + "://id/?q=test";
+        mMediator.loadUrl(
+                new OmniboxLoadUrlParams.Builder(url, PageTransition.TYPED)
+                        .setOpenInNewTab(true)
+                        .build());
+
+        verify(mockExtensionUiBackend)
+                .onOmniboxExtensionInputEntered(mWebContents, url, true, false);
+        verify(mTab, never()).loadUrl(any());
+        verify(mTabModelSelector, never()).openNewTab(any(), anyInt(), any(), anyBoolean());
+        verify(mMultiInstanceOrchestrator, never())
+                .openUrlInOtherWindow(any(), any(), anyInt(), anyBoolean(), anyBoolean());
+
+        ExtensionUi.setBackendForTesting(null);
     }
 
     private FuseboxSessionState getSession() {

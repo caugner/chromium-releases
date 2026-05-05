@@ -8,6 +8,7 @@
 #include <memory>
 #include <vector>
 
+#include "base/functional/callback_forward.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
@@ -23,6 +24,10 @@ class GURL;
 class LocationBar;
 class Profile;
 
+namespace content {
+class NavigationHandle;
+}  // namespace content
+
 namespace omnibox {
 class OmniboxPopupCloser;
 }  // namespace omnibox
@@ -36,7 +41,10 @@ class ChromeOmniboxClient final : public OmniboxClient {
   ChromeOmniboxClient& operator=(const ChromeOmniboxClient&) = delete;
   ~ChromeOmniboxClient() override;
 
+  LocationBar* GetLocationBar() const { return location_bar_; }
+
   // OmniboxClient.
+  bool IsChromeOmniboxClient() const override;
   std::unique_ptr<AutocompleteProviderClient> CreateAutocompleteProviderClient()
       override;
   bool CurrentPageExists() const override;
@@ -50,7 +58,8 @@ class ChromeOmniboxClient final : public OmniboxClient {
   SessionID GetSessionID() const override;
   bool ShowConfirmationDialogIfDefaultSearchExtensionControlled(
       const GURL& url,
-      base::OnceCallback<void(bool)> callback) override;
+      base::OnceCallback<void(ExtensionControlledDialogResult)> callback)
+      override;
   PrefService* GetPrefs() override;
   const PrefService* GetPrefs() const override;
   bookmarks::BookmarkModel* GetBookmarkModel() override;
@@ -86,8 +95,6 @@ class ChromeOmniboxClient final : public OmniboxClient {
   void OnInputStateChanged() override;
   void OnFocusChanged(OmniboxFocusState state,
                       OmniboxFocusChangeReason reason) override;
-  void OnKeywordModeChanged(bool entered,
-                            const std::u16string& keyword) override;
   void MaybeShowOnFocusHatsSurvey(AutocompleteProviderClient* client) override;
   void CheckConditionsAndLaunchSurvey();
   void OnResultChanged(const AutocompleteResult& result,
@@ -133,6 +140,11 @@ class ChromeOmniboxClient final : public OmniboxClient {
   void OnInputInProgress(bool in_progress) override;
   void OnPopupVisibilityChanged(bool popup_is_open) override;
   void OpenUrl(GURL gurl) override;
+  void OpenUrlWithCallback(
+      GURL gurl,
+      WindowOpenDisposition disposition,
+      base::OnceCallback<void(base::WeakPtr<content::NavigationHandle>)>
+          callback);
   void OpenIphLink(GURL gurl) override;
   bool IsHistoryEmbeddingsEnabled() const override;
   bool IsAimPopupEnabled() const override;
@@ -141,6 +153,7 @@ class ChromeOmniboxClient final : public OmniboxClient {
   void MaybePrewarmForDefaultSearchEngine(PrewarmTrigger trigger) override;
   base::WeakPtr<OmniboxClient> AsWeakPtr() override;
   Profile* profile() { return profile_; }
+  Browser* browser() { return browser_; }
 
   // Update shortcuts when a navigation succeeds.
   static void OnSuccessfulNavigation(Profile* profile,

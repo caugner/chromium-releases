@@ -29,12 +29,11 @@
 #include "chrome/browser/ui/views/tab_search_bubble_host.h"
 #include "chrome/browser/ui/views/tabs/browser_tab_strip_controller.h"
 #include "chrome/browser/ui/views/tabs/dragging/tab_drag_controller.h"
+#include "chrome/browser/ui/views/tabs/hovercard/tab_hover_card_controller.h"
 #include "chrome/browser/ui/views/tabs/new_tab_button.h"
 #include "chrome/browser/ui/views/tabs/shared/tab_strip_combo_button.h"
 #include "chrome/browser/ui/views/tabs/shared/tab_strip_flat_edge_button.h"
-#include "chrome/browser/ui/views/tabs/tab_hover_card_controller.h"
 #include "chrome/browser/ui/views/tabs/tab_search_button.h"
-#include "chrome/browser/ui/views/tabs/tab_search_container.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/ui/views/tabs/tab_strip_action_container.h"
 #include "chrome/browser/ui/views/tabs/tab_strip_control_button.h"
@@ -272,10 +271,8 @@ HorizontalTabStripRegionView::HorizontalTabStripRegionView(
                                  views::LayoutAlignment::kCenter);
   }
 
-  std::unique_ptr<TabStrip> tab_strip = CreateTabStrip(this, browser_view);
-
-  // Add and configure the TabSearchContainer and TabStripComboButton.
-  std::unique_ptr<TabSearchContainer> tab_search_container;
+  // Add and configure the TabSearchButton and TabStripComboButton.
+  std::unique_ptr<TabSearchButton> tab_search_button;
   std::unique_ptr<TabStripActionContainer> tab_strip_action_container;
   if (browser &&
       (browser->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL)) {
@@ -287,25 +284,25 @@ HorizontalTabStripRegionView::HorizontalTabStripRegionView(
                                               views::LayoutAlignment::kStart);
     } else if (!base::FeatureList::IsEnabled(
                    tabs::kHorizontalTabStripComboButton)) {
-      tab_search_container = std::make_unique<TabSearchContainer>(
-          render_tab_search_before_tab_strip_, this, tab_strip.get());
-      tab_search_container->SetProperty(views::kCrossAxisAlignmentKey,
-                                        views::LayoutAlignment::kCenter);
+      tab_search_button =
+          std::make_unique<TabSearchButton>(browser, Edge::kNone, Edge::kNone);
+      tab_search_button->SetProperty(views::kCrossAxisAlignmentKey,
+                                     views::LayoutAlignment::kCenter);
     }
   }
 
-  if (tab_search_container && render_tab_search_before_tab_strip_) {
-    tab_search_container->SetPaintToLayer();
-    tab_search_container->layer()->SetFillsBoundsOpaquely(false);
+  if (tab_search_button && render_tab_search_before_tab_strip_) {
+    tab_search_button->SetPaintToLayer();
+    tab_search_button->layer()->SetFillsBoundsOpaquely(false);
 
-    tab_search_container_ = AddChildView(std::move(tab_search_container));
+    tab_search_button_ = AddChildView(std::move(tab_search_button));
 
     // Inset between the tabsearch and tabstrip should be reduced to account for
     // extra spacing.
-    tab_search_container_->SetProperty(views::kViewIgnoredByLayoutKey, true);
+    tab_search_button_->SetProperty(views::kViewIgnoredByLayoutKey, true);
   }
 
-  tab_strip_ = AddChildView(std::move(tab_strip));
+  tab_strip_ = AddChildView(CreateTabStrip(this, browser_view));
 
   // Allow the |tab_strip_| to grow into the free space available in
   // the HorizontalTabStripRegionView.
@@ -328,6 +325,14 @@ HorizontalTabStripRegionView::HorizontalTabStripRegionView(
         l10n_util::GetStringUTF16(IDS_TOOLTIP_NEW_TAB));
     new_tab_button_->GetViewAccessibility().SetName(
         l10n_util::GetStringUTF16(IDS_ACCNAME_NEWTAB));
+
+#if BUILDFLAG(IS_LINUX)
+    // On Linux, middle-clicking the New Tab Button triggers
+    // paste and navigate, either to URLs or to search queries.
+    new_tab_button_->SetTriggerableEventFlags(
+        new_tab_button_->GetTriggerableEventFlags() |
+        ui::EF_MIDDLE_MOUSE_BUTTON);
+#endif
   }
 
   reserved_grab_handle_space_ =
@@ -340,9 +345,9 @@ HorizontalTabStripRegionView::HorizontalTabStripRegionView(
 
   SetProperty(views::kElementIdentifierKey, kTabStripRegionElementId);
 
-  if (browser && tab_search_container && !render_tab_search_before_tab_strip_) {
-    tab_search_container_ = AddChildView(std::move(tab_search_container));
-    tab_search_container_->SetProperty(
+  if (browser && tab_search_button && !render_tab_search_before_tab_strip_) {
+    tab_search_button_ = AddChildView(std::move(tab_search_button));
+    tab_search_button_->SetProperty(
         views::kMarginsKey,
         gfx::Insets::TLBR(0, 0, 0,
                           GetLayoutConstant(LayoutConstant::kTabStripPadding)));
@@ -368,8 +373,8 @@ HorizontalTabStripRegionView::~HorizontalTabStripRegionView() {
   if (unfocus_button_) {
     RemoveChildViewT(std::exchange(unfocus_button_, nullptr));
   }
-  if (tab_search_container_) {
-    RemoveChildViewT(std::exchange(tab_search_container_, nullptr));
+  if (tab_search_button_) {
+    RemoveChildViewT(std::exchange(tab_search_button_, nullptr));
   }
 }
 
@@ -383,8 +388,8 @@ bool HorizontalTabStripRegionView::IsPositionInWindowCaption(
     return false;
   }
 
-  if (render_tab_search_before_tab_strip_ && tab_search_container_ &&
-      IsHitInView(tab_search_container_, point)) {
+  if (render_tab_search_before_tab_strip_ && tab_search_button_ &&
+      IsHitInView(tab_search_button_, point)) {
     return false;
   }
 
@@ -434,8 +439,8 @@ views::View::Views HorizontalTabStripRegionView::GetChildrenInZOrder() {
     children.emplace_back(unfocus_button_.get());
   }
 
-  if (tab_search_container_) {
-    children.emplace_back(tab_search_container_.get());
+  if (tab_search_button_) {
+    children.emplace_back(tab_search_button_.get());
   }
 
   if (tab_strip_action_container_) {
@@ -457,9 +462,9 @@ void HorizontalTabStripRegionView::Layout(PassKey) {
     return;
   }
 
-  const bool tab_search_container_before_tab_strip =
-      tab_search_container_ && render_tab_search_before_tab_strip_;
-  if (tab_search_container_before_tab_strip ||
+  const bool tab_search_button_before_tab_strip =
+      tab_search_button_ && render_tab_search_before_tab_strip_;
+  if (tab_search_button_before_tab_strip ||
       (unfocus_button_ && unfocus_button_->GetVisible()) || combo_button_) {
     UpdateTabStripMargin();
   }
@@ -467,9 +472,9 @@ void HorizontalTabStripRegionView::Layout(PassKey) {
   LayoutSuperclass<views::AccessiblePaneView>(this);
 
   int leading_offset = 0;
-  if (tab_search_container_before_tab_strip) {
-    AdjustViewBoundsRect(tab_search_container_, leading_offset);
-    leading_offset += tab_search_container_->GetPreferredSize().width() +
+  if (tab_search_button_before_tab_strip) {
+    AdjustViewBoundsRect(tab_search_button_, leading_offset);
+    leading_offset += tab_search_button_->GetPreferredSize().width() +
                       GetLayoutConstant(LayoutConstant::kTabStripPadding);
   }
 
@@ -571,11 +576,11 @@ views::View* HorizontalTabStripRegionView::GetDefaultFocusableChild() {
                          : AccessiblePaneView::GetDefaultFocusableChild();
 }
 
-TabStripFlatEdgeButton* HorizontalTabStripRegionView::GetTabSearchButton() {
+views::Button* HorizontalTabStripRegionView::GetTabSearchButton() {
   if (combo_button_) {
     return combo_button_->end_button();
   }
-  return nullptr;
+  return tab_search_button_;
 }
 
 views::LabelButton* HorizontalTabStripRegionView::GetGlicButton() {
@@ -679,6 +684,12 @@ views::View* HorizontalTabStripRegionView::GetTabStripView() {
   return tab_strip_;
 }
 
+std::unique_ptr<ExpandOnHoverLock>
+HorizontalTabStripRegionView::GetExpandOnHoverLock(
+    ExpandOnHoverLockType lock_type) {
+  return nullptr;
+}
+
 bool HorizontalTabStripRegionView::HasLeadingButtons() const {
   if (combo_button_ && combo_button_->GetVisible() &&
       ((combo_button_->start_button() &&
@@ -690,8 +701,8 @@ bool HorizontalTabStripRegionView::HasLeadingButtons() const {
   if (unfocus_button_ && unfocus_button_->GetVisible()) {
     return true;
   }
-  if (tab_search_container_ && render_tab_search_before_tab_strip_ &&
-      tab_search_container_->GetVisible()) {
+  if (tab_search_button_ && render_tab_search_before_tab_strip_ &&
+      tab_search_button_->GetVisible()) {
     return true;
   }
   return false;
@@ -736,14 +747,8 @@ void HorizontalTabStripRegionView::UpdateButtonBorders() {
   if (unfocus_button_) {
     UpdateBorderInsetsIfNeeded(unfocus_button_, border_insets);
   }
-  if (tab_search_container_) {
-    UpdateBorderInsetsIfNeeded(tab_search_container_->tab_search_button(),
-                               border_insets);
-
-    if (tab_search_container_->auto_tab_group_button()) {
-      UpdateBorderInsetsIfNeeded(tab_search_container_->auto_tab_group_button(),
-                                 border_insets);
-    }
+  if (tab_search_button_) {
+    UpdateBorderInsetsIfNeeded(tab_search_button_, border_insets);
   }
 }
 
@@ -781,11 +786,11 @@ void HorizontalTabStripRegionView::UpdateTabStripMargin() {
   std::optional<int> tab_strip_left_margin;
   int current_leading_width = 0;
 
-  if (tab_search_container_ && render_tab_search_before_tab_strip_) {
-    // The `tab_search_container_` is being laid out manually.
-    CHECK(tab_search_container_->GetProperty(views::kViewIgnoredByLayoutKey));
+  if (tab_search_button_ && render_tab_search_before_tab_strip_) {
+    // The `tab_search_button_` is being laid out manually.
+    CHECK(tab_search_button_->GetProperty(views::kViewIgnoredByLayoutKey));
     current_leading_width +=
-        tab_search_container_->GetPreferredSize().width() +
+        tab_search_button_->GetPreferredSize().width() +
         GetLayoutConstant(LayoutConstant::kTabStripPadding);
   }
 

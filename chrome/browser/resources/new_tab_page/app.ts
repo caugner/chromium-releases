@@ -238,7 +238,7 @@ export class AppElement extends AppElementBase {
 
       // Used in cr-searchbox component via host-context.
       colorSourceIsBaseline: {type: Boolean},
-      logoColor_: {type: String},
+      logoColor_: {type: Object},
       singleColoredLogo_: {type: Boolean},
 
       realboxShown_: {type: Boolean},
@@ -294,7 +294,6 @@ export class AppElement extends AppElementBase {
       wallpaperSearchButtonAnimationEnabled_: {type: Boolean},
       wallpaperSearchButtonEnabled_: {type: Boolean},
       showWallpaperSearchButton_: {type: Boolean},
-      composeboxCloseByClickOutside_: {type: Boolean},
       isActionChipsVisible_: {type: Boolean},
       isFooterVisible_: {type: Boolean},
 
@@ -303,17 +302,16 @@ export class AppElement extends AppElementBase {
         reflect: true,
       },
 
-      realboxLayoutMode_: {
-        type: String,
-        reflect: true,
-      },
-
       searchboxCyclingPlaceholders_: {
         type: Boolean,
       },
 
       ntpNextFeaturesEnabled_: {type: Boolean},
-      maxTilesBeforeShowMore_: {type: Number},
+      ntpNextDisablementEnabled_: {type: Boolean},
+      maxTilesInCollapsedState_: {type: Number},
+      maxShortcutsInExpandedState_: {type: Number},
+      maxMostVisitedTilesInExpandedState_: {type: Number},
+      maxEnterpriseShortcuts_: {type: Number},
       containerFocused_: {type: Boolean},
 
       /**
@@ -326,16 +324,12 @@ export class AppElement extends AppElementBase {
 
       contextMenuGlifAnimationState_: {type: String},
       undoToastCallback_: {type: Object},
-      undoToastMessage_: {type: Object},
+      undoToastMessage_: {type: String},
 
       /**
        * Whether to show the AIM threads rail when composebox is open.
        */
       enableThreadsRail_: {type: Boolean},
-      reducedMotionPreferred_: {
-        type: Boolean,
-        reflect: true,
-      },
 
       // =======================================================================
       // Private properties
@@ -348,6 +342,9 @@ export class AppElement extends AppElementBase {
         type: Number,
         reflect: true,
       },
+
+      energyEffectEnabled_: {type: Boolean, reflect: true},
+      energyEffectAnimationEnabled_: {type: Boolean, reflect: true},
     };
   }
 
@@ -412,36 +409,42 @@ export class AppElement extends AppElementBase {
   protected accessor wallpaperSearchButtonEnabled_: boolean =
       loadTimeData.getBoolean('wallpaperSearchButtonEnabled');
   protected accessor showWallpaperSearchButton_: boolean = false;
-  protected accessor composeboxCloseByClickOutside_: boolean =
-      loadTimeData.getBoolean('composeboxCloseByClickOutside');
   protected accessor isActionChipsVisible_: boolean =
       loadTimeData.getBoolean('actionChipsEnabled');
   protected accessor isFooterVisible_: boolean = false;
   protected accessor ntpRealboxNextEnabled_: boolean =
       loadTimeData.getBoolean('ntpRealboxNextEnabled');
-  protected accessor realboxLayoutMode_: string =
-      loadTimeData.getString('realboxLayoutMode');
   protected accessor searchboxCyclingPlaceholders_: boolean =
       loadTimeData.getBoolean('searchboxCyclingPlaceholders');
   protected accessor ntpNextFeaturesEnabled_: boolean =
       loadTimeData.getBoolean('ntpNextFeaturesEnabled');
-  protected accessor maxTilesBeforeShowMore_: number =
-      loadTimeData.getInteger('maxTilesBeforeShowMore');
+  protected accessor ntpNextDisablementEnabled_: boolean =
+      loadTimeData.getBoolean('ntpNextDisablementEnabled');
+  protected accessor maxTilesInCollapsedState_: number =
+      loadTimeData.getInteger('maxTilesInCollapsedState');
+  protected accessor maxShortcutsInExpandedState_: number =
+      loadTimeData.getInteger('maxShortcutsInExpandedState');
+  protected accessor maxMostVisitedTilesInExpandedState_: number =
+      loadTimeData.getInteger('maxMostVisitedTilesInExpandedState');
+  protected accessor maxEnterpriseShortcuts_: number =
+      loadTimeData.getInteger('maxEnterpriseShortcuts');
   protected accessor containerFocused_: boolean = false;
   protected accessor showScrim_: boolean = false;
   protected accessor contextMenuGlifAnimationState_: GlifAnimationState =
-      this.ntpNextFeaturesEnabled_ && this.isActionChipsVisible_ ?
+      this.ntpNextFeaturesEnabled_ &&
+          (!this.ntpNextDisablementEnabled_ || this.isActionChipsVisible_) ?
       GlifAnimationState.SPINNER_ONLY :
       GlifAnimationState.INELIGIBLE;
   protected accessor undoToastCallback_: (() => void)|null = null;
   protected accessor undoToastMessage_: string|null = null;
-  protected ephemeralContextMenuDescriptionEnabled_: boolean =
-      loadTimeData.getBoolean('enableEphemeralContextMenuDescription') ?? false;
   protected showContextMenuDescription_: boolean =
       loadTimeData.getBoolean('composeboxShowContextMenuDescription');
   protected accessor enableThreadsRail_: boolean =
       loadTimeData.getBoolean('enableThreadsRail');
-
+  protected accessor energyEffectEnabled_: boolean =
+      loadTimeData.getBoolean('energyEffectEnabled');
+  protected accessor energyEffectAnimationEnabled_: boolean =
+      loadTimeData.getBoolean('energyEffectAnimationEnabled');
   private accessor selectedCustomizeDialogPage_: string|null = null;
   private accessor middleSlotPromoLoaded_: boolean = false;
   private accessor modulesLoadedStatus_: ModuleLoadStatus =
@@ -738,7 +741,7 @@ export class AppElement extends AppElementBase {
       this.recordBrowserPromoMetrics_();
     }
 
-    if (this.ntpRealboxNextEnabled_ && this.realboxLayoutMode_ !== '') {
+    if (this.ntpRealboxNextEnabled_) {
       this.registerHelpBubble(
           CONTEXTUAL_ENTRYPOINT_ELEMENT_ID, ['#searchbox', '#context'],
           {fixed: true});
@@ -888,8 +891,8 @@ export class AppElement extends AppElementBase {
   }
 
   protected onScrimClick_() {
-    if (this.showComposebox_ && this.composeboxCloseByClickOutside_) {
-      this.onComposeboxClickOutside_();
+    if (this.showComposebox_) {
+      this.onComposeboxOutsideClick_();
     }
     if (this.showLensUploadDialog_) {
       this.onCloseLensSearch_();
@@ -897,12 +900,12 @@ export class AppElement extends AppElementBase {
     this.containerFocused_ = false;
   }
 
-  protected onComposeboxClickOutside_() {
+  protected onComposeboxOutsideClick_() {
     const composebox =
         this.shadowRoot.querySelector<ComposeboxElement>('#composebox');
     assert(composebox);
     const closeComposebox = new CustomEvent('closeComposebox', {
-      detail: {composeboxText: composebox.getText()},
+      detail: {composeboxText: composebox.input},
       bubbles: true,
       cancelable: true,
     });
@@ -924,7 +927,7 @@ export class AppElement extends AppElementBase {
     const composebox =
         this.shadowRoot.querySelector<ComposeboxElement>('#composebox');
     assert(composebox);
-    composebox.setText('');
+    composebox.input = '';
     composebox.resetModes();
     if (this.ntpRealboxNextEnabled_) {
       composebox.closeDropdown();
@@ -960,13 +963,6 @@ export class AppElement extends AppElementBase {
 
   protected onCloseLensSearch_() {
     this.showLensUploadDialog_ = false;
-  }
-
-  protected onContextMenuEntrypointClick_() {
-    if (this.ephemeralContextMenuDescriptionEnabled_ &&
-        this.showContextMenuDescription_) {
-      this.pageHandler_.recordContextMenuClick();
-    }
   }
 
   protected onCustomizeClick_() {
@@ -1344,6 +1340,23 @@ export class AppElement extends AppElementBase {
   }
 
   private onWindowClick_(e: Event) {
+    if (this.ntpRealboxNextEnabled_) {
+      const searchbox = this.shadowRoot.querySelector('ntp-searchbox');
+      const actionChips = this.shadowRoot.querySelector('ntp-action-chips');
+      const helpBubble =
+          searchbox ? searchbox.shadowRoot.querySelector('help-bubble') : null;
+      if (helpBubble) {
+        const isClickOnBubble = e.composedPath().includes(helpBubble);
+        const isClickOnSearchbox =
+            searchbox && e.composedPath().includes(searchbox);
+        const isClickOnActionChips =
+            actionChips && e.composedPath().includes(actionChips);
+        if (!isClickOnBubble && (isClickOnSearchbox || isClickOnActionChips)) {
+          this.hideHelpBubble(CONTEXTUAL_ENTRYPOINT_ELEMENT_ID);
+        }
+      }
+    }
+
     if (e.composedPath() && e.composedPath()[0] === $$(this, '#content')) {
       recordClick(NtpElement.BACKGROUND);
       return;
@@ -1414,9 +1427,13 @@ export class AppElement extends AppElementBase {
     this.realboxHadSecondarySide = e.detail.value;
   }
 
-  protected onSearchboxContainerFocusin_() {
+  protected onSearchboxContainerFocusin_(e: FocusEvent) {
     if (this.ntpRealboxNextEnabled_) {
-      this.containerFocused_ = true;
+      const isHelpBubble = e.composedPath().some(
+          el => (el as HTMLElement)?.tagName === 'HELP-BUBBLE');
+      if (!isHelpBubble) {
+        this.containerFocused_ = true;
+      }
     }
   }
 

@@ -27,7 +27,6 @@
 #import "ios/chrome/browser/autofill/form_input_accessory/coordinator/form_input_accessory_mediator_handler.h"
 #import "ios/chrome/browser/autofill/form_input_accessory/coordinator/keyboard_accessory_optional_update_scheduler.h"
 #import "ios/chrome/browser/autofill/form_input_accessory/public/form_input_accessory_chromium_text_data.h"
-#import "ios/chrome/browser/autofill/form_input_accessory/public/scoped_form_input_accessory_reauth_module_override.h"
 #import "ios/chrome/browser/autofill/form_input_accessory/ui/form_input_accessory_consumer.h"
 #import "ios/chrome/browser/autofill/form_input_accessory/ui/form_suggestion_view.h"
 #import "ios/chrome/browser/autofill/model/bottom_sheet/autofill_bottom_sheet_observer_bridge.h"
@@ -665,14 +664,6 @@ bool IsStateless() {
 
 #pragma mark - Private
 
-// Returns the reauthentication module, which can be an override for testing
-// purposes.
-- (ReauthenticationModule*)reauthenticationModule {
-  id<ReauthenticationProtocol> overrideModule =
-      ScopedFormInputAccessoryReauthModuleOverride::Get();
-  return overrideModule ? overrideModule : _reauthenticationModule;
-}
-
 - (void)updateSuggestionsIfNeeded {
   if (!_webState || !_webState->IsVisible()) {
     return;
@@ -838,7 +829,8 @@ bool IsStateless() {
 // Handles the selection of a suggestion. `index` indicates the position of the
 // suggestion among the available suggestions.
 - (void)handleSuggestion:(FormSuggestion*)formSuggestion
-                 atIndex:(NSInteger)index {
+                 atIndex:(NSInteger)index
+              completion:(ProceduralBlock)completion {
   if ([self getProviderTypeFromSuggestion:formSuggestion] ==
       SuggestionProviderTypePassword) {
     default_browser::NotifyPasswordAutofillSuggestionUsed(
@@ -849,7 +841,9 @@ bool IsStateless() {
         notifyAutofillSuggestionWithIPHSelectedFor:formSuggestion
                                                        .featureForIPH];
   }
-  [self.currentProvider didSelectSuggestion:formSuggestion atIndex:index];
+  [self.currentProvider didSelectSuggestion:formSuggestion
+                                    atIndex:index
+                                 completion:completion];
 }
 
 // Sets the last focused form activity web frame ID with the given `frame`.
@@ -870,7 +864,8 @@ bool IsStateless() {
 #pragma mark - FormSuggestionClient
 
 - (void)didSelectSuggestion:(FormSuggestion*)formSuggestion
-                    atIndex:(NSInteger)index {
+                    atIndex:(NSInteger)index
+                 completion:(ProceduralBlock)completion {
   if (IsStateless()) {
     // When using the stateless FormSuggestionsController, ensure the params
     // attached to the suggestion are the same as the ones held by this mediator
@@ -891,19 +886,25 @@ bool IsStateless() {
   if (!formSuggestion.requiresReauth) {
     [self logReauthenticationEvent:ReauthenticationEvent::kSuccess
                      forSuggestion:formSuggestion];
-    [self handleSuggestion:formSuggestion atIndex:index];
+    [self handleSuggestion:formSuggestion atIndex:index completion:completion];
     return;
   }
   if ([self.reauthenticationModule canAttemptReauth]) {
     NSString* reason = l10n_util::GetNSString(IDS_IOS_AUTOFILL_REAUTH_REASON);
+    __weak __typeof(self) weakSelf = self;
     auto completionHandler = ^(ReauthenticationResult result) {
       if (result != ReauthenticationResult::kFailure) {
-        [self logReauthenticationEvent:ReauthenticationEvent::kSuccess
-                         forSuggestion:formSuggestion];
-        [self handleSuggestion:formSuggestion atIndex:index];
+        [weakSelf logReauthenticationEvent:ReauthenticationEvent::kSuccess
+                             forSuggestion:formSuggestion];
+        [weakSelf handleSuggestion:formSuggestion
+                           atIndex:index
+                        completion:completion];
       } else {
-        [self logReauthenticationEvent:ReauthenticationEvent::kFailure
-                         forSuggestion:formSuggestion];
+        [weakSelf logReauthenticationEvent:ReauthenticationEvent::kFailure
+                             forSuggestion:formSuggestion];
+        if (completion) {
+          completion();
+        }
       }
     };
 
@@ -914,15 +915,16 @@ bool IsStateless() {
   } else {
     [self logReauthenticationEvent:ReauthenticationEvent::kMissingPasscode
                      forSuggestion:formSuggestion];
-    [self handleSuggestion:formSuggestion atIndex:index];
+    [self handleSuggestion:formSuggestion atIndex:index completion:completion];
   }
 }
 
 - (void)didSelectSuggestion:(FormSuggestion*)formSuggestion
                     atIndex:(NSInteger)index
-                     params:(const autofill::FormActivityParams&)params {
+                     params:(const autofill::FormActivityParams&)params
+                 completion:(ProceduralBlock)completion {
   CHECK_EQ(_lastSeenParams, params);
-  [self didSelectSuggestion:formSuggestion atIndex:index];
+  [self didSelectSuggestion:formSuggestion atIndex:index completion:completion];
 }
 
 #pragma mark - PasswordCounterObserver

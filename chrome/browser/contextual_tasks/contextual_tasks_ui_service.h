@@ -6,14 +6,18 @@
 #define CHROME_BROWSER_CONTEXTUAL_TASKS_CONTEXTUAL_TASKS_UI_SERVICE_H_
 
 #include <map>
+#include <set>
 #include <utility>
 #include <vector>
 
+#include "base/callback_list.h"
 #include "base/functional/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
+#include "base/observer_list.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks.mojom.h"
+#include "chrome/browser/contextual_tasks/contextual_tasks_ui_service_delegate.h"
 #include "chrome/browser/tab_list/tab_list_interface.h"
 #include "components/contextual_search/contextual_search_session_handle.h"
 #include "components/keyed_service/core/keyed_service.h"
@@ -46,7 +50,15 @@ namespace tabs {
 class TabInterface;
 }  // namespace tabs
 
+namespace lens {
+class LensMediaLinkHandler;
+}  // namespace lens
+
 namespace contextual_tasks {
+inline constexpr char kTaskQueryParam[] = "chrome_task_id";
+inline constexpr char kChromeHostParam[] = "chrome_host";
+
+class ContextualTasksCookieSynchronizer;
 class ContextualTasksService;
 class ContextualTasksUIInterface;
 
@@ -58,17 +70,31 @@ class ContextualTasksUiService : public KeyedService {
                            IsAllowedHost_WithOverride);
 
  public:
+  class Observer : public base::CheckedObserver {
+   public:
+    virtual void OnContextualTasksUiServiceShutdown(
+        ContextualTasksUiService* service) {}
+  };
+
   ContextualTasksUiService(
       Profile* profile,
+      std::unique_ptr<ContextualTasksUiServiceDelegate> delegate,
       contextual_tasks::ContextualTasksService* contextual_tasks_service,
       signin::IdentityManager* identity_manager,
-      AimEligibilityService* aim_eligibility_service);
+      AimEligibilityService* aim_eligibility_service,
+      std::unique_ptr<ContextualTasksCookieSynchronizer> cookie_synchronizer);
   ContextualTasksUiService(const ContextualTasksUiService&) = delete;
   ContextualTasksUiService operator=(const ContextualTasksUiService&) = delete;
   ~ContextualTasksUiService() override;
 
   // KeyedService:
   void Shutdown() override;
+
+  // Triggers the cookie synchronization to the isolated partition.
+  virtual void EnsureCookiesSynced();
+
+  void AddObserver(Observer* observer);
+  void RemoveObserver(Observer* observer);
 
   // A notification that the browser attempted to navigate to the AI page. If
   // this method is being called, it means the navigation was blocked and it
@@ -126,6 +152,20 @@ class ContextualTasksUiService : public KeyedService {
   // entry is removed from the cache.
   virtual std::optional<GURL> GetInitialUrlForTask(const base::Uuid& uuid);
 
+  // Returns the URL that a task should be created for. This function does
+  // not clear the entry from the cache.
+  virtual std::optional<GURL> GetCreationUrlForTask(const base::Uuid& task_id);
+
+  // Adds a callback to be run when the URL for a task becomes available.
+  // This is only used in cases where the side panel is "warmed up" (i.e. using
+  // very specific *GhostLoader methods).
+  virtual void AddPendingUrlCallback(
+      const base::Uuid& task_id,
+      base::OnceCallback<void(const GURL&)> callback);
+
+  // Returns whether the task is waiting for a URL to be generated.
+  virtual bool IsTaskWaitingForUrl(const base::Uuid& task_id);
+
   // Get a thread URL based on the task ID. If no task is found or the task does
   // not have a thread ID, the default AI URL is returned.
   virtual void GetThreadUrlFromTaskId(const base::Uuid& task_id,
@@ -153,6 +193,15 @@ class ContextualTasksUiService : public KeyedService {
       std::unique_ptr<contextual_search::ContextualSearchSessionHandle>
           session_handle);
 
+  // Opens the contextual tasks side panel showing a ghost loader while waiting
+  // for the initial thread URL to be provided for that task. This creates an
+  // empty task. If the panel is already open for a task, this is a no-op.
+  virtual void InitSidePanelWithGhostLoader(
+      BrowserWindowInterface* browser_window_interface,
+      tabs::TabInterface* tab_interface,
+      std::unique_ptr<contextual_search::ContextualSearchSessionHandle>
+          session_handle);
+
   // Opens the contextual tasks side panel with the protected error page showing
   // by default.
   virtual void StartTaskUiInSidePanelWithErrorPage(
@@ -170,6 +219,9 @@ class ContextualTasksUiService : public KeyedService {
 
   // Returns whether the provided URL is to a contextual tasks WebUI page.
   static bool IsContextualTasksUrl(const GURL& url);
+
+  // Gets the contextual task Id from a contextual task host URL.
+  static base::Uuid GetTaskIdFromUrl(const GURL& url);
 
   // Returns whether the provided URL represents a contextual tasks "display
   // URL" that should lead to the contextual tasks WebUI page upon navigation.
@@ -192,6 +244,9 @@ class ContextualTasksUiService : public KeyedService {
   // it. This will exclude chrome webui-specific params, specifically "task".
   static GURL CopyParamsFromWebUIUrl(const GURL& base_url,
                                      const GURL& webui_url);
+
+  // Returns whether the provided host is trusted for overrides.
+  static bool IsTrustedHost(const std::string& host);
 
   // Called when the Lens overlay is shown/hidden. No-op if the active UI is not
   // in the side panel since the Lens button is always hidden in a tab.
@@ -234,13 +289,16 @@ class ContextualTasksUiService : public KeyedService {
 
   // Fetches an access token for the primary account.
   using GetAccessTokenCallback = base::OnceCallback<void(const std::string&)>;
-  virtual void GetAccessToken(
-      GetAccessTokenCallback callback,
-      base::WeakPtr<content::WebContents> web_contents);
+  virtual void GetAccessToken(GetAccessTokenCallback callback,
+                              base::WeakPtr<content::WebContents> web_contents);
 
   // Gets the entry point override for a given task.
   omnibox::ChromeAimEntryPoint GetInitialEntryPointForTask(
       const base::Uuid& task_id);
+
+  // Show the feedback form.
+  virtual void OpenFeedbackUi(BrowserWindowInterface* browser,
+                              const GURL& page_url);
 
   base::WeakPtr<ContextualTasksUiService> GetWeakPtr() {
     return weak_ptr_factory_.GetWeakPtr();
@@ -263,6 +321,20 @@ class ContextualTasksUiService : public KeyedService {
   virtual void LoadUrlInWebContents(const GURL& url,
                                     content::WebContents* web_contents);
 
+  // Creates a LensMediaLinkHandler for the given WebContents.
+  // Virtual to allow overriding in tests to mock the handler.
+#if !BUILDFLAG(IS_ANDROID)
+  virtual std::unique_ptr<lens::LensMediaLinkHandler> CreateMediaLinkHandler(
+      content::WebContents* web_contents);
+#endif
+
+  // Handles PDF citation links by scrolling to page if applicable.
+  // Returns true if handled.
+  // Virtual to allow overriding in tests.
+  virtual bool MaybeHandlePdfCitation(const GURL& url,
+                                      tabs::TabInterface* tab,
+                                      const base::Uuid& task_id);
+
  private:
   void StartAccessTokenFetch();
 
@@ -280,15 +352,22 @@ class ContextualTasksUiService : public KeyedService {
   // Runs all pending access token callbacks with the provided token.
   void RunPendingAccessTokenCallbacks(const std::string& token);
 
+  // Called when AIM eligibility changes.
+  void OnAimEligibilityChanged();
+
   // Focus an existing tab based on the provided URL if it exists. The URLs are
   // compared without text selection directives as they don't change the page
   // content and only tell the browser what text to highlight on the page. A
   // pointer to the selected tab is returned if found.
-  // TODO(crbug.com/483442073): Remove the ifdef block once we remove
-  // TabStripModel from MaybeFocusExistingOpenTab.
   tabs::TabInterface* MaybeFocusExistingOpenTab(const GURL& url,
                                                 TabListInterface* tab_list,
                                                 const base::Uuid& task_id);
+
+  // Handles video citation links by seeking existing video if applicable.
+  // Returns true if handled.
+  bool MaybeHandleVideoCitation(const GURL& url,
+                                tabs::TabInterface* tab,
+                                const base::Uuid& task_id);
 
   // A callback for checking whether text fragments from a URL are on a page.
   void OnTextFinderLookupComplete(
@@ -309,10 +388,24 @@ class ContextualTasksUiService : public KeyedService {
   // Navigates to a share URL.
   virtual void OnShareUrlNavigation(const GURL& url);
 
+  // Sets the initial thread URL for a given task and runs any pending
+  // callbacks.
+  virtual void OnInitialThreadUrlAvailable(const base::Uuid& task_id,
+                                           const GURL& url);
+
   // Checks if the provided URL matches any of the allowed hosts.
   static bool IsAllowedHost(const GURL& url);
 
+  // Returns the host override for a given task if it differs from the default.
+  std::string GetHostForTask(const base::Uuid& task_id);
+
+ private:
+  base::ObserverList<Observer> observers_;
+
   const raw_ptr<Profile> profile_;
+
+  // The delegate to perform platform specific tasks.
+  std::unique_ptr<ContextualTasksUiServiceDelegate> delegate_;
 
   const raw_ptr<contextual_tasks::ContextualTasksService>
       contextual_tasks_service_;
@@ -335,6 +428,13 @@ class ContextualTasksUiService : public KeyedService {
   // A timer used to refresh the OAuth token before it expires.
   base::OneShotTimer token_refresh_timer_;
 
+  // The cookie synchronizer for the isolated partition.
+  std::unique_ptr<ContextualTasksCookieSynchronizer> cookie_synchronizer_;
+
+  // Subscription for AimEligibilityService changes to trigger cookie sync.
+  base::CallbackListSubscription aim_eligibility_subscription_;
+  bool is_cobrowse_eligible_ = false;
+
   // Map a task's ID to the URL that was used to create it, if it exists. This
   // is primarily used in init flows where the contextual tasks UI is
   // intercepting a query from some other surface like the omnibox. The entry
@@ -351,6 +451,12 @@ class ContextualTasksUiService : public KeyedService {
   // Map of tasks that should show the error page on load to the source trigger.
   std::map<base::Uuid, contextual_search::ContextualSearchSource>
       pending_error_page_tasks_;
+
+  // Map of tasks that are waiting for a URL to be generated. The value is a
+  // callback to be run when the URL becomes available, or null if no callback
+  // has been added yet.
+  std::map<base::Uuid, base::OnceCallback<void(const GURL&)>>
+      tasks_waiting_for_url_;
 
   base::WeakPtrFactory<ContextualTasksUiService> weak_ptr_factory_{this};
 };

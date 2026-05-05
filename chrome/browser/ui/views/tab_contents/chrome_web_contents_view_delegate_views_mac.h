@@ -6,12 +6,15 @@
 #define CHROME_BROWSER_UI_VIEWS_TAB_CONTENTS_CHROME_WEB_CONTENTS_VIEW_DELEGATE_VIEWS_MAC_H_
 
 #include <memory>
+#include <optional>
+#include <vector>
 
-#include "base/memory/raw_ptr.h"
+#include "base/containers/flat_set.h"
 #include "base/memory/weak_ptr.h"
 #include "components/renderer_context_menu/context_menu_delegate.h"
 #include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/web_contents_view_delegate.h"
+#include "ui/base/clipboard/clipboard_format_type.h"
 
 class ChromeWebContentsViewFocusHelper;
 class RenderViewContextMenuBase;
@@ -21,6 +24,10 @@ namespace content {
 class RenderWidgetHostView;
 class WebContents;
 }  // namespace content
+
+namespace ui {
+class DataTransferEndpoint;
+}  // namespace ui
 
 class ChromeWebContentsViewDelegateViewsMac
     : public content::WebContentsViewDelegate,
@@ -56,13 +63,28 @@ class ChromeWebContentsViewDelegateViewsMac
   std::unique_ptr<RenderViewContextMenuBase> BuildMenu(
       content::RenderFrameHost& render_frame_host,
       const content::ContextMenuParams& params) override;
+  void BuildMenuAsync(
+      content::RenderFrameHost& render_frame_host,
+      const content::ContextMenuParams& params,
+      base::OnceCallback<void(std::unique_ptr<RenderViewContextMenuBase>)>
+          callback) override;
   void ShowMenu(std::unique_ptr<RenderViewContextMenuBase> menu) override;
 
  private:
   void OnReadAvailableTypes(
       content::GlobalRenderFrameHostId render_frame_host_id,
       const content::ContextMenuParams& params,
+      std::optional<ui::DataTransferEndpoint> data_dst,
+      base::OnceCallback<void(std::unique_ptr<RenderViewContextMenuBase>)>
+          callback,
       std::vector<std::u16string> types);
+
+  void OnGetAllAvailableFormats(
+      content::GlobalRenderFrameHostId render_frame_host_id,
+      const content::ContextMenuParams& params,
+      base::OnceCallback<void(std::unique_ptr<RenderViewContextMenuBase>)>
+          callback,
+      base::flat_set<ui::ClipboardFormatType> formats);
 
   content::RenderWidgetHostView* GetActiveRenderWidgetHostView() const;
   ChromeWebContentsViewFocusHelper* GetFocusHelper() const;
@@ -77,6 +99,7 @@ class ChromeWebContentsViewDelegateViewsMac
   std::unique_ptr<WebDragBookmarkHandlerMac> bookmark_handler_;
 
   bool is_paste_enabled_ = false;
+  bool is_paste_and_match_style_enabled_ = false;
 
   base::WeakPtrFactory<ChromeWebContentsViewDelegateViewsMac> weak_ptr_factory_{
       this};

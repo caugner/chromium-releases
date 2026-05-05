@@ -4,6 +4,8 @@
 
 package org.chromium.chrome.browser.omnibox.fusebox;
 
+import static com.google.common.truth.Truth.assertThat;
+
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -24,6 +26,7 @@ import org.chromium.chrome.browser.omnibox.fusebox.FuseboxProperties.PopupButton
 import org.chromium.components.feature_engagement.Tracker;
 import org.chromium.components.omnibox.AimModelsProto.ModelMode;
 import org.chromium.components.omnibox.AutocompleteRequestType;
+import org.chromium.components.omnibox.ToolModeProto.ToolMode;
 import org.chromium.ui.modelutil.PropertyModel;
 
 import java.util.Arrays;
@@ -34,10 +37,11 @@ public class FuseboxMetricsTest {
 
     private final PropertyModel mPropertyModel = new PropertyModel(FuseboxProperties.ALL_KEYS);
     private @Mock Tracker mTracker;
+    private FuseboxMetrics mMetrics;
 
     @Before
     public void setUp() {
-        FuseboxMetrics.resetForTesting();
+        mMetrics = new FuseboxMetrics();
     }
 
     @Test
@@ -72,22 +76,53 @@ public class FuseboxMetricsTest {
                         "Omnibox.MobileFusebox.AttachmentButtonUsed",
                         FuseboxMetrics.FuseboxAttachmentButtonType.CLIPBOARD);
 
-        FuseboxMetrics.notifyAttachmentButtonUsed(
-                FuseboxMetrics.FuseboxAttachmentButtonType.CLIPBOARD);
+        mMetrics.notifyAttachmentButtonUsed(FuseboxMetrics.FuseboxAttachmentButtonType.CLIPBOARD);
 
         histogramWatcher.assertExpected();
     }
 
     @Test
-    public void testNotifyModelButtonUsed() {
+    public void testNotifyModelButtonSelected() {
         HistogramWatcher histogramWatcher =
                 HistogramWatcher.newSingleRecordWatcher(
-                        "Omnibox.MobileFusebox.ModelButtonUsed",
+                        "Omnibox.MobileFusebox.ModelButtonSelected",
                         ModelMode.MODEL_MODE_GEMINI_PRO_VALUE);
 
-        FuseboxMetrics.notifyModelButtonUsed(ModelMode.MODEL_MODE_GEMINI_PRO_VALUE);
+        FuseboxMetrics.notifyModelButtonSelected(ModelMode.MODEL_MODE_GEMINI_PRO_VALUE);
 
         histogramWatcher.assertExpected();
+    }
+
+    @Test
+    public void testNotifyToolButtonSelected() {
+        var histogramWatcher =
+                HistogramWatcher.newSingleRecordWatcher(
+                        "Omnibox.MobileFusebox.ToolButtonSelected",
+                        ToolMode.TOOL_MODE_IMAGE_GEN_VALUE);
+
+        FuseboxMetrics.notifyToolButtonSelected(ToolMode.TOOL_MODE_IMAGE_GEN_VALUE);
+
+        histogramWatcher.assertExpected();
+    }
+
+    @Test
+    public void testToolModeHistogramBound() {
+        // When this test fails, it means the proto added a new tool mode, and
+        // TOOL_MODE_HISTOGRAM_BOUND needs to be updated.
+        for (ToolMode mode : ToolMode.values()) {
+            if (mode == ToolMode.UNRECOGNIZED) continue;
+            assertThat(mode.getNumber()).isLessThan(FuseboxMetrics.TOOL_MODE_HISTOGRAM_BOUND);
+        }
+    }
+
+    @Test
+    public void testModelModeHistogramBound() {
+        // When this test fails, it means the proto added a new model mode, and
+        // MODEL_MODE_HISTOGRAM_BOUND needs to be updated.
+        for (ModelMode mode : ModelMode.values()) {
+            if (mode == ModelMode.UNRECOGNIZED) continue;
+            assertThat(mode.getNumber()).isLessThan(FuseboxMetrics.MODEL_MODE_HISTOGRAM_BOUND);
+        }
     }
 
     @Test
@@ -124,7 +159,7 @@ public class FuseboxMetricsTest {
                                 ModelMode.MODEL_MODE_GEMINI_PRO_AUTOROUTE_VALUE)
                         .build();
 
-        FuseboxMetrics.notifyAttachmentsPopupToggled(true, mPropertyModel, mTracker);
+        mMetrics.notifyAttachmentsPopupToggled(true, mPropertyModel, mTracker);
 
         histogramWatcher.assertExpected();
     }
@@ -162,7 +197,7 @@ public class FuseboxMetricsTest {
                                 FuseboxMetrics.FuseboxAttachmentButtonType.FILES)
                         .build();
 
-        FuseboxMetrics.notifyAttachmentsPopupToggled(true, mPropertyModel, mTracker);
+        mMetrics.notifyAttachmentsPopupToggled(true, mPropertyModel, mTracker);
 
         histogramWatcher.assertExpected();
     }
@@ -190,7 +225,33 @@ public class FuseboxMetricsTest {
                                 FuseboxMetrics.FuseboxAttachmentButtonType.GALLERY)
                         .build();
 
-        FuseboxMetrics.notifyAttachmentsPopupToggled(true, mPropertyModel, mTracker);
+        mMetrics.notifyAttachmentsPopupToggled(true, mPropertyModel, mTracker);
+
+        histogramWatcher.assertExpected();
+    }
+
+    @Test
+    public void testNotifyAttachmentsPopupToggled_ShowPopup_ToolButtonsVisible() {
+        mPropertyModel.set(FuseboxProperties.POPUP_TOOL_AI_MODE_VISIBLE, true);
+        mPropertyModel.set(FuseboxProperties.POPUP_TOOL_CREATE_IMAGE_VISIBLE, true);
+        mPropertyModel.set(FuseboxProperties.POPUP_TOOL_DEEP_SEARCH_VISIBLE, true);
+        mPropertyModel.set(FuseboxProperties.POPUP_TOOL_CANVAS_VISIBLE, false);
+
+        var histogramWatcher =
+                HistogramWatcher.newBuilder()
+                        .expectBooleanRecord("Omnibox.MobileFusebox.AttachmentsPopupToggled", true)
+                        .expectIntRecord(
+                                "Omnibox.MobileFusebox.ToolButtonShown",
+                                ToolMode.TOOL_MODE_UNSPECIFIED_VALUE)
+                        .expectIntRecord(
+                                "Omnibox.MobileFusebox.ToolButtonShown",
+                                ToolMode.TOOL_MODE_IMAGE_GEN_VALUE)
+                        .expectIntRecord(
+                                "Omnibox.MobileFusebox.ToolButtonShown",
+                                ToolMode.TOOL_MODE_DEEP_SEARCH_VALUE)
+                        .build();
+
+        mMetrics.notifyAttachmentsPopupToggled(true, mPropertyModel, mTracker);
 
         histogramWatcher.assertExpected();
     }
@@ -202,14 +263,14 @@ public class FuseboxMetricsTest {
                         "Omnibox.MobileFusebox.AttachmentsPopupToggled", false);
 
         // When hiding the popup, no other metrics should be recorded.
-        FuseboxMetrics.notifyAttachmentsPopupToggled(false, mPropertyModel, mTracker);
+        mMetrics.notifyAttachmentsPopupToggled(false, mPropertyModel, mTracker);
 
         histogramWatcher.assertExpected();
     }
 
     @Test
     public void testNotifyOmniboxSessionEnded_SessionStarted_Navigation_NoAttachments() {
-        FuseboxMetrics.notifyOmniboxSessionStarted();
+        mMetrics.notifyOmniboxSessionStarted();
 
         var histogramWatcher =
                 HistogramWatcher.newBuilder()
@@ -222,7 +283,7 @@ public class FuseboxMetricsTest {
                         // No attachment button usage/shown metrics should be recorded.
                         .build();
 
-        FuseboxMetrics.notifyOmniboxSessionEnded(
+        mMetrics.notifyOmniboxSessionEnded(
                 true, AutocompleteRequestType.SEARCH, ModelMode.MODEL_MODE_GEMINI_REGULAR_VALUE);
 
         histogramWatcher.assertExpected();
@@ -230,7 +291,7 @@ public class FuseboxMetricsTest {
 
     @Test
     public void testNotifyOmniboxSessionEnded_SessionStarted_Navigation_AimRequest() {
-        FuseboxMetrics.notifyOmniboxSessionStarted();
+        mMetrics.notifyOmniboxSessionStarted();
 
         var histogramWatcher =
                 HistogramWatcher.newBuilder()
@@ -245,7 +306,7 @@ public class FuseboxMetricsTest {
                                 ModelMode.MODEL_MODE_GEMINI_REGULAR_VALUE)
                         .build();
 
-        FuseboxMetrics.notifyOmniboxSessionEnded(
+        mMetrics.notifyOmniboxSessionEnded(
                 true, AutocompleteRequestType.AI_MODE, ModelMode.MODEL_MODE_GEMINI_REGULAR_VALUE);
 
         histogramWatcher.assertExpected();
@@ -254,7 +315,7 @@ public class FuseboxMetricsTest {
     @Test
     @EnableFeatures(ChromeFeatureList.CHROME_ITEM_PICKER_UI)
     public void testNotifyOmniboxSessionEnded_SessionStarted_Abandon_AttachmentsUsed() {
-        FuseboxMetrics.notifyOmniboxSessionStarted();
+        mMetrics.notifyOmniboxSessionStarted();
 
         mPropertyModel.set(FuseboxProperties.POPUP_ATTACH_CAMERA_VISIBLE, true);
         mPropertyModel.set(FuseboxProperties.POPUP_ATTACH_GALLERY_VISIBLE, true);
@@ -319,14 +380,12 @@ public class FuseboxMetricsTest {
                                 ModelMode.MODEL_MODE_GEMINI_PRO_VALUE)
                         .build();
 
-        FuseboxMetrics.notifyAttachmentsPopupToggled(true, mPropertyModel, mTracker);
+        mMetrics.notifyAttachmentsPopupToggled(true, mPropertyModel, mTracker);
 
-        FuseboxMetrics.notifyAttachmentButtonUsed(
-                FuseboxMetrics.FuseboxAttachmentButtonType.CAMERA);
-        FuseboxMetrics.notifyAttachmentButtonUsed(
-                FuseboxMetrics.FuseboxAttachmentButtonType.TAB_PICKER);
+        mMetrics.notifyAttachmentButtonUsed(FuseboxMetrics.FuseboxAttachmentButtonType.CAMERA);
+        mMetrics.notifyAttachmentButtonUsed(FuseboxMetrics.FuseboxAttachmentButtonType.TAB_PICKER);
 
-        FuseboxMetrics.notifyOmniboxSessionEnded(
+        mMetrics.notifyOmniboxSessionEnded(
                 false, AutocompleteRequestType.AI_MODE, ModelMode.MODEL_MODE_GEMINI_PRO_VALUE);
 
         histogramWatcher.assertExpected();

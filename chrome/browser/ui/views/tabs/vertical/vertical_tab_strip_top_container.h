@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_TABS_VERTICAL_VERTICAL_TAB_STRIP_TOP_CONTAINER_H_
 #define CHROME_BROWSER_UI_VIEWS_TABS_VERTICAL_VERTICAL_TAB_STRIP_TOP_CONTAINER_H_
 
+#include "ui/menus/simple_menu_model.h"
+#include "ui/views/context_menu_controller.h"
 #include "ui/views/layout/delegating_layout_manager.h"
 #include "ui/views/layout/layout_types.h"
 #include "ui/views/view.h"
@@ -12,6 +14,7 @@
 class TabStripComboButton;
 class TabStripFlatEdgeButton;
 class BrowserWindowInterface;
+class ExpandOnHoverLock;
 
 namespace gfx {
 class Point;
@@ -24,12 +27,15 @@ class VerticalTabStripStateController;
 namespace views {
 class ActionViewController;
 class LabelButton;
+class MenuRunner;
 }  // namespace views
 
 // Top container of the vertical tab strip, manages the collapse and tab search
 // buttons, accounting for space that might be needed for caption buttons.
 class VerticalTabStripTopContainer : public views::View,
-                                     public views::LayoutDelegate {
+                                     public views::LayoutDelegate,
+                                     public views::ContextMenuController,
+                                     public ui::SimpleMenuModel::Delegate {
   METADATA_HEADER(VerticalTabStripTopContainer, views::View)
 
  public:
@@ -56,6 +62,17 @@ class VerticalTabStripTopContainer : public views::View,
 
   bool IsPositionInWindowCaption(const gfx::Point& point);
 
+  // views::ContextMenuController:
+  void ShowContextMenuForViewImpl(
+      views::View* source,
+      const gfx::Point& point,
+      ui::mojom::MenuSourceType source_type) override;
+
+  // ui::SimpleMenuModel::Delegate:
+  bool IsCommandIdChecked(int command_id) const override;
+  bool IsCommandIdEnabled(int command_id) const override;
+  void ExecuteCommand(int command_id, int event_flags) override;
+
   // These methods provide the toolbar height and exclusion width, before the
   // layout of this view, for use in calculating positioning of child views. If
   // an exclusion width is provided, nothing can be rendered within the
@@ -63,8 +80,12 @@ class VerticalTabStripTopContainer : public views::View,
   // aligned to the leading, top corner.
   void SetToolbarHeightForLayout(int toolbar_height);
   void SetCaptionButtonWidthForLayout(int caption_button_width);
+  void SetIsExitingExpandOnHoverForLayout(bool is_exiting_expand_on_hover);
+  bool WillWrapDueToOverflow(int available_width) const;
 
  private:
+  void OnCollapseButtonContextMenuClosed();
+
   // Calculates the width of the visible buttons and returns the sum along with
   // the padding between them.
   int GetPreferredWidth() const;
@@ -82,6 +103,10 @@ class VerticalTabStripTopContainer : public views::View,
 
   std::unique_ptr<views::ActionViewController> action_view_controller_;
 
+  std::unique_ptr<ui::SimpleMenuModel> context_menu_model_;
+  std::unique_ptr<views::MenuRunner> context_menu_runner_;
+  std::unique_ptr<ExpandOnHoverLock> expand_on_hover_lock_;
+
   // This represents the toolbar (element containing toolbar buttons, omnibox,
   // app menu, etc) height.
   int toolbar_height_ = 0;
@@ -90,6 +115,10 @@ class VerticalTabStripTopContainer : public views::View,
   // rendered inside of it becaused that area is reserved for outside UI
   // elements.
   int caption_button_width_ = 0;
+  // This is true when the width of the tab strip needs to shrink while exiting
+  // the expand-on-hover animation. This is because the final state needs to be
+  // within the wrapped state bounds when leading caption buttons are present.
+  bool is_exiting_expand_on_hover_ = false;
 
   // This is updated during layout calculation and then applied during layout.
   mutable views::LayoutOrientation combo_button_orientation_ =

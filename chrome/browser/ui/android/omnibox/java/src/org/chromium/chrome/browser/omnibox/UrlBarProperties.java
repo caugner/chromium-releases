@@ -41,17 +41,21 @@ class UrlBarProperties {
         /** Specifies how the text should be selected in the focused state. */
         public final Range<Integer> selection;
 
+        public final boolean originChanged;
+
         public UrlBarTextState(
                 CharSequence text,
                 CharSequence textForAutofillServices,
                 @ScrollType int scrollType,
                 int scrollToIndex,
-                Range<Integer> selection) {
+                Range<Integer> selection,
+                boolean originChanged) {
             this.text = text;
             this.textForAutofillServices = textForAutofillServices;
             this.scrollType = scrollType;
             this.scrollToIndex = scrollToIndex;
             this.selection = selection;
+            this.originChanged = originChanged;
         }
 
         @Override
@@ -173,6 +177,10 @@ class UrlBarProperties {
     public static final WritableObjectPropertyKey<Callback<String>> TEXT_CHANGE_LISTENER =
             new WritableObjectPropertyKey<>();
 
+    /** The callback to be notified on raw url text changes (rich context). */
+    public static final WritableObjectPropertyKey<Callback<UrlBarTextChangeInfo>>
+            RICH_TEXT_CHANGE_LISTENER = new WritableObjectPropertyKey<>();
+
     /** Specifies the color for url bar text. */
     public static final WritableIntPropertyKey TEXT_COLOR = new WritableIntPropertyKey();
 
@@ -210,6 +218,7 @@ class UrlBarProperties {
                 INCOGNITO_COLORS_ENABLED,
                 KEY_DOWN_LISTENER,
                 LONG_CLICK_LISTENER,
+                RICH_TEXT_CHANGE_LISTENER,
                 SELECT_ALL_ON_FOCUS,
                 SHOW_CURSOR,
                 SHOW_HINT_TEXT,

@@ -28,15 +28,16 @@ export function getHtml(this: ContextualTasksComposeboxElement) {
           .maxSuggestions="${5}"
           .overrideClampLineNum="${3}"
           .selectedMatchIndex="${this.selectedMatchIndex_}"
-          ?hidden="${!this.showSuggestions_}"
+          ?hidden="${!this.shouldShowSuggestions_()}"
           @match-focusin="${this.onMatchFocusin_}"
           @keydown="${this.onDropdownKeydown_}">
       </cr-composebox-dropdown>
-      ${this.showSuggestionsActivityLink_ && this.showSuggestions_ ? html`
+      ${this.showSuggestionsActivityLink_ &&
+          this.shouldShowSuggestions_() ? html`
         <div id="suggestionActivity">
           <localized-link
-            localized-string="${this.i18nAdvanced('suggestionActivityLink')}"
-            @link-clicked="${this.onSuggestionActivityLinkClicked_}">
+              .localizedString="${this.i18nAdvanced('suggestionActivityLink')}"
+              @link-clicked="${this.onSuggestionActivityLinkClicked_}">
           </localized-link>
         </div>
       `: ''}
@@ -48,21 +49,23 @@ export function getHtml(this: ContextualTasksComposeboxElement) {
         >
       <cr-composebox
           id="composebox"
-          ?autofocus="${false}"
+          .autofocus="${false}"
           carousel-on-top_
           entrypoint-name="ContextualTasks"
           searchbox-layout-mode="TallBottomContext"
           .lensButtonDisabled="${this.lensButtonDisabled_}"
-          .showLensButton="${this.showLensButton_}"
+          .showLensButton="${this.shouldShowLensButton_()}"
           .suggestionActivityEnabled="${false}"
           .disableCaretColorAnimation="${!this.caretAnimationsEnabled_}"
           .inputPlaceholderOverride="${this.getInputPlaceholder_()}"
-          .dropdownNeeded="${this.dropdownNeeded_}"
+          .dropdownNeeded="${this.isDropdownNeeded_()}"
           .lensButtonTriggersOverlay="${true}"
           .enableCarouselScrolling="${true}"
           .isFollowupQuery="${!this.isZeroState}"
           .enableFileHint="${this.enableFileHint_}"
           .isCanvasQuerySubmitted="${this.isCanvasQuerySubmitted}"
+          .energyEffectAnimationEnabled="${this.energyEffectAnimationEnabled_}"
+          .isZeroState="${this.isZeroState}"
           @result-changed="${this.onSuggestionsResultChanged_}"
           @open-image-upload="${this.onOpenImageUpload_}"
           @open-file-upload="${this.onOpenFileUpload_}"
@@ -79,15 +82,16 @@ export function getHtml(this: ContextualTasksComposeboxElement) {
           .maxSuggestions="${5}"
           .overrideClampLineNum="${3}"
           .selectedMatchIndex="${this.selectedMatchIndex_}"
-          ?hidden="${!this.showSuggestions_}"
+          ?hidden="${!this.shouldShowSuggestions_()}"
           @match-focusin="${this.onMatchFocusin_}"
           @keydown="${this.onDropdownKeydown_}">
       </cr-composebox-dropdown>
-      ${this.showSuggestionsActivityLink_ && this.showSuggestions_ ? html`
+      ${this.showSuggestionsActivityLink_ &&
+          this.shouldShowSuggestions_() ? html`
         <div id="suggestionActivity">
           <localized-link
-            localized-string="${this.i18nAdvanced('suggestionActivityLink')}"
-            @link-clicked="${this.onSuggestionActivityLinkClicked_}">
+              .localizedString="${this.i18nAdvanced('suggestionActivityLink')}"
+              @link-clicked="${this.onSuggestionActivityLinkClicked_}">
           </localized-link>
         </div>
       `: ''}

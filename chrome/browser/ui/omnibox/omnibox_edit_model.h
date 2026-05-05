@@ -20,6 +20,7 @@
 #include "base/observer_list_types.h"
 #include "base/time/time.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
+#include "components/contextual_tasks/public/query_contextualizer.h"
 #include "components/omnibox/browser/autocomplete_controller.h"
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_match.h"
@@ -35,6 +36,10 @@
 class OmniboxController;
 class OmniboxPopupView;
 class TemplateURL;
+class Profile;
+namespace contextual_search {
+class ContextualSearchSessionHandle;
+}
 namespace gfx {
 class Image;
 }
@@ -98,6 +103,9 @@ class OmniboxEditModel {
 
     ~Observer() override = default;
   };
+
+  void SetQueryContextualizerForTesting(
+      std::unique_ptr<contextual_tasks::QueryContextualizer> contextualizer);
 
   explicit OmniboxEditModel(OmniboxController* controller);
   OmniboxEditModel(const OmniboxEditModel&) = delete;
@@ -199,10 +207,10 @@ class OmniboxEditModel {
   // that state has changed.
   void SetInputInProgress(bool in_progress);
 
-  // Calls SetInputInProgress, via SetInputInProgressNoNotify and
-  // NotifyObserversInputInProgress, calling the latter after
-  // StartAutocomplete, so that the result is only updated once.
-  void UpdateInput(bool has_selected_text, bool prevent_inline_autocomplete);
+  // Calls `SetInputInProgress()`, via `SetInputInProgressNoNotify()` and
+  // `NotifyObserversInputInProgress()`, calling the latter after
+  // `StartAutocomplete()`, so that the result is only updated once.
+  void UpdateInput(bool prevent_inline_autocomplete);
 
   // Resets the permanent display texts (display_text_ and url_for_editing_)
   // to those provided by the controller. Returns true if the display texts
@@ -233,10 +241,9 @@ class OmniboxEditModel {
   // no user input in progress).
   void Revert();
 
-  // Directs the popup to start autocomplete.  Makes use of the |view_| text and
-  // selection, so make sure to set those before calling StartAutocomplete().
-  void StartAutocomplete(bool has_selected_text,
-                         bool prevent_inline_autocomplete);
+  // Directs the popup to start autocomplete. Makes use of the `view_`
+  // selection, so make sure to set that before calling `StartAutocomplete()`.
+  void StartAutocomplete(bool prevent_inline_autocomplete);
 
   // Determines whether the user can "paste and go", given the specified text.
   bool CanPasteAndGo(const std::u16string& text) const;
@@ -655,7 +662,7 @@ class OmniboxEditModel {
       const GURL& alternate_nav_url,
       const std::u16string& pasted_text,
       base::TimeTicks match_selection_timestamp,
-      bool proceed);
+      OmniboxClient::ExtensionControlledDialogResult proceed);
 
   // Updates the feedback type on the match at the given index and schedules a
   // repaint to update the suggestion view. On negative feedback, also shows the
@@ -739,6 +746,22 @@ class OmniboxEditModel {
   void RecordAiModeMetrics(const std::u16string& query_text,
                            bool activated,
                            bool via_keyboard);
+
+  void OnContextualizationComplete(
+      const std::u16string& query_text,
+      WindowOpenDisposition disposition,
+      base::WeakPtr<contextual_search::ContextualSearchSessionHandle>
+          session_handle);
+
+  contextual_search::ContextualSearchSessionHandle*
+  GetOrCreateContextualSearchSessionHandle(Profile* profile);
+
+  void NavigateToUrlWithSession(
+      base::WeakPtr<contextual_search::ContextualSearchSessionHandle>
+          session_handle,
+      const std::u16string& query_text,
+      WindowOpenDisposition disposition,
+      GURL url);
 
   // Owns this.
   const raw_ptr<OmniboxController> controller_;
@@ -903,6 +926,25 @@ class OmniboxEditModel {
 
   // See comment on `Observer`.
   mutable base::ObserverList<Observer> observers_;
+
+  // True if the query contextualizer has been initialized for the current
+  // session.
+  bool query_contextualizer_initialized_ = false;
+
+  // Session handle for the query contextualizer. Initiated on-demand when the
+  // user triggers the AI Mode button if there is context to upload. Its
+  // lifecycle is tied to the duration of context submission and URL creation,
+  // and is reset if the contextualizer triggers a cleanup.
+  std::unique_ptr<contextual_search::ContextualSearchSessionHandle>
+      session_handle_;
+
+  // Delegate for the query contextualizer, used to interact with the omnibox
+  // client.
+  std::unique_ptr<contextual_tasks::QueryContextualizer::Delegate>
+      query_contextualizer_delegate_;
+
+  // The query contextualizer used to fetch context for the search query.
+  std::unique_ptr<contextual_tasks::QueryContextualizer> query_contextualizer_;
 
   base::WeakPtrFactory<OmniboxEditModel> weak_factory_{this};
 };

@@ -10,6 +10,8 @@
 
 #include "base/memory/raw_ptr.h"
 #include "base/test/bind.h"
+#include "base/test/gmock_callback_support.h"
+#include "base/test/run_until.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/unguessable_token.h"
 #include "chrome/browser/browser_process.h"
@@ -20,15 +22,19 @@
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service_factory.h"
 #include "chrome/browser/contextual_tasks/mock_contextual_tasks_ui_service.h"
 #include "chrome/browser/global_features.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "components/application_locale_storage/application_locale_storage.h"
-#include "content/public/test/navigation_simulator.h"
-#include "content/public/test/web_contents_tester.h"
+#include "components/contextual_search/mock_contextual_search_context_controller.h"
+#include "components/contextual_search/mock_contextual_search_session_handle.h"
 #include "components/contextual_tasks/public/contextual_task.h"
 #include "components/contextual_tasks/public/features.h"
 #include "components/contextual_tasks/public/mock_contextual_tasks_service.h"
 #include "components/lens/lens_url_utils.h"
+#include "components/prefs/pref_service.h"
+#include "content/public/test/navigation_simulator.h"
 #include "content/public/test/test_web_ui.h"
+#include "content/public/test/web_contents_tester.h"
 #include "net/base/url_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -73,6 +79,8 @@ class MockPage : public mojom::Page {
               (override));
   MOCK_METHOD(void, HideInput, (), (override));
   MOCK_METHOD(void, RestoreInput, (), (override));
+  MOCK_METHOD(void, EnterBasicMode, (), (override));
+  MOCK_METHOD(void, ExitBasicMode, (), (override));
   MOCK_METHOD(void, OnZeroStateChange, (bool is_zero_state), (override));
   MOCK_METHOD(void, OnAiPageStatusChanged, (bool is_ai_page), (override));
   MOCK_METHOD(void,
@@ -89,24 +97,13 @@ class MockPage : public mojom::Page {
   MOCK_METHOD(void, LockInput, (), (override));
   MOCK_METHOD(void, UnlockInput, (), (override));
   MOCK_METHOD(void, SetShowReopenTabs, (bool show), (override));
-  MOCK_METHOD(void,
-              InjectInput,
-              (const std::string& title,
-               const std::string& thumbnail,
-               const base::UnguessableToken& file_token,
-               bool supports_unimodal),
-              (override));
-  MOCK_METHOD(void,
-              InjectInputWithIcon,
-              (const std::string& title,
-               contextual_tasks::mojom::IconType icon_id,
-               const base::UnguessableToken& file_token,
-               bool supports_unimodal),
-              (override));
+  MOCK_METHOD(void, InjectInput, (mojom::InjectedInputPtr input), (override));
   MOCK_METHOD(void,
               RemoveInjectedInput,
               (const base::UnguessableToken& file_token),
               (override));
+  MOCK_METHOD(void, OnSidePanelPinStateChanged, (bool is_pinned), (override));
+  MOCK_METHOD(void, SetInNlm, (bool in_nlm), (override));
 
   mojo::Receiver<mojom::Page> receiver_{this};
 };
@@ -162,6 +159,8 @@ class ContextualTasksPageHandlerTest : public BrowserWithTestWindowTest {
     mock_contextual_tasks_ui_service_ =
         static_cast<MockContextualTasksUiService*>(
             ContextualTasksUiServiceFactory::GetForBrowserContext(profile()));
+
+    profile()->GetPrefs()->SetBoolean(prefs::kPinContextualTaskButton, false);
 
     page_handler_ = std::make_unique<ContextualTasksPageHandler>(
         mojo::PendingReceiver<mojom::PageHandler>(), contextual_tasks_ui_.get(),
@@ -568,6 +567,65 @@ TEST_F(ContextualTasksPageHandlerTest, ShowThreadHistory) {
   page_handler_->ShowThreadHistory();
 }
 
+TEST_F(ContextualTasksPageHandlerTest, PinSidePanel) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(
+      contextual_tasks::kEnableContextualTasksPinButtonInToolbar);
+
+  // Recreate page_handler_ to pick up the feature flag.
+  // Expect any sequence of false transitions caused by baseline sync.
+  EXPECT_CALL(page_, OnSidePanelPinStateChanged(false))
+      .Times(testing::AnyNumber());
+
+  page_handler_ = std::make_unique<ContextualTasksPageHandler>(
+      mojo::PendingReceiver<mojom::PageHandler>(), contextual_tasks_ui_.get(),
+      mock_contextual_tasks_ui_service_, mock_contextual_tasks_service_);
+  page_handler_->set_skip_feedback_ui_for_testing(true);
+  // Set default to false for testing, as the default registered value is true.
+  profile()->GetPrefs()->SetBoolean(prefs::kPinContextualTaskButton, false);
+
+  // Initial state should be unpinned.
+  EXPECT_FALSE(
+      profile()->GetPrefs()->GetBoolean(prefs::kPinContextualTaskButton));
+
+  // We expect the page to be notified when the pref changes.
+  EXPECT_CALL(page_, OnSidePanelPinStateChanged(true)).Times(1);
+
+  // Pin the side panel.
+  page_handler_->PinSidePanel();
+  EXPECT_TRUE(base::test::RunUntil([&]() {
+    return profile()->GetPrefs()->GetBoolean(prefs::kPinContextualTaskButton);
+  }));
+
+  // Verify state via pref.
+  EXPECT_TRUE(
+      profile()->GetPrefs()->GetBoolean(prefs::kPinContextualTaskButton));
+
+  // Now unpin.
+  EXPECT_CALL(page_, OnSidePanelPinStateChanged(false)).Times(1);
+  page_handler_->UnpinSidePanel();
+  EXPECT_TRUE(base::test::RunUntil([&]() {
+    return !profile()->GetPrefs()->GetBoolean(prefs::kPinContextualTaskButton);
+  }));
+}
+
+TEST_F(ContextualTasksPageHandlerTest, PinSidePanel_FeatureDisabled) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndDisableFeature(
+      contextual_tasks::kEnableContextualTasksPinButtonInToolbar);
+
+  // Initial state should be unpinned.
+  EXPECT_FALSE(
+      profile()->GetPrefs()->GetBoolean(prefs::kPinContextualTaskButton));
+
+  // Pin the side panel (should be a no-op when feature is disabled).
+  page_handler_->PinSidePanel();
+
+  // Should still be false.
+  EXPECT_FALSE(
+      profile()->GetPrefs()->GetBoolean(prefs::kPinContextualTaskButton));
+}
+
 TEST_F(ContextualTasksPageHandlerTest, MoveTaskUiToNewTab) {
   base::Uuid task_id = base::Uuid::GenerateRandomV4();
   contextual_tasks_ui_->SetTaskId(task_id);
@@ -691,9 +749,9 @@ TEST_F(ContextualTasksPageHandlerTest, OpenMyActivityUi) {
   page_handler_->OpenMyActivityUi();
 }
 
-TEST_F(ContextualTasksPageHandlerTest, OpenHelpUi) {
+TEST_F(ContextualTasksPageHandlerTest, OpenFeedbackUi) {
   // Smoke test to ensure it doesn't crash.
-  page_handler_->OpenHelpUi();
+  page_handler_->OpenFeedbackUi();
 }
 
 TEST_F(ContextualTasksPageHandlerTest, OpenOnboardingHelpUi) {
@@ -898,6 +956,131 @@ TEST_F(ContextualTasksPageHandlerTest,
 
   page_handler_->OnTaskUpdated(task,
                                ContextualTasksService::TriggerSource::kLocal);
+  run_loop.Run();
+}
+
+TEST_F(ContextualTasksPageHandlerTest, PrefChangeNotification) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(kEnableContextualTasksPinButtonInToolbar);
+
+  // Ignore any unpinned syncs fired initially by constructor setup.
+  EXPECT_CALL(page_, OnSidePanelPinStateChanged(false))
+      .Times(testing::AnyNumber());
+
+  // Recreate page_handler_ to pick up the feature flag.
+  page_handler_ = std::make_unique<ContextualTasksPageHandler>(
+      mojo::PendingReceiver<mojom::PageHandler>(), contextual_tasks_ui_.get(),
+      mock_contextual_tasks_ui_service_, mock_contextual_tasks_service_);
+  page_handler_->set_skip_feedback_ui_for_testing(true);
+
+  base::RunLoop run_loop;
+  EXPECT_CALL(page_, OnSidePanelPinStateChanged(true))
+      .WillOnce(base::test::RunClosure(run_loop.QuitClosure()));
+
+  profile()->GetPrefs()->SetBoolean(prefs::kPinContextualTaskButton, true);
+
+  run_loop.Run();
+}
+
+TEST_F(ContextualTasksPageHandlerTest,
+       OnReceivedInjectInput_OverridesExisting) {
+  // Setup mocks.
+  NiceMock<contextual_search::MockContextualSearchSessionHandle>
+      mock_session_handle;
+  NiceMock<contextual_search::MockContextualSearchContextController>
+      mock_controller;
+
+  ON_CALL(mock_session_handle, GetController())
+      .WillByDefault(Return(&mock_controller));
+  ON_CALL(*contextual_tasks_ui_, GetOrCreateContextualSessionHandle())
+      .WillByDefault(Return(&mock_session_handle));
+
+  // Register pre-existing active token.
+  base::UnguessableToken old_token = base::UnguessableToken::Create();
+  mock_session_handle.GetUploadedContextTokensForTesting().push_back(old_token);
+
+  // Mock corresponding file info mapping to "target_id".
+  contextual_search::FileInfo old_file_info;
+  old_file_info.input_data = std::make_unique<lens::ContextualInputData>();
+  old_file_info.input_data->modality_chip_props = lens::ModalityChipProps();
+  old_file_info.input_data->modality_chip_props->set_id("target_id");
+
+  ON_CALL(mock_controller, GetFileInfo(old_token))
+      .WillByDefault(Return(&old_file_info));
+
+  // Action prep: Pack the inject request into full AimToClientMessage
+  // container.
+  lens::AimToClientMessage container;
+  auto* input_proto = container.mutable_inject_input();
+  input_proto->mutable_modality()->set_id("target_id");
+  input_proto->mutable_modality()->set_title("New Title");
+
+  size_t size = container.ByteSizeLong();
+  std::vector<uint8_t> serialized(size);
+  container.SerializeToArray(serialized.data(), size);
+
+  // 1. Verification: Should synchronously drop the OLD token.
+  EXPECT_CALL(mock_controller, DeleteFile(old_token)).WillOnce(Return(true));
+  EXPECT_CALL(page_, RemoveInjectedInput(old_token)).Times(1);
+
+  // 2. Verification: Should instantiate unique NEW token.
+  base::UnguessableToken new_token = base::UnguessableToken::Create();
+  EXPECT_CALL(mock_session_handle, CreateContextToken())
+      .WillOnce(Return(new_token));
+
+  // 3. Verification: Should successfully pipe NEW injection command to UI.
+  base::RunLoop run_loop;
+  EXPECT_CALL(page_, InjectInput(_))
+      .WillOnce([&run_loop, new_token](mojom::InjectedInputPtr mojo_input) {
+        EXPECT_EQ(mojo_input->file_token, new_token);
+        run_loop.Quit();
+      });
+
+  page_handler_->OnWebviewMessage(serialized);
+  run_loop.Run();
+}
+
+TEST_F(ContextualTasksPageHandlerTest,
+       OnReceivedRemoveInjectedInput_SynchronousDelete) {
+  NiceMock<contextual_search::MockContextualSearchSessionHandle>
+      mock_session_handle;
+  NiceMock<contextual_search::MockContextualSearchContextController>
+      mock_controller;
+
+  ON_CALL(mock_session_handle, GetController())
+      .WillByDefault(Return(&mock_controller));
+  ON_CALL(*contextual_tasks_ui_, GetOrCreateContextualSessionHandle())
+      .WillByDefault(Return(&mock_session_handle));
+
+  base::UnguessableToken target_token = base::UnguessableToken::Create();
+  mock_session_handle.GetUploadedContextTokensForTesting().push_back(
+      target_token);
+
+  contextual_search::FileInfo file_info;
+  file_info.input_data = std::make_unique<lens::ContextualInputData>();
+  file_info.input_data->modality_chip_props = lens::ModalityChipProps();
+  file_info.input_data->modality_chip_props->set_id("removable_id");
+
+  ON_CALL(mock_controller, GetFileInfo(target_token))
+      .WillByDefault(Return(&file_info));
+
+  // Verify synchronous remove flow.
+  EXPECT_CALL(mock_controller, DeleteFile(target_token)).WillOnce(Return(true));
+  base::RunLoop run_loop;
+  EXPECT_CALL(page_, RemoveInjectedInput(target_token))
+      .WillOnce([&run_loop](const base::UnguessableToken& token) {
+        run_loop.Quit();
+      });
+
+  // Action prep: Pack and route via the public interface.
+  lens::AimToClientMessage container;
+  container.mutable_remove_injected_input()->set_id("removable_id");
+
+  size_t size = container.ByteSizeLong();
+  std::vector<uint8_t> serialized(size);
+  container.SerializeToArray(serialized.data(), size);
+
+  page_handler_->OnWebviewMessage(serialized);
   run_loop.Run();
 }
 

@@ -305,6 +305,10 @@ class LensOverlayController : public OverlayBaseController,
     return initialization_data_->selected_region_;
   }
 
+  LensSearchController* get_lens_search_controller_for_testing() {
+    return lens_search_controller_;
+  }
+
   const std::optional<std::pair<int, int>> get_selected_text_for_region() {
     return initialization_data_->selected_text_;
   }
@@ -607,11 +611,13 @@ class LensOverlayController : public OverlayBaseController,
   void StartScreenshotFlow() override;
   void FinishedWaitingForReflow(base::TimeTicks reflow_start_time) override;
   bool ShouldShowPreselectionBubble() override;
+  void ShowPreselectionBubble() override;
   bool UseOverlayBlur() override;
   void NotifyPageNavigated() override;
   void NotifyOverlayClosing() override;
   void NotifyTabForegrounded() override;
   void NotifyTabWillEnterBackground() override;
+  PreselectionUIConfig GetPreselectionBubbleConfig() override;
   bool IsOverlayViewShared() const override;
 
   // content::WebContentsDelegate:

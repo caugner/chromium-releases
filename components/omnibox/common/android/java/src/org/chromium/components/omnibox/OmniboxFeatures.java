@@ -117,6 +117,9 @@ public class OmniboxFeatures {
                     OmniboxFeatureList.OMNIBOX_X_GEO_PERMISSION_GRANULARITY,
                     FeatureState.ENABLED_IN_PROD);
 
+    public static final CachedFlag sPlatformAgnosticXGeo =
+            newFlag(OmniboxFeatureList.PLATFORM_AGNOSTIC_X_GEO, FeatureState.DISABLED);
+
     public static final CachedFlag sAsyncViewInflation =
             newFlag(OmniboxFeatureList.OMNIBOX_ASYNC_VIEW_INFLATION, FeatureState.ENABLED_IN_TEST);
 
@@ -135,9 +138,6 @@ public class OmniboxFeatures {
     public static final BooleanCachedFeatureParam sShowDedicatedModeButton =
             newBooleanParam(sOmniboxMultimodalInput, "show_dedicated_mode_button", false);
 
-    public static final BooleanCachedFeatureParam sShowTryAiModeHintInDedicatedModeButton =
-            newBooleanParam(sOmniboxMultimodalInput, "show_try_aimode_hint_in_mode_button", false);
-
     public static final BooleanCachedFeatureParam sShowImageGenerationButtonInIncognito =
             newBooleanParam(sOmniboxMultimodalInput, "show_image_gen_button_in_incognito", true);
 
@@ -145,7 +145,7 @@ public class OmniboxFeatures {
             newBooleanParam(sOmniboxMultimodalInput, "compact_fusebox", false);
 
     public static final BooleanCachedFeatureParam sMultiattachmentFusebox =
-            newBooleanParam(sOmniboxMultimodalInput, "multi_context", false);
+            newBooleanParam(sOmniboxMultimodalInput, "multi_context", true);
 
     public static final BooleanCachedFeatureParam sRedirectComposeplateButton =
             newBooleanParam(sOmniboxMultimodalInput, "redirect_composeplate_button", true);
@@ -162,6 +162,9 @@ public class OmniboxFeatures {
     public static final BooleanCachedFeatureParam sShowModelPicker =
             newBooleanParam(sOmniboxMultimodalInput, "show_model_picker", false);
 
+    public static final BooleanCachedFeatureParam sShowBottomSheetPopup =
+            newBooleanParam(sOmniboxMultimodalInput, "show_bottom_sheet_popup", false);
+
     public static final CachedFlag sMultilineEditField =
             newFlag(OmniboxFeatureList.MULTILINE_EDIT_FIELD, FeatureState.ENABLED_IN_PROD);
 
@@ -172,15 +175,21 @@ public class OmniboxFeatures {
             newFlag(OmniboxFeatureList.ANDROID_HUB_SEARCH_TAB_GROUPS, FeatureState.ENABLED_IN_PROD);
 
     public static final CachedFlag sOmniboxImprovementForLFF =
-            newFlag(OmniboxFeatureList.OMNIBOX_IMPROVEMENT_FOR_LFF, FeatureState.DISABLED);
+            newFlag(OmniboxFeatureList.OMNIBOX_IMPROVEMENT_FOR_LFF, FeatureState.ENABLED_IN_TEST);
 
     public static final CachedFlag sRemoveSearchReadyOmnibox =
             newFlag(OmniboxFeatureList.REMOVE_SEARCH_READY_OMNIBOX, FeatureState.DISABLED);
+
+    public static final CachedFlag sOmniboxItemDecoration =
+            newFlag(OmniboxFeatureList.OMNIBOX_ITEM_DECORATION, FeatureState.DISABLED);
 
     public static final CachedFlag sServeJavaCachedZeroSuggest =
             newFlag(
                     OmniboxFeatureList.SERVE_JAVA_CACHED_ZERO_SUGGEST,
                     FeatureState.ENABLED_IN_PROD);
+
+    public static final CachedFlag sResetSuggestionsScroll =
+            newFlag(OmniboxFeatureList.RESET_SUGGESTIONS_SCROLL, FeatureState.DISABLED);
 
     public static final BooleanCachedFeatureParam sRemoveSroIncludingVerbatimMatch =
             newBooleanParam(
@@ -395,6 +404,16 @@ public class OmniboxFeatures {
     }
 
     /**
+     * @return Whether the device is in a desktop-like configuration (tablet with a physical
+     *     keyboard and precision pointer).
+     */
+    public static boolean isDesktopMode() {
+        return DeviceFormFactor.isTablet()
+                && DeviceInput.supportsAlphabeticKeyboard()
+                && DeviceInput.supportsPrecisionPointer();
+    }
+
+    /**
      * @return Whether the contents of the omnibox should be retained on focus as opposed to being
      *     cleared. When {@code true} and the omnibox contents are retained, focus events will also
      *     result in the omnibox contents being fully selected so as to allow for easy replacement
@@ -405,9 +424,7 @@ public class OmniboxFeatures {
         if (sShouldRetainOmniboxOnFocusForTesting != null) {
             return sShouldRetainOmniboxOnFocusForTesting;
         }
-        return DeviceFormFactor.isTablet()
-                && DeviceInput.supportsAlphabeticKeyboard()
-                && DeviceInput.supportsPrecisionPointer();
+        return isDesktopMode();
     }
 
     /**

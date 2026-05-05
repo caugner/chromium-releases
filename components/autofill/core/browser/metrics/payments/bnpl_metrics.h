@@ -120,6 +120,67 @@ enum class BnplFormEvent {
 
 // LINT.ThenChange(/tools/metrics/histograms/metadata/autofill/enums.xml:BnplFormEvent)
 
+// LINT.IfChange(PayLaterTabsFormEvent)
+
+// All Pay Later Tab Form Events are logged once per page load.
+//
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class PayLaterTabsFormEvent {
+  // Payments autofill suggestions were shown on a BNPL-eligible page,
+  // regardless of whether the Pay Later Tab was shown.
+  kSuggestionsShown = 0,
+
+  // Payments autofill suggestions were shown in Pay Now / Pay Later tabs.
+  kSuggestionsShownWithPayLaterTab = 1,
+
+  // Users switched from the Pay Now tab to the Pay Later tab.
+  kSwitchedToPayLaterTab = 2,
+
+  // Users switched from the Pay Later tab to the Pay Now tab.
+  kSwitchedToPayNowTab = 3,
+
+  // An Affirm BNPL suggestion was accepted.
+  kAffirmAccepted = 4,
+
+  // A Zip BNPL suggestion was accepted.
+  kZipAccepted = 5,
+
+  // A Klarna BNPL suggestion was accepted.
+  kKlarnaAccepted = 6,
+
+  // An Afterpay BNPL suggestion was accepted.
+  kAfterpayAccepted = 7,
+
+  // A form was filled with an Affirm VCN.
+  kFormFilledWithAffirm = 8,
+
+  // A form was filled with a Zip VCN.
+  kFormFilledWithZip = 9,
+
+  // A form was filled with a Klarna VCN.
+  kFormFilledWithKlarna = 10,
+
+  // A form was filled with an Afterpay VCN.
+  kFormFilledWithAfterpay = 11,
+
+  // A form was submitted with an Affirm VCN.
+  kFormSubmittedWithAffirm = 12,
+
+  // A form was submitted with a Zip VCN.
+  kFormSubmittedWithZip = 13,
+
+  // A form was submitted with a Klarna VCN.
+  kFormSubmittedWithKlarna = 14,
+
+  // A form was submitted with an Afterpay VCN.
+  kFormSubmittedWithAfterpay = 15,
+
+  kMaxValue = kFormSubmittedWithAfterpay,
+};
+
+// LINT.ThenChange(/tools/metrics/histograms/metadata/autofill/enums.xml:PayLaterTabsFormEvent)
+
 // Logs if the buy-now-pay-later preference is changed by the user through the
 // pay-over-time toggle in the payment methods settings page. Records true when
 // the user switches on buy-now-pay-later. Records false when the user switches
@@ -158,6 +219,16 @@ void LogBnplPopupWindowResult(autofill::BnplIssuer::IssuerId issuer_id,
 void LogBnplPopupWindowLatency(base::TimeDelta duration,
                                autofill::BnplIssuer::IssuerId issuer_id,
                                BnplFlowResult result);
+
+// Logs suggestion shown events for the Pay Later tab.
+void LogSuggestionShownForPayLaterTab(bool contains_pay_later_tab_suggestions);
+
+// Logs that a pay later tab suggestion was accepted.
+void LogPayLaterTabSuggestionAccepted(autofill::BnplIssuer::IssuerId issuer_id);
+
+// Logs Pay Later Tab form events. Please refer to `PayLaterTabsFormEvent` for
+// the possible enumerations that can be logged.
+void LogPayLaterTabsFormEvent(PayLaterTabsFormEvent event);
 
 // Logs BNPL form events. Please refer to `BnplFormEvent` for the possible
 // enumerations that can be logged.

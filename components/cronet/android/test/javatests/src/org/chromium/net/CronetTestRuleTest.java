@@ -189,7 +189,6 @@ public class CronetTestRuleTest {
                         name = "random_bytes_flag",
                         value = {'a', 'b', 'c'})
             })
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testHttpFlagsAreCorrectlyApplied() {
         var flags =
                 HttpFlagsForImpl.getHttpFlags(

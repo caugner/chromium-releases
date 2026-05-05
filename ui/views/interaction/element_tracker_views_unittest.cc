@@ -16,6 +16,7 @@
 #include "base/run_loop.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/test/bind.h"
+#include "build/build_config.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/interaction/element_identifier.h"
@@ -36,6 +37,10 @@
 #include "ui/views/test/widget_test.h"
 #include "ui/views/view_class_properties.h"
 #include "ui/views/widget/widget.h"
+
+#if BUILDFLAG(IS_MAC)
+#include "base/mac/mac_util.h"
+#endif
 
 namespace views {
 
@@ -1086,6 +1091,12 @@ TEST_F(ElementTrackerViewsTest, MinimizeMaximizeWhileHiddenDoesNotSendEvents) {
 }
 
 TEST_F(ElementTrackerViewsTest, MinimizeMaximizeWhileShownDoesNotSendEvents) {
+#if BUILDFLAG(IS_MAC)
+  if (base::mac::MacOSMajorVersion() <= 13) {
+    GTEST_SKIP()
+        << "Flaky on MacOS 13 builders; see https://crbug.com/507411988";
+  }
+#endif
   auto widget = CreateWidget();
   const auto context = ElementTrackerViews::GetContextForWidget(widget.get());
   UNCALLED_MOCK_CALLBACK(ui::ElementTracker::Callback, shown);
@@ -1128,6 +1139,12 @@ TEST_F(ElementTrackerViewsTest, MinimizeHideMaximizeSendsHideEvent) {
 }
 
 TEST_F(ElementTrackerViewsTest, MinimizeShowMaximizeSendsShowEvent) {
+#if BUILDFLAG(IS_MAC)
+  if (base::mac::MacOSMajorVersion() <= 13) {
+    GTEST_SKIP()
+        << "Flaky on MacOS 13 builders; see https://crbug.com/507411988";
+  }
+#endif
   auto widget = CreateWidget();
   const auto context = ElementTrackerViews::GetContextForWidget(widget.get());
   UNCALLED_MOCK_CALLBACK(ui::ElementTracker::Callback, shown);
@@ -1399,6 +1416,29 @@ TEST_F(ElementTrackerViewsTest, GetAllMatchingViewsWithMultipleViews) {
                 kTestElementID, context));
 }
 
+TEST_F(ElementTrackerViewsTest,
+       GetAllMatchingViewsWithMultipleViewsSomeNotvisible) {
+  auto widget = CreateWidget();
+  View* const contents = widget->SetContentsView(std::make_unique<View>());
+  View* const v1 = contents->AddChildView(std::make_unique<View>());
+  View* const v2 = contents->AddChildView(std::make_unique<View>());
+  widget->Show();
+  const ui::ElementContext context =
+      ElementTrackerViews::GetContextForView(contents);
+
+  v1->SetProperty(kElementIdentifierKey, kTestElementID);
+  v2->SetProperty(kElementIdentifierKey, kTestElementID);
+  v2->SetVisible(false);
+  ElementTrackerViews::ViewList expected = {v1, v2};
+  EXPECT_EQ(expected, ElementTrackerViews::GetInstance()->GetAllMatchingViews(
+                          kTestElementID, context));
+  EXPECT_EQ(expected, ElementTrackerViews::GetInstance()->GetAllMatchingViews(
+                          kTestElementID, context, /*require_visible=*/false));
+  expected = {v1};
+  EXPECT_EQ(expected, ElementTrackerViews::GetInstance()->GetAllMatchingViews(
+                          kTestElementID, context, /*require_visible=*/true));
+}
+
 TEST_F(ElementTrackerViewsTest, GetAllMatchingViewsWithNonViewsElements) {
   auto widget = CreateWidget();
   View* const contents = widget->SetContentsView(std::make_unique<View>());
@@ -1478,6 +1518,39 @@ TEST_F(ElementTrackerViewsTest, GetAllViewsInAnyContextWithMultipleViews) {
       ElementTrackerViews::GetInstance()->GetAllMatchingViewsInAnyContext(
           kTestElementID),
       testing::UnorderedElementsAre(v3));
+}
+
+TEST_F(ElementTrackerViewsTest,
+       GetAllViewsInAnyContextWithMultipleViewsSomeNotVisible) {
+  auto widget = CreateWidget();
+  auto widget2 = CreateWidget();
+  View* const contents = widget->SetContentsView(std::make_unique<View>());
+  View* const v1 = contents->AddChildView(std::make_unique<View>());
+  View* const v2 = contents->AddChildView(std::make_unique<View>());
+  View* const contents2 = widget2->SetContentsView(std::make_unique<View>());
+  View* const v3 = contents2->AddChildView(std::make_unique<View>());
+  View* const v4 = contents2->AddChildView(std::make_unique<View>());
+  widget->Show();
+  widget2->Show();
+
+  v1->SetProperty(kElementIdentifierKey, kTestElementID);
+  v2->SetProperty(kElementIdentifierKey, kTestElementID);
+  v3->SetProperty(kElementIdentifierKey, kTestElementID);
+  v4->SetProperty(kElementIdentifierKey, kTestElementID2);
+  v2->SetVisible(false);
+  v3->SetVisible(false);
+  EXPECT_THAT(
+      ElementTrackerViews::GetInstance()->GetAllMatchingViewsInAnyContext(
+          kTestElementID),
+      testing::UnorderedElementsAre(v1, v2, v3));
+  EXPECT_THAT(
+      ElementTrackerViews::GetInstance()->GetAllMatchingViewsInAnyContext(
+          kTestElementID, /*require_visible=*/false),
+      testing::UnorderedElementsAre(v1, v2, v3));
+  EXPECT_THAT(
+      ElementTrackerViews::GetInstance()->GetAllMatchingViewsInAnyContext(
+          kTestElementID, /*require_visible=*/true),
+      testing::UnorderedElementsAre(v1));
 }
 
 TEST_F(ElementTrackerViewsTest, GetAllViewsInAnyContextWithNonViewsElements) {

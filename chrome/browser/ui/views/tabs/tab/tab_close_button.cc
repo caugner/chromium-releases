@@ -14,7 +14,6 @@
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_slot_controller.h"
 #include "components/strings/grit/components_strings.h"
-#include "components/vector_icons/vector_icons.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/pointer/touch_ui_controller.h"
@@ -77,6 +76,7 @@ TabCloseButton::TabCloseButton(PressedCallback pressed_callback,
       base::TimeDelta());
 
   image_container_view()->DestroyLayer();
+  label()->SetHandlesTooltips(false);
 
   // The ink drop highlight path is the same as the focus ring highlight path,
   // but needs to be explicitly mirrored for RTL.

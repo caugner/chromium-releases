@@ -9,6 +9,7 @@
 #include "chrome/browser/ui/views/toolbar/toolbar_button.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_glic_constants.h"
 #include "ui/base/metadata/metadata_header_macros.h"
+#include "ui/views/layout/layout_types.h"
 
 class BrowserFrameView;
 
@@ -29,13 +30,16 @@ class ToolbarGlicButton : public GlicButton<ToolbarButton> {
   ToolbarGlicButton& operator=(const ToolbarGlicButton&) = delete;
   ~ToolbarGlicButton() override;
 
+  gfx::Size CalculatePreferredSize(
+      const views::SizeBounds& available_size) const override;
+
   void SetCloseButtonFocusBehavior(
       views::View::FocusBehavior focus_behavior) override;
 
   bool IsWidgetAlive() const;
   void AddedToWidget() override;
   void UpdateColors() override;
-  void SetWidthFactor(float factor);
+  void UpdateStyle(bool should_match_toolbar);
   void AddCloseButton(PressedCallback pressed_callback);
   BrowserFrameView* GetBrowserFrameView() const;
   void SetForegroundFrameActiveColorId(ui::ColorId new_color_id) override;

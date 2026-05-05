@@ -9,7 +9,7 @@ import {assert, assertInstanceof, assertNotReached} from '//resources/js/assert.
 import {EventTracker} from '//resources/js/event_tracker.js';
 import {loadTimeData} from '//resources/js/load_time_data.js';
 import type {RectF} from '//resources/mojo/ui/gfx/geometry/mojom/geometry.mojom-webui.js';
-import {PolymerElement} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {flush, PolymerElement} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {GLIF_HEX_COLORS} from './color_utils.js';
 import {CenterRotatedBox_CoordinateType} from './geometry.mojom-webui.js';
@@ -295,6 +295,9 @@ export class PostSelectionRendererElement extends
         this.shouldDarkenScrim = true;
       }
     });
+    this.eventTracker_.add(this, 'pointermove', (e: PointerEvent) => {
+      this.handlePointerMoveForFocus(e);
+    });
     this.resizeObserver.observe(this);
     // Set up listener to listen to events from C++.
     this.listenerIds = [
@@ -321,11 +324,53 @@ export class PostSelectionRendererElement extends
     this.listenerIds = [];
   }
 
-  private onStaticRegionPointerEnter(event: PointerEvent) {
-    const id = (event.currentTarget as HTMLElement).dataset['id'];
-    if (id) {
-      this.dispatchEvent(new CustomEvent(
-          'activate-region', {bubbles: true, composed: true, detail: {id}}));
+  private handlePointerMoveForFocus(event: PointerEvent) {
+    // Don't switch focus if the user is currently dragging/resizing.
+    if (this.currentDragTarget !== DragTarget.NONE) {
+      return;
+    }
+
+    const elements =
+        this.shadowRoot!.elementsFromPoint(event.clientX, event.clientY) as
+        HTMLElement[];
+
+    // If we're hovering over the active region's controls (close button, corners),
+    // don't switch focus.
+    if (elements.some(
+            el => el.classList.contains('close-button') ||
+                el.classList.contains('corner-hit-box'))) {
+      return;
+    }
+
+    // Filter for elements that represent a selection region and map them to
+    // their corresponding region ID and normalized area.
+    const smallestRegion =
+        elements
+            .filter(
+                el => el.classList.contains('static-region') ||
+                    el.id === 'postSelection')
+            .map(el => {
+              const id = el.id === 'postSelection' ? this.activeRegionId :
+                                                     el.dataset['id'];
+              const region = this.selectedRegions.find(r => r.id === id);
+              return {
+                id,
+                area: region ? region.region.width * region.region.height :
+                               Infinity,
+              };
+            })
+            .reduce(
+                (prev, curr) => (curr.area < prev.area ? curr : prev),
+                {id: '', area: Infinity});
+
+    // If the smallest region at this point isn't already the active one,
+    // request a focus switch.
+    if (smallestRegion.id && smallestRegion.id !== this.activeRegionId) {
+      this.dispatchEvent(new CustomEvent('activate-region', {
+        bubbles: true,
+        composed: true,
+        detail: {id: smallestRegion.id},
+      }));
     }
   }
 
@@ -359,12 +404,9 @@ export class PostSelectionRendererElement extends
             .map(r => this.selectedRegionToStaticRegion(r));
 
     this.updateCornerDimensions();
-    // Ensure canvases are rendered for the new regions. We use
-    // requestAnimationFrame to allow the dom-repeat to stamp the new canvases
-    // before we try to draw to them.
-    requestAnimationFrame(() => {
-      this.renderStaticRegionCanvases();
-    });
+    // Draw canvases immediately to prevent flicker on static regions.
+    flush();
+    this.renderStaticRegionCanvases();
   }
 
   private selectedRegionToStaticRegion(region: SelectedRegion): StaticRegion {
@@ -376,15 +418,14 @@ export class PostSelectionRendererElement extends
     const rightOffset = 100 - (leftPercent + widthPercent);
     const bottomOffset = 100 - (topPercent + heightPercent);
 
-    const cornerWidth = 'var(--post-selection-corner-width)';
     const cornerRadius = 'var(--post-selection-cutout-corner-radius, 8px)';
 
     return {
       id: region.id,
-      left: `calc(${leftPercent}% - ${cornerWidth})`,
-      top: `calc(${topPercent}% - ${cornerWidth})`,
-      width: `calc(${widthPercent}% + (2 * ${cornerWidth}))`,
-      height: `calc(${heightPercent}% + (2 * ${cornerWidth}))`,
+      left: `${leftPercent}%`,
+      top: `${topPercent}%`,
+      width: `${widthPercent}%`,
+      height: `${heightPercent}%`,
       clipPath: `inset(${topPercent}% ${rightOffset}% ${bottomOffset}% ${
           leftPercent}% round ${cornerRadius})`,
     };
@@ -814,6 +855,9 @@ export class PostSelectionRendererElement extends
     // Only update properties defined absolutely, i.e. corner dimensions.
     // Properties that are defined relatively do not need to be updated.
     this.updateCornerDimensions();
+    this.style.setProperty(
+        '--post-selection-show-gradient',
+        this.multiRegionSelectionEnabled ? '1' : '0');
     if (this.newBoxAnimation) {
       (this.newBoxAnimation.effect as KeyframeEffect)
           .setKeyframes(this.getNewBoxAnimationKeyframes());

@@ -16,8 +16,8 @@ import {getTemplate} from './region_selection.html.js';
 import {ScreenshotBitmapBrowserProxyImpl} from './screenshot_bitmap_browser_proxy.js';
 import {renderScreenshot} from './screenshot_utils.js';
 import {RegionSource, SelectionOverlayBaseHandler} from './selection_overlay_base_handler.js';
-import {focusShimmerOnRegion, type GestureEvent, GestureState, getRelativeCoordinate, ShimmerControlRequester, unfocusShimmer} from './selection_utils.js';
-import type {Point} from './selection_utils.js';
+import {focusShimmerOnRegion, GestureState, getRelativeCoordinate, ShimmerControlRequester, unfocusShimmer} from './selection_utils.js';
+import type {GestureEvent, Point} from './selection_utils.js';
 
 // A simple interface representing a rectangle with normalized values.
 interface NormalizedRectangle {
@@ -99,6 +99,11 @@ export class RegionSelectionElement extends RegionSelectionElementBase {
         type: Boolean,
         value: false,
       },
+      multiRegionSelectionEnabled: {
+        reflectToAttribute: true,
+        type: Boolean,
+        value: () => loadTimeData.getBoolean('enableMultiRegionSelection'),
+      },
       screenshotDataUri: String,
       shaderLayerColorHexes: {
         type: Array,
@@ -155,6 +160,8 @@ export class RegionSelectionElement extends RegionSelectionElementBase {
   declare private selectionOverlayRect: DOMRect;
   // Whether keyboard selection should be displayed.
   declare private displayKeyboardSelection: boolean;
+  // Whether multi-region selection is enabled.
+  declare private multiRegionSelectionEnabled: boolean;
 
   // The colors used for the gradient stroke of the region selection.
   declare private regionStrokeColor1: string;

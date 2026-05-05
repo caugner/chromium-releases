@@ -48,7 +48,6 @@ import org.chromium.net.CronetTestRule.IgnoreFor;
 import org.chromium.net.CronetTestRule.IntFlag;
 import org.chromium.net.CronetTestRule.RequiresMinAndroidApi;
 import org.chromium.net.CronetTestRule.RequiresMinApi;
-import org.chromium.net.NetworkChangeNotifierAutoDetect.ConnectivityManagerDelegate;
 import org.chromium.net.TestUrlRequestCallback.ResponseStep;
 import org.chromium.net.httpflags.BaseFeature;
 import org.chromium.net.httpflags.FlagValue;
@@ -233,7 +232,7 @@ public class CronetUrlRequestContextTest {
         try (LogcatCapture logcatSink =
                 new LogcatCapture(
                         Arrays.asList(
-                                HttpFlagsLoader.TAG + ":I",
+                                Log.normalizeTag(HttpFlagsLoader.TAG + ":I"),
                                 Log.normalizeTag(TAG + ":I"),
                                 "chromium:I"))) {
             // Run the action that should do printing to logcat.
@@ -266,7 +265,6 @@ public class CronetUrlRequestContextTest {
             reason =
                     "HTTP flags are only supported on native Cronet for now. "
                             + "crbug.com/1495401: Emulator image does not have HttpFlags code yet")
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testHttpFlagsAreLoaded() throws Exception {
         setupManifest(/* enableHttpFlags= */ true, /* enableTelemetry= */ true);
         String marker = UUID.randomUUID().toString();
@@ -285,7 +283,6 @@ public class CronetUrlRequestContextTest {
             reason =
                     "HTTP flags are only supported on native Cronet for now. "
                             + "crbug.com/1495401: Emulator image does not have HttpFlags code yet")
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testHttpFlagsAreLoadedFromAPI() throws Exception {
         setupManifest(/* enableHttpFlags= */ true, /* enableTelemetry= */ true);
         String marker = UUID.randomUUID().toString();
@@ -340,7 +337,6 @@ public class CronetUrlRequestContextTest {
             reason =
                     "HTTP flags are only supported on native Cronet for now. "
                             + "crbug.com/1495401: Emulator image does not have HttpFlags code yet")
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testHttpFlagsAppliedIfAppIdMatches() throws Exception {
         setupManifest(/* enableHttpFlags= */ true, /* enableTelemetry= */ true);
         String marker = UUID.randomUUID().toString();
@@ -395,7 +391,6 @@ public class CronetUrlRequestContextTest {
             reason =
                     "HTTP flags are only supported on native Cronet for now. "
                             + "crbug.com/1495401: Emulator image does not have HttpFlags code yet")
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testHttpFlagsAppliedIfTelemetryOverrideIsUsed() throws Exception {
         setupManifest(/* enableHttpFlags= */ true, /* enableTelemetry= */ false);
         String marker = UUID.randomUUID().toString();
@@ -414,7 +409,6 @@ public class CronetUrlRequestContextTest {
             reason =
                     "HTTP flags are only supported on native Cronet for now. "
                             + "crbug.com/1495401: Emulator image does not have HttpFlags code yet")
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testHttpFlagsAppliedIfAtMinVersion() throws Exception {
         setupManifest(/* enableHttpFlags= */ true, /* enableTelemetry= */ true);
         String marker = UUID.randomUUID().toString();
@@ -433,7 +427,6 @@ public class CronetUrlRequestContextTest {
             reason =
                     "HTTP flags are only supported on native Cronet for now. "
                             + "crbug.com/1495401: Emulator image does not have HttpFlags code yet")
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testHttpFlagsAppliedIfAboveMinVersion() throws Exception {
         setupManifest(/* enableHttpFlags= */ true, /* enableTelemetry= */ true);
         String marker = UUID.randomUUID().toString();
@@ -479,7 +472,6 @@ public class CronetUrlRequestContextTest {
             reason =
                     "HTTP flags are only supported on native Cronet for now. "
                             + "crbug.com/1495401: Emulator image does not have HttpFlags code yet")
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testBaseFeatureFlagsOverridesEnabled() throws Exception {
         setupManifest(/* enableHttpFlags= */ true, /* enableTelemetry= */ true);
         String marker = UUID.randomUUID().toString();
@@ -834,9 +826,9 @@ public class CronetUrlRequestContextTest {
             reason = "Tests native implementation internals")
     public void testNetworkBoundContextLifetime() throws Exception {
         ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
-        ConnectivityManagerDelegate delegate =
-                new ConnectivityManagerDelegate(mTestRule.getTestFramework().getContext());
-        Network defaultNetwork = delegate.getDefaultNetwork();
+        ConnectivityManagerWrapper wrapper =
+                new ConnectivityManagerWrapper(mTestRule.getTestFramework().getContext());
+        Network defaultNetwork = wrapper.getDefaultNetwork();
         assume().that(defaultNetwork).isNotNull();
 
         TestUrlRequestCallback callback = new TestUrlRequestCallback();
@@ -898,8 +890,8 @@ public class CronetUrlRequestContextTest {
         callback.setAutoAdvance(false);
         ExperimentalUrlRequest.Builder urlRequestBuilder =
                 cronetEngine.newUrlRequestBuilder(mUrl, callback, callback.getExecutor());
-        ConnectivityManagerDelegate delegate =
-                new ConnectivityManagerDelegate(mTestRule.getTestFramework().getContext());
+        ConnectivityManagerWrapper delegate =
+                new ConnectivityManagerWrapper(mTestRule.getTestFramework().getContext());
         Network defaultNetwork = delegate.getDefaultNetwork();
         assume().that(defaultNetwork).isNotNull();
 
@@ -969,8 +961,8 @@ public class CronetUrlRequestContextTest {
 
     @Test
     public void testBindToDefaultNetworkSucceeds() {
-        ConnectivityManagerDelegate delegate =
-                new ConnectivityManagerDelegate(mTestRule.getTestFramework().getContext());
+        ConnectivityManagerWrapper delegate =
+                new ConnectivityManagerWrapper(mTestRule.getTestFramework().getContext());
         Network defaultNetwork = delegate.getDefaultNetwork();
         assume().that(defaultNetwork).isNotNull();
 
@@ -2329,7 +2321,6 @@ public class CronetUrlRequestContextTest {
                         name = NativeCronetProvider.OVERRIDE_NATIVE_CRONET_WITH_HTTPENGINE_FLAG,
                         value = false)
             })
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testNativeCronetProviderShouldNotServeHttpEngineWithFlagDisabled()
             throws Exception {
         CronetProvider nativeProvider =
@@ -2461,7 +2452,6 @@ public class CronetUrlRequestContextTest {
             reason =
                     "Fallback implementation doesn't support HTTP flags; AOSP doesn't have this"
                             + " logic yet")
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testCronetEngineThreadPriority_honorsHttpFlag() throws Exception {
         final int flagValue = 13;
         CronetEngine engine =
@@ -2492,7 +2482,6 @@ public class CronetUrlRequestContextTest {
             reason =
                     "Fallback implementation doesn't support HTTP flags; AOSP doesn't have this"
                             + " logic yet")
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testCronetEngineThreadPriority_httpFlagOverridesBuilderOption() throws Exception {
         final int flagValue = 13;
         CronetEngine engine =

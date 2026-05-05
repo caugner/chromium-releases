@@ -62,6 +62,11 @@ COMPONENT_EXPORT(UI_BASE_FEATURES)
 extern const char kApplyNativeOcclusionToCompositorTypeThrottleAndRelease[];
 #endif  // BUILDFLAG(IS_WIN)
 
+#if BUILDFLAG(IS_MAC)
+COMPONENT_EXPORT(UI_BASE_FEATURES)
+BASE_DECLARE_FEATURE(kOnlyUseWindowResizeHelperOnResize);
+#endif  // BUILDFLAG(IS_MAC)
+
 #if BUILDFLAG(IS_CHROMEOS)
 COMPONENT_EXPORT(UI_BASE_FEATURES)
 bool IsImprovedKeyboardShortcutsEnabled();
@@ -293,6 +298,11 @@ BASE_DECLARE_FEATURE_PARAM(int, kCompensationExpectedLatencyMs);
 // considered acceptable by the `CompensateGestureScrollUpdateLatency` feature.
 COMPONENT_EXPORT(UI_BASE_FEATURES)
 BASE_DECLARE_FEATURE_PARAM(int, kCompensationAcceptableLatencyMs);
+
+// When enabled, Ctrl+Alt+Click (Cmd+Alt+Click on macOS) opens a link in a
+// split view alongside the current tab.
+COMPONENT_EXPORT(UI_BASE_FEATURES)
+BASE_DECLARE_FEATURE(kSplitViewLinkOpen);
 
 }  // namespace features
 

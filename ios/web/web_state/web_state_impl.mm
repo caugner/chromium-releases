@@ -13,6 +13,7 @@
 #import "base/compiler_specific.h"
 #import "base/debug/dump_without_crashing.h"
 #import "base/feature_list.h"
+#import "base/notreached.h"
 #import "base/time/time.h"
 #import "ios/web/common/features.h"
 #import "ios/web/js_messaging/web_frames_manager_impl.h"
@@ -25,6 +26,7 @@
 #import "ios/web/web_state/ui/crw_web_controller.h"
 #import "ios/web/web_state/web_state_impl_realized_web_state.h"
 #import "ios/web/web_state/web_state_impl_serialized_data.h"
+#import "ios/web/web_state/web_view_pass_key.h"
 #import "net/base/apple/url_conversions.h"
 #import "url/gurl.h"
 
@@ -431,6 +433,15 @@ id<CRWWebViewNavigationProxy> WebStateImpl::GetWebViewNavigationProxy() const {
   return nil;
 }
 
+WKWebView* WebStateImpl::GetWebView(WebViewPassKey pass_key) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (pimpl_) [[likely]] {
+    CRWWebController* web_controller = pimpl_->GetWebController();
+    return [web_controller webViewWithPassKey:std::move(pass_key)];
+  }
+  return nil;
+}
+
 #pragma mark - WebFrame management
 
 void WebStateImpl::RetrieveExistingFrames() {
@@ -658,6 +669,20 @@ void WebStateImpl::LoadSimulatedRequest(const GURL& url,
 void WebStateImpl::Stop() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   RealizedState()->Stop();
+}
+
+std::optional<std::string> WebStateImpl::GetUserAgentOverride() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (pimpl_) [[likely]] {
+    return pimpl_->GetUserAgentOverride();
+  }
+  return std::nullopt;
+}
+
+void WebStateImpl::SetUserAgentOverride(
+    std::optional<std::string> ua_override) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  RealizedState()->SetUserAgentOverride(std::move(ua_override));
 }
 
 const NavigationManager* WebStateImpl::GetNavigationManager() const {
@@ -1000,6 +1025,19 @@ id WebStateImpl::GetActivityItem() API_AVAILABLE(ios(16.4)) {
     return nil;
   }
   return [GetWebController() activityItem];
+}
+
+bool WebStateImpl::IsCustomOpenPanelSupported() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (pimpl_) [[likely]] {
+    return pimpl_->IsCustomOpenPanelSupported();
+  }
+  return false;
+}
+
+void WebStateImpl::SetCustomOpenPanelSupported(bool supports) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  RealizedState()->SetCustomOpenPanelSupported(supports);
 }
 
 UIColor* WebStateImpl::GetThemeColor() {

@@ -5,8 +5,9 @@
 package org.chromium.chrome.browser.omnibox.suggestions.action;
 
 import org.chromium.build.annotations.NullMarked;
+import org.chromium.chrome.browser.omnibox.R;
 import org.chromium.components.omnibox.AutocompleteInput.SiteSearchData;
-import org.chromium.components.omnibox.R;
+import org.chromium.components.omnibox.action.ActionPresentationMode;
 import org.chromium.components.omnibox.action.OmniboxAction;
 import org.chromium.components.omnibox.action.OmniboxActionDelegate;
 import org.chromium.components.omnibox.action.OmniboxActionId;
@@ -25,10 +26,9 @@ public class SiteSearchAction extends OmniboxAction {
                 nativeInstance,
                 hint,
                 accessibilityHint,
-                // TODO(crbug.com/459590224): Change it to search icon.
-                DEFAULT_ICON,
+                new ActionIcon(R.drawable.ic_suggestion_magnifier, true),
                 R.style.TextAppearance_ChipText,
-                /* showAsActionButton= */ false,
+                ActionPresentationMode.CHIP,
                 WindowOpenDisposition.CURRENT_TAB);
         this.keyword = keyword;
     }

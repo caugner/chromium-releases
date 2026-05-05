@@ -25,6 +25,7 @@
 #include "base/task/bind_post_task.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/thread_pool.h"
+#include "build/branding_buildflags.h"
 #include "chrome/browser/lens/core/mojom/geometry.mojom.h"
 #include "chrome/browser/lens/core/mojom/lens_side_panel.mojom.h"
 #include "chrome/browser/lens/core/mojom/overlay_object.mojom.h"
@@ -36,6 +37,7 @@
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/color/chrome_color_id.h"
 #include "chrome/browser/ui/desktop_to_mobile_promos/ios_promo_trigger_service.h"
 #include "chrome/browser/ui/desktop_to_mobile_promos/ios_promo_trigger_service_factory.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
@@ -70,7 +72,6 @@
 #include "chrome/browser/ui/user_education/browser_user_education_interface.h"
 #include "chrome/browser/ui/views/interaction/browser_elements_views.h"
 #include "chrome/browser/ui/views/side_panel/side_panel.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_util.h"
 #include "chrome/browser/ui/webui/webui_embedding_context.h"
 #include "chrome/common/chrome_render_frame.mojom.h"
 #include "chrome/common/pref_names.h"
@@ -89,6 +90,7 @@
 #include "components/permissions/permission_request_manager.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/tabs/public/tab_interface.h"
+#include "components/vector_icons/vector_icons.h"
 #include "components/viz/common/frame_timing_details.h"
 #include "components/zoom/zoom_controller.h"
 #include "content/public/browser/download_manager.h"
@@ -705,6 +707,8 @@ bool LensOverlayController::IsUrlEligibleForTutorialIPHForTesting(
 
 void LensOverlayController::ShowUI(
     lens::LensOverlayInvocationSource invocation_source) {
+  invocation_source_ = invocation_source;
+
   if (!CanShowModalUI()) {
     return;
   }
@@ -726,9 +730,6 @@ void LensOverlayController::ShowUI(
       pref_service_->GetInteger(prefs::kLensOverlayStartCount);
   pref_service_->SetInteger(prefs::kLensOverlayStartCount,
                             lens_overlay_start_count + 1);
-
-  // Store reference for later use.
-  invocation_source_ = invocation_source;
 
   // Create the languages controller.
   languages_controller_ =
@@ -1372,6 +1373,14 @@ bool LensOverlayController::ShouldShowPreselectionBubble() {
   return !pending_region_ && !IsResultsSidePanelShowing();
 }
 
+void LensOverlayController::ShowPreselectionBubble() {
+  // Don't show the preselection bubble if the overlay is not being shown.
+  if (IsResultsSidePanelShowing()) {
+    return;
+  }
+  OverlayBaseController::ShowPreselectionBubble();
+}
+
 bool LensOverlayController::UseOverlayBlur() {
   return lens::features::GetLensOverlayUseBlur();
 }
@@ -1500,6 +1509,19 @@ void LensOverlayController::NotifyTabWillEnterBackground() {
     interface->AbortFeaturePromo(
         feature_engagement::kIPHiOSLensPromoDesktopFeature);
   }
+}
+
+OverlayBaseController::PreselectionUIConfig
+LensOverlayController::GetPreselectionBubbleConfig() {
+  return {
+      .message_string_id = IDS_LENS_OVERLAY_INITIAL_TOAST_MESSAGE_SIMPLIFIED,
+      .bubble_background_color = kColorLensOverlayToastBackground,
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+      .icon = &vector_icons::kGoogleLensMonochromeLogoIcon
+#else
+      .icon = &vector_icons::kSearchChromeRefreshIcon
+#endif
+  };
 }
 
 bool LensOverlayController::IsOverlayViewShared() const {

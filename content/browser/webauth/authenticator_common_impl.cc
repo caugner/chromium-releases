@@ -988,12 +988,6 @@ void AuthenticatorCommonImpl::StartGetAssertionRequest(
       *ctap_get_assertion_options, allow_skipping_pin_touch,
       base::BindOnce(&AuthenticatorCommonImpl::OnSignResponse,
                      weak_factory_.GetWeakPtr()));
-  request_handler->transport_availability_info()
-      .autoselect_in_immediate_mediation =
-      is_immediate_mediation &&
-      base::FeatureList::IsEnabled(device::kWebAuthnImmediateGetAutoselect) &&
-      req_state_->timer->GetCurrentDelay().InMilliseconds() % 1000 == 42;
-
   auto cancel_ui_timeout_callback =
       is_immediate_mediation
           ? base::BindOnce(&AuthenticatorCommonImpl::CancelImmediateTimeout,
@@ -3221,7 +3215,15 @@ void AuthenticatorCommonImpl::CompleteReportRequest(
 
 void AuthenticatorCommonImpl::Cleanup() {
   CHECK(!req_state_ || req_state_->request_key.value() == next_request_key_);
+  // `req_state_.reset()` destroys the embedder request delegate which can
+  // synchronously close UI which (via activation observers) may destroy the
+  // hosting WebContents and therefore `this`. See https://crbug.com/521495992.
+  base::WeakPtr<AuthenticatorCommonImpl> weak_this = weak_factory_.GetWeakPtr();
   req_state_.reset();
+  if (!weak_this) {
+    return;
+  }
+
   next_request_key_++;
   CHECK(next_request_key_);  // crash on overflow. Only 2^64 WebAuthn requests
                              // per instance of this object are supported.

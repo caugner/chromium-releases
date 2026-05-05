@@ -197,6 +197,7 @@ constexpr base::TimeDelta kSigninTimeout = base::Seconds(10);
   _authServiceObserverBridge.reset();
   _identityManagerObserverBridge.reset();
   _webSigninTracker.reset();
+  [_authenticationFlow interrupt];
   _authenticationFlow = nil;
 }
 
@@ -217,6 +218,20 @@ constexpr base::TimeDelta kSigninTimeout = base::Seconds(10);
 }
 
 #pragma mark - AuthenticationFlowDelegate
+
+- (void)authenticationFlowDidFetchHostedDomain:(NSString*)hostedDomain {
+  if (hostedDomain.length > 0) {
+    RecordConsistencyPromoUserAction(
+        signin_metrics::AccountConsistencyPromoAction::
+            SIGNIN_STARTED_WITH_MANAGED_ACCOUNT,
+        _accessPoint);
+  } else {
+    RecordConsistencyPromoUserAction(
+        signin_metrics::AccountConsistencyPromoAction::
+            SIGNIN_STARTED_WITH_NON_MANAGED_ACCOUNT,
+        _accessPoint);
+  }
+}
 
 - (void)
     authenticationFlowDidSignInInSameProfileWithCancelationReason:

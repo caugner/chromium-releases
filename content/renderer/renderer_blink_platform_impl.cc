@@ -19,7 +19,6 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/pattern.h"
 #include "base/strings/string_number_conversions.h"
@@ -54,7 +53,7 @@
 #include "content/renderer/media/inspector_media_event_handler.h"
 #include "content/renderer/media/render_media_event_handler.h"
 #include "content/renderer/media/renderer_webaudiodevice_impl.h"
-#include "content/renderer/memory_coordinator/renderer_memory_coordinator_policy.h"
+#include "content/renderer/memory_coordinator/last_resort_gc_policy.h"
 #include "content/renderer/render_frame_impl.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/renderer_navigation_metrics_manager.h"
@@ -414,7 +413,7 @@ bool RendererBlinkPlatformImpl::IsolateStartsInBackground() {
 }
 
 WebString RendererBlinkPlatformImpl::DefaultLocale() {
-  return WebString::FromASCII(RenderThread::Get()->GetLocale());
+  return WebString::FromAscii(RenderThread::Get()->GetLocale());
 }
 
 void RendererBlinkPlatformImpl::SetSuddenTerminationAllowed(bool allowed) {
@@ -560,6 +559,12 @@ RendererBlinkPlatformImpl::SharedCompositorWorkerContextProvider(
     cc::RasterDarkModeFilter* dark_mode_filter) {
   return RenderThreadImpl::current()->SharedCompositorWorkerContextProvider(
       dark_mode_filter);
+}
+
+void RendererBlinkPlatformImpl::SharedMediaContextProvider(
+    base::OnceCallback<void(scoped_refptr<viz::RasterContextProvider>)>
+        callback) {
+  RenderThreadImpl::current()->SharedMediaContextProvider(std::move(callback));
 }
 
 bool RendererBlinkPlatformImpl::IsGpuRemoteDisconnected() {
@@ -776,7 +781,6 @@ RendererBlinkPlatformImpl::CreateRasterGraphicsContextProvider(
 
   constexpr bool automatic_flushes = true;
   constexpr bool support_locking = false;
-  constexpr bool lose_context_when_out_of_memory = false;
 
   gpu::SchedulingPriority stream_priority =
       (base::FeatureList::IsEnabled(features::kInitialWebUI) &&
@@ -790,8 +794,7 @@ RendererBlinkPlatformImpl::CreateRasterGraphicsContextProvider(
       viz::ContextProviderCommandBuffer::CreateForRaster(
           std::move(gpu_channel_host), kGpuStreamIdDefault, stream_priority,
           GURL(document_url), automatic_flushes, support_locking,
-          gpu::SharedMemoryLimits(), ToVizContextType(context_type),
-          lose_context_when_out_of_memory));
+          gpu::SharedMemoryLimits(), ToVizContextType(context_type)));
 }
 
 //------------------------------------------------------------------------------
@@ -909,7 +912,7 @@ void RendererBlinkPlatformImpl::OnGpuChannelEstablished(
 
 blink::WebString RendererBlinkPlatformImpl::ConvertIDNToUnicode(
     const blink::WebString& host) {
-  return WebString::FromUTF16(url_formatter::IDNToUnicode(host.Ascii()));
+  return WebString::FromUtf16(url_formatter::IDNToUnicode(host.Ascii()));
 }
 
 //------------------------------------------------------------------------------
@@ -994,7 +997,11 @@ void RendererBlinkPlatformImpl::CreateServiceWorkerSubresourceLoaderFactory(
           /*remote_controller=*/mojo::NullRemote(),
           /*remote_cache_storage=*/mojo::NullRemote(), client_id.Utf8(),
           blink::mojom::ServiceWorkerFetchHandlerBypassOption::kDefault,
-          /*router_rules=*/std::nullopt, blink::EmbeddedWorkerStatus::kStopped,
+          /*router_rules=*/std::nullopt, network::CrossOriginEmbedderPolicy(),
+          mojo::NullRemote() /*coep_reporter*/,
+          network::DocumentIsolationPolicy(),
+          mojo::NullRemote() /*dip_reporter*/,
+          blink::EmbeddedWorkerStatus::kStopped,
           /*running_status_receiver=*/mojo::NullReceiver()),
       network::SharedURLLoaderFactory::Create(std::move(fallback_factory)),
       std::move(receiver), std::move(task_runner));
@@ -1181,12 +1188,9 @@ bool RendererBlinkPlatformImpl::IsUserLevelMemoryPressureSignalEnabled() {
 #endif  // BUILDFLAG(IS_ANDROID)
 
 void RendererBlinkPlatformImpl::OnV8HeapLastResortGC() {
-  // In --single-process mode, the RendererMemoryCoordinatorPolicy does not run.
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kSingleProcess)) {
-    return;
+  if (auto* policy = LastResortGCPolicy::Get()) {
+    policy->OnV8HeapLastResortGC();
   }
-  RendererMemoryCoordinatorPolicy::Get().OnV8HeapLastResortGC();
 }
 
 }  // namespace content

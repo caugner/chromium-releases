@@ -37,13 +37,18 @@ AutofillClient::PopupOpenArgs::PopupOpenArgs(
     std::vector<Suggestion> suggestions,
     AutofillSuggestionTriggerSource trigger_source,
     int32_t form_control_ax_id,
-    PopupAnchorType anchor_type)
+    PopupAnchorType anchor_type,
+    bool show_tabbed_popup,
+    bool prefer_prev_arrow_side_on_suggestions_update)
     : element_bounds(element_bounds),
       text_direction(text_direction),
       suggestions(std::move(suggestions)),
       trigger_source(trigger_source),
       form_control_ax_id(form_control_ax_id),
-      anchor_type(anchor_type) {}
+      anchor_type(anchor_type),
+      show_tabbed_popup(show_tabbed_popup),
+      prefer_prev_arrow_side_on_suggestions_update(
+          prefer_prev_arrow_side_on_suggestions_update) {}
 AutofillClient::PopupOpenArgs::PopupOpenArgs(
     const AutofillClient::PopupOpenArgs&) = default;
 AutofillClient::PopupOpenArgs::PopupOpenArgs(AutofillClient::PopupOpenArgs&&) =
@@ -133,6 +138,10 @@ AutofillAiModelCache* AutofillClient::GetAutofillAiModelCache() {
 }
 
 AutofillAiModelExecutor* AutofillClient::GetAutofillAiModelExecutor() {
+  return nullptr;
+}
+
+consent_auditor::ConsentAuditor* AutofillClient::GetConsentAuditor() {
   return nullptr;
 }
 
@@ -228,13 +237,20 @@ ActorKeyMetricsRecorder* AutofillClient::GetActorKeyMetricsRecorder() {
 }
 
 std::unique_ptr<device_reauth::DeviceAuthenticator>
-AutofillClient::GetDeviceAuthenticator(std::string histogram) {
+AutofillClient::GetDeviceAuthenticator(std::string histogram) const {
   return nullptr;
 }
 
 std::unique_ptr<device_reauth::DeviceAuthenticator>
-AutofillClient::GetDeviceAuthenticator() {
+AutofillClient::GetDeviceAuthenticator() const {
   return GetDeviceAuthenticator("");
+}
+
+bool AutofillClient::SupportsDeviceReauth() const {
+  std::unique_ptr<device_reauth::DeviceAuthenticator> authenticator =
+      GetDeviceAuthenticator();
+  return authenticator &&
+         authenticator->CanAuthenticateWithBiometricOrScreenLock();
 }
 
 void AutofillClient::ShowPlusAddressEmailOverrideNotification(
@@ -326,7 +342,11 @@ void AutofillClient::ShowAutofillAiLocalSaveNotification() {
   NOTIMPLEMENTED();
 }
 
-void AutofillClient::ShowAutofillAiFailureNotification(std::u16string message) {
+void AutofillClient::ShowAutofillAiSaveToWalletFailureNotification() {
+  NOTIMPLEMENTED();
+}
+
+void AutofillClient::ShowAutofillAiFetchFromWalletFailureNotification() {
   NOTIMPLEMENTED();
 }
 

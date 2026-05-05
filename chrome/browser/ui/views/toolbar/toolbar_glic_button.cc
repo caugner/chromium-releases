@@ -4,7 +4,9 @@
 // found in the LICENSE file.
 #include "chrome/browser/ui/views/toolbar/toolbar_glic_button.h"
 
+#include "base/logging.h"
 #include "chrome/app/vector_icons/vector_icons.h"
+#include "chrome/browser/glic/public/features.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/color/chrome_color_id.h"
 #include "chrome/browser/ui/layout_constants.h"
@@ -47,10 +49,24 @@ ToolbarGlicButton::ToolbarGlicButton(
 
 ToolbarGlicButton::~ToolbarGlicButton() = default;
 
+gfx::Size ToolbarGlicButton::CalculatePreferredSize(
+    const views::SizeBounds& available_size) const {
+  gfx::Size size =
+      GlicButton<ToolbarButton>::CalculatePreferredSize(available_size);
+  size.set_height(GetLayoutConstant(LayoutConstant::kToolbarButtonHeight));
+  return size;
+}
+
 void ToolbarGlicButton::AddedToWidget() {
   split_rounded_edge_radius_ = GetRoundedCornerRadius();
   SetLeftRightCornerRadii(GetRoundedCornerRadius(), GetRoundedCornerRadius());
-  SetDefaultBackgroundColorId(kColorToolbarGlicButtonBackgroundDefault);
+  bool show_before_avatar =
+      base::FeatureList::IsEnabled(features::kGlicToolbarButtonLocation) &&
+      features::kGlicToolbarButtonLocationParam.Get() ==
+          features::GlicToolbarButtonLocation::kLeftOfProfileChip;
+  SetDefaultBackgroundColorId(show_before_avatar
+                                  ? kColorToolbar
+                                  : kColorToolbarGlicButtonBackgroundDefault);
   GlicButton<ToolbarButton>::AddedToWidget();
 }
 
@@ -103,6 +119,15 @@ void ToolbarGlicButton::UpdateColors() {
   ToolbarButton::UpdateColorsAndInsets();
 }
 
+void ToolbarGlicButton::UpdateStyle(bool should_match_toolbar) {
+  ChromeColorIds background_color_id =
+      should_match_toolbar ? kColorToolbar
+                           : kColorToolbarGlicButtonBackgroundDefault;
+
+  SetDefaultBackgroundColorId(background_color_id);
+  UpdateColors();
+}
+
 void ToolbarGlicButton::SetCloseButtonFocusBehavior(
     views::View::FocusBehavior focus_behavior) {}
 
@@ -110,7 +135,7 @@ void ToolbarGlicButton::AddCloseButton(PressedCallback pressed_callback) {
   auto close_button =
       std::make_unique<views::LabelButton>(std::move(pressed_callback));
   close_button->SetTooltipText(
-      l10n_util::GetStringUTF16(IDS_TOOLTIP_TAB_ORGANIZE_CLOSE));
+      l10n_util::GetStringUTF16(IDS_TOOLTIP_GLIC_CLOSE));
 
   const ui::ImageModel icon_image_model = ui::ImageModel::FromVectorIcon(
       vector_icons::kCloseChromeRefreshIcon,

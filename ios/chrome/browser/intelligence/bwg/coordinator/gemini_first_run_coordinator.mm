@@ -4,19 +4,23 @@
 
 #import "ios/chrome/browser/intelligence/bwg/coordinator/gemini_first_run_coordinator.h"
 
+#import "base/strings/sys_string_conversions.h"
 #import "components/feature_engagement/public/event_constants.h"
 #import "components/feature_engagement/public/tracker.h"
 #import "components/prefs/pref_service.h"
+#import "components/variations/service/variations_service.h"
+#import "components/variations/service/variations_service_utils.h"
 #import "ios/chrome/browser/feature_engagement/model/tracker_factory.h"
 #import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_controller.h"
 #import "ios/chrome/browser/intelligence/bwg/coordinator/gemini_first_run_mediator.h"
 #import "ios/chrome/browser/intelligence/bwg/coordinator/gemini_first_run_mediator_delegate.h"
 #import "ios/chrome/browser/intelligence/bwg/metrics/gemini_metrics.h"
-#import "ios/chrome/browser/intelligence/bwg/model/bwg_service_factory.h"
 #import "ios/chrome/browser/intelligence/bwg/model/bwg_tab_helper.h"
 #import "ios/chrome/browser/intelligence/bwg/model/gemini_browser_agent.h"
-#import "ios/chrome/browser/intelligence/bwg/ui/bwg_fre_wrapper_view_controller.h"
+#import "ios/chrome/browser/intelligence/bwg/model/gemini_service_factory.h"
+#import "ios/chrome/browser/intelligence/bwg/ui/gemini_fre_wrapper_view_controller.h"
 #import "ios/chrome/browser/intelligence/features/features.h"
+#import "ios/chrome/browser/shared/model/application_context/application_context.h"
 #import "ios/chrome/browser/shared/model/browser/browser.h"
 #import "ios/chrome/browser/shared/model/prefs/pref_names.h"
 #import "ios/chrome/browser/shared/model/profile/profile_ios.h"
@@ -40,13 +44,16 @@
   GeminiFirstRunMediator* _mediator;
 
   // Wrapper view controller for the First Run Experience (FRE) UI.
-  BWGFREWrapperViewController* _viewController;
+  GeminiFREWrapperViewController* _viewController;
 
   // Handler for sending Gemini commands.
   id<BWGCommands> _geminiCommandsHandler;
 
-  // Returns the `_entryPoint` the coordinator was initialized from.
+  // The `gemini::EntryPoint` the coordinator was initialized from.
   gemini::EntryPoint _entryPoint;
+
+  // Type of Gemini FRE.
+  GeminiFREType _FREType;
 
   // Handler for sending IPH commands.
   id<HelpCommands> _helpCommandsHandler;
@@ -64,10 +71,12 @@
 - (instancetype)initWithBaseViewController:(UIViewController*)viewController
                                    browser:(Browser*)browser
                             fromEntryPoint:(gemini::EntryPoint)entryPoint
+                                   FREType:(GeminiFREType)FREType
                          completionHandler:(void (^)(BOOL success))completion {
   self = [super initWithBaseViewController:viewController browser:browser];
   if (self) {
     _entryPoint = entryPoint;
+    _FREType = FREType;
     _completion = completion;
   }
   return self;
@@ -95,7 +104,7 @@
       initWithPrefService:_prefService
              webStateList:self.browser->GetWebStateList()
        baseViewController:self.baseViewController
-               BWGService:BwgServiceFactory::GetForProfile(self.profile)
+               BWGService:GeminiServiceFactory::GetForProfile(self.profile)
        geminiBrowserAgent:GeminiBrowserAgent::FromBrowser(self.browser)
                   tracker:_tracker
                entryPoint:_entryPoint
@@ -107,23 +116,27 @@
 
   [self prepareAIHubIPH];
 
-  _viewController = [[BWGFREWrapperViewController alloc]
+  variations::VariationsService* variations_service =
+      GetApplicationContext()->GetVariationsService();
+  std::string country =
+      variations_service
+          ? base::ToLowerASCII(variations_service->GetStoredPermanentCountry())
+          : "";
+  NSString* nsCountry = base::SysUTF8ToNSString(country);
+  _viewController = [[GeminiFREWrapperViewController alloc]
          initWithPromo:_mediator.shouldShowPromo
-      isAccountManaged:[self isManagedAccount]];
+      isAccountManaged:[self isManagedAccount]
+               FREType:_FREType
+               country:nsCountry];
   _viewController.sheetPresentationController.delegate = self;
   _viewController.mutator = _mediator;
 
-  BwgTabHelper* BWGTabHelper = [self activeWebStateGeminiTabHelper];
   [self.baseViewController presentViewController:_viewController
                                         animated:YES
                                       completion:^{
                                         // Record FRE was shown.
                                         RecordFREShown();
                                       }];
-
-  if (BWGTabHelper) {
-    BWGTabHelper->SetBwgUiShowing(true);
-  }
 
   [super start];
 }
@@ -137,7 +150,6 @@
 - (void)stopWithCompletion:(ProceduralBlock)completion {
   BwgTabHelper* BWGTabHelper = [self activeWebStateGeminiTabHelper];
   if (BWGTabHelper) {
-    BWGTabHelper->SetBwgUiShowing(false);
     BWGTabHelper->SetPreventContextualPanelEntryPoint(NO);
   }
 
@@ -200,7 +212,7 @@
   return BwgTabHelper::FromWebState(activeWebState);
 }
 
-// Attemps to present the entry point IPH the user hasn't used the AI Hub entry
+// Attempts to present the entry point IPH the user hasn't used the AI Hub entry
 // point yet.
 - (void)presentPageActionMenuIPH {
   if (_entryPoint != gemini::EntryPoint::AIHub) {

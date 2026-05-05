@@ -19,7 +19,7 @@ import org.chromium.base.supplier.NullableObservableSupplier;
 import org.chromium.base.supplier.OneShotCallback;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
-import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel.StateChangeReason;
+import org.chromium.chrome.browser.compositor.overlay_panel.OverlayPanel.StateChangeReason;
 import org.chromium.chrome.browser.firstrun.FirstRunStatus;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.locale.LocaleManager;
@@ -29,6 +29,7 @@ import org.chromium.chrome.browser.readaloud.ReadAloudControllerSupplier;
 import org.chromium.chrome.browser.search_engines.TemplateUrlServiceFactory;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.ui.signin.ForcedSigninStatusProvider;
 import org.chromium.components.search_engines.TemplateUrlService;
 import org.chromium.components.search_engines.TemplateUrlService.TemplateUrlServiceObserver;
 import org.chromium.content_public.browser.GestureListenerManager;
@@ -368,6 +369,8 @@ public class ContextualSearchTabHelper extends EmptyTabObserver
         boolean isActive =
                 !webContents.isIncognito()
                         && FirstRunStatus.getFirstRunFlowComplete()
+                        && !ForcedSigninStatusProvider.getForProfile(profile)
+                                .isForcedSigninShowing()
                         && !ContextualSearchPolicy.isContextualSearchDisabled(profile)
                         && isDseGoogle
                         && !LocaleManager.getInstance().needToCheckForSearchEnginePromo()
@@ -386,6 +389,9 @@ public class ContextualSearchTabHelper extends EmptyTabObserver
                             + !webContents.isIncognito()
                             + " getFirstRunFlowComplete: "
                             + FirstRunStatus.getFirstRunFlowComplete()
+                            + "isForcedSigninShowing: "
+                            + ForcedSigninStatusProvider.getForProfile(profile)
+                                    .isForcedSigninShowing()
                             + " !isContextualSearchDisabled: "
                             + !ContextualSearchManager.isContextualSearchDisabled(profile)
                             + " isDefaultSearchEngineGoogle: "

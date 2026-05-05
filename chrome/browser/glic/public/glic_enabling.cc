@@ -36,6 +36,7 @@
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/pdf/common/constants.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/public/base/signin_switches.h"
@@ -67,9 +68,10 @@ namespace glic {
 //   - If the size is 1 and the string is "*", then all countries are enabled.
 //   - Otherwise, the country must be in this list to be enabled.
 
-// Comma separated list of countries to enable GLIC, by default, if country
+// Comma separated list of countries to enable Glic, by default, if country
 // filtering is enabled.
-constexpr char kDefaultEnabledCountries[] = "us";
+
+constexpr char kDefaultEnabledCountries[] = "us,ca,nz,in";
 
 // Feature flag kGlicLocaleFiltering controls whether locale filtering is
 // applied client side. Two finch params are used to control this, both are a
@@ -82,9 +84,16 @@ constexpr char kDefaultEnabledCountries[] = "us";
 //   - If the size is 1 and the string is "*", then all locales are enabled.
 //   - Otherwise, the locale must be in this list to be enabled.
 
-// Comma separated list of locales to enable GLIC, by default, if locale
+// Comma separated list of locales to enable Glic, by default, if locale
 // filtering is enabled.
-constexpr char kDefaultEnabledLocales[] = "en-us";
+constexpr char kDefaultEnabledLocales[] =
+    "af,am,bg,bn,ca,cs,da,de,el,es,es-419,et,fi,fil,fr,gu,hi,hr,hu,id,it,ja,kn,"
+    "ko,lt,lv,ml,mr,ms,nl,no,pl,pt-BR,pt-PT,ro,ru,sk,sl,sr,sv,sw,ta,te,th,tr,"
+    "uk,vi,zh-CN,zh-TW,en-GB,en-US"
+#if BUILDFLAG(IS_CHROMEOS)
+    ",eu,gl,is,zu"
+#endif
+    ;
 
 namespace {
 
@@ -227,8 +236,6 @@ std::string GlicGlobalEnabling::Delegate::GetPermanentCountryCode() {
   std::string permanent_country_code =
       base::ToLowerASCII(variations::GetCurrentCountryCode(
           g_browser_process->variations_service()));
-  DLOG_IF(WARNING, permanent_country_code.empty())
-      << "Couldn't get permanent country info.";
   return permanent_country_code;
 }
 
@@ -238,8 +245,6 @@ std::string GlicGlobalEnabling::Delegate::GetSessionCountryCode() {
     latest_country = base::ToLowerASCII(
         g_browser_process->variations_service()->GetLatestCountry());
   }
-  DLOG_IF(WARNING, latest_country.empty())
-      << "Couldn't get latest country info.";
   return latest_country;
 }
 
@@ -271,6 +276,7 @@ void GlicEnabling::ProfileEnablement::RecordMetrics(
 
   if (feature_disabled) {
     record_reason(Reason::kFeatureDisabled);
+    RecordFeatureDisabledReason(suffix);
   }
   if (not_regular_profile) {
     record_reason(Reason::kNotRegularProfile);
@@ -303,6 +309,28 @@ void GlicEnabling::ProfileEnablement::RecordMetrics(
       !primary_account_not_fully_signed_in);
 }
 
+void GlicEnabling::ProfileEnablement::RecordFeatureDisabledReason(
+    const std::string& suffix) const {
+  auto record_reason = [&](FeatureDisabledReason reason) {
+    base::UmaHistogramEnumeration(
+        base::StrCat({"Glic.GlobalEnabling.FeatureDisabledReason.", suffix}),
+        reason);
+  };
+
+  if (feature_flag_disabled) {
+    record_reason(FeatureDisabledReason::kFeatureFlagDisabled);
+  }
+  if (disallowed_by_country_filter) {
+    record_reason(FeatureDisabledReason::kCountryDisabled);
+  }
+  if (disallowed_by_locale_filter) {
+    record_reason(FeatureDisabledReason::kLocaleDisabled);
+  }
+  if (system_requirement_not_met) {
+    record_reason(FeatureDisabledReason::kSystemRequirementNotMet);
+  }
+}
+
 GlicEnabling::ProfileEnablement GlicEnabling::EnablementForProfile(
     Profile* profile) {
   ProfileEnablement result;
@@ -311,8 +339,19 @@ GlicEnabling::ProfileEnablement GlicEnabling::EnablementForProfile(
     return result;
   }
 
-  if (!IsEnabledByFlags()) {
+  GlicGlobalEnabling& global_enabling =
+      g_browser_process->GetFeatures()->glic_global_enabling();
+
+  if (!global_enabling.IsEnabledByFlags()) {
     result.feature_disabled = true;
+
+    result.feature_flag_disabled =
+        !base::FeatureList::IsEnabled(features::kGlic);
+    result.disallowed_by_country_filter = !global_enabling.IsCountryEnabled();
+    result.disallowed_by_locale_filter = !global_enabling.IsLocaleEnabled();
+    result.system_requirement_not_met =
+        !global_enabling.IsSystemRequirementMet();
+
     return result;
   }
 
@@ -432,20 +471,12 @@ GlicGlobalEnabling::GlicGlobalEnabling(Delegate& delegate) {
 
 GlicGlobalEnabling::~GlicGlobalEnabling() = default;
 
-bool GlicGlobalEnabling::IsEnabledByFlags() {
-  if (g_bypass_enablement_checks_for_testing) {
-    return true;
-  }
-  // It is important that this value not change at runtime in production. Any
-  // future updates to this function must maintain that property.
-  bool is_enabled = base::FeatureList::IsEnabled(features::kGlic) &&
-                    locale_enablement_.value_or(true) &&
-                    country_enablement_.value_or(true);
+bool GlicGlobalEnabling::IsSystemRequirementMet() const {
 #if BUILDFLAG(IS_CHROMEOS)
   static const bool supported_system_requirements = [] {
     constexpr base::ByteCount kMinimumMemoryThreshold = base::GiB(8);
 
-    // TODO(b:468055370): Remove the bypassing once the glic is fully launched.
+    // TODO(b:468055370): Remove the bypassing once Glic is fully launched.
     const bool bypass_cbx_requirement =
         base::FeatureList::IsEnabled(
             chromeos::features::kGlicEnableFor8GbDevices) &&
@@ -456,9 +487,23 @@ bool GlicGlobalEnabling::IsEnabledByFlags() {
                 chromeos::features::kFeatureManagementGlic));
   }();
 
-  is_enabled = is_enabled && supported_system_requirements;
+  return supported_system_requirements;
+#else
+  return true;
 #endif  // BUILDFLAG(IS_CHROMEOS)
-  return is_enabled;
+}
+
+bool GlicGlobalEnabling::IsEnabledByFlags() {
+  if (g_bypass_enablement_checks_for_testing) {
+    return true;
+  }
+  // It is important that this value not change at runtime in production. Any
+  // future updates to this function must maintain that property.
+  bool is_enabled = base::FeatureList::IsEnabled(features::kGlic) &&
+                    locale_enablement_.value_or(true) &&
+                    country_enablement_.value_or(true);
+
+  return is_enabled && IsSystemRequirementMet();
 }
 
 bool GlicEnabling::IsEnabledByFlags() {
@@ -589,6 +634,11 @@ bool GlicEnabling::IsEligibleForGlicTieredRollout(Profile* profile) {
              subscription_eligibility_service->GetAiSubscriptionTier());
 }
 
+bool GlicEnabling::IsInternalsWebUIEnabled(Profile* profile) {
+  return base::FeatureList::IsEnabled(features::kGlic) &&
+         profile->IsRegularProfile();
+}
+
 bool GlicEnabling::ShouldShowSettingsPage(Profile* profile) {
   return EnablementForProfile(profile).ShouldShowSettingsPage();
 }
@@ -616,7 +666,7 @@ bool GlicEnabling::IsChromeOSProfileEligible(const Profile* profile) {
   switch (user->GetType()) {
     case user_manager::UserType::kRegular:
     case user_manager::UserType::kChild:
-      // These are ok to use glic.
+      // These are ok to use Glic.
       break;
     case user_manager::UserType::kGuest:
     case user_manager::UserType::kPublicAccount:
@@ -630,11 +680,6 @@ bool GlicEnabling::IsChromeOSProfileEligible(const Profile* profile) {
   return true;
 }
 #endif  // BUILDFLAG(IS_CHROMEOS)
-
-bool GlicEnabling::IsUnifiedFreEnabled(Profile* profile) {
-  return IsMultiInstanceEnabled() &&
-         base::FeatureList::IsEnabled(features::kGlicUnifiedFreScreen);
-}
 
 bool GlicEnabling::IsTrustFirstOnboardingEnabledForProfile(Profile* profile) {
   return IsMultiInstanceEnabled() && !HasConsentedForProfile(profile) &&
@@ -685,22 +730,12 @@ bool GlicEnabling::IsTrustFirstOnboardingGatedFeatureEnabled(
 }
 
 bool GlicEnabling::IsMultiInstanceEnabledByFlags() {
-  const bool multi_instance_enabled =
-      base::FeatureList::IsEnabled(features::kGlicMultiInstance);
-  const bool multi_tab_enabled =
-      base::FeatureList::IsEnabled(mojom::features::kGlicMultiTab);
-  const bool tab_underlines_enabled =
-      base::FeatureList::IsEnabled(features::kGlicMultitabUnderlines);
+  return true;
+}
 
-  if (multi_instance_enabled &&
-      !(multi_tab_enabled && tab_underlines_enabled)) {
-    LOG(ERROR)
-        << "GlicMultiInstance is enabled without kGlicMultiTab and/or "
-           "kGlicMultitabUnderlines. All of these features must be enabled to "
-           "ensure proper behavior.";
-  }
-
-  return multi_instance_enabled && multi_tab_enabled && tab_underlines_enabled;
+bool GlicEnabling::IsSelectionPromptEnabledForProfile(Profile* profile) {
+  return IsEnabledForProfile(profile) &&
+         base::FeatureList::IsEnabled(features::kGlicSelectionPrompt);
 }
 
 bool GlicEnabling::IsShareImageEnabledForProfile(Profile* profile) {
@@ -710,96 +745,7 @@ bool GlicEnabling::IsShareImageEnabledForProfile(Profile* profile) {
 }
 
 bool GlicEnabling::IsMultiInstanceEnabled() {
-  if (IsMultiInstanceEnabledByFlags()) {
-    return true;
-  }
-
-  if (!base::FeatureList::IsEnabled(
-          features::kGlicEnableMultiInstanceBasedOnTier)) {
-    return false;
-  }
-
-  // MultiTab feaure enablement should still gate multi-instance enablement when
-  // considering subscription tier.
-  if (!base::FeatureList::IsEnabled(mojom::features::kGlicMultiTab) ||
-      !base::FeatureList::IsEnabled(features::kGlicMultitabUnderlines)) {
-    LOG(ERROR) << "Multi-instance functions cannot be enabled without the "
-                  "kGlicMultiTab and kGlicMultitabUnderlines features. These "
-                  "features must be enabled to ensure proper behavior.";
-    return false;
-  }
-
-  return IsEligibleForGlicMultiInstanceTieredRolloutThisRun();
-}
-
-bool GlicEnabling::IsEligibleForGlicMultiInstanceTieredRolloutThisRun() {
-  // It is necessary that `is_eligible` does not change after the first call to
-  // this function during a run of Chrome, as multi-instance cannot be
-  // enabled/disabled dynamically.
-  static bool is_eligible =
-      GetAndUpdateEligibilityForGlicMultiInstanceTieredRollout(nullptr);
-
-  return is_eligible;
-}
-
-bool GlicEnabling::GetAndUpdateEligibilityForGlicMultiInstanceTieredRollout(
-    Profile* additional_profile) {
-  if (!g_browser_process->local_state() ||
-      !g_browser_process->profile_manager()) {
-    return false;
-  }
-
-  // Reset local state enablement pref if corresponding command line flag is
-  // set. Intended for manual testing only.
-  auto* command_line = base::CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(
-          ::switches::kGlicResetMultiInstanceEnabledByTier)) {
-    g_browser_process->local_state()->SetBoolean(
-        prefs::kGlicMultiInstanceEnabledBySubscriptionTier, false);
-  }
-
-  // If multi-instance was ever enabled by tier, ensure that it stays enabled.
-  if (g_browser_process->local_state()->GetBoolean(
-          prefs::kGlicMultiInstanceEnabledBySubscriptionTier)) {
-    return true;
-  }
-
-  // G1 status command line flag supersedes actual tier check from eligibility
-  // service. Intended for manual testing only.
-  bool flag_overrides_tier =
-      command_line->HasSwitch(::switches::kGlicForceG1StatusForMultiInstance);
-  if (flag_overrides_tier) {
-    std::string flag_value = command_line->GetSwitchValueASCII(
-        ::switches::kGlicForceG1StatusForMultiInstance);
-    bool is_g1_via_flag = flag_value == "true" ? true : false;
-    if (is_g1_via_flag) {
-      g_browser_process->local_state()->SetBoolean(
-          prefs::kGlicMultiInstanceEnabledBySubscriptionTier, true);
-    }
-    return is_g1_via_flag;
-  }
-
-  // If `additional_profile` was specified, also check it.
-  std::vector<Profile*> available_profiles =
-      g_browser_process->profile_manager()->GetLoadedProfiles();
-  if (additional_profile) {
-    available_profiles.emplace_back(additional_profile);
-  }
-
-  for (Profile* profile : available_profiles) {
-    auto* subscription_eligibility_service = subscription_eligibility::
-        SubscriptionEligibilityServiceFactory::GetForProfile(profile);
-    int32_t profile_subscription_tier =
-        subscription_eligibility_service
-            ? subscription_eligibility_service->GetAiSubscriptionTier()
-            : 0;
-    if (profile_subscription_tier == 1 || profile_subscription_tier == 2) {
-      g_browser_process->local_state()->SetBoolean(
-          prefs::kGlicMultiInstanceEnabledBySubscriptionTier, true);
-      return true;
-    }
-  }
-  return false;
+  return IsMultiInstanceEnabledByFlags();
 }
 
 GlicEnabling::GlicEnabling(Profile* profile,

@@ -7,11 +7,14 @@
 
 #include "base/functional/callback.h"
 #include "base/memory/weak_ptr.h"
+#include "chrome/browser/actor/actor_keyed_service.h"
+#include "chrome/browser/actor/actor_task.h"
 #include "chrome/browser/password_manager/actor_login/internal/actor_login_siwg_controller.h"
 #include "components/password_manager/core/browser/actor_login/actor_login_quality_logger_interface.h"
 #include "components/password_manager/core/browser/actor_login/internal/actor_login_delegate.h"
+#include "components/password_manager/core/browser/password_form.h"
 #include "components/password_manager/core/browser/password_manager_driver.h"
-#include "content/public/browser/web_contents_observer.h"
+#include "components/password_manager/core/browser/password_manager_interface.h"
 #include "content/public/browser/web_contents_user_data.h"
 
 namespace password_manager {
@@ -29,7 +32,8 @@ class ActorLoginMetricsHelper;
 class ActorLoginDelegateImpl
     : public ActorLoginDelegate,
       public content::WebContentsObserver,
-      public content::WebContentsUserData<ActorLoginDelegateImpl> {
+      public content::WebContentsUserData<ActorLoginDelegateImpl>,
+      public password_manager::PasswordManagerInterface::Observer {
  public:
   using PasswordDriverSupplierForPrimaryMainFrame =
       base::RepeatingCallback<password_manager::PasswordManagerDriver*(
@@ -52,13 +56,20 @@ class ActorLoginDelegateImpl
 
   // `ActorLoginDelegate` implementation:
   void GetCredentials(
+      bool has_sign_in_with_google_button,
       base::WeakPtr<ActorLoginQualityLoggerInterface> mqls_logger,
       CredentialsOrErrorReply callback) override;
-  void AttemptLogin(const Credential& credential,
-                    bool should_store_permission,
-                    base::WeakPtr<ActorLoginQualityLoggerInterface> mqls_logger,
-                    base::TimeTicks attempt_login_tool_start_time,
-                    LoginStatusResultOrErrorReply callback) override;
+  void AttemptLogin(
+      const Credential& credential,
+      bool should_store_permission,
+      base::WeakPtr<ActorLoginQualityLoggerInterface> mqls_logger,
+      base::TimeTicks attempt_login_tool_start_time,
+      LoginStatusResultOrErrorReply done_callback,
+      base::WeakPtr<ActionSequenceDelegate> action_sequence_delegate) override;
+
+  // password_manager::PasswordManagerInterface::Observer implementation:
+  void OnLoginSuccessful(
+      const password_manager::PasswordForm& pending_form) override;
 
  private:
   friend class content::WebContentsUserData<ActorLoginDelegateImpl>;
@@ -68,7 +79,7 @@ class ActorLoginDelegateImpl
   // will call when no instance exists and it needs to create one.
   ActorLoginDelegateImpl(
       content::WebContents* web_contents,
-      ::password_manager::PasswordManagerClient* client,
+      password_manager::PasswordManagerClient* client,
       PasswordDriverSupplierForPrimaryMainFrame driver_supplier);
 
   // content::WebContentsObserver:
@@ -81,9 +92,28 @@ class ActorLoginDelegateImpl
   // Private helper methods for handling task completion. They should be
   // invoked asynchronously.
   void OnGetCredentialsCompleted(CredentialsOrErrorReply callback,
-                                 CredentialsOrError result);
+                                 CredentialsOrError result,
+                                 bool conflicting_permissions);
   void OnAttemptLoginCompleted(
       base::expected<LoginStatusResult, ActorLoginError> result);
+
+  // Called when `OnAttemptLoginCompleted` is invoked with a result for
+  // a federated credential login.
+  void ProcessFederatedResult(
+      base::expected<LoginStatusResult, ActorLoginError> result);
+
+  void OnActorTaskStateChanged(actor::ActorTask& task);
+
+  void OnActionSequenceEnded(bool success);
+
+  bool ShouldCleanUpConflictingPermissions(
+      const password_manager::PasswordForm& form) const;
+
+  // Calls the permissions cleaning service to clean up conflicting permissions.
+  // If the login attempt was performed with a password credential,
+  // `signon_realm`, is used to identify it, so that we don't clean the
+  // permission granted after disambiguation.
+  void ClearConflictingPermissions(std::optional<std::string> signon_realm);
 
   // Helper methods for recording metrics.
   void RecordGetCredentialsMetricsAndResetHelper(
@@ -92,7 +122,10 @@ class ActorLoginDelegateImpl
 
   // Store the pending callback. A non-null callback indicates an active
   // request.
-  LoginStatusResultOrErrorReply pending_attempt_login_callback_;
+  LoginStatusResultOrErrorReply pending_attempt_login_done_callback_;
+
+  base::WeakPtr<ActionSequenceDelegate> action_sequence_delegate_;
+  base::CallbackListSubscription action_sequence_subscription_;
 
   // Helper for `GetCredentials`. Scoped to one `GetCredentials` request.
   std::unique_ptr<ActorLoginGetCredentialsHelper> get_credentials_helper_;
@@ -117,8 +150,29 @@ class ActorLoginDelegateImpl
   // and click the SiwG button. After the prototype, the click will be done
   // through `ExecutionEngine`.
   // Scoped to one `AttemptLogin` request.
-  // TODO(crbug.com/479505793): Implement the click without heuristics.
   std::unique_ptr<ActorLoginSiwgController> siwg_controller_;
+
+  // Track the currently acting task to know when we can remove the
+  // FederatedEmbedderLoginRequest from the `WebContents`. This is needed to
+  // ensure that the request is removed in cases such as the task being stopped
+  // by user action, which can happen before the login flow completes.
+  actor::TaskId acting_task_id_;
+  base::CallbackListSubscription actor_task_state_subscription_;
+
+  // Stores the credential with which the latest `AttemptLogin` request was
+  // made. This is used to clean up the permission after the login attempt.
+  std::unique_ptr<Credential> last_attempted_credential_;
+
+  // Set to true whenever we find conflicting permissions in the
+  // `GetCredentials` step. Reset when the login process completes. If the login
+  // is successful the conflicting permissions will be cleaned up.
+  // TODO(crbug.com/486089293): Reset on federated login completion as well.
+  bool found_conflicting_permissions_ = false;
+
+  // Used to listen to whether the password login was successful.
+  base::ScopedObservation<password_manager::PasswordManagerInterface,
+                          password_manager::PasswordManagerInterface::Observer>
+      observation_{this};
 
   base::WeakPtrFactory<ActorLoginDelegateImpl> weak_ptr_factory_{this};
 

@@ -13,36 +13,20 @@ export function getHtml(this: SearchboxElement) {
   // clang-format off
   return html`<!--_html_template_start_-->
 <div id="inputWrapper" @focusout="${this.onInputWrapperFocusout}"
-    @keydown="${this.onInputWrapperKeydown}"
-    @dragenter="${this.dragAndDropHandler?.handleDragEnter}"
-    @dragover="${this.dragAndDropHandler?.handleDragOver}"
-    @dragleave="${this.dragAndDropHandler?.handleDragLeave}"
-    @drop="${this.dragAndDropHandler?.handleDrop}">
+    @keydown="${this.onInputWrapperKeydown}">
   <cr-searchbox-input id="input"
       exportparts="searchbox-input"
       ?dropdown-is-visible="${this.dropdownIsVisible}"
-      input-aria-live="${this.inputAriaLive_}"
+      input-aria-live="${this.inputAriaLive}"
       ?multi-line-enabled="${this.multiLineEnabled}"
       placeholder-text="${this.computePlaceholderText_(this.placeholderText)}"
       searchbox-aria-description="${this.searchboxAriaDescription}"
       searchbox-icon="${this.searchboxIcon_}"
       .selectedMatch="${this.selectedMatch}"
-      ?input-has-matches="${this.inputHasMatches_()}"
-      @focusin="${this.onInputFocus_}"
-      @searchbox-input-files-pasted="${this.onSearchboxInputFilesPasted_}"
-      @searchbox-input-text-updated="${this.onInputTextUpdated_}"
-      @searchbox-input-tab-or-mouse-clicked="${this.onInputFocusChanged}">
-    ${this.showThumbnail ? html`
-      <div id="thumbnailContainer" slot="thumbnail">
-        <cr-searchbox-thumbnail id="thumbnail"
-            thumbnail-url="${this.thumbnailUrl_}"
-            ?is-deletable="${this.isThumbnailDeletable_}"
-            @remove-thumbnail-click="${this.onRemoveThumbnailClick_}"
-            role="button" aria-label="${this.i18n('searchboxThumbnailLabel')}"
-            tabindex="${this.getThumbnailTabindex_()}">
-        </cr-searchbox-thumbnail>
-      </div>
-    ` : ''}
+      ?input-has-matches="${this.hasMatches()}"
+      @focusin="${this.onInputFocusin_}"
+      @searchbox-input-text-updated="${this.onSearchboxInputTextUpdated_}"
+      @input-focus-changed="${this.onInputFocusChanged}">
     ${this.shouldShowVoiceLens_(this.searchboxVoiceSearchEnabled_) ? html`
       <div slot="action-buttons" class="searchbox-icon-button-container voice">
         <button id="voiceSearchButton" class="searchbox-icon-button"
@@ -58,11 +42,6 @@ export function getHtml(this: SearchboxElement) {
             title="${this.i18n('lensSearchButtonLabel')}">
         </button>
       </div>
-    ` : ''}
-    ${this.composeButtonEnabled ? html`
-      <cr-searchbox-compose-button id="composeButton" slot="compose-button"
-          @compose-click="${this.onComposeClick_}">
-      </cr-searchbox-compose-button>
     ` : ''}
   </cr-searchbox-input>
   <div class="dropdownContainer">

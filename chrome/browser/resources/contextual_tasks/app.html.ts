@@ -31,7 +31,7 @@ export function getHtml(this: ContextualTasksAppElement) {
     html`<contextual-tasks-error-dialog></contextual-tasks-error-dialog>` : ''}
   <div id="flexCenterContainer">
     <div id="composeboxHeaderWrapper"
-        ?hidden="${this.enableBasicMode_ && this.isInBasicMode_ && !this.enableBasicModeZOrder_}">
+        ?hidden="${this.isComposeboxHeaderWrapperHidden_()}">
       <h1 class="thread-header" id="composeboxHeader">
         ${this.userName_
             ? [
@@ -54,14 +54,15 @@ export function getHtml(this: ContextualTasksAppElement) {
     <contextual-tasks-composebox id="composebox"
           style="${this.getComposeboxBoundsStyles()}"
           ?hidden="${this.isComposeboxHidden_()}"
-          .isZeroState="${this.isZeroState_}"
+          .isZeroState="${!!this.isZeroState_}"
           .isSidePanel="${!this.isShownInTab_}"
           .isLensOverlayShowing="${this.isLensOverlayShowing_}"
           .isOverlayOpenForAimVisualSearch="${
               this.isOverlayOpenForAimVisualSearch_}"
           .enableNativeZeroStateSuggestions="${
               this.enableNativeZeroStateSuggestions_}"
-          .inputEnabled="${!this.isInputLocked_}">
+          .inputEnabled="${!this.isInputLocked_}"
+          .inNlm="${this.inNlm_}">
     </contextual-tasks-composebox>
 </if>
   </div>

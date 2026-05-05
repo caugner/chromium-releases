@@ -59,7 +59,19 @@ public class AutofillKeyboardAccessoryViewBridge implements AutofillDelegate {
 
     @Override
     public void suggestionSelected(int listIndex) {
-        mManualFillingComponent.dismiss();
+        suggestionSelected(listIndex, false);
+    }
+
+    @Override
+    public void suggestionSelected(int listIndex, boolean showLoadingOnAcceptance) {
+        if (mManualFillingComponent != null) {
+            if (showLoadingOnAcceptance) {
+                mManualFillingComponent.setWaitingForFetch(true);
+            } else {
+                mManualFillingComponent.setWaitingForFetch(false);
+                mManualFillingComponent.dismiss();
+            }
+        }
         if (mNativeAutofillKeyboardAccessory == 0) return;
         AutofillKeyboardAccessoryViewBridgeJni.get()
                 .suggestionSelected(mNativeAutofillKeyboardAccessory, listIndex);
@@ -128,6 +140,10 @@ public class AutofillKeyboardAccessoryViewBridge implements AutofillDelegate {
     /** Hides the Autofill view. */
     @CalledByNative
     private void dismiss() {
+        if (mManualFillingComponent != null) {
+            mManualFillingComponent.dismissIfWaitingForFetch();
+        }
+
         if (mManualFillingComponentSupplier != null) {
             if (mManualFillingComponent != null) {
                 mManualFillingComponent.setSuggestions(List.of(), this);
@@ -226,6 +242,7 @@ public class AutofillKeyboardAccessoryViewBridge implements AutofillDelegate {
             @JniType("std::u16string") String iphDescriptionText,
             GURL customIconUrl,
             boolean applyDeactivatedStyle,
+            boolean showLoadingOnAcceptance,
             @Nullable Payload payload) {
         int drawableId = iconId == 0 ? DropdownItem.NO_ICON : iconId;
         return new AutofillSuggestion.Builder()
@@ -239,6 +256,7 @@ public class AutofillKeyboardAccessoryViewBridge implements AutofillDelegate {
                 .setIphDescriptionText(iphDescriptionText)
                 .setCustomIconUrl(customIconUrl)
                 .setApplyDeactivatedStyle(applyDeactivatedStyle)
+                .setShowLoadingOnAcceptance(showLoadingOnAcceptance)
                 .setPayload(payload)
                 .build();
     }

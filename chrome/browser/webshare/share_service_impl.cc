@@ -8,9 +8,12 @@
 #include <memory>
 #include <string_view>
 
+#include "base/check.h"
 #include "base/feature_list.h"
 #include "base/files/safe_base_name.h"
+#include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/notreached.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/bad_message.h"
@@ -19,7 +22,6 @@
 #include "content/public/browser/web_contents.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "services/network/public/mojom/permissions_policy/permissions_policy_feature.mojom.h"
-
 #if BUILDFLAG(IS_MAC)
 #include "chrome/browser/webshare/mac/sharing_service_operation.h"
 #endif
@@ -296,11 +298,12 @@ void ShareServiceImpl::RunShareOperation(
          blink::mojom::ShareError result) { std::move(callback).Run(result); },
       std::move(sharing_service_operation), std::move(callback)));
 #elif BUILDFLAG(IS_WIN)
-  // Drop fullscreen mode so the Share UI can be easily clicked away from,
-  // without clicking back into the web contents
-  base::ScopedClosureRunner fullscreen_block =
-      web_contents->ForSecurityDropFullscreen(
-          /*display_id=*/display::kInvalidDisplayId);
+  auto blocker = web_contents->ForSecurityDropFullscreen(
+      /*display_id=*/display::kInvalidDisplayId);
+  if (!blocker) {
+    std::move(callback).Run(blink::mojom::ShareError::PERMISSION_DENIED);
+    return;
+  }
 
   auto share_operation = std::make_unique<webshare::ShareOperation>(
       title, text, share_url, web_contents);
@@ -314,7 +317,7 @@ void ShareServiceImpl::RunShareOperation(
             fullscreen_block.RunAndReset();
             std::move(callback).Run(result);
           },
-          std::move(share_operation), std::move(fullscreen_block),
+          std::move(share_operation), std::move(*blocker),
           std::move(callback)));
 #else
   NOTREACHED();

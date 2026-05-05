@@ -7,6 +7,8 @@ package org.chromium.ui.widget;
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.content.Context;
+import android.graphics.drawable.Animatable;
+import android.graphics.drawable.Drawable;
 import android.os.SystemClock;
 import android.util.AttributeSet;
 import android.view.View;
@@ -53,6 +55,12 @@ public class LoadingView extends ProgressBar {
                     mStartTime = SystemClock.elapsedRealtime();
                     setVisibility(View.VISIBLE);
                     setAlpha(1.0f);
+
+                    // Force the indeterminate drawable to start animating.
+                    Drawable d = getIndeterminateDrawable();
+                    if (d instanceof Animatable animatable) {
+                        animatable.start();
+                    }
 
                     for (Observer observer : mObservers) {
                         observer.onShowLoadingUiComplete();
@@ -130,11 +138,20 @@ public class LoadingView extends ProgressBar {
      * fades out.
      */
     public void hideLoadingUi() {
+        hideLoadingUi(false);
+    }
+
+    /**
+     * Hide loading UI.
+     *
+     * @param skipDelay If true, the loading UI hides immediately without fading out.
+     */
+    public void hideLoadingUi(boolean skipDelay) {
         removeCallbacks(mDelayedShow);
         removeCallbacks(mDelayedHide);
         mShouldShow = false;
 
-        if (getVisibility() == VISIBLE) {
+        if (!skipDelay && getVisibility() == VISIBLE) {
             postDelayed(
                     mDelayedHide,
                     Math.max(
@@ -166,6 +183,7 @@ public class LoadingView extends ProgressBar {
     }
 
     private void onHideLoadingFinished() {
+        animate().cancel();
         setVisibility(GONE);
         for (Observer observer : mObservers) {
             observer.onHideLoadingUiComplete();

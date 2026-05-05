@@ -20,6 +20,7 @@
 #include "components/tabs/public/tab_interface.h"
 #include "content/public/browser/page_user_data.h"
 #include "content/public/browser/webid/identity_request_dialog_controller.h"
+#include "third_party/blink/public/mojom/webid/federated_auth_request.mojom-shared.h"
 #include "ui/gfx/native_ui_types.h"
 
 namespace content {
@@ -136,7 +137,9 @@ class IdentityDialogController
   content::WebContents* ShowModalDialog(
       const GURL& url,
       blink::mojom::RpMode rp_mode,
-      DismissCallback dismiss_callback) override;
+      DismissCallback dismiss_callback,
+      content::IdentityRequestDialogController::ShownModalAsyncCallback
+          on_shown_async) override;
   void CloseModalDialog() override;
   void OnFlowCompleted(content::webid::FederatedLoginResult result) override;
   content::WebContents* GetRpWebContents() override;
@@ -161,6 +164,9 @@ class IdentityDialogController
   // Allows setting a mock AccountSelectionView for testing purposes.
   void SetAccountSelectionViewForTesting(
       std::unique_ptr<AccountSelectionView> account_view);
+
+  // Set acting_task_id for testing purposes.
+  void SetActingTaskIdForTesting(actor::TaskId task_id);
 
   // Requests a UI volume recommendation from |segmentation_platform_service_|.
   void RequestUiVolumeRecommendation(
@@ -190,12 +196,13 @@ class IdentityDialogController
   // Whether to show FedCM UI or not.
   bool ShouldShowFedCmUi();
 
-  void OnActorTaskStateChanged(actor::TaskId task_id,
-                               actor::ActorTask::State state);
+  void OnActorTaskStateChanged(actor::ActorTask& task);
 
   void UpdateTaskId(actor::TaskId task_id);
 
   void DidInvokeShowUi();
+
+  void NotifyEmbedderOfResult(content::webid::FederatedLoginResult result);
 
   std::unique_ptr<AccountSelectionView> account_view_{nullptr};
   AccountSelectionCallback on_account_selection_;
@@ -204,7 +211,7 @@ class IdentityDialogController
   MoreDetailsCallback on_more_details_;
   AccountsDisplayedCallback on_accounts_displayed_;
   raw_ptr<content::WebContents> rp_web_contents_{nullptr};
-  blink::mojom::RpMode rp_mode_;
+  blink::mojom::RpMode rp_mode_ = blink::mojom::RpMode::kPassive;
   // Wheter we invoked any show methods. UI may be shown be not invoked in cases
   // such as an active actor task.
   bool did_invoke_show_ui_ = false;

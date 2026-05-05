@@ -645,6 +645,14 @@ void WebMediaPlayerMSCompositor::PutCurrentFrame() {
 
 base::TimeDelta WebMediaPlayerMSCompositor::GetPreferredRenderInterval() {
   DCHECK(video_frame_compositor_task_runner_->BelongsToCurrentThread());
+  base::AutoLock auto_lock(current_frame_lock_);
+  return GetPreferredRenderIntervalInternal();
+}
+
+base::TimeDelta
+WebMediaPlayerMSCompositor::GetPreferredRenderIntervalInternal() {
+  DCHECK(video_frame_compositor_task_runner_->BelongsToCurrentThread());
+  current_frame_lock_.AssertAcquired();
   if (!rendering_frame_buffer_) {
     DCHECK_GE(last_render_length_, base::TimeDelta());
     return last_render_length_;
@@ -838,8 +846,12 @@ void WebMediaPlayerMSCompositor::OnFramePresented(
         display_time - last_displayed_frame_timestamps_->display_time;
     if (displayed_diff >= kMaxGapToForget) {
       last_displayed_frame_timestamps_ = std::nullopt;
+    } else if (displayed_diff.InMilliseconds() < 0) {
+      // These frames do exist at least in tests and so we need to check
+      // how common they are. See crbug.com/496714028.
+      ++negative_display_duration_count_;
+      return;
     } else {
-      DCHECK_GE(displayed_diff.InMilliseconds(), 0);
       harmonic_framerate_estimator_.AddSample(displayed_diff);
 
       if (capture_begin_time.has_value() &&
@@ -899,6 +911,14 @@ void WebMediaPlayerMSCompositor::OnFramePresented(
 void WebMediaPlayerMSCompositor::
     MaybeEmitHarmonicFramerateAndReproductionJitter() {
   DCHECK(video_frame_compositor_task_runner_->BelongsToCurrentThread());
+
+  if (negative_display_duration_count_ > 0) {
+    base::UmaHistogramCounts100(
+        "Media.WebMediaPlayerCompositor.NegativeDisplayDurationCount",
+        negative_display_duration_count_);
+    negative_display_duration_count_ = 0;
+  }
+
   // Emit harmonic frame rate histogram. We omit this for screenshare since this
   // is often variable frame rate which makes the harmonic frame rate metric
   // meaningless.
@@ -1033,7 +1053,7 @@ void WebMediaPlayerMSCompositor::SetCurrentFrame(
       (expected_display_time.has_value() && !expected_display_time->is_null())
           ? *expected_display_time
           : now;
-  last_preferred_render_interval_ = GetPreferredRenderInterval();
+  last_preferred_render_interval_ = GetPreferredRenderIntervalInternal();
   ++presented_frames_;
 
   TRACE_EVENT_INSTANT2("media", "SetCurrentFrame Timestamps",
@@ -1152,6 +1172,7 @@ void WebMediaPlayerMSCompositor::ReplaceCurrentFrameWithACopy() {
 
 void WebMediaPlayerMSCompositor::SetAlgorithmEnabledForTesting(
     bool algorithm_enabled) {
+  base::AutoLock auto_lock(current_frame_lock_);
   if (!algorithm_enabled) {
     rendering_frame_buffer_.reset();
     return;
@@ -1159,9 +1180,9 @@ void WebMediaPlayerMSCompositor::SetAlgorithmEnabledForTesting(
 
   if (!rendering_frame_buffer_) {
     rendering_frame_buffer_ = std::make_unique<VideoRendererAlgorithmWrapper>(
-        blink::BindRepeating(
+        ConvertToBaseRepeatingCallback(CrossThreadBindRepeating(
             &WebMediaPlayerMSCompositor::MapTimestampsToRenderTimeTicks,
-            Unretained(this)),
+            CrossThreadUnretained(this))),
         &media_log_);
   }
 }
@@ -1192,9 +1213,8 @@ WebMediaPlayerMSCompositor::GetLastPresentedFrameMetadata() {
     frame_metadata->width = last_frame->visible_rect().width();
     frame_metadata->height = last_frame->visible_rect().height();
     frame_metadata->media_time = last_frame->timestamp();
+    frame_metadata->metadata.MergeMetadataFrom(last_frame->metadata());
   }
-
-  frame_metadata->metadata.MergeMetadataFrom(last_frame->metadata());
 
   return frame_metadata;
 }

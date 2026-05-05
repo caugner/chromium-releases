@@ -40,7 +40,6 @@ import org.chromium.net.CronetTestRule.Flags;
 import org.chromium.net.CronetTestRule.IgnoreFor;
 import org.chromium.net.CronetTestRule.RequiresMinAndroidApi;
 import org.chromium.net.CronetTestRule.RequiresMinApi;
-import org.chromium.net.NetworkChangeNotifierAutoDetect.ConnectivityManagerDelegate;
 import org.chromium.net.TestBidirectionalStreamCallback.FailureType;
 import org.chromium.net.TestBidirectionalStreamCallback.ResponseStep;
 import org.chromium.net.impl.BidirectionalStreamNetworkException;
@@ -417,7 +416,6 @@ public class BidirectionalStreamTest {
     @Test
     @SmallTest
     @Flags(boolFlags = {@BoolFlag(name = JavaCronetProvider.FORCE_HTTPENGINE_FLAG, value = false)})
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testSimpleGetWithFallbackForcingHttpEngineDisabled() throws Exception {
         String url = Http2TestServer.getEchoMethodUrl();
         TestBidirectionalStreamCallback callback = new TestBidirectionalStreamCallback();
@@ -2090,9 +2088,9 @@ public class BidirectionalStreamTest {
     // TODO(crbug.com/41494733): Enable on Android M once fixed.
     @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testBindToDefaultNetworkSucceeds() {
-        ConnectivityManagerDelegate delegate =
-                new ConnectivityManagerDelegate(mTestRule.getTestFramework().getContext());
-        Network defaultNetwork = delegate.getDefaultNetwork();
+        ConnectivityManagerWrapper wrapper =
+                new ConnectivityManagerWrapper(mTestRule.getTestFramework().getContext());
+        Network defaultNetwork = wrapper.getDefaultNetwork();
         assume().that(defaultNetwork).isNotNull();
 
         String url = Http2TestServer.getEchoMethodUrl();

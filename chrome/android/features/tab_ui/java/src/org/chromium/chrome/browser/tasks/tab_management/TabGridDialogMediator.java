@@ -75,7 +75,6 @@ import org.chromium.chrome.browser.tasks.tab_management.TabListEditorCoordinator
 import org.chromium.chrome.browser.tasks.tab_management.TabSwitcherMessageManager.MessageType;
 import org.chromium.chrome.browser.tasks.tab_management.TabUiMetricsHelper.TabGroupColorChangeActionType;
 import org.chromium.chrome.browser.tasks.tab_management.TabUiMetricsHelper.TabListEditorOpenMetricGroups;
-import org.chromium.chrome.browser.tinker_tank.TinkerTankDelegate;
 import org.chromium.chrome.browser.ui.messages.snackbar.Snackbar;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.url_constants.UrlConstantResolver;
@@ -669,9 +668,7 @@ public class TabGridDialogMediator
         mModel.set(TabGridDialogProperties.IS_DIALOG_VISIBLE, false);
     }
 
-    /**
-     * @return a boolean indicating if the result of handling the backpress was successful.
-     */
+    /** Returns a boolean indicating if the result of handling the backpress was successful. */
     public boolean handleBackPress() {
         if (mTabListEditorControllerSupplier != null
                 && mTabListEditorControllerSupplier.hasValue()) {
@@ -681,6 +678,10 @@ public class TabGridDialogMediator
                 controller.hide();
                 return !controller.isVisible();
             }
+        }
+        // If the dialog is not visible, then the back press is not handled.
+        if (!isVisible()) {
+            return false;
         }
         hideDialog(true);
         RecordUserAction.record("TabGridDialog.Exit");
@@ -950,14 +951,6 @@ public class TabGridDialogMediator
                         ShowMode.MENU_ONLY,
                         ButtonType.ICON_AND_TEXT,
                         IconPosition.START));
-        if (TinkerTankDelegate.isEnabled()) {
-            actions.add(
-                    TabListEditorTinkerTankAction.createAction(
-                            mActivity,
-                            ShowMode.MENU_ONLY,
-                            ButtonType.ICON_AND_TEXT,
-                            IconPosition.START));
-        }
         actions.add(
                 TabListEditorShareAction.createAction(
                         mActivity,

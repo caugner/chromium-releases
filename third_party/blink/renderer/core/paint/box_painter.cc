@@ -27,10 +27,9 @@ void BoxPainter::RecordTrackedElementAndRegionCaptureData(
           background_client, *crop_id, ToPixelSnappedRect(paint_rect));
     }
 
-    const TrackedElementRect* rect = element->GetTrackedElementRect();
-    if (rect) {
+    if (const auto* sub_rects = element->GetTrackedElementSubRects()) {
       paint_info.context.GetPaintController().RecordTrackedElementData(
-          background_client, *rect, ToPixelSnappedRect(paint_rect));
+          background_client, ToPixelSnappedRect(paint_rect), *sub_rects);
     }
   }
 }
@@ -49,7 +48,8 @@ void BoxPainter::RecordScrollHitTestData(
   // hit test data.
   if (paint_info.ShouldOmitCompositingInfo()) {
     bool painting_canvas_child = false;
-    if (RuntimeEnabledFeatures::CanvasDrawElementEnabled()) {
+    if (RuntimeEnabledFeatures::CanvasDrawElementEnabled(
+            layout_box_.GetDocument().GetExecutionContext())) {
       if (auto* element = DynamicTo<Element>(layout_box_.GetNode())) {
         if (element->IsInCanvasSubtree()) {
           painting_canvas_child = true;

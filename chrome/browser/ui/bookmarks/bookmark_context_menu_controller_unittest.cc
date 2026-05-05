@@ -596,8 +596,7 @@ TEST_F(BookmarkContextMenuControllerTest,
   const BookmarkNode* child1_node = a_bb_node->children()[0].get();
   const BookmarkNode* child2_node = a_bb_node->children()[1].get();
 
-  // Selecting two nodes that are not permanent nodes should not return any node
-  // to focus.
+  // Selecting two nodes that are not permanent nodes should not return any node to focus.
   BookmarkContextMenuController controller(
       gfx::NativeWindow(), nullptr, nullptr, profile_.get(),
       BookmarkLaunchLocation::kNone, {child1_node, child2_node},

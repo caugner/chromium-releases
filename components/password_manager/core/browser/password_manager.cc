@@ -665,16 +665,6 @@ void PasswordManager::RegisterLocalPrefs(PrefRegistrySimple* registry) {
                              PrefRegistry::NO_REGISTRATION_FLAGS);
 }
 
-bool PasswordManager::ShouldAllowSavingPasswordsWithInFlowRecovery() {
-#if BUILDFLAG(IS_ANDROID)
-  // TODO(crbug.com/483652520): Also check if the client is in the correct error state.
-  return base::FeatureList::IsEnabled(
-      password_manager::features::kInFlowTrustedVaultKeyRetrievalAndroid);
-#else
-  return false;
-#endif
-}
-
 PasswordManager::PasswordManager(PasswordManagerClient* client)
     : client_(client),
       account_store_cb_list_subscription_(
@@ -833,6 +823,14 @@ void PasswordManager::UpdateFormManagers() {
       driver->GetPasswordAutofillManager()->DeleteFillData();
     }
   }
+}
+
+void PasswordManager::AddObserver(Observer* observer) {
+  observers_.AddObserver(observer);
+}
+
+void PasswordManager::RemoveObserver(Observer* observer) {
+  observers_.RemoveObserver(observer);
 }
 
 void PasswordManager::DropFormManagers() {
@@ -1044,8 +1042,7 @@ bool PasswordManager::HaveFormManagersReceivedData(
   }
   for (const auto& form_manager : password_form_cache_.GetFormManagers()) {
     if (form_manager->GetDriver().get() == driver &&
-        form_manager->GetFormFetcher()->GetState() ==
-            FormFetcher::State::WAITING) {
+        !form_manager->IsFetchCompleted()) {
       return false;
     }
   }
@@ -1216,8 +1213,7 @@ PasswordFormManager* PasswordManager::ProvisionallySaveForm(
     }
   }
 
-  if (is_manual_fallback && matched_manager->GetFormFetcher()->GetState() ==
-                                FormFetcher::State::WAITING) {
+  if (is_manual_fallback && !matched_manager->IsFetchCompleted()) {
     // In case of manual fallback, the form manager has to be ready for saving.
     return nullptr;
   }
@@ -1464,8 +1460,7 @@ bool PasswordManager::IsAutomaticSavePromptAvailable(
     return false;
   }
 
-  if (submitted_manager->GetFormFetcher()->GetState() ==
-      FormFetcher::State::WAITING) {
+  if (!submitted_manager->IsFetchCompleted()) {
     // We have a provisional save manager, but it didn't finish matching yet.
     // We just give up.
     RecordProvisionalSaveFailure(
@@ -1604,6 +1599,9 @@ void PasswordManager::OnLoginSuccessful() {
       submitted_form->federation_origin,
       submitted_manager->GetPendingCredentials().username_value);
   client_->NotifyOnSuccessfulLogin(submitted_form->username_value);
+  for (Observer& observer : observers_) {
+    observer.OnLoginSuccessful(submitted_manager->GetPendingCredentials());
+  }
 
   auto submission_event =
       submitted_manager->GetSubmittedForm()->submission_event;
@@ -1628,7 +1626,7 @@ void PasswordManager::OnLoginSuccessful() {
 
   UMA_HISTOGRAM_BOOLEAN("PasswordManager.AbleToSavePasswordsOnSuccessfulLogin",
                         able_to_save_passwords);
-  if (!submitted_manager->IsPasswordUpdate() && !(able_to_save_passwords || ShouldAllowSavingPasswordsWithInFlowRecovery())) {
+  if (!submitted_manager->IsPasswordUpdate() && !able_to_save_passwords) {
     return;
   }
 
@@ -1689,7 +1687,10 @@ void PasswordManager::OnLoginSuccessful() {
     if (logger) {
       logger->LogMessage(Logger::STRING_DECISION_SAVE);
     }
-    submitted_manager->Save();
+    std::unique_ptr<PasswordFormManagerForUI> owned_submitted_manager =
+        MoveOwnedSubmittedManager();
+    CHECK_EQ(owned_submitted_manager.get(), submitted_manager);
+    owned_submitted_manager->Save();
 
     if (!submitted_manager->IsNewLogin()) {
       client_->NotifySuccessfulLoginWithExistingPassword(
@@ -1697,7 +1698,7 @@ void PasswordManager::OnLoginSuccessful() {
     }
 
     if (submitted_manager->HasGeneratedPassword()) {
-      client_->AutomaticPasswordSave(MoveOwnedSubmittedManager(),
+      client_->AutomaticPasswordSave(std::move(owned_submitted_manager),
                                      /*is_update_confirmation=*/false);
     }
   }
@@ -1759,7 +1760,7 @@ void PasswordManager::ProcessAutofillPredictions(
   const FormPredictions& form_predictions =
       server_predictions_
           .insert_or_assign(
-              CalculateFormSignature(form),
+              {CalculateFormSignature(form), driver_id},
               ConvertToFormPredictions(driver_id, form, predictions))
           .first->second;
 
@@ -1909,13 +1910,13 @@ PasswordFormManager* PasswordManager::GetMatchedManagerForField(
 std::optional<FormPredictions> PasswordManager::FindServerPredictionsForField(
     FieldRendererId field_id,
     int driver_id) {
-  for (const auto& form : server_predictions_) {
-    if (form.second.driver_id != driver_id) {
+  for (const auto& [key, predictions] : server_predictions_) {
+    if (key.second != driver_id) {
       continue;
     }
-    for (const PasswordFieldPrediction& field : form.second.fields) {
+    for (const PasswordFieldPrediction& field : predictions.fields) {
       if (field.renderer_id == field_id) {
-        return form.second;
+        return predictions;
       }
     }
   }
@@ -1941,6 +1942,10 @@ void PasswordManager::ShowManualFallbackForSaving(
   // `form_manager` will become nullptr.
   if (!form_manager) {
     HideManualFallbackForSaving();
+    return;
+  }
+
+  if (!form_manager->IsFetchCompleted()) {
     return;
   }
 

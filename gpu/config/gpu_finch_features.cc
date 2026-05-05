@@ -116,6 +116,16 @@ BASE_FEATURE(kRemoveGPULegacyIPC, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kSharedImageStubHighPriority, base::FEATURE_DISABLED_BY_DEFAULT);
 #endif
 
+// Disables hardware YUV conversion on NVIDIA + Wayland to workaround a driver
+// bug.
+BASE_FEATURE(kNvidiaWaylandYuvHardwareConversionWorkaround,
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX)
+             base::FEATURE_ENABLED_BY_DEFAULT
+#else
+             base::FEATURE_DISABLED_BY_DEFAULT
+#endif
+);
+
 // Enable GPU Rasterization by default. This can still be overridden by
 // --enable-gpu-rasterization or --disable-gpu-rasterization.
 // DefaultEnableGpuRasterization has launched on Mac, Windows, ChromeOS,
@@ -329,6 +339,12 @@ BASE_FEATURE(kSkiaGraphite,
 // compatible backing to serve clients requested usage is not already present.
 BASE_FEATURE(kUseDynamicBackingAllocations, base::FEATURE_DISABLED_BY_DEFAULT);
 
+// When enabled, this feature allows ClientSharedImage to store and use a
+// scoped_refptr to SharedImageInterface, instead of the raw_ptr as used in
+// SharedImageInterfaceHolder.
+BASE_FEATURE(kUseStrongRefToSharedImageInterface,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 // Enable atlasing of small paths on Skia Graphite. Only meaningful if
 // SkiaGraphite is also enabled.
 BASE_FEATURE(kSkiaGraphiteSmallPathAtlas, base::FEATURE_DISABLED_BY_DEFAULT);
@@ -388,7 +404,7 @@ BASE_FEATURE_PARAM(bool,
                    kSkiaGraphiteEnableDeferredSubmit,
                    &kSkiaGraphite,
                    "enable_deferred_submit",
-                   true);
+                   BUILDFLAG(IS_WIN));
 
 const base::FeatureParam<bool> kSkiaGraphiteEnableMSAAOnNewerIntel{
     &kSkiaGraphite, "enable_msaa_on_newer_intel", true};
@@ -413,11 +429,6 @@ BASE_FEATURE(kSkiaGraphiteDawnUseD3D12, base::FEATURE_DISABLED_BY_DEFAULT);
 // Usage for Graphite is controlled independently with
 // kSkiaGraphiteDawnUsePersistentCache.
 BASE_FEATURE(kGpuPersistentCache, base::FEATURE_DISABLED_BY_DEFAULT);
-
-// Enabling this will make the GPU decode path use a mock implementation of
-// discardable memory.
-BASE_FEATURE(kNoDiscardableMemoryForGpuDecodePath,
-             base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Use a 100-command limit before forcing context switch per command buffer
 // instead of 20.
@@ -756,11 +767,6 @@ bool IsSkiaGraphitePrecompilationEnabled(
   return base::FeatureList::IsEnabled(features::kSkiaGraphitePrecompilation);
 }
 
-// Set up such that service side purge depends on the client side purge feature
-// being enabled. And enabling service side purge disables client purge
-bool EnablePurgeGpuImageDecodeCache() {
-  return !base::FeatureList::IsEnabled(kPruneOldTransferCacheEntries);
-}
 bool EnablePruneOldTransferCacheEntries() {
   return base::FeatureList::IsEnabled(kPruneOldTransferCacheEntries);
 }
@@ -819,6 +825,14 @@ bool IsAndroidSurfaceControlEnabled() {
 // should be 1 irrespecticve of the feature LimitAImageReaderMaxSizeToOne
 // enabled or not. Get() returns default value even if the feature is disabled.
 bool LimitAImageReaderMaxSizeToOne() {
+  // The feature is enabled by default, if it was overridden by user we should
+  // not limit regardless if it will work or not.
+  base::FeatureList* feature_list = base::FeatureList::GetInstance();
+  if (feature_list && feature_list->IsFeatureOverriddenFromCommandLine(
+                          kLimitAImageReaderMaxSizeToOne.name)) {
+    return base::FeatureList::IsEnabled(kLimitAImageReaderMaxSizeToOne);
+  }
+
   // Always limit image reader to 1 frame for Android TV. Many TVs doesn't work
   // with more than 1 frame and it's very hard to localize which models do.
   if (base::android::device_info::is_tv()) {
@@ -923,4 +937,10 @@ BASE_FEATURE(kConfigurableGPUWatchdogTimeout,
              base::FEATURE_DISABLED_BY_DEFAULT);
 const base::FeatureParam<int> kConfigurableGPUWatchdogTimeoutSeconds{
     &kConfigurableGPUWatchdogTimeout, "watchdog_timeout_seconds", 30};
+
+// Enables the optimization where GPU channels are sent to renderer processes
+// early when the renderer process is being initialized, instead of waiting
+// for the renderer to request the GPU channel to the browser process.
+BASE_FEATURE(kSendGPUChannelEarly, base::FEATURE_DISABLED_BY_DEFAULT);
+
 }  // namespace features

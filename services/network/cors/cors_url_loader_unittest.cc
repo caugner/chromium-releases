@@ -165,6 +165,58 @@ TEST_F(CorsURLLoaderTest, ForbiddenMethods) {
   }
 }
 
+TEST_F(CorsURLLoaderTest, ForbiddenMethodOverride) {
+  const struct {
+    std::string header_name;
+    std::string header_value;
+  } kTestCases[] = {
+      {"X-HTTP-Method-Override", "TRACE"},
+      {"X-HTTP-Method-Override", "TRACK"},
+      {"X-HTTP-Method-Override", "CONNECT"},
+      {"X-HTTP-Method", "TRACE"},
+      {"X-Method-Override", "TRACE"},
+  };
+  for (const auto& test_case : kTestCases) {
+    SCOPED_TRACE(test_case.header_name);
+    SCOPED_TRACE(test_case.header_value);
+    for (const mojom::RequestMode mode :
+         {mojom::RequestMode::kSameOrigin, mojom::RequestMode::kNoCors,
+          mojom::RequestMode::kCors,
+          mojom::RequestMode::kCorsWithForcedPreflight,
+          mojom::RequestMode::kNavigate}) {
+      SCOPED_TRACE(mode);
+
+      ResetFactory(
+          url::Origin::Create(GURL("https://example.com")) /* initiator */,
+          OriginatingProcessId::browser());
+
+      ResourceRequest request;
+      request.mode = mode;
+      request.credentials_mode = mojom::CredentialsMode::kInclude;
+      request.url = GURL("https://example.com/");
+      request.request_initiator = url::Origin::Create(request.url);
+      request.method = "POST";
+      request.headers.SetHeader(test_case.header_name, test_case.header_value);
+
+      BadMessageTestHelper bad_message_helper;
+      CreateLoaderAndStart(request);
+      if (IsNetworkLoaderStarted()) {
+        RunUntilCreateLoaderAndStartCalled();
+        NotifyLoaderClientOnReceiveResponse();
+        NotifyLoaderClientOnComplete(net::OK);
+      }
+      RunUntilComplete();
+
+      EXPECT_FALSE(IsNetworkLoaderStarted());
+      EXPECT_FALSE(client().has_received_redirect());
+      EXPECT_FALSE(client().has_received_response());
+      EXPECT_TRUE(client().has_received_completion());
+      EXPECT_THAT(client().completion_status().error_code,
+                  net::test::IsError(net::ERR_INVALID_ARGUMENT));
+    }
+  }
+}
+
 TEST_F(CorsURLLoaderTest, SameOriginWithoutInitiator) {
   ResourceRequest request;
   request.mode = mojom::RequestMode::kSameOrigin;
@@ -2357,6 +2409,109 @@ TEST_F(CorsURLLoaderTest, PreflightMissingAllowOrigin) {
   EXPECT_THAT(client().completion_status().cors_error_status,
               Optional(CorsErrorStatus(
                   mojom::CorsError::kPreflightMissingAllowOriginHeader)));
+}
+
+// A "Content-Type: message/ad-auction-trusted-signals-request" request header
+// should cause a preflight when issued from a renderer.
+TEST_F(CorsURLLoaderTest, PreflightAdAuctionTrustedSignalsFromRenderer) {
+  auto initiator = url::Origin::Create(GURL("https://foo.example"));
+  ResetFactory(initiator, kRendererProcessId);
+
+  ResourceRequest request;
+  request.method = "POST";
+  request.mode = mojom::RequestMode::kCors;
+  request.credentials_mode = mojom::CredentialsMode::kOmit;
+  request.url = GURL("https://example.com/");
+  request.request_initiator = initiator;
+  request.request_body = base::MakeRefCounted<network::ResourceRequestBody>();
+  request.headers.SetHeader("Content-Type",
+                            "message/ad-auction-trusted-signals-request");
+
+  CreateLoaderAndStart(request);
+  RunUntilCreateLoaderAndStartCalled();
+  NotifyLoaderClientOnReceiveResponse(
+      {{"Access-Control-Allow-Origin", "https://foo.example"}});
+  NotifyLoaderClientOnComplete(net::OK);
+  RunUntilComplete();
+
+  EXPECT_THAT(client().completion_status().error_code,
+              net::test::IsError(net::ERR_FAILED));
+  EXPECT_THAT(client().completion_status().cors_error_status,
+              Optional(CorsErrorStatus(
+                  mojom::CorsError::kHeaderDisallowedByPreflightResponse,
+                  /*failed_parameter=*/"content-type")));
+}
+
+// A "Content-Type: message/ad-auction-trusted-signals-request" request header
+// should cause a preflight when issued from the browser without
+// `is_ad_auction_trusted_signals_request` being set to true. This relies on the
+// default value being false, since no consumer is expected to explicitly set it
+// to false.
+TEST_F(CorsURLLoaderTest,
+       PreflightAdAuctionTrustedSignalsFromBrowserNonTrustedSignalsRequest) {
+  auto initiator = url::Origin::Create(GURL("https://foo.example"));
+  ResetFactoryParams factory_params;
+  factory_params.is_trusted = true;
+  ResetFactory(/*initiator=*/std::nullopt, OriginatingProcessId::browser(),
+               factory_params);
+
+  ResourceRequest request;
+  request.method = "POST";
+  request.mode = mojom::RequestMode::kCors;
+  request.credentials_mode = mojom::CredentialsMode::kOmit;
+  request.url = GURL("https://example.com/");
+  request.request_initiator = initiator;
+  request.request_body = base::MakeRefCounted<network::ResourceRequestBody>();
+  request.headers.SetHeader("Content-Type",
+                            "message/ad-auction-trusted-signals-request");
+  request.trusted_params = ResourceRequest::TrustedParams();
+
+  CreateLoaderAndStart(request);
+  RunUntilCreateLoaderAndStartCalled();
+  NotifyLoaderClientOnReceiveResponse(
+      {{"Access-Control-Allow-Origin", "https://foo.example"}});
+  NotifyLoaderClientOnComplete(net::OK);
+  RunUntilComplete();
+
+  EXPECT_THAT(client().completion_status().error_code,
+              net::test::IsError(net::ERR_FAILED));
+  EXPECT_THAT(client().completion_status().cors_error_status,
+              Optional(CorsErrorStatus(
+                  mojom::CorsError::kHeaderDisallowedByPreflightResponse,
+                  /*failed_parameter=*/"content-type")));
+}
+
+// A "Content-Type: message/ad-auction-trusted-signals-request" request header
+// should not require a preflight when issued from the browser with
+// `is_ad_auction_trusted_signals_request` set to true.
+TEST_F(CorsURLLoaderTest,
+       NoPreflightAdAuctionTrustedSignalsFromBrowserTrustedSignalsRequest) {
+  auto initiator = url::Origin::Create(GURL("https://foo.example"));
+  ResetFactoryParams factory_params;
+  factory_params.is_trusted = true;
+  ResetFactory(/*initiator=*/std::nullopt, OriginatingProcessId::browser(),
+               factory_params);
+
+  ResourceRequest request;
+  request.method = "POST";
+  request.mode = mojom::RequestMode::kCors;
+  request.credentials_mode = mojom::CredentialsMode::kOmit;
+  request.url = GURL("https://example.com/");
+  request.request_initiator = initiator;
+  request.request_body = base::MakeRefCounted<network::ResourceRequestBody>();
+  request.headers.SetHeader("Content-Type",
+                            "message/ad-auction-trusted-signals-request");
+  request.trusted_params = ResourceRequest::TrustedParams();
+  request.trusted_params->is_ad_auction_trusted_signals_request = true;
+
+  CreateLoaderAndStart(request);
+  RunUntilCreateLoaderAndStartCalled();
+  NotifyLoaderClientOnReceiveResponse(
+      {{"Access-Control-Allow-Origin", "https://foo.example"}});
+  NotifyLoaderClientOnComplete(net::OK);
+  RunUntilComplete();
+
+  EXPECT_THAT(client().completion_status().error_code, net::test::IsOk());
 }
 
 TEST_F(CorsURLLoaderTest, NonBrowserNavigationRedirect) {

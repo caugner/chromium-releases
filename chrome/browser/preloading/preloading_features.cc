@@ -18,10 +18,16 @@ BASE_FEATURE_PARAM(bool,
                    &kPrewarm,
                    "user_interaction_trigger",
                    false);
+BASE_FEATURE_PARAM(bool, kPrewarmRevalidate, &kPrewarm, "revalidate", false);
 BASE_FEATURE_PARAM(bool,
                    kPrewarmThrottlePrefetch,
                    &kPrewarm,
                    "throttle_prefetch",
+                   false);
+BASE_FEATURE_PARAM(bool,
+                   kPrewarmThrottleUserNavigation,
+                   &kPrewarm,
+                   "throttle_user_navigation",
                    false);
 BASE_FEATURE_PARAM(bool,
                    kForceEnableWithDevTools,

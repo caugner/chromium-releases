@@ -11,6 +11,7 @@ import androidx.annotation.IntDef;
 import org.chromium.base.Callback;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
+import org.chromium.chrome.browser.omnibox.fusebox.FuseboxCoordinator.FuseboxState;
 import org.chromium.chrome.browser.ui.theme.BrandedColorScheme;
 import org.chromium.components.omnibox.AutocompleteRequestType;
 import org.chromium.ui.modelutil.PropertyKey;
@@ -18,8 +19,10 @@ import org.chromium.ui.modelutil.PropertyModel.WritableBooleanPropertyKey;
 import org.chromium.ui.modelutil.PropertyModel.WritableObjectPropertyKey;
 import org.chromium.ui.modelutil.SimpleRecyclerViewAdapter;
 
+import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
 
 /** The properties associated with the Fusebox bar. */
 @NullMarked
@@ -30,6 +33,21 @@ class FuseboxProperties {
         int ATTACHMENT = 0;
         int TOOL = 1;
         int MODEL = 2;
+    }
+
+    /** The possible states of the Fusebox popup. */
+    @IntDef({PopupState.HIDDEN, PopupState.FLOATING, PopupState.BOTTOM})
+    @Retention(RetentionPolicy.SOURCE)
+    @Target({ElementType.TYPE_USE})
+    public @interface PopupState {
+        /** The popup is hidden. */
+        int HIDDEN = 0;
+
+        /** The popup is floating near the anchor. */
+        int FLOATING = 1;
+
+        /** The popup is anchored at the bottom of the screen. */
+        int BOTTOM = 2;
     }
 
     /** Encapsulates the state for a button in the Fusebox popup. */
@@ -68,10 +86,6 @@ class FuseboxProperties {
     public static final WritableBooleanPropertyKey ADD_BUTTON_VISIBLE =
             new WritableBooleanPropertyKey();
 
-    /** Whether the attachments toolbar is visible. */
-    public static final WritableBooleanPropertyKey ATTACHMENTS_TOOLBAR_VISIBLE =
-            new WritableBooleanPropertyKey();
-
     /** Whether the attachments RecyclerView is visible. */
     public static final WritableBooleanPropertyKey ATTACHMENTS_VISIBLE =
             new WritableBooleanPropertyKey();
@@ -92,8 +106,9 @@ class FuseboxProperties {
     public static final WritableObjectPropertyKey<@BrandedColorScheme Integer> COLOR_SCHEME =
             new WritableObjectPropertyKey<>();
 
-    /** Whether the UI is in compact mode. */
-    public static final WritableBooleanPropertyKey COMPACT_UI = new WritableBooleanPropertyKey();
+    /** The state the the UI of the fusebox should currently be in. */
+    public static final WritableObjectPropertyKey<@FuseboxState Integer> FUSEBOX_STATE =
+            new WritableObjectPropertyKey<>();
 
     /** Action to perform when the user clicks the Camera button in the popup. */
     public static final WritableObjectPropertyKey<Runnable> POPUP_ATTACH_CAMERA_CLICKED =
@@ -189,6 +204,10 @@ class FuseboxProperties {
     public static final WritableBooleanPropertyKey POPUP_MODEL_HEADER_VISIBLE =
             new WritableBooleanPropertyKey();
 
+    /** The state of the popup. */
+    public static final WritableObjectPropertyKey<@PopupState Integer> POPUP_STATE =
+            new WritableObjectPropertyKey<>();
+
     /** Action to perform when the user clicks the AI Mode button in the popup. */
     public static final WritableObjectPropertyKey<Runnable> POPUP_TOOL_AI_MODE_CLICKED =
             new WritableObjectPropertyKey<>();
@@ -253,13 +272,12 @@ class FuseboxProperties {
         // go/keep-sorted start
         ADAPTER,
         ADD_BUTTON_VISIBLE,
-        ATTACHMENTS_TOOLBAR_VISIBLE,
         ATTACHMENTS_VISIBLE,
         AUTOCOMPLETE_REQUEST_TYPE,
         AUTOCOMPLETE_REQUEST_TYPE_CLICKED,
         BUTTON_ADD_CLICKED,
         COLOR_SCHEME,
-        COMPACT_UI,
+        FUSEBOX_STATE,
         POPUP_ATTACH_CAMERA_CLICKED,
         POPUP_ATTACH_CAMERA_ENABLED,
         POPUP_ATTACH_CAMERA_VISIBLE,
@@ -282,6 +300,7 @@ class FuseboxProperties {
         POPUP_MODEL_BUTTON_DATA_LIST,
         POPUP_MODEL_DIVIDER_VISIBLE,
         POPUP_MODEL_HEADER_VISIBLE,
+        POPUP_STATE,
         POPUP_TOOL_AI_MODE_CLICKED,
         POPUP_TOOL_AI_MODE_ENABLED,
         POPUP_TOOL_AI_MODE_VISIBLE,

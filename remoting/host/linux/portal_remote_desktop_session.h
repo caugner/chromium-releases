@@ -13,7 +13,7 @@
 #include "base/sequence_checker.h"
 #include "base/thread_annotations.h"
 #include "base/types/expected.h"
-#include "remoting/host/base/loggable.h"
+#include "remoting/base/loggable.h"
 #include "remoting/host/desktop_display_info_monitor.h"
 #include "remoting/host/linux/ei_sender_session.h"
 #include "remoting/host/linux/gdbus_connection_ref.h"
@@ -126,8 +126,12 @@ class PortalRemoteDesktopSession {
   void OnConnectionCreated(GDBusConnectionRef connection);
   void OnCreateSessionResponse(gvariant::GVariantRef<"a{sv}"> result);
   void OnSelectDevicesResponse(gvariant::GVariantRef<"a{sv}"> result);
+  void ConnectToEIS(
+      GDBusConnectionRef::CallCallback<
+          std::pair<std::tuple<GDBusFdList::Handle>, GDBusFdList>> callback);
   void OnCaptureStreamInitResult(base::expected<void, std::string> result);
   void OnEisFd(std::pair<std::tuple<GDBusFdList::Handle>, GDBusFdList> args);
+  void OnEiSessionDisconnected();
   void OnEiSession(std::unique_ptr<EiSenderSession> ei_session);
   void OnSessionClosed(gvariant::GVariantRef<"a{sv}"> details);
 
