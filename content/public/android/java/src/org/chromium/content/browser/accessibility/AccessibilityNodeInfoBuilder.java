@@ -429,13 +429,14 @@ public class AccessibilityNodeInfoBuilder {
         node.setTooltipText(tooltipText);
         node.setExpandedState(expandedState);
 
-        // If we have deprecated TYPE_ANNOUNCEMENT, we should properly mark live region root nodes.
+        // If we have deprecated TYPE_ANNOUNCEMENT or enabled the new live region behavior, we
+        // should properly mark live region root nodes.
         // Otherwise, we choose to use AnnounceLiveRegionText() to make this announcement for us.
-        // TODO(crbug.com/470048610): Once the Finch experiment for
-        // ACCESSIBILITY_IMPROVE_LIVE_REGION_ANNOUNCE is complete, we should add the flag to the
-        // if-statement below. However, until TalkBack 17.0 is released, we cannot send
-        // WINDOW_CONTENT_CHANGED events with a valid LiveRegion without altering user experience.
-        if (ContentFeatureMap.isEnabled(ContentFeatureList.ACCESSIBILITY_DEPRECATE_TYPE_ANNOUNCE)) {
+        // TODO(crbug.com/507858294): Remove the following flags after a period of stability in
+        // several stable releases.
+        if (ContentFeatureMap.isEnabled(ContentFeatureList.ACCESSIBILITY_DEPRECATE_TYPE_ANNOUNCE)
+                || ContentFeatureMap.isEnabled(
+                        ContentFeatureList.ACCESSIBILITY_IMPROVE_LIVE_REGION_ANNOUNCE)) {
             node.setLiveRegion(liveRegion);
         }
 
@@ -640,36 +641,10 @@ public class AccessibilityNodeInfoBuilder {
                 node.getExtras().remove(EXTRAS_KEY_OFFSCREEN);
             }
 
-            updateNodeVisibilityForOcclusion(node);
-        }
-    }
-
-    /**
-     * Updates the visibility of an accessibility node based on whether it is occluded by other
-     * rects. If it is, it should be invisible to accessibility.
-     *
-     * @param info The {@link AccessibilityNodeInfoCompat} for the web content node.
-     */
-    private void updateNodeVisibilityForOcclusion(AccessibilityNodeInfoCompat info) {
-        if (!AccessibilityFeaturesMap.isEnabled(
-                AccessibilityFeatures.ACCESSIBILITY_HANDLE_OCCLUDING_VIEWS)) {
-            return;
-        }
-
-        if (!info.isVisibleToUser()) return;
-
-        Rect webNodeBounds = new Rect();
-        info.getBoundsInScreen(webNodeBounds);
-        if (webNodeBounds.isEmpty()) return;
-
-        SparseArray<Rect> occludingRects = mDelegate.getOccludingRects();
-        for (int i = 0; i < occludingRects.size(); i++) {
-            Rect occludingRect = occludingRects.valueAt(i);
-            Rect intersection = new Rect(webNodeBounds);
-            if (intersection.intersect(occludingRect)) {
-                info.setVisibleToUser(false);
-                // No need to check other occluding rects if the node is already invisible.
-                return;
+            if (AccessibilityFeaturesMap.isEnabled(
+                    AccessibilityFeatures.ACCESSIBILITY_HANDLE_OCCLUDING_VIEWS)) {
+                AccessibilityNodeInfoUtils.updateNodeForOcclusion(
+                        node, mDelegate.getOccludingRects());
             }
         }
     }
@@ -971,7 +946,7 @@ public class AccessibilityNodeInfoBuilder {
 
     public static void convertWebRectToAndroidCoordinates(
             Rect rect,
-            Bundle extras,
+            @Nullable Bundle extras,
             AccessibilityDelegate.AccessibilityCoordinates accessibilityCoordinates,
             View view,
             boolean isScreenCoordinates) {
@@ -1007,13 +982,16 @@ public class AccessibilityNodeInfoBuilder {
         int clippedLeft = viewLocation[0];
         int clippedRight = clippedLeft + ac.getLastFrameViewportWidthPixInt();
 
-        // Always provide the unclipped bounds in the Bundle for any interested downstream client.
-        extras.putInt(EXTRAS_KEY_UNCLIPPED_TOP, rect.top);
-        extras.putInt(EXTRAS_KEY_UNCLIPPED_BOTTOM, rect.bottom);
-        extras.putInt(EXTRAS_KEY_UNCLIPPED_LEFT, rect.left);
-        extras.putInt(EXTRAS_KEY_UNCLIPPED_RIGHT, rect.right);
-        extras.putInt(EXTRAS_KEY_UNCLIPPED_WIDTH, rect.width());
-        extras.putInt(EXTRAS_KEY_UNCLIPPED_HEIGHT, rect.height());
+        if (extras != null) {
+            // Always provide the unclipped bounds in the Bundle for any interested downstream
+            // client.
+            extras.putInt(EXTRAS_KEY_UNCLIPPED_TOP, rect.top);
+            extras.putInt(EXTRAS_KEY_UNCLIPPED_BOTTOM, rect.bottom);
+            extras.putInt(EXTRAS_KEY_UNCLIPPED_LEFT, rect.left);
+            extras.putInt(EXTRAS_KEY_UNCLIPPED_RIGHT, rect.right);
+            extras.putInt(EXTRAS_KEY_UNCLIPPED_WIDTH, rect.width());
+            extras.putInt(EXTRAS_KEY_UNCLIPPED_HEIGHT, rect.height());
+        }
 
         if (rect.top < clippedTop) {
             rect.top = clippedTop;

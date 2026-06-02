@@ -90,8 +90,11 @@ namespace {
 ScrollableArea* ToScrollableArea(Node* node) {
   DCHECK(node);
   LayoutBox* scrolling_box = node->GetLayoutBox();
-  if (auto* element = DynamicTo<Element>(node))
-    scrolling_box = element->GetLayoutBoxForScrolling();
+  if (auto* element = DynamicTo<Element>(node)) {
+    auto* box = element->GetLayoutBoxForScrolling();
+    scrolling_box =
+        box && box->GetScrollableArea()->ScrollableAxes() ? box : nullptr;
+  }
   return scrolling_box ? scrolling_box->GetScrollableArea() : nullptr;
 }
 
@@ -391,7 +394,7 @@ WebPagePopupImpl::WebPagePopupImpl(
   }
 
   InitializeCompositing(screen_infos,
-                        /*settings=*/nullptr);
+                        /*settings=*/nullptr, {}, {}, {});
 
   popup_client_->AdjustSettings(page_->GetSettings());
   popup_client_->CreatePagePopupController(*page_, *this);
@@ -480,7 +483,14 @@ void WebPagePopupImpl::DidSetBounds() {
 
 void WebPagePopupImpl::InitializeCompositing(
     const display::ScreenInfos& screen_infos,
-    const cc::LayerTreeSettings* settings) {
+    const cc::LayerTreeSettings* settings,
+    CrossVariantMojoRemote<viz::mojom::blink::CompositorFrameSinkInterfaceBase>
+        initial_frame_sink,
+    CrossVariantMojoReceiver<
+        viz::mojom::blink::CompositorFrameSinkClientInterfaceBase>
+        initial_frame_sink_client,
+    CrossVariantMojoReceiver<mojom::blink::RenderInputRouterClientInterfaceBase>
+        initial_viz_rir_client) {
   // Careful Initialize() is called after InitializeCompositing, so don't do
   // much work here.
   widget_base_->InitializeCompositing(*page_->GetPageScheduler(), screen_infos,

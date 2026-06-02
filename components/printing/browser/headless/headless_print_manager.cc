@@ -78,7 +78,7 @@ void HeadlessPrintManager::SetupScriptedPrintPreview(
   std::move(callback).Run();
 }
 
-void HeadlessPrintManager::ShowScriptedPrintPreview(bool source_is_modifiable) {
+void HeadlessPrintManager::ShowScriptedPrintPreview() {
   DLOG(ERROR) << "Scripted print preview is not supported";
 }
 

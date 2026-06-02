@@ -15,6 +15,7 @@
 #include "base/scoped_observation.h"
 #include "base/time/time.h"
 #include "base/values.h"
+#include "chrome/browser/ui/views/permissions/embedded_permission_prompt_observer.h"
 #include "components/contextual_search/contextual_search_types.h"
 #include "components/contextual_search/pref_names.h"
 #include "components/omnibox/browser/autocomplete_controller.h"
@@ -41,7 +42,12 @@ namespace searchbox_internal {
 // Internal constants for icon resource paths shared by SearchboxHandler and its
 // subclasses.
 extern const char* kSearchSparkIconResourceName;
+extern const char* kReplyRotated180IconResourceName;
 }  // namespace searchbox_internal
+
+namespace gfx {
+class Size;
+}  // namespace gfx
 
 // Base class for browser-side handlers that handle bi-directional communication
 // with WebUI search boxes.
@@ -50,8 +56,16 @@ extern const char* kSearchSparkIconResourceName;
 #define DECLARE_FEATURE(feature) static constinit const base::Feature feature
 
 class SearchboxHandler : public searchbox::mojom::PageHandler,
-                         public AutocompleteController::Observer {
+                         public AutocompleteController::Observer,
+                         public EmbeddedPermissionPromptObserver::Observer {
  public:
+  class Delegate {
+   public:
+    virtual void OnEmbeddedPermissionDialogChanged(
+        bool is_showing,
+        const gfx::Size& prompt_size) = 0;
+  };
+
   SearchboxHandler(const SearchboxHandler&) = delete;
   SearchboxHandler& operator=(const SearchboxHandler&) = delete;
 
@@ -59,7 +73,12 @@ class SearchboxHandler : public searchbox::mojom::PageHandler,
     bool enable_voice_search = false;
     bool enable_lens_search = false;
     bool session_allows_drag_and_drop = false;
+    bool is_lens = false;
   };
+
+  static bool GetAllVoiceSearchCoherenceComposeboxesEnabled();
+  static bool GetVoiceSearchCoherenceAnySearchboxExperimentEnabled();
+  static bool GetVoiceSearchCoherenceCobrowsingComposeboxEnabled();
 
   static base::DictValue GetWebUIDataSourceDict(Profile* profile);
   static base::DictValue GetWebUIDataSourceDict(Profile* profile,
@@ -69,9 +88,6 @@ class SearchboxHandler : public searchbox::mojom::PageHandler,
   // `OmniboxAction::GetIconImage()` to svg resource strings.
   virtual std::string AutocompleteIconToResourceName(
       const gfx::VectorIcon& icon) const;
-
-  // Returns true if the page remote is bound and ready to receive calls.
-  bool IsRemoteBound() const;
 
   // Adds file context to the searchbox from the browser.
   void AddFileContextFromBrowser(
@@ -88,6 +104,10 @@ class SearchboxHandler : public searchbox::mojom::PageHandler,
   void OnResultChanged(AutocompleteController* controller,
                        bool default_match_changed) override;
 
+  // EmbeddedPermissionPromptObserver::Observer:
+  void OnEmbeddedPermissionPromptChanged(bool is_showing,
+                                         const gfx::Size& prompt_size) override;
+
   // searchbox::mojom::PageHandler:
   void OnFocusChanged(bool focused) override;
   void QueryAutocomplete(const std::u16string& input,
@@ -101,6 +121,8 @@ class SearchboxHandler : public searchbox::mojom::PageHandler,
                              bool ctrl_key,
                              bool meta_key,
                              bool shift_key) override;
+  void SetSmartComposeStats(
+      searchbox::mojom::SmartComposeStatsPtr smart_compose_stats) override {}
   void SetPopupSelection(
       searchbox::mojom::OmniboxPopupSelectionPtr selection) override;
   void OpenPopupSelection(uint32_t result_sequence_id,
@@ -136,10 +158,6 @@ class SearchboxHandler : public searchbox::mojom::PageHandler,
   void AddTabContext(int32_t tab_id,
                      bool delay_upload,
                      AddTabContextCallback) override {}
-  void AddDriveContext(const std::string& drive_id,
-                       const std::string& resource_key,
-                       const std::string& mime_type_string,
-                       AddDriveContextCallback callback) override {}
   void DeleteContext(const base::UnguessableToken& file_token,
                      bool from_automatic_chip) override {}
   void ClearFiles(bool should_block_auto_suggested_tabs) override {}
@@ -148,7 +166,8 @@ class SearchboxHandler : public searchbox::mojom::PageHandler,
                    bool alt_key,
                    bool ctrl_key,
                    bool meta_key,
-                   bool shift_key) override {}
+                   bool shift_key,
+                   bool is_voice_search) override {}
   void OpenLensSearch() override {}
   void SetActiveToolMode(omnibox::ToolMode tool) override {}
   void RecordToolSelectionAction(omnibox::ToolMode tool) override {}
@@ -158,14 +177,9 @@ class SearchboxHandler : public searchbox::mojom::PageHandler,
   void ShouldShowDriveDisclaimer(
       ShouldShowDriveDisclaimerCallback callback) override;
   void OnDriveDisclaimerAccepted() override;
+  void OnDriveUploadClicked(OnDriveUploadClickedCallback callback) override;
   void GetPageClassification(GetPageClassificationCallback callback) override;
-
-  // Stores `callback` to be run when the page remote is bound and ready to
-  // receive calls. Runs `callback` immediately if the remote is already bound.
-  void set_page_is_bound_callback_for_testing(base::OnceClosure callback);
-
-  DECLARE_FEATURE(kVoiceSearchCoherence);
-  static const base::FeatureParam<bool> kVoiceSearchRecordingAnimation;
+  void set_delegate(Delegate* delegate) { omnibox_delegate_ = delegate; }
 
  protected:
   FRIEND_TEST_ALL_PREFIXES(RealboxHandlerTest, AutocompleteController_Start);
@@ -191,10 +205,13 @@ class SearchboxHandler : public searchbox::mojom::PageHandler,
   const AutocompleteMatch* GetMatchWithUrl(size_t index, const GURL& url) const;
 
   virtual omnibox::InputState GetInputState() const;
+  virtual std::string GetPreviousQuery();
 
   raw_ptr<Profile> profile_;
   raw_ptr<content::WebContents> web_contents_;
   raw_ptr<OmniboxController> controller_;
+  raw_ptr<Delegate> omnibox_delegate_;
+
   // Children classes should use `omnibox_controller()` or `controller_`.
   std::unique_ptr<OmniboxController> owned_controller_;
 
@@ -204,7 +221,7 @@ class SearchboxHandler : public searchbox::mojom::PageHandler,
 
   mojo::Receiver<searchbox::mojom::PageHandler> page_handler_;
   mojo::Remote<searchbox::mojom::Page> page_;
-  base::OnceClosure page_is_bound_callback_for_testing_;
+  base::WeakPtrFactory<SearchboxHandler> weak_ptr_factory_{this};
 
   searchbox::mojom::AutocompleteResultPtr CreateAutocompleteResult(
       const std::u16string& input,

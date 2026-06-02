@@ -45,16 +45,15 @@ SkillsUI::SkillsUI(content::WebUI* web_ui) : ui::MojoWebUIController(web_ui) {
                      glic::GlicEnabling::IsReadyForProfile(profile));
   source->AddInteger("MAX_NAME_CHAR_COUNT", kMaxNameCharCount);
   source->AddInteger("MAX_PROMPT_CHAR_COUNT", kMaxPromptCharCount);
-  source->AddBoolean("isRefinementEnabled",
-                     // Disable refinement whenever browseSkillsPage is disabled
-                     // (non-en locales).
-                     !ShouldDisableBrowseSkillsPage());
+  source->AddBoolean(
+      "isRefinementEnabled",
+      base::FeatureList::IsEnabled(features::kSkillsRefinementEnabled));
+  source->AddBoolean(
+      "isSubheadersEnabled",
+      base::FeatureList::IsEnabled(features::kSkillsSubheadersEnabled));
   source->AddBoolean(
       "isAutocompleteEnabled",
       base::FeatureList::IsEnabled(features::kSkillsAutocomplete));
-  source->AddBoolean(
-      "isPartnerPicksEnabled",
-      base::FeatureList::IsEnabled(features::kSkillsPartnerPicks));
   source->AddBoolean("shouldDisableBrowseSkillsPage",
                      ShouldDisableBrowseSkillsPage());
 
@@ -67,9 +66,9 @@ SkillsUI::SkillsUI(content::WebUI* web_ui) : ui::MojoWebUIController(web_ui) {
       {"save", IDS_SAVE},
       {"delete", IDS_SKILL_PAGE_USER_SKILLS_DELETE},
       {"add", IDS_ADD},
+      {"all", IDS_SKILLS_PAGE_ALL_CATEGORY},
+      {"curatedByPrefix", IDS_SKILLS_CURATED_PREFIX},
       {"browseSkillsTitle", IDS_SKILL_PAGE_BROWSE_SKILLS_TITLE},
-      // TODO(b/503394871): Remove this string.
-      {"topPicksTitle", IDS_SKILL_PAGE_BROWSE_SKILLS_TOP_PICKS_TITLE},
       {"firstPartyAddSkillErrorToast",
        IDS_SKILL_PAGE_FIRST_PARTY_ADD_SKILL_ERROR_TOAST},
       {"emptyStateTitle", IDS_SKILL_PAGE_EMPTY_STATE_TITLE},

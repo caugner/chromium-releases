@@ -17,6 +17,8 @@ namespace lens::features {
 
 BASE_FEATURE(kLensStandalone, base::FEATURE_ENABLED_BY_DEFAULT);
 
+BASE_FEATURE(kShowContextualTasksMenuIcon, base::FEATURE_DISABLED_BY_DEFAULT);
+
 BASE_FEATURE(kLensOverlay,
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
              base::FEATURE_DISABLED_BY_DEFAULT
@@ -24,6 +26,8 @@ BASE_FEATURE(kLensOverlay,
              base::FEATURE_ENABLED_BY_DEFAULT
 #endif
 );
+
+BASE_FEATURE(kLensOverlayAndroid, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kLensOverlayTranslateButton, base::FEATURE_DISABLED_BY_DEFAULT);
 
@@ -86,8 +90,6 @@ BASE_FEATURE(kLensSearchNotFoundOnPageToast,
              "kLensSearchNotFoundOnPageToast",
              base::FEATURE_DISABLED_BY_DEFAULT);
 
-BASE_FEATURE(kLensOverlayStraightToSrp, base::FEATURE_DISABLED_BY_DEFAULT);
-
 BASE_FEATURE(kLensSearchAimM3, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kLensSearchAimM3EnUs, base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kLensSearchAimM3UseAimEligibility,
@@ -111,8 +113,6 @@ BASE_FEATURE(kLensAimSuggestions, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kLensAimSuggestionsGradientBackground,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
-BASE_FEATURE(kLensSearchZeroStateCsb, base::FEATURE_DISABLED_BY_DEFAULT);
-
 BASE_FEATURE(kLensVideoCitations, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kLensUpdatedFeedbackEntrypoint, base::FEATURE_ENABLED_BY_DEFAULT);
@@ -124,6 +124,9 @@ BASE_FEATURE(kLensOverlayOptimizationFilter, base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kLensOverlayNonBlockingPrivacyNotice,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
+BASE_FEATURE(kLensOverlayNonBlockingPrivacyNoticeForImageSearch,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 BASE_FEATURE(kLensUseSeparateRequestIdForViewportImages,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
@@ -133,6 +136,8 @@ BASE_FEATURE(kLensSendVitForSingleContextNextQueries,
 BASE_FEATURE(kLensSendRawFileMediaTypes, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kLensSendUrlsInComposeboxes, base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kLensSendQuerySubmissionTime, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kLensRestrictAnnotatedPageContentToSameSiteFramesForNextQueries,
              base::FEATURE_DISABLED_BY_DEFAULT);
@@ -226,14 +231,6 @@ constexpr base::FeatureParam<bool> kIsOmniboxEntrypointAlwaysVisible{
 const base::FeatureParam<bool> kUseBrowserDarkModeSettingForLensOverlay{
     &kLensOverlay, "use-browser-dark-mode-setting", true};
 
-const base::FeatureParam<bool> kDynamicThemeForLensOverlay{
-    &kLensOverlay, "use-dynamic-theme", true};
-
-const base::FeatureParam<double> kDynamicThemeMinPopulationPct{
-    &kLensOverlay, "use-dynamic-theme-min-population-pct", 0.002f};
-
-const base::FeatureParam<double> kDynamicThemeMinChroma{
-    &kLensOverlay, "use-dynamic-theme-min-chroma", 3.0f};
 
 const base::FeatureParam<bool>
     kSendVisualSearchInteractionParamForLensTextQueries{
@@ -432,9 +429,6 @@ constexpr base::FeatureParam<base::TimeDelta> kSupportedLanguagesCacheTimeoutMs{
 constexpr base::FeatureParam<int> kRecentLanguagesAmount{
     &kLensOverlayTranslateLanguages, "recent-languages-amount", 5};
 
-constexpr base::FeatureParam<bool>
-    kLensOverlayVisualSelectionUpdatesEnableDynamicTheme{
-        &kLensOverlayVisualSelectionUpdates, "enable-dynamic-theme", false};
 
 constexpr base::FeatureParam<bool>
     kLensOverlayVisualSelectionUpdatesEnableBorderGlow{
@@ -547,9 +541,6 @@ const base::FeatureParam<base::TimeDelta>
         &kLensOverlayEduActionChip, "lens-action-chip-show-debounce-interval",
         base::Seconds(1)};
 
-constexpr base::FeatureParam<std::string> kLensOverlayStraightToSrpQuery{
-    &kLensOverlayStraightToSrp, "query", ""};
-
 constexpr base::FeatureParam<bool> kOpenAimInSidePanel{
     &kLensSearchAimM3, "open-aim-in-side-panel", true};
 
@@ -578,9 +569,6 @@ constexpr base::FeatureParam<bool>
     kLensOverlayTextSelectionContextMenuEntrypointContextualize{
         &kLensOverlayTextSelectionContextMenuEntrypoint, "contextualize",
         false};
-
-constexpr base::FeatureParam<std::string> kZeroStateCsbQuery{
-    &kLensSearchZeroStateCsb, "zero-state-csb-query", ""};
 
 const base::FeatureParam<
     LensAimSuggestionsType>::Option kLensAimSuggestionsTypeOptions[] = {
@@ -868,13 +856,6 @@ bool UseBrowserDarkModeSettingForLensOverlay() {
   return kUseBrowserDarkModeSettingForLensOverlay.Get();
 }
 
-double DynamicThemeMinPopulationPct() {
-  return kDynamicThemeMinPopulationPct.Get();
-}
-
-double DynamicThemeMinChroma() {
-  return kDynamicThemeMinChroma.Get();
-}
 
 bool SendVisualSearchInteractionParamForLensTextQueries() {
   return kSendVisualSearchInteractionParamForLensTextQueries.Get();
@@ -1032,12 +1013,6 @@ bool IsLensOverlayVisualSelectionUpdatesEnabled() {
   return base::FeatureList::IsEnabled(kLensOverlayVisualSelectionUpdates);
 }
 
-bool IsDynamicThemeDetectionEnabled() {
-  if (IsLensOverlayVisualSelectionUpdatesEnabled()) {
-    return kLensOverlayVisualSelectionUpdatesEnableDynamicTheme.Get();
-  }
-  return kDynamicThemeForLensOverlay.Get();
-}
 
 bool GetVisualSelectionUpdatesEnableBorderGlow() {
   return IsLensOverlayVisualSelectionUpdatesEnabled() &&
@@ -1274,13 +1249,6 @@ bool IsLensSearchNotFoundOnPageToastEnabled() {
   return base::FeatureList::IsEnabled(kLensSearchNotFoundOnPageToast);
 }
 
-bool IsLensOverlayStraightToSrpEnabled() {
-  return base::FeatureList::IsEnabled(kLensOverlayStraightToSrp);
-}
-
-std::string GetStraightToSrpQuery() {
-  return kLensOverlayStraightToSrpQuery.Get();
-}
 
 bool IsLensOverlayTextSelectionContextMenuEntrypointEnabled() {
   return base::FeatureList::IsEnabled(
@@ -1299,13 +1267,6 @@ bool IsLensSidePanelWebviewResultsEnabled() {
   return base::FeatureList::IsEnabled(kLensSidePanelEnableWebviewResults);
 }
 
-bool IsLensSearchZeroStateCsbEnabled() {
-  return base::FeatureList::IsEnabled(kLensSearchZeroStateCsb);
-}
-
-std::string GetZeroStateCsbQuery() {
-  return IsLensSearchZeroStateCsbEnabled() ? kZeroStateCsbQuery.Get() : "";
-}
 
 bool IsLensVideoCitationsEnabled() {
   return base::FeatureList::IsEnabled(kLensVideoCitations);
@@ -1329,6 +1290,12 @@ bool IsLensOverlayOptimizationFilterEnabled() {
 
 bool IsLensOverlayNonBlockingPrivacyNoticeEnabled() {
   return base::FeatureList::IsEnabled(kLensOverlayNonBlockingPrivacyNotice);
+}
+
+bool IsLensOverlayNonBlockingPrivacyNoticeForImageSearchEnabled() {
+  return base::FeatureList::IsEnabled(kLensOverlayNonBlockingPrivacyNotice) &&
+         base::FeatureList::IsEnabled(
+             kLensOverlayNonBlockingPrivacyNoticeForImageSearch);
 }
 
 int GetLensOverlayNonBlockingPrivacyNoticeImpressionCap() {

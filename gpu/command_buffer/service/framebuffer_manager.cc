@@ -704,6 +704,13 @@ bool Framebuffer::GetReadBufferIsMultisampledTexture() const {
              : false;
 }
 
+bool Framebuffer::GetReadBufferIsMultisampledRenderbuffer() const {
+  const Attachment* attachment = GetReadBufferAttachment();
+  return attachment ? attachment->IsRenderbufferAttachment() &&
+                          attachment->samples() > 1
+                    : false;
+}
+
 GLsizei Framebuffer::GetSamples() const {
   // Assume the framebuffer is complete, so return any attachment's samples.
   auto iter = attachments_.begin();
@@ -999,7 +1006,7 @@ void Framebuffer::UpdateDrawBufferMasks() {
   draw_buffer_type_mask_ = 0u;
   draw_buffer_float32_mask_ = 0u;
   draw_buffer_bound_mask_ = 0u;
-  for (uint32_t index = 0; index < manager_->max_color_attachments_; ++index) {
+  for (uint32_t index = 0; index < manager_->max_draw_buffers_; ++index) {
     GLenum draw_buffer = UNSAFE_TODO(draw_buffers_[index]);
     if (draw_buffer == GL_NONE)
       continue;

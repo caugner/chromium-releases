@@ -101,15 +101,6 @@ public class SharedStatics {
                 "Android.WebView.ApiCall.Static", sample, ApiCall.COUNT);
     }
 
-    public String findAddress(String addr) {
-        mAwInit.triggerAndWaitForChromiumStarted(
-                WebViewChromiumAwInit.CallSite.STATIC_FIND_ADDRESS);
-        try (TraceEvent event = TraceEvent.scoped("WebView.APICall.Framework.FIND_ADDRESS")) {
-            recordStaticApiCall(ApiCall.FIND_ADDRESS);
-            return AwContentsStatics.findAddress(addr);
-        }
-    }
-
     public String getDefaultUserAgent(Context context) {
         if (!mAwInit.isChromiumInitStarted()) {
             mAwInit.maybeSetChromiumUiThread(Looper.getMainLooper());
@@ -147,13 +138,33 @@ public class SharedStatics {
         }
     }
 
+    private boolean shouldEnableStaticMethodsNotTriggerStartup() {
+        return CommandLine.getInstance()
+                        .hasSwitch(AwSwitches.WEBVIEW_STATIC_METHODS_NOT_TRIGGER_STARTUP)
+                || WebViewCachedFlags.get()
+                        .isCachedFeatureEnabled(
+                                AwFeatures.WEBVIEW_STATIC_METHODS_NOT_TRIGGER_STARTUP);
+    }
+
+    private boolean shouldPost() {
+        // TODO(437338203): When we clean this up after it ships to 100%, we can remove all the
+        // triggerAndWaitForChromiumStarted calls in the methods that use shouldPost, since they
+        // will always be no-ops.
+        return shouldEnableStaticMethodsNotTriggerStartup() && !mAwInit.isChromiumInitStarted();
+    }
+
     public void setWebContentsDebuggingEnabled(boolean enable) {
+        if (shouldPost()) {
+            mAwInit.getRunQueue().addTask(() -> setWebContentsDebuggingEnabled(enable));
+            return;
+        }
         mAwInit.triggerAndWaitForChromiumStarted(
                 WebViewChromiumAwInit.CallSite.STATIC_SET_WEB_CONTENTS_DEBUGGING_ENABLED);
         try (TraceEvent event =
                 TraceEvent.scoped("WebView.APICall.Framework.SET_WEB_CONTENTS_DEBUGGING_ENABLED")) {
             recordStaticApiCall(ApiCall.SET_WEB_CONTENTS_DEBUGGING_ENABLED);
-            // On debug builds, Web Contents debugging is enabled elsewhere, and cannot be disabled.
+            // On debug builds, Web Contents debugging is enabled elsewhere, and cannot
+            // be disabled.
             if (ApkInfo.isDebugAndroidOrApp()) return;
             setWebContentsDebuggingEnabledUnconditionally(enable);
         }
@@ -173,6 +184,10 @@ public class SharedStatics {
     }
 
     public void clearClientCertPreferences(Runnable onCleared) {
+        if (shouldPost()) {
+            mAwInit.getRunQueue().addTask(() -> clearClientCertPreferences(onCleared));
+            return;
+        }
         mAwInit.triggerAndWaitForChromiumStarted(
                 WebViewChromiumAwInit.CallSite.STATIC_CLEAR_CLIENT_CERT_PREFERENCES);
         try (TraceEvent event =
@@ -199,6 +214,10 @@ public class SharedStatics {
     }
 
     public void enableSlowWholeDocumentDraw() {
+        if (shouldPost()) {
+            mAwInit.getRunQueue().addTask(() -> enableSlowWholeDocumentDraw());
+            return;
+        }
         mAwInit.triggerAndWaitForChromiumStarted(
                 WebViewChromiumAwInit.CallSite.STATIC_ENABLE_SLOW_WHOLE_DOCUMENT_DRAW);
         try (TraceEvent event =
@@ -237,6 +256,10 @@ public class SharedStatics {
     }
 
     public void setSafeBrowsingAllowlist(List<String> urls, Callback<Boolean> callback) {
+        if (shouldPost()) {
+            mAwInit.getRunQueue().addTask(() -> setSafeBrowsingAllowlist(urls, callback));
+            return;
+        }
         mAwInit.triggerAndWaitForChromiumStarted(
                 WebViewChromiumAwInit.CallSite.STATIC_SET_SAFE_BROWSING_ALLOWLIST);
         try (TraceEvent event =
@@ -266,32 +289,11 @@ public class SharedStatics {
         }
     }
 
-    private boolean shouldStopBrowserStartupInIsMultiProcessEnabled() {
-        if (mAwInit.isAsyncStartupWithMultiProcessExperimentEnabled()) {
-            return true;
-        }
-
-        if (CommandLine.getInstance()
-                .hasSwitch(AwSwitches.WEBVIEW_STOP_BROWSER_STARTUP_IN_IS_MULTI_PROCESS_ENABLED)) {
-            return true;
-        }
-
-        return WebViewCachedFlags.get()
-                .isCachedFeatureEnabled(
-                        AwFeatures.WEBVIEW_STOP_BROWSER_STARTUP_IN_IS_MULTI_PROCESS_ENABLED);
-    }
-
     public boolean isMultiProcessEnabled() {
         try (TraceEvent event =
                 TraceEvent.scoped("WebView.APICall.Framework.IS_MULTI_PROCESS_ENABLED")) {
             recordStaticApiCall(ApiCall.IS_MULTI_PROCESS_ENABLED);
-            if (shouldStopBrowserStartupInIsMultiProcessEnabled()) {
-                return mAwInit.isMultiProcessEnabled();
-            }
-
-            mAwInit.triggerAndWaitForChromiumStarted(
-                    WebViewChromiumAwInit.CallSite.STATIC_IS_MULTI_PROCESS_ENABLED);
-            return AwContentsStatics.isMultiProcessEnabled();
+            return mAwInit.isMultiProcessEnabled();
         }
     }
 
@@ -321,6 +323,7 @@ public class SharedStatics {
         }
     }
 
+    // TODO(b/428680502): This method should be removed as we decided that this will not be shipped.
     public void setRendererLibraryPrefetchMode(int mode) {
         mAwInit.triggerAndWaitForChromiumStarted(
                 WebViewChromiumAwInit.CallSite.STATIC_SET_RENDERER_LIBRARY_PREFETCH_MODE);
@@ -329,6 +332,7 @@ public class SharedStatics {
         AwContentsStatics.setRendererLibraryPrefetchMode(mode);
     }
 
+    // TODO(b/428680502): This method should be removed as we decided that this will not be shipped.
     public int getRendererLibraryPrefetchMode() {
         mAwInit.triggerAndWaitForChromiumStarted(
                 WebViewChromiumAwInit.CallSite.STATIC_GET_RENDERER_LIBRARY_PREFETCH_MODE);

@@ -20,7 +20,8 @@
 class DownloadFileService;
 
 namespace enterprise_connectors {
-class IOSAnalysisRequestHandler;
+class FilesRequestHandlerBase;
+class ContentAnalysisInfo;
 }
 
 namespace web {
@@ -76,6 +77,13 @@ class DownloadManagerTabHelper
   // Sets whether the Download toolbar should adapt to the fullscreen state.
   virtual void AdaptToFullscreen(bool adapt_to_fullscreen);
 
+  // Returns whether `files_request_handler_` is currently processing the
+  // download.
+  bool IsScannerProcessing() const;
+
+  // Set the scanner processing state for testing purposes.
+  void SetIsScannerProcessingForTesting(bool processing);  // IN-TEST
+
   // Returns whether `task_` still needs to be saved to Drive.
   bool WillDownloadTaskBeSavedToDrive() const;
 
@@ -84,6 +92,7 @@ class DownloadManagerTabHelper
   explicit DownloadManagerTabHelper(web::WebState* web_state);
 
  private:
+  friend class DownloadManagerTabHelperTest;
   friend class web::WebStateUserData<DownloadManagerTabHelper>;
 
   // web::WebStateObserver overrides:
@@ -142,10 +151,13 @@ class DownloadManagerTabHelper
   __weak id<DownloadManagerTabHelperDelegate> delegate_ = nil;
   __weak id<SnackbarCommands> snackbar_handler_ = nil;
   std::unique_ptr<web::DownloadTask> task_;
-  std::unique_ptr<enterprise_connectors::IOSAnalysisRequestHandler>
-      analysis_request_handler_;
+  std::unique_ptr<enterprise_connectors::ContentAnalysisInfo>
+      content_analysis_info_;
+  std::unique_ptr<enterprise_connectors::FilesRequestHandlerBase>
+      files_request_handler_;
   base::FilePath task_final_file_path_;
   bool delegate_started_ = false;
+  bool is_processing_for_testing_ = false;
 
   base::WeakPtrFactory<DownloadManagerTabHelper> weak_ptr_factory_{this};
 };

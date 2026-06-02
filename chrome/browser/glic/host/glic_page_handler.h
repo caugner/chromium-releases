@@ -92,8 +92,7 @@ class GlicPageHandler : public glic::mojom::PageHandler,
   void WebUiStateChanged(glic::mojom::WebUiState new_state) override;
 
   // PanelStateObserver implementation.
-  void PanelStateChanged(const glic::mojom::PanelState& panel_state,
-                         const PanelStateContext& context) override;
+  void PanelStateChanged(const glic::mojom::PanelState& panel_state) override;
 
   void UpdatePageState(mojom::PanelStateKind panelStateKind);
 
@@ -102,7 +101,7 @@ class GlicPageHandler : public glic::mojom::PageHandler,
  private:
   GlicKeyedService* GetGlicService();
 
-  // Owned by HostManager. Cleared when the page handler unregisters.
+  // Cleared when the page handler unregisters.
   raw_ptr<Host> host_;
   // There should at most one WebClientHandler at a time. A new one is created
   // each time the webview loads a page.

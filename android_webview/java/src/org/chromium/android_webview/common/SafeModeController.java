@@ -173,6 +173,16 @@ public class SafeModeController {
         mRegisteredActions = null;
     }
 
+    public void enableAllRegisteredActionsForTesting() {
+        if (mRegisteredActions == null) {
+            throw new IllegalStateException(
+                    "enableAllRegisteredActionsForTesting called before registerActions");
+        }
+        for (SafeModeAction action : mRegisteredActions) {
+            action.enable();
+        }
+    }
+
     /** Overload for queryActions which gets the Context from ContextUtils. */
     public Set<String> queryActions(String webViewPackageName) {
         final Context appContext = ContextUtils.getApplicationContext();
@@ -184,6 +194,23 @@ public class SafeModeController {
      * empty set if SafeMode is disabled. This should only be called from embedded WebView contexts.
      */
     public Set<String> queryActions(Context appContext, String webViewPackageName) {
+        if (mRegisteredActions == null) {
+            throw new IllegalStateException("Must registerActions() before calling queryActions()");
+        }
+        return queryActionsInternal(appContext, webViewPackageName);
+    }
+
+    /**
+     * Overload for queryActions which does not require registerActions() to be called first. This
+     * overload is only for ComponentUpdater and should be removed once that code is no longer
+     * needed.
+     */
+    public Set<String> queryActionsUnsafe(String webViewPackageName) {
+        final Context appContext = ContextUtils.getApplicationContext();
+        return queryActionsInternal(appContext, webViewPackageName);
+    }
+
+    private Set<String> queryActionsInternal(Context appContext, String webViewPackageName) {
         Set<String> actions = new HashSet<>();
 
         Uri uri =
@@ -213,7 +240,36 @@ public class SafeModeController {
         }
 
         Log.i(TAG, "Received SafeModeActions: %s", actions);
+        if (mRegisteredActions == null) return actions;
+        for (SafeModeAction action : mRegisteredActions) {
+            if (actions.contains(action.getId())) {
+                Log.i(TAG, "Enabling %s.", action.getId());
+                action.enable();
+            }
+        }
         return actions;
+    }
+
+    /**
+     * Helper method to return whether a given SafeModeAction is enabled. If it has not been
+     * registered, this method defaults to false and DOES NOT fail loudly. If this method is called
+     * before executeActions then it will return false. If a SafeModeAction is later executed, it
+     * will return true for the same action.
+     *
+     * @param id the SafeModeActionId of the action to query.
+     * @return if a SafeModeAction has been registered and has been enabled.
+     */
+    public boolean isActionEnabled(String id) {
+        if (mRegisteredActions == null) {
+            Log.w(TAG, "SafeModeAction enablement checked before registerActions was called");
+            return false;
+        }
+        for (SafeModeAction action : mRegisteredActions) {
+            if (id.equals(action.getId())) {
+                return action.isEnabled();
+            }
+        }
+        return false;
     }
 
     /**
@@ -242,7 +298,7 @@ public class SafeModeController {
                     // Allow SafeModeActions in general to perform disk reads and writes.
                     try (StrictModeContext ignored = StrictModeContext.allowDiskWrites()) {
                         Log.i(TAG, "Starting to execute %s", currentSafeModeActionName);
-                        if (action.execute()) {
+                        if (action.executeAtStartup()) {
                             Log.i(
                                     TAG,
                                     "Finished executing %s (%s)",

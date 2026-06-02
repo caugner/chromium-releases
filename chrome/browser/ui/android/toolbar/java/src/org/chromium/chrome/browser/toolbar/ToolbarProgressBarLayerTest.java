@@ -34,6 +34,7 @@ import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider
 import org.chromium.chrome.browser.browser_controls.TopControlsStacker;
 import org.chromium.chrome.browser.browser_controls.TopControlsStacker.TopControlVisibility;
 import org.chromium.chrome.browser.toolbar.top.ToolbarControlContainer;
+import org.chromium.chrome.browser.toolbar.top.ToolbarLayout;
 import org.chromium.ui.base.TestActivity;
 
 /** Unit tests for {@link ToolbarProgressBarLayer}. */
@@ -51,13 +52,14 @@ public class ToolbarProgressBarLayerTest {
     @Mock private TopControlsStacker mTopControlsStacker;
     @Mock private BottomControlsStacker mBottomControlsStacker;
     @Mock private CoordinatorLayout mContentView;
+    @Mock private ToolbarLayout mToolbarLayout;
 
     private Activity mActivity;
     private View mProgressBarContainer;
     private View mToolbarHairline;
 
     private ToolbarProgressBarLayer mLayer;
-    private @ControlsPosition int mTestControlPosition = ControlsPosition.NONE;
+    private @ControlsPosition int mTestControlPosition = ControlsPosition.BOTTOM;
     private SettableMonotonicObservableSupplier<Integer> mBookmarkBarIdSupplier;
 
     @Before
@@ -79,7 +81,8 @@ public class ToolbarProgressBarLayerTest {
                         mBookmarkBarIdSupplier,
                         mTopControlsStacker,
                         mBottomControlsStacker,
-                        false);
+                        false,
+                        mToolbarLayout);
     }
 
     @Test

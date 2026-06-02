@@ -48,6 +48,8 @@ int GetLayoutConstant(LayoutConstant constant) {
       return 1;
     case LayoutConstant::kLocationBarChildInteriorPadding:
       return 3;
+    case LayoutConstant::kLocationBarChildInternalSpacing:
+      return touch_ui ? 10 : 4;
     case LayoutConstant::kLocationBarChildCornerRadius:
       return 12;
     case LayoutConstant::kLocationBarChipIconSize:
@@ -58,14 +60,22 @@ int GetLayoutConstant(LayoutConstant constant) {
       return touch_ui ? 3 : 2;
     case LayoutConstant::kLocationBarPageInfoIconVerticalPadding:
       return touch_ui ? 3 : 5;
+    case LayoutConstant::kLocationBarPageInfoIconLabelExtraTrailingPadding:
+      return 4;
+    case LayoutConstant::kLocationBarPageInfoIconDangerousLeadingPadding:
+      return 6;
+    case LayoutConstant::kLocationBarPageInfoIconDangerousTrailingPadding:
+      return 10;
     case LayoutConstant::kLocationBarTrailingDecorationEdgePadding:
       return touch_ui ? 3 : 12;
     case LayoutConstant::kLocationBarTrailingDecorationInnerPadding:
       return touch_ui ? 3 : 8;
     case LayoutConstant::kLocationBarHeight:
       return touch_ui ? 36 : 34;
+    // LINT.IfChange(LocationBarIconSize)
     case LayoutConstant::kLocationBarIconSize:
       return touch_ui ? 20 : 16;
+    // LINT.ThenChange(//chrome/browser/ui/omnibox/omnibox_edit_model.cc:SuperGIconSize)
     case LayoutConstant::kLocationBarLeadingIconSize:
       return GetLayoutConstant(LayoutConstant::kLocationBarIconSize);
     case LayoutConstant::kLocationBarTrailingIconSize:
@@ -116,7 +126,7 @@ int GetLayoutConstant(LayoutConstant constant) {
       return touch_ui ? 0 : 2;
     case LayoutConstant::kLocationBarMargin:
       return touch_ui ? 12 : 9;
-    case LayoutConstant::kToolbarHeightSidePanelInset:
+    case LayoutConstant::kSidePanelInset:
       return 8;
     case LayoutConstant::kPageInfoIconSize:
       return 20;
@@ -132,14 +142,12 @@ int GetLayoutConstant(LayoutConstant constant) {
       return 32;
     case LayoutConstant::kVerticalTabMinWidth:
       return 32;
-    case LayoutConstant::kVerticalTabStripUncollapsedPadding:
+    case LayoutConstant::kVerticalTabStripHorizontalPadding:
       return 12;
-    case LayoutConstant::kVerticalTabStripCollapsedHorizontalPadding:
+    case LayoutConstant::kVerticalTabStripUncollapsedVerticalPadding:
       return 12;
     case LayoutConstant::kVerticalTabStripCollapsedVerticalPadding:
       return 8;
-    case LayoutConstant::kVerticalTabStripCollapsedSeparatorPadding:
-      return 12;
     case LayoutConstant::kVerticalTabStripComboButtonIconSize:
       return 18;
     case LayoutConstant::kVerticalTabStripButtonIconSize:
@@ -184,7 +192,7 @@ gfx::Insets GetLayoutInsets(LayoutInset inset) {
 
     case TOOLBAR_ACTION_VIEW: {
       // TODO(afakhry): Unify all toolbar button sizes on all platforms.
-      // https://crbug.com/822967.
+      // https://crbug.com/40567493.
       return gfx::Insets(touch_ui ? 10 : 0);
     }
 
@@ -200,6 +208,9 @@ gfx::Insets GetLayoutInsets(LayoutInset inset) {
 
     case WEB_APP_APP_MENU_CHIP_PADDING:
       return gfx::Insets::TLBR(0, 4, 0, 6);
+
+    case WEB_APP_UNINSTALL_BUTTON_PADDING:
+      return gfx::Insets::TLBR(0, 8, 0, 8);
 
     case AVATAR_CHIP_PADDING:
       if (touch_ui) {

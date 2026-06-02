@@ -7,6 +7,7 @@
 #include "chrome/browser/feedback/public/feedback_source.h"
 #include "chrome/browser/feedback/show_feedback_page.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/grit/branded_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
@@ -30,5 +31,22 @@ void ContextualTasksUiServiceDelegateDesktop::OpenFeedbackUi(
                            /*category_tag=*/"cobrowse",
                            /*extra_diagnostics=*/std::string());
 }
+
+void ContextualTasksUiServiceDelegateDesktop::ShowUndoSnackbar(
+    BrowserWindowInterface* browser_window_interface) {}
+
+void ContextualTasksUiServiceDelegateDesktop::OnWebUIReady(
+    BrowserWindowInterface* browser_window_interface,
+    const base::Uuid& task_id,
+    content::WebContents* web_contents) {}
+
+void ContextualTasksUiServiceDelegateDesktop::OnWebUIDestroyed(
+    BrowserWindowInterface* browser_window_interface,
+    const std::optional<base::Uuid>& task_id) {}
+
+void ContextualTasksUiServiceDelegateDesktop::OnTaskChanged(
+    BrowserWindowInterface* browser_window_interface,
+    const std::optional<base::Uuid>& old_task_id,
+    const std::optional<base::Uuid>& new_task_id) {}
 
 }  // namespace contextual_tasks

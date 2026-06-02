@@ -13,6 +13,7 @@
 #include "base/metrics/user_metrics_action.h"
 #include "base/notimplemented.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/time/time.h"
 #include "chrome/browser/glic/browser_ui/tab_underline_controller.h"
 #include "chrome/browser/glic/browser_ui/tab_underline_view.h"
 #include "chrome/browser/glic/public/glic_enabling.h"
@@ -59,11 +60,14 @@
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/models/list_selection_model.h"
 #include "ui/base/theme_provider.h"
+#include "ui/base/ui_base_features.h"
+#include "ui/compositor/layer.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/events/types/event_type.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/rounded_corners_f.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/geometry/skia_conversions.h"
 #include "ui/gfx/scoped_canvas.h"
@@ -139,7 +143,9 @@ VerticalTabView::VerticalTabView(TabCollectionNode* collection_node)
           // TODO(crbug.com/467733947): Hook up metrics logging callback.
           base::DoNothingAs<void(views::View*, const ui::MouseEvent&)>()))),
       hover_controller_(gfx::Animation::ShouldRenderRichAnimation()
-                            ? std::make_unique<GlowHoverController>(this)
+                            ? std::make_unique<GlowHoverController>(
+                                  this,
+                                  kGlowHoverAnimationDuration)
                             : nullptr) {
   tabs::TabInterface* tab = const_cast<tabs::TabInterface*>(GetTabInterface());
   BrowserWindowInterface* browser_window = tab->GetBrowserWindowInterface();
@@ -284,9 +290,7 @@ std::optional<SkColor> VerticalTabView::GetBackgroundColor() {
 }
 
 SkPath VerticalTabView::GetPath() const {
-  const SkScalar corner_radius = SkIntToScalar(
-      GetLayoutConstant(LayoutConstant::kVerticalTabCornerRadius) +
-      (split_ ? GetInsets().height() : 0));
+  const SkScalar corner_radius = GetCornerRadius();
   return SkPath::RRect(SkRRect::MakeRectXY(gfx::RectToSkRect(GetLocalBounds()),
                                            corner_radius, corner_radius));
 }
@@ -535,7 +539,7 @@ void VerticalTabView::OnPaint(gfx::Canvas* canvas) {
 void VerticalTabView::PaintTabBackgroundWithImages(
     gfx::Canvas* canvas,
     std::optional<int> active_tab_fill_id,
-    std::optional<int> inactive_tab_fill_id) const {
+    std::optional<int> inactive_tab_fill_id) {
   const TabStyle::TabSelectionState current_state = GetSelectionState();
 
   if (current_state == TabStyle::TabSelectionState::kActive) {
@@ -575,7 +579,7 @@ void VerticalTabView::PaintTabBackgroundFill(
     gfx::Canvas* canvas,
     TabStyle::TabSelectionState selection_state,
     bool hovered,
-    std::optional<int> fill_id) const {
+    std::optional<int> fill_id) {
   if (ShouldPaintTabBackgroundColor(selection_state, fill_id.has_value(),
                                     hovered)) {
     cc::PaintFlags flags;
@@ -661,6 +665,19 @@ void VerticalTabView::OnBlur() {
 
 void VerticalTabView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
   SetClipPath(GetPath());
+}
+
+void VerticalTabView::UpdateParentLayer() {
+  views::View::UpdateParentLayer();
+  if (layer()) {
+    UpdateLayerRoundedCorners();
+  }
+}
+
+void VerticalTabView::UpdateLayerRoundedCorners() {
+  const SkScalar corner_radius = GetCornerRadius();
+  layer()->SetRoundedCornerRadius(gfx::RoundedCornersF(corner_radius));
+  layer()->SetIsFastRoundedCorner(true);
 }
 
 void VerticalTabView::OnThemeChanged() {
@@ -835,7 +852,7 @@ bool VerticalTabView::IsApparentlyActive() const {
   if (active_) {
     return true;
   }
-  if (hovered_) {
+  if (!features::IsGlassFrameEnabled() && hovered_) {
     return GetHoverOpacity() > 0.5f;
   }
   return selected_;
@@ -873,11 +890,11 @@ views::BubbleBorder::Arrow VerticalTabView::GetAnchorPosition() const {
   return views::BubbleBorder::Arrow::LEFT_TOP;
 }
 
-const views::View* VerticalTabView::GetAnchorView() const {
+views::BubbleAnchor VerticalTabView::GetAnchor() {
   if (split_ && !collapsed_) {
-    return parent();
+    return views::BubbleAnchor(parent());
   }
-  return HoverCardAnchorTarget::GetAnchorView();
+  return views::BubbleAnchor(this);
 }
 
 void VerticalTabView::ResetCollectionNode() {
@@ -1043,8 +1060,10 @@ void VerticalTabView::UpdateThemeColors() {
 
   active_tab_fill_id_ = active_tab_fill_id;
   inactive_tab_fill_id_ = inactive_tab_fill_id;
-  should_fill_background_tab_color_ = theme_provider->GetDisplayProperty(
-      ThemeProperties::SHOULD_FILL_BACKGROUND_TAB_COLOR);
+  if (!features::IsGlassFrameEnabled()) {
+    should_fill_background_tab_color_ = theme_provider->GetDisplayProperty(
+        ThemeProperties::SHOULD_FILL_BACKGROUND_TAB_COLOR);
+  }
 }
 
 void VerticalTabView::UpdateColors() {
@@ -1156,7 +1175,7 @@ int VerticalTabView::UncollapsedMinWidth() {
   // tab strip is in the narrowest uncollapsed state.
   return (VerticalTabStripRegionView::kUncollapsedMinWidth -
           2 * GetLayoutConstant(
-                  LayoutConstant::kVerticalTabStripUncollapsedPadding) -
+                  LayoutConstant::kVerticalTabStripHorizontalPadding) -
           VerticalSplitTabView::kSplitViewGap -
           VerticalTabGroupView::kTabLeadingPadding) /
          2;
@@ -1166,7 +1185,7 @@ int VerticalTabView::UncollapsedMinWidth() {
 int VerticalTabView::CollapsedWidth() {
   return VerticalTabStripRegionView::kCollapsedWidth -
          2 * GetLayoutConstant(
-                 LayoutConstant::kVerticalTabStripCollapsedHorizontalPadding);
+                 LayoutConstant::kVerticalTabStripHorizontalPadding);
 }
 
 bool VerticalTabView::IsInExpandOnHover(int width) const {
@@ -1187,6 +1206,12 @@ void VerticalTabView::UpdateHoverCard(HoverCardAnchorTarget* target,
         target, static_cast<TabSlotController::HoverCardUpdateType>(
                     hover_card_update_type));
   }
+}
+
+SkScalar VerticalTabView::GetCornerRadius() const {
+  return SkIntToScalar(
+      GetLayoutConstant(LayoutConstant::kVerticalTabCornerRadius) +
+      (split_ ? GetInsets().height() : 0));
 }
 
 BEGIN_METADATA(VerticalTabView)

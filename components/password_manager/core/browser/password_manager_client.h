@@ -539,7 +539,7 @@ class PasswordManagerClient {
 
   // Marks all credentials that have been loaded for this page and have been
   // received via the password sharing feature as notified.
-  virtual void MarkSharedCredentialsAsNotified(const GURL& url);
+  virtual void MarkSharedCredentialsAsNotified(const url::Origin& origin);
 #endif  // BUILDFLAG(IS_ANDROID)
 
   // Returns the Chrome channel for the installation.
@@ -578,9 +578,7 @@ class PasswordManagerClient {
 
   virtual UndoPasswordChangeController* GetUndoPasswordChangeController();
 
-#if !BUILDFLAG(IS_ANDROID)
   virtual bool IsActorTaskActive();
-#endif  // !BUILDFLAG(IS_ANDROID)
 };
 
 }  // namespace password_manager

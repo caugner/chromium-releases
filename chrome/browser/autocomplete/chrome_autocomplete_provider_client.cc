@@ -36,6 +36,7 @@
 #include "chrome/browser/history_clusters/history_clusters_service_factory.h"
 #include "chrome/browser/history_embeddings/history_embeddings_service_factory.h"
 #include "chrome/browser/history_embeddings/history_embeddings_utils.h"
+#include "chrome/browser/omnibox/geolocation_header_service_factory.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/preloading/prefetch/search_prefetch/search_prefetch_service.h"
 #include "chrome/browser/preloading/prefetch/search_prefetch/search_prefetch_service_factory.h"
@@ -310,6 +311,11 @@ TemplateURLService* ChromeAutocompleteProviderClient::GetTemplateURLService() {
 const TemplateURLService*
 ChromeAutocompleteProviderClient::GetTemplateURLService() const {
   return TemplateURLServiceFactory::GetForProfile(profile_);
+}
+
+GeolocationHeaderService*
+ChromeAutocompleteProviderClient::GetGeolocationHeaderService() const {
+  return GeolocationHeaderServiceFactory::GetForProfile(profile_);
 }
 
 DocumentSuggestionsService*
@@ -601,10 +607,9 @@ bool ChromeAutocompleteProviderClient::IsLensEnabled() const {
   if (auto* lens_search_controller =
           GetLensSearchController(GetWebContents(web_contents_getter_))) {
     // Guaranteed to exist if lens_search_controller is  not null.
-    return lens_search_controller->GetTabInterface()
-        ->GetBrowserWindowInterface()
-        ->GetFeatures()
-        .lens_overlay_entry_point_controller()
+    return lens::LensOverlayEntryPointController::From(
+               lens_search_controller->GetTabInterface()
+                   ->GetBrowserWindowInterface())
         ->IsEnabled();
   }
 #endif
@@ -616,10 +621,9 @@ bool ChromeAutocompleteProviderClient::AreLensEntrypointsVisible() const {
   if (auto* lens_search_controller =
           GetLensSearchController(GetWebContents(web_contents_getter_))) {
     // Guaranteed to exist if lens_search_controller is  not null.
-    return lens_search_controller->GetTabInterface()
-        ->GetBrowserWindowInterface()
-        ->GetFeatures()
-        .lens_overlay_entry_point_controller()
+    return lens::LensOverlayEntryPointController::From(
+               lens_search_controller->GetTabInterface()
+                   ->GetBrowserWindowInterface())
         ->AreVisible();
   }
 #endif  // !BUILDFLAG(IS_ANDROID)
@@ -665,6 +669,11 @@ bool ChromeAutocompleteProviderClient::IsOmniboxNextAimPopupEnabled() const {
 #else
   return false;
 #endif  // !BUILDFLAG(IS_ANDROID)
+}
+
+bool ChromeAutocompleteProviderClient::IsGeminiStarterPackEnabled() const {
+  return AutocompleteProviderClient::IsGeminiStarterPackEnabled() &&
+         profile_->GetPrefs()->GetInteger(prefs::kGeminiSettings) == 0;
 }
 
 base::CallbackListSubscription
@@ -743,12 +752,9 @@ void ChromeAutocompleteProviderClient::OpenLensOverlay(bool show) {
   if (auto* lens_search_controller =
           GetLensSearchController(GetWebContents(web_contents_getter_))) {
     if (show) {
-      // If the Omnibox Next Lens search chip feature is enabled, do not show
-      // the contextual search box in the Lens Overlay.
-      bool should_show_csb = !IsOmniboxNextLensSearchChipEnabled();
+      // Force showing the contextual search box in the Lens Overlay.
       lens_search_controller->OpenLensOverlay(
-          lens::LensOverlayInvocationSource::kOmniboxPageAction,
-          should_show_csb);
+          lens::LensOverlayInvocationSource::kOmniboxPageAction, true);
     } else {
       // TODO(crbug.com/402497756): For prototyping, reusing the existing
       // omnibox entry point. However, for production, create a new invocation

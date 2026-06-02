@@ -86,7 +86,7 @@ AccessibilityPanel::AccessibilityPanel(content::BrowserContext* browser_context,
   widget_->Init(std::move(params));
   // We rely on being able to set the bounds of the panel to control when it
   // captures input rather than hiding the widget because we need to continue to
-  // receive key events. crbug.com/1251129.
+  // receive key events. crbug.com/40792303.
   widget_->GetNativeWindow()->layer()->SetMasksToBounds(true);
 }
 
@@ -123,13 +123,6 @@ bool AccessibilityPanel::HandleContextMenu(
     const content::ContextMenuParams& params) {
   // Eat all requests as context menus are disallowed.
   return true;
-}
-
-bool AccessibilityPanel::ShouldAllowRendererInitiatedCrossProcessNavigation(
-    bool is_outermost_main_frame_navigation) {
-  // Block navigations that cause the main frame of the accessibility panel
-  // to navigate to non-extension content.
-  return !is_outermost_main_frame_navigation;
 }
 
 void AccessibilityPanel::DidFirstVisuallyNonEmptyPaint() {

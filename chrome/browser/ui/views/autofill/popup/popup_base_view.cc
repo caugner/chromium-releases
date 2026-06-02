@@ -16,8 +16,8 @@
 #include "base/location.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/themes/theme_service.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
 #include "chrome/browser/ui/views/autofill/popup/custom_cursor_suppressor.h"
 #include "chrome/browser/ui/views/autofill/popup/popup_view_utils.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
@@ -155,7 +155,7 @@ class PopupBaseView::Widget : public views::Widget {
     }
 
     return &ThemeService::GetThemeProviderForProfile(
-        popup_base_view()->GetBrowser()->profile());
+        popup_base_view()->GetBrowser()->GetProfile());
   }
 
   views::Widget* GetPrimaryWindowWidget() override {
@@ -256,11 +256,24 @@ PopupBaseView::~PopupBaseView() {
   CHECK(!IsInObserverList());
 }
 
-Browser* PopupBaseView::GetBrowser() {
-  if (content::WebContents* web_contents = GetWebContents()) {
-    return chrome::FindBrowserWithTab(web_contents);
+BrowserWindowInterface* PopupBaseView::GetBrowser() {
+  // When the browser is destroyed during test teardown (e.g.,
+  // PopupViewViewsBrowsertest.SearchBarViewProvided), the browser's owned
+  // popup widget is closed via Widget::ForEachOwnedWidget → CloseNow.
+  // Destroying the popup's HWND triggers a WM_WINDOWPOSCHANGED message,
+  // which calls GetPrimaryWindowWidget() → GetBrowser(). At that point,
+  // FindBrowserWithTab() would access a partially torn-down Browser and
+  // hang. Returning nullptr here is safe because callers (GetThemeProvider,
+  // GetPrimaryWindowWidget) already handle a null return gracefully.
+  if (GetWidget() && GetWidget()->IsClosed()) {
+    return nullptr;
   }
-  return nullptr;
+  content::WebContents* web_contents = GetWebContents();
+  if (!web_contents) {
+    return nullptr;
+  }
+  return GlobalBrowserCollection::GetInstance()->FindBrowserWithTab(
+      web_contents);
 }
 
 bool PopupBaseView::DoShow() {
@@ -350,7 +363,7 @@ void PopupBaseView::DoHide() {
   if (GetWidget()) {
     // Don't call CloseNow() because some of the functions higher up the stack
     // assume the the widget is still valid after this point.
-    // http://crbug.com/229224
+    // http://crbug.com/40312043
     // NOTE: This deletes |this|.
     GetWidget()->Close();
   } else {
@@ -396,7 +409,8 @@ void PopupBaseView::NotifyAXSelection(views::View& selected_view) {
       {"PopupSuggestionView", "PopupPasswordSuggestionView", "PopupFooterView",
        "PopupSeparatorView", "PopupWarningView", "PopupBaseView",
        "PasswordGenerationPopupViewViews::GeneratedPasswordBox", "PopupRowView",
-       "PopupRowWithButtonView", "PopupRowContentView", "MdTextButton"});
+       "PopupRowWithButtonView", "PopupRowContentView", "MdTextButton",
+       "PopupBnplFootnoteView"});
   DCHECK(kDerivedClasses.contains(selected_view.GetClassName()))
       << "If you add a new derived class from AutofillPopupRowView, add it "
          "here and to onSelection(evt) in "

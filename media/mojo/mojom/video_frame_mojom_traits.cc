@@ -383,8 +383,32 @@ bool StructTraits<media::mojom::VideoFrameDataView,
       return false;
     }
 
+    if (coded_size != shared_image->size()) {
+      DLOG(ERROR) << "coded_size (" << coded_size.ToString()
+                  << ") does not match shared_image size ("
+                  << shared_image->size().ToString() << ")";
+      return false;
+    }
+
     bool is_mappable = shared_image_data.is_mappable();
     if (is_mappable) {
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+      // TODO(crbug.com/513289253): Avoid CloneGpuMemoryBufferHandle() only for
+      // validation.
+      const auto video_pixel_format =
+          media::SharedImageFormatToVideoPixelFormat(shared_image->format());
+      if (video_pixel_format) {
+        auto gmb_handle = shared_image->CloneGpuMemoryBufferHandle();
+        if (!gmb_handle.is_null() && gmb_handle.type == gfx::NATIVE_PIXMAP) {
+          if (!media::VerifyGpuMemoryBufferHandle(*video_pixel_format,
+                                                  coded_size, gmb_handle)) {
+            LOG(ERROR)
+                << "Invalid GpuMemoryBufferHandle for mappable SharedImage";
+            return false;
+          }
+        }
+      }
+#endif
       // VideoFrame should have buffer usage if its SI is mappable.
       // NOTE: This isn't exactly correct for software SharedImages can be
       // mappable but do not have buffer usage. But since, such software
@@ -398,8 +422,8 @@ bool StructTraits<media::mojom::VideoFrameDataView,
     } else {
       frame = media::VideoFrame::WrapSharedImage(
           format, shared_image, sync_token,
-          media::VideoFrame::ReleaseMailboxCB(), coded_size, visible_rect,
-          natural_size, timestamp);
+          media::VideoFrame::ReleaseMailboxCB(), visible_rect, natural_size,
+          timestamp);
     }
 
 #if BUILDFLAG(IS_ANDROID)

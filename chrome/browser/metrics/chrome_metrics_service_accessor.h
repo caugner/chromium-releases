@@ -11,9 +11,7 @@
 
 #include "base/gtest_prod_util.h"
 #include "build/build_config.h"
-#include "chrome/browser/glic/host/glic_synthetic_trial_manager.h"
 #include "chrome/browser/metrics/metrics_reporting_state.h"
-#include "chrome/browser/supervised_user/metrics_service_accessor_delegate.h"
 #include "chrome/common/buildflags.h"
 #include "components/metrics/metrics_service_accessor.h"
 #include "components/variations/synthetic_trials.h"
@@ -39,6 +37,10 @@ namespace browser_sync {
 class ChromeSyncClient;
 }
 
+namespace supervised_user {
+class MetricsServiceAccessorDelegateImpl;
+}
+
 class ChromeDomainReliabilityDelegate;
 namespace domain_reliability {
 class TestDomainReliabilityServiceDelegate;
@@ -47,11 +49,16 @@ class TestDomainReliabilityServiceDelegate;
 namespace extensions {
 class ChromeGuestViewManagerDelegate;
 class ChromeMetricsPrivateDelegate;
+class GlicPrivateInvokeFunction;
 }  // namespace extensions
 
 namespace first_run {
 class FirstRunMasterPrefsVariationsSeedTest;
 }
+
+namespace glic {
+class GlicSyntheticTrialManager;
+}  // namespace glic
 
 namespace metrics {
 class ChromeOSPerUserMetricsBrowserTestBase;
@@ -85,7 +92,6 @@ class FieldTrialRegisterImpl;
 
 namespace feed {
 class FeedServiceDelegateImpl;
-class WebFeedSubscriptionCoordinator;
 }  // namespace feed
 
 namespace browser_sync {
@@ -145,6 +151,7 @@ class ChromeMetricsServiceAccessor : public metrics::MetricsServiceAccessor {
   friend class domain_reliability::TestDomainReliabilityServiceDelegate;
   friend class extensions::ChromeGuestViewManagerDelegate;
   friend class extensions::ChromeMetricsPrivateDelegate;
+  friend class extensions::GlicPrivateInvokeFunction;
   friend void ChangeMetricsReportingStateWithReply(
       bool,
       OnMetricsReportingCallbackType,
@@ -179,7 +186,6 @@ class ChromeMetricsServiceAccessor : public metrics::MetricsServiceAccessor {
   friend class feed::FeedServiceDelegateImpl;
   friend class FirstRunService;
   friend class browser_sync::DeviceInfoSyncClientImpl;
-  friend class feed::WebFeedSubscriptionCoordinator;
   friend class HttpsFirstModeService;
   friend class ash::DemoSession;
   friend class DataSharingUI;

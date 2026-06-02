@@ -45,11 +45,10 @@ function announceElementAriaLabel(element: HTMLElement) {
     // Note: ariaNotify is more efficient and appears to work more reliably, but
     // support is not guaranteed in all browsers. Fall back on a11y announcer if
     // the ariaNotify function is unavailable.
-    const ariaNotify = (element as any).ariaNotify;
-    if (ariaNotify) {
-      ariaNotify.call(element, message);
+    if (element.ariaNotify) {
+      element.ariaNotify(message);
     } else {
-      getA11yAnnouncer(element)?.announce(message);
+      getA11yAnnouncer(element).announce(message);
     }
   }
 }
@@ -128,16 +127,20 @@ export class OmniboxPopupAppElement extends I18nMixinLit
         type: Boolean,
         reflect: true,
       },
+      showContextButtonSuggestionLabel_: {type: Boolean},
       isContentSharingEnabled_: {type: Boolean},
       isLensSearchEnabled_: {type: Boolean},
       isLensSearchEligible_: {type: Boolean},
       isAimPopupEligible_: {type: Boolean},
+      isLensChipShown_: {type: Boolean},
       isAimButtonVisible_: {type: Boolean},
       isRecentTabChipEnabled_: {type: Boolean},
       recentTabForChip_: {type: Object},
       webuiOmniboxPopupSelectionControlEnabled_: {type: Boolean},
       inputState_: {type: Object},
       usePecApi_: {type: Boolean},
+      applyContextButtonBackground_: {type: Boolean},
+      isOblongShape_: {type: Boolean},
     };
   }
 
@@ -159,19 +162,25 @@ export class OmniboxPopupAppElement extends I18nMixinLit
   protected accessor webuiOmniboxPopupSelectionControlEnabled_: boolean =
       loadTimeData.getBoolean('webuiOmniboxPopupSelectionControlEnabled');
   protected accessor isLensSearchEligible_: boolean = false;
+  protected accessor isLensChipShown_: boolean = false;
   protected accessor isAimPopupEligible_: boolean = false;
   protected accessor isAimButtonVisible_: boolean = false;
   protected accessor recentTabForChip_: TabInfo|null = null;
   protected accessor inputState_: InputState|null = null;
   protected accessor usePecApi_: boolean =
       loadTimeData.getBoolean('contextualMenuUsePecApi');
+  protected accessor applyContextButtonBackground_: boolean = false;
+  protected accessor isOblongShape_: boolean =
+      loadTimeData.getBoolean('contextButtonShapeIsOblong');
 
   private callbackRouter_: SearchboxPageCallbackRouter;
   private eventTracker_ = new EventTracker();
   private hideContextButton_: boolean =
       loadTimeData.getBoolean('hideClassicContextButton');
-  private showContextMenuDescription_: boolean =
-      loadTimeData.getBoolean('composeboxShowContextMenuDescription');
+  private contextButtonHasBackground_: boolean =
+      loadTimeData.getBoolean('contextButtonHasBackground');
+  protected accessor showContextButtonSuggestionLabel_: boolean =
+      loadTimeData.getBoolean('omniboxShowContextButtonSuggestionLabel');
   private listenerIds_: number[] = [];
   private pageHandler_: SearchboxPageHandlerInterface;
   private popupCallbackRouter_: OmniboxPopupPageCallbackRouter;
@@ -286,6 +295,14 @@ export class OmniboxPopupAppElement extends I18nMixinLit
         changedPrivateProperties.has('isLensSearchEligible_')) {
       this.showContextEntrypoint_ = this.computeShowContextEntrypoint_();
     }
+
+    if (changedPrivateProperties.has('isContentSharingEnabled_') ||
+        changedPrivateProperties.has('isLensSearchEligible_')) {
+      this.isLensChipShown_ =
+          this.isContentSharingEnabled_ && this.isLensSearchEligible_;
+      this.applyContextButtonBackground_ =
+          this.contextButtonHasBackground_ && !this.isLensChipShown_;
+    }
   }
 
   getDropdown(): SearchboxDropdownElement {
@@ -295,7 +312,7 @@ export class OmniboxPopupAppElement extends I18nMixinLit
     return this.shadowRoot.querySelector('cr-searchbox-dropdown')!;
   }
 
-  protected get shouldHideEntrypointButton_(): boolean {
+  protected shouldHideEntrypointButton_(): boolean {
     return this.searchboxLayoutMode_ === 'Compact';
   }
 
@@ -354,7 +371,7 @@ export class OmniboxPopupAppElement extends I18nMixinLit
 
   private getContextualEntrypointButton_(): ContextualEntrypointButtonElement|
       null {
-    if (this.showContextEntrypoint_ && !this.shouldHideEntrypointButton_) {
+    if (this.showContextEntrypoint_ && !this.shouldHideEntrypointButton_()) {
       return this.shadowRoot.querySelector<ContextualEntrypointButtonElement>(
           '#context');
     }
@@ -515,7 +532,7 @@ export class OmniboxPopupAppElement extends I18nMixinLit
     }
     // TODO(crbug.com/462775253): Ideally everything available for selection
     // comes from the AutocompleteResult.
-    if (this.showContextEntrypoint_ && !this.shouldHideEntrypointButton_) {
+    if (this.showContextEntrypoint_ && !this.shouldHideEntrypointButton_()) {
       available.push({
         line: -1,
         state: SelectionLineState.kFocusedButtonContextEntrypoint,
@@ -606,15 +623,6 @@ export class OmniboxPopupAppElement extends I18nMixinLit
         browserTabsAllowedByPecApi &&
         (input?.length === 0 ||
          this.stripUrl_(input) === this.stripUrl_(this.recentTabForChip_?.url));
-  }
-
-  protected computeShowContextEntrypointDescription_(): boolean {
-    if (!this.showContextMenuDescription_) {
-      return false;
-    }
-    const toolChipsVisible = this.isContentSharingEnabled_ &&
-        (this.computeShowRecentTabChip_() || this.isLensSearchEligible_);
-    return !toolChipsVisible;
   }
 
   private stripUrl_(url: string|undefined): string {

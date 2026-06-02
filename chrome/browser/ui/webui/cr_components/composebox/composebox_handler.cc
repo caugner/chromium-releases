@@ -13,13 +13,14 @@
 #include "base/time/time.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/omnibox/omnibox_controller.h"
+#include "chrome/browser/ui/user_education/browser_user_education_interface.h"
 #include "chrome/browser/ui/webui/cr_components/searchbox/contextual_searchbox_handler.h"
 #include "chrome/browser/ui/webui/cr_components/searchbox/searchbox_utils.h"
-#include "chrome/browser/ui/webui/top_chrome/top_chrome_web_ui_controller.h"
 #include "chrome/browser/ui/webui/webui_embedding_context.h"
 #include "components/contextual_search/contextual_search_types.h"
 #include "components/contextual_search/input_state_model.h"
 #include "components/contextual_tasks/public/features.h"
+#include "components/feature_engagement/public/feature_constants.h"
 #include "components/lens/lens_url_utils.h"
 #include "components/metrics/metrics_provider.h"
 #include "components/omnibox/browser/autocomplete_match_type.h"
@@ -106,7 +107,7 @@ void ComposeboxOmniboxClient::OnAutocompleteAccept(
       query_text, disposition,
       PageClassificationToAimEntryPoint(
           GetPageClassification(/*is_prefetch=*/false)),
-      additional_params);
+      additional_params, /*is_voice_search=*/false);
 }
 
 }  // namespace
@@ -195,6 +196,25 @@ void ComposeboxHandler::OnContextMenuOpened() {
   }
 }
 
+void ComposeboxHandler::NotifyComposeboxQuerySubmittedWithContext() {
+  if (!web_contents_) {
+    return;
+  }
+  auto* browser_window_interface =
+      webui::GetBrowserWindowInterface(web_contents_);
+  if (!browser_window_interface) {
+    return;
+  }
+  auto* user_education_interface =
+      BrowserUserEducationInterface::From(browser_window_interface);
+  if (!user_education_interface) {
+    return;
+  }
+  user_education_interface->NotifyFeaturePromoFeatureUsed(
+      feature_engagement::kIPHDesktopRealboxContextualSearchFeature,
+      FeaturePromoFeatureUsedAction::kClosePromoIfPresent);
+}
+
 void ComposeboxHandler::NavigateUrl(const GURL& url) {
   if (!url.is_valid()) {
     return;
@@ -263,7 +283,8 @@ void ComposeboxHandler::SubmitQuery(const std::string& query_text,
                                     bool alt_key,
                                     bool ctrl_key,
                                     bool meta_key,
-                                    bool shift_key) {
+                                    bool shift_key,
+                                    bool is_voice_search) {
   const WindowOpenDisposition disposition = ui::DispositionFromClick(
       /*middle_button=*/mouse_button == 1, alt_key, ctrl_key, meta_key,
       shift_key);
@@ -272,14 +293,15 @@ void ComposeboxHandler::SubmitQuery(const std::string& query_text,
           omnibox_controller()->client()->GetPageClassification(
               /*is_prefetch=*/false));
   SubmitQuery(query_text, disposition, aim_entry_point,
-              /*additional_params=*/{});
+              /*additional_params=*/{}, is_voice_search);
 }
 
 void ComposeboxHandler::SubmitQuery(
     const std::string& query_text,
     WindowOpenDisposition disposition,
     omnibox::ChromeAimEntryPoint aim_entrypoint,
-    std::map<std::string, std::string> additional_params) {
+    std::map<std::string, std::string> additional_params,
+    bool is_voice_search) {
   if (auto* metrics_recorder = GetMetricsRecorder()) {
     // Record AIM tool and model mode on query submission.
     const auto& input_state = GetInputState();
@@ -291,7 +313,7 @@ void ComposeboxHandler::SubmitQuery(
   }
 
   ContextualizeQueryAndOpenUrl(query_text, disposition, aim_entrypoint,
-                               std::move(additional_params));
+                               std::move(additional_params), is_voice_search);
 }
 
 void ComposeboxHandler::OpenUrl(GURL url,

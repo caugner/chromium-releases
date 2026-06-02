@@ -26,6 +26,7 @@
 #include "chrome/browser/ui/side_panel/side_panel_enums.h"
 #include "chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model.h"
 #include "chrome/browser/ui/toolbar_controller_util.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/contextual_tasks/contextual_tasks_button.h"
 #include "chrome/browser/ui/views/toolbar/overflow_button.h"
 #include "chrome/browser/ui/views/toolbar/pinned_toolbar_button_status_indicator.h"
@@ -284,6 +285,13 @@ ToolbarController::GetDefaultResponsiveElements(Browser* browser) {
   elements.insert(
       elements.end(),
       {ToolbarController::ResponsiveElementInfo(
+           ToolbarController::ElementIdInfo(
+               kToolbarBatterySaverButtonElementId,
+               IDS_OVERFLOW_MENU_ITEM_TEXT_ENERGY_SAVER,
+               &kBatterySaverRefreshIcon, kToolbarBatterySaverButtonElementId,
+               kToolbarBatterySaverBubbleElementId),
+           /*is_section_end=*/false),
+       ToolbarController::ResponsiveElementInfo(
            ToolbarController::ElementIdInfo(kToolbarChromeLabsButtonElementId,
                                             IDS_OVERFLOW_MENU_ITEM_TEXT_LABS,
                                             &kScienceIcon,
@@ -300,11 +308,7 @@ ToolbarController::GetDefaultResponsiveElements(Browser* browser) {
        ToolbarController::ResponsiveElementInfo(
            ToolbarController::ElementIdInfo(kToolbarNewTabButtonElementId,
                                             IDS_OVERFLOW_MENU_ITEM_TEXT_NEW_TAB,
-#if BUILDFLAG(ENABLE_WEBUI_TAB_STRIP)
-                                            &kNewTabToolbarButtonIcon,
-#else
                                             nullptr,
-#endif  // BUILDFLAG(ENABLE_WEBUI_TAB_STRIP)
                                             kToolbarNewTabButtonElementId),
            /*is_section_end=*/true),
        ToolbarController::ResponsiveElementInfo(
@@ -315,17 +319,32 @@ ToolbarController::GetDefaultResponsiveElements(Browser* browser) {
                             : (&kUserAccountAvatarRefreshIcon),
                kToolbarAvatarButtonElementId, kToolbarAvatarBubbleElementId),
            /*is_section_end=*/false)});
+
+  if (base::FeatureList::IsEnabled(features::kToolbarGlicButtonResizing)) {
+    elements.emplace_back(
+        ToolbarController::ElementIdInfo(
+            kGlicButtonElementId, IDS_GLIC_BUTTON_ENTRYPOINT_ASK_GEMINI_LABEL,
+            nullptr, kGlicButtonElementId),
+        /*is_section_end=*/false);
+  }
+
   return elements;
 }
 
 std::vector<ui::ElementIdentifier>
 ToolbarController::GetDefaultOverflowOrder() {
-  return std::vector<ui::ElementIdentifier>(
-      {kToolbarHomeButtonElementId, kToolbarChromeLabsButtonElementId,
-       kToolbarMediaButtonElementId, kToolbarNewTabButtonElementId,
-       kToolbarForwardButtonElementId, kToolbarAvatarButtonElementId,
-       kToolbarSplitTabsToolbarButtonElementId,
-       ContextualTasksButton::kContextualTasksToolbarButton});
+  std::vector<ui::ElementIdentifier> order = {
+      kToolbarBatterySaverButtonElementId, kToolbarHomeButtonElementId,
+      kToolbarChromeLabsButtonElementId, kToolbarMediaButtonElementId,
+      kToolbarNewTabButtonElementId, kToolbarForwardButtonElementId,
+      kToolbarAvatarButtonElementId, kToolbarSplitTabsToolbarButtonElementId,
+      ContextualTasksButton::kContextualTasksToolbarButton};
+  if (base::FeatureList::IsEnabled(features::kToolbarGlicButtonResizing)) {
+    const auto it =
+        std::find(order.begin(), order.end(), kToolbarAvatarButtonElementId);
+    order.insert(it, kGlicButtonElementId);
+  }
+  return order;
 }
 
 // Every activate identifier should have an action name in order to emit
@@ -334,51 +353,53 @@ std::string ToolbarController::GetActionNameFromElementIdentifier(
     std::variant<ui::ElementIdentifier, actions::ActionId> identifier) {
   static const base::NoDestructor<base::flat_map<
       std::variant<ui::ElementIdentifier, actions::ActionId>, std::string_view>>
-      identifier_to_action_name_map({
-          {kToolbarAvatarButtonElementId, "AvatarButton"},
-          {kToolbarChromeLabsButtonElementId, "ChromeLabsButton"},
-          {kExtensionsMenuButtonElementId, "ExtensionsMenuButton"},
-          {kToolbarForwardButtonElementId, "ForwardButton"},
-          {kToolbarHomeButtonElementId, "HomeButton"},
-          {kToolbarMediaButtonElementId, "MediaButton"},
-          {kToolbarNewTabButtonElementId, "NewTabButton"},
-          {kToolbarSidePanelButtonElementId, "SidePanelButton"},
-          {kToolbarSplitTabsToolbarButtonElementId, "SplitTabs"},
-          {ContextualTasksButton::kContextualTasksToolbarButton,
-           "PinnedContextualTasksSidePanelButton"},
-          {kActionClearBrowsingData, "PinnedClearBrowsingDataButton"},
-          {kActionCopyUrl, "PinnedCopyLinkButton"},
-          {kActionDevTools, "PinnedDeveloperToolsButton"},
-          {kActionNewIncognitoWindow, "PinnedNewIncognitoWindowButton"},
-          {kActionPrint, "PinnedPrintButton"},
-          {kActionQrCodeGenerator, "PinnedQrCodeGeneratorButton"},
-          {kActionRouteMedia, "PinnedCastButton"},
-          {kActionSendTabToSelf, "PinnedSendTabToSelfButton"},
-          {kActionShowAddressesBubbleOrPage,
-           "PinnedShowAddressesBubbleOrPageButton"},
-          {kActionShowChromeLabs, "PinnedShowChromeLabsButton"},
-          {kActionShowDownloads, "PinnedShowDownloadsButton"},
-          {kActionShowPasswordsBubbleOrPage,
-           "PinnedShowPasswordsBubbleOrPageButton"},
-          {kActionShowPaymentsBubbleOrPage,
-           "PinnedShowPaymentsBubbleOrPageButton"},
-          {kActionShowTranslate, "PinnedShowTranslateButton"},
-          {kActionSidePanelShowBookmarks, "PinnedShowBookmarkSidePanelButton"},
-          {kActionSidePanelShowReadAnything,
-           "PinnedShowReadAnythingSidePanelButton"},
-          {kActionSidePanelShowHistoryCluster,
-           "PinnedShowHistorySidePanelButton"},
-          {kActionSidePanelShowReadingList,
-           "PinnedShowReadingListSidePanelButton"},
-          {kActionSidePanelShowSearchCompanion,
-           "PinnedShowSearchCompanionSidePanelButton"},
-          {kActionTaskManager, "PinnedTaskManagerButton"},
-          {kActionSidePanelShowLensOverlayResults,
-           "PinnedShowLensOverlayResultsSidePanelButton"},
-          {kActionSendSharedTabGroupFeedback, "SharedTabGroupFeedbackButton"},
-          {kActionTabSearch, "PinnedTabSearchButton"},
-          {kActionSidePanelShowGlic, "PinnedGlicButton"},
-      });
+      identifier_to_action_name_map(
+          {{kToolbarAvatarButtonElementId, "AvatarButton"},
+           {kToolbarBatterySaverButtonElementId, "BatterySaverButton"},
+           {kToolbarChromeLabsButtonElementId, "ChromeLabsButton"},
+           {kExtensionsMenuButtonElementId, "ExtensionsMenuButton"},
+           {kToolbarForwardButtonElementId, "ForwardButton"},
+           {kToolbarHomeButtonElementId, "HomeButton"},
+           {kToolbarMediaButtonElementId, "MediaButton"},
+           {kToolbarNewTabButtonElementId, "NewTabButton"},
+           {kToolbarSidePanelButtonElementId, "SidePanelButton"},
+           {kToolbarSplitTabsToolbarButtonElementId, "SplitTabs"},
+           {ContextualTasksButton::kContextualTasksToolbarButton,
+            "PinnedContextualTasksSidePanelButton"},
+           {kActionClearBrowsingData, "PinnedClearBrowsingDataButton"},
+           {kActionCopyUrl, "PinnedCopyLinkButton"},
+           {kActionDevTools, "PinnedDeveloperToolsButton"},
+           {kActionNewIncognitoWindow, "PinnedNewIncognitoWindowButton"},
+           {kActionPrint, "PinnedPrintButton"},
+           {kActionQrCodeGenerator, "PinnedQrCodeGeneratorButton"},
+           {kActionRouteMedia, "PinnedCastButton"},
+           {kActionSendTabToSelf, "PinnedSendTabToSelfButton"},
+           {kActionShowAddressesBubbleOrPage,
+            "PinnedShowAddressesBubbleOrPageButton"},
+           {kActionShowChromeLabs, "PinnedShowChromeLabsButton"},
+           {kActionShowDownloads, "PinnedShowDownloadsButton"},
+           {kActionShowPasswordsBubbleOrPage,
+            "PinnedShowPasswordsBubbleOrPageButton"},
+           {kActionShowPaymentsBubbleOrPage,
+            "PinnedShowPaymentsBubbleOrPageButton"},
+           {kActionShowTranslate, "PinnedShowTranslateButton"},
+           {kActionSidePanelShowBookmarks, "PinnedShowBookmarkSidePanelButton"},
+           {kActionSidePanelShowReadAnything,
+            "PinnedShowReadAnythingSidePanelButton"},
+           {kActionSidePanelShowHistoryCluster,
+            "PinnedShowHistorySidePanelButton"},
+           {kActionSidePanelShowReadingList,
+            "PinnedShowReadingListSidePanelButton"},
+           {kActionSidePanelShowSearchCompanion,
+            "PinnedShowSearchCompanionSidePanelButton"},
+           {kActionTaskManager, "PinnedTaskManagerButton"},
+           {kActionSidePanelShowLensOverlayResults,
+            "PinnedShowLensOverlayResultsSidePanelButton"},
+           {kActionSendSharedTabGroupFeedback, "SharedTabGroupFeedbackButton"},
+           {kActionTabSearch, "PinnedTabSearchButton"},
+           {kActionSidePanelShowGlic, "PinnedGlicButton"},
+           {kActionSidePanelShowTabsFromOtherDevices,
+            "PinnedTabsFromOtherDevicesButton"}});
 
   const auto it = identifier_to_action_name_map->find(identifier);
   return it == identifier_to_action_name_map->end()
@@ -409,7 +430,20 @@ bool ToolbarController::PopOut(ui::ElementIdentifier identifier) {
   auto& original = it->second->original_spec;
 
   if (original.has_value()) {
-    element->SetProperty(views::kFlexBehaviorKey, original.value());
+    if (base::FeatureList::IsEnabled(features::kToolbarProfileChipResizing)) {
+      // Some elements (e.g. profile chip) use flex rules that allow
+      // snapping/scaling to zero. When popping out, elements should never be
+      // below the mininmum size.
+      element->SetProperty(
+          views::kFlexBehaviorKey,
+          views::FlexSpecification(views::MinimumFlexSizeRule::kScaleToMinimum,
+                                   views::MaximumFlexSizeRule::kPreferred)
+              .WithOrder((*original).order())
+              .WithWeight((*original).weight())
+              .WithAlignment((*original).alignment()));
+    } else {
+      element->SetProperty(views::kFlexBehaviorKey, original.value());
+    }
   } else {
     element->ClearProperty(views::kFlexBehaviorKey);
   }
@@ -616,6 +650,9 @@ ToolbarController::GetResponsiveElementsWithOrderedActions() const {
     actions::ActionId a_action_id = std::get<actions::ActionId>(a.overflow_id);
     actions::ActionId b_action_id = std::get<actions::ActionId>(b.overflow_id);
 
+    if (a_action_id == b_action_id) {
+      return false;
+    }
     for (int ordered_pinned_action_id : ordered_pinned_action_ids) {
       if (a_action_id == ordered_pinned_action_id) {
         return true;
@@ -870,7 +907,9 @@ void ToolbarController::PopulateMenu(views::MenuItemView* parent) {
     }
   }
 
-  parent->GetSubmenu()->InvalidateLayout();
+  if (parent->HasSubmenu()) {
+    parent->GetSubmenu()->InvalidateLayout();
+  }
 }
 
 void ToolbarController::ShowMenu() {

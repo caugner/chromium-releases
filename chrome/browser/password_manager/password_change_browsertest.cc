@@ -76,6 +76,7 @@
 #include "ui/events/test/test_event.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/test/button_test_api.h"
+#include "url/origin.h"
 
 namespace {
 
@@ -135,18 +136,6 @@ std::unique_ptr<KeyedService> CreateOptimizationService(
   return opt_guide_keyed_service;
 }
 
-password_manager::PasswordForm CreatePasswordForm(
-    const GURL& url,
-    const std::u16string& username,
-    const std::u16string& password) {
-  password_manager::PasswordForm form;
-  form.url = GURL(url);
-  form.signon_realm = url.GetWithEmptyPath().spec();
-  form.username_value = username;
-  form.password_value = password;
-  return form;
-}
-
 void NavigateToURL(content::WebContents* web_contents, const GURL& url) {
   ASSERT_TRUE(content::NavigateToURL(web_contents, url));
 }
@@ -164,6 +153,25 @@ class PasswordChangeBrowserTest : public PasswordManagerBrowserTestBase {
         {autofill::features::debug::kShowDomNodeIDs,
          password_manager::features::kUseDetachedWidget},
         {});
+  }
+
+  password_manager::PasswordForm CreatePasswordForm(
+      const GURL& url,
+      const std::u16string& username,
+      const std::u16string& password,
+      const std::string& change_pwd_path = "") {
+    password_manager::PasswordForm form;
+    form.url = GURL(url);
+    form.signon_realm = url.GetWithEmptyPath().spec();
+    form.username_value = username;
+    form.password_value = password;
+    if (!change_pwd_path.empty()) {
+      form.change_password_url =
+          embedded_test_server()->GetURL(change_pwd_path);
+    } else {
+      form.change_password_url = url.Resolve("/change-password");
+    }
+    return form;
   }
 
   void SetUpInProcessBrowserTestFixture() override {
@@ -221,12 +229,6 @@ class PasswordChangeBrowserTest : public PasswordManagerBrowserTestBase {
                 optimization_guide::UserVisibleFeatureKey::
                     kPasswordChangeSubmission))
         .WillByDefault(Return(true));
-  }
-
-  void SetChangePasswordUrl(const std::string& url) {
-    const GURL main_url = WebContents()->GetLastCommittedURL();
-    EXPECT_CALL(*affiliation_service(), GetChangePasswordURL(main_url))
-        .WillOnce(Return(embedded_test_server()->GetURL(url)));
   }
 
   TestModelQualityLogsUploaderService& logs_uploader() {
@@ -369,11 +371,12 @@ class PasswordChangeBrowserTest : public PasswordManagerBrowserTestBase {
     autofill::LocalFrameToken frame_token(rfh->GetFrameToken().value());
     autofill::FormData form;
     form.set_url(GURL("https://www.foo.com"));
+    form.set_main_frame_origin(url::Origin::Create(form.url()));
     form.set_renderer_id(autofill::test::MakeFormRendererId());
     autofill::FormFieldData field = {autofill::test::CreateTestFormField(
         "some_label", "some_name", "some_value",
         autofill::FormControlType::kInputText)};
-
+    field.set_origin(url::Origin::Create(form.url()));
     form.set_fields({field});
     return autofill::test::CreateFormDataForFrame(form, frame_token);
   }
@@ -412,6 +415,7 @@ class PasswordChangeBrowserTest : public PasswordManagerBrowserTestBase {
   autofill::TestAutofillManagerInjector<TestAutofillManager>
       autofill_manager_injector_;
   base::test::ScopedFeatureList scoped_feature_list_;
+  GURL change_password_url_;
   base::WeakPtrFactory<PasswordChangeBrowserTest> weak_ptr_factory_{this};
 };
 
@@ -426,11 +430,10 @@ class PasswordChangeBrowserTest : public PasswordManagerBrowserTestBase {
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
                        MAYBE_ChangePasswordFormIsFilledAutomatically) {
   SetPrivacyNoticeAcceptedPref();
-  SetChangePasswordUrl("/password/update_form_empty_fields_no_submit.html");
-
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word",
+                         "/password/update_form_empty_fields_no_submit.html"),
       WebContents());
   PasswordChangeDelegate* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());
@@ -455,11 +458,10 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest, GeneratedPasswordIsPreSaved) {
   SetPrivacyNoticeAcceptedPref();
-  SetChangePasswordUrl("/password/update_form_empty_fields_no_submit.html");
-
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word",
+                         "/password/update_form_empty_fields_no_submit.html"),
       WebContents());
   PasswordChangeDelegate* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());
@@ -485,11 +487,9 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest, GeneratedPasswordIsPreSaved) {
 // returned.
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest, StopPasswordChange) {
   SetPrivacyNoticeAcceptedPref();
-  SetChangePasswordUrl("/password/done.html");
-
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word", "/password/done.html"),
       WebContents());
   ASSERT_TRUE(
       password_change_service()->GetPasswordChangeDelegate(WebContents()));
@@ -501,11 +501,10 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest, StopPasswordChange) {
 
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest, NewPasswordIsSaved) {
   SetPrivacyNoticeAcceptedPref();
-  SetChangePasswordUrl("/password/update_form_empty_fields.html");
-
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word",
+                         "/password/update_form_empty_fields.html"),
       WebContents());
   PasswordChangeDelegate* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());
@@ -559,11 +558,11 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest, OldPasswordIsUpdated) {
   password_manager::PasswordStoreInterface* password_store =
       GetDefaultPasswordStore(browser()->profile());
   password_manager::PasswordForm form = CreatePasswordForm(
-      WebContents()->GetLastCommittedURL(), u"test", u"pa$$word");
+      WebContents()->GetLastCommittedURL(), u"test", u"pa$$word",
+      "/password/update_form_empty_fields.html");
   password_store->AddLogin(form);
   WaitForPasswordStore();
 
-  SetChangePasswordUrl("/password/update_form_empty_fields.html");
   password_change_service()->OfferPasswordChangeUi(form, WebContents());
   PasswordChangeDelegate* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());
@@ -589,11 +588,10 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest, OldPasswordIsUpdated) {
 
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest, OpenTabWithPasswordChange) {
   SetPrivacyNoticeAcceptedPref();
-  SetChangePasswordUrl("/password/update_form_empty_fields.html");
-
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word",
+                         "/password/update_form_empty_fields.html"),
       WebContents());
   PasswordChangeDelegate* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());
@@ -621,11 +619,10 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest, OpenTabWithPasswordChange) {
 
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
                        LeakCheckDialogWithPrivacyNoticeDisplayed) {
-  SetChangePasswordUrl("/password/update_form_empty_fields.html");
-
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word",
+                         "/password/update_form_empty_fields.html"),
       WebContents());
   PasswordChangeDelegate* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());
@@ -639,11 +636,10 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest, FailureDialogDisplayed) {
   SetPrivacyNoticeAcceptedPref();
-  SetChangePasswordUrl("/password/update_form_empty_fields.html");
-
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word",
+                         "/password/update_form_empty_fields.html"),
       WebContents());
   PasswordChangeDelegate* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());
@@ -665,11 +661,10 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest, FailureDialogDisplayed) {
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
                        LeakCheckDialogWithoutPrivacyNoticeDisplayed) {
   SetPrivacyNoticeAcceptedPref();
-  SetChangePasswordUrl("/password/update_form_empty_fields.html");
-
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word",
+                         "/password/update_form_empty_fields.html"),
       WebContents());
 
   PasswordChangeDelegate* delegate =
@@ -684,11 +679,9 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest, OTPDetectionHaltsTheFlow) {
   SetPrivacyNoticeAcceptedPref();
-  SetChangePasswordUrl("/password/done.html");
-
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word", "/password/done.html"),
       WebContents());
   PasswordChangeDelegate* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());
@@ -731,11 +724,9 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest, OTPDetectionHaltsTheFlow) {
 // Verify that clicking cancel on the toast, stops the flow
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest, CancelFromToast) {
   SetPrivacyNoticeAcceptedPref();
-  SetChangePasswordUrl("/password/done.html");
-
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word", "/password/done.html"),
       WebContents());
   PasswordChangeDelegate* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());
@@ -788,11 +779,10 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest, CancelFromToast) {
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
                        ViewDetailsFromToastAfterPageNavigation) {
   SetPrivacyNoticeAcceptedPref();
-  SetChangePasswordUrl("/password/update_form_empty_fields.html");
-
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word",
+                         "/password/update_form_empty_fields.html"),
       WebContents());
   PasswordChangeDelegate* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());
@@ -840,11 +830,11 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest, ViewPasswordBubbleFromToast) {
       embedded_test_server()->GetURL("/password/simple_password.html")));
 
   SetPrivacyNoticeAcceptedPref();
-  SetChangePasswordUrl("/password/update_form_empty_fields.html");
 
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word",
+                         "/password/update_form_empty_fields.html"),
       WebContents());
   PasswordChangeDelegate* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());
@@ -882,11 +872,10 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest, ViewPasswordBubbleFromToast) {
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
                        CrossOriginNavigationDetected) {
   SetPrivacyNoticeAcceptedPref();
-  SetChangePasswordUrl("/password/update_form_empty_fields.html");
-
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word",
+                         "/password/update_form_empty_fields.html"),
       WebContents());
 
   // Verify the delegate is created.
@@ -945,13 +934,13 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
                        CrossOriginNavigationDetectedBeforeStartingTheFlow) {
   SetPrivacyNoticeAcceptedPref();
-  SetChangePasswordUrl("/password/update_form_empty_fields.html");
 
   AddOtpToThePage();
 
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word",
+                         "/password/update_form_empty_fields.html"),
       WebContents());
 
   // Verify the delegate is created.
@@ -974,14 +963,13 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
                        OnTabCloseLogsUnexpectedFailure) {
   SetPrivacyNoticeAcceptedPref();
-  SetChangePasswordUrl("/password/done.html");
 
   int original_apc_flow_tab_index =
       browser()->tab_strip_model()->GetIndexOfWebContents(WebContents());
 
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word", "/password/done.html"),
       WebContents());
   PasswordChangeDelegate* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());
@@ -1031,11 +1019,10 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
                        FlowInterruptedDuringOpenFormStep) {
   SetPrivacyNoticeAcceptedPref();
-  SetChangePasswordUrl("/password/done.html");
 
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word", "/password/done.html"),
       WebContents());
   PasswordChangeDelegate* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());
@@ -1077,11 +1064,10 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
                        FlowInterruptedAfterOpenFormStep) {
   SetPrivacyNoticeAcceptedPref();
-  SetChangePasswordUrl("/password/update_form_empty_fields.html");
-
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word",
+                         "/password/update_form_empty_fields.html"),
       WebContents());
   PasswordChangeDelegate* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());
@@ -1128,11 +1114,10 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
                        FlowInterruptedAfterSubmitFormStep) {
   SetPrivacyNoticeAcceptedPref();
-  SetChangePasswordUrl("/password/update_form_empty_fields.html");
-
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word",
+                         "/password/update_form_empty_fields.html"),
       WebContents());
   PasswordChangeDelegate* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());
@@ -1172,11 +1157,10 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
                        OtpDetectedDuringSubmitFormStep) {
   SetPrivacyNoticeAcceptedPref();
-  SetChangePasswordUrl("/password/update_form_empty_fields.html");
-
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word",
+                         "/password/update_form_empty_fields.html"),
       WebContents());
   PasswordChangeDelegate* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());
@@ -1218,11 +1202,10 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
                        OtpDetectedDuringVerificationStep) {
   SetPrivacyNoticeAcceptedPref();
-  SetChangePasswordUrl("/password/update_form_empty_fields.html");
-
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word",
+                         "/password/update_form_empty_fields.html"),
       WebContents());
   PasswordChangeDelegate* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());
@@ -1258,10 +1241,10 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
 }
 
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest, OpenTabWhenLoggedOut) {
-  SetChangePasswordUrl("/password/update_form_empty_fields.html");
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word",
+                         "/password/update_form_empty_fields.html"),
       WebContents());
   auto* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());
@@ -1293,11 +1276,9 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest, OpenTabWhenLoggedOut) {
 
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
                        UserIsLoggedInOnSecondAttempt) {
-  SetChangePasswordUrl("/password/done.html");
-
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word", "/password/done.html"),
       WebContents());
   auto* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());
@@ -1339,10 +1320,9 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
                        LoginCheckRespondedWithError) {
-  SetChangePasswordUrl("/password/done.html");
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word", "/password/done.html"),
       WebContents());
   auto* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());
@@ -1384,11 +1364,10 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
     GTEST_SKIP() << "UserInterventionForPasswordChange is enabled.";
   }
   SetPrivacyNoticeAcceptedPref();
-  SetChangePasswordUrl("/password/update_form_empty_fields.html");
-
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word",
+                         "/password/update_form_empty_fields.html"),
       WebContents());
   PasswordChangeDelegate* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());
@@ -1440,11 +1419,9 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTest,
                        FlowInterruptedBeforeLoginCheck) {
   SetPrivacyNoticeAcceptedPref();
-  SetChangePasswordUrl("/password/done.html");
-
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word", "/password/done.html"),
       WebContents());
   PasswordChangeDelegate* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());
@@ -1502,11 +1479,10 @@ class PasswordChangeBrowserTestShowHiddenTab
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTestShowHiddenTab,
                        ShowHiddenTabDuringPasswordChange) {
   SetPrivacyNoticeAcceptedPref();
-  SetChangePasswordUrl("/password/update_form_empty_fields_no_submit.html");
-
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word",
+                         "/password/update_form_empty_fields_no_submit.html"),
       WebContents());
   PasswordChangeDelegate* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());
@@ -1533,11 +1509,11 @@ class PasswordChangeBrowserTestUserInterventionEnabled
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTestUserInterventionEnabled,
                        UserInterventionAfterSubmission_TaskWasTakenOver) {
   SetPrivacyNoticeAcceptedPref();
-  SetChangePasswordUrl("/password/update_form_empty_fields.html");
 
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word",
+                         "/password/update_form_empty_fields.html"),
       WebContents());
   PasswordChangeDelegate* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());
@@ -1601,12 +1577,12 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTestUserInterventionEnabled,
   password_manager::PasswordStoreInterface* password_store =
       GetDefaultPasswordStore(browser()->profile());
   password_manager::PasswordForm form = CreatePasswordForm(
-      WebContents()->GetLastCommittedURL(), u"test", u"old_pa$$word");
+      WebContents()->GetLastCommittedURL(), u"test", u"old_pa$$word",
+      "/password/update_form_empty_fields.html");
   password_store->AddLogin(form);
   WaitForPasswordStore();
 
   // Start the Password Change Flow.
-  SetChangePasswordUrl("/password/update_form_empty_fields.html");
   password_change_service()->OfferPasswordChangeUi(form, WebContents());
   PasswordChangeDelegate* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());
@@ -1656,11 +1632,10 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTestUserInterventionEnabled,
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTestUserInterventionEnabled,
                        StandardSuccess_FeatureEnabled) {
   SetPrivacyNoticeAcceptedPref();
-  SetChangePasswordUrl("/password/update_form_empty_fields.html");
-
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word",
+                         "/password/update_form_empty_fields.html"),
       WebContents());
   PasswordChangeDelegate* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());
@@ -1707,11 +1682,10 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTestUserInterventionEnabled,
 IN_PROC_BROWSER_TEST_F(PasswordChangeBrowserTestUserInterventionEnabled,
                        StandardFailure_FeatureEnabled) {
   SetPrivacyNoticeAcceptedPref();
-  SetChangePasswordUrl("/password/update_form_empty_fields.html");
-
   password_change_service()->OfferPasswordChangeUi(
       CreatePasswordForm(WebContents()->GetLastCommittedURL(), u"test",
-                         u"pa$$word"),
+                         u"pa$$word",
+                         "/password/update_form_empty_fields.html"),
       WebContents());
   PasswordChangeDelegate* delegate =
       password_change_service()->GetPasswordChangeDelegate(WebContents());

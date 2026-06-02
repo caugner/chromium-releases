@@ -280,6 +280,7 @@ Certaines fonctionnalités ne seront peut-être pas disponibles et les modificat
 
           **Suggérer des questions :** génère une liste à puces de trois à cinq questions stimulantes qu'un utilisateur pourrait poser pour mieux comprendre la capture d'écran. Ces questions doivent inclure au moins une question portant précisément sur un objet visuel, sa conception ou son emplacement.</translation>
 <translation id="386202838227397562">Veuillez fermer toutes les fenêtres de Google Chrome et réessayer.</translation>
+<translation id="3869083394918739976">Vous pouvez continuer à clavarder avec le mode IA sans changer d'onglet. Pour commencer, connectez-vous à Chrome. Vous obtiendrez également vos mots de passe et bien plus encore sur tous vos appareils.</translation>
 <translation id="3873044882194371212">Ouvrir le lien dans une fenêtre de navi&amp;gation privée Chrome</translation>
 <translation id="3885770153807205175">Sélecteur de langue</translation>
 <translation id="3889417619312448367">Désinstaller Google Chrome</translation>
@@ -329,6 +330,9 @@ Certaines fonctionnalités ne seront peut-être pas disponibles et les modificat
 <translation id="4348548358339558429">Pour bénéficier de la personnalisation, incluez Chrome dans l'activité sur le Web et dans les applications</translation>
 <translation id="436060642166082913">Chrome a bloqué ce téléchargement, car le fichier peut endommager vos comptes personnels et de réseaux sociaux</translation>
 <translation id="4367027658822022112">Vous pouvez épingler Lentille Google pour un accès facile; cliquez sur le bouton Épingler en haut du panneau latéral</translation>
+<translation id="4380616334811859000">Chrome désactive l'optimisation JavaScript lorsque vous visitez un site pour la première fois.
+
+Si cette page ne fonctionne pas comme prévu, essayez d'autoriser l'optimisation.</translation>
 <translation id="4389991535395284064">Lors de la navigation en mode Navigation privée, Chrome vous avertira avant de charger un site en utilisant une connexion non sécurisée</translation>
 <translation id="4427306783828095590">La protection renforcée en fait plus pour bloquer l'hameçonnage et les logiciels nuisibles</translation>
 <translation id="4434353761996769206">Erreur du programme d'installation : <ph name="INSTALLER_ERROR" /></translation>
@@ -423,6 +427,7 @@ Google Chrome ne peut pas récupérer vos paramètres.</translation>
 <translation id="547202872422499512">Chrome se lance désormais au démarrage de Windows afin que vous puissiez commencer à naviguer instantanément. Vous pouvez désactiver cette option dans les paramètres.</translation>
 <translation id="5486346529181556467">Améliorez la sécurité en ligne pour tous en signalant un site que vous pensez dangereux. Apprenez-en plus sur la <ph name="BEGIN_LINK" />politique relative aux sites dangereux de Google<ph name="END_LINK" />.</translation>
 <translation id="5524890928877629608">Coin supérieur gauche de la zone de recherche : gauche <ph name="LEFT" /> %, haut <ph name="TOP" /> %</translation>
+<translation id="5529390769101499214">Pour gérer vos extensions, cliquez sur « Extensions » dans le menu principal de Chrome.</translation>
 <translation id="5550137307985173298">Cliquez sur le bouton Personnaliser Chrome sur la page Nouvel onglet pour donner un nouveau style à Chrome</translation>
 <translation id="5566025111015594046">Google Chrome (mDNS-In)</translation>
 <translation id="5579324208890605088">Erreur de démarrage : veuillez exécuter le programme d'installation en tant qu'utilisateur normal et non en tant qu'administrateur.</translation>
@@ -782,7 +787,6 @@ Vous ne pouvez pas enregistrer de nouveaux favoris dans votre compte tant que vo
 <translation id="8862326446509486874">Vous ne disposez pas des droits requis pour faire une installation sur le système. Relancez l'installation une fois que vous serez connecté comme administrateur.</translation>
 <translation id="8865415417596392024">Données relatives à Chrome dans votre compte</translation>
 <translation id="8883862939660515976">Poser des questions à Lentille Google à propos de cette image</translation>
-<translation id="8892956691293410744">Pour poser des questions au mode IA sur votre onglet sans quitter la page, connectez-vous à Chrome. Vous obtiendrez également vos mots de passe et bien plus encore sur tous vos appareils.</translation>
 <translation id="8914504000324227558">Relancer Google Chrome</translation>
 <translation id="8922193594870374009">Pour envoyer un numéro de <ph name="ORIGIN" /> vers votre téléphone Android, connectez-vous à Chrome sur les deux appareils.</translation>
 <translation id="8922998289262614701">Retirer les données de cette appli de Chrome</translation>

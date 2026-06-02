@@ -100,6 +100,9 @@ class PopupViewViews : public PopupBaseView,
   // The maximum width of the popup.
   static constexpr int kAutofillPopupMaxWidth = 456;
 
+  // The width of the @memory popup.
+  static constexpr int kAtMemoryPopupWidth = 320;
+
   // The time it takes for a selected cell to open a sub-popup if it has one.
   static constexpr base::TimeDelta kMouseOpenSubPopupDelay =
       base::Milliseconds(250);
@@ -220,6 +223,8 @@ class PopupViewViews : public PopupBaseView,
   // selectable.
   bool HasSelectablePopupRowViewAt(size_t index) const;
 
+  PopupBnplFootnoteView* GetBnplFootnoteView() const;
+
   // Instantiates the content of the popup.
   void InitViews();
 
@@ -268,6 +273,11 @@ class PopupViewViews : public PopupBaseView,
   // Reacts to key events under the assumption that the currently shown popup
   // contains @memory content.
   bool HandleKeyPressEventForAtMemory(
+      const input::NativeWebKeyboardEvent& event);
+
+  // Handles horizontal navigation (Left/Right arrows) for the popup, which
+  // may result in opening or closing sub-popups.
+  bool HandlePopupHorizontalNavigation(
       const input::NativeWebKeyboardEvent& event);
 
   // AutofillPopupView:

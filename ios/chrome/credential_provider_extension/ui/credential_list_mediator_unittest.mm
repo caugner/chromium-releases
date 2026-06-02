@@ -76,7 +76,8 @@ ArchivableCredential* TestPasswordCredential() {
                                            serviceName:@"example.com"
                               registryControlledDomain:@"example.com"
                                               username:@"username_value"
-                                                  note:@"note"];
+                                                  note:@"note"
+                                          lastUsedTime:0];
 }
 
 ArchivableCredential* TestPasswordCredential2() {
@@ -90,7 +91,8 @@ ArchivableCredential* TestPasswordCredential2() {
                                         serviceName:@"example2.com"
                            registryControlledDomain:@"example2.com"
                                            username:@"username_value2"
-                                               note:@"note2"];
+                                               note:@"note2"
+                                       lastUsedTime:0];
 }
 
 NSArray<ASCredentialServiceIdentifier*>* ServiceIdentifierWithName(
@@ -445,7 +447,8 @@ TEST_F(CredentialListMediatorTest, FilterPasswordCredentialsSubdomain) {
                                         serviceName:@"example.com"
                            registryControlledDomain:@"example.com"
                                            username:@"username_value"
-                                               note:@"note"];
+                                               note:@"note"
+                                       lastUsedTime:0];
 
   NSMutableArray<id<Credential>>* credentials = [NSMutableArray array];
   [credentials addObject:credential];
@@ -486,7 +489,8 @@ TEST_F(CredentialListMediatorTest, FilterPasswordCredentialsNoFalseMatch) {
                                         serviceName:@"example.com"
                            registryControlledDomain:@"example.com"
                                            username:@"username_value"
-                                               note:@"note"];
+                                               note:@"note"
+                                       lastUsedTime:0];
 
   NSMutableArray<id<Credential>>* credentials = [NSMutableArray array];
   [credentials addObject:credential];
@@ -525,6 +529,47 @@ TEST_F(CredentialListMediatorTest, FilterPasswordCredentialsNoFalseMatch) {
   NSArray<id<Credential>>* filteredCredentials =
       [credentialListMediator filterCredentials];
   ASSERT_EQ(filteredCredentials.count, 0u);
+}
+
+// Tests that an Android-app credential is not suggested to an unrelated
+// web origin whose DNS hostname happens to be lexically equal to the Android
+// package name, when there's no matching registry controlled domain.
+TEST_F(CredentialListMediatorTest,
+       FilterAndroidCredentialsRejectsCollidingWebOrigin) {
+  ArchivableCredential* androidCredential = [[ArchivableCredential alloc]
+               initWithFavicon:nil
+                          gaia:nil
+                      password:@"password"
+                          rank:1
+              recordIdentifier:@"android://hash@example.com"
+             serviceIdentifier:@"android://hash@example.com"
+                   serviceName:@"android://hash@example.com"
+      registryControlledDomain:@""
+                      username:@"uesrname_value"
+                          note:@""
+                  lastUsedTime:0];
+
+  NSMutableArray<id<Credential>>* credentials = [NSMutableArray array];
+  [credentials addObject:androidCredential];
+  id<CredentialStore> credentialStore =
+      [[MockCredentialStore alloc] initWithCredentials:credentials];
+
+  // iOS hands the CPE the *page origin's host* as the service identifier.
+  // A request for example.com should not be matched.
+  ASCredentialServiceIdentifier* requestedSite =
+      [[ASCredentialServiceIdentifier alloc]
+          initWithIdentifier:@"example.com"
+                        type:ASCredentialServiceIdentifierTypeDomain];
+  NSArray* serviceIdentifiers = @[ requestedSite ];
+
+  CredentialListMediator* mediator =
+      [[CredentialListMediator alloc] initWithConsumer:nil
+                                             UIHandler:nil
+                                       credentialStore:credentialStore
+                                    serviceIdentifiers:serviceIdentifiers
+                             credentialResponseHandler:nil];
+  mediator.allCredentials = [mediator fetchAllCredentials];
+  EXPECT_EQ([mediator filterCredentials].count, 0u);
 }
 
 }  // namespace credential_provider_extension

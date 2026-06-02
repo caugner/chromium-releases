@@ -96,7 +96,7 @@ void VerticalTabStripController::ShowContextMenuForNode(
 
   CHECK(browser_view_->tab_strip_view());
   expand_on_hover_lock_ = browser_view_->tab_strip_view()->GetExpandOnHoverLock(
-      ExpandOnHoverLockType::kKeepExpanded);
+      ExpandOnHoverLockType::kKeepCurrentState);
 
   // `base::Unretained(this)` is safe because `context_menu_controller_` is
   // owned by `this`, ensuring the callback cannot outlive `this`.
@@ -279,6 +279,10 @@ const ui::ListSelectionModel& VerticalTabStripController::GetSelectionModel()
 void VerticalTabStripController::ToggleTabGroupCollapsedState(
     const TabGroup* group,
     ToggleTabGroupCollapsedStateOrigin origin) {
+  if (model_->closing_all()) {
+    return;
+  }
+
   bool is_currently_collapsed = group->visual_data()->is_collapsed();
   bool should_toggle_group = true;
 

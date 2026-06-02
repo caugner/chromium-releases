@@ -44,6 +44,10 @@ enum class CancelationReason {
   kUserCanceled,
   // Canceled, but not by the user.
   kFailed,
+  // Canceled due to age mismatch.
+  kAgeMismatchCanceled,
+  // Canceled due to age mismatch, user wants to stay signed out.
+  kAgeMismatchCanceledStaySignedOut,
 };
 
 }  // namespace signin_ui
@@ -176,7 +180,14 @@ extern const char* const kUMASSORecallPromoSeenCount;
 inline constexpr base::TimeDelta kMinorModeRestrictionsFetchDeadline =
     base::Milliseconds(500);
 
+// Default timeout to wait for fetching the CanSignInToChrome capability.
+inline constexpr base::TimeDelta kCanSignInToChromeCapabilityFetchTimeout =
+    base::Milliseconds(500);
+
 // URL to the learn more screen about managed profiles.
 extern NSString* const kManagedProfileLearnMoreURL;
+
+// URL to the learn more screen about age mismatch signout.
+extern NSString* const kAgeMismatchSignoutLearnMoreURL;
 
 #endif  // IOS_CHROME_BROWSER_AUTHENTICATION_UI_BUNDLED_SIGNIN_SIGNIN_CONSTANTS_H_

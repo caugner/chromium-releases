@@ -21,9 +21,11 @@
 #include "third_party/abseil-cpp/absl/container/node_hash_map.h"
 #include "ui/accessibility/platform/ax_node_id_delegate.h"
 #include "ui/accessibility/platform/ax_unique_id.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace ui {
+enum class AXOffscreenResult;
 class MotionEventAndroid;
 struct AXTreeUpdate;
 }  // namespace ui
@@ -153,6 +155,7 @@ class CONTENT_EXPORT WebContentsAccessibilityAndroid
   // Methods to get information about a specific node.
   bool IsEditableText(JNIEnv* env, int32_t id);
   bool IsFocused(JNIEnv* env, int32_t id);
+  bool IsTextSelectable(JNIEnv* env, int32_t id);
   // Returns ui::kAXAndroidUndefinedSelectionIndex if no selection.
   int32_t GetEditableTextSelectionStart(JNIEnv* env, int32_t id);
   // Returns ui::kAXAndroidUndefinedSelectionIndex if no selection.
@@ -419,9 +422,6 @@ class CONTENT_EXPORT WebContentsAccessibilityAndroid
   void AnnounceLiveRegionText(const std::u16string& text);
   void HandleActiveDescendantChanged(int32_t unique_id);
   void HandleTextSelectionChanged(int32_t unique_id);
-  void HandleExtendedSelectionChanged(int32_t unique_id,
-                                      int32_t focus_unique_id,
-                                      int32_t focus_offset);
   void HandleEditableTextChanged(int32_t unique_id, int32_t subType);
   void HandleSliderChanged(int32_t unique_id);
   void SendDelayedWindowContentChangedEvent();
@@ -552,6 +552,10 @@ class CONTENT_EXPORT WebContentsAccessibilityAndroid
       const base::android::JavaRef<jobject>& info,
       int32_t id,
       BrowserAccessibilityAndroid* node);
+
+  gfx::Rect GetAbsoluteBoundsForNode(
+      BrowserAccessibilityAndroid* node,
+      ui::AXOffscreenResult* offscreen_result = nullptr);
 
   base::android::ScopedJavaLocalRef<jobject> ToJavaCanonicalStringRangesMap(
       JNIEnv* env,

@@ -34,11 +34,13 @@
 #import "ios/chrome/browser/composebox/public/composebox_model_option.h"
 #import "ios/chrome/browser/composebox/public/features.h"
 #import "ios/chrome/browser/composebox/ui/composebox_input_plate_consumer.h"
+#import "ios/chrome/browser/composebox/ui/composebox_ui_input_state.h"
 #import "ios/chrome/browser/lens/ui_bundled/lens_availability.h"
 #import "ios/chrome/browser/lens/ui_bundled/lens_entrypoint.h"
 #import "ios/chrome/browser/shared/model/profile/test/test_profile_ios.h"
 #import "ios/chrome/browser/shared/model/web_state_list/test/fake_web_state_list_delegate.h"
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list.h"
+#import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/signin/model/identity_manager_factory.h"
 #import "ios/web/public/test/fakes/fake_web_state.h"
 #import "net/base/apple/url_conversions.h"
@@ -74,66 +76,19 @@
 - (void)updateState:(ComposeboxInputItemState)state
     forItemWithIdentifier:(const base::UnguessableToken&)identifier {
 }
-- (void)setAIModeEnabled:(BOOL)enabled {
-}
-- (void)setImageGenerationEnabled:(BOOL)enabled {
-}
-- (void)setCanvasEnabled:(BOOL)enabled {
-}
-- (void)setDeepSearchEnabled:(BOOL)enabled {
-}
-- (void)allowModelPicker:(BOOL)allowed {
+- (void)setUIInputState:(ComposeboxUIInputState*)state {
+  using enum ComposeboxMode;
+  _createImageHidden =
+      state.allowedTools.find(kImageGeneration) == state.allowedTools.end();
+  _createImageDisabled =
+      state.disabledTools.find(kImageGeneration) != state.disabledTools.end();
+  _canvasHidden = state.allowedTools.find(kCanvas) == state.allowedTools.end();
+  _deepSearchHidden =
+      state.allowedTools.find(kDeepSearch) == state.allowedTools.end();
 }
 - (void)setCompact:(BOOL)compact {
 }
-- (void)setCurrentTabFavicon:(UIImage*)favicon {
-}
-- (void)hideAttachCurrentTabAction:(BOOL)hidden {
-}
-- (void)hideAttachTabActions:(BOOL)hidden {
-}
-- (void)disableAttachTabActions:(BOOL)disabled {
-}
-- (void)hideAttachFileActions:(BOOL)hidden {
-}
-- (void)disableAttachFileActions:(BOOL)disabled {
-}
-- (void)hideCreateImageActions:(BOOL)hidden {
-  _createImageHidden = hidden;
-}
-- (void)disableCanvasActions:(BOOL)disabled {
-}
-- (void)disableCreateImageActions:(BOOL)disabled {
-  _createImageDisabled = disabled;
-}
-- (void)hideCameraActions:(BOOL)hidden {
-}
-- (void)disableCameraActions:(BOOL)disabled {
-}
-- (void)hideGalleryActions:(BOOL)hidden {
-}
-- (void)disableGalleryActions:(BOOL)disabled {
-}
-- (void)setAllowedModels:
-    (std::unordered_set<ComposeboxModelOption>)allowedModels {
-}
-- (void)setDisabledModels:
-    (std::unordered_set<ComposeboxModelOption>)disabledModels {
-}
-- (void)hideCanvasActions:(BOOL)hidden {
-  _canvasHidden = hidden;
-}
-- (void)hideDeepSearchActions:(BOOL)hidden {
-  _deepSearchHidden = hidden;
-}
-- (void)disableDeepSearchActions:(BOOL)disabled {
-}
-- (void)setRemainingAttachmentCapacity:(NSUInteger)capacity {
-}
-- (void)setServerStrings:(ComposeboxServerStrings*)serverStrings {
-}
-- (void)setModelOption:(ComposeboxModelOption)modelOption {
-}
+
 - (void)updateVisibleControls:(ComposeboxInputPlateControls)visibleControls {
   _visibleControls = visibleControls;
 }
@@ -362,6 +317,8 @@ class ComposeboxInputPlateMediatorTest : public PlatformTest {
     } else {
       disabled_features.push_back(kComposeboxDeepSearch);
     }
+
+    disabled_features.push_back(kComposeboxAIMDisabled);
 
     scoped_feature_list_.Reset();
     scoped_feature_list_.InitWithFeatures(enabled_features, disabled_features);

@@ -159,16 +159,16 @@ using blink::WebTouchPoint;
 using ui::WebInputEventTraits;
 using viz::FrameEvictionManager;
 
-#define EXPECT_EVICTED(view)                   \
-  {                                            \
-    EXPECT_FALSE((view)->HasPrimarySurface()); \
-    EXPECT_FALSE((view)->HasSavedFrame());     \
+#define EXPECT_EVICTED(view)                         \
+  {                                                  \
+    EXPECT_FALSE((view)->HasPrimarySurface());       \
+    EXPECT_FALSE((view)->HasSavedCompositorFrame()); \
   }
 
-#define EXPECT_HAS_FRAME(view)                \
-  {                                           \
-    EXPECT_TRUE((view)->HasPrimarySurface()); \
-    EXPECT_TRUE((view)->HasSavedFrame());     \
+#define EXPECT_HAS_FRAME(view)                      \
+  {                                                 \
+    EXPECT_TRUE((view)->HasPrimarySurface());       \
+    EXPECT_TRUE((view)->HasSavedCompositorFrame()); \
   }
 
 namespace content {
@@ -310,7 +310,7 @@ class FakeRenderWidgetHostViewAura : public RenderWidgetHostViewAura {
     return GetDelegatedFrameHost()->HasFallbackSurface();
   }
 
-  bool HasSavedFrame() const {
+  bool HasSavedCompositorFrame() const override {
     return GetDelegatedFrameHost()->HasSavedFrame();
   }
 
@@ -6499,6 +6499,9 @@ class InputMethodStateAuraTest : public InputMethodAuraTestBase {
 TEST_F(InputMethodStateAuraTest, GetCaretBounds) {
   for (auto index : active_view_sequence_) {
     ActivateViewForTextInputManager(views_[index], ui::TEXT_INPUT_TYPE_TEXT);
+    // Set a non-empty bounds for the view to prevent selection bounds from
+    // being clamped to an empty viewport in TextInputManager.
+    views_[index]->SetBounds(gfx::Rect(0, 0, 800, 600));
     gfx::Rect anchor_rect = gfx::Rect(0, 0, 10, 10);
     gfx::Rect focus_rect = gfx::Rect(10 + index, 10 + index, 10, 10);
     views_[index]->SelectionBoundsChanged(
@@ -6518,6 +6521,35 @@ TEST_F(InputMethodStateAuraTest, GetCaretBounds) {
     EXPECT_EQ(measured_rect, text_input_client()->GetCaretBounds());
   }
 }
+TEST_F(InputMethodStateAuraTest, EditContextBoundsClamped) {
+  RenderWidgetHostViewAura* view = tab_view();
+  view->SetBounds(gfx::Rect(0, 0, 800, 600));
+  ActivateViewForTextInputManager(view, ui::TEXT_INPUT_TYPE_TEXT);
+  TextInputManager* manager = GetTextInputManager(view);
+
+  ui::mojom::TextInputState state;
+  state.type = ui::TEXT_INPUT_TYPE_TEXT;
+  state.edit_context_control_bounds = gfx::Rect(-50, -50, 100, 100);
+  state.edit_context_selection_bounds = gfx::Rect(-50, -50, 100, 100);
+
+  manager->UpdateTextInputState(view, state);
+
+  std::optional<gfx::Rect> control_bounds = manager->GetTextControlBounds();
+  std::optional<gfx::Rect> selection_bounds = manager->GetTextSelectionBounds();
+
+  EXPECT_TRUE(control_bounds.has_value());
+  EXPECT_TRUE(selection_bounds.has_value());
+
+  // Expected adjusted bounds in view local space is (0, 0, 100, 100).
+  gfx::Rect expected_local_bounds = gfx::Rect(0, 0, 100, 100);
+
+  gfx::Rect expected_bounds = gfx::Rect(
+      view->TransformPointToRootCoordSpace(expected_local_bounds.origin()),
+      expected_local_bounds.size());
+
+  EXPECT_EQ(control_bounds.value(), expected_bounds);
+  EXPECT_EQ(selection_bounds.value(), expected_bounds);
+}
 
 // This test is for composition character bounds.
 TEST_F(InputMethodStateAuraTest, GetCompositionCharacterBounds) {
@@ -6526,6 +6558,7 @@ TEST_F(InputMethodStateAuraTest, GetCompositionCharacterBounds) {
   EXPECT_FALSE(text_input_client()->GetCompositionCharacterBounds(0, &bound));
   for (auto index : active_view_sequence_) {
     ActivateViewForTextInputManager(views_[index], ui::TEXT_INPUT_TYPE_TEXT);
+    views_[index]->SetBounds(gfx::Rect(0, 0, 800, 600));
     // Simulate an IPC to set character bounds for the view.
     views_[index]->ImeCompositionRangeChanged(
         gfx::Range(), {{gfx::Rect(1, 2, 3, 4 + index)}});
@@ -6877,15 +6910,27 @@ class DestroyingMockInputMethod : public ui::MockInputMethod {
     }
   }
 
+  void OnTextInputTypeChanged(ui::TextInputClient* client) override {
+    ui::MockInputMethod::OnTextInputTypeChanged(client);
+    if (on_text_input_type_changed_) {
+      std::move(on_text_input_type_changed_).Run();
+    }
+  }
+
   void set_on_caret_bounds_changed(base::OnceClosure closure) {
     on_caret_bounds_changed_ = std::move(closure);
   }
 
+  void set_on_text_input_type_changed(base::OnceClosure closure) {
+    on_text_input_type_changed_ = std::move(closure);
+  }
+
  private:
   base::OnceClosure on_caret_bounds_changed_;
+  base::OnceClosure on_text_input_type_changed_;
 };
 
-class RenderWidgetHostViewAuraOnBoundsChangedUAFTest
+class RenderWidgetHostViewAuraReentrantDestructionIME
     : public RenderWidgetHostViewAuraTest {
  public:
   void SetUp() override {
@@ -6914,7 +6959,7 @@ class RenderWidgetHostViewAuraOnBoundsChangedUAFTest
 // ~AutoReset both touch freed memory. AutoReset::scoped_variable_ is
 // RAW_PTR_EXCLUSION, so it is not MiraclePtr-protected: the ~AutoReset write
 // lands in a freed (un-quarantined) slot.
-TEST_F(RenderWidgetHostViewAuraOnBoundsChangedUAFTest,
+TEST_F(RenderWidgetHostViewAuraReentrantDestructionIME,
        DestroyDuringOnCaretBoundsChanged) {
   InitViewForFrame(nullptr);
   ParentHostView(view_, parent_view_);
@@ -6937,6 +6982,37 @@ TEST_F(RenderWidgetHostViewAuraOnBoundsChangedUAFTest,
   // keyboard_occluded_bounds_) followed by a write-after-free in
   // ~AutoReset<bool> to the freed in_bounds_changed_ slot.
   raw_view->OnBoundsChanged(gfx::Rect(), gfx::Rect(0, 0, 100, 100));
+}
+
+// RWHVA::OnUpdateTextInputStateCalled() calls
+// GetInputMethod()->OnTextInputTypeChanged(this), which on Windows reaches
+// TSFBridge::OnTextInputTypeChanged() -> ITfThreadMgr::SetFocus(). If the
+// active TIP pumps the message queue and the view is destroyed re-entrantly,
+// on unwind the function continues to dereference the freed `this` and
+// `updated_view`.
+TEST_F(RenderWidgetHostViewAuraReentrantDestructionIME,
+       DestroyDuringOnTextInputTypeChanged) {
+  InitViewForFrame(nullptr);
+  ParentHostView(view_, parent_view_);
+  // `view_` shares the root window (and thus the InputMethod) with
+  // `parent_view_`.
+  ASSERT_EQ(static_cast<ui::InputMethod*>(input_method_.get()),
+            GetInputMethod());
+
+  // Arrange for the view to be synchronously destroyed inside
+  // OnTextInputTypeChanged, simulating re-entrant destruction triggered by a
+  // TSF callout that pumps a queued window.close() / renderer-gone task.
+  input_method_->set_on_text_input_type_changed(
+      base::BindLambdaForTesting([&]() {
+        widget_host_ = nullptr;
+        view_.ExtractAsDangling()->Destroy();
+      }));
+
+  ui::mojom::TextInputState state;
+  state.type = ui::TEXT_INPUT_TYPE_TEXT;
+  // Dispatching this state notifies `view_` (a TextInputManager observer) via
+  // OnUpdateTextInputStateCalled(), which calls into the input method above.
+  GetTextInputManager(view_)->UpdateTextInputState(view_, state);
 }
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS)
@@ -7366,5 +7442,13 @@ TEST(IndexFromPointFlagsTest, OStreamOperator) {
   EXPECT_STREQ(all_bits.str().c_str(), "Unknown(0xff)");
 }
 #endif  // BUILDFLAG(IS_WIN)
+
+TEST_F(RenderWidgetHostViewAuraTest, ForceSpecifiedDeadline) {
+  EXPECT_EQ(std::nullopt, parent_view_->GetForceSpecifiedDeadlineForTesting());
+  parent_view_->SetForceSpecifiedDeadline(5);
+  EXPECT_EQ(5u, parent_view_->GetForceSpecifiedDeadlineForTesting());
+  parent_view_->SetForceSpecifiedDeadline(std::nullopt);
+  EXPECT_EQ(std::nullopt, parent_view_->GetForceSpecifiedDeadlineForTesting());
+}
 
 }  // namespace content

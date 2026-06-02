@@ -21,6 +21,15 @@ struct InjectedInput {
   bool submit_after_injection;
 };
 
+struct ContextualTaskId {
+  mojo_base.mojom.Uuid value;
+};
+
+struct ContextualWindowId {
+  mojo_base.mojom.UnguessableToken value;
+};
+
+
 // Represents the the visual information needed to display a single context row
 // of a tab where title and url will be displayed in the sources menu.
 struct TabContext {
@@ -68,6 +77,7 @@ enum IconType {
   kFormatQuoteFilled = 79,
   kImage = 84,
   kDrivePdf = 101,
+  kInvertedFormatQuoteFilled = 186,
 };
 
 // Browser-side handler for requests from the WebUI page.
@@ -173,6 +183,14 @@ interface PageHandler {
 
   // Unpins the side panel from the toolbar.
   UnpinSidePanel();
+
+  // Registers a tracked window with its ID, associated task ID, and URL.
+  RegisterWindow(ContextualTaskId task_id,
+                 url.mojom.Url url,
+                 ContextualWindowId window_id);
+
+  // Requests the browser to close a tracked window.
+  CloseWindow(ContextualWindowId window_id);
 };
 
 // WebUI-side handler for requests from the browser.
@@ -289,6 +307,14 @@ interface Page {
   // Called by the browser process (C++) to notify the UI when the pin state
   // changes.
   OnSidePanelPinStateChanged(bool is_pinned);
+
+  // Called by the browser process (C++) to notify the UI whether the expand
+  // button should be enabled.
+  SetExpandButtonEnabled(bool enabled);
+
+  // Called by the browser process (C++) to notify the UI that a tracked window
+  // was closed.
+  OnWindowClosed(ContextualWindowId window_id);
 };
 
 // Used to bootstrip bi-directional communication between the browser and webui.

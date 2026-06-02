@@ -8,9 +8,10 @@
 #include "base/functional/callback_forward.h"
 #include "base/functional/function_ref.h"
 #include "base/types/expected.h"
-#include "chrome/browser/actor/enterprise_policy_url_checker.h"
+#include "chrome/browser/actor/enterprise_policy_checker.h"
 #include "chrome/common/actor.mojom-forward.h"
 #include "chrome/common/actor/task_id.h"
+#include "components/actor/public/mojom/actor_types.mojom-forward.h"
 #include "third_party/abseil-cpp/absl/container/flat_hash_set.h"
 #include "url/origin.h"
 
@@ -41,6 +42,7 @@ enum class MayActOnUrlBlockReason {
   kWrongScheme,
   kEnterprisePolicy,
   kBlockedByStaticList,
+  kBlockedByContainerConfig,
 };
 
 using DecisionCallback = base::OnceCallback<void(/*may_act=*/bool)>;
@@ -62,7 +64,7 @@ void MayActOnTab(const tabs::TabInterface& tab,
                  AggregatedJournal& journal,
                  TaskId task_id,
                  const OriginChecker& origin_checker,
-                 const EnterprisePolicyUrlChecker& policy_checker,
+                 const EnterprisePolicyChecker& policy_checker,
                  DecisionCallbackWithReason callback);
 
 // Like MayActOnTab, but considers a URL on its own.
@@ -74,7 +76,7 @@ void MayActOnUrl(const GURL& url,
                  Profile* profile,
                  AggregatedJournal& journal,
                  TaskId task_id,
-                 const EnterprisePolicyUrlChecker& policy_checker,
+                 const EnterprisePolicyChecker& policy_checker,
                  DecisionCallbackWithReason callback);
 
 // Checks if navigation to `url` should be blocked using

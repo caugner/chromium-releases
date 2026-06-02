@@ -190,6 +190,11 @@ TypeConverter<scoped_refptr<media::DecoderBuffer>,
       return nullptr;
     }
     buffer->set_decrypt_config(std::move(decrypt_config));
+
+    if (!media::DecoderBuffer::DoSubsamplesMatch(*buffer)) {
+      DVLOG(1) << __func__ << ": Subsamples do not match buffer size";
+      return nullptr;
+    }
   }
 
   // TODO(dalecurtis): We intentionally do not deserialize the data section of
@@ -220,7 +225,7 @@ TypeConverter<media::mojom::AudioBufferPtr, media::AudioBuffer>::Convert(
     // Safe to CHECK here since this is into Mojo not From mojo (and thus not
     // untrusted input).
     CHECK_GT(input.data_size(), 0u);
-    CHECK_GE(input.data_size(), input.data_->span().size());
+    CHECK_LE(input.data_size(), input.data_->span().size());
     auto buffer_start = input.data_->span().begin();
     auto buffer_end = buffer_start + input.data_size();
     buffer->data.assign(buffer_start, buffer_end);

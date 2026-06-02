@@ -11,7 +11,6 @@
 #include "chrome/browser/glic/glic_pref_names.h"
 #include "chrome/browser/glic/public/glic_enabling.h"
 #include "chrome/browser/glic/public/glic_keyed_service.h"
-#include "chrome/browser/glic/test_support/glic_test_util.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
@@ -67,7 +66,9 @@ TEST_F(GlicMetricsProviderTest, ProvideCurrentSessionData) {
 
 TEST_F(GlicMetricsProviderTest, ProvideCurrentSessionData_ZoomLevel) {
   // Set FRE completion for profile2 only.
-  SetFRECompletion(profile2(), prefs::FreStatus::kCompleted);
+  GlicKeyedService::Get(profile2())
+      ->enabling()
+      .SetCompletedFre(prefs::FreStatus::kCompleted);
   // Set zoom level for profile2.
   profile2()->GetPrefs()->SetInteger(prefs::kGlicZoomLevel, 125);
 
@@ -80,7 +81,9 @@ TEST_F(GlicMetricsProviderTest, ProvideCurrentSessionData_ZoomLevel) {
   histograms.ExpectUniqueSample("Glic.ZoomLevel.SteadyState", 125, 1);
 
   // Set FRE completion for profile1.
-  SetFRECompletion(profile1(), prefs::FreStatus::kCompleted);
+  GlicKeyedService::Get(profile1())
+      ->enabling()
+      .SetCompletedFre(prefs::FreStatus::kCompleted);
 
   provider.ProvideCurrentSessionData(nullptr);
   histograms.ExpectTotalCount("Glic.ZoomLevel.SteadyState", 3);

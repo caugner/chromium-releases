@@ -1490,12 +1490,9 @@ export class CommandHandler implements CommandHandlerInterface {
   private speakTimeAndDate_(): void {
     chrome.automation.getDesktop(d => {
       // First, try speaking the on-screen time.
-      // Only consider TIME nodes that live in the Views desktop tree (the
-      // system-tray clock); exclude <time> / role="time" from web content.
+      const allTime = d.findAll({role: RoleType.TIME});
       // TODO(b/314203187): Not null asserted, check that this is correct.
-      const allTime = d.findAll({
-                         role: RoleType.TIME
-                       }).filter(time => time.root?.role === RoleType.DESKTOP);
+      allTime.filter(time => time.root!.role === RoleType.DESKTOP);
 
       let timeString = '';
       allTime.forEach(time => {

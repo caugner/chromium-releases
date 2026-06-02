@@ -91,6 +91,8 @@ class QueryContextualizer {
         base::OnceCallback<void(std::vector<TabId>)> callback) = 0;
   };
 
+  // `service` can be nullptr if task-scoped context decoration is not needed
+  // (e.g. standard Omnibox unimodal search).
   QueryContextualizer(ContextualTasksService* service, Delegate* delegate);
   virtual ~QueryContextualizer();
 
@@ -126,7 +128,8 @@ class QueryContextualizer {
       bool enable_smart_tab_selection);
 
   // Extracts URLs from the query text.
-  static std::vector<GURL> ExtractUrlsFromQuery(const std::string& query_text);
+  static std::vector<std::string> ExtractUrlsFromQuery(
+      const std::string& query_text);
 
  private:
   void OnRelevantTabsFetched(

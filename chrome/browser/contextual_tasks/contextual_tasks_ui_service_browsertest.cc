@@ -26,6 +26,7 @@
 #include "components/tabs/public/tab_interface.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/mock_media_session.h"
+#include "net/dns/mock_host_resolver.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 namespace contextual_tasks {
@@ -76,7 +77,7 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksUiServiceBrowserTest,
   // Fake a thread link click without necessarily having to open the side panel
   // and negotiate all those moving pieces.
   ui_service->OnThreadLinkClicked(citation_url, task.GetTaskId(), nullptr,
-                                  browser()->GetWeakPtr());
+                                  browser()->GetWeakPtr(), url::Origin());
 
   // Wait for the TextHighlighterManager to be created.
   EXPECT_TRUE(base::test::RunUntil([&]() {
@@ -128,7 +129,7 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksUiServiceBrowserTest,
   // Fake a thread link click without necessarily having to open the side panel
   // and negotiate all those moving pieces.
   ui_service->OnThreadLinkClicked(citation_url, task.GetTaskId(), nullptr,
-                                  browser()->GetWeakPtr());
+                                  browser()->GetWeakPtr(), url::Origin());
 
   // Wait for the new tab to be created.
   EXPECT_TRUE(base::test::RunUntil(
@@ -163,6 +164,7 @@ class TestContextualTasksUiService : public ContextualTasksUiService {
             contextual_tasks_service,
             /*identity_manager=*/nullptr,
             aim_eligibility_service,
+            /*eligibility_manager=*/nullptr,
             std::unique_ptr<ContextualTasksCookieSynchronizer>()) {}
   ~TestContextualTasksUiService() override = default;
 
@@ -241,9 +243,10 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksVideoCitationsBrowserTest,
         return std::make_unique<TestLensMediaLinkHandler>(wc);
       });
 
+  GURL youtube_url("https://www.youtube.com/watch?v=123");
   // Fake a thread link click.
-  test_ui_service->OnThreadLinkClicked(url, task.GetTaskId(), nullptr,
-                                       browser()->GetWeakPtr());
+  test_ui_service->OnThreadLinkClicked(youtube_url, task.GetTaskId(), nullptr,
+                                       browser()->GetWeakPtr(), url::Origin());
 
   // Ensure the tab count hasn't changed.
   EXPECT_EQ(browser()->tab_strip_model()->count(), 2);

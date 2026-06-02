@@ -72,6 +72,9 @@ BASE_FEATURE(kEnableNotifyZeroStateRenderedCapability,
 BASE_FEATURE(kContextualTasksSendFullVersionListEnabled,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
+BASE_FEATURE(kContextualTasksSendContextualInputUploadType,
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
 BASE_FEATURE(kContextualTasksUrlRedirectToAimUrl,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
@@ -102,7 +105,7 @@ BASE_FEATURE(kContextualTasksHideMenuOnAiPage,
              base::FEATURE_ENABLED_BY_DEFAULT);
 #endif  // BUILDFLAG(IS_ANDROID)
 
-BASE_FEATURE(kContextualTasksUpdateModelOnNavigation,
+BASE_FEATURE(kContextualTasksHideCloseButtonInVerticalTabs,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kContextualTasksVideoCitations, base::FEATURE_ENABLED_BY_DEFAULT);
@@ -116,14 +119,21 @@ BASE_FEATURE(kContextualTasksLazyFetchClusterInfo,
 // Enables custom UI for NLM.
 BASE_FEATURE(kContextualTasksCustomNlmUi, base::FEATURE_ENABLED_BY_DEFAULT);
 
+// When enabled, the back button expands the side panel.
+BASE_FEATURE(kContextualTasksBackButtonExpandsSidePanel,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 // Enables the use of APC comparison for webpages in the recontextualization
 // flow.
 BASE_FEATURE(kContextualTasksWebpageApcComparison,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
-bool GetIsContextualTasksUpdateModeOnNavigationEnabled() {
-  return base::FeatureList::IsEnabled(kContextualTasksUpdateModelOnNavigation);
-}
+// Enables prefetching of cookies for contextual tasks.
+BASE_FEATURE(kContextualTasksCookiePrefetch, base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kAimTriggeredThreadLinks, base::FEATURE_ENABLED_BY_DEFAULT);
+
+BASE_FEATURE(kContextualTasksWindowTracking, base::FEATURE_ENABLED_BY_DEFAULT);
 
 bool GetIsContextualTasksPdfCitationsEnabled() {
   return base::FeatureList::IsEnabled(kContextualTasksPdfCitations);
@@ -131,6 +141,10 @@ bool GetIsContextualTasksPdfCitationsEnabled() {
 
 bool GetIsContextualTasksLazyFetchClusterInfoEnabled() {
   return base::FeatureList::IsEnabled(kContextualTasksLazyFetchClusterInfo);
+}
+
+bool GetIsContextualTasksWindowTrackingEnabled() {
+  return base::FeatureList::IsEnabled(kContextualTasksWindowTracking);
 }
 
 const base::FeatureParam<bool> kContextualTasksLockAndUnlockInputCapability(
@@ -153,11 +167,6 @@ const base::FeatureParam<bool> kContextualTasksEnableCookieSync(
     "ContextualTasksEnableCookieSync",
     true);
 
-const base::FeatureParam<bool> kContextualTasksEnableCookiePrefetch(
-    &kContextualTasks,
-    "ContextualTasksEnableCookiePrefetch",
-    false);
-
 const base::FeatureParam<bool> kOnlyUseTitlesForSimilarity(
     &kContextualTasksContext,
     "ContextualTasksContextOnlyUseTitles",
@@ -165,7 +174,7 @@ const base::FeatureParam<bool> kOnlyUseTitlesForSimilarity(
 
 const base::FeatureParam<double> kTabSelectionScoreThreshold{
     &kContextualTasksContext,
-    "ContextualTasksContextTabSelectionScoreThreshold", 0.8};
+    "ContextualTasksContextTabSelectionScoreThreshold", 0.4};
 
 const base::FeatureParam<double> kContentVisibilityThreshold{
     &kContextualTasksContext,
@@ -187,11 +196,18 @@ const base::FeatureParam<base::TimeDelta> kSmartTabSharingTabSelectionTimeout(
 const base::FeatureParam<double> kSmartTabSharingPromoScoreThreshold(
     &kContextualTasksContext,
     "ContextualTasksContextSmartTabSharingPromoScoreThreshold",
-    0.9);
+    0.6);
 
 const base::FeatureParam<double> kContextualTasksContextLoggingSampleRate{
     &kContextualTasksContextLogging, "ContextualTasksContextLoggingSampleRate",
     1.0};
+
+const base::FeatureParam<bool> kSendContextualInputUploadTypeInSearchUrl{
+    &kContextualTasksSendContextualInputUploadType, "send_in_search_url", true};
+
+const base::FeatureParam<bool> kSendContextualInputUploadTypeInAimRequest{
+    &kContextualTasksSendContextualInputUploadType, "send_in_aim_request",
+    true};
 
 // Enables tab auto-chip for contextual tasks.
 const base::FeatureParam<bool> kContextualTasksTabAutoSuggestionChipEnabled(
@@ -260,8 +276,10 @@ const base::FeatureParam<bool> kForceGscInTabMode(
 // Version 2.2: Added UI fixes for NLM.
 // Version 2.3: UI fixes for transitions from search results.
 // Version 2.4: Adds ability to hideInput/restoreInput
+// Version 2.5: Support for link click post messages and window.open calls from
+//              AIM.
 const base::FeatureParam<std::string> kContextualTasksUserAgentSuffix{
-    &kContextualTasks, "contextual-tasks-user-agent-suffix", "Cobrowsing/2.4"};
+    &kContextualTasks, "contextual-tasks-user-agent-suffix", "Cobrowsing/2.5"};
 
 const base::FeatureParam<std::string> kContextualTasksHelpUrl(
     &kContextualTasks,
@@ -547,7 +565,7 @@ bool ShouldEnableCookieSync() {
 }
 
 bool ShouldEnableCookiePrefetch() {
-  return kContextualTasksEnableCookiePrefetch.Get();
+  return base::FeatureList::IsEnabled(kContextualTasksCookiePrefetch);
 }
 
 bool ShouldEnableLockAndUnlockInputCapability() {
@@ -598,6 +616,16 @@ const char kContextualTasksSuggestionsEnabledName[] =
     "Contextual Tasks Suggestions Enabled";
 const char kContextualTasksSuggestionsEnabledDescription[] =
     "Enables suggestions for contextual tasks.";
+
+const char kContextualTasksBackButtonExpandsSidePanelName[] =
+    "Contextual Tasks Back Button Expands Side Panel";
+const char kContextualTasksBackButtonExpandsSidePanelDescription[] =
+    "Enables expanding the side panel on back navigations.";
+
+const char kContextualTasksCookiePrefetchName[] =
+    "Contextual Tasks Cookie Prefetch";
+const char kContextualTasksCookiePrefetchDescription[] =
+    "Enables prefetching of cookies for contextual tasks.";
 
 }  // namespace flag_descriptions
 

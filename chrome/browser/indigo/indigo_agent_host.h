@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "base/memory/weak_ptr.h"
 #include "chrome/common/indigo/indigo.mojom.h"
@@ -16,9 +17,9 @@
 #include "mojo/public/cpp/bindings/associated_receiver.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
 
-namespace indigo {
+class GURL;
 
-class IndigoScriptLoader;
+namespace indigo {
 
 // Browser-side host for the IndigoAgent in the renderer. This class is
 // page-scoped, meaning it is correctly managed and cleaned up when a navigation
@@ -35,9 +36,13 @@ class IndigoAgentHost : public content::PageUserData<IndigoAgentHost>,
   // Returns false if no script is configured via the command line.
   bool Invoke();
 
+  // Resets the Indigo feature on the page.
+  void Reset();
+
   // chrome::mojom::IndigoAgentHost:
   void StartImageReplacement(
       mojo::PendingRemote<blink::mojom::ImageReplacement> replacement,
+      bool is_primary,
       StartImageReplacementCallback callback) override;
 
  private:
@@ -50,18 +55,17 @@ class IndigoAgentHost : public content::PageUserData<IndigoAgentHost>,
   explicit IndigoAgentHost(content::Page& page);
   friend class content::PageUserData<IndigoAgentHost>;
 
-  void OnScriptLoaded(const std::string& script_path,
+  void OnScriptLoaded(const GURL& script_url,
                       std::optional<std::string> script_content);
 
   chrome::mojom::IndigoAgent& GetAgent();
 
   mojo::AssociatedReceiver<chrome::mojom::IndigoAgentHost> receiver_{this};
   mojo::AssociatedRemote<chrome::mojom::IndigoAgent> agent_;
-  std::unique_ptr<IndigoScriptLoader> script_loader_;
   InjectionState injection_state_ = InjectionState::kNotInjected;
 
-  // Number of times Invoke() was called while injection was in progress.
-  int pending_invoke_count_ = 0;
+  enum class PendingOperation { kInvoke, kReset };
+  std::vector<PendingOperation> pending_operations_;
 
   PAGE_USER_DATA_KEY_DECL();
 

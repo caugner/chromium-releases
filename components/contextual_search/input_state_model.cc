@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "base/check.h"
+#include "base/logging.h"
 #include "components/contextual_search/contextual_search_session_handle.h"
 #include "components/contextual_search/contextual_search_types.h"
 #include "components/contextual_search/pref_names.h"
@@ -86,64 +87,6 @@ void MaybePopulateBrowserTabInputTypeRule(omnibox::SearchboxConfig* config) {
   }
 }
 
-// Populates `InputTypeRule` for `omnibox::INPUT_TYPE_DRIVE` if it does
-// not exist.
-void MaybePopulateDriveInputTypeRule(omnibox::SearchboxConfig* config) {
-  if (!config) {
-    return;
-  }
-  omnibox::RuleSet* rule_set = config->mutable_rule_set();
-
-  bool drive_rule_exists =
-      std::ranges::any_of(rule_set->input_type_rules(), [](const auto& rule) {
-        return rule.input_type() == omnibox::INPUT_TYPE_DRIVE;
-      });
-
-  // Populate `InputTypeRule` for `omnibox::INPUT_TYPE_DRIVE`.
-  if (!drive_rule_exists) {
-    omnibox::InputTypeRule* new_rule = rule_set->add_input_type_rules();
-    new_rule->set_input_type(omnibox::INPUT_TYPE_DRIVE);
-    new_rule->add_allowed_input_types(omnibox::INPUT_TYPE_LENS_IMAGE);
-    new_rule->add_allowed_input_types(omnibox::INPUT_TYPE_LENS_FILE);
-    new_rule->add_allowed_input_types(omnibox::INPUT_TYPE_BROWSER_TAB);
-    new_rule->add_allowed_input_types(omnibox::INPUT_TYPE_DRIVE);
-  }
-
-  // Add `omnibox::INPUT_TYPE_DRIVE` to the `allowed_input_types` in
-  // `ToolRule` for all tools if the tool allows both images and files.
-  for (auto& tool_rule : *rule_set->mutable_tool_rules()) {
-    bool has_image = false;
-    bool has_file = false;
-    for (const auto& input_type : tool_rule.allowed_input_types()) {
-      if (input_type == omnibox::INPUT_TYPE_LENS_IMAGE) {
-        has_image = true;
-      } else if (input_type == omnibox::INPUT_TYPE_LENS_FILE) {
-        has_file = true;
-      }
-    }
-    if (has_image && has_file) {
-      tool_rule.add_allowed_input_types(omnibox::INPUT_TYPE_DRIVE);
-    }
-  }
-
-  // Add `omnibox::INPUT_TYPE_DRIVE` to the `allowed_input_types` in
-  // `ModelRule` for all models if the model allows both images and files.
-  for (auto& model_rule : *rule_set->mutable_model_rules()) {
-    bool has_image = false;
-    bool has_file = false;
-    for (const auto& input_type : model_rule.allowed_input_types()) {
-      if (input_type == omnibox::INPUT_TYPE_LENS_IMAGE) {
-        has_image = true;
-      } else if (input_type == omnibox::INPUT_TYPE_LENS_FILE) {
-        has_file = true;
-      }
-    }
-    if (has_image && has_file) {
-      model_rule.add_allowed_input_types(omnibox::INPUT_TYPE_DRIVE);
-    }
-  }
-}
-
 std::optional<omnibox::ModelMode> GetActiveModelFromUrl(
     const GURL& active_url,
     const std::vector<omnibox::ModelConfig>& model_configs,
@@ -159,7 +102,7 @@ std::optional<omnibox::ModelMode> GetActiveModelFromUrl(
     if (!std::ranges::contains(allowed_models, model_config.model())) {
       continue;
     }
-    if (model_config.aim_url_params().size() == 0) {
+    if (model_config.aim_url_params().empty()) {
       continue;
     }
     bool all_params_match = true;
@@ -186,6 +129,48 @@ std::optional<omnibox::ModelMode> GetActiveModelFromUrl(
   return best_model;
 }
 
+std::optional<omnibox::ToolMode> GetActiveToolFromUrl(
+    const GURL& active_url,
+    const std::vector<omnibox::ToolConfig>& tool_configs,
+    const std::vector<omnibox::ToolMode>& allowed_tools) {
+  if (!active_url.is_valid() || !active_url.has_query()) {
+    return std::nullopt;
+  }
+
+  std::optional<omnibox::ToolMode> best_tool = std::nullopt;
+  size_t max_matched_params = 0;
+
+  for (const auto& tool_config : tool_configs) {
+    if (!std::ranges::contains(allowed_tools, tool_config.tool())) {
+      continue;
+    }
+    if (tool_config.aim_url_params().empty()) {
+      continue;
+    }
+    bool all_params_match = true;
+    size_t matched_count = tool_config.aim_url_params().size();
+    for (const auto& url_param : tool_config.aim_url_params()) {
+      std::string value;
+      bool found =
+          net::GetValueForKeyInQuery(active_url, url_param.param_key(), &value);
+      if (!found || value != url_param.param_value()) {
+        all_params_match = false;
+        break;
+      }
+    }
+    if (all_params_match) {
+      if (!best_tool.has_value() || matched_count > max_matched_params) {
+        best_tool = tool_config.tool();
+        max_matched_params = matched_count;
+      } else if (matched_count == max_matched_params) {
+        DLOG(WARNING) << "Ambiguous tool match tie!";
+      }
+    }
+  }
+
+  return best_tool;
+}
+
 // Checks if a set of items are all present in an allowed list.
 template <typename T, typename U>
 bool AreItemsAllowed(const T& items, const U& allowed_items) {
@@ -201,16 +186,14 @@ InputStateModel::InputStateModel(
     contextual_search::ContextualSearchSessionHandle& session_handle,
     const SearchboxConfig& config,
     const GURL& active_url,
-    bool is_off_the_record)
+    bool is_off_the_record,
+    bool browser_identity_matches_aim_identity)
     : session_handle_(session_handle.AsWeakPtr()),
-      is_off_the_record_(is_off_the_record) {
+      is_off_the_record_(is_off_the_record),
+      browser_identity_matches_aim_identity_(
+          browser_identity_matches_aim_identity) {
   SearchboxConfig mutable_config = config;
   MaybePopulateBrowserTabInputTypeRule(&mutable_config);
-
-  if (base::FeatureList::IsEnabled(
-          omnibox::kComposeboxDriveContextMenuOption)) {
-    MaybePopulateDriveInputTypeRule(&mutable_config);
-  }
 
   if (mutable_config.has_rule_set()) {
     rule_set_ = mutable_config.rule_set();
@@ -235,6 +218,10 @@ InputStateModel::InputStateModel(
         mutable_config.input_type_configs().size());
     for (const auto& input_type_config : mutable_config.input_type_configs()) {
       if (input_type_config.has_input_type()) {
+        if (input_type_config.input_type() == omnibox::INPUT_TYPE_DRIVE &&
+            !IsDriveSupported()) {
+          continue;
+        }
         state_.allowed_input_types.push_back(input_type_config.input_type());
       }
     }
@@ -248,6 +235,10 @@ InputStateModel::InputStateModel(
     }
     state_.input_type_configs.reserve(mutable_config.input_type_configs_size());
     for (const auto& input_type_config : mutable_config.input_type_configs()) {
+      if (input_type_config.input_type() == omnibox::INPUT_TYPE_DRIVE &&
+          !IsDriveSupported()) {
+        continue;
+      }
       state_.input_type_configs.push_back(input_type_config);
     }
     if (mutable_config.has_tools_section_config()) {
@@ -285,14 +276,16 @@ InputStateModel::InputStateModel(
     state_.allowed_input_types.push_back(omnibox::INPUT_TYPE_BROWSER_TAB);
   }
 
-  // Only add drive if it does not already exist and the drive flag is
-  // enabled.
-  if (!contains(omnibox::INPUT_TYPE_DRIVE) &&
-      base::FeatureList::IsEnabled(
-          omnibox::kComposeboxDriveContextMenuOption)) {
-    state_.allowed_input_types.push_back(omnibox::InputType::INPUT_TYPE_DRIVE);
-  }
   state_.active_tool = omnibox::ToolMode::TOOL_MODE_UNSPECIFIED;
+  state_.is_canvas_query_submitted = false;
+  if (auto parsed_tool = GetActiveToolFromUrl(active_url, state_.tool_configs,
+                                              state_.allowed_tools);
+      parsed_tool.has_value()) {
+    state_.active_tool = *parsed_tool;
+    if (*parsed_tool == omnibox::ToolMode::TOOL_MODE_CANVAS) {
+      state_.is_canvas_query_submitted = true;
+    }
+  }
   // the initial model should be the first allowed model, but can be
   // overridden by parameters in the active web contents URL.
   state_.active_model = state_.GetDefaultModel();
@@ -312,7 +305,9 @@ InputStateModel::InputStateModel(
     const InputStateModel& new_input_state_model,
     contextual_search::ContextualSearchSessionHandle& new_session_handle)
     : session_handle_(new_session_handle.AsWeakPtr()),
-      is_off_the_record_(new_input_state_model.is_off_the_record_) {
+      is_off_the_record_(new_input_state_model.is_off_the_record_),
+      browser_identity_matches_aim_identity_(
+          new_input_state_model.browser_identity_matches_aim_identity_) {
   state_ = new_input_state_model.state_;
   rule_set_ = new_input_state_model.rule_set_;
   pref_service_ = new_input_state_model.pref_service_;
@@ -374,11 +369,24 @@ void InputStateModel::setActiveModel(ModelMode model) {
   updateSelectedState(state_.active_tool, model);
 }
 
-void InputStateModel::UpdateModelFromUrl(const GURL& url) {
-  if (auto matched_model = GetActiveModelFromUrl(url, state_.model_configs,
-                                                 state_.allowed_models);
-      matched_model.has_value()) {
-    setActiveModel(*matched_model);
+void InputStateModel::UpdateStateFromUrl(const GURL& url) {
+  auto matched_tool =
+      GetActiveToolFromUrl(url, state_.tool_configs, state_.allowed_tools);
+  ToolMode new_tool = matched_tool.value_or(state_.active_tool);
+
+  bool new_canvas_submitted = state_.is_canvas_query_submitted;
+  if (matched_tool.has_value()) {
+    new_canvas_submitted = (*matched_tool == ToolMode::TOOL_MODE_CANVAS);
+  }
+
+  auto matched_model =
+      GetActiveModelFromUrl(url, state_.model_configs, state_.allowed_models);
+  ModelMode new_model = matched_model.value_or(state_.active_model);
+
+  if (new_model != state_.active_model || new_tool != state_.active_tool ||
+      new_canvas_submitted != state_.is_canvas_query_submitted) {
+    state_.is_canvas_query_submitted = new_canvas_submitted;
+    updateSelectedState(new_tool, new_model);
   }
 }
 
@@ -437,6 +445,15 @@ void InputStateModel::updateSelectedState(ToolMode tool, ModelMode model) {
 
   // Notify subscribers once `state_` is updated.
   notifySubscribers();
+}
+
+bool InputStateModel::IsDriveSupported() const {
+  // Drive is only supported when the browser identity matches the aim identity,
+  // not in an off-the-record (incognito) session, and the feature flag is
+  // enabled.
+  return browser_identity_matches_aim_identity_ && !is_off_the_record_ &&
+         base::FeatureList::IsEnabled(
+             omnibox::kComposeboxDriveContextMenuOption);
 }
 
 // Helper to check if search content sharing is enabled based on the

@@ -8,6 +8,7 @@
 #include "chrome/browser/glic/browser_ui/glic_vector_icon_manager.h"
 #include "chrome/browser/glic/public/features.h"
 #include "chrome/browser/ui/color/chrome_color_id.h"
+#include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/views/glic/glic_actor_task_icon.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_button.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
@@ -18,7 +19,16 @@ ToolbarGlicActorTaskIcon::ToolbarGlicActorTaskIcon(
     BrowserWindowInterface* browser_window_interface,
     PressedCallback pressed_callback)
     : GlicActorTaskIcon<ToolbarButton>(browser_window_interface,
-                                       pressed_callback) {}
+                                       pressed_callback) {
+  SetTaskIconToDefault();
+
+  // The task icon will only ever be shown with the GlicButton, so can always
+  // set the corner radii for split button styling.
+  SetLeftRightCornerRadii(kSplitLeftEdgeRadius, GetSplitRoundedEdgeRadius());
+  SetInkdropHoverColorId(kColorTabBackgroundInactiveHoverFrameActive);
+
+  UpdateColors();
+}
 
 ToolbarGlicActorTaskIcon::~ToolbarGlicActorTaskIcon() = default;
 
@@ -30,6 +40,12 @@ void ToolbarGlicActorTaskIcon::AddedToWidget() {
   UpdateIconsWithStandardColors(
       glic::GlicVectorIconManager::GetVectorIcon(IDR_ACTOR_AUTO_BROWSE_ICON));
   GlicActorTaskIcon<ToolbarButton>::AddedToWidget();
+}
+
+gfx::Size ToolbarGlicActorTaskIcon::GetMinimumSize() const {
+  int size = GetLayoutConstant(LayoutConstant::kToolbarButtonHeight) +
+             kActorNudgeLabelMargin;
+  return gfx::Size(size, size);
 }
 
 void ToolbarGlicActorTaskIcon::SetForegroundFrameActiveColorId(
@@ -74,9 +90,16 @@ void ToolbarGlicActorTaskIcon::SetLeftRightCornerRadii(int left, int right) {
 
 float ToolbarGlicActorTaskIcon::GetCornerRadiusFor(
     ToolbarButton::Edge edge) const {
-  return edge == ToolbarButton::Edge::kLeft
-             ? left_corner_radius_.value_or(GetRoundedCornerRadius())
-             : GetRoundedCornerRadius();
+  switch (edge) {
+    case ToolbarButton::Edge::kLeft:
+    case ToolbarButton::Edge::kTopLeft:
+    case ToolbarButton::Edge::kBottomLeft:
+      return left_corner_radius_.value_or(GetRoundedCornerRadius());
+    case ToolbarButton::Edge::kRight:
+    case ToolbarButton::Edge::kTopRight:
+    case ToolbarButton::Edge::kBottomRight:
+      return GetRoundedCornerRadius();
+  }
 }
 
 int ToolbarGlicActorTaskIcon::GetSplitRoundedEdgeRadius() {

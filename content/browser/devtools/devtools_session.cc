@@ -10,7 +10,9 @@
 #include "base/containers/flat_set.h"
 #include "base/functional/bind.h"
 #include "base/trace_event/trace_event.h"
+#include "content/browser/bad_message.h"
 #include "content/browser/devtools/devtools_manager.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/browser/devtools/protocol/devtools_domain_handler.h"
 #include "content/browser/devtools/protocol/protocol.h"
 #include "content/browser/devtools/render_frame_devtools_agent_host.h"
@@ -537,10 +539,39 @@ void DevToolsSession::FlushProtocolNotifications() {}
 // parsed and sent as is, since a renderer may be compromised; so therefore,
 // we're not sending them via the DevToolsAgentHostClientChannel interface
 // (::DispatchProtocolMessageToClient) but directly to the client instead.
-static void DispatchProtocolResponseOrNotification(
+void DevToolsSession::DispatchProtocolResponseOrNotification(
     DevToolsAgentHostClient* client,
     DevToolsAgentHostImpl* agent_host,
-    blink::mojom::DevToolsMessagePtr message) {
+    blink::mojom::DevToolsMessagePtr message,
+    const std::string& session_id,
+    const bool& is_notification) {
+  // If BigBuffer is backed by shared memory, make a copy so that a compromised
+  // renderer wouldn't be able to mess with the message as we validate it.
+  std::vector<uint8_t> message_bytes;
+  base::span<const uint8_t> message_span;
+  switch (message->data.storage_type()) {
+    case mojo_base::BigBuffer::StorageType::kBytes:
+      message_span = message->data.byte_span();
+      break;
+    case mojo_base::BigBuffer::StorageType::kSharedMemory:
+      message_bytes.assign(message->data.begin(), message->data.end());
+      message_span = message_bytes;
+      break;
+    default:
+      // just keep span empty, this will cause renderer killed for invalid
+      // message below.
+      break;
+  }
+
+  if (message_span.empty() ||
+      !ValidateMessage(session_id, /*expected_has_id=*/!is_notification,
+                       message_span)) {
+    if (RenderProcessHost* process_host = agent_host->GetProcessHost()) {
+      bad_message::ReceivedBadMessage(
+          process_host, bad_message::RFH_INCONSISTENT_DEVTOOLS_MESSAGE);
+    }
+    return;
+  }
   client->DispatchProtocolMessage(agent_host, message->data);
 }
 
@@ -560,7 +591,8 @@ void DevToolsSession::DispatchProtocolResponse(
   pending_messages_.erase(it->second);
   waiting_for_response_.erase(it);
   DispatchProtocolResponseOrNotification(client_, agent_host_,
-                                         std::move(message));
+                                         std::move(message), session_id_,
+                                         /*is_notification=*/false);
   // |this| may be deleted at this point.
 }
 
@@ -569,7 +601,8 @@ void DevToolsSession::DispatchProtocolNotification(
     blink::mojom::DevToolsSessionStatePtr updates) {
   ApplySessionStateUpdates(std::move(updates));
   DispatchProtocolResponseOrNotification(client_, agent_host_,
-                                         std::move(message));
+                                         std::move(message), session_id_,
+                                         /*is_notification=*/true);
   // |this| may be deleted at this point.
 }
 
@@ -692,6 +725,63 @@ DevToolsSession::MaybeGetDurableMessageCollector() {
   return durable_message_collector_.is_bound()
              ? durable_message_collector_.get()
              : nullptr;
+}
+
+DevToolsSession* DevToolsSession::GetSessionById(const std::string& session_id) {
+  auto it = child_sessions_.find(session_id);
+  return it == child_sessions_.end() ? nullptr : it->second.get();
+}
+
+// static
+bool DevToolsSession::ValidateMessage(const std::string& expected_session_id,
+                                      const bool expected_has_id,
+                                      base::span<const uint8_t> message) {
+  std::vector<uint8_t> cbor_message;
+  crdtp::span<uint8_t> span_message = crdtp::SpanFrom(message);
+
+  if (!crdtp::cbor::IsCBORMessage(span_message)) {
+    if (!crdtp::json::ConvertJSONToCBOR(span_message, &cbor_message).ok()) {
+      return false;  // Safely terminate renderer on malformed JSON
+    }
+    span_message = crdtp::SpanFrom(cbor_message);
+  }
+
+  // Do NOT use crdtp::Dispatchable here. It enforces the presence of both
+  // 'id' and 'method', which are not guaranteed in Responses and Notifications.
+  crdtp::span<uint8_t> extracted_session_id =
+      crdtp::cbor::GetString8ValueFromMap(span_message,
+                                          crdtp::SpanFrom("sessionId"));
+
+  if (!expected_has_id &&
+      crdtp::cbor::HasKeyInMap(span_message, crdtp::SpanFrom("id"))) {
+    DLOG(ERROR) << "Expected no id in the message but received one";
+    return false;
+  }
+
+  if (expected_session_id.empty()) {
+    if (!extracted_session_id.empty()) {
+      DLOG(ERROR) << "Root session expected no sessionId but received one: "
+                  << (extracted_session_id.empty()
+                          ? ""
+                          : std::string(extracted_session_id.begin(),
+                                        extracted_session_id.end()));
+      return false;
+    }
+    return true;
+  } else {
+    if (extracted_session_id.empty() ||
+        !crdtp::SpanEquals(crdtp::SpanFrom(expected_session_id),
+                           extracted_session_id)) {
+      DLOG(ERROR) << "Child session expected sessionId: " << expected_session_id
+                  << ", but got: "
+                  << (extracted_session_id.empty()
+                          ? ""
+                          : std::string(extracted_session_id.begin(),
+                                        extracted_session_id.end()));
+      return false;
+    }
+    return true;
+  }
 }
 
 }  // namespace content

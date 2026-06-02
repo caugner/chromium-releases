@@ -41,9 +41,9 @@ namespace views {
 class WebView;
 }  // namespace views
 
-namespace enterprise_watermark {
-class WatermarkView;
-}  // namespace enterprise_watermark
+namespace enterprise_data_protection {
+class DataProtectionOverlayView;
+}  // namespace enterprise_data_protection
 
 // ContentsContainerView holds the ContentsWebView and the outlines and
 // minitoolbar when in split view.
@@ -92,8 +92,9 @@ class ContentsContainerView : public views::View,
   ContentsCaptureBorderView* capture_contents_border_view() {
     return capture_contents_border_view_;
   }
-  enterprise_watermark::WatermarkView* watermark_view() {
-    return watermark_view_;
+  enterprise_data_protection::DataProtectionOverlayView*
+  data_protection_overlay_view() {
+    return data_protection_overlay_view_;
   }
   views::WebView* ai_overlay_dialog_view() { return ai_overlay_dialog_view_; }
   const ContentsContainerOutline* contents_outline_view() const {
@@ -102,6 +103,8 @@ class ContentsContainerView : public views::View,
   TabModalDialogHost* web_contents_modal_dialog_host() {
     return &web_contents_modal_dialog_host_;
   }
+
+  views::View* indigo_overlay_view() { return indigo_overlay_view_; }
 
   // Sets the contents resizing strategy.
   void SetContentsResizingStrategy(
@@ -184,8 +187,9 @@ class ContentsContainerView : public views::View,
   // Separator between the web contents and the Footer.
   raw_ptr<views::View> new_tab_footer_view_separator_ = nullptr;
 
-  // The view that overlays a watermark on the contents container.
-  raw_ptr<enterprise_watermark::WatermarkView> watermark_view_ = nullptr;
+  // The view that overlays the contents container.
+  raw_ptr<enterprise_data_protection::DataProtectionOverlayView>
+      data_protection_overlay_view_ = nullptr;
 
   // The overlay dialog view that is displayed on top of the web contents.
   raw_ptr<views::WebView> ai_overlay_dialog_view_ = nullptr;
@@ -210,6 +214,10 @@ class ContentsContainerView : public views::View,
   raw_ptr<ContentsContainerOutline> container_outline_ = nullptr;
 
   raw_ptr<ContentsCaptureBorderView> capture_contents_border_view_ = nullptr;
+
+  // Toolbar for chrome/browser/indigo/, which determines where in the content
+  // area it wants to float.
+  raw_ptr<views::View> indigo_overlay_view_ = nullptr;
 
   // See `SetTargetContentSize()`.
   std::optional<gfx::Outsets> target_content_bounds_;

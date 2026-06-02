@@ -19,6 +19,9 @@
   initial-value: 0deg;
 }
 
+/* Do not adjust height of ':host'. All children of ':host'
+ * inherit from the searchbox/composebox parent's height and width.
+ */
 :host {
   --color-dragging-opaque-frost-backup_: rgba(240, 242, 245, 1);
   --color-drag-placeholder-font: rgba(86, 89, 94, 1);
@@ -81,6 +84,11 @@
   --gradient-angle-end: 225deg;
   --mask-angle-start: -90deg;
   --mask-angle-end: 200deg;
+}
+
+.audio-animation {
+  opacity: 1;
+  transition: opacity 300ms ease-in-out;
 }
 
 #dragDropPlaceholder {
@@ -209,15 +217,6 @@
 :host(:not([entrypoint-name='Omnibox'])) .double-gradient {
   pointer-events: none;
   z-index: var(--search-animated-glow-gradient-z-index, 2);
-}
-
-:host([animation-state='listening']) {
-  --search-animated-glif-rotation-duration: 1.5s;
-}
-
-:host([animation-state='listening']) .gradient::before {
-  animation: gradient-spin-listen var(--glif-rotation-duration_)
-    var(--search-animated-glow-gradient-curve) forwards;
 }
 
 :host([animation-state='dragging'][energy-effect-animation-enabled]),
@@ -428,11 +427,6 @@
   animation: color-pulse-on-expand var(--expand-duration,
       var(--search-animated-glow-expand-duration))
       var(--standard-curve, var(--search-animated-glow-standard-curve));
-}
-
-:host([animation-state='listening']) .background::before {
-  animation:
-      plate-background-blur-on-listen var(--expand-timing_);
 }
 
 @keyframes plate-background-blur-on-expand {
@@ -660,10 +654,6 @@
   animation: gradient-border-width-close-submit var(--expand-timing_);
 }
 
-:host([animation-state='listening']) .background {
-  animation: gradient-border-width-close-listen var(--expand-timing_);
-}
-
 :host([animation-state='dragging']) .background::before {
   animation: none;
   /* Frosted glass color; overlays the actual composebox background: */
@@ -707,4 +697,29 @@
   100% {
     border-width: 0;
   }
+}
+
+/* Use opacity and pointer-events to utilize fade transition. */
+:host(:not([is-listening])) .audio-animation {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Hide audio animation via fade if permission prompt is showing. */
+:host(.embedded-permission-prompt-showing) .audio-animation {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Overlay that goes over any of the above effects
+ * (background, etc.) */
+#fullContainerOverlay {
+  display: flex;
+  /* Since ':host' has no size or position, this is sized and
+   * positioned relative to their nearest positioned ancestor, which
+   * is from the parent 'composebox' or 'searchbox'.
+   */
+  inset: 0;
+  /* Ensure it does not take up space in composebox/searchbox layout. */
+  position: absolute;
 }

@@ -840,6 +840,15 @@ gfx::Rect Widget::GetClientAreaBoundsInScreen() const {
                         : gfx::Rect();
 }
 
+gfx::Rect Widget::GetNonDecoratedClientAreaBoundsInScreen() const {
+  if (non_client_view_ && non_client_view_->frame_view()) {
+    return non_client_view_->frame_view()
+        ->GetNonDecoratedClientAreaBoundsInScreen();
+  }
+
+  return GetClientAreaBoundsInScreen();
+}
+
 gfx::Rect Widget::GetRestoredBounds() const {
   return native_widget_ ? native_widget_->GetRestoredBounds() : gfx::Rect();
 }
@@ -1606,10 +1615,13 @@ void Widget::SetCapture(View* view) {
   }
 
   if (!native_widget_->HasCapture()) {
+    WidgetDeletionObserver widget_deletion_observer(this);
     native_widget_->SetCapture();
 
-    // Early return if setting capture was unsuccessful.
-    if (!native_widget_->HasCapture()) {
+    // Early return if this widget was destroyed, the native widget was torn
+    // down, or setting capture was unsuccessful.
+    if (!widget_deletion_observer.IsWidgetAlive() || !native_widget_ ||
+        !native_widget_->HasCapture()) {
       return;
     }
   }

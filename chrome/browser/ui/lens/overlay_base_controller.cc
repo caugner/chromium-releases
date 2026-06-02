@@ -12,6 +12,7 @@
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/lens/lens_preselection_bubble.h"
 #include "chrome/browser/ui/side_panel/side_panel_ui.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/interaction/browser_elements_views.h"
 #include "chrome/browser/ui/webui/webui_embedding_context.h"
 #include "chrome/common/pref_names.h"
@@ -216,10 +217,22 @@ void OverlayBaseController::RenderProcessExited(
 }
 
 raw_ptr<views::View> OverlayBaseController::CreateViewForOverlay() {
-  // Grab the host view for the overlay which is owned by the browser view.
-  auto* const host_view =
-      BrowserElementsViews::From(tab_->GetBrowserWindowInterface())
-          ->GetView(GetViewContainerId());
+  views::View* host_view = nullptr;
+
+  // For split views, we may use ContentsContainerViews to look up the ID.
+  if (!IsOverlayViewShared()) {
+    auto* browser_view = BrowserView::GetBrowserViewForBrowser(
+        tab_->GetBrowserWindowInterface());
+    if (browser_view) {
+      auto* contents_container =
+          browser_view->GetContentsContainerViewFor(tab_->GetContents());
+      host_view = contents_container->GetViewByElementId(GetViewContainerId());
+    }
+  } else {
+    // Grab the host view for the overlay which is owned by the browser view.
+    host_view = BrowserElementsViews::From(tab_->GetBrowserWindowInterface())
+                    ->GetView(GetViewContainerId());
+  }
   CHECK(host_view);
 
   // Setup a preselection anchor view. Usually bubbles are anchored to top
@@ -454,8 +467,20 @@ void OverlayBaseController::TabWillEnterBackground(tabs::TabInterface* tab) {
     // kHidden. Otherwise, restore to the current state.
     backgrounded_state_ = is_in_transitional_state ? State::kHidden : state_;
 
+    // If the overlay is shared, it should always be hidden when the tab will be
+    // backgrounded; if the overlay is scoped to a tab, it should be only hidden
+    // if the tab is not part of a split view.
+    // TODO(b:8222824): Revisit this for hiding the entire split view for
+    // tab-scoped overlay.
+    bool should_hide = false;
+    if (IsOverlayViewShared()) {
+      should_hide = true;
+    } else {
+      should_hide = !tab_->IsSplit();
+    }
+
     // If the overlay UI is showing, hide it.
-    if (overlay_web_view_ && overlay_web_view_->GetVisible()) {
+    if (should_hide && overlay_web_view_ && overlay_web_view_->GetVisible()) {
       HideOverlay();
     }
 
@@ -492,11 +517,9 @@ void OverlayBaseController::ShowModalUI() {
   auto* const side_panel_ui =
       tab_->GetBrowserWindowInterface()->GetFeatures().side_panel_ui();
   CHECK(side_panel_ui);
-  auto panel_type = GetSidePanelType();
 
   // Setup observer to be notified of side panel opens and closes.
   side_panel_shown_subscription_ = side_panel_ui->RegisterSidePanelShown(
-      panel_type,
       base::BindRepeating(&OverlayBaseController::OnSidePanelDidOpen,
                           weak_factory_.GetWeakPtr()));
 
@@ -525,12 +548,12 @@ void OverlayBaseController::ShowModalUI() {
 
   // This should be the last thing called in ShowUI, so if something goes wrong
   // in capturing the screenshot, the state gets cleaned up correctly.
-  if (side_panel_ui->IsSidePanelShowing(panel_type) && ShouldCloseSidePanel() &&
+  if (side_panel_ui->IsSidePanelShowing() && ShouldCloseSidePanel() &&
       !IsResultsSidePanelShowing()) {
     // Close the currently opened side panel synchronously if it's not the Lens
     // panel. Postpone the screenshot for a fixed time to allow reflow.
     state_ = State::kClosingOpenedSidePanel;
-    side_panel_ui->Close(panel_type, SidePanelEntryHideReason::kSidePanelClosed,
+    side_panel_ui->Close(SidePanelEntryHideReason::kSidePanelClosed,
                          /*suppress_animations=*/true);
     base::SingleThreadTaskRunner::GetCurrentDefault()
         ->PostNonNestableDelayedTask(
@@ -835,9 +858,9 @@ void OverlayBaseController::ShowPreselectionBubble() {
     preselection_widget_ = views::BubbleDialogDelegateView::CreateBubble(
         std::make_unique<lens::LensPreselectionBubble>(
             tab_->GetHandle(), preselection_widget_anchor_,
-            net::NetworkChangeNotifier::IsOffline(), config.show_cancel_button,
+            net::NetworkChangeNotifier::IsOffline(),
             config.bubble_background_color, config.icon,
-            config.cancel_button_color,
+            config.cancel_button_config,
             /*exit_clicked_callback=*/
             base::BindRepeating(&OverlayBaseController::RequestSyncClose,
                                 weak_factory_.GetWeakPtr(),

@@ -20,6 +20,7 @@ source_set("selection") {
   deps = [
     ":mojo_bindings",
     "//base",
+    "//chrome/browser/actor",
     "//chrome/browser/glic",
     "//chrome/browser/glic:mojo_bindings",
     "//chrome/browser/glic/resources:browser_resources",
@@ -29,6 +30,7 @@ source_set("selection") {
     "//chrome/browser/ui/webui:webui_util",
     "//chrome/browser/ui/webui/top_chrome",
     "//chrome/common:chrome_features",
+    "//components/actor/public/mojom:mojo_bindings",
     "//mojo/public/mojom/base",
   ]
 }

@@ -138,6 +138,9 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   gfx::Size GetVisibleViewportSize() override;
   gfx::Size GetVisibleViewportSizeDevicePx() override;
   void SetInsets(const gfx::Insets& insets) override;
+  void SetForceSpecifiedDeadline(
+      std::optional<uint32_t> deadline_in_frames) override;
+  std::optional<uint32_t> GetForceSpecifiedDeadlineForTesting() override;
   TouchSelectionControllerClientManager*
   GetTouchSelectionControllerClientManager() override;
   ui::mojom::VirtualKeyboardMode GetVirtualKeyboardMode() override;
@@ -219,6 +222,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
       gfx::PointF* transformed_point) override;
   viz::FrameSinkId GetRootFrameSinkId() override;
   viz::SurfaceId GetCurrentSurfaceId() const override;
+  bool HasSavedCompositorFrame() const override;
   void FocusedNodeChanged(bool is_editable_node,
                           const gfx::Rect& node_bounds_in_screen) override;
 #if BUILDFLAG(IS_WIN)

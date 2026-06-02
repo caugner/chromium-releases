@@ -93,21 +93,8 @@ void LensOverlayHomeworkPageActionController::HandlePageActionEvent(
       LensSearchController::FromTabWebContents(tab_->GetContents());
   CHECK(controller);
 
-  if (lens::features::IsLensOverlayStraightToSrpEnabled()) {
-    std::string query_text =
-        lens::features::GetStraightToSrpQuery().empty()
-            ? l10n_util::GetStringUTF8(IDS_LENS_CONTEXTUAL_SEARCH_DEFAULT_QUERY)
-            : lens::features::GetStraightToSrpQuery();
-    controller->IssueTextSearchRequest(
-        lens::LensOverlayInvocationSource::kHomeworkActionChip, query_text,
-        /*additional_query_parameters=*/{},
-        AutocompleteMatchType::Type::SEARCH_SUGGEST,
-        /*is_zero_prefix_suggestion=*/false,
-        /*suppress_contextualization=*/false);
-  } else {
-    controller->OpenLensOverlay(
-        lens::LensOverlayInvocationSource::kHomeworkActionChip);
-  }
+  controller->OpenLensOverlay(
+      lens::LensOverlayInvocationSource::kHomeworkActionChip);
   UserEducationService::MaybeNotifyNewBadgeFeatureUsed(
       tab_->GetContents()->GetBrowserContext(), lens::features::kLensOverlay);
 
@@ -132,9 +119,8 @@ bool LensOverlayHomeworkPageActionController::ShouldShow() {
 
   // Hide the homework chip if the broader lens feature is disabled.
   const auto* lens_overlay_entry_point_controller =
-      tab_->GetBrowserWindowInterface()
-          ->GetFeatures()
-          .lens_overlay_entry_point_controller();
+      lens::LensOverlayEntryPointController::From(
+          tab_->GetBrowserWindowInterface());
   if (!lens_overlay_entry_point_controller ||
       !lens_overlay_entry_point_controller->AreVisible()) {
     return false;

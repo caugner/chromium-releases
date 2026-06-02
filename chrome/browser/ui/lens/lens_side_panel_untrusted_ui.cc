@@ -181,7 +181,6 @@ LensSidePanelUntrustedUI::LensSidePanelUntrustedUI(content::WebUI* web_ui)
   html_source->AddBoolean(
       "composeboxShowTypedSuggest",
       lens::features::IsLensAimTypeAheadSuggestionsEnabled());
-  html_source->AddBoolean("composeboxShowTypedSuggestWithContext", true);
   // Enable ZPS if suggestions are enabled.
   html_source->AddBoolean("composeboxShowZps",
                           lens::features::GetAimSuggestionsEnabled());
@@ -190,15 +189,18 @@ LensSidePanelUntrustedUI::LensSidePanelUntrustedUI(content::WebUI* web_ui)
   // Disable context menu and related features.
   html_source->AddBoolean("composeboxShowContextMenu", false);
   html_source->AddBoolean("composeboxShowContextMenuDescription", true);
-  // Enables a fix that causes no flickering when transitioning between ZPS and
-  // typed suggestions.
-  html_source->AddBoolean("composeboxNoFlickerSuggestionsFix", true);
   // Specify metrics source.
   html_source->AddString(
       "composeboxSource",
       contextual_search::ContextualSearchMetricsRecorder::
           ContextualSearchSourceToString(
               contextual_search::ContextualSearchSource::kLens));
+
+  // Pass the feature flag state to the WebUI to determine if context
+  // management should be handled within the composebox.
+  // Hardcoded to false because the old side panel composebox lacks a context menu.
+  html_source->AddBoolean("contextManagementInComposeboxEnabled", false);
+  html_source->AddBoolean("tabFaviconChipsToCoinsEnabled", false);
 
   // Add strings for post message communication with the remote UI.
   lens::ClientToAimMessage handshake_ping;
@@ -214,8 +216,8 @@ LensSidePanelUntrustedUI::LensSidePanelUntrustedUI(content::WebUI* web_ui)
   html_source->AddResourcePaths(kLensSharedResources);
 
   // Add required resources for the searchbox.
-  html_source->AddLocalizedStrings(
-      SearchboxHandler::GetWebUIDataSourceDict(Profile::FromWebUI(web_ui)));
+  html_source->AddLocalizedStrings(SearchboxHandler::GetWebUIDataSourceDict(
+      Profile::FromWebUI(web_ui), {.is_lens = true}));
   html_source->AddString(
       "searchboxDefaultIcon",
       lens::features::GetVisualSelectionUpdatesEnableGradientSuperG()
@@ -247,10 +249,7 @@ LensSidePanelUntrustedUI::LensSidePanelUntrustedUI(content::WebUI* web_ui)
   html_source->AddString(
       "searchboxComposePlaceholder",
       l10n_util::GetStringUTF8(IDS_LENS_COMPOSEBOX_HINT_TEXT));
-  html_source->AddBoolean("composeboxShowPdfUpload", false);
   html_source->AddBoolean("composeboxSmartComposeEnabled", false);
-  html_source->AddBoolean("composeboxShowDeepSearchButton", false);
-  html_source->AddBoolean("composeboxShowCreateImageButton", false);
 
   // If the ThemeSource isn't added here, since this WebUI is
   // chrome-untrusted, it will be unable to load stylesheets until a new tab

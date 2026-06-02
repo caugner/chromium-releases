@@ -172,7 +172,6 @@ constexpr char kDocumentWithNamedElement[] = "/select.html";
 constexpr char kDocumentWithNamedElementWithFragment[] =
     "/select.html#fragment";
 constexpr char kDocumentWithImage[] = "/test_visual.html";
-constexpr char kDocumentWithDynamicColor[] = "/lens/dynamic_color.html";
 constexpr char kPdfDocument[] = "/pdf/test.pdf";
 constexpr char kMultiPagePdf[] = "/pdf/test-bookmarks.pdf";
 constexpr char kPdfDocumentWithForm[] = "/pdf/submit_form.pdf";
@@ -415,9 +414,6 @@ class LensOverlayPageFake : public lens::mojom::LensPage {
     last_received_text_ = std::move(text);
   }
 
-  void ThemeReceived(lens::mojom::OverlayThemePtr theme) override {
-    last_received_theme_ = std::move(theme);
-  }
 
   void ShouldShowContextualSearchBox(bool should_show) override {
     last_received_should_show_contextual_searchbox_ = should_show;
@@ -471,7 +467,6 @@ class LensOverlayPageFake : public lens::mojom::LensPage {
 
   void Reset() {
     last_received_screenshot_.reset();
-    last_received_theme_->reset();
     last_received_objects_ = std::vector<lens::mojom::OverlayObjectPtr>();
     last_received_text_.reset();
     post_region_selection_.reset();
@@ -492,7 +487,6 @@ class LensOverlayPageFake : public lens::mojom::LensPage {
 
   SkBitmap last_received_screenshot_;
   std::optional<bool> last_received_is_side_panel_open_;
-  std::optional<lens::mojom::OverlayThemePtr> last_received_theme_;
   std::vector<lens::mojom::OverlayObjectPtr> last_received_objects_;
   bool last_received_should_show_contextual_searchbox_ = false;
   std::string source_language_;
@@ -732,13 +726,12 @@ class LensOverlayControllerBrowserTest : public InProcessBrowserTest {
         kActiveContentsWebViewRetrievalId);
   }
 
+  SidePanel* GetSidePanel() { return browser()->GetBrowserView().side_panel(); }
+
   virtual void SetupFeatureList() {
     feature_list_.InitWithFeaturesAndParameters(
         {{lens::features::kLensOverlay,
-          {{"results-search-url", kResultsSearchBaseUrl},
-           {"use-dynamic-theme", "true"},
-           {"use-dynamic-theme-min-population-pct", "0.002"},
-           {"use-dynamic-theme-min-chroma", "3.0"}}},
+          {{"results-search-url", kResultsSearchBaseUrl}}},
          {lens::features::kLensOverlayContextualSearchbox,
           {
               {"send-page-url-for-contextualization", "true"},
@@ -749,7 +742,6 @@ class LensOverlayControllerBrowserTest : public InProcessBrowserTest {
          {lens::features::kLensOverlaySidePanelOpenInNewTab, {}}},
         /*disabled_features=*/{
             contextual_tasks::kContextualTasks,
-            lens::features::kLensSearchZeroStateCsb,
             lens::features::kLensAimSuggestions,
             lens::features::kLensOverlaySuggestionsMigration,
             lens::features::kLensOverlayNonBlockingPrivacyNotice});
@@ -783,8 +775,7 @@ class LensOverlayControllerBrowserTest : public InProcessBrowserTest {
   }
 
   bool IsSidePanelOpen() {
-    return browser()->GetFeatures().side_panel_ui()->IsSidePanelShowing(
-        GetLensOverlaySidePanelCoordinator()->GetPanelType());
+    return browser()->GetFeatures().side_panel_ui()->IsSidePanelShowing();
   }
 
   bool IsLensResultsSidePanelShowing() {
@@ -828,9 +819,7 @@ class LensOverlayControllerBrowserTest : public InProcessBrowserTest {
 
   void SimulateOpenInNewTabButtonClick() {
     views::Button* open_in_new_tab_button =
-        browser()
-            ->GetBrowserView()
-            .contents_height_side_panel()
+        GetSidePanel()
             ->GetHeaderView<SidePanelHeader>()
             ->header_open_in_new_tab_button();
     views::test::ButtonTestApi(open_in_new_tab_button)
@@ -1332,8 +1321,7 @@ IN_PROC_BROWSER_TEST_F(LensOverlayControllerBrowserTest, SidePanelModalDialog) {
   // Wait for open animation to progress. This is important, otherwise when we
   // close the lens overlay at a later time the side panel will be closed
   // together synchronously.
-  SidePanel* side_panel = BrowserView::GetBrowserViewForBrowser(browser())
-                              ->contents_height_side_panel();
+  SidePanel* side_panel = GetSidePanel();
   ASSERT_TRUE(base::test::RunUntil(
       [&]() { return side_panel->GetAnimationValue() > 0; }));
 
@@ -1426,8 +1414,7 @@ IN_PROC_BROWSER_TEST_F(LensOverlayControllerBrowserTest,
   ASSERT_FALSE(GetWebView()->GetEnabled());
 
   // Close the side panel.
-  browser()->GetFeatures().side_panel_ui()->Close(
-      GetLensOverlaySidePanelCoordinator()->GetPanelType());
+  browser()->GetFeatures().side_panel_ui()->Close();
 
   // Ensure the overlay closes too.
   ASSERT_TRUE(base::test::RunUntil(
@@ -1459,8 +1446,7 @@ IN_PROC_BROWSER_TEST_F(LensOverlayControllerBrowserTest,
   EXPECT_TRUE(IsLensResultsSidePanelShowing());
 
   // Close the side panel.
-  browser()->GetFeatures().side_panel_ui()->Close(
-      GetLensOverlaySidePanelCoordinator()->GetPanelType());
+  browser()->GetFeatures().side_panel_ui()->Close();
 
   // Verify that the side panel close logic was not iteratively re-triggered
   // by the notification loop, which prevents reentrancy on the ObserverList.
@@ -4129,9 +4115,7 @@ IN_PROC_BROWSER_TEST_F(LensOverlayControllerBrowserTest,
 
   // Make the side panel larger.
   const int increment = -50;
-  BrowserView::GetBrowserViewForBrowser(browser())
-      ->contents_height_side_panel()
-      ->OnResize(increment, true);
+  GetSidePanel()->OnResize(increment, true);
   // Popping the query should load the previous query into the results frame.
   content::TestNavigationObserver pop_observer(
       controller->GetSidePanelWebContentsForTesting());
@@ -4584,10 +4568,8 @@ IN_PROC_BROWSER_TEST_F(LensOverlayControllerBrowserTest, SidePanelOpen) {
   // Wait for side panel to fully open.
   browser()->GetFeatures().side_panel_ui()->Show(
       SidePanelEntry::Id::kBookmarks);
-  ASSERT_TRUE(base::test::RunUntil([&]() {
-    return browser()->GetBrowserView().contents_height_side_panel()->state() ==
-           SidePanel::State::kOpen;
-  }));
+  ASSERT_TRUE(base::test::RunUntil(
+      [&]() { return GetSidePanel()->state() == SidePanel::State::kOpen; }));
 
   auto* controller = GetLensOverlayController();
   OpenLensOverlay(LensOverlayInvocationSource::kAppMenu);
@@ -4597,8 +4579,7 @@ IN_PROC_BROWSER_TEST_F(LensOverlayControllerBrowserTest, SidePanelOpen) {
       [&]() { return controller->state() == State::kOverlay; }));
 
   // And the side-panel should be hidden.
-  EXPECT_EQ(browser()->GetBrowserView().contents_height_side_panel()->state(),
-            SidePanel::State::kClosed);
+  EXPECT_EQ(GetSidePanel()->state(), SidePanel::State::kClosed);
 }
 
 // TODO(crbug.com/471036459): Reenable this test on Mac
@@ -4631,10 +4612,8 @@ IN_PROC_BROWSER_TEST_F(LensOverlayControllerBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(LensOverlayControllerBrowserTest, EnterprisePolicy) {
   // The default policy is to allow the feature to be enabled.
-  EXPECT_TRUE(browser()
-                  ->GetFeatures()
-                  .lens_overlay_entry_point_controller()
-                  ->IsEnabled());
+  EXPECT_TRUE(
+      lens::LensOverlayEntryPointController::From(browser())->IsEnabled());
 
   // If GenAiDefaultSettings is set, the feature enablement should
   // fallback to GenAiDefaultSettings setting.
@@ -4643,28 +4622,22 @@ IN_PROC_BROWSER_TEST_F(LensOverlayControllerBrowserTest, EnterprisePolicy) {
                policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
                base::Value(2), nullptr);
   policy_provider()->UpdateChromePolicy(policies);
-  EXPECT_FALSE(browser()
-                   ->GetFeatures()
-                   .lens_overlay_entry_point_controller()
-                   ->IsEnabled());
+  EXPECT_FALSE(
+      lens::LensOverlayEntryPointController::From(browser())->IsEnabled());
 
   policies.Set("LensOverlaySettings", policy::POLICY_LEVEL_MANDATORY,
                policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
                base::Value(1), nullptr);
   policy_provider()->UpdateChromePolicy(policies);
-  EXPECT_FALSE(browser()
-                   ->GetFeatures()
-                   .lens_overlay_entry_point_controller()
-                   ->IsEnabled());
+  EXPECT_FALSE(
+      lens::LensOverlayEntryPointController::From(browser())->IsEnabled());
 
   policies.Set("LensOverlaySettings", policy::POLICY_LEVEL_MANDATORY,
                policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
                base::Value(0), nullptr);
   policy_provider()->UpdateChromePolicy(policies);
-  EXPECT_TRUE(browser()
-                  ->GetFeatures()
-                  .lens_overlay_entry_point_controller()
-                  ->IsEnabled());
+  EXPECT_TRUE(
+      lens::LensOverlayEntryPointController::From(browser())->IsEnabled());
 }
 
 class LensOverlayControllerEntrypointsBrowserTest
@@ -4684,8 +4657,7 @@ class LensOverlayControllerEntrypointsBrowserTest
     //   kAiModeOmniboxEntryPoint.
     feature_list_.InitWithFeaturesAndParameters(
         enabled_features,
-        /*disabled_features=*/{omnibox::kAiModeOmniboxEntryPoint,
-                               lens::features::kLensSearchZeroStateCsb});
+        /*disabled_features=*/{omnibox::kAiModeOmniboxEntryPoint});
   }
 
   void VerifyEntrypoints(bool expected_visible) {
@@ -5226,7 +5198,7 @@ class LensOverlayControllerBrowserFullscreenDisabled
           {
               {"enable-in-fullscreen", "false"},
           }}},
-        {{lens::features::kLensSearchZeroStateCsb}});
+        {});
   }
 };
 
@@ -5333,7 +5305,6 @@ class LensOverlayControllerBrowserPDFTest
     auto disabled = PDFExtensionTestBase::GetDisabledFeatures();
     disabled.emplace_back(lens::features::kLensOverlayContextualSearchbox);
     disabled.emplace_back(lens::features::kLensOverlayKeyboardSelection);
-    disabled.emplace_back(lens::features::kLensSearchZeroStateCsb);
     return disabled;
   }
 
@@ -5585,8 +5556,7 @@ class LensOverlayControllerBrowserPDFContextualizationTest
   }
 
   std::vector<base::test::FeatureRef> GetDisabledFeatures() const override {
-    return {contextual_tasks::kContextualTasks,
-            lens::features::kLensSearchZeroStateCsb};
+    return {contextual_tasks::kContextualTasks};
   }
 
  protected:
@@ -6241,8 +6211,7 @@ class LensOverlayControllerBrowserPDFUpdatedContentFieldsTest
   }
 
   std::vector<base::test::FeatureRef> GetDisabledFeatures() const override {
-    return {contextual_tasks::kContextualTasks,
-            lens::features::kLensSearchZeroStateCsb};
+    return {contextual_tasks::kContextualTasks};
   }
 
  protected:
@@ -6297,8 +6266,7 @@ class LensOverlayControllerBrowserPDFIncreaseLimitTest
   }
 
   std::vector<base::test::FeatureRef> GetDisabledFeatures() const override {
-    return {contextual_tasks::kContextualTasks,
-            lens::features::kLensSearchZeroStateCsb};
+    return {contextual_tasks::kContextualTasks};
   }
 
  protected:
@@ -6365,8 +6333,7 @@ class LensOverlayControllerBrowserWithPixelsTest
     feature_list_.InitWithFeatures(
         /*enabled_features=*/{}, /*disabled_features=*/{
             contextual_tasks::kContextualTasks,
-            lens::features::kLensOverlayVisualSelectionUpdates,
-            lens::features::kLensSearchZeroStateCsb});
+            lens::features::kLensOverlayVisualSelectionUpdates});
   }
 
   bool IsNotEmptyAndNotTransparentBlack(SkBitmap bitmap) {
@@ -6383,96 +6350,7 @@ class LensOverlayControllerBrowserWithPixelsTest
   }
 };
 
-IN_PROC_BROWSER_TEST_F(LensOverlayControllerBrowserWithPixelsTest,
-                       DynamicTheme_Fallback) {
-  WaitForPaint();
-  // State should start in off.
-  auto* controller = GetLensOverlayController();
-  ASSERT_EQ(controller->state(), State::kOff);
 
-  // Showing UI should change the state to screenshot and eventually to overlay.
-  OpenLensOverlay(LensOverlayInvocationSource::kAppMenu);
-  ASSERT_EQ(controller->state(), State::kScreenshot);
-  ASSERT_TRUE(base::test::RunUntil(
-      [&]() { return controller->state() == State::kOverlay; }));
-
-  // Verify screenshot was captured and stored.
-  auto screenshot_bitmap = controller->initial_screenshot();
-  EXPECT_TRUE(IsNotEmptyAndNotTransparentBlack(screenshot_bitmap));
-  screenshot_bitmap = controller->updated_screenshot();
-  EXPECT_TRUE(IsNotEmptyAndNotTransparentBlack(screenshot_bitmap));
-
-  // Verify screenshot was encoded and passed to WebUI.
-  auto* fake_controller = static_cast<LensOverlayControllerFake*>(controller);
-  ASSERT_TRUE(fake_controller);
-  EXPECT_FALSE(
-      fake_controller->fake_overlay_page_.last_received_screenshot_.empty());
-
-  // Verify expected color palette was identified, fallback expected
-  // with the page being mostly colorless.
-  ASSERT_EQ(lens::PaletteId::kFallback, controller->color_palette());
-  // Verify expected theme color were passed to WebUI.
-  auto expected_theme = lens::mojom::OverlayTheme::New();
-  expected_theme->primary = lens::kColorFallbackPrimary;
-  expected_theme->shader_layer_1 = lens::kColorFallbackShaderLayer1;
-  expected_theme->shader_layer_2 = lens::kColorFallbackShaderLayer2;
-  expected_theme->shader_layer_3 = lens::kColorFallbackShaderLayer3;
-  expected_theme->shader_layer_4 = lens::kColorFallbackShaderLayer4;
-  expected_theme->shader_layer_5 = lens::kColorFallbackShaderLayer5;
-  expected_theme->scrim = lens::kColorFallbackScrim;
-  expected_theme->surface_container_highest_light =
-      lens::kColorFallbackSurfaceContainerHighestLight;
-  expected_theme->surface_container_highest_dark =
-      lens::kColorFallbackSurfaceContainerHighestDark;
-  expected_theme->selection_element = lens::kColorFallbackSelectionElement;
-  EXPECT_TRUE(
-      fake_controller->fake_overlay_page_.last_received_theme_.has_value());
-  const auto& received_theme =
-      fake_controller->fake_overlay_page_.last_received_theme_.value();
-  EXPECT_EQ(received_theme->primary, expected_theme->primary);
-}
-
-IN_PROC_BROWSER_TEST_F(LensOverlayControllerBrowserWithPixelsTest,
-                       DynamicTheme_DynamicColorTangerine) {
-  WaitForPaint(kDocumentWithDynamicColor);
-
-  // State should start in off.
-  auto* controller = GetLensOverlayController();
-  ASSERT_EQ(controller->state(), State::kOff);
-
-  auto* fake_controller = static_cast<LensOverlayControllerFake*>(controller);
-  ASSERT_TRUE(fake_controller);
-  EXPECT_TRUE(
-      fake_controller->fake_overlay_page_.last_received_screenshot_.empty());
-  EXPECT_FALSE(
-      fake_controller->fake_overlay_page_.last_received_theme_.has_value());
-
-  // Showing UI should change the state to screenshot and eventually to overlay.
-  OpenLensOverlay(LensOverlayInvocationSource::kAppMenu);
-  ASSERT_EQ(controller->state(), State::kScreenshot);
-  ASSERT_TRUE(base::test::RunUntil(
-      [&]() { return controller->state() == State::kOverlay; }));
-
-  // Verify screenshot was captured and stored.
-  auto screenshot_bitmap = controller->initial_screenshot();
-  EXPECT_TRUE(IsNotEmptyAndNotTransparentBlack(screenshot_bitmap));
-  screenshot_bitmap = controller->updated_screenshot();
-  EXPECT_TRUE(IsNotEmptyAndNotTransparentBlack(screenshot_bitmap));
-
-  // Verify screenshot was encoded and passed to WebUI.
-  EXPECT_FALSE(
-      fake_controller->fake_overlay_page_.last_received_screenshot_.empty());
-
-  // Verify expected color palette was identified.
-  ASSERT_EQ(lens::PaletteId::kTangerine, controller->color_palette());
-  // Verify expected theme color were passed to WebUI.
-  auto expected_theme = controller->CreateTheme(lens::PaletteId::kTangerine);
-  EXPECT_TRUE(
-      fake_controller->fake_overlay_page_.last_received_theme_.has_value());
-  const auto& received_theme =
-      fake_controller->fake_overlay_page_.last_received_theme_.value();
-  EXPECT_EQ(received_theme->primary, expected_theme->primary);
-}
 
 IN_PROC_BROWSER_TEST_F(LensOverlayControllerBrowserWithPixelsTest,
                        ViewportImageBoundingBoxes) {
@@ -7844,8 +7722,7 @@ class LensOverlayControllerIframeBrowserTest
           {{"results-search-url", embedded_test_server()
                                       ->GetURL(kDocumentWithNamedElement)
                                       .spec()}}}},
-        /*disabled_features=*/{contextual_tasks::kContextualTasks,
-                               lens::features::kLensSearchZeroStateCsb});
+        /*disabled_features=*/{contextual_tasks::kContextualTasks});
   }
 };
 
@@ -7969,7 +7846,7 @@ class LensOverlayControllerInnerTextEnabledSmallByteLimitTest
               {"use-apc-as-context", "false"},
               {"file-upload-limit-bytes", "10"},
           }}},
-        /*disabled_features=*/{lens::features::kLensSearchZeroStateCsb});
+        /*disabled_features=*/{});
   }
 };
 
@@ -8057,7 +7934,7 @@ class LensOverlayControllerApcOnlyTest
               {"use-apc-as-context", "true"},
           }},
          {lens::features::kLensSearchProtectedPage, {}}},
-        {lens::features::kLensSearchZeroStateCsb});
+        {});
   }
 };
 
@@ -8203,8 +8080,7 @@ class LensOverlayControllerInnerTextAndApc
               {"use-updated-content-fields", "true"},
           }},
          {lens::features::kLensSearchProtectedPage, {}}},
-        {contextual_tasks::kContextualTasks,
-         lens::features::kLensSearchZeroStateCsb});
+        {contextual_tasks::kContextualTasks});
   }
 };
 
@@ -8452,7 +8328,6 @@ class LensOverlayControllerContextualFeaturesDisabledTest
         /*disabled_features=*/{
             contextual_tasks::kContextualTasks,
             lens::features::kLensOverlayContextualSearchbox,
-            lens::features::kLensSearchZeroStateCsb,
             lens::features::kLensOverlayNonBlockingPrivacyNotice});
   }
 };
@@ -8705,8 +8580,7 @@ class LensOverlayControllerOverlaySearchbox
     feature_list_.InitWithFeatures(
         /*enabled_features=*/{lens::features::kLensOverlay,
                               lens::features::kLensOverlayContextualSearchbox},
-        /*disabled_features=*/{contextual_tasks::kContextualTasks,
-                               lens::features::kLensSearchZeroStateCsb});
+        /*disabled_features=*/{contextual_tasks::kContextualTasks});
   }
 
   void VerifyContextualSearchQueryParameters(const GURL& url_to_process) {
@@ -8938,8 +8812,7 @@ class LensOverlayControllerSideBySideBrowserTest
   void SetupFeatureList() override {
     feature_list_.InitWithFeaturesAndParameters(
         {{lens::features::kLensOverlay, {{"use-blur", "true"}}}},
-        {contextual_tasks::kContextualTasks,
-         lens::features::kLensSearchZeroStateCsb});
+        {contextual_tasks::kContextualTasks});
   }
 
   bool AreAnyRoundedCornersShowing() {
@@ -9386,48 +9259,6 @@ IN_PROC_BROWSER_TEST_F(LensOverlayControllerBrowserTest, ReshowOverlay) {
       fake_controller->fake_overlay_page_.last_received_screenshot_.isNull());
 }
 
-class LensOverlayControllerZeroStateCsbTest
-    : public LensOverlayControllerBrowserTest {
- protected:
-  void SetupFeatureList() override {
-    feature_list_.InitWithFeaturesAndParameters(
-        {{lens::features::kLensSearchZeroStateCsb, {}}},
-        /*disabled_features=*/{});
-  }
-};
-
-IN_PROC_BROWSER_TEST_F(LensOverlayControllerZeroStateCsbTest,
-                       OpenLensOverlayWithZeroStateCsbQuery) {
-  WaitForPaint();
-
-  // State should start in off.
-  auto* controller = GetLensOverlayController();
-  ASSERT_EQ(controller->state(), State::kOff);
-
-  // Showing UI should change the state to hidden and open the side panel.
-  OpenLensOverlay(LensOverlayInvocationSource::kAppMenu);
-
-  // Expect the Lens Overlay results panel to open.
-  ASSERT_TRUE(
-      base::test::RunUntil([&]() { return IsLensResultsSidePanelShowing(); }));
-  EXPECT_TRUE(content::WaitForLoadStop(
-      GetLensOverlaySidePanelCoordinator()->GetSidePanelWebContents()));
-  // Overlay should stay in off state.
-  ASSERT_EQ(controller->state(), State::kOff);
-
-  auto* fake_query_controller =
-      static_cast<lens::TestLensOverlayQueryController*>(
-          GetLensOverlayQueryController());
-  EXPECT_TRUE(fake_query_controller->last_queried_region());
-  EXPECT_EQ(fake_query_controller->last_queried_region()->box.width(), 1.0);
-  EXPECT_EQ(fake_query_controller->last_queried_region()->box.height(), 1.0);
-  EXPECT_EQ(fake_query_controller->last_queried_region()->box.x(), 0.5);
-  EXPECT_EQ(fake_query_controller->last_queried_region()->box.y(), 0.5);
-  EXPECT_EQ(fake_query_controller->last_queried_region()->rotation, 0.0);
-  EXPECT_EQ(fake_query_controller->last_lens_selection_type(),
-            lens::REGION_SEARCH);
-}
-
 class LensOverlayControllerReinvocationBrowserTest
     : public LensOverlayControllerBrowserTest {
  protected:
@@ -9436,13 +9267,20 @@ class LensOverlayControllerReinvocationBrowserTest
         {lens::features::kLensOverlay,
          lens::features::kLensOverlayContextualSearchbox,
          lens::features::kLensSearchReinvocationAffordance},
-        {contextual_tasks::kContextualTasks,
-         lens::features::kLensSearchZeroStateCsb});
+        {contextual_tasks::kContextualTasks});
   }
 };
 
+// TODO(crbug.com/510100103): Re-enable after fixing flakiness.
+#if BUILDFLAG(IS_LINUX)
+#define MAYBE_NotifiesSidePanelOfOverlayVisibilityChanges \
+  DISABLED_NotifiesSidePanelOfOverlayVisibilityChanges
+#else
+#define MAYBE_NotifiesSidePanelOfOverlayVisibilityChanges \
+  NotifiesSidePanelOfOverlayVisibilityChanges
+#endif
 IN_PROC_BROWSER_TEST_F(LensOverlayControllerReinvocationBrowserTest,
-                       NotifiesSidePanelOfOverlayVisibilityChanges) {
+                       MAYBE_NotifiesSidePanelOfOverlayVisibilityChanges) {
   WaitForPaint();
   auto* controller = GetLensOverlayController();
   ASSERT_EQ(controller->state(), State::kOff);
@@ -9893,17 +9731,15 @@ class LensOverlayControllerContextualTasksBrowserTest
          lens::features::kLensOverlayContextualSearchbox,
          lens::features::kLensSearchReinvocationAffordance,
          contextual_tasks::kContextualTasks},
-        {lens::features::kLensSearchZeroStateCsb});
+        {});
   }
 };
 
 IN_PROC_BROWSER_TEST_F(LensOverlayControllerContextualTasksBrowserTest,
                        EnterprisePolicy) {
   // The default policy is to allow the feature to be enabled.
-  EXPECT_TRUE(browser()
-                  ->GetFeatures()
-                  .lens_overlay_entry_point_controller()
-                  ->IsEnabled());
+  EXPECT_TRUE(
+      lens::LensOverlayEntryPointController::From(browser())->IsEnabled());
 
   // Even if the LensOverlaySettings policy is set to disabled, the feature
   // should still be enabled since the enterprise policy for contextual tasks is
@@ -9913,26 +9749,68 @@ IN_PROC_BROWSER_TEST_F(LensOverlayControllerContextualTasksBrowserTest,
                policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
                base::Value(1), nullptr);
   policy_provider()->UpdateChromePolicy(policies);
-  EXPECT_TRUE(browser()
-                  ->GetFeatures()
-                  .lens_overlay_entry_point_controller()
-                  ->IsEnabled());
+  EXPECT_TRUE(
+      lens::LensOverlayEntryPointController::From(browser())->IsEnabled());
 
   policies.Set("SearchContentSharingSettings", policy::POLICY_LEVEL_MANDATORY,
                policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
                base::Value(1), nullptr);
   policy_provider()->UpdateChromePolicy(policies);
-  EXPECT_FALSE(browser()
-                   ->GetFeatures()
-                   .lens_overlay_entry_point_controller()
-                   ->IsEnabled());
+  EXPECT_FALSE(
+      lens::LensOverlayEntryPointController::From(browser())->IsEnabled());
 
   policies.Set("SearchContentSharingSettings", policy::POLICY_LEVEL_MANDATORY,
                policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
                base::Value(0), nullptr);
   policy_provider()->UpdateChromePolicy(policies);
-  EXPECT_TRUE(browser()
-                  ->GetFeatures()
-                  .lens_overlay_entry_point_controller()
-                  ->IsEnabled());
+  EXPECT_TRUE(
+      lens::LensOverlayEntryPointController::From(browser())->IsEnabled());
+}
+
+class LensOverlayControllerNonBlockingPrivacyNoticeForImageSearchBrowserTest
+    : public LensOverlayControllerBrowserTest {
+ public:
+  void SetupFeatureList() override {
+    feature_list_.InitWithFeatures(
+        /*enabled_features=*/
+        {lens::features::kLensOverlayNonBlockingPrivacyNotice,
+         lens::features::kLensOverlayNonBlockingPrivacyNoticeForImageSearch},
+        /*disabled_features=*/{contextual_tasks::kContextualTasks});
+  }
+
+  void SetUpOnMainThread() override {
+    LensOverlayControllerBrowserTest::SetUpOnMainThread();
+    browser()->profile()->GetPrefs()->SetBoolean(
+        lens::prefs::kLensSharingPageScreenshotEnabled, false);
+    browser()->profile()->GetPrefs()->SetBoolean(
+        lens::prefs::kLensSharingPageContentEnabled, false);
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(
+    LensOverlayControllerNonBlockingPrivacyNoticeForImageSearchBrowserTest,
+    ShowUIWithPendingRegion_GrantsSessionPermissionAndOverridesRegion) {
+  WaitForPaint();
+
+  auto* controller = GetLensOverlayController();
+  ASSERT_EQ(controller->state(), State::kOff);
+
+  OpenLensOverlayWithPendingRegion(
+      LensOverlayInvocationSource::kContentAreaContextMenuImage,
+      kTestRegion->Clone(), CreateNonEmptyBitmap(100, 100));
+  ASSERT_EQ(controller->state(), State::kScreenshot);
+  ASSERT_TRUE(
+      base::test::RunUntil([&]() { return IsLensResultsSidePanelShowing(); }));
+
+  auto* fake_query_controller =
+      static_cast<lens::TestLensOverlayQueryController*>(
+          GetLensOverlayQueryController());
+  EXPECT_TRUE(fake_query_controller->HasPermissionForSession());
+
+  ASSERT_TRUE(fake_query_controller->last_queried_region());
+  const auto& box = fake_query_controller->last_queried_region()->box;
+  EXPECT_EQ(box.x(), 0.5f);
+  EXPECT_EQ(box.y(), 0.5f);
+  EXPECT_EQ(box.width(), 1.0f);
+  EXPECT_EQ(box.height(), 1.0f);
 }

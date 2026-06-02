@@ -23,6 +23,9 @@ BASE_DECLARE_FEATURE(kContextualTasksContextLibrary);
 BASE_DECLARE_FEATURE(kContextualTasksContextLogging);
 BASE_DECLARE_FEATURE(kContextualTasksShowOnboardingTooltip);
 
+// Enables prefetching of cookies for contextual tasks.
+BASE_DECLARE_FEATURE(kContextualTasksCookiePrefetch);
+
 // Overrides the value of EntryPointEligibilitymanager::IsEligible to true.
 BASE_DECLARE_FEATURE(kContextualTasksForceEntryPointEligibility);
 
@@ -48,6 +51,10 @@ BASE_DECLARE_FEATURE(kEnableNotifyZeroStateRenderedCapability);
 // requests initiated from within an embedded Co-Browse <webview>.
 BASE_DECLARE_FEATURE(kContextualTasksSendFullVersionListEnabled);
 
+// If enabled, AIM will send the ContextualInputUploadType enum on
+// ContextualInputs.
+BASE_DECLARE_FEATURE(kContextualTasksSendContextualInputUploadType);
+
 // When contextual tasks is disabled and this flag is enabled, intecept the
 // contextual tasks URL and redirect to aim URL.
 BASE_DECLARE_FEATURE(kContextualTasksUrlRedirectToAimUrl);
@@ -71,8 +78,8 @@ BASE_DECLARE_FEATURE(kContextualTasksRoundedClipPath);
 // panel. The menu is still shown for lens flows.
 BASE_DECLARE_FEATURE(kContextualTasksHideMenuOnAiPage);
 
-// Enables updating the model from URL parameters on every inner navigation.
-BASE_DECLARE_FEATURE(kContextualTasksUpdateModelOnNavigation);
+// Enables hiding the close button when in vertical tabs or immersive mode.
+BASE_DECLARE_FEATURE(kContextualTasksHideCloseButtonInVerticalTabs);
 
 // Enables intercepting YouTube links with timestamps to seek video instead of
 // navigating.
@@ -82,6 +89,9 @@ BASE_DECLARE_FEATURE(kContextualTasksVideoCitations);
 // navigating.
 BASE_DECLARE_FEATURE(kContextualTasksPdfCitations);
 
+// When enabled, the back button can expand the side panel.
+BASE_DECLARE_FEATURE(kContextualTasksBackButtonExpandsSidePanel);
+
 // Enables lazy fetching of cluster info for multimodal queries.
 BASE_DECLARE_FEATURE(kContextualTasksLazyFetchClusterInfo);
 
@@ -89,11 +99,18 @@ BASE_DECLARE_FEATURE(kContextualTasksLazyFetchClusterInfo);
 // flow.
 BASE_DECLARE_FEATURE(kContextualTasksWebpageApcComparison);
 
-bool GetIsContextualTasksUpdateModeOnNavigationEnabled();
+// When enabled, AIM must send the browser a message to initiate the cobrowse
+// experience for link clicks.
+BASE_DECLARE_FEATURE(kAimTriggeredThreadLinks);
+
+// Enables window tracking for Contextual Tasks.
+BASE_DECLARE_FEATURE(kContextualTasksWindowTracking);
 
 bool GetIsContextualTasksPdfCitationsEnabled();
 
 bool GetIsContextualTasksLazyFetchClusterInfoEnabled();
+
+bool GetIsContextualTasksWindowTrackingEnabled();
 
 // Enum denoting which entry point can show when enabled.
 enum class EntryPointOption {
@@ -123,6 +140,13 @@ extern const base::FeatureParam<std::string> kQueryEmbeddingTask;
 // The sample rate for logging contextual tasks context quality.
 extern const base::FeatureParam<double>
     kContextualTasksContextLoggingSampleRate;
+
+// Controls whether we set the upload type in CreateSearchUrl.
+extern const base::FeatureParam<bool> kSendContextualInputUploadTypeInSearchUrl;
+
+// Controls whether we set the upload type in CreateClientToAimRequest.
+extern const base::FeatureParam<bool>
+    kSendContextualInputUploadTypeInAimRequest;
 
 // Controls whether the contextual task page action should show
 extern const base::FeatureParam<EntryPointOption, true> kShowEntryPoint;
@@ -320,6 +344,10 @@ extern const char kContextualTasksContextName[];
 extern const char kContextualTasksContextDescription[];
 extern const char kContextualTasksSuggestionsEnabledName[];
 extern const char kContextualTasksSuggestionsEnabledDescription[];
+extern const char kContextualTasksBackButtonExpandsSidePanelName[];
+extern const char kContextualTasksBackButtonExpandsSidePanelDescription[];
+extern const char kContextualTasksCookiePrefetchName[];
+extern const char kContextualTasksCookiePrefetchDescription[];
 
 }  // namespace flag_descriptions
 

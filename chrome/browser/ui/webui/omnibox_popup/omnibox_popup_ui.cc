@@ -18,6 +18,7 @@
 #include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/ui_features.h"
+#include "chrome/browser/ui/views/omnibox/omnibox_popup_presenter_base.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
 #include "chrome/browser/ui/webui/metrics_reporter/metrics_reporter_service.h"
 #include "chrome/browser/ui/webui/omnibox_popup/omnibox_popup_aim_handler.h"
@@ -35,6 +36,7 @@
 #include "components/favicon_base/favicon_url_parser.h"
 #include "components/lens/lens_features.h"
 #include "components/omnibox/browser/aim_eligibility_service.h"
+#include "components/omnibox/common/composebox_features.h"
 #include "components/omnibox/common/omnibox_features.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -61,7 +63,7 @@ std::string_view AddContextButtonVariantToSearchboxLayoutMode(
 bool OmniboxPopupUIConfig::IsWebUIEnabled(
     content::BrowserContext* browser_context) {
   return omnibox::IsAimPopupFeatureEnabled() ||
-         base::FeatureList::IsEnabled(omnibox::kWebUIOmniboxFullPopup) ||
+         omnibox::IsWebUIOmniboxFullPopupEnabled() ||
          omnibox::IsWebUIOmniboxPopupEnabled() ||
          features::IsWebUILocationBarEnabled();
 }
@@ -93,6 +95,8 @@ OmniboxPopupUI::OmniboxPopupUI(content::WebUI* web_ui)
   source->AddBoolean("isTopChromeSearchbox", true);
   source->AddBoolean("omniboxAimPopupEnabled",
                      omnibox::IsAimPopupFeatureEnabled());
+  source->AddBoolean("omniboxShowContextButtonSuggestionLabel",
+                     omnibox::kContextButtonShowSuggestionLabel.Get());
   source->AddBoolean(
       "omniboxPopupDebugEnabled",
       base::FeatureList::IsEnabled(omnibox::kWebUIOmniboxPopupDebug));
@@ -119,13 +123,6 @@ OmniboxPopupUI::OmniboxPopupUI(content::WebUI* web_ui)
   source->AddString("composeboxImageFileTypes", image_mime_types);
   source->AddBoolean("lensSendRawFileMediaTypesEnabled",
                      lens::features::IsLensSendRawFileMediaTypesEnabled());
-  const auto* aim_eligibility_service =
-      AimEligibilityServiceFactory::GetForProfile(profile_);
-  bool show_pdf_upload = aim_eligibility_service &&
-                         aim_eligibility_service->IsPdfUploadEligible() &&
-                         composebox_config.is_pdf_upload_enabled();
-  source->AddBoolean("composeboxShowPdfUpload", show_pdf_upload);
-
   source->AddBoolean(
       "caretAnimationEnabled",
       base::FeatureList::IsEnabled(omnibox::kOmniboxAnimatedCaret));
@@ -133,6 +130,8 @@ OmniboxPopupUI::OmniboxPopupUI(content::WebUI* web_ui)
                      omnibox::kContextMenuEnableMultiTabSelection.Get());
   source->AddBoolean("composeboxShowContextMenu",
                      omnibox::kShowContextMenu.Get());
+  // TODO (crbug.com/509939902) - Clean up composeboxShowContextMenuDescription
+  // and determine if it should be removed in all instances.
   source->AddBoolean(
       "composeboxShowContextMenuDescription",
       omnibox::kShowContextMenuDescription.Get() &&
@@ -140,10 +139,6 @@ OmniboxPopupUI::OmniboxPopupUI(content::WebUI* web_ui)
               omnibox::AddContextButtonVariant::kInline);
   source->AddBoolean("composeboxShowContextMenuTabPreviews",
                      omnibox::kShowContextMenuTabPreviews.Get());
-  source->AddBoolean("composeboxShowCreateImageButton",
-                     omnibox::IsCreateImagesEnabled(profile_));
-  source->AddBoolean("composeboxShowDeepSearchButton",
-                     omnibox::IsDeepSearchEnabled(profile_));
   source->AddBoolean("composeboxShowImageSuggest",
                      omnibox::kShowComposeboxImageSuggestions.Get());
   source->AddBoolean("composeboxShowLensSearchChip",
@@ -158,10 +153,19 @@ OmniboxPopupUI::OmniboxPopupUI(content::WebUI* web_ui)
   source->AddBoolean("composeboxShowZps", omnibox::kShowComposeboxZps.Get());
   source->AddBoolean("composeboxSmartComposeEnabled",
                      omnibox::kShowSmartCompose.Get());
+  source->AddBoolean("contextButtonHasBackground",
+                     omnibox::kContextButtonHasBackground.Get());
+  source->AddBoolean("webuiOmniboxSimplificationEnabled",
+                     base::FeatureList::IsEnabled(
+                         omnibox::internal::kWebUIOmniboxSimplification));
   source->AddBoolean("hideClassicContextButton",
                      omnibox::kHideClassicContextButton.Get());
   source->AddBoolean("composeboxForkEnabled",
                      omnibox::kUseComposeboxFork.Get());
+  source->AddBoolean(
+      "contextManagementInComposeboxEnabled",
+      base::FeatureList::IsEnabled(omnibox::kContextManagementInComposebox));
+  source->AddBoolean("tabFaviconChipsToCoinsEnabled", false);
   auto searchbox_layout_mode = AddContextButtonVariantToSearchboxLayoutMode(
       omnibox::kWebUIOmniboxAimPopupAddContextButtonVariantParam.Get());
   source->AddString("searchboxLayoutMode", searchbox_layout_mode);
@@ -179,12 +183,13 @@ OmniboxPopupUI::OmniboxPopupUI(content::WebUI* web_ui)
   source->AddBoolean(
       "energyEffectEnabled",
       base::FeatureList::IsEnabled(omnibox::kEnergyEffectInOmnibox));
+  source->AddBoolean("contextButtonShapeIsOblong",
+                     omnibox::kContextButtonShapeIsOblong.Get());
 
-  webui::SetupWebUIDataSource(
-      source, kOmniboxPopupResources,
-      base::FeatureList::IsEnabled(omnibox::kWebUIOmniboxFullPopup)
-          ? IDR_OMNIBOX_POPUP_OMNIBOX_POPUP_FULL_HTML
-          : IDR_OMNIBOX_POPUP_OMNIBOX_POPUP_HTML);
+  webui::SetupWebUIDataSource(source, kOmniboxPopupResources,
+                              omnibox::IsWebUIOmniboxFullPopupEnabled()
+                                  ? IDR_OMNIBOX_POPUP_OMNIBOX_POPUP_FULL_HTML
+                                  : IDR_OMNIBOX_POPUP_OMNIBOX_POPUP_HTML);
   webui::EnableTrustedTypesCSP(source);
 
   content::URLDataSource::Add(profile_,
@@ -280,6 +285,15 @@ void OmniboxPopupUI::CreatePageHandler(
                           base::Unretained(this)),
       base::BindRepeating(&OmniboxPopupUI::ClearContextualSessionHandle,
                           base::Unretained(this)));
+
+  // If presenter delegate is connected, set the delegate in the handler so the
+  // handler can notify the delegate when there are embedded permissions prompt
+  // changes. Otherwise, once the presenter delegate connects itself, connect
+  // the two there instead. `composebox_handler_` is used since composebox page
+  // handler is where PEPC mojo call lives.
+  if (presenter_delegate_) {
+    composebox_handler_->set_delegate(presenter_delegate_);
+  }
 }
 
 contextual_search::ContextualSearchSessionHandle*
@@ -301,4 +315,17 @@ OmniboxPopupUI::GetOrCreateContextualSessionHandle() {
 
 void OmniboxPopupUI::ClearContextualSessionHandle() {
   shared_session_handle_.reset();
+}
+
+void OmniboxPopupUI::SetPresenterDelegate(OmniboxPopupPresenterBase* delegate) {
+  presenter_delegate_ = delegate;
+
+  // If the handler is initialized already, set the delegate in the handler so
+  // the handler can notify the delegate when there are embedded permissions
+  // prompt changes. Otherwise, once the handler is initialized, connect the two
+  // there instead. `composebox_handler_` is used since composebox page handler
+  // is where PEPC mojo call lives.
+  if (composebox_handler_) {
+    composebox_handler_->set_delegate(presenter_delegate_);
+  }
 }

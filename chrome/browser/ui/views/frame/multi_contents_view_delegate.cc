@@ -8,7 +8,7 @@
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/navigator/browser_navigator.h"
 #include "chrome/browser/ui/tabs/split_tab_metrics.h"
 #include "chrome/browser/ui/tabs/tab_enums.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -40,8 +40,9 @@ void MultiContentsViewDelegateImpl::WebContentsFocused(
   // split. There could be a race condition between when the focus happens and
   // when the contents of MultiContentsView are swapped out. See
   // crbug.com/485670308.
-  if (std::find(tabs.begin(), tabs.end(), tab_strip_model_->GetActiveTab()) !=
-      tabs.end()) {
+  if (tab_strip_model_->GetActiveTab() != tab &&
+      std::find(tabs.begin(), tabs.end(), tab_strip_model_->GetActiveTab()) !=
+          tabs.end()) {
     tab_strip_model_->ActivateTabAt(tab_strip_model_->GetIndexOfTab(tab));
   }
 }

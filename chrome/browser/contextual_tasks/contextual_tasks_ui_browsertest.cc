@@ -18,6 +18,7 @@
 #include "chrome/browser/contextual_tasks/contextual_tasks_cookie_synchronizer.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_panel_controller.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_service_factory.h"
+#include "chrome/browser/contextual_tasks/contextual_tasks_types.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service_delegate_desktop.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service_factory.h"
@@ -93,6 +94,10 @@ class MockContextualTasksPage : public contextual_tasks::mojom::Page {
   MOCK_METHOD(void, SetInNlm, (bool in_nlm), (override));
   MOCK_METHOD(void, OnAiPageStatusChanged, (bool), (override));
   MOCK_METHOD(void,
+              OnWindowClosed,
+              (const contextual_tasks::ContextualWindowId& window_id),
+              (override));
+  MOCK_METHOD(void,
               OnLensOverlayStateChanged,
               (bool is_showing, bool maybe_show_overlay_hint_text),
               (override));
@@ -108,6 +113,7 @@ class MockContextualTasksPage : public contextual_tasks::mojom::Page {
   MOCK_METHOD(void, LockInput, (), (override));
   MOCK_METHOD(void, UnlockInput, (), (override));
   MOCK_METHOD(void, SetShowReopenTabs, (bool show), (override));
+  MOCK_METHOD(void, SetExpandButtonEnabled, (bool enabled), (override));
   MOCK_METHOD(void,
               RemoveInjectedInput,
               (const base::UnguessableToken& file_token),
@@ -384,7 +390,8 @@ class ContextualTasksUICookieSyncBrowserTest
         profile, std::move(delegate),
         contextual_tasks::ContextualTasksServiceFactory::GetForProfile(profile),
         IdentityManagerFactory::GetForProfile(profile),
-        AimEligibilityServiceFactory::GetForProfile(profile), std::move(mock));
+        AimEligibilityServiceFactory::GetForProfile(profile),
+        /*eligibility_manager=*/nullptr, std::move(mock));
   }
 
  protected:
@@ -625,6 +632,15 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksNoMockBrowserTest, CanZoom) {
 }
 
 IN_PROC_BROWSER_TEST_F(ContextualTasksNoMockBrowserTest,
+                       IncognitoDoesNotCrash) {
+  Browser* incognito_browser = CreateIncognitoBrowser();
+  EXPECT_TRUE(ui_test_utils::NavigateToURL(
+      incognito_browser, GURL(chrome::kChromeUINewTabPageURL)));
+  EXPECT_TRUE(ui_test_utils::NavigateToURL(
+      incognito_browser, GURL(chrome::kChromeUIContextualTasksURL)));
+}
+
+IN_PROC_BROWSER_TEST_F(ContextualTasksNoMockBrowserTest,
                        CannotZoomInSidePanel) {
   std::unique_ptr<content::WebContents> side_panel_contents =
       content::WebContents::Create(
@@ -642,6 +658,44 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksNoMockBrowserTest,
       zoom::ZoomController::FromWebContents(side_panel_contents.get());
   ASSERT_EQ(zoom::ZoomController::ZoomMode::ZOOM_MODE_DISABLED,
             zoom_controller->zoom_mode());
+}
+
+IN_PROC_BROWSER_TEST_F(ContextualTasksNoMockBrowserTest,
+                       BidirectionalZoomSync) {
+  EXPECT_TRUE(ui_test_utils::NavigateToURL(
+      browser(), GURL(chrome::kChromeUIContextualTasksURL)));
+  content::WebContents* web_contents =
+      TabListInterface::From(browser())->GetActiveTab()->GetContents();
+
+  auto* controller = static_cast<ContextualTasksUI*>(
+      web_contents->GetWebUI()->GetController());
+  ASSERT_TRUE(controller);
+
+  auto* zoom_controller = zoom::ZoomController::FromWebContents(web_contents);
+
+  // Set tracked host.
+  controller->SetAimUrl(GURL("https://google.com"));
+
+  content::HostZoomMap* zoom_map =
+      content::HostZoomMap::GetDefaultForBrowserContext(browser()->profile());
+
+  // 1. Test Host -> WebUI sync.
+  double target_zoom = 2.0;
+  zoom_map->SetZoomLevelForHost("google.com", target_zoom);
+
+  EXPECT_TRUE(base::test::RunUntil([&]() {
+    return std::abs(zoom_controller->GetZoomLevel() - target_zoom) < 0.01;
+  }));
+
+  // 2. Test WebUI -> Host sync.
+  double new_zoom = 3.0;
+  zoom_controller->SetZoomLevel(new_zoom);
+
+  EXPECT_TRUE(base::test::RunUntil([&]() {
+    return std::abs(
+               zoom_map->GetZoomLevelForHostAndScheme("https", "google.com") -
+               new_zoom) < 0.01;
+  }));
 }
 
 IN_PROC_BROWSER_TEST_F(ContextualTasksNoMockBrowserTest,
@@ -715,7 +769,8 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksUIBrowserTest,
 
   GURL initial_url("https://example.com/");
   auto input_state_model = std::make_unique<contextual_search::InputStateModel>(
-      *session_handle, config, initial_url, /*is_off_the_record=*/false);
+      *session_handle, config, initial_url, /*is_off_the_record=*/false,
+      /*is_signed_in=*/true);
 
   content::WebContents* web_contents =
       TabListInterface::From(browser())->GetActiveTab()->GetContents();

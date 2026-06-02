@@ -281,6 +281,7 @@ Neke funkcije su možda nedostupne i promene podešavanja neće biti sačuvane.
 
           **Predložite pitanja:** Generišite listu sa 3 do 5 pitanja koja podstiču na razmišljanje i koja korisnik može da postavi da bi bolje razumeo snimak ekrana. Ova pitanja treba da obuhvataju bar jedno koje se konkretno odnosi na vizuelni objekat, njegov dizajn ili položaj.</translation>
 <translation id="386202838227397562">Zatvorite sve prozore Google Chrome pregledača i pokušajte ponovo.</translation>
+<translation id="3869083394918739976">Možete da nastavite da četujete sa AI režimom bez prelaska na drugu karticu. Za početak se prijavite u Chrome. Moći ćete i da pristupate lozinkama i drugom sadržaju na svim uređajima.</translation>
 <translation id="3873044882194371212">Otvori link u Chrome prozoru bez arhi&amp;viranja</translation>
 <translation id="3885770153807205175">Birač jezika</translation>
 <translation id="3889417619312448367">Deinstaliraj Google Chrome</translation>
@@ -330,6 +331,9 @@ Neke funkcije su možda nedostupne i promene podešavanja neće biti sačuvane.
 <translation id="4348548358339558429">Da biste dobili personalizaciju, uvrstite Chrome u aktivnosti na vebu i u aplikacijama</translation>
 <translation id="436060642166082913">Chrome je blokirao ovo preuzimanje jer ovaj fajl može da naškodi ličnim nalozima i nalozima na društvenim mrežama</translation>
 <translation id="4367027658822022112">Možete da zakačite Google objektiv radi jednostavnog pristupa; kliknite na dugme Zakači u vrhu bočne table</translation>
+<translation id="4380616334811859000">Chrome isključuje optimizaciju JavaScript-a kad prvi put posetite sajt.
+
+Ako ova stranica ne radi na očekivani način, probajte da dozvolite optimizaciju.</translation>
 <translation id="4389991535395284064">Kada pregledate u režimu bez arhiviranja, Chrome će vas upozoriti pre učitavanja sajta pomoću nebezbedne veze</translation>
 <translation id="4427306783828095590">Poboljšana zaštita nudi više mogućnosti za blokiranje „pecanja“ i malvera</translation>
 <translation id="4434353761996769206">Greška programa za instalaciju: <ph name="INSTALLER_ERROR" /></translation>
@@ -424,6 +428,7 @@ Google Chrome ne može da vrati podešavanja.</translation>
 <translation id="547202872422499512">Chrome se sada pokreće kada se pokrene Windows, pa možete odmah da počnete da pregledate. To možete da isključite u podešavanjima.</translation>
 <translation id="5486346529181556467">Prijavite sajt za koji mislite da je štetan da biste poboljšali onlajn bezbednost za svakoga. Saznajte više o <ph name="BEGIN_LINK" />Google smernicama za nebezbedne sajtove<ph name="END_LINK" />.</translation>
 <translation id="5524890928877629608">gornji levi ugao oblasti pretrage: ulevo <ph name="LEFT" />%, nagore <ph name="TOP" />%</translation>
+<translation id="5529390769101499214">Upravljajte dodacima klikom na Dodaci u glavnom meniju Chrome-a.</translation>
 <translation id="5550137307985173298">Kliknite na dugme Prilagodi Chrome na stranici nove kartice da biste Chrome-u dali nov izgled</translation>
 <translation id="5566025111015594046">Google Chrome (mDNS-In)</translation>
 <translation id="5579324208890605088">Greška pri pokretanju: pokrenite program za instalaciju kao redovan korisnik, a ne kao administrator.</translation>
@@ -784,7 +789,6 @@ Ne možete da sačuvate nove obeleživače na nalogu dok ne izbrišete neke. Ako
 <translation id="8862326446509486874">Nemate odgovarajuća prava za instalaciju na nivou sistema. Probajte ponovo da pokrenete program za instalaciju, ovoga puta kao administrator.</translation>
 <translation id="8865415417596392024">Chrome podaci na nalogu</translation>
 <translation id="8883862939660515976">Postavite pitanje Google objektivu o ovoj slici</translation>
-<translation id="8892956691293410744">Da biste postavili pitanje AI režimu o kartici bez napuštanja stranice, prijavite se u Chrome. Moći ćete i da pristupate lozinkama i drugom sadržaju na svim uređajima.</translation>
 <translation id="8914504000324227558">Ponovo pokreni Chrome</translation>
 <translation id="8922193594870374009">Da biste poslali broj sa <ph name="ORIGIN" /> na Android telefon, prijavite se u Chrome na oba uređaja.</translation>
 <translation id="8922998289262614701">Ukloni podatke ove aplikacije iz Chrome-a</translation>

@@ -317,9 +317,8 @@ AdsPageLoadMetricsObserver::OnFencedFramesStart(
     content::NavigationHandle* navigation_handle,
     const GURL& currently_committed_url) {
   // Need the observer-level forwarding for FrameReceivedUserActivation,
-  // FrameDisplayStateChanged, FrameSizeChanged, MediaStartedPlaying,
-  // OnMainFrameIntersectionRectChanged, OnMainFrameViewportRectChanged,
-  // and OnV8MemoryChanged.
+  // FrameDisplayStateChanged, FrameSizeChanged, MediaStartedPlaying, and
+  // OnV8MemoryChanged.
   return FORWARD_OBSERVING;
 }
 
@@ -707,12 +706,9 @@ void AdsPageLoadMetricsObserver::MediaStartedPlaying(
   }
 }
 
-void AdsPageLoadMetricsObserver::OnMainFrameIntersectionRectChanged(
-    content::RenderFrameHost* render_frame_host,
-    const gfx::Rect& main_frame_intersection_rect) {
-  if (render_frame_host->IsInPrimaryMainFrame()) {
-    page_ad_density_tracker_.UpdateMainFrameRect(main_frame_intersection_rect);
-  }
+void AdsPageLoadMetricsObserver::OnMainFrameRectChanged(
+    const gfx::Rect& main_frame_rect) {
+  page_ad_density_tracker_.UpdateMainFrameRect(main_frame_rect);
 }
 
 void AdsPageLoadMetricsObserver::OnMainFrameViewportRectChanged(

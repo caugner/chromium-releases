@@ -132,11 +132,6 @@ Nota: Consulta más información sobre las políticas de mitigación de procesos
 <translation id="1077675271127011209">Inhabilitar informes de uso y de datos sobre fallos</translation>
 <translation id="1079498696402787191">Usar el valor predeterminado para los hashes permitidos en los handshakes de TLS</translation>
 <translation id="1079801999187584280">No permitir el uso de herramientas para desarrolladores</translation>
-<translation id="1081263326166769685">Si se habilita la política, <ph name="PRODUCT_OS_NAME" /> enviará a Google métricas de uso y datos de diagnóstico, como informes sobre fallos. Si se inhabilita la política, no se enviarán métricas ni datos de diagnóstico.
-
-En los dispositivos gestionados, esta política está habilitada de forma predeterminada y envía métricas a Google.
-
-En el caso de los dispositivos no gestionados, el usuario puede decidir si quiere enviar las métricas cuando la política no se ha definido.</translation>
 <translation id="1081470306474387129">La API Controlled Frame, disponible para ciertos contextos aislados, como las aplicaciones web aisladas (IWAs), permite que una aplicación inserte y manipule contenido arbitrario.
 Consulta https://github.com/WICG/controlled-frame para obtener más información.
 
@@ -369,6 +364,18 @@ Sin embargo, los patrones de esta política que coinciden con el origen no puede
 <translation id="1262993197422487260">No incluir el botón para mostrar la contraseña en la pantalla de inicio de sesión y de bloqueo</translation>
 <translation id="1265053460044691532">Limitar el tiempo durante el que un usuario autenticado a través de SAML puede iniciar sesión sin conexión</translation>
 <translation id="1265076559723566171">Controla la configuración de los usuarios de centros educativos</translation>
+<translation id="1268782248484174352">Especifica el nivel de informes de métricas de <ph name="PRODUCT_OS_NAME" />.
+
+Si se define esta política, se determinará la cantidad de datos de uso y de fallos que se envían a Google:
+* 0 = Inhabilitar informes: no se envían a Google datos de uso ni de fallos.
+* 1 = Informes básicos: se envía a Google un conjunto limitado de datos de uso y de fallos.
+* 2 = Informes avanzados: se envía a Google un conjunto completo de datos de uso y de fallos.
+
+Si no se define esta política, el usuario podrá elegir el comportamiento de los informes de métricas durante la instalación o en la primera ejecución. Además, podrá cambiar este ajuste más adelante.
+
+Esta política solo se evalúa si el experimento <ph name="RESTRUCTURE_METRICS_CONSENT_SETTINGS_EXPERIMENT_NAME" /> está activo en el dispositivo.
+
+Si el experimento <ph name="RESTRUCTURE_METRICS_CONSENT_SETTINGS_EXPERIMENT_NAME" /> está activo en el dispositivo y se definen tanto esta política como la política <ph name="DEVICE_METRICS_REPORTING_ENABLED_POLICY_NAME" />, esta política tendrá prioridad.</translation>
 <translation id="1271811620059192171">Habilitar grupos atómicos de políticas</translation>
 <translation id="127264587838521316">Habilita las solicitudes de instalación de extensiones de <ph name="PRODUCT_NAME" /></translation>
 <translation id="1272798957154751008">Habilitar la migración de dispositivos Chromad a la gestión en la nube</translation>
@@ -699,14 +706,6 @@ Si no se asigna ningún valor a esta política, el selector de emojis estará ha
 <translation id="1523587744262636189">puerto 10080 (puede desbloquearse hasta el 01/04/2022)</translation>
 <translation id="1523774894176285446">Navegador alternativo donde se abren los sitios web configurados.</translation>
 <translation id="152657506688053119">Lista de URL alternativas para el proveedor de búsquedas predeterminado</translation>
-<translation id="1526766414933532012">Política para controlar si se puede inhabilitar la opción de medición de anuncios de <ph name="PRIVACY_SANDBOX_NAME" /> para los usuarios.
-
-Si se inhabilita esta política, se desactivará la opción de medición de anuncios para los usuarios.
-Si se habilita esta política o no se define, los usuarios podrán activar o desactivar la opción de medición de anuncios de <ph name="PRIVACY_SANDBOX_NAME" /> en sus dispositivos.
-
-Para definir esta política, se debe inhabilitar la política <ph name="PRIVACY_SANDBOX_PROMPT_ENABLED_POLICY_NAME" />.
-
-Esta política queda obsoleta a partir de la versión 144 de <ph name="PRODUCT_NAME" /> con la discontinuación de la API Attribution Reporting.</translation>
 <translation id="1532928374875633053">Te permite definir una lista de patrones de URL donde se especifique qué sitios otorgarán automáticamente el permiso de colocación de ventanas. Esto extenderá la capacidad de los sitios de ver información sobre las pantallas de los dispositivos y usarla para abrir y colocar ventanas, o solicitar la pantalla completa en pantallas específicas.
 
       Para obtener información detallada sobre los patrones de URL válidos, consulta https://chromeenterprise.google/policies/url-patterns. Se permite el uso de caracteres comodín (<ph name="WILDCARD_VALUE" />). Esta política solo detecta coincidencias basadas en el origen, así que se ignora cualquier ruta del patrón de URL.
@@ -1144,6 +1143,7 @@ Esta política no tendrá efecto si la opción de conservar los datos de navegac
 
       Si no se establece esta política, los usuarios podrán gestionar la lista completa de idiomas preferidos.</translation>
 <translation id="1803646570632580723">Lista de aplicaciones fijadas que deben aparecer en la barra de aplicaciones</translation>
+<translation id="1807539058116290184">Inhabilitar el gesto de pellizcar para hacer zoom en el modo Kiosco</translation>
 <translation id="1808715480127969042">Bloquear cookies en estos sitios</translation>
 <translation id="1810261428246410396">Permitir conexión compartida instantánea.</translation>
 <translation id="1813638828646876133">Habilitar el envío automático de PIN en la pantalla de bloqueo y de inicio de sesión</translation>
@@ -1796,6 +1796,18 @@ Si se inhabilita esta política, los usuarios no podrán usar esta función.
 
       Si se asigna un valor a esta política, los usuarios no podrán cambiarla en <ph name="PRODUCT_NAME" />. Si no se le asigna ningún valor, se permitirá la comprobación de filtraciones de credenciales, pero el usuario podrá desactivarla.</translation>
 <translation id="2208976000652006649">Parámetros para URL de búsqueda que utiliza POST</translation>
+<translation id="2211167090584042804">Especifica el nivel de informes de métricas de <ph name="PRODUCT_NAME" />.
+
+Si se define esta política, se determinará la cantidad de datos de uso y de fallos que se envían a Google:
+* 0 = Inhabilitar informes: no se envían a Google datos de uso ni de fallos.
+* 1 = Informes básicos: se envía a Google un conjunto limitado de datos de uso y de fallos.
+* 2 = Informes avanzados: se envía a Google un conjunto completo de datos de uso y de fallos.
+
+Si no se define esta política, el usuario podrá elegir el comportamiento de los informes de métricas durante la instalación o en la primera ejecución. Además, podrá cambiar este ajuste más adelante.
+
+Esta política solo se evalúa si el experimento <ph name="RESTRUCTURE_METRICS_CONSENT_SETTINGS_EXPERIMENT_NAME" /> está activo en el dispositivo.
+
+Si el experimento <ph name="RESTRUCTURE_METRICS_CONSENT_SETTINGS_EXPERIMENT_NAME" /> está activo en el dispositivo y se definen tanto esta política como la política <ph name="METRICS_REPORTING_ENABLED_POLICY_NAME" />, esta política tendrá prioridad.</translation>
 <translation id="2212011154693551439">La página del historial de Chrome organizada en grupos se mostrará en chrome://history/grouped de forma predeterminada.</translation>
 <translation id="2212207215880394506">No permitir la edición de fotos basada en IA generativa.</translation>
 <translation id="221287948061571053">Ocultar insignia de empresa desplegada en la barra de herramientas</translation>
@@ -1872,6 +1884,25 @@ Si no se establece esta política o se inhabilita, no se permitirá la transfere
 <translation id="225340736558643885">Habilitar advertencias en formularios no seguros</translation>
 <translation id="2258126710006312594">Permite que los usuarios con acceso remoto transfieran archivos al host y desde el host</translation>
 <translation id="225830954785359083">Impedir que las páginas muestren ventanas emergentes durante la descarga</translation>
+<translation id="2260635608598936994">Configura filtros para seleccionar qué certificados de cliente se incluyen en los informes de señales de seguridad de <ph name="PRODUCT_NAME" />. Estos informes envían información sobre la posición del navegador y del dispositivo a <ph name="GOOGLE_WORKSPACE_PRODUCT_NAME" />, que los administradores pueden usar para configurar reglas de <ph name="GOOGLE_CONTEXT_AWARE_ACCESS" />.
+
+Esta política te permite definir filtros basados en atributos de certificados de cliente, como los nombres distinguidos de ISSUER o SUBJECT. <ph name="PRODUCT_NAME" /> solo incluirá certificados en los informes de señales si coinciden con al menos uno de los filtros especificados.
+
+     Ejemplos del uso de la sección <ph name="SELECTOR_PLACEHOLDER" />:
+
+      * Si se asigna el valor <ph name="SECURITY_SIGNALS_CLIENT_CERTIFICATE_SELECTORS_FILTER_EXAMPLE" /> a <ph name="SELECTOR_PLACEHOLDER" />, solo se seleccionarán los certificados de cliente emitidos por un certificado en el que CommonName tenga el valor <ph name="ISSUER_CN_PLACEHOLDER" />.
+
+      * Si <ph name="SELECTOR_PLACEHOLDER" /> contiene las secciones <ph name="ISSUER_STRING_VALUE" /> y <ph name="SUBJECT_STRING_VALUE" />, solo se seleccionarán los certificados de cliente que cumplan ambas condiciones.
+
+      * Si <ph name="SELECTOR_PLACEHOLDER" /> contiene una sección <ph name="SUBJECT_STRING_VALUE" /> con el valor <ph name="FILTER_STRING_ORGANIZATION" />, el certificado debe contener al menos una organización que coincida con el valor especificado para que se pueda seleccionar.
+
+      * Si <ph name="SELECTOR_PLACEHOLDER" /> contiene una sección <ph name="SUBJECT_STRING_VALUE" /> con un valor <ph name="FILTER_STRING_ORGANIZATIONAL_UNIT" />, el certificado debe contener al menos una unidad organizativa que coincida con el valor especificado para que se pueda seleccionar.
+
+      * Si se asigna el valor <ph name="EMPTY_DICTIONARY" /> a <ph name="SELECTOR_PLACEHOLDER" />, se ignorarán los detalles vacíos de esta política.
+
+      Si no se establece la política, no se seleccionarán certificados de cliente durante el envío de informes de señales.
+
+*Importante:* Esta política solo se aplicará si la política <ph name="USER_SECURITY_SIGNALS_REPORTING_POLICY_NAME" /> está habilitada, que controla la función general para enviar señales de seguridad desde Chrome.</translation>
 <translation id="2261648512244797294">Inhabilitar el protocolo Privet de impresión obsoleto</translation>
 <translation id="2262701937800507517">Usar el orden del algoritmo de cifrado predeterminado de <ph name="PRODUCT_OS_NAME" /></translation>
 <translation id="2263881357524831360">Permitir el uso de gestores de contraseñas de terceros en <ph name="PRODUCT_NAME" /> para <ph name="ANDROID_NAME" /></translation>
@@ -2108,6 +2139,15 @@ Si no se le asigna ningún valor, la pantalla de privacidad se inhabilitará ini
 <translation id="2450392422484526374">Si se asigna el valor true a esta política, se habilitará la impresión silenciosa, que cerrará inmediatamente la ventana de vista previa de impresión cuando se abra e imprimirá en la impresora predeterminada con las opciones prefijadas. Si la opción predeterminada de impresión es "Guardar como PDF", el archivo se guardará en la carpeta Descargas.
 
 Si no se define esta política o se le asigna el valor false, se inhabilitará la impresión silenciosa, por lo que no se cerrará automáticamente la ventana de vista previa de impresión y se pedirá al usuario que seleccione una opción.</translation>
+<translation id="2451322901390143329">Controla si a los Web Workers creados a partir de URLs de datos se les asigna un origen opaco único.
+
+Los Web Workers se pueden crear mediante una URL de datos que contenga la secuencia de comandos del worker. Anteriormente, estos workers heredaban el origen de la página que los había creado, lo que les permitía acceder al mismo almacenamiento local, a las cookies y a otros datos vinculados al origen. Para mejorar la seguridad y cumplir la especificación HTML, Chrome cambiará su comportamiento predeterminado en la versión 149 para que ahora los workers creados a partir de URLs de datos tengan un origen único y opaco. De esta forma, se aíslan de los datos de la página del creador.
+
+Si se habilita esta política o no se define, se usará el nuevo comportamiento predeterminado (más seguro) y los Web Workers creados a partir de URLs de datos tendrán un origen opaco único.
+
+Si se inhabilita esta política, Chrome volverá al comportamiento antiguo y los Web Workers creados a partir de URLs de datos heredarán el origen de su creador. Esto permite a los administradores resolver temporalmente problemas de compatibilidad si las aplicaciones internas dejan de funcionar debido al cambio de seguridad.
+
+Esta política es temporal y se eliminará en la versión 157.</translation>
 <translation id="2452225615952836461">Utilizar métodos de solicitud siempre en mayúsculas</translation>
 <translation id="2454228136871844693">Optimizar para una mejor estabilidad.</translation>
 <translation id="2455033019778127130">Sigue el comportamiento predeterminado del navegador, muestra los Términos del Servicio y espera a que el usuario los acepte.</translation>
@@ -2671,6 +2711,15 @@ Si se inhabilita esta política o no se establece, los usuarios podrán transfer
 Si se habilita esta política o no se define, los usuarios podrán añadir cuentas de Kerberos a través de la configuración de cuentas de Kerberos en la página de configuración de cuentas de Kerberos. Los usuarios tendrán control total sobre las cuentas que han añadido y podrán modificarlas o eliminarlas.
 
 Si se inhabilita esta política, los usuarios no podrán añadir cuentas de Kerberos. Solo se podrán añadir cuentas mediante la política "Configurar cuentas de Kerberos". Esta es una forma eficaz de bloquear cuentas.</translation>
+<translation id="2771222727845689796">Esta política te permite especificar una lista de patrones de URL. El contenido web en segundo plano que coincida con estos patrones se forzará a ejecutarse con prioridad de primer plano.
+
+Si se habilita la política <ph name="FORCE_FOREGROUND_PRIORITY_FOR_ALL_TABS_POLICY_NAME" />, se ignorará esta lista, ya que se forzará que todas las pestañas tengan prioridad de primer plano.
+
+Si se inhabilita <ph name="FORCE_FOREGROUND_PRIORITY_FOR_ALL_TABS_POLICY_NAME" /> o no se define, solo se forzará el contenido que coincida con los patrones de esta lista.
+
+Para obtener información detallada sobre los patrones válidos de <ph name="URL_LABEL" />, consulta https://support.google.com/chrome/a?p=url_blocklist_filter_format.
+
+Si esta lista está vacía o no se define, no se forzará la prioridad de primer plano para ningún contenido en segundo plano.</translation>
 <translation id="2772231477628401250">Usar HTTP para descargar actualizaciones</translation>
 <translation id="2772955711376920612">Si se habilita la política y se establecen <ph name="DEVICE_POWER_PEAK_SHIFT_BATTERY_THRESHOLD_POLICY_NAME" /> y <ph name="DEVICE_POWER_PEAK_SHIFT_DAY_CONFIG_POLICY_NAME" />, se mantiene activado el cambio de alimentación en picos (en caso de ser compatible con el dispositivo). La política de gestión del cambio de alimentación en picos es una política de ahorro de energía que minimiza el uso de corriente alterna durante las horas en las que más energía se utiliza del día. Para ejecutar el modo de cambio de alimentación en picos, se puede configurar una hora de inicio y de finalización para cada día de la semana. Siempre y cuando la batería se mantenga por encima del umbral especificado, el dispositivo funciona con la batería durante esas horas (aunque esté conectada la corriente alterna). Después de la hora de finalización especificada, el dispositivo funcionará con corriente alterna (si está conectada), pero no cargará la batería. El dispositivo volverá a funcionar con normalidad usando la corriente alterna y cargando la batería después de la hora de inicio de carga especificada.
 
@@ -2803,10 +2852,6 @@ Esta política solo se puede establecer como política de usuarios basada en la 
 <translation id="288923520817177650">Permitir la creación de sesiones <ph name="WEBXR_AR_SESSION_ENUM_VALUE" /> de <ph name="WEBXR_API_NAME_SHORT" /></translation>
 <translation id="2889842394011108075">window.webkitStorageInfo estará disponible.</translation>
 <translation id="2890645751406497668">Conceder permiso automáticamente a estos sitios web para conectarse a dispositivos USB con los ID de proveedor y producto facilitados.</translation>
-<translation id="2891049933730408118">Si se establece esta política, se especificará desde qué orígenes se deben permitir los esquemas de autenticación HTTP admitidos por <ph name="PRODUCT_NAME" />, independientemente de la política <ph name="AUTH_SCHEMES_POLICY_NAME" />.
-
-      El patrón de origen debe tener el formato que se indica en esta página: <ph name="URL_SCHEME_FORMAT_LINK" />. Pueden definirse hasta 1000 excepciones en <ph name="ALL_HTTP_AUTH_ALLOWED_FOR_ORIGINS_POLICY_NAME" />.
-      Se permite el uso de comodines para todo el origen o para partes de este (el esquema, el alojamiento o el puerto).</translation>
 <translation id="2893546967669465276">Enviar los registros del sistema al servidor de administración</translation>
 <translation id="2893660462311365527">Intervalo de recogida de telemetría de red en milisegundos</translation>
 <translation id="2894914342151915910">Suprimir advertencias cuando Chrome se ejecute en un sistema no compatible</translation>
@@ -2864,6 +2909,7 @@ Los niveles de complejidad se basan en las métricas de calidad de las contrase�
 
 Consulta el artículo del Centro de Ayuda para ver explicaciones detalladas de lo que implica cada nivel tanto para los PINs como para las contraseñas.</translation>
 <translation id="2926813071464307947">Inhabilitar el entorno aislado del contenedor de aplicaciones del renderizador</translation>
+<translation id="2930792103747180259">Inhabilitado: la recuperación en segundo plano de los service workers se permite sin restricciones.</translation>
 <translation id="2931888116345994552">Si se habilita o no se establece, se habilitarán las actualizaciones de todos los componentes de <ph name="PRODUCT_NAME" />.
 
       Si se inhabilita, se desactivarán las actualizaciones de los componentes. Sin embargo, algunos componentes quedan exentos de esta política: las actualizaciones de los componentes que no contengan código ejecutable o que sean esenciales para proteger la seguridad del navegador no se inhabilitarán.
@@ -2978,6 +3024,7 @@ Esta política es temporal y se eliminará más adelante.</translation>
 <translation id="2976033779241323433">Habilitar el teclado virtual táctil según la heurística predeterminada del sistema</translation>
 <translation id="2976429807269247880">Configuración antigua de comportamiento de cookies de <ph name="ATTRIBUTE_SAMESITE_NAME" /></translation>
 <translation id="2979696534869541158">Forzar la implementación antigua</translation>
+<translation id="2984696342503554732">Habilitado: la recuperación en segundo plano desde service workers está restringida.</translation>
 <translation id="2985927503455169394">Usa el modo predeterminado de la experiencia de incorporación del Asistente</translation>
 <translation id="2987155890997901449">Habilitar ARC</translation>
 <translation id="2987227569419001736">Controlar el uso de la API Bluetooth web</translation>
@@ -3209,6 +3256,7 @@ Si se inhabilita esta política o no se define, el menú de accesibilidad flotan
 <translation id="3127816006382989270">Permite el acceso a una lista de URLs en modo Incógnito.</translation>
 <translation id="3128072319047570212">Configuración del generador de claves</translation>
 <translation id="3131703464330936425">No permitir el roaming de datos de móviles</translation>
+<translation id="3131928857191083710">Configuración de tamaño de grupo de sockets</translation>
 <translation id="3135820765957090754">Si se habilita esta opción, los usuarios podrán sincronizar los ajustes de la red Wi‑Fi entre sus dispositivos <ph name="PRODUCT_OS_NAME" /> y un teléfono Android conectado. Para poder sincronizar los ajustes de la red Wi‑Fi, los usuarios deben aceptar explícitamente esta función completando un proceso de configuración.
 
       Si se inhabilita esta opción, los usuarios no podrán sincronizar los ajustes de la red Wi‑Fi.
@@ -3293,6 +3341,18 @@ Varias políticas indican orígenes que afectan a las solicitudes al dispositivo
           Si no se establece esta política, se utiliza un valor de tiempo predeterminado.
 
           El valor de esta política debe especificarse en milisegundos.</translation>
+<translation id="3197981761853858791">Esta política está obsoleta porque la configuración de la petición de <ph name="PRIVACY_SANDBOX_NAME" /> ya no se admite.
+
+Política para controlar si se muestra el mensaje de <ph name="PRIVACY_SANDBOX_NAME" /> a los usuarios.
+El mensaje es un flujo de bloqueo de usuarios que informa a los usuarios sobre los ajustes de <ph name="PRIVACY_SANDBOX_NAME" />. Visita <ph name="PRIVACY_SANDBOX_URL" /> para consultar más información sobre las iniciativas de Chrome para suprimir las cookies de terceros.
+
+Si se inhabilita esta política, <ph name="PRODUCT_NAME" /> no mostrará el mensaje de <ph name="PRIVACY_SANDBOX_NAME" />.
+Si se habilita esta política o no se define, <ph name="PRODUCT_NAME" /> determinará si se puede mostrar el mensaje de <ph name="PRIVACY_SANDBOX_NAME" /> y, si se puede, lo mostrará.
+
+Se debe deshabilitar esta política si se ha definido alguna de las siguientes políticas:
+<ph name="PRIVACY_SANDBOX_AD_TOPICS_ENABLED_POLICY_NAME" />
+<ph name="PRIVACY_SANDBOX_SITE_ENABLED_ADS_ENABLED_POLICY_NAME" />
+<ph name="PRIVACY_SANDBOX_AD_MEASUREMENT_ENABLED_POLICY_NAME" /></translation>
 <translation id="3198385910521788907">No mostrar la pantalla del detector de presencia humana durante el inicio de sesión</translation>
 <translation id="3205825995289802549">Maximizar la primera ventana del navegador en la primera ejecución</translation>
 <translation id="320607884987562184">Si se asigna el valor 1 a esta política, los sitios web podrán ejecutar JavaScript. Si se le asigna el valor 2, no se permitirá el uso de JavaScript.
@@ -4061,6 +4121,12 @@ Esta política de dispositivos es equivalente a la política de usuarios <ph nam
       Si se inhabilita esta opción, los usuarios no podrán acceder a la función Autocompletar.
 
       Si se habilita esta opción o no se le asigna ningún valor, los usuarios controlarán la función Autocompletar. Esto les permitirá configurar perfiles de Autocompletar y activar o desactivar la función según sus preferencias.</translation>
+<translation id="3730809439296971274">Política para controlar si se puede inhabilitar la opción de anuncios sugeridos por sitios de <ph name="PRIVACY_SANDBOX_NAME" /> para los usuarios.
+
+Si se inhabilita esta política, se desactivará la opción de anuncios sugeridos por sitios para los usuarios.
+Si se habilita esta política o no se define, los usuarios podrán activar o desactivar la opción de anuncios sugeridos por sitios de <ph name="PRIVACY_SANDBOX_NAME" /> en sus dispositivos.
+
+Esta política queda obsoleta a partir de la versión 144 de <ph name="PRODUCT_NAME" /> con la discontinuación de la API Protected Audience.</translation>
 <translation id="3733014427925403568">Día de la semana del intervalo.</translation>
 <translation id="3736879847913515635">Habilitar Añadir persona en el administrador de usuarios</translation>
 <translation id="3744984310825999317">Permitir que <ph name="PEPPER_NAME" /> use un nuevo decodificador para decodificar vídeo mediante aceleración por hardware.</translation>
@@ -4365,8 +4431,31 @@ Esta política se puede combinar con <ph name="POLICY_CLOUD_POLICY_OVERRIDES_PLA
           Si no le asignas ningún valor, las teclas persistentes estarán inhabilitadas inicialmente en la pantalla de inicio de sesión, pero el usuario podrá habilitarlas en cualquier momento.</translation>
 <translation id="3927291637826333102">Permitir la captura de escritorios, ventanas y pestañas de estos orígenes</translation>
 <translation id="3928726028264020458">Habilitar los informes sobre VPD del dispositivo</translation>
+<translation id="393516164454995927">Definir esta política permite especificar el número máximo de conexiones simultáneas por servidor proxy para solicitudes de WebSocket.
+
+Para modificar los límites de solicitudes que no son de WebSocket, consulta <ph name="MAX_CONNECTIONS_PER_PROXY_POLICY_NAME" />.
+
+Si no se establece esta política, se utilizará el valor predeterminado (128).
+
+Algunas aplicaciones web consumen muchas conexiones con las solicitudes GET pendientes, por lo que un valor inferior a 128 puede hacer que la red del navegador se bloquee si se abren muchas aplicaciones web de este tipo.
+Algunos servidores proxy no son capaces de gestionar un número elevado de conexiones simultáneas por cliente, lo que se puede solucionar estableciendo un valor inferior para esta política.
+
+El valor debe ser igual o superior a 6.
+Si defines un valor inferior a ese límite, se usará 6.
+Si estableces un valor inferior al predeterminado (128), debes hacerlo bajo tu propia responsabilidad.
+
+El valor debe ser igual o inferior a 256.
+Si defines un valor superior a ese límite, se usará 256.
+Si defines un valor superior al predeterminado (128), lo haces bajo tu propia responsabilidad.</translation>
 <translation id="3935592079035695061">Milisegundos desde la medianoche.</translation>
 <translation id="3937800910397007337">Forzar la prioridad de primer plano de todas las pestañas</translation>
+<translation id="3938885528378923718">Configura cómo descarga <ph name="PRODUCT_NAME" /> el modelo fundacional de IA generativa y lo usa para la inferencia de forma local.
+
+Si se permite esta política (valor 0) o no se define, el modelo se descargará automáticamente y se usará para la inferencia.
+
+Si se inhabilita esta política (valor 1), el modelo no se descargará y el modelo ya descargado (si lo hay) se eliminará.
+
+En las plataformas de escritorio, también se puede inhabilitar la descarga del modelo asignando el valor false a <ph name="COMPONENT_UPDATES_ENABLED_POLICY_NAME" />.</translation>
 <translation id="3941289958028934630">Inhabilitar los mensajes de voz en la pantalla de inicio de sesión</translation>
 <translation id="3943930334592166130">Esta política controla si al usuario se le pedirá que seleccione un certificado de cliente cuando haya más de un certificado que coincida con <ph name="AUTO_SELECT_CERTIFICATE_FOR_URLS_POLICY_NAME" />.
       Si se habilita esta política, se le pedirá al usuario que seleccione un certificado de cliente cuando la política de selección automática coincida con varios certificados.
@@ -4814,6 +4903,7 @@ Esta política se usaba para inhabilitar la actualización automática de conten
       Si se desactiva esta política o no se establece, los usuarios pueden cambiar este ajuste.
 
       Nota: En Android, usa la política <ph name="ISOLATE_ORIGINS_ANDROID_POLICY_NAME" />.</translation>
+<translation id="4261641564041253502">Seleccionar automáticamente los certificados de cliente que coincidan con los filtros de los informes de señales de seguridad de <ph name="PRODUCT_NAME" />.</translation>
 <translation id="4261820385751181068">Configuración regional para la pantalla de inicio de sesión del dispositivo</translation>
 <translation id="4263788921751326798">Inhabilitar los informes de datos sobre fallos del dispositivo</translation>
 <translation id="4268586991084547853">Más compatibles con las listas de sitios del modo empresarial de Microsoft IE/Edge.</translation>
@@ -5090,6 +5180,7 @@ En el caso de <ph name="PRODUCT_OS_NAME" />, esta política siempre es efectiva.
 <translation id="4463675333222095358">Habilitar conversión de unidades de Respuestas rápidas</translation>
 <translation id="4464365009416584564">Inhabilitar <ph name="CHROME_SYNC_NAME" /></translation>
 <translation id="4467952432486360968">Bloquear cookies de terceros</translation>
+<translation id="4468220154891570994">Permitir el gesto de pellizcar para hacer zoom en el modo Kiosco</translation>
 <translation id="4472740647327683596">Ancho de la página en micrómetros</translation>
 <translation id="4474167089968829729">Habilitar el almacenamiento de contraseñas en el gestor de contraseñas</translation>
 <translation id="4474266799109921560">Si se le asigna el valor 2 a esta política, se impedirá automáticamente que los orígenes de aplicaciones web aisladas usen la API WebPrinting.
@@ -6113,14 +6204,6 @@ Para obtener más información sobre el tratamiento de datos en las funciones de
 <translation id="5063480226653192405">Uso</translation>
 <translation id="5067143124345820993">Lista de admisión de usuarios con permiso para iniciar sesión</translation>
 <translation id="50689955292091946">Habilitar el teclado virtual de accesibilidad en la pantalla de inicio de sesión</translation>
-<translation id="5069453818168036580">Política para controlar si se puede inhabilitar la opción de anuncios sugeridos por sitios de <ph name="PRIVACY_SANDBOX_NAME" /> para los usuarios.
-
-Si se inhabilita esta política, se desactivará la opción de anuncios sugeridos por sitios para los usuarios.
-Si se habilita esta política o no se define, los usuarios podrán activar o desactivar la opción de anuncios sugeridos por sitios de <ph name="PRIVACY_SANDBOX_NAME" /> en sus dispositivos.
-
-Para definir esta política, se debe inhabilitar la política <ph name="PRIVACY_SANDBOX_PROMPT_ENABLED_POLICY_NAME" />.
-
-Esta política queda obsoleta a partir de la versión 144 de <ph name="PRODUCT_NAME" /> con la discontinuación de la API Protected Audience.</translation>
 <translation id="5069522005630249098">Esta opción determina cuántos datos de usuario se conservarán después de inhabilitar <ph name="LACROS_NAME" />.
 
       Si a esta política se le asigna el valor <ph name="LACROS_BACKWARD_MIGRATION_NONE" /> o no se le asigna ninguno, no se realizará la retromigración de datos.
@@ -6228,6 +6311,12 @@ Esta política es una tregua temporal para dar tiempo a la adaptación del conte
 <translation id="5124368997194894978">Habilitar el inicio con CA (corriente alterna)</translation>
 <translation id="5130213897914754028">Impedir que los sitios usen SharedArrayBuffers</translation>
 <translation id="5130935469849337738">Ofrecer traducción siempre</translation>
+<translation id="513314432051760916">Política para controlar si se puede inhabilitar la opción de medición de anuncios de <ph name="PRIVACY_SANDBOX_NAME" /> para los usuarios.
+
+Si se inhabilita esta política, se desactivará la opción de medición de anuncios para los usuarios.
+Si se habilita esta política o no se define, los usuarios podrán activar o desactivar la opción de medición de anuncios de <ph name="PRIVACY_SANDBOX_NAME" /> en sus dispositivos.
+
+Esta política queda obsoleta a partir de la versión 144 de <ph name="PRODUCT_NAME" /> con la discontinuación de la API Attribution Reporting.</translation>
 <translation id="5138579693170759139">Esta política permite que los administradores controlen cómo procesa Google las cookies y los datos enviados a la Búsqueda a través de <ph name="PRODUCT_OS_NAME" />.
 Si se habilita la política, el usuario podrá usar el cuadro de búsqueda del menú de aplicaciones de <ph name="PRODUCT_OS_NAME" /> y el cuadro de direcciones del navegador <ph name="PRODUCT_NAME" /> en <ph name="PRODUCT_OS_NAME" />. Las cookies y los datos solo se podrán usar con fines esenciales.
 Si no se establece esta política o se inhabilita, las cookies y los datos se podrán usar con fines no esenciales.</translation>
@@ -6250,6 +6339,7 @@ Los dominios deben tener el formato de un nombre de dominio completo (FQDN) o de
 
 Los dominios con un formato incorrecto se ignorarán.</translation>
 <translation id="5163002264923337812">Habilitar el inicio de sesión basado en la Web antiguo</translation>
+<translation id="5163120075537316507">Se han inhabilitado orígenes opacos para URLs de datos en Web Workers (comportamiento obsoleto)</translation>
 <translation id="5163889437570441600">Permite que se envíe contenido al dispositivo usando <ph name="PRODUCT_NAME" />.
 
           Si se le asigna el valor False a la política, los usuarios no podrán enviar contenido a su dispositivo. Si se le asigna el valor True, los usuarios podrán enviar contenido. Si no se establece la política, los usuarios no podrán enviar contenido a dispositivos ChromeOS registrados, pero sí podrán enviar contenido a dispositivos no registrados.</translation>
@@ -6513,22 +6603,6 @@ Si no se establece, el valor predeterminado será 0 grados y los usuarios podrá
 <translation id="5293285950307241933">Borrar todos los datos de usuario locales</translation>
 <translation id="5293619885162445352">Permitir que <ph name="PEPPER_NAME" /> use el nuevo decodificador de vídeo.</translation>
 <translation id="529457411593078576">Habilitar los Términos del Servicio cuando CCT se ejecute por primera vez</translation>
-<translation id="529718811410033393">Definir esta política permite especificar el número máximo de conexiones simultáneas por servidor proxy para solicitudes que no son de WebSocket.
-
-Para modificar los límites de solicitudes de WebSocket, consulta <ph name="MAX_CONNECTIONS_PER_PROXY_FOR_WEBSOCKET_POLICY_NAME" />.
-
-Si no se establece esta política, se utilizará el valor predeterminado (32).
-
-Algunas aplicaciones web consumen muchas conexiones con las solicitudes GET pendientes, por lo que un valor inferior a 32 puede hacer que la red del navegador se bloquee si se abren muchas aplicaciones web de este tipo.
-Algunos servidores proxy no son capaces de gestionar un número elevado de conexiones simultáneas por cliente, lo que se puede solucionar definiendo un valor inferior para esta política.
-
-El valor debe ser igual o superior a 6.
-Si defines un valor inferior a ese límite, se usará 6.
-Si defines un valor inferior al predeterminado (32), lo haces bajo tu propia responsabilidad.
-
-El valor debe ser igual o inferior a 256 (99 en <ph name="PRODUCT_NAME" /> 147 y versiones anteriores).
-Si defines un valor superior a ese límite, se usará 256 (99 en <ph name="PRODUCT_NAME" /> 147 y versiones anteriores).
-Si defines un valor superior al predeterminado (32), lo haces bajo tu propia responsabilidad.</translation>
 <translation id="5297873769621042075">Si se define esta política, se especificará una lista o patrones de nombre de host (como "'[*.]example.com") que no se actualizarán a HTTPS. Si el modo Solo HTTPS está habilitado, no se mostrará un intersticial de error. Las organizaciones pueden usar esta política para mantener el acceso a los servidores que no admiten HTTPS sin necesidad de inhabilitar las actualizaciones a HTTPS ni el modo Solo HTTPS.
 
 Los nombres de host especificados deben canonicalizarse, es decir, cada IDN debe convertirse a su formato de etiqueta A, y todas las letras ASCII deben ser minúsculas.
@@ -6543,13 +6617,6 @@ Nota: Esta política no se aplica a las actualizaciones de HSTS.</translation>
 <translation id="5303080953475303561">Esta política controla la frecuencia con la que la pantalla de bloqueo solicita la contraseña para el desbloqueo rápido. Cuando aparece la pantalla de bloqueo, si el tiempo transcurrido desde la última vez que se introdujo la contraseña es mayor al del valor elegido, el desbloqueo rápido no estará disponible. Si los usuarios permanecen en la pantalla de bloqueo pasado ese tiempo, la próxima vez que introduzcan un código incorrecto o vuelvan a acceder a la pantalla de bloqueo (lo que suceda primero), se les pedirá la contraseña.
 
       Si no se establece esta política, los usuarios que utilicen el desbloqueo rápido deben introducir su contraseña en la pantalla de bloqueo cada día.</translation>
-<translation id="530488290401810961">Configura cómo descarga <ph name="PRODUCT_NAME" /> el modelo fundacional de IA generativa y lo usa para la inferencia de forma local.
-
-Si se permite esta política (valor 0) o no se define, el modelo se descargará automáticamente y se usará para la inferencia.
-
-Si se inhabilita esta política (valor 1), el modelo no se descargará y el modelo ya descargado (si lo hay) se eliminará.
-
-En las plataformas de ordenadores, <ph name="COMPONENT_UPDATES_ENABLED_POLICY_NAME" /> también puede inhabilitar la descarga del modelo.</translation>
 <translation id="5306186200045823863">Confiar en la infraestructura de PKI antigua de Symantec Corporation</translation>
 <translation id="5307432759655324440">Disponibilidad del modo Incógnito</translation>
 <translation id="5308551343115571396">Después de que se inhabilite <ph name="LACROS_NAME" />, intentaremos conservar tantos datos de usuario como sea posible y eliminaremos todos los datos del navegador.</translation>
@@ -6900,6 +6967,13 @@ Si se inhabilita <ph name="NTPCARDSVISIBLE" />, no se mostrará la tarjeta de Sh
 <translation id="5542235730745104308">Si se asigna el valor true a esta política, <ph name="PRODUCT_NAME" /> usará páginas de error alternativas que vienen incorporadas (como "No se encuentra la página"). Si se le asigna el valor false, <ph name="PRODUCT_NAME" /> nunca usará páginas de error alternativas.
 
 Si se define esta política, los usuarios no podrán modificarla. Si no se define, la política estará activada, pero los usuarios podrán cambiar este ajuste.</translation>
+<translation id="5543124658694855168">Si se define esta política, las empresas podrán anular el valor que devuelve la <ph name="CPU_PERFORMANCE_API_NAME" /> (es decir,
+<ph name="CPU_PERFORMANCE_GETTER_NAME" />).
+Consulta https://github.com/WICG/cpu-performance para obtener más información.
+
+Si se define esta política, el valor de <ph name="CPU_PERFORMANCE_GETTER_NAME" /> se anulará y se le asignará el valor especificado. Si no se define esta política, se usará el cálculo predeterminado del nivel de rendimiento.
+
+Los valores posibles de esta política son del 0 al 4.</translation>
 <translation id="5544059132156503357">Si se define esta política, se designará qué tipos de cifrado se admiten cuando se solicitan tickets de Kerberos de un servidor de <ph name="MS_AD_NAME" />.
 
 Estos son los efectos de cada valor:
@@ -7206,6 +7280,7 @@ Esta política afecta a los flujos de autenticación de inicio de sesión y de b
 <translation id="5706929446669049441">Inhabilitar que se puedan compartir credenciales de usuario</translation>
 <translation id="57072195677044908">Inhabilita la separación de perfiles</translation>
 <translation id="5708969689202733975">Configurar los modos de desbloqueo rápido permitidos</translation>
+<translation id="5714281972278520176">Habilitar orígenes opacos para URLs de datos en Web Workers</translation>
 <translation id="5714563837055244378">Habilitar la opción de compartir de Android a aplicación web.</translation>
 <translation id="5715739768416614900">Habilitar las herramientas de solución de problemas de kiosco.</translation>
 <translation id="5717973246079053225">Inhabilitar los informes en la nube de un perfil gestionado</translation>
@@ -7465,6 +7540,7 @@ Si se le asigna el valor "EnabledFocusSoundsOnly", se habilitará la función de
 
 Si se inhabilita esta política, se inhabilitarán los sonidos en el modo Sin distracciones.</translation>
 <translation id="5890063326284543943">Controlar el uso de la API Serial</translation>
+<translation id="5893086678951790439">Nivel de informes de métricas</translation>
 <translation id="5893303508158298667">Si se habilita <ph name="REMOTE_ACCESS_HOST_FIREWALL_TRAVERSAL_POLICY_NAME" />, siempre y cuando se habilite <ph name="REMOTE_ACCESS_HOST_ALLOW_RELAYED_CONNECTION_POLICY_NAME" /> o no se le asigne ningún valor, los clientes remotos podrán utilizar servidores de retransmisión para conectarse a este equipo cuando no haya disponible una conexión directa (por ejemplo, debido a restricciones del cortafuegos).
 
       Si se le asigna el valor Disabled a esta política, el acceso remoto no se desactivará, pero solo se permitirán las conexiones procedentes de la misma red (sin NAT transversal ni retransmisión).</translation>
@@ -7589,6 +7665,7 @@ A partir de la versión 147 de <ph name="PRODUCT_NAME" />, esta política dejar�
 
       Si se le asigna un valor a esta política, los usuarios no podrán cambiarlo. Si no se establece, los usuarios deciden si se muestran o no los encabezados y pies de página.</translation>
 <translation id="5951418260805607969">Mostrar notificación de poco espacio en disco</translation>
+<translation id="5952917461013988610">Informes básicos</translation>
 <translation id="5958746038080720143">Habilitar optimizaciones de detección automática de proxy web (WPAD)</translation>
 <translation id="5961137303188584693">Dirección NIC MAC integrada en el dispositivo</translation>
 <translation id="5962271004971310788">Extensiones que el usuario debe permitir que se ejecuten en Incógnito para navegar en modo Incógnito</translation>
@@ -7704,6 +7781,22 @@ Si se le asigna el valor false a esta política, se suprimirá la atribución a 
 Si se asigna el valor true a esta política o no se le asigna ningún valor, podrán usar la lista de clase de Google Classroom.
 
 Si se le asigna el valor false, no podrán acceder a la función.</translation>
+<translation id="6061604539167728530">Definir esta política permite especificar el número máximo de conexiones simultáneas por servidor proxy para solicitudes que no son de WebSocket.
+
+Para modificar los límites de solicitudes de WebSocket, consulta <ph name="MAX_CONNECTIONS_PER_PROXY_FOR_WEBSOCKET_POLICY_NAME" />.
+
+Si no se establece esta política, se utilizará el valor predeterminado (128).
+
+Algunas aplicaciones web consumen muchas conexiones con las solicitudes GET pendientes, por lo que un valor inferior a 128 puede hacer que la red del navegador se bloquee si se abren muchas aplicaciones web de este tipo.
+Algunos servidores proxy no son capaces de gestionar un número elevado de conexiones simultáneas por cliente, lo que se puede solucionar estableciendo un valor inferior para esta política.
+
+El valor debe ser igual o superior a 6.
+Si defines un valor inferior a ese límite, se usará 6.
+Si estableces un valor inferior al predeterminado (128), debes hacerlo bajo tu propia responsabilidad.
+
+El valor debe ser igual o inferior a 256 (99 en <ph name="PRODUCT_NAME" /> 147 y versiones anteriores).
+Si defines un valor superior a ese límite, se usará 256 (99 en <ph name="PRODUCT_NAME" /> 147 y versiones anteriores).
+Si defines un valor superior al predeterminado (128), lo haces bajo tu propia responsabilidad.</translation>
 <translation id="6066761914755798079">Si <ph name="DEFAULT_SEARCH_PROVIDER_ENABLED_POLICY_NAME" /> está activada y se asigna un valor a <ph name="DEFAULT_SEARCH_PROVIDER_SUGGEST_URL_POLICY_NAME" />, se especificará la URL que utilizará el buscador para mostrar sugerencias de búsqueda. La URL debe incluir la cadena <ph name="SEARCH_TERM_MARKER" />, que en la consulta se sustituirá por los términos de búsqueda del usuario.
 
       Puedes especificar la URL de la Búsqueda de Google introduciendo lo siguiente: <ph name="GOOGLE_SUGGEST_SEARCH_URL" />.</translation>
@@ -8059,6 +8152,7 @@ En <ph name="MAC_OS_NAME" />, esta política solo está disponible en instancias
 <translation id="6287128640500683781">Permitir que cualquier usuario inicie sesión</translation>
 <translation id="6287310684159482272">Configuración de cookies</translation>
 <translation id="6287742528823584153">Habilitar el servicio <ph name="PRODUCT_NAME" /> e iniciar el escritorio remoto al iniciar sesión</translation>
+<translation id="6293411231114989812">Se han habilitado orígenes opacos para URLs de datos en Web Workers (nuevo comportamiento predeterminado)</translation>
 <translation id="6299147100249359151">Permite la detección del nivel de las políticas.</translation>
 <translation id="6299554629216555326">Configuración de la gestión de ventanas</translation>
 <translation id="6302021021024941085">Inhabilitar las herramientas de solución de problemas de kiosco.</translation>
@@ -8196,6 +8290,7 @@ Nota: Esta política solo se aplica a las plataformas compatibles con extensione
 
       Independientemente de si se establece o no esta política, los usuarios no podrán cambiar la opción de configuración de WPAD.</translation>
 <translation id="6363485842496031347">Los ajustes de Supr usan la combinación de teclas que incluye la tecla modificadora Alt</translation>
+<translation id="6364336078281746235">Forzar la prioridad de primer plano para URLs concretas</translation>
 <translation id="6366574325767783825">Si se le asigna el valor "Habilitada" a esta política o no se le asigna ninguno, <ph name="PRODUCT_NAME" /> aceptará contenidos web de tipo Signed HTTP Exchanges.
 
       Si se le asigna el valor "Inhabilitada", los Signed HTTP Exchanges no se podrán cargar.</translation>
@@ -8875,17 +8970,6 @@ Esta política sustituye a la obsoleta de <ph name="WINDOW_PLACEMENT_BLOCKED_FOR
 <translation id="6813263547126514821">Encendido y apagado</translation>
 <translation id="681446116407619279">Esquemas de autenticación admitidos</translation>
 <translation id="6815628711329903153">Permitir la nueva asignación de búferes para el complemento PPAPI de las APIs Graphics3D</translation>
-<translation id="6819031008957510729">Si se habilita esta política, se recomendará habilitar de forma predeterminada el envío a Google de informes anónimos sobre datos de uso y de fallos de <ph name="PRODUCT_NAME" />. Los usuarios podrán cambiar este ajuste.
-
-Si se inhabilita esta política, el envío a Google de informes anónimos sobre datos de uso y de fallos de Chrome estará inhabilitado. Los usuarios no podrán cambiar este ajuste.
-
-Si no se define esta política, los usuarios podrán elegir el comportamiento del envío de informes anónimos durante la instalación o cuando se ejecute por primera vez. Además, podrán cambiar este ajuste más adelante.
-
-(En <ph name="PRODUCT_OS_NAME" />, consultar <ph name="DEVICE_METRICS_REPORTING_ENABLED_POLICY_NAME" />). 
-
-En <ph name="MS_WIN_NAME" />, esta política solo está disponible en instancias que estén vinculadas a un dominio de <ph name="MS_AD_NAME" /> o a <ph name="MS_AAD_NAME" />, o que se hayan registrado en <ph name="CHROME_ENTERPRISE_CORE_NAME" />.
-
-En <ph name="MAC_OS_NAME" />, esta política solo está disponible en instancias que se gestionen mediante MDM, que estén vinculadas a un dominio a través de MCX o que se hayan registrado en <ph name="CHROME_ENTERPRISE_CORE_NAME" />.</translation>
 <translation id="6819838337315703072">Si se activa la compatibilidad con aplicaciones <ph name="LINUX_OS_NAME" />, al habilitar la política se enviará información sobre el uso de las aplicaciones <ph name="LINUX_OS_NAME" /> al servidor.
 
       Si se inhabilita esta política o no se le asigna ningún valor, no se enviará información de uso.</translation>
@@ -8893,6 +8977,7 @@ En <ph name="MAC_OS_NAME" />, esta política solo está disponible en instancias
 Si se habilita esta política o no se le asigna ningún valor, el usuario podrá guardar imágenes en <ph name="GOOGLE_PHOTOS_PRODUCT_NAME" /> desde el menú contextual. Si se inhabilita esta política, los usuarios no podrán ver esa opción en el menú contextual.
 Esta política no impide que los usuarios puedan guardar imágenes en <ph name="GOOGLE_PHOTOS_PRODUCT_NAME" /> de otras formas distintas a la utilización del menú contextual.</translation>
 <translation id="6823711520976094072">Si a esta política se le asigna un valor inferior a 1 MB o no se le asigna ningún valor, <ph name="PRODUCT_OS_NAME" /> usará el tamaño predeterminado de 256 MB para el almacenamiento en caché de aplicaciones y extensiones que deben instalar varios usuarios de un mismo dispositivo, lo que evitará que cada usuario deba volver a descargar cada elemento.</translation>
+<translation id="6828918560681256273">Restringir la API Background Fetch cuando se llama desde un service worker</translation>
 <translation id="6829632070341067746">Esta política controla la reciente refactorización para las APIs Graphics3D en el complemento PPAPI.
 
 La migración solo afecta a detalles de implementación interna y no debería cambiar ningún comportamiento. No obstante, esta política se puede utilizar en caso de que alguna aplicación PPAPI no funcione correctamente.
@@ -8964,6 +9049,7 @@ Si se asigna el valor false a esta política o no se define, este diseño no est
 <translation id="686079137349561371">Microsoft Windows 7 o versiones posteriores</translation>
 <translation id="6863927303509860338">Configurar accesos directos en la página Nueva pestaña</translation>
 <translation id="6866755486434471318">Permitir que <ph name="PEPPER_NAME" /> use imágenes compartidas para decodificar vídeos.</translation>
+<translation id="6874461444739276423">Nivel de informes de métricas de dispositivos</translation>
 <translation id="6878757724611298427">Permitir que los usuarios usen aplicaciones Android en dispositivos no afiliados</translation>
 <translation id="6881447940489194100">Hash SHA-256 codificado en formato hexadecimal de los datos.</translation>
 <translation id="68818134518270542">Si se establece esta política, se especificarán las aplicaciones que pueden activar los usuarios para tomar notas en la pantalla de bloqueo de <ph name="PRODUCT_OS_NAME" />.
@@ -9306,6 +9392,13 @@ En <ph name="MAC_OS_NAME" />, esta política solo está disponible en instancias
 <translation id="7055022222176591388">No permitir versiones obsoletas de <ph name="FLASH_PLUGIN_NAME" /></translation>
 <translation id="7056040036973126753">Podrán enviarse datos de fiabilidad de dominios a Google en función de los ajustes de la política de análisis de métricas de usuario de Chrome</translation>
 <translation id="7062803946218028349">Permitir que se habilite Mi teléfono</translation>
+<translation id="7063646777978847358">Esta política controla si las solicitudes de recuperación en segundo plano de los service workers están restringidas. Si se ve afectada una función que descarga archivos en segundo plano, esta política puede ser pertinente.
+
+Si se habilita esta política o no se define, la restricción estará activa y las solicitudes de recuperación en segundo plano de contextos de service worker podrían bloquearse.
+
+Si se inhabilita esta política, se omitirá la restricción y todos los service workers podrán hacer solicitudes de recuperación en segundo plano.
+
+Esta política de empresa es temporal y se eliminará a partir de la versión M152.</translation>
 <translation id="7066292150801784098">Inhabilitar la interacción de los usuarios remotos con ventanas con permisos de administrador en sesiones de asistencia remota</translation>
 <translation id="706669471845501145">Permitir que los sitios muestren notificaciones de escritorio</translation>
 <translation id="7067419518071223152">Si se establece esta política, podrás definir una lista de patrones de URL que especifique qué aplicaciones web tienen acceso a ciertos tipos de archivo.
@@ -9381,6 +9474,9 @@ Si defines esta política, los usuarios no podrán cambiarla ni anularla.
 
 Si no se define, la lupa estará inhabilitada inicialmente en la pantalla de inicio de sesión, pero el usuario podrá habilitarla en cualquier momento.</translation>
 <translation id="7109384070286741861">Inhabilitar CECPQ2</translation>
+<translation id="711246451611873603">Si se habilita esta política o no se define, se permitirá hacer zoom usando el gesto de pellizcar en una sesión del modo Kiosco.
+
+Si se inhabilita esta política, no se permitirá hacer zoom usando el gesto de pellizcar en una sesión del modo Kiosco.</translation>
 <translation id="7113439794629928551">Mostrar controles multimedia para las sesiones de <ph name="PRODUCT_NAME" /> iniciadas por otros dispositivos</translation>
 <translation id="7113803652772945829">Si se le asigna el valor true a esta política, los usuarios podrán usar un gestor de contraseñas de terceros.
 Ese gestor de contraseñas se encargará de guardar y rellenar todas las contraseñas, los datos para pagos y los datos de autocompletado.
@@ -10117,22 +10213,6 @@ Si no se define esta política, no se permitirán excepciones de <ph name="FLOAT
 
       Si el dispositivo del usuario no está administrado, la disponibilidad de esta función dependerá también de si el usuario es el propietario del dispositivo.</translation>
 <translation id="7570291542739287032">Solo en la nube</translation>
-<translation id="7571158727244273239">Definir esta política permite especificar el número máximo de conexiones simultáneas por servidor proxy para solicitudes de WebSocket.
-
-Para modificar los límites de solicitudes que no son de WebSocket, consulta <ph name="MAX_CONNECTIONS_PER_PROXY_POLICY_NAME" />.
-
-Si no se establece esta política, se utilizará el valor predeterminado (32).
-
-Algunas aplicaciones web consumen muchas conexiones con las solicitudes GET pendientes, por lo que un valor inferior a 32 puede hacer que la red del navegador se bloquee si se abren muchas aplicaciones web de este tipo.
-Algunos servidores proxy no son capaces de gestionar un número elevado de conexiones simultáneas por cliente, lo que se puede solucionar definiendo un valor inferior para esta política.
-
-El valor debe ser igual o superior a 6.
-Si defines un valor inferior a ese límite, se usará 6.
-Si defines un valor inferior al predeterminado (32), lo haces bajo tu propia responsabilidad.
-
-El valor debe ser igual o inferior a 256.
-Si defines un valor superior a ese límite, se usará 256.
-Si defines un valor superior al predeterminado (32), lo haces bajo tu propia responsabilidad.</translation>
 <translation id="7572641760104970905">Sin complejidad</translation>
 <translation id="757395965347379751">Si se habilita esta opción, <ph name="PRODUCT_NAME" /> permitirá los certificados SHA-1 firmados siempre que se validen correctamente y se vinculen a certificados AC instalados localmente.
 
@@ -10246,6 +10326,10 @@ Las políticas que deban fusionarse tendrán que establecerse en <ph name="POLIC
       Si se le asigna el valor False o no se define, desactivará los informes.
       Las reglas definidas con restricciones de nivel ALLOW en DataLeakPreventionRulesList no informarán de los eventos en ambos casos.</translation>
 <translation id="7648907905084499629">Usar el comportamiento de cookies de <ph name="FEATURE_NAME_SAMESITE_BY_DEFAULT_COOKIES" /> en todos los sitios web</translation>
+<translation id="7649831723389657756">Si se establece esta política, se especificará desde qué orígenes se deben permitir los esquemas de autenticación HTTP admitidos por <ph name="PRODUCT_NAME" />, independientemente de la política <ph name="AUTH_SCHEMES_POLICY_NAME" />.
+
+      El patrón de origen debe tener el formato que se indica en esta página: <ph name="URL_SCHEME_FORMAT_LINK" />. Pueden definirse hasta 1000 excepciones en <ph name="ALL_HTTP_AUTH_ALLOWED_FOR_ORIGINS_POLICY_NAME" />.
+      Se permiten comodines para el componente de host (por ejemplo, "*:8000" coincide con todos los hosts del puerto 8000). Para que coincida con todos los esquemas o todos los puertos, omite el componente por completo (por ejemplo, "example.com" coincide con cualquier esquema y cualquier puerto). Un nombre de host (por ejemplo, "example.com") también coincide con sus subdominios. Para que coincida exactamente con un host y excluir sus subdominios, añade un punto delante (por ejemplo, ".example.com"). Para que coincidan todos los orígenes, usa un solo asterisco ("*").</translation>
 <translation id="7657261947024629645">Optimizar para un mejor rendimiento.</translation>
 <translation id="76580522298425324">Permitir captura de pantalla sin gesto previo del usuario</translation>
 <translation id="7661379728107156839">Complejidad baja</translation>
@@ -10294,6 +10378,7 @@ Esta política se puede anular para orígenes de aplicaciones web aisladas espec
 
           El valor de esta política debe especificarse en milisegundos. Los valores deben ser inferiores o iguales al retraso de desconexión de la pantalla (si se ha configurado) y al retraso de inactividad.</translation>
 <translation id="7680437377926096177">Impide que se muestre el cuadro de diálogo de cierre de sesión cuando se cierra la última ventana.</translation>
+<translation id="7681075922820376711">Anulación del nivel de rendimiento de la CPU</translation>
 <translation id="7682409626897786151">Permite definir una lista de patrones de URL donde se especifique qué sitios pueden usar la generación de claves. Si un patrón de URL está en KeygenBlockedForUrls, se anularán estas excepciones.
 
           Si no se establece esta política, se usará en todos los sitios el valor general predeterminado especificado en la política DefaultKeygenSetting (si está configurada) o en la configuración personal del usuario (en caso contrario).
@@ -10618,6 +10703,12 @@ Para obtener información detallada sobre los patrones de <ph name="URL_LABEL" /
 <translation id="7891884447851425349">Si <ph name="DEFAULT_SEARCH_PROVIDER_ENABLED_POLICY_NAME" /> está activada y se asigna un valor a <ph name="DEFAULT_SEARCH_PROVIDER_SEARCH_URL_POLICY_NAME" />, se especificará la URL del buscador usada durante una búsqueda predeterminada. La URL debe incluir la cadena <ph name="SEARCH_TERM_MARKER" />, que en la consulta se sustituirá por los términos de búsqueda del usuario.
 
       Puedes especificar la URL de la Búsqueda de Google introduciendo lo siguiente: <ph name="GOOGLE_SEARCH_URL" />.</translation>
+<translation id="7892399002226884003">Política para controlar si se puede inhabilitar la opción de temas de anuncios de <ph name="PRIVACY_SANDBOX_NAME" /> para los usuarios.
+
+Si se inhabilita esta política, la opción de temas de anuncios se desactivará para los usuarios.
+Si se habilita esta política o no se define, los usuarios podrán activar o desactivar la opción de temas de anuncios de <ph name="PRIVACY_SANDBOX_NAME" /> en sus dispositivos.
+
+Esta política está obsoleta a partir de la versión 144 de <ph name="PRODUCT_NAME" /> con la discontinuación de la API Topics.</translation>
 <translation id="7893719068404928632">Si se habilita esta política, cuando deba mostrarse una advertencia en <ph name="CHROME_DEVTOOLS_NAME" /> debido a un fallo en las comprobaciones de <ph name="LOCAL_NETWORK_ACCESS" />, se bloqueará la solicitud principal.
 
 Si se inhabilita esta política o no se define, las solicitudes de <ph name="LOCAL_NETWORK_ACCESS" /> usarán la gestión predeterminada de estas solicitudes.
@@ -11017,6 +11108,13 @@ Si no se le asigna ningún valor, la pantalla de privacidad se inhabilitará ini
 <translation id="8171262216089271568">Habilitar el cursor grande en la pantalla de inicio de sesión</translation>
 <translation id="8171924760436219650">Cambiar el botón principal del ratón al botón derecho en la pantalla de inicio de sesión</translation>
 <translation id="81724933026241365">Permitir que los usuarios apaguen el dispositivo usando el icono de apagar o el botón de encendido físico</translation>
+<translation id="8173338752620395043">Si se habilita la política, <ph name="PRODUCT_OS_NAME" /> enviará a Google métricas de uso y datos de diagnóstico, como informes sobre fallos. Si se inhabilita la política, no se enviarán métricas ni datos de diagnóstico.
+
+En los dispositivos gestionados, esta política está habilitada de forma predeterminada y envía métricas a Google.
+
+En el caso de los dispositivos no gestionados, el usuario puede decidir si quiere enviar las métricas cuando la política no se ha definido.
+
+Si el experimento <ph name="RESTRUCTURE_METRICS_CONSENT_SETTINGS_EXPERIMENT_NAME" /> está activo en el dispositivo y se definen tanto esta política como la política <ph name="DEVICE_METRICS_REPORTING_LEVEL_POLICY_NAME" />, la política <ph name="DEVICE_METRICS_REPORTING_LEVEL_POLICY_NAME" /> tendrá prioridad.</translation>
 <translation id="8173864651667424191">Cuando la opción Imprimir como imagen está disponible, se establece como opción predeterminada en las vistas previas de impresión de documentos PDF.</translation>
 <translation id="8175922758834816585">Habilitar los mensajes de voz en la pantalla de inicio de sesión y permitir que el usuario los inhabilite temporalmente</translation>
 <translation id="8176035528522326671">Permitir que el usuario de empresa sea solo un usuario principal de varios perfiles (comportamiento predeterminado para usuarios administrados por empresas)</translation>
@@ -11140,16 +11238,6 @@ Estas políticas están destinadas exclusivamente a la configuración de instanc
 No es necesario configurar estas opciones manualmente. En la página <ph name="POLICY_TEMPLATE_DOWNLOAD_URL" />, puedes encontrar plantillas fáciles de utilizar para Windows, Mac y Linux.
 
 Te recomendamos que utilices GPO para configurar la política en Windows, aunque aún se admite la asignación de la política a través del registro para instancias de Windows vinculadas a un dominio de <ph name="MS_AD_NAME" />.</translation>
-<translation id="8261008508574620157">Política para controlar si se muestra el mensaje de <ph name="PRIVACY_SANDBOX_NAME" /> a los usuarios.
-El mensaje es un flujo de bloqueo de usuarios que informa a los usuarios sobre los ajustes de <ph name="PRIVACY_SANDBOX_NAME" />. Visita <ph name="PRIVACY_SANDBOX_URL" /> para consultar más información sobre las iniciativas de Chrome para suprimir las cookies de terceros.
-
-Si se inhabilita esta política, <ph name="PRODUCT_NAME" /> no mostrará el mensaje de <ph name="PRIVACY_SANDBOX_NAME" />.
-Si se habilita esta política o no se define, <ph name="PRODUCT_NAME" /> determinará si se puede mostrar el mensaje de <ph name="PRIVACY_SANDBOX_NAME" /> y, si se puede, lo mostrará.
-
-Se debe deshabilitar esta política si se ha definido alguna de las siguientes políticas:
-<ph name="PRIVACY_SANDBOX_AD_TOPICS_ENABLED_POLICY_NAME" />
-<ph name="PRIVACY_SANDBOX_SITE_ENABLED_ADS_ENABLED_POLICY_NAME" />
-<ph name="PRIVACY_SANDBOX_AD_MEASUREMENT_ENABLED_POLICY_NAME" /></translation>
 <translation id="826163650738550159">Esta política proporcionará acceso a la página de prueba de políticas. Mientras se prueban las políticas en esta página, el resto de políticas se ignorarán.
 Esta función solo estará disponible en el canal Canary.
 
@@ -11617,6 +11705,7 @@ Si no se define esta política, su comportamiento lo determinará la política <
 Para obtener más información sobre el tratamiento de datos en las funciones de IA generativa, consulta https://support.google.com/chrome/a?p=generative_ai_settings.</translation>
 <translation id="8566842294717252664">Oculta tienda web en página Nueva pestaña y en menú de aplicaciones</translation>
 <translation id="8567697114274003779">Definir una etiqueta de empresa personalizada para un perfil gestionado</translation>
+<translation id="8570976102224880079">Informes avanzados</translation>
 <translation id="8571069584826006598">Permitir que los orígenes de aplicaciones web aisladas soliciten al usuario acceso a impresoras locales mediante la API WebPrinting</translation>
 <translation id="8571119890730528225">Inhabilitar la partición del almacenamiento de terceros.</translation>
 <translation id="8571314270766672278">Restaurar y restablecer el dispositivo al cambiar a una versión inferior (intentar conservar el registro)</translation>
@@ -11803,16 +11892,9 @@ Esta política es una medida temporal y se eliminará tras algunos logros.</tran
       Si esta política se inhabilita, se reducirán la seguridad y la estabilidad de <ph name="PRODUCT_NAME" />, ya que se podría cargar código desconocido y potencialmente hostil en el proceso del navegador de <ph name="PRODUCT_NAME" />. Por ello, esta política solo debe inhabilitarse si hay problemas de compatibilidad con un software de terceros que deba ejecutarse en el proceso del navegador de <ph name="PRODUCT_NAME" />.
 
       Nota: Consulta más información sobre las políticas de mitigación de procesos en la página https://chromium.googlesource.com/chromium/src/+/HEAD/docs/design/sandbox.md#Process-mitigation-policies.</translation>
-<translation id="8672039014434141545">Política para controlar si se puede inhabilitar la opción de temas de anuncios de <ph name="PRIVACY_SANDBOX_NAME" /> para los usuarios.
-
-Si se inhabilita esta política, la opción de temas de anuncios se desactivará para los usuarios.
-Si se habilita esta política o no se define, los usuarios podrán activar o desactivar la opción de temas de anuncios de <ph name="PRIVACY_SANDBOX_NAME" /> en sus dispositivos.
-
-Para definir esta política, se debe inhabilitar la política <ph name="PRIVACY_SANDBOX_PROMPT_ENABLED_POLICY_NAME" />.
-
-Esta política está obsoleta a partir de la versión 144 de <ph name="PRODUCT_NAME" /> con la discontinuación de la API Topics.</translation>
 <translation id="8672321184841719703">Versión de destino de actualizaciones automáticas</translation>
 <translation id="867410340948518937">U2F (Universal Second Factor)</translation>
+<translation id="8675599659717867329">Inhabilitar informes</translation>
 <translation id="8676959842615154675">Si se habilita esta política, el host de acceso remoto comparará el nombre del usuario local al que está asociado el host con el nombre de la cuenta de Google registrado como el propietario del host; por ejemplo, "juanmartinez" si el host pertenece a la cuenta de Google juanmartinez@example.com. Este host no se iniciará si el nombre del propietario del host es diferente al nombre del usuario local al que está asociado el host. Para establecer que la cuenta de Google del propietario se asocie a un dominio específico, usa esta política junto a <ph name="REMOTE_ACCESS_HOST_DOMAIN_POLICY_NAME" />.
 
       Si se inhabilita esta política o no se le asigna ningún valor, el host de acceso remoto podrá asociarse a cualquier usuario local.</translation>
@@ -12628,6 +12710,19 @@ Determina si un usuario puede configurar el nombre de host del dispositivo.
 Si se inhabilita, las APIs de cuota de almacenamiento suelen devolver un valor dinámico proporcional al espacio total disponible en el dispositivo, independientemente del uso.
 Si no se define, las APIs de cuota de almacenamiento usarán el comportamiento predeterminado de Chrome.
 Los sitios con permisos de almacenamiento ilimitado no se ven afectados por este ajuste. Tampoco se verá afectada la cuota obligatoria.</translation>
+<translation id="975621145048605048">Si se habilita esta política, se recomendará habilitar de forma predeterminada el envío a Google de informes anónimos sobre datos de uso y de fallos de <ph name="PRODUCT_NAME" />. Los usuarios podrán cambiar este ajuste.
+
+Si se inhabilita esta política, el envío a Google de informes anónimos de datos de uso y de fallos de Chrome estará inhabilitado. Los usuarios no podrán cambiar este ajuste.
+
+Si no se define esta política, los usuarios podrán elegir el comportamiento del envío de informes anónimos durante la instalación o cuando se ejecute por primera vez. Además, podrán cambiar este ajuste más adelante.
+
+En el caso de <ph name="PRODUCT_OS_NAME" />, consulta <ph name="DEVICE_METRICS_REPORTING_ENABLED_POLICY_NAME" />.
+
+Si el experimento <ph name="RESTRUCTURE_METRICS_CONSENT_SETTINGS_EXPERIMENT_NAME" /> está activo en el dispositivo y se definen tanto esta política como la política <ph name="METRICS_REPORTING_LEVEL_POLICY_NAME" />, la política <ph name="METRICS_REPORTING_LEVEL_POLICY_NAME" /> tendrá prioridad.
+
+En <ph name="MS_WIN_NAME" />, esta política solo está disponible en instancias que estén vinculadas a un dominio de <ph name="MS_AD_NAME" /> o a <ph name="MS_AAD_NAME" />, o que se hayan registrado en <ph name="CHROME_ENTERPRISE_CORE_NAME" />.
+
+En <ph name="MAC_OS_NAME" />, esta política solo está disponible en instancias que se gestionen mediante MDM, que estén vinculadas a un dominio a través de MCX o que se hayan registrado en <ph name="CHROME_ENTERPRISE_CORE_NAME" />.</translation>
 <translation id="976415389478739655">Requerir que los dispositivos de los usuarios estén en una red gestionada para formar parte de la clase <ph name="CLASS_TOOLS_NAME" /></translation>
 <translation id="978619365985286086">Ajustes de las herramientas de gestión de clases</translation>
 <translation id="978658824596356870">Formato de reloj de 24 horas</translation>

@@ -8,6 +8,7 @@
 
 #include "chrome/browser/background/glic/glic_launcher_configuration.h"
 #include "chrome/browser/glic/common/local_hotkey_manager.h"
+#include "chrome/browser/glic/glic_pref_names_internal.h"
 #include "chrome/common/chrome_features.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_registry.h"
@@ -54,6 +55,11 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   // Boolean pref for the closed captioning setting.
   registry->RegisterBooleanPref(prefs::kGlicClosedCaptioningEnabled, false);
 
+  registry->RegisterIntegerPref(prefs::kGlicSelectionWidgetDismissCount, 0);
+
+  // Boolean pref that determines if errors are allowed to be shown.
+  registry->RegisterBooleanPref(prefs::kGlicShowErrorAllowed, false);
+
   // Boolean pref for the daisy chain new tabs setting.
   registry->RegisterBooleanPref(prefs::kGlicKeepSidepanelOpenOnNewTabsEnabled,
                                 true);
@@ -70,6 +76,8 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterListPref(prefs::kGlicActuationOnWebBlockedForURLs);
 
   registry->RegisterBooleanPref(prefs::kGlicUserEnabledActuationOnWeb, false);
+
+  registry->RegisterBooleanPref(prefs::kGlicPartitionNeedsCookieSync, true);
 }
 
 void RegisterLocalStatePrefs(PrefRegistrySimple* registry) {
@@ -93,6 +101,9 @@ void RegisterLocalStatePrefs(PrefRegistrySimple* registry) {
   registry->RegisterStringPref(prefs::kGlicGuestUrlPresetProd, "");
   registry->RegisterStringPref(
       prefs::kGlicWebContinuityOriginatingHostUrlPreset, "");
+#if BUILDFLAG(IS_MAC)
+  registry->RegisterBooleanPref(prefs::kGlicUseAltOSIcon, false);
+#endif
 }
 
 }  // namespace glic::prefs

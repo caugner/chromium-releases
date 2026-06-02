@@ -42,8 +42,6 @@ GPU_CONFIG_EXPORT BASE_DECLARE_FEATURE(kUseDynamicBackingAllocations);
 
 GPU_CONFIG_EXPORT BASE_DECLARE_FEATURE(kUseStrongRefToSharedImageInterface);
 
-GPU_CONFIG_EXPORT BASE_DECLARE_FEATURE(kUseCompoundImageBackingAsDefault);
-
 GPU_CONFIG_EXPORT BASE_DECLARE_FEATURE(kEnableMSAAOnNewIntelGPUs);
 
 #if BUILDFLAG(IS_WIN)
@@ -187,6 +185,8 @@ GPU_CONFIG_EXPORT BASE_DECLARE_FEATURE(kWebGPUCompatibilityMode);
 GPU_CONFIG_EXPORT bool IsGraphiteContextThreadSafe();
 
 GPU_CONFIG_EXPORT BASE_DECLARE_FEATURE(kSendGPUChannelEarly);
+GPU_CONFIG_EXPORT extern const base::FeatureParam<bool>
+    kSendGPUChannelEarlyTopChromeOnly;
 
 }  // namespace features
 

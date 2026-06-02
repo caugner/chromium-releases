@@ -8,6 +8,7 @@ import("//android_webview/variables.gni")
 import("//build/config/android/rules.gni")
 import("//build/config/python.gni")
 import("//device/vr/buildflags/buildflags.gni")
+import("//printing/buildflags/buildflags.gni")
 import("//testing/test.gni")
 import("//third_party/jni_zero/jni_zero.gni")
 import("//tools/grit/repack.gni")
@@ -274,6 +275,7 @@ shared_library_with_jni("libstandalonelibwebviewchromium") {
   ldflags = [ "-Wl,-shared,-Bsymbolic" ]
   deps = [
     ":draw_fn_impl_jni_headers",
+    ":test_support",
     ":webview_instrumentation_test_native_jni_impl",
     "//android_webview",
     "//android_webview/browser/gfx",
@@ -478,7 +480,6 @@ base_webview_instrumentation_test_apk("webview_instrumentation_test_apk") {
     "../javatests/src/org/chromium/android_webview/test/ClientOnReceivedErrorTest.java",
     "../javatests/src/org/chromium/android_webview/test/ClientOnReceivedHttpErrorTest.java",
     "../javatests/src/org/chromium/android_webview/test/ConsoleMessagesForBlockedLoadsTest.java",
-    "../javatests/src/org/chromium/android_webview/test/ContentViewMiscTest.java",
     "../javatests/src/org/chromium/android_webview/test/ContextMenuTest.java",
     "../javatests/src/org/chromium/android_webview/test/CookieManagerDisabledPartitioningTest.java",
     "../javatests/src/org/chromium/android_webview/test/CookieManagerStartupTest.java",
@@ -538,6 +539,7 @@ base_webview_instrumentation_test_apk("webview_instrumentation_test_apk") {
     "../javatests/src/org/chromium/android_webview/test/VisualStateTest.java",
     "../javatests/src/org/chromium/android_webview/test/WebExposedTest.java",
     "../javatests/src/org/chromium/android_webview/test/WebKitHitTestTest.java",
+    "../javatests/src/org/chromium/android_webview/test/WebMessageListenerPrerenderTest.java",
     "../javatests/src/org/chromium/android_webview/test/WebViewAsynchronousFindApisTest.java",
     "../javatests/src/org/chromium/android_webview/test/WebViewFindApisTestRule.java",
     "../javatests/src/org/chromium/android_webview/test/WebViewModalDialogOverrideTest.java",
@@ -704,6 +706,7 @@ android_library("webview_instrumentation_test_mock_services_java") {
 android_library("webview_instrumentation_test_utils_java") {
   testonly = true
   sources = [
+    "../javatests/src/org/chromium/android_webview/test/util/AwPrefetchTestUtil.java",
     "../javatests/src/org/chromium/android_webview/test/util/DisableOriginTrialsSafeModeTestUtils.java",
     "../javatests/src/org/chromium/android_webview/test/util/EmbeddedComponentLoaderFactory.java",
     "../javatests/src/org/chromium/android_webview/test/util/ManifestMetadataMockApplicationContext.java",
@@ -731,6 +734,7 @@ android_library("webview_instrumentation_test_utils_java") {
 generate_jni("webview_instrumentation_test_native_jni") {
   testonly = true
   sources = [
+    "../javatests/src/org/chromium/android_webview/test/util/AwPrefetchTestUtil.java",
     "../javatests/src/org/chromium/android_webview/test/util/DisableOriginTrialsSafeModeTestUtils.java",
     "../javatests/src/org/chromium/android_webview/test/util/EmbeddedComponentLoaderFactory.java",
     "../javatests/src/org/chromium/android_webview/test/util/RendererProcessMetricsProviderUtils.java",
@@ -742,6 +746,7 @@ generate_jni("webview_instrumentation_test_native_jni") {
 
 source_set("webview_instrumentation_test_native_jni_impl") {
   sources = [
+    "browser/aw_prefetch_manager_test_utils.cc",
     "browser/disable_origin_trials_safemode_test_utils.cc",
     "browser/embedded_component_loader_test_helper.cc",
     "browser/renderer_process_metrics_provider_utils.cc",
@@ -761,6 +766,7 @@ source_set("webview_instrumentation_test_native_jni_impl") {
     "//components/component_updater/android:embedded_component_loader",
     "//components/component_updater/android:embedded_component_loader_jni_headers",
     "//components/embedder_support/origin_trials",
+    "//components/prefs:test_support",
     "//content/public/common",
     "//net:test_support",
     "//third_party/protobuf:protobuf_lite",
@@ -775,11 +781,22 @@ repack("android_webview_unittests_pak") {
   output = "$root_out_dir/android_webview_unittests_resources.pak"
 }
 
+source_set("test_support") {
+  testonly = true
+  sources = [
+    "../browser/gfx/test/fake_hwui_gl_context.cc",
+    "../browser/gfx/test/fake_hwui_gl_context.h",
+  ]
+
+  deps = [ "//base" ]
+}
+
 test("android_webview_unittests") {
   deps = [
     ":android_webview_unittests_assets",
     ":android_webview_unittests_java",
     ":android_webview_unittests_jni",
+    ":test_support",
     "//android_webview/browser",
     "//android_webview/browser/gfx",
     "//android_webview/browser/lifecycle",
@@ -839,13 +856,16 @@ test("android_webview_unittests") {
     "../browser/aw_content_browser_client_content_restriction_throttles_unittest.cc",
     "../browser/aw_content_browser_client_unittest.cc",
     "../browser/aw_contents_client_bridge_unittest.cc",
+    "../browser/aw_cookie_access_policy_unittest.cc",
     "../browser/aw_crash_keys_unittest.cc",
     "../browser/aw_field_trials_unittest.cc",
     "../browser/aw_origin_matched_header_unittest.cc",
     "../browser/aw_pac_processor_unittest.cc",
     "../browser/aw_permission_manager_unittest.cc",
     "../browser/aw_user_agent_metadata_unittest.cc",
+    "../browser/content_restriction/aw_content_restriction_navigation_throttle_unittest.cc",
     "../browser/content_restriction/aw_content_restriction_url_loader_throttle_unittest.cc",
+    "../browser/cookie_manager_unittest.cc",
     "../browser/enterprise_authentication_app_link_policy_handler_unittest.cc",
     "../browser/file_system_access/aw_file_system_access_permission_context_unittest.cc",
     "../browser/gfx/begin_frame_source_webview_unittest.cc",
@@ -883,6 +903,16 @@ test("android_webview_unittests") {
     "../nonembedded/component_updater/aw_component_update_service_test.cc",
     "../nonembedded/component_updater/aw_component_updater_configurator_unittest.cc",
   ]
+
+  if (enable_printing) {
+    sources += [ "../browser/aw_print_manager_unittest.cc" ]
+    deps += [
+      "//components/printing/common",
+      "//components/printing/common:mojo_interfaces",
+      "//printing",
+      "//printing:settings",
+    ]
+  }
 
   # TODO(crbug.com/40031409): Fix code that adds exit-time destructors and
   # enable the diagnostic by removing this line.
@@ -931,7 +961,6 @@ robolectric_binary("android_webview_junit_tests") {
     "../junit/src/org/chromium/android_webview/robolectric/AwLayoutSizerTest.java",
     "../junit/src/org/chromium/android_webview/robolectric/AwScrollOffsetManagerTest.java",
     "../junit/src/org/chromium/android_webview/robolectric/AwWebContentsMetricsRecorderTest.java",
-    "../junit/src/org/chromium/android_webview/robolectric/FindAddressTest.java",
     "../junit/src/org/chromium/android_webview/robolectric/PlatformSelectionActionMenuDelegateTest.java",
     "../junit/src/org/chromium/android_webview/robolectric/PrefetchOperationResultTest.java",
     "../junit/src/org/chromium/android_webview/robolectric/RectUtilsTest.java",

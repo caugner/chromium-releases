@@ -139,10 +139,15 @@ void HTMLFormControlElement::DetachLayoutTree(bool performing_reattach) {
 
 void HTMLFormControlElement::AttributeChanged(
     const AttributeModificationParams& params) {
+  if (RuntimeEnabledFeatures::WebMCPEnabled(GetExecutionContext())) {
+    if (HTMLFormElement* form = Form()) {
+      form->ScheduleWebMCPSchemaUpdate();
+    }
+  }
   HTMLElement::AttributeChanged(params);
   if (params.name == html_names::kDisabledAttr &&
       params.old_value.IsNull() != params.new_value.IsNull()) {
-    DisabledAttributeChanged();
+    DisabledAttributeChanged(DisabledChangedReason::kAttributeChanged);
     if (params.reason == AttributeModificationReason::kDirectly &&
         IsDisabledFormControl() && AdjustedFocusedElementInTreeScope() == this)
       blur();
@@ -174,12 +179,13 @@ void HTMLFormControlElement::ParseAttribute(
   }
 }
 
-void HTMLFormControlElement::DisabledAttributeChanged() {
+void HTMLFormControlElement::DisabledAttributeChanged(
+    DisabledChangedReason reason) {
   // Don't blur in this function because this is called for descendants of
   // <fieldset> while tree traversal.
   EventDispatchForbiddenScope event_forbidden;
 
-  ListedElement::DisabledAttributeChanged();
+  ListedElement::DisabledAttributeChanged(reason);
   InvalidateIfHasEffectiveAppearance();
 
   // TODO(dmazzoni): http://crbug.com/699438.

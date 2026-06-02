@@ -61,7 +61,7 @@
 #include "extensions/common/extension_urls.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_constants.h"
-#include "extensions/common/manifest_url_handlers.h"
+#include "extensions/common/manifest_handlers/manifest_url_handlers.h"
 
 #if BUILDFLAG(IS_CHROMEOS)
 #include "base/time/time.h"
@@ -883,6 +883,7 @@ scoped_refptr<CrxInstaller> ExtensionUpdater::CreateUpdateInstaller(
 
   // Either |pending_extension_info| or |extension| or both must not be null.
   scoped_refptr<CrxInstaller> installer(CrxInstaller::CreateSilent(profile_));
+  installer->set_is_update(true);
   installer->set_expected_id(id);
   installer->set_expected_hash(file.expected_hash);
   int creation_flags = Extension::NO_FLAGS;

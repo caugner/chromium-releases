@@ -236,6 +236,7 @@ class ChromePasswordManagerClient
   void PromptUserToEnableAutosignin() override;
   bool IsOffTheRecord() const override;
   profile_metrics::BrowserProfileType GetProfileType() const override;
+  using password_manager::PasswordManagerClient::GetPasswordManager;
   const password_manager::PasswordManagerInterface* GetPasswordManager()
       const override;
   using password_manager::PasswordManagerClient::GetPasswordFeatureManager;
@@ -319,7 +320,7 @@ class ChromePasswordManagerClient
 #if BUILDFLAG(IS_ANDROID)
   webauthn::WebAuthnCredManDelegate* GetWebAuthnCredManDelegateForDriver(
       password_manager::PasswordManagerDriver* driver) override;
-  void MarkSharedCredentialsAsNotified(const GURL& url) override;
+  void MarkSharedCredentialsAsNotified(const url::Origin& origin) override;
 #endif  // BUILDFLAG(IS_ANDROID)
   version_info::Channel GetChannel() const override;
   void RefreshPasswordManagerSettingsIfNeeded() const override;
@@ -407,9 +408,7 @@ class ChromePasswordManagerClient
   password_manager::UndoPasswordChangeController*
   GetUndoPasswordChangeController() override;
 
-#if !BUILDFLAG(IS_ANDROID)
   bool IsActorTaskActive() override;
-#endif  // !BUILDFLAG(IS_ANDROID)
 
   bool apply_client_side_prediction_override_for_testing() const {
     return apply_client_side_prediction_override_;
@@ -417,6 +416,8 @@ class ChromePasswordManagerClient
   void ApplyClientSidePredictionOverride() {
     apply_client_side_prediction_override_ = true;
   }
+
+  void OnNonFedCmFederatedLogin();
 
  protected:
   // Callable for tests.
@@ -443,6 +444,7 @@ class ChromePasswordManagerClient
       content::RenderFrameHost* render_frame_host,
       const content::GlobalRequestID& request_id,
       const blink::mojom::ResourceLoadInfo& resource_load_info) override;
+  void OnFedCmFederatedLogin(bool success) override;
 
   // autofill::AutofillManager::Observer:
   void OnFieldTypesDetermined(autofill::AutofillManager& manager,
@@ -513,6 +515,8 @@ class ChromePasswordManagerClient
   void PropagatePredictionsToPasswordManager(autofill::AutofillManager& manager,
                                              autofill::FormGlobalId form_id,
                                              FieldTypeSource source);
+
+  void OnNonPasswordLoginDetected();
 
   password_manager::PasswordManager password_manager_;
   password_manager::PasswordFeatureManagerImpl password_feature_manager_;

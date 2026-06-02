@@ -9,10 +9,13 @@
 #include "base/scoped_observation.h"
 #include "build/build_config.h"
 #include "chrome/browser/glic/glic_profile_manager.h"
-#include "chrome/browser/glic/public/service/glic_instance_coordinator.h"
 #include "chrome/browser/status_icons/status_icon_menu_model.h"
 #include "chrome/browser/status_icons/status_icon_observer.h"
 #include "chrome/browser/ui/browser_window/public/browser_collection_observer.h"
+
+#if BUILDFLAG(IS_MAC)
+#include "chrome/browser/background/glic/os_icon_provider_mac.h"
+#endif
 
 class StatusIcon;
 class StatusIconMenuModel;
@@ -58,6 +61,9 @@ class GlicStatusIcon : public StatusIconObserver,
 
   void UpdateVisibilityOfExitInContextMenu();
 
+  // Virtual for testing.
+  virtual void SetIcon(const gfx::ImageSkia& icon);
+
   StatusIconMenuModel* GetContextMenuForTesting() { return context_menu_; }
 
  protected:
@@ -73,9 +79,13 @@ class GlicStatusIcon : public StatusIconObserver,
   base::ScopedObservation<GlobalBrowserCollection, BrowserCollectionObserver>
       browser_collection_observation_{this};
 
-  raw_ptr<StatusTray> status_tray_;
-  raw_ptr<StatusIcon> status_icon_;
-  raw_ptr<StatusIconMenuModel> context_menu_;
+  raw_ptr<StatusTray> status_tray_ = nullptr;
+  raw_ptr<StatusIcon> status_icon_ = nullptr;
+  raw_ptr<StatusIconMenuModel> context_menu_ = nullptr;
+
+#if BUILDFLAG(IS_MAC)
+  OSIconProviderMac os_icon_provider_mac_;
+#endif
 };
 
 }  // namespace glic

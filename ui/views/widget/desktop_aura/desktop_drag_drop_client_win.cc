@@ -6,7 +6,6 @@
 
 #include <memory>
 
-#include "base/auto_reset.h"
 #include "base/notimplemented.h"
 #include "base/scoped_observation.h"
 #include "base/threading/hang_watcher.h"
@@ -48,21 +47,19 @@ class SourceWindowObserver : public aura::WindowObserver {
       scoped_observation_;
 };
 
-bool g_is_dragging = false;
-
 }  // namespace
 
 DesktopDragDropClientWin::DesktopDragDropClientWin(
     aura::Window* root_window,
     HWND window,
     DesktopWindowTreeHostWin* desktop_host)
-    : desktop_host_(desktop_host) {
+    : drag_drop_in_progress_(false), desktop_host_(desktop_host) {
   drop_target_ = new DesktopDropTargetWin(root_window);
   drop_target_->Init(window);
 }
 
 DesktopDragDropClientWin::~DesktopDragDropClientWin() {
-  if (g_is_dragging) {
+  if (drag_drop_in_progress_) {
     DragCancel();
   }
 }
@@ -74,7 +71,7 @@ ui::mojom::DragOperation DesktopDragDropClientWin::StartDragAndDrop(
     const gfx::Point& screen_location,
     int allowed_operations,
     ui::mojom::DragEventSource source) {
-  CHECK(!g_is_dragging);
+  CHECK(!drag_drop_in_progress_);
   if (desktop_host_->IsInNativeMoveResizeLoop()) {
     return ui::PreferredDragOperation(
         ui::DragDropTypes::DropEffectToDragOperation(DROPEFFECT_NONE));
@@ -104,6 +101,7 @@ ui::mojom::DragOperation DesktopDragDropClientWin::StartDragAndDrop(
   SourceWindowObserver source_window_observer(source_window);
   base::WeakPtr<DesktopDragDropClientWin> alive(weak_factory_.GetWeakPtr());
 
+  drag_drop_in_progress_ = true;
   drag_source_ = ui::DragSourceWin::Create();
   Microsoft::WRL::ComPtr<ui::DragSourceWin> drag_source_copy = drag_source_;
   drag_source_copy->set_data(data.get());
@@ -111,7 +109,6 @@ ui::mojom::DragOperation DesktopDragDropClientWin::StartDragAndDrop(
       true);
 
   DWORD effect;
-  base::AutoReset<bool> drag_scoper(&g_is_dragging, true);
 
   // Never consider the current scope as hung. The hang watching deadline (if
   // any) is not valid since the user can take unbounded time to complete the
@@ -135,6 +132,10 @@ ui::mojom::DragOperation DesktopDragDropClientWin::StartDragAndDrop(
   }
   drag_source_copy->set_data(nullptr);
 
+  if (alive) {
+    drag_drop_in_progress_ = false;
+  }
+
   if (result != DRAGDROP_S_DROP) {
     effect = DROPEFFECT_NONE;
   }
@@ -144,13 +145,11 @@ ui::mojom::DragOperation DesktopDragDropClientWin::StartDragAndDrop(
 }
 
 void DesktopDragDropClientWin::DragCancel() {
-  if (drag_source_) {
-    drag_source_->CancelDrag();
-  }
+  drag_source_->CancelDrag();
 }
 
 bool DesktopDragDropClientWin::IsDragDropInProgress() {
-  return g_is_dragging;
+  return drag_drop_in_progress_;
 }
 
 void DesktopDragDropClientWin::AddObserver(

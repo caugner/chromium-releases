@@ -509,6 +509,7 @@ public class CustomTabToolbarUnitTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked") // reset() is a generic-varargs method.
     public void testContainerVisibilityChange() {
         // Self changes should be ignored.
         mToolbar.addContainerVisibilityChangeObserver(mContainerVisibilityChangeObserver);
@@ -803,11 +804,7 @@ public class CustomTabToolbarUnitTest {
                         .setOnLongClickListener(longClickListener)
                         .setButtonVariant(AdaptiveToolbarButtonVariant.PRICE_INSIGHTS)
                         .build();
-        ButtonDataImpl buttonData = new ButtonDataImpl();
-        buttonData.setButtonSpec(buttonSpec);
-        buttonData.setCanShow(true);
-        buttonData.setEnabled(true);
-        return buttonData;
+        return new ButtonDataImpl(/* canShow= */ true, /* isEnabled= */ true, buttonSpec);
     }
 
     private ButtonData getDataForReaderModeIconButton() {
@@ -825,10 +822,6 @@ public class CustomTabToolbarUnitTest {
                         .setOnLongClickListener(longClickListener)
                         .setButtonVariant(READER_MODE)
                         .build();
-        ButtonDataImpl buttonData = new ButtonDataImpl();
-        buttonData.setButtonSpec(buttonSpec);
-        buttonData.setCanShow(true);
-        buttonData.setEnabled(true);
-        return buttonData;
+        return new ButtonDataImpl(/* canShow= */ true, /* isEnabled= */ true, buttonSpec);
     }
 }

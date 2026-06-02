@@ -13,6 +13,7 @@
 #include "base/android/path_utils.h"
 #include "base/functional/bind.h"
 #include "base/location.h"
+#include "base/memory/singleton.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task/single_thread_task_runner.h"
@@ -395,11 +396,17 @@ void DownloadManagerService::OnDownloadsInitialized(
     download::SimpleDownloadManagerCoordinator* coordinator,
     bool active_downloads_only) {
   if (active_downloads_only) {
-    OnPendingDownloadsLoaded();
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE,
+        base::BindOnce(&DownloadManagerService::OnPendingDownloadsLoaded,
+                       base::Unretained(this)));
     return;
   }
   is_manager_initialized_ = true;
-  OnPendingDownloadsLoaded();
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&DownloadManagerService::OnPendingDownloadsLoaded,
+                     base::Unretained(this)));
   while (!profiles_with_pending_get_downloads_actions_.empty()) {
     ProfileKey* profile_key =
         profiles_with_pending_get_downloads_actions_.back();
@@ -562,9 +569,9 @@ void DownloadManagerService::OnPendingDownloadsLoaded() {
   auto result =
       std::ranges::find_if_not(coordinators_, &ProfileKey::IsOffTheRecord,
                                &Coordinators::value_type::first);
-  CHECK(result != coordinators_.end())
-      << "A non-OffTheRecord coordinator should exist when "
-         "OnPendingDownloadsLoaded is triggered.";
+  if (result == coordinators_.end()) {
+    return;
+  }
   ProfileKey* profile_key = result->first;
 
   // Kick-off the auto-resumption handler.

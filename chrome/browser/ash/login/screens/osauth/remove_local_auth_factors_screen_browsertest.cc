@@ -12,6 +12,7 @@
 #include "ash/constants/ash_switches.h"
 #include "base/files/file_util.h"
 #include "base/path_service.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/test_future.h"
 #include "base/values.h"
@@ -29,14 +30,19 @@
 #include "chrome/browser/ash/login/test/user_auth_config.h"
 #include "chrome/browser/ash/login/wizard_controller.h"
 #include "chrome/browser/ash/policy/core/browser_policy_connector_ash.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/ui/ash/login/login_display_host.h"
 #include "chrome/browser/ui/webui/ash/login/cryptohome_recovery_setup_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/remove_local_auth_factors_screen_handler.h"
+#include "chrome/test/base/fake_gaia_mixin.h"
 #include "chromeos/ash/components/dbus/userdataauth/fake_userdataauth_client.h"
 #include "chromeos/ash/components/login/auth/public/user_context.h"
+#include "chromeos/ash/components/osauth/public/auth_session_storage.h"
 #include "chromeos/ash/components/osauth/public/common_types.h"
 #include "components/account_id/account_id.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
 #include "components/policy/policy_constants.h"
+#include "components/user_manager/known_user.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/test/browser_test.h"
 
@@ -123,6 +129,10 @@ class RemoveLocalAuthFactorsScreenTest : public LoginManagerTest {
     EXPECT_FALSE(cryptohome_.HasPinFactor(account_id));
     EXPECT_FALSE(cryptohome_.HasLocalPasswordFactor(account_id));
     EXPECT_TRUE(cryptohome_.HasGaiaPasswordFactor(account_id));
+
+    test::OobeJS().ExpectElementContainsText(account_id.GetUserEmail(),
+                                             {"remove-local-auth-factors",
+                                              "subtitleText"});
 
     test::OobeJS().ClickOnPath(kDoneButtonPath);
 
@@ -237,11 +247,17 @@ IN_PROC_BROWSER_TEST_F(RemoveLocalAuthFactorsScreenTest,
 IN_PROC_BROWSER_TEST_F(RemoveLocalAuthFactorsScreenTest,
                        AuthFactorsRemovedForPinUser) {
   // Test Setup is handled by the PRE_ test above.
+  base::HistogramTester histogram_tester;
 
   // Test Execution: User attempts to re-authenticate with their PIN,
   // triggering the screen to handle disallowed factors.
   ReauthUserWithPin(pin_only_user_.account_id);
   WaitForRemoveLocalAuthFactorsSuccessScreen();
+
+  histogram_tester.ExpectBucketCount(
+      "Enterprise.RemoveLocalAuthFactorsScreen.Shown", true, 1);
+  histogram_tester.ExpectBucketCount(
+      "Enterprise.RemoveLocalAuthFactorsScreen.Success", true, 1);
 
   // Test Verification: Confirm local factors (PIN/Local password) are removed
   // and the user successfully proceeds into an active session.
@@ -249,25 +265,68 @@ IN_PROC_BROWSER_TEST_F(RemoveLocalAuthFactorsScreenTest,
 }
 
 IN_PROC_BROWSER_TEST_F(RemoveLocalAuthFactorsScreenTest,
-                       PRE_AuthFactorsRemovedForGaiaPasswordPinUser) {
+                       PRE_AuthSessionKeptAlive) {
+  LoginOfflineAndSetPolicy(pin_only_user_.account_id);
+}
+
+IN_PROC_BROWSER_TEST_F(RemoveLocalAuthFactorsScreenTest, AuthSessionKeptAlive) {
+  ReauthUserWithPin(pin_only_user_.account_id);
+  WaitForRemoveLocalAuthFactorsSuccessScreen();
+
+  // Verify that the auth session has a keep alive while on this screen.
+  auto* wizard_context = LoginDisplayHost::default_host()->GetWizardContext();
+  ASSERT_TRUE(wizard_context->extra_factors_token.has_value());
+  EXPECT_TRUE(AuthSessionStorage::Get()->CheckHasKeepAliveForTesting(
+      wizard_context->extra_factors_token.value()));
+
+  VerifyLocalAuthFactorsRemovedAndSessionStarted(pin_only_user_.account_id);
+}
+
+IN_PROC_BROWSER_TEST_F(RemoveLocalAuthFactorsScreenTest,
+                       PRE_AuthFactorsNotRemovedForGaiaPasswordPinUser) {
+  // Test Setup: Log the user in offline and apply a policy disabling all
+  // local auth factors.
+  LoginOfflineAndSetPolicy(gaia_password_and_pin_user_.account_id);
+}
+
+IN_PROC_BROWSER_TEST_F(RemoveLocalAuthFactorsScreenTest,
+                       AuthFactorsNotRemovedForGaiaPasswordPinUser) {
+  // Test Setup is handled by the PRE_ test above.
+
+  // Test Execution: User attempts to re-authenticate (via Gaia),
+  // triggering the local auth factors removal flow.
+  ReauthUser(gaia_password_and_pin_user_.account_id);
+
+  // Test Verification: Confirm that the session starts.
+  login_manager_mixin_.WaitForActiveSession();
+}
+
+IN_PROC_BROWSER_TEST_F(RemoveLocalAuthFactorsScreenTest,
+                       PRE_AuthFactorsRemoveFailureForPinUser) {
   // Test Setup: Log the user in offline and apply a policy disabling all
   // local auth factors.
   LoginOfflineAndSetPolicy(pin_only_user_.account_id);
 }
 
 IN_PROC_BROWSER_TEST_F(RemoveLocalAuthFactorsScreenTest,
-                       AuthFactorsRemovedForGaiaPasswordPinUser) {
+                       AuthFactorsRemoveFailureForPinUser) {
   // Test Setup is handled by the PRE_ test above.
+  base::HistogramTester histogram_tester;
 
   // Test Execution: User attempts to re-authenticate (via Gaia),
   // triggering the local auth factors removal flow.
-  ReauthUser(gaia_password_and_pin_user_.account_id);
-  WaitForRemoveLocalAuthFactorsSuccessScreen();
+  cryptohome_.SetNextOperationError(
+      FakeUserDataAuthClient::Operation::kRemoveAuthFactor,
+      cryptohome::ErrorWrapper::CreateFromErrorCodeOnly(
+          ::user_data_auth::CryptohomeErrorCode::
+              CRYPTOHOME_ERROR_KEY_NOT_FOUND));
+  ReauthUserWithPin(pin_only_user_.account_id);
 
-  // Test Verification: Confirm local factors are removed while Gaia
-  // remains intact, and the session starts.
-  VerifyLocalAuthFactorsRemovedAndSessionStarted(
-      gaia_password_and_pin_user_.account_id);
+  // Test Verification: Confirm that the session starts.
+  login_manager_mixin_.WaitForActiveSession();
+
+  histogram_tester.ExpectBucketCount(
+      "Enterprise.RemoveLocalAuthFactorsScreen.Success", false, 1);
 }
 
 IN_PROC_BROWSER_TEST_F(
@@ -360,8 +419,7 @@ INSTANTIATE_TEST_SUITE_P(
     RemoveLocalAuthFactorsScreenTestWithRecoveryInstantiation,
     RemoveLocalAuthFactorsScreenTestWithRecovery,
     ::testing::ValuesIn({UserType::kLocalPasswordUser, UserType::kPinUser,
-                         UserType::kLocalPasswordAndPinUser,
-                         UserType::kGaiaPasswordAndPinUser}));
+                         UserType::kLocalPasswordAndPinUser}));
 
 // Instantiate the parameterized tests for users with local passwords.
 INSTANTIATE_TEST_SUITE_P(
@@ -369,5 +427,44 @@ INSTANTIATE_TEST_SUITE_P(
     RemoveLocalAuthFactorsScreenTestWithLocalPassword,
     ::testing::ValuesIn({UserType::kLocalPasswordUser,
                          UserType::kLocalPasswordAndPinUser}));
+
+IN_PROC_BROWSER_TEST_F(RemoveLocalAuthFactorsScreenTest, PRE_SkipForSAMLUser) {
+  LoginOfflineAndSetPolicy(local_password_and_pin_user_.account_id);
+  user_manager::KnownUser(g_browser_process->local_state())
+      .UpdateUsingSAML(local_password_and_pin_user_.account_id, true);
+}
+
+IN_PROC_BROWSER_TEST_F(RemoveLocalAuthFactorsScreenTest, SkipForSAMLUser) {
+  // Test Setup is handled by the PRE_ test above.
+
+  // Test Execution: Re-authenticate the user
+  ReauthUserWithLocalPassword(local_password_and_pin_user_.account_id);
+
+  // Test Verification: Should bypass the screen and start session.
+  login_manager_mixin_.WaitForActiveSession();
+}
+
+IN_PROC_BROWSER_TEST_F(RemoveLocalAuthFactorsScreenTest,
+                       PRE_DoubleClickingDoneButtonWorks) {
+  LoginOfflineAndSetPolicy(local_password_only_user_.account_id);
+}
+
+IN_PROC_BROWSER_TEST_F(RemoveLocalAuthFactorsScreenTest,
+                       DoubleClickingDoneButtonWorks) {
+  // Test Setup is handled by the PRE_ test above.
+
+  // Test Execution: Re-authenticate the user, forcing them through the
+  // local auth factor removal UI flow.
+  ReauthUserWithLocalPassword(local_password_only_user_.account_id);
+  WaitForRemoveLocalAuthFactorsSuccessScreen();
+  // Click on the done button multiple times
+  test::OobeJS().Evaluate(
+      "const el = " + test::GetOobeElementPath(kDoneButtonPath) + ";" +
+      "el.click();" + "el.click();");
+
+  // Test Verification: Should pass the screen and start session (and not cause
+  // a crash).
+  login_manager_mixin_.WaitForActiveSession();
+}
 
 }  // namespace ash

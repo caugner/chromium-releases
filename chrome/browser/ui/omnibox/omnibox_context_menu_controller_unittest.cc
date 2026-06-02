@@ -179,7 +179,7 @@ TEST_F(OmniboxContextMenuControllerTest, GetMaxTabSuggestions_UsesServerLimit) {
 TEST_F(OmniboxContextMenuControllerTest, GetIconForInputType_Drive) {
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   ui::ImageModel expected_icon = ui::ImageModel::FromVectorIcon(
-      vector_icons::kGoogleDriveIcon, ui::kColorMenuIcon,
+      vector_icons::kGoogleDriveMonochromeIcon, ui::kColorMenuIcon,
       ui::SimpleMenuModel::kDefaultIconSize);
 #else
   ui::ImageModel expected_icon = ui::ImageModel();
@@ -192,7 +192,8 @@ TEST_F(OmniboxContextMenuControllerTest, GetIconForInputType_Drive) {
 TEST_F(OmniboxContextMenuControllerTest, ExecuteCommand_DriveInputType) {
   OmniboxPopupWebContentsHelper::CreateForWebContents(web_contents_.get());
   base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(omnibox::kAimUsePecApi);
+  feature_list.InitWithFeatures(
+      {omnibox::kAimUsePecApi, omnibox::kComposeboxDriveContextMenuOption}, {});
 
   omnibox::InputState state;
   state.allowed_input_types.push_back(omnibox::InputType::INPUT_TYPE_DRIVE);

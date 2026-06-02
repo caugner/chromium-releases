@@ -208,8 +208,7 @@ public class CustomTabToolbar extends ToolbarLayout implements View.OnLongClickL
     private boolean mShouldHighlightCookieControlsIcon;
     private @MonotonicNonNull BrowserServicesIntentDataProvider mIntentDataProvider;
 
-    @SuppressWarnings("NullAway")
-    private Supplier<AppMenuHandler> mAppMenuHandler = () -> null;
+    private Supplier<@Nullable AppMenuHandler> mAppMenuHandler = () -> null;
 
     private @Nullable AppMenuObserver mAppMenuObserver;
     private @MonotonicNonNull Activity mActivity;
@@ -256,7 +255,7 @@ public class CustomTabToolbar extends ToolbarLayout implements View.OnLongClickL
         public SearchActivityClient searchClient;
 
         /** The package name of the Custom Tabs embedder. */
-        public String clientPackageName;
+        public @Nullable String clientPackageName;
 
         /** A handler for taps on the omnibox, or null if the default handler should be used. */
         public @Nullable Consumer<Tab> tapHandler;
@@ -269,7 +268,7 @@ public class CustomTabToolbar extends ToolbarLayout implements View.OnLongClickL
 
         public OmniboxParams(
                 SearchActivityClient searchClient,
-                String clientPackageName,
+                @Nullable String clientPackageName,
                 @Nullable Consumer<Tab> tapHandler,
                 Function<Tab, Boolean> tapHandlerWithVerification) {
             this.searchClient = searchClient;
@@ -502,7 +501,7 @@ public class CustomTabToolbar extends ToolbarLayout implements View.OnLongClickL
     }
 
     // TODO(crbug.com/428261559): Delete this after the refactoring.
-    public void setAppMenuHandler(Supplier<AppMenuHandler> appMenuHandler) {
+    public void setAppMenuHandler(Supplier<@Nullable AppMenuHandler> appMenuHandler) {
         mAppMenuHandler = appMenuHandler;
     }
 
@@ -571,11 +570,13 @@ public class CustomTabToolbar extends ToolbarLayout implements View.OnLongClickL
 
         int menuId = menuInfo.first;
 
-        mAppMenuHandler.get().setMenuHighlight(menuId, false);
+        var handler = mAppMenuHandler.get();
+        assumeNonNull(handler);
+        handler.setMenuHighlight(menuId, false);
         View menuIcon = mMenuButton.findViewById(R.id.menu_button);
         menuIcon.setContentDescription(
                 getContext().getString(R.string.accessibility_custom_tab_menu_with_dot));
-        if (mAppMenuObserver != null) mAppMenuHandler.get().removeObserver(mAppMenuObserver);
+        if (mAppMenuObserver != null) handler.removeObserver(mAppMenuObserver);
         mAppMenuObserver =
                 new AppMenuObserver() {
                     @Override
@@ -587,14 +588,14 @@ public class CustomTabToolbar extends ToolbarLayout implements View.OnLongClickL
                             String menuTitle = getContext().getString(menuInfo.second);
                             int textId = R.string.accessibility_custom_tab_menu_item_highlight;
                             String highlightedMenu = getContext().getString(textId, menuTitle);
-                            mAppMenuHandler.get().setContentDescription(highlightedMenu);
+                            handler.setContentDescription(highlightedMenu);
                         }
                     }
 
                     @Override
                     public void onMenuHighlightChanged(boolean highlighting) {}
                 };
-        mAppMenuHandler.get().addObserver(mAppMenuObserver);
+        handler.addObserver(mAppMenuObserver);
     }
 
     private @Nullable Pair<Integer, Integer> getHighlightMenuInfo(
@@ -604,9 +605,10 @@ public class CustomTabToolbar extends ToolbarLayout implements View.OnLongClickL
                 // Figure out which of the two menu items (enable/disable) appears and needs
                 // highlighting.
                 // TODO(crbug.com/424807997): Avoid casting.
+                var handler = mAppMenuHandler.get();
+                assumeNonNull(handler);
                 var appMenuDelegate =
-                        (AppMenuPropertiesDelegateImpl)
-                                mAppMenuHandler.get().getMenuPropertiesDelegate();
+                        (AppMenuPropertiesDelegateImpl) handler.getMenuPropertiesDelegate();
                 var showEnabled = appMenuDelegate.getPriceTrackingMenuItemInfo(getCurrentTab());
                 if (showEnabled == null) yield null;
                 yield showEnabled
@@ -676,7 +678,7 @@ public class CustomTabToolbar extends ToolbarLayout implements View.OnLongClickL
      */
     public void initVisibilityRule(
             Activity activity,
-            Supplier<AppMenuHandler> appMenuHandler,
+            Supplier<@Nullable AppMenuHandler> appMenuHandler,
             BrowserServicesIntentDataProvider intentDataProvider) {
         mActivity = activity;
         mAppMenuHandler = appMenuHandler;
@@ -1515,7 +1517,7 @@ public class CustomTabToolbar extends ToolbarLayout implements View.OnLongClickL
 
     @VisibleForTesting
     static String parsePublisherNameFromUrl(GURL url) {
-        // TODO(ianwen): Make it generic to parse url from URI path. http://crbug.com/599298
+        // TODO(ianwen): Make it generic to parse url from URI path. http://crbug.com/40463066
         // The url should look like: https://www.google.com/amp/s/www.nyt.com/ampthml/blogs.html
         // or https://www.google.com/amp/www.nyt.com/ampthml/blogs.html.
         String[] segments = url.getPath().split("/");
@@ -1785,7 +1787,7 @@ public class CustomTabToolbar extends ToolbarLayout implements View.OnLongClickL
             return true;
         }
 
-        private Supplier getProfileSupplier() {
+        private Supplier<@Nullable Profile> getProfileSupplier() {
             Tab tab = getCurrentTab();
             if (tab != null) return () -> tab.getProfile();
 
@@ -2769,9 +2771,6 @@ public class CustomTabToolbar extends ToolbarLayout implements View.OnLongClickL
 
         @Override
         public void showUrlBarCursorWithoutFocusAnimations() {}
-
-        @Override
-        public void clearUrlBarCursorWithoutFocusAnimations() {}
 
         @Override
         public void revertChanges() {}

@@ -118,8 +118,8 @@ class TestPaymentsAutofillClient : public PaymentsAutofillClient {
       base::OnceClosure accept_virtual_card_callback,
       base::OnceClosure decline_virtual_card_callback) override;
   void VirtualCardEnrollCompleted(PaymentsRpcResult result) override;
-  void OnCardDataAvailable(
-      const FilledCardInformationBubbleOptions& options) override;
+  void OnCardDataAvailable(const FilledCardInformationBubbleOptions& options,
+                           const url::Origin& origin) override;
   void ConfirmSaveIbanLocally(
       const Iban& iban,
       bool should_show_prompt,
@@ -433,7 +433,7 @@ class TestPaymentsAutofillClient : public PaymentsAutofillClient {
   bool credit_card_name_fix_flow_bubble_was_shown_ = false;
 #endif
 
-  ::testing::NiceMock<MockMerchantPromoCodeManager>
+  testing::NiceMock<MockMerchantPromoCodeManager>
       mock_merchant_promo_code_manager_;
   std::unique_ptr<AutofillOfferManager> autofill_offer_manager_;
   std::unique_ptr<MockMandatoryReauthManager>

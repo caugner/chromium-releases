@@ -69,6 +69,7 @@ class ChromeAutocompleteProviderClient : public AutocompleteProviderClient {
   InMemoryURLIndex* GetInMemoryURLIndex() override;
   TemplateURLService* GetTemplateURLService() override;
   const TemplateURLService* GetTemplateURLService() const override;
+  GeolocationHeaderService* GetGeolocationHeaderService() const override;
   DocumentSuggestionsService* GetDocumentSuggestionsService() const override;
   RemoteSuggestionsService* GetRemoteSuggestionsService(
       bool create_if_necessary) const override;
@@ -131,6 +132,7 @@ class ChromeAutocompleteProviderClient : public AutocompleteProviderClient {
   bool ShouldSendPageTitleSuggestParam() const override;
   bool IsOmniboxNextLensSearchChipEnabled() const override;
   bool IsOmniboxNextAimPopupEnabled() const override;
+  bool IsGeminiStarterPackEnabled() const override;
   base::CallbackListSubscription GetLensSuggestInputsWhenReady(
       LensOverlaySuggestInputsCallback callback) const override;
   base::WeakPtr<AutocompleteProviderClient> GetWeakPtr() override;

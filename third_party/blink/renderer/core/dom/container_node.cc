@@ -917,7 +917,7 @@ LayoutBox* ContainerNode::GetLayoutBoxForScrolling() const {
   if (box) {
     box = box->ContentLayoutBox();
   }
-  return box && box->IsScrollContainer() ? box : nullptr;
+  return box && box->GetScrollableArea() ? box : nullptr;
 }
 
 bool ContainerNode::IsReadingFlowContainer() const {
@@ -1906,10 +1906,15 @@ void ContainerNode::ReplaceChildren(const VectorOf<Node>& nodes,
 
   // 3. Replace all with node within this.
   ChildListMutationScope mutation(*this);
-  while (Node* first_child = firstChild()) {
-    RemoveChild(first_child, exception_state);
-    if (exception_state.HadException()) {
-      return;
+
+  if (RuntimeEnabledFeatures::RemoveChildrenInReplaceChildrenEnabled()) {
+    RemoveChildren();
+  } else {
+    while (Node* first_child = firstChild()) {
+      RemoveChild(first_child, exception_state);
+      if (exception_state.HadException()) {
+        return;
+      }
     }
   }
 

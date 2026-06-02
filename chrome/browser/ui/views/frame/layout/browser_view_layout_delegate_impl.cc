@@ -6,6 +6,7 @@
 
 #include "base/feature_list.h"
 #include "build/build_config.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
@@ -21,30 +22,34 @@
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/browser/ui/views/web_apps/frame_toolbar/web_app_frame_toolbar_view.h"
 #include "chrome/common/buildflags.h"
+#include "chrome/common/pref_names.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/views/view.h"
 
-#if BUILDFLAG(ENABLE_WEBUI_TAB_STRIP)
-#include "chrome/browser/ui/views/frame/webui_tab_strip_container_view.h"
+#if BUILDFLAG(IS_MAC)
+#include "chrome/browser/ui/fullscreen_util_mac.h"
 #endif
 
 BrowserViewLayoutDelegateImpl::BrowserViewLayoutDelegateImpl(
     BrowserView& browser_view)
-    : browser_view_(browser_view) {}
+    : browser_view_(browser_view) {
+  if (base::FeatureList::IsEnabled(tabs::kHorizontalTabStripComboButton)) {
+    PrefService* prefs = browser_view_->GetProfile()->GetPrefs();
+    tab_search_pinned_to_tab_strip_ =
+        prefs->GetBoolean(prefs::kTabSearchPinnedToTabstrip);
+
+    pref_registrar_.Init(prefs);
+    pref_registrar_.Add(
+        prefs::kTabSearchPinnedToTabstrip,
+        base::BindRepeating(
+            &BrowserViewLayoutDelegateImpl::OnTabSearchPinnedStateChanged,
+            base::Unretained(this)));
+  }
+}
 BrowserViewLayoutDelegateImpl::~BrowserViewLayoutDelegateImpl() = default;
 
 bool BrowserViewLayoutDelegateImpl::ShouldDrawTabStrip() const {
   return browser_view_->ShouldDrawTabStrip();
-}
-
-bool BrowserViewLayoutDelegateImpl::ShouldUseTouchableTabstrip() const {
-#if BUILDFLAG(ENABLE_WEBUI_TAB_STRIP)
-  return WebUITabStripContainerView::UseTouchableTabStrip(
-             browser_view_->browser()) &&
-         browser_view_->GetSupportsTabStrip();
-#else
-  return false;
-#endif
 }
 
 bool BrowserViewLayoutDelegateImpl::ShouldDrawVerticalTabStrip() const {
@@ -71,9 +76,21 @@ BrowserLayoutParams BrowserViewLayoutDelegateImpl::GetBrowserLayoutParams(
       // This can happen sometimes right after a browser is created.
       return params;
     }
-    return params.InLocalCoordinates(use_browser_bounds
-                                         ? browser_view_->bounds()
-                                         : params.visual_client_area);
+    const gfx::Rect browser_bounds = browser_view_->bounds();
+#if BUILDFLAG(IS_CHROMEOS)
+    // Sometimes in kiosk mode the browser bounds briefly fail to line up with
+    // the client area. Rather than allowing this to crash in
+    // `InLocalCoordinates()`, just use the client bounds instead. The worst
+    // outcome in this case is that some minimum size calculations may be off by
+    // a few pixels for one frame.
+    // See https://crbug.com/506933210 for more information.
+    if (use_browser_bounds &&
+        !params.visual_client_area.Contains(browser_bounds)) {
+      use_browser_bounds = false;
+    }
+#endif
+    return params.InLocalCoordinates(
+        use_browser_bounds ? browser_bounds : params.visual_client_area);
   }
 
   return BrowserLayoutParams();
@@ -82,6 +99,13 @@ BrowserLayoutParams BrowserViewLayoutDelegateImpl::GetBrowserLayoutParams(
 BrowserViewLayoutDelegateImpl::WindowState
 BrowserViewLayoutDelegateImpl::GetBrowserWindowState() const {
   if (browser_view_->IsFullscreen()) {
+#if BUILDFLAG(IS_MAC)
+    if (fullscreen_utils::IsAlwaysShowToolbarEnabled(
+            browser_view_->browser()) &&
+        !fullscreen_utils::IsInContentFullscreen(browser_view_->browser())) {
+      return WindowState::kFullscreenWithToolbar;
+    }
+#endif
     return WindowState::kFullscreen;
   }
   if (browser_view_->IsMaximized()) {
@@ -133,9 +157,14 @@ bool BrowserViewLayoutDelegateImpl::IsActiveTabSplit() const {
 
 bool BrowserViewLayoutDelegateImpl::IsActiveTabAtLeadingWindowEdge() const {
   if (auto* const frame = GetFrameView()) {
-    const bool has_leading_search_button =
+    bool has_leading_search_button =
         tabs::GetTabSearchPosition(browser_view_->browser()) ==
         tabs::TabSearchPosition::kLeadingHorizontalTabstrip;
+    if (base::FeatureList::IsEnabled(tabs::kHorizontalTabStripComboButton)) {
+      // Tab search button can be unpinned so including it in the determination
+      // of leading edge of horizontal tab strip.
+      has_leading_search_button &= tab_search_pinned_to_tab_strip_;
+    }
     if (!frame->CaptionButtonsOnLeadingEdge() && !has_leading_search_button) {
       return browser_view_->browser()->tab_strip_model()->IsTabInForeground(0);
     }
@@ -227,4 +256,10 @@ const BrowserFrameView* BrowserViewLayoutDelegateImpl::GetFrameView() const {
   return browser_view_->browser_widget()
              ? browser_view_->browser_widget()->GetFrameView()
              : nullptr;
+}
+
+void BrowserViewLayoutDelegateImpl::OnTabSearchPinnedStateChanged() {
+  tab_search_pinned_to_tab_strip_ =
+      browser_view_->GetProfile()->GetPrefs()->GetBoolean(
+          prefs::kTabSearchPinnedToTabstrip);
 }

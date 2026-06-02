@@ -1001,4 +1001,9 @@ void RenderWidgetHostViewBase::SetViewTransitionResources(
   view_transition_resources_ = std::move(resources);
 }
 
+std::optional<uint32_t>
+RenderWidgetHostView::GetForceSpecifiedDeadlineForTesting() {
+  return std::nullopt;
+}
+
 }  // namespace content

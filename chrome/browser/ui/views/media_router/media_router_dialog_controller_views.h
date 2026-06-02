@@ -7,6 +7,7 @@
 
 #include <memory>
 
+#include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_multi_source_observation.h"
@@ -96,6 +97,10 @@ class MediaRouterDialogControllerViews
   // CastToolbarButtonController is responsible for showing and hiding the
   // toolbar action. It's owned by MediaRouterUIService and it may be nullptr.
   CastToolbarButtonController* GetActionController();
+
+  // Called after the dialog is created to complete post-creation steps.
+  void OnDialogCreated(MediaRouterDialogActivationLocation activation_location,
+                       ShowCastDialogStatus status);
 
   MediaRouterUI* ui() { return ui_.get(); }
 

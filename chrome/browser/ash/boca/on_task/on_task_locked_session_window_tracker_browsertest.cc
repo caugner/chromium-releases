@@ -29,6 +29,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
 #include "chrome/browser/ui/views/web_apps/frame_toolbar/web_app_frame_toolbar_view.h"
@@ -835,12 +836,14 @@ IN_PROC_BROWSER_TEST_F(OnTaskLockedSessionWindowTrackerBrowserTest,
   ASSERT_TRUE(platform_util::IsBrowserLockedFullscreen(boca_app_browser));
 
   // Attempt to create a new browser window and verify it gets closed.
-  size_t original_browser_count = chrome::GetTotalBrowserCount();
+  size_t original_browser_count =
+      GlobalBrowserCollection::GetInstance()->GetSize();
   const base::WeakPtr<Browser> browser_weak_ptr =
       Browser::Create(Browser::CreateParams(profile(), /*user_gesture=*/true))
           ->AsWeakPtr();
   content::RunAllTasksUntilIdle();
-  EXPECT_EQ(chrome::GetTotalBrowserCount(), original_browser_count);
+  EXPECT_EQ(GlobalBrowserCollection::GetInstance()->GetSize(),
+            original_browser_count);
   EXPECT_FALSE(browser_weak_ptr);
 }
 
@@ -864,10 +867,12 @@ IN_PROC_BROWSER_TEST_F(OnTaskLockedSessionWindowTrackerBrowserTest,
   ASSERT_FALSE(platform_util::IsBrowserLockedFullscreen(boca_app_browser));
 
   // Attempt to create a new browser window and verify it is closed.
-  size_t original_browser_count = chrome::GetTotalBrowserCount();
+  size_t original_browser_count =
+      GlobalBrowserCollection::GetInstance()->GetSize();
   CreateBrowser(profile());
   content::RunAllTasksUntilIdle();
-  EXPECT_EQ(chrome::GetTotalBrowserCount(), original_browser_count + 1);
+  EXPECT_EQ(GlobalBrowserCollection::GetInstance()->GetSize(),
+            original_browser_count + 1);
 }
 
 IN_PROC_BROWSER_TEST_F(OnTaskLockedSessionWindowTrackerBrowserTest,
@@ -890,11 +895,13 @@ IN_PROC_BROWSER_TEST_F(OnTaskLockedSessionWindowTrackerBrowserTest,
   ASSERT_FALSE(platform_util::IsBrowserLockedFullscreen(boca_app_browser));
 
   // Attempt to create a new popup and verify window tracker picks it up.
-  size_t original_browser_count = chrome::GetTotalBrowserCount();
+  size_t original_browser_count =
+      GlobalBrowserCollection::GetInstance()->GetSize();
   Browser* const popup_browser = Browser::Create(Browser::CreateParams(
       Browser::TYPE_APP_POPUP, profile(), /*user_gesture=*/true));
   content::RunAllTasksUntilIdle();
-  EXPECT_EQ(chrome::GetTotalBrowserCount(), original_browser_count + 1);
+  EXPECT_EQ(GlobalBrowserCollection::GetInstance()->GetSize(),
+            original_browser_count + 1);
   auto* const window_tracker =
       LockedSessionWindowTrackerFactory::GetInstance()->GetForBrowserContext(
           profile());
@@ -1061,7 +1068,10 @@ IN_PROC_BROWSER_TEST_F(
   // the browser's backing ui::BaseWindow.
   const auto activate_browser = [](BrowserWindowInterface* browser) {
     // We must fake deactivation the previously activated browser first.
-    chrome::FindLastActive()->DidBecomeInactive();
+    GlobalBrowserCollection::GetInstance()
+        ->GetLastActiveBrowser()
+        ->GetBrowserForMigrationOnly()
+        ->DidBecomeInactive();
 
     // Simulate activation of `browser`.
     browser->GetBrowserForMigrationOnly()->DidBecomeActive();

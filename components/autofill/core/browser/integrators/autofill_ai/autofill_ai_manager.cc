@@ -215,6 +215,17 @@ void AutofillAiManager::OnSuggestionsShown(
     const AutofillField& field,
     base::span<const Suggestion> shown_suggestions,
     ukm::SourceId ukm_source_id) {
+  if (last_logged_ukm_source_id_ != ukm_source_id &&
+      !form.server_predictions_received_timestamp().is_null()) {
+    base::TimeDelta duration =
+        base::TimeTicks::Now() - form.server_predictions_received_timestamp();
+    base::UmaHistogramLongTimes(
+        "Autofill.Ai.TimingInterval."
+        "LoadedServerPredictionsToSuggestionsShown",
+        duration);
+    last_logged_ukm_source_id_ = ukm_source_id;
+  }
+
   std::vector<const EntityInstance*> entities_suggested;
   for (const Suggestion& suggestion : shown_suggestions) {
     if (const auto* payload =
@@ -243,6 +254,27 @@ void AutofillAiManager::OnSuggestionsShown(
 
 void AutofillAiManager::OnFormSeen(const FormStructure& form) {
   UpdateLoggerReadinessData(form);
+}
+
+void AutofillAiManager::OnFormInteracted(const FormStructure& form,
+                                         ukm::SourceId ukm_source_id) {
+  if (last_logged_ukm_source_id_for_interaction_ == ukm_source_id ||
+      form.server_predictions_received_timestamp().is_null()) {
+    return;
+  }
+  const DenseSet<EntityType> relevant_entities =
+      GetRelevantEntityTypesForFields(form.fields());
+  if (relevant_entities.empty()) {
+    return;
+  }
+
+  base::TimeDelta duration =
+      base::TimeTicks::Now() - form.server_predictions_received_timestamp();
+  base::UmaHistogramLongTimes(
+      "Autofill.Ai.TimingInterval."
+      "LoadedServerPredictionsToFirstInteraction",
+      duration);
+  last_logged_ukm_source_id_for_interaction_ = ukm_source_id;
 }
 
 void AutofillAiManager::OnDidFillSuggestion(
@@ -437,13 +469,12 @@ void AutofillAiManager::HandlePromptResult(
         // doesn't require a valid `session_id`.
         if (base::FeatureList::IsEnabled(
                 wallet::features::kWalletApiPrivatePassesConsent)) {
-          // Wallet private pass save/migrate prompts include a consent that the
-          // user needs to accept to proceed.
-          CHECK(ui_context.consent_string_id.has_value());
-          CHECK(ui_context.clicked_button_string_id.has_value());
+          CHECK(ui_context.accepted_consent_string_id.has_value());
+          CHECK(ui_context.accept_button_string_id.has_value());
           session_id = RecordWalletPrivatePassConsent(
-              *ui_context.consent_string_id,
-              *ui_context.clicked_button_string_id, *client_);
+              ui_context.accepted_consent_string_id.value(),
+              ui_context.accept_button_string_id.value(),
+              *client_->GetConsentAuditor(), *client_->GetIdentityManager());
         }
         wallet_manager->SaveWalletEntityInstance(entity, session_id,
                                                  std::move(callback));
@@ -507,26 +538,17 @@ std::vector<Suggestion> AutofillAiManager::GetSuggestions(
   const AutofillField* autofill_field =
       form.GetFieldById(trigger_field.global_id());
 
-  auto on_suggestion_data_returned =
-      [&form, &autofill_field, &trigger_field, &suggestions, this,
-       &suggestion_generator](
-          std::pair<SuggestionGenerator::SuggestionDataSource,
-                    std::vector<SuggestionGenerator::SuggestionData>>
-              suggestion_data) {
-        suggestion_generator.GenerateSuggestions(
-            form.ToFormData(), trigger_field, &form, autofill_field, *client_,
-            {std::move(suggestion_data)},
-            [&suggestions](
-                SuggestionGenerator::ReturnedSuggestions returned_suggestions) {
-              suggestions = std::move(returned_suggestions.second);
-            });
+  auto on_suggestions_generated =
+      [&suggestions](
+          SuggestionGenerator::ReturnedSuggestions returned_suggestions) {
+        suggestions = std::move(returned_suggestions.second);
       };
 
-  // Since the `on_suggestion_data_returned` callback is called synchronously,
-  // we can assume that `suggestions` will hold correct value.
-  suggestion_generator.FetchSuggestionData(form.ToFormData(), trigger_field,
+  // Since the `on_suggestions_generated` callback is called synchronously, we
+  // can assume that `suggestions` will hold the correct value.
+  suggestion_generator.GenerateSuggestions(form.ToFormData(), trigger_field,
                                            &form, autofill_field, *client_,
-                                           on_suggestion_data_returned);
+                                           on_suggestions_generated);
   return suggestions;
 }
 
@@ -821,7 +843,7 @@ AutofillAiManager::GetMigratePromptCandidates(
   for (const EntityInstance& entity : saved_entities) {
     switch (entity.record_type()) {
       case EntityInstance::RecordType::kLocal:
-        //  Do not add entity types that cannot be upstreamed.
+        // Do not add entity types that cannot be upstreamed.
         if (MayPerformAutofillAiAction(
                 *client_, AutofillAiAction::kImportToWallet, entity.type())) {
           saved_local_entities.push_back(&entity);

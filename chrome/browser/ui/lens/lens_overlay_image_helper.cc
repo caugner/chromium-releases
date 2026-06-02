@@ -235,7 +235,6 @@ std::optional<lens::ImageCropAndBitmap> DownscaleAndEncodeBitmapRegionIfNeeded(
   lens::ImageCropAndBitmap image_crop_and_bitmap;
   scoped_refptr<base::RefCountedBytes> data =
       base::MakeRefCounted<base::RefCountedBytes>();
-  ;
   if (region_bytes.has_value()) {
     image_crop_and_bitmap.region_bitmap = DownscaleImageIfNeeded(*region_bytes, /*ui_scale_factor=*/0,
                                            client_logs);
@@ -246,10 +245,12 @@ std::optional<lens::ImageCropAndBitmap> DownscaleAndEncodeBitmapRegionIfNeeded(
 
   const auto& region_bitmap = image_crop_and_bitmap.region_bitmap;
   auto& image_crop = image_crop_and_bitmap.image_crop;
-  if (EncodeImageMaybeWithTransparency(
-          region_bitmap,
-          lens::features::GetLensOverlayImageCompressionQuality(), data,
-          client_logs)) {
+
+  // Populate the zoomed_crop spatial context independently of byte encoding
+  // success. This ensures region geometry is preserved for the backend even if
+  // compression fails. Valid dimension boundaries are enforced to prevent
+  // division by zero.
+  if (region_rect.width() > 0 && image.width() > 0 && image.height() > 0) {
     auto* mutable_zoomed_crop = image_crop.mutable_zoomed_crop();
     mutable_zoomed_crop->set_parent_height(image.height());
     mutable_zoomed_crop->set_parent_width(image.width());
@@ -270,7 +271,12 @@ std::optional<lens::ImageCropAndBitmap> DownscaleAndEncodeBitmapRegionIfNeeded(
         static_cast<double>(image.height()));
     mutable_zoomed_crop->mutable_crop()->set_coordinate_type(
         lens::CoordinateType::NORMALIZED);
+  }
 
+  if (EncodeImageMaybeWithTransparency(
+          region_bitmap,
+          lens::features::GetLensOverlayImageCompressionQuality(), data,
+          client_logs)) {
     image_crop.mutable_image()->mutable_image_content()->assign(data->begin(),
                                                                 data->end());
   }
@@ -323,110 +329,6 @@ lens::mojom::CenterRotatedBoxPtr GetCenterRotatedBoxFromTabViewAndImageBounds(
   region->coordinate_type =
       lens::mojom::CenterRotatedBox_CoordinateType::kNormalized;
   return region;
-}
-
-SkColor ExtractVibrantOrDominantColorFromImage(const SkBitmap& image,
-                                               float min_population_pct) {
-  if (image.empty() || image.isNull()) {
-    return SK_ColorTRANSPARENT;
-  }
-
-  min_population_pct = std::clamp(min_population_pct, 0.0f, 1.0f);
-
-  std::vector<color_utils::ColorProfile> profiles;
-  // vibrant color profile
-  profiles.emplace_back(color_utils::LumaRange::ANY,
-                        color_utils::SaturationRange::VIBRANT);
-  // any color profile
-  profiles.emplace_back(color_utils::LumaRange::ANY,
-                        color_utils::SaturationRange::ANY);
-
-  auto vibrantAndDominantColors = color_utils::CalculateProminentColorsOfBitmap(
-      image, profiles, /*region=*/nullptr, color_utils::ColorSwatchFilter());
-
-  for (const auto& swatch : vibrantAndDominantColors) {
-    // Valid color. Extraction failure returns 0 alpha channel.
-    // Population Threshold.
-    if (SkColorGetA(swatch.color) != SK_AlphaTRANSPARENT &&
-        static_cast<float>(swatch.population) >=
-            static_cast<float>(
-                std::min(image.width() * image.height(),
-                         color_utils::kMaxConsideredPixelsForSwatches)) *
-                min_population_pct) {
-      return swatch.color;
-    }
-  }
-  return SK_ColorTRANSPARENT;
-}
-
-std::optional<float> CalculateHueAngle(
-    const std::tuple<float, float, float>& lab_color) {
-  float a = std::get<1>(lab_color);
-  float b = std::get<2>(lab_color);
-  if (a == 0) {
-    return std::nullopt;
-  }
-  return atan2(b, a);
-}
-
-float CalculateChroma(const std::tuple<float, float, float>& lab_color) {
-  return hypotf(std::get<1>(lab_color), std::get<2>(lab_color));
-}
-
-std::optional<float> CalculateHueAngleDistance(
-    const std::tuple<float, float, float>& lab_color1,
-    const std::tuple<float, float, float>& lab_color2) {
-  auto angle1 = CalculateHueAngle(lab_color1);
-  auto angle2 = CalculateHueAngle(lab_color2);
-  if (!angle1.has_value() || !angle2.has_value()) {
-    return std::nullopt;
-  }
-  float distance = std::abs(angle1.value() - angle2.value());
-  return std::min(distance, (float)(std::numbers::pi * 2.0 - distance));
-}
-
-// This conversion goes from legacy int based RGB to sRGB floats to
-// XYZD50 to Lab, leveraging gfx conver_conversion functions.
-std::tuple<float, float, float> ConvertColorToLab(SkColor color) {
-  // Legacy RGB -> float sRGB -> XYZD50 -> LAB.
-  auto [r, g, b] = gfx::SRGBLegacyToSRGB((float)SkColorGetR(color),
-                                         (float)SkColorGetG(color),
-                                         (float)SkColorGetB(color));
-  auto [x, y, z] = gfx::SRGBToXYZD50(r, g, b);
-  return gfx::XYZD50ToLab(x, y, z);
-}
-
-SkColor FindBestMatchedColorOrTransparent(
-    const std::vector<SkColor>& candidate_colors,
-    SkColor seed_color,
-    float min_chroma) {
-  if (SkColorGetA(seed_color) == SK_AlphaTRANSPARENT) {
-    return SK_ColorTRANSPARENT;
-  }
-  if (candidate_colors.empty()) {
-    return SK_ColorTRANSPARENT;
-  }
-
-  const auto& seed_lab = ConvertColorToLab(seed_color);
-  // Check seed has enough chroma, calculated as hypot of a & b channels.
-  if (CalculateChroma(seed_lab) < min_chroma) {
-    return SK_ColorTRANSPARENT;
-  }
-
-  auto closest_color = std::min_element(
-      candidate_colors.begin(), candidate_colors.end(),
-      [&seed_lab](const auto& color1, const auto& color2) -> bool {
-        const auto& theme1_lab = ConvertColorToLab(color1);
-        const auto& theme2_lab = ConvertColorToLab(color2);
-        auto angle1 = CalculateHueAngleDistance(theme1_lab, seed_lab);
-        auto angle2 = CalculateHueAngleDistance(theme2_lab, seed_lab);
-        return angle1.has_value() && angle2.has_value() &&
-               angle1.value() < angle2.value();
-      });
-  if (closest_color == candidate_colors.end()) {
-    return SK_ColorTRANSPARENT;
-  }
-  return *closest_color;
 }
 
 }  // namespace lens

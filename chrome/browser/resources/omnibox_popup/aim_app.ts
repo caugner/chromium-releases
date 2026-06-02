@@ -8,6 +8,7 @@ import '/strings.m.js';
 
 import {ColorChangeUpdater} from '//resources/cr_components/color_change_listener/colors_css_updater.js';
 import type {ComposeboxElement} from '//resources/cr_components/composebox/composebox.js';
+import type {VoicePermissionPromptState} from '//resources/cr_components/composebox/composebox_voice_search.js';
 import {assert} from '//resources/js/assert.js';
 import {EventTracker} from '//resources/js/event_tracker.js';
 import {loadTimeData} from '//resources/js/load_time_data.js';
@@ -45,8 +46,19 @@ export class OmniboxAimAppElement extends CrLitElement {
       composeboxForkEnabled_: {type: Boolean},
       searchboxLayoutMode_: {type: String},
       hasAllowedInputs_: {type: Boolean},
-      energyEffectEnabled_: {type: Boolean, reflect: true},
-      energyEffectAnimationEnabled_: {type: Boolean, reflect: true},
+      caretAnimationsEnabled_: {type: Boolean},
+      disableComposeboxAnimation_: {type: Boolean},
+      energyEffectEnabled_: {
+        type: Boolean,
+        reflect: true,
+      },
+      energyEffectAnimationEnabled_: {
+        type: Boolean,
+        reflect: true,
+      },
+      disableVoiceSearchAnimation_: {type: Boolean},
+      usePecApi_: {type: Boolean},
+      isOblongShape_: {type: Boolean},
     };
   }
 
@@ -55,11 +67,13 @@ export class OmniboxAimAppElement extends CrLitElement {
   protected accessor searchboxLayoutMode_: string =
       loadTimeData.getString('searchboxLayoutMode');
   protected accessor hasAllowedInputs_: boolean = false;
-  protected disableCaretColorAnimation_: boolean =
-      loadTimeData.getBoolean('caretColorAnimationDisabled');
-  protected disableComposeboxAnimation_: boolean =
+  protected accessor disableComposeboxAnimation_: boolean =
       loadTimeData.getBoolean('composeboxAnimationDisabled');
-  protected caretAnimationsEnabled_: boolean =
+  // Voice search animation is disabled outside of voice coherence.
+  protected accessor disableVoiceSearchAnimation_: boolean =
+      !loadTimeData.getBoolean('voiceSearchCoherenceComposeboxesEnabled');
+
+  protected accessor caretAnimationsEnabled_: boolean =
       loadTimeData.getBoolean('caretAnimationEnabled');
   protected accessor energyEffectEnabled_: boolean =
       loadTimeData.getBoolean('energyEffectEnabled');
@@ -68,6 +82,10 @@ export class OmniboxAimAppElement extends CrLitElement {
   // across all surfaces (= Nextbox, Omnibox, and Realbox).
   protected accessor energyEffectAnimationEnabled_: boolean =
       loadTimeData.getBoolean('energyEffectEnabled');
+  protected accessor usePecApi_: boolean =
+      loadTimeData.getBoolean('contextualMenuUsePecApi');
+  protected accessor isOblongShape_: boolean =
+      loadTimeData.getBoolean('contextButtonShapeIsOblong');
 
   private eventTracker_ = new EventTracker();
   private pageHandler_: PageHandlerInterface;
@@ -135,6 +153,28 @@ export class OmniboxAimAppElement extends CrLitElement {
     this.pageHandler_.showContextMenu(point);
   }
 
+  // Fired from voice search component in cr-composebox if minimum height
+  // and width are non zero when permission prompt is displayed, or any time
+  // when permission prompt hides.
+  protected onEmbeddedVoicePermissionPromptChanged(
+      e: CustomEvent<VoicePermissionPromptState>) {
+    if (e.detail.isOpened) {  // Permission prompt opened.
+      if (this.$.composebox) {
+        this.$.composebox.classList.add('has-embedded-permission-prompt');
+        this.$.composebox.style.setProperty(
+            '--cr_composebox_minimum_height', `${e.detail.height}px`);
+        this.$.composebox.style.setProperty(
+            '--cr_composebox_minimum_width', `${e.detail.width}px`);
+      }
+    } else {  // Permission prompt closed.
+      if (this.$.composebox) {
+        this.$.composebox.classList.remove('has-embedded-permission-prompt');
+        this.$.composebox.style.removeProperty(
+            '--cr_composebox_minimum_height');
+        this.$.composebox.style.removeProperty('--cr_composebox_minimum_width');
+      }
+    }
+  }
   protected onCloseComposebox_() {
     this.pageHandler_.requestClose();
   }

@@ -225,7 +225,7 @@ BASE_FEATURE(kNtpFeatureOptimizationModuleRemoval,
 
 // If enabled, stale shortcuts will be auto-removed from the NTP.
 BASE_FEATURE(kNtpFeatureOptimizationShortcutsRemoval,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // If enabled, the dismiss module buttons will be removed from the NTP modules.
 BASE_FEATURE(kNtpFeatureOptimizationDismissModulesRemoval,
@@ -318,7 +318,7 @@ const base::FeatureParam<bool> kNtpNextClientSensitivityCheckParam(
 const base::FeatureParam<bool> kNtpNextShowStaticRecentTabChipParam(
     &ntp_features::kNtpNextFeatures,
     "NtpNextShowStaticRecentTabChipParam",
-    true);
+    false);
 const base::FeatureParam<bool> kNtpNextShowDismissalUIParam(
     &ntp_features::kNtpNextFeatures,
     "NtpNextShowDismissalUIParam",

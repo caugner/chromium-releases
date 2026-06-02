@@ -26,6 +26,16 @@ class ContextualTasksUiServiceDelegateDesktop
   // ContextualTasksUiServiceDelegate overrides:
   void OpenFeedbackUi(BrowserWindowInterface* browser,
                       const GURL& page_url) override;
+  void ShowUndoSnackbar(
+      BrowserWindowInterface* browser_window_interface) override;
+  void OnWebUIReady(BrowserWindowInterface* browser_window_interface,
+                    const base::Uuid& task_id,
+                    content::WebContents* web_contents) override;
+  void OnWebUIDestroyed(BrowserWindowInterface* browser_window_interface,
+                        const std::optional<base::Uuid>& task_id) override;
+  void OnTaskChanged(BrowserWindowInterface* browser_window_interface,
+                     const std::optional<base::Uuid>& old_task_id,
+                     const std::optional<base::Uuid>& new_task_id) override;
 
  protected:
   Profile* profile() const { return profile_; }

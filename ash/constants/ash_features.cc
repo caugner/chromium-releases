@@ -206,6 +206,18 @@ constexpr base::FeatureParam<std::string> kBocaSpotlightUrlTemplate{
     &kBocaSpotlight, "spotlight-url-template",
     "https://remotedesktop.google.com/support/session/{sessionCode}"};
 
+// Enables or disables Gemini integration for Boca on ChromeOS.
+BASE_FEATURE(kBocaGeminiIntegration, base::FEATURE_DISABLED_BY_DEFAULT);
+
+// The URL to use for Gemini integration in Boca.
+constexpr base::FeatureParam<std::string> kBocaGeminiUrl{
+    &kBocaGeminiIntegration, "BocaGeminiUrl", "https://gemini.google.com"};
+
+// The URL to use for Gemini guided learning in Boca.
+constexpr base::FeatureParam<std::string> kBocaGeminiGuidedLearningUrl{
+    &kBocaGeminiIntegration, "BocaGeminiGuidedLearningUrl",
+    "https://gemini.google.com/guided-learning"};
+
 // Enables or disables Boca network restriction for Boca on ChromeOS.
 BASE_FEATURE(kBocaNetworkRestriction, base::FEATURE_DISABLED_BY_DEFAULT);
 
@@ -767,7 +779,7 @@ BASE_FEATURE(kFixStaticIpForTwoManagedEthPorts,
 BASE_FEATURE(kFjordOobe, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Controls if the Fjord variant of OOBE is shown for squid devices.
-BASE_FEATURE(kFjordOobeForSquid, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kFjordOobeForSquid, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Force flag for the Fjord variant of OOBE. This is to make testing easier
 // because the Fjord OOBE variant is buildflag dependent.
@@ -868,7 +880,7 @@ BASE_FEATURE(kGoogleOneOfferFilesBanner, base::FEATURE_DISABLED_BY_DEFAULT);
 // Enables the Google Services Connectivity diagnostic routine for testing
 // connectivity to essential Google services.
 BASE_FEATURE(kGoogleServicesConnectivityRoutine,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Enables targeting for feature-aware devices, as controlled by the feature
 // management module.
@@ -1064,11 +1076,6 @@ BASE_FEATURE(kImeDownloaderExperiment, base::FEATURE_DISABLED_BY_DEFAULT);
 // Enable or disable proto-based communication for IME Service.
 BASE_FEATURE(kImeServiceProto, base::FEATURE_DISABLED_BY_DEFAULT);
 
-// Enable or disable system emoji picker GIF support
-BASE_FEATURE(kImeSystemEmojiPickerGIFSupport,
-             "SystemEmojiPickerGIFSupport",
-             base::FEATURE_ENABLED_BY_DEFAULT);
-
 // Enable or disable system emoji picker jelly support
 BASE_FEATURE(kImeSystemEmojiPickerJellySupport,
              "SystemEmojiPickerJellySupport",
@@ -1200,8 +1207,7 @@ BASE_FEATURE(kFeatureManagementLobster, base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Enabling this flag allows password complexity checks when setting a local pin
 // or password.
-BASE_FEATURE(kLocalFactorsPasswordComplexity,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kLocalFactorsPasswordComplexity, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Enables local authentication controller with PIN support.
 BASE_FEATURE(kLocalAuthenticationWithPin, base::FEATURE_ENABLED_BY_DEFAULT);
@@ -1341,7 +1347,7 @@ BASE_FEATURE(kOsSyncAccessibilitySettingsBatch1,
 // animations and caption styling) so the rollout can proceed in small,
 // reversible stages.
 BASE_FEATURE(kOsSyncAccessibilitySettingsBatch2,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Gates syncing of the third batch of accessibility settings (screen + docked
 // magnifiers and select-to-speak toggles) so rollout can proceed incrementally.
@@ -1372,6 +1378,10 @@ BASE_FEATURE(kOobePersonalizedOnboarding, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // If enabled, Pre-consent metrics functionality is enabled during OOBE.
 BASE_FEATURE(kOobePreConsentMetrics, base::FEATURE_ENABLED_BY_DEFAULT);
+
+// If enabled, skips ARC apps on 4GiB devices in OOBE personalized recommend
+// apps screen.
+BASE_FEATURE(kOobeSkipArcAppsOn4GbDevices, base::FEATURE_DISABLED_BY_DEFAULT);
 
 // If enabled, Consumer Software Screen will be shown during OOBE.
 BASE_FEATURE(kOobeSoftwareUpdate, base::FEATURE_ENABLED_BY_DEFAULT);
@@ -1611,7 +1621,7 @@ BASE_FEATURE(kQuickUnlockPinAutosubmitBackfill,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Enables reordering of screens in the recovery flow.
-BASE_FEATURE(kRecoveryFlowReorder, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kRecoveryFlowReorder, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Enables or disables Release Notes notifications on non-stable ChromeOS
 // channels. Used for testing.
@@ -2033,10 +2043,6 @@ BASE_FEATURE(kWifiSyncUploadProxyConfigs, base::FEATURE_DISABLED_BY_DEFAULT);
 // Wi-Fi networks that are received from Chrome Sync.
 BASE_FEATURE(kWifiSyncApplyProxyConfigs, base::FEATURE_DISABLED_BY_DEFAULT);
 
-// Controls whether to apply incoming Wi-Fi configuration delete events from
-// the Chrome Sync server.
-BASE_FEATURE(kWifiSyncApplyDeletes, base::FEATURE_DISABLED_BY_DEFAULT);
-
 // Enables an experimental feature that splits windows by dragging one window
 // over another window.
 BASE_FEATURE(kWindowSplitting, base::FEATURE_DISABLED_BY_DEFAULT);
@@ -2076,10 +2082,6 @@ BASE_FEATURE(kEnablePeripheralsLogging,
 // Enable peripheral notification to notify users when a input device is
 // connected to the user's chromebook for the first time.
 BASE_FEATURE(kPeripheralNotification, base::FEATURE_ENABLED_BY_DEFAULT);
-
-// Enable fast ink for software cursor. Fast ink provides a low-latency
-// cursor with possible tearing artifacts.
-BASE_FEATURE(kEnableFastInkForSoftwareCursor, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Enables fwupd developer mode, disabling all firmware authentication checks.
 BASE_FEATURE(kFwupdDeveloperMode, base::FEATURE_DISABLED_BY_DEFAULT);
@@ -2374,6 +2376,10 @@ bool IsBocaSpotlightEnabled() {
   return base::FeatureList::IsEnabled(kBocaSpotlight);
 }
 
+bool IsBocaGeminiIntegrationEnabled() {
+  return base::FeatureList::IsEnabled(kBocaGeminiIntegration);
+}
+
 bool IsBocaNetworkRestrictionEnabled() {
   return base::FeatureList::IsEnabled(kBocaNetworkRestriction);
 }
@@ -2598,10 +2604,6 @@ bool IsExtendedUpdatesOptInFeatureEnabled() {
 
 bool IsExternalKeyboardInDiagnosticsAppEnabled() {
   return base::FeatureList::IsEnabled(kEnableExternalKeyboardsInDiagnostics);
-}
-
-bool IsFastInkForSoftwareCursorEnabled() {
-  return base::FeatureList::IsEnabled(kEnableFastInkForSoftwareCursor);
 }
 
 bool IsFastPairEnabled() {
@@ -3018,6 +3020,10 @@ bool IsOobePersonalizedOnboardingEnabled() {
 
 bool IsOobePreConsentMetricsEnabled() {
   return base::FeatureList::IsEnabled(kOobePreConsentMetrics);
+}
+
+bool IsOobeSkipArcAppsOn4GbDevicesEnabled() {
+  return base::FeatureList::IsEnabled(kOobeSkipArcAppsOn4GbDevices);
 }
 
 bool IsOobeSoftwareUpdateEnabled() {

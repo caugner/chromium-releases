@@ -46,6 +46,10 @@ BASE_DECLARE_FEATURE(kApiContentSettingsClipboard);
 // Controls the availability of the enterprise.kioskInput API.
 BASE_DECLARE_FEATURE(kApiEnterpriseKioskInput);
 
+// Controls the availability of registering public MIME handlers via
+// the mimeHandler manifest key.
+BASE_DECLARE_FEATURE(kApiMimeHandler);
+
 // Controls the availability of the runtime.actionData API.
 // TODO(crbug.com/376354347): Remove this when the experiment is finished.
 BASE_DECLARE_FEATURE(kApiRuntimeActionData);
@@ -74,6 +78,26 @@ BASE_DECLARE_FEATURE(kApiEnterpriseReportingPrivateOnDataMaskingRulesTriggered);
 
 // Controls the availability of Glic access from Google webpages.
 BASE_DECLARE_FEATURE(kApiGlicAccessFromGoogleWebpage);
+// Controls the availability of Glic access from Chrome promotion pages.
+BASE_DECLARE_FEATURE(kApiGlicAccessFromPromotionPage);
+extern const base::FeatureParam<std::string> kProdPromptEndpointUrlParam;
+extern const base::FeatureParam<std::string> kGlicInvokeApiOAuth2ScopeParam;
+extern const base::FeatureParam<bool> kGlicRequireConsentForInvokeParam;
+
+enum class GlicOpenNewTabDisposition {
+  kForeground,                // Always open in foreground.
+  kBackground,                // Always open in background.
+  kForegroundIfNotConsented,  // Open in foreground if user has not consented,
+                              // else in background.
+};
+extern const base::FeatureParam<GlicOpenNewTabDisposition>
+    kGlicOpenNewTabDispositionParam;
+
+// String constants for GlicOpenNewTabDisposition.
+inline constexpr char kGlicOpenNewTabDispositionForeground[] = "foreground";
+inline constexpr char kGlicOpenNewTabDispositionBackground[] = "background";
+inline constexpr char kGlicOpenNewTabDispositionForegroundIfNotConsented[] =
+    "foreground_if_not_consented";
 
 // Controls the availability of the new `proxyOverrideRulesPrivate` API.
 BASE_DECLARE_FEATURE(kApiProxyOverrideRulesPrivate);
@@ -98,6 +122,10 @@ BASE_DECLARE_FEATURE(kAllowWithholdingExtensionPermissionsOnInstall);
 // process things that renderer process never run content scripts from the
 // extension).
 BASE_DECLARE_FEATURE(kCheckingNoExtensionIdInExtensionIpcs);
+
+// Controls whether component extensions are allowed to use chrome://resources/
+// URLs in worker scripts and subresources.
+BASE_DECLARE_FEATURE(kComponentExtensionAllowWorkerChromeResources);
 
 // If enabled, <webview>s will be allowed to request permission from an
 // embedding Chrome App to request access to Human Interface Devices.
@@ -155,6 +183,10 @@ BASE_DECLARE_FEATURE(kAllowLegacyMV2Extensions);
 // the 'registerProtocolHandler' Web API, defined in the Custom Handlers
 // section of the HTML specification.
 BASE_DECLARE_FEATURE(kExtensionProtocolHandlers);
+
+// Enables extension support for the "tab" context menu, allowing extensions
+// to add custom items when right-clicking a tab.
+BASE_DECLARE_FEATURE(kExtensionTabContextMenu);
 
 // If enabled, only manifest v3 extensions is allowed while v2 will be disabled.
 // Note that this feature is now only checked by `ExtensionManagement` which
@@ -297,6 +329,11 @@ BASE_DECLARE_FEATURE(kEnableShouldShowPromotion);
 // returning to the previous provider.
 BASE_DECLARE_FEATURE(kSearchEngineExplicitChoiceDialog);
 BASE_DECLARE_FEATURE_PARAM(bool, kSearchEngineExplicitChoiceDialogEscapable);
+
+// If true, the dialog is re-shown until a choice is made. If false, the
+// dialog is limited to once per session, as the original dialog works.
+BASE_DECLARE_FEATURE_PARAM(bool,
+                           kSearchEngineExplicitChoiceDialogUnlimitedShows);
 
 // When enabled, all search extensions will unconditionally get the search
 // engine override dialog.

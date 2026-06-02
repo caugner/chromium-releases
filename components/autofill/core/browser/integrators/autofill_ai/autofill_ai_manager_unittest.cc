@@ -91,17 +91,17 @@ using ::testing::WithArgs;
 constexpr auto kAcceptBubble =
     AutofillClient::AutofillAiBubbleResult::kAccepted;
 const AutofillClient::EntityImportUIContext kAcceptUIContext(
-    /*consent_string_id=*/123,
-    /*clicked_button_string_id=*/234);
+    /*accepted_consent_string_id=*/123,
+    /*accept_button_string_id=*/234);
 constexpr auto kDeclineBubble = AutofillClient::AutofillAiBubbleResult::kClosed;
 const AutofillClient::EntityImportUIContext kDeclineUIContext(
-    /*consent_string_id=*/123,
-    /*clicked_button_string_id=*/345);
+    /*accepted_consent_string_id=*/123,
+    /*accept_button_string_id=*/345);
 constexpr auto kIgnoreBubble =
     AutofillClient::AutofillAiBubbleResult::kNotInteracted;
 const AutofillClient::EntityImportUIContext kIgnoreUIContext(
-    /*consent_string_id=*/123,
-    /*clicked_button_string_id=*/std::nullopt);
+    /*accepted_consent_string_id=*/123,
+    /*accept_button_string_id=*/std::nullopt);
 
 auto FirstElementIs(auto&& matcher) {
   return ResultOf(
@@ -304,7 +304,11 @@ TEST_F(AutofillAiManagerTest,
 // Tests that IPH should be displayed if the user is opted out of the feature,
 // has an address, and form submission with filled out fields would lead to
 // entity import.
+// TODO(crbug.com/440488776): Remove this test when cleaning up
+// kAutofillAiAvailableByDefault. This feature deprecated the IPH.
 TEST_F(AutofillAiManagerTest, ShouldDisplayIph) {
+  base::test::ScopedFeatureList feature;
+  feature.InitAndDisableFeature(features::kAutofillAiAvailableByDefault);
   test::FormDescription form_description = {.fields = {{}}};
   FormData form = test::GetFormData(form_description);
   FormStructure form_structure = FormStructure(form);
@@ -318,8 +322,12 @@ TEST_F(AutofillAiManagerTest, ShouldDisplayIph) {
 
 // Tests that IPH should be displayed when the user is opted out of the feature
 // and does not have address or payments data stored.
+// TODO(crbug.com/440488776): Remove this test when cleaning up
+// kAutofillAiAvailableByDefault. This feature deprecated the IPH.
 TEST_F(AutofillAiManagerTest,
        ShouldDisplayIphWhenUserHasNoAddressOrPaymentsData) {
+  base::test::ScopedFeatureList feature;
+  feature.InitAndDisableFeature(features::kAutofillAiAvailableByDefault);
   test::FormDescription form_description = {.fields = {{}}};
   FormData form = test::GetFormData(form_description);
   FormStructure form_structure = FormStructure(form);
@@ -1335,9 +1343,9 @@ TEST_F(AutofillAiManagerImportFormTest, PassportSaveToWalletConsent) {
   EXPECT_EQ(session_id_consent_auditor, session_id_api_call);
   sync_pb::UserConsentTypes::WalletPrivatePassConsent expected_consent;
   expected_consent.mutable_description_grd_ids()->Add(
-      *kAcceptUIContext.consent_string_id);
+      *kAcceptUIContext.accepted_consent_string_id);
   expected_consent.set_confirmation_grd_id(
-      *kAcceptUIContext.clicked_button_string_id);
+      *kAcceptUIContext.accept_button_string_id);
   EXPECT_THAT(consent, base::test::EqualsProto(expected_consent));
 }
 
@@ -2033,6 +2041,107 @@ TEST_F(AutofillAiManagerUpstreamTest, ServerEntity_DoNotShowMigrationPrompt) {
 
   EXPECT_CALL(autofill_client(), ShowEntityImportBubble).Times(0);
   EXPECT_FALSE(manager().OnFormSubmitted(*form, /*ukm_source_id=*/{}));
+}
+
+TEST_F(AutofillAiManagerTest, LoadedServerPredictionsToSuggestionsShownTiming) {
+  base::HistogramTester histogram_tester;
+  test::FormDescription form_description = {
+      .fields = {{.role = PASSPORT_NUMBER}}};
+  FormData form = test::GetFormData(form_description);
+  FormStructure form_structure = FormStructure(form);
+  AddPredictionsToFormStructure(form_structure, {{PASSPORT_NUMBER}});
+  form_structure.set_server_predictions_received_timestamp(
+      base::TimeTicks::Now() - base::Seconds(2));
+
+  AddOrUpdateEntityInstance(GetPassportEntityInstance());
+
+  ukm::SourceId ukm_source_id_1 =
+      ukm::ConvertToSourceId(1, ukm::SourceIdType::NAVIGATION_ID);
+  ukm::SourceId ukm_source_id_2 =
+      ukm::ConvertToSourceId(2, ukm::SourceIdType::NAVIGATION_ID);
+
+  Suggestion passport_suggestion(SuggestionType::kFillAutofillAi);
+  passport_suggestion.payload =
+      Suggestion::AutofillAiPayload(GetPassportEntityInstance().guid());
+
+  // First time showing suggestions on page 1 logs the metric.
+  manager().OnSuggestionsShown(form_structure, *form_structure.field(0),
+                               {passport_suggestion}, ukm_source_id_1);
+  histogram_tester.ExpectTotalCount(
+      "Autofill.Ai.TimingInterval.LoadedServerPredictionsToSuggestionsShown",
+      1);
+
+  // Second time showing suggestions on page 1 DOES NOT log.
+  manager().OnSuggestionsShown(form_structure, *form_structure.field(0),
+                               {passport_suggestion}, ukm_source_id_1);
+  histogram_tester.ExpectTotalCount(
+      "Autofill.Ai.TimingInterval.LoadedServerPredictionsToSuggestionsShown",
+      1);
+
+  // Showing suggestions on page 2 LOGS again.
+  manager().OnSuggestionsShown(form_structure, *form_structure.field(0),
+                               {passport_suggestion}, ukm_source_id_2);
+  histogram_tester.ExpectTotalCount(
+      "Autofill.Ai.TimingInterval.LoadedServerPredictionsToSuggestionsShown",
+      2);
+}
+
+TEST_F(AutofillAiManagerTest, LoadedServerPredictionsToFirstInteractionTiming) {
+  base::HistogramTester histogram_tester;
+  test::FormDescription form_description = {
+      .fields = {{.role = PASSPORT_NUMBER}}};
+  FormData form = test::GetFormData(form_description);
+  FormStructure form_structure = FormStructure(form);
+  AddPredictionsToFormStructure(form_structure, {{PASSPORT_NUMBER}});
+  form_structure.set_server_predictions_received_timestamp(
+      base::TimeTicks::Now() - base::Seconds(2));
+
+  ukm::SourceId ukm_source_id_1 =
+      ukm::ConvertToSourceId(1, ukm::SourceIdType::NAVIGATION_ID);
+  ukm::SourceId ukm_source_id_2 =
+      ukm::ConvertToSourceId(2, ukm::SourceIdType::NAVIGATION_ID);
+
+  // First interaction on page 1 logs the metric.
+  manager().OnFormInteracted(form_structure, ukm_source_id_1);
+  histogram_tester.ExpectTotalCount(
+      "Autofill.Ai.TimingInterval.LoadedServerPredictionsToFirstInteraction",
+      1);
+
+  // Second interaction on page 1 DOES NOT log.
+  manager().OnFormInteracted(form_structure, ukm_source_id_1);
+  histogram_tester.ExpectTotalCount(
+      "Autofill.Ai.TimingInterval.LoadedServerPredictionsToFirstInteraction",
+      1);
+
+  // Interaction on page 2 LOGS again.
+  manager().OnFormInteracted(form_structure, ukm_source_id_2);
+  histogram_tester.ExpectTotalCount(
+      "Autofill.Ai.TimingInterval.LoadedServerPredictionsToFirstInteraction",
+      2);
+}
+
+// Tests that the time elapsed between receiving server predictions and the
+// first interaction with an Autofill AI-relevant form is correctly recorded.
+// It also verifies that this metric is logged at most once per page by
+// checking that subsequent interactions on the same UKM source ID do not
+// trigger additional logs, while a new page (source ID) does.
+TEST_F(AutofillAiManagerTest,
+       LoadedServerPredictionsToFirstInteractionTiming_NonAiForm) {
+  base::HistogramTester histogram_tester;
+  test::FormDescription form_description = {.fields = {{.role = COMPANY_NAME}}};
+  FormData form = test::GetFormData(form_description);
+  FormStructure form_structure = FormStructure(form);
+  AddPredictionsToFormStructure(form_structure, {{COMPANY_NAME}});
+  form_structure.set_server_predictions_received_timestamp(
+      base::TimeTicks::Now() - base::Seconds(2));
+
+  ukm::SourceId ukm_source_id_1 =
+      ukm::ConvertToSourceId(1, ukm::SourceIdType::NAVIGATION_ID);
+
+  manager().OnFormInteracted(form_structure, ukm_source_id_1);
+  histogram_tester.ExpectTotalCount(
+      "Autofill.Ai.TimingInterval.LoadedServerPredictionsToFirstInteraction",
+      0);
 }
 
 }  // namespace

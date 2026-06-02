@@ -1179,9 +1179,6 @@ void DocumentLoader::UpdateForSameDocumentNavigation(
   if (SoftNavigationHeuristics* heuristics =
           frame_->DomWindow()->GetSoftNavigationHeuristics()) {
     // if `heuristics` exists it means we're in an outermost main frame.
-    //
-    // TODO(crbug.com/41494072): `heuristics` existing does not imply this
-    // navigation was initiated in the main world.
     heuristics->SameDocumentNavigationCommitted(
         old_url, new_url, type, same_document_metrics_token, interaction_id);
   }
@@ -3161,8 +3158,14 @@ void DocumentLoader::CommitNavigation() {
   // The PaintHolding feature defers compositor commits until content has been
   // painted or 500ms have passed, whichever comes first. We require that this
   // be an html document served via http.
-  if (base::FeatureList::IsEnabled(blink::features::kPaintHolding) &&
-      IsA<HTMLDocument>(document) && Url().ProtocolIsInHttpFamily()) {
+  // Additionally, when the client signals an initial WebUI frame load, we allow
+  // deferred compositor commits to coordinate synchronous initial UI present
+  // with embedders.
+  if ((base::FeatureList::IsEnabled(blink::features::kPaintHolding) &&
+       IsA<HTMLDocument>(document) && Url().ProtocolIsInHttpFamily()) ||
+      (base::FeatureList::IsEnabled(
+           blink::features::kInitialWebUISurfaceSync) &&
+       frame_->Client()->IsForInitialWebUI())) {
     document->SetDeferredCompositorCommitIsAllowed(true);
   } else {
     document->SetDeferredCompositorCommitIsAllowed(false);

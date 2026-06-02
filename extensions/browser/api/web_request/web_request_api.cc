@@ -473,7 +473,7 @@ void WebRequestAPI::OnListenerAdded(const EventListenerInfo& details) {
   // since they are not bound to a specific process. See crbug.com/513321171.
   if (extension && !details.is_lazy && process &&
       !ProcessMap::Get(details.browser_context)
-           ->Contains(extension->id(), process->GetDeprecatedID())) {
+           ->Contains(extension->id(), process->GetID())) {
     bad_message::ReceivedBadMessage(
         process, bad_message::WRA_INVALID_EXTENSION_ID_FOR_PROCESS);
     return;
@@ -636,7 +636,8 @@ void WebRequestAPI::OnListenerRemoved(const EventListenerInfo& details) {
         &WebRequestAPI::UpdateActiveListener, weak_factory_.GetWeakPtr(),
         base::UnsafeDanglingUntriaged(details.browser_context.get()),
         update_type, details.extension_id, sub_event_name,
-        details.worker_thread_id, details.service_worker_version_id);
+        details.render_process_id, details.worker_thread_id,
+        details.service_worker_version_id);
   }
 
   if (ExtensionRegistry::Get(details.browser_context)
@@ -1086,6 +1087,7 @@ void WebRequestAPI::UpdateActiveListener(
     WebRequestEventRouter::ListenerUpdateType update_type,
     const ExtensionId& extension_id,
     const std::string& sub_event_name,
+    content::ChildProcessId render_process_id,
     int worker_thread_id,
     int64_t service_worker_version_id) {
   if (!ExtensionsBrowserClient::Get()->IsValidContext(browser_context_id)) {
@@ -1096,8 +1098,8 @@ void WebRequestAPI::UpdateActiveListener(
       reinterpret_cast<content::BrowserContext*>(browser_context_id);
   WebRequestEventRouter::Get(browser_context)
       ->UpdateActiveListener(browser_context, update_type, extension_id,
-                             sub_event_name, worker_thread_id,
-                             service_worker_version_id);
+                             sub_event_name, render_process_id,
+                             worker_thread_id, service_worker_version_id);
 }
 
 void WebRequestAPI::RemoveLazyListener(content::BrowserContext* browser_context,

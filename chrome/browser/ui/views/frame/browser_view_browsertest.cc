@@ -14,6 +14,7 @@
 #include "base/test/values_test_util.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "chrome/browser/devtools/devtools_ui_controller.h"
 #include "chrome/browser/devtools/devtools_window_testing.h"
 #include "chrome/browser/policy/dm_token_utils.h"
 #include "chrome/browser/preloading/scoped_prewarm_feature_list.h"
@@ -21,10 +22,11 @@
 #include "chrome/browser/safe_browsing/chrome_enterprise_url_lookup_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands_mac.h"
-#include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_context.h"
+#include "chrome/browser/ui/navigator/browser_navigator.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog.h"
 #include "chrome/browser/ui/tab_ui_helper.h"
 #include "chrome/browser/ui/tabs/public/tab_features.h"
@@ -80,6 +82,7 @@
 #include "ui/base/ozone_buildflags.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/gfx/geometry/point.h"
+#include "ui/views/test/views_test_utils.h"
 #include "url/url_constants.h"
 
 #if defined(USE_AURA)
@@ -162,8 +165,6 @@ class BrowserViewTest : public InProcessBrowserTest {
 
 #if BUILDFLAG(IS_CHROMEOS)
 using BrowserViewChromeOSTest = ChromeOSBrowserUITest;
-using BrowserViewChromeOSTestNoWebUiTabStrip =
-    WebUiTabStripOverrideTest<false, BrowserViewChromeOSTest>;
 #endif
 
 namespace {
@@ -306,32 +307,38 @@ IN_PROC_BROWSER_TEST_F(BrowserViewTest, DevToolsDockedUpdatesBrowserWindow) {
   gfx::Rect full_bounds = active_contents_container_view()->GetLocalBounds();
   gfx::Rect small_bounds(10, 20, 30, 40);
 
-  browser_view()->UpdateDevTools(active_web_contents());
+  DevtoolsUIController::From(browser())->UpdateDevtools(active_web_contents());
+  views::test::RunScheduledLayout(browser_view());
   EXPECT_FALSE(devtools_web_view()->web_contents());
   EXPECT_EQ(full_bounds, devtools_web_view()->bounds());
   EXPECT_EQ(full_bounds, contents_web_view()->bounds());
 
   // Docked.
   OpenDevToolsWindow(true);
+  views::test::RunScheduledLayout(browser_view());
   EXPECT_TRUE(devtools_web_view()->web_contents());
   EXPECT_EQ(full_bounds, devtools_web_view()->bounds());
 
   SetDevToolsBounds(small_bounds);
+  views::test::RunScheduledLayout(browser_view());
   EXPECT_TRUE(devtools_web_view()->web_contents());
   EXPECT_EQ(full_bounds, devtools_web_view()->bounds());
   EXPECT_EQ(small_bounds, contents_web_view()->bounds());
 
-  browser_view()->UpdateDevTools(active_web_contents());
+  DevtoolsUIController::From(browser())->UpdateDevtools(active_web_contents());
+  views::test::RunScheduledLayout(browser_view());
   EXPECT_TRUE(devtools_web_view()->web_contents());
   EXPECT_EQ(full_bounds, devtools_web_view()->bounds());
   EXPECT_EQ(small_bounds, contents_web_view()->bounds());
 
   CloseDevToolsWindow();
+  views::test::RunScheduledLayout(browser_view());
   EXPECT_FALSE(devtools_web_view()->web_contents());
   EXPECT_EQ(full_bounds, devtools_web_view()->bounds());
   EXPECT_EQ(full_bounds, contents_web_view()->bounds());
 
-  browser_view()->UpdateDevTools(active_web_contents());
+  DevtoolsUIController::From(browser())->UpdateDevtools(active_web_contents());
+  views::test::RunScheduledLayout(browser_view());
   EXPECT_FALSE(devtools_web_view()->web_contents());
   EXPECT_EQ(full_bounds, devtools_web_view()->bounds());
   EXPECT_EQ(full_bounds, contents_web_view()->bounds());
@@ -351,25 +358,30 @@ IN_PROC_BROWSER_TEST_F(BrowserViewTest, DevToolsUndockedUpdatesBrowserWindow) {
   gfx::Rect small_bounds(10, 20, 30, 40);
 
   OpenDevToolsWindow(false);
+  views::test::RunScheduledLayout(browser_view());
   EXPECT_TRUE(devtools_web_view()->web_contents());
   EXPECT_EQ(full_bounds, devtools_web_view()->bounds());
 
   SetDevToolsBounds(small_bounds);
+  views::test::RunScheduledLayout(browser_view());
   EXPECT_TRUE(devtools_web_view()->web_contents());
   EXPECT_EQ(full_bounds, devtools_web_view()->bounds());
   EXPECT_EQ(small_bounds, contents_web_view()->bounds());
 
-  browser_view()->UpdateDevTools(active_web_contents());
+  DevtoolsUIController::From(browser())->UpdateDevtools(active_web_contents());
+  views::test::RunScheduledLayout(browser_view());
   EXPECT_TRUE(devtools_web_view()->web_contents());
   EXPECT_EQ(full_bounds, devtools_web_view()->bounds());
   EXPECT_EQ(small_bounds, contents_web_view()->bounds());
 
   CloseDevToolsWindow();
+  views::test::RunScheduledLayout(browser_view());
   EXPECT_FALSE(devtools_web_view()->web_contents());
   EXPECT_EQ(full_bounds, devtools_web_view()->bounds());
   EXPECT_EQ(full_bounds, contents_web_view()->bounds());
 
-  browser_view()->UpdateDevTools(active_web_contents());
+  DevtoolsUIController::From(browser())->UpdateDevtools(active_web_contents());
+  views::test::RunScheduledLayout(browser_view());
   EXPECT_FALSE(devtools_web_view()->web_contents());
   EXPECT_EQ(full_bounds, devtools_web_view()->bounds());
   EXPECT_EQ(full_bounds, contents_web_view()->bounds());
@@ -483,7 +495,7 @@ IN_PROC_BROWSER_TEST_F(BrowserViewTest, AvoidUnnecessaryVisibilityChanges) {
   // BookmarkBarView isn't shown.
   browser()->profile()->GetPrefs()->SetBoolean(
       bookmarks::prefs::kShowBookmarkBar, false);
-  GURL new_tab_url(chrome::kChromeUINewTabURL);
+  GURL new_tab_url = chrome::ChromeUINewTabURLAsGURL();
   chrome::AddTabAt(browser(), GURL(), -1, true);
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), new_tab_url));
 
@@ -531,7 +543,7 @@ IN_PROC_BROWSER_TEST_F(BrowserViewTest, AvoidUnnecessaryVisibilityChanges) {
 
 // Launch the app, navigate to a page with a title, check that the tab title
 // is set before load finishes and the throbber state updates when the title
-// changes. Regression test for crbug.com/752266
+// changes. Regression test for crbug.com/40533493
 IN_PROC_BROWSER_TEST_F(BrowserViewTest, TitleAndLoadState) {
   const std::u16string test_title(u"Title Of Awesomeness");
   auto* contents = browser()->tab_strip_model()->GetActiveWebContents();
@@ -596,8 +608,9 @@ IN_PROC_BROWSER_TEST_F(BrowserViewTest, GetAccessibleTabModalDialogTree) {
 #endif
 
   // There is no dialog, but the browser UI should be visible. So we expect the
-  // browser's reload button and no "OK" button from a dialog.
-  EXPECT_NE(ui::AXPlatformNodeTestHelper::FindChildByName(ax_node, "Reload"),
+  // browser's app menu button and no "OK" button from a dialog.
+  EXPECT_NE(ui::AXPlatformNodeTestHelper::FindChildByName(
+                ax_node, l10n_util::GetStringUTF8(IDS_ACCNAME_APP)),
             nullptr);
   EXPECT_EQ(ui::AXPlatformNodeTestHelper::FindChildByName(ax_node, "OK"),
             nullptr);
@@ -619,8 +632,9 @@ IN_PROC_BROWSER_TEST_F(BrowserViewTest, GetAccessibleTabModalDialogTree) {
   focus_waiter.Wait();
 
   // The tab modal dialog should be in the accessibility tree; everything else
-  // should be hidden. So we expect an "OK" button and no reload button.
-  EXPECT_EQ(ui::AXPlatformNodeTestHelper::FindChildByName(ax_node, "Reload"),
+  // should be hidden. So we expect an "OK" button and no app menu button.
+  EXPECT_EQ(ui::AXPlatformNodeTestHelper::FindChildByName(
+                ax_node, l10n_util::GetStringUTF8(IDS_ACCNAME_APP)),
             nullptr);
   EXPECT_NE(ui::AXPlatformNodeTestHelper::FindChildByName(ax_node, "OK"),
             nullptr);
@@ -717,8 +731,17 @@ IN_PROC_BROWSER_TEST_F(BrowserViewTest, SplitViewActiveIndexTest) {
 
 // Verifies that page and devtools WebViews are being correctly laid out
 // when DevTools is opened/closed/updated while docked.
+//
+// TODO(crbug.com/507885173): Flaky on MSAN.
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_DevToolsDockedRemainsOpenInWithFocusInSplit \
+  DISABLED_DevToolsDockedRemainsOpenInWithFocusInSplit
+#else
+#define MAYBE_DevToolsDockedRemainsOpenInWithFocusInSplit \
+  DevToolsDockedRemainsOpenInWithFocusInSplit
+#endif
 IN_PROC_BROWSER_TEST_F(BrowserViewTest,
-                       DevToolsDockedRemainsOpenInWithFocusInSplit) {
+                       MAYBE_DevToolsDockedRemainsOpenInWithFocusInSplit) {
   // Add enough tabs to create two split views.
   chrome::AddTabAt(browser(), GURL(), -1, true);
   chrome::AddTabAt(browser(), GURL(), -1, true);
@@ -892,14 +915,20 @@ IN_PROC_BROWSER_TEST_F(BrowserViewTest, AccessibleTabLabel) {
                 IDS_TAB_AX_LABEL_PINNED_FORMAT,
                 l10n_util::GetStringFUTF16(
                     IDS_TAB_AX_LABEL_SPLIT_TAB_LEFT_VIEW_FORMAT,
-                    browser()->GetTitleForTab(0))),
+                    browser()->GetTitleForTab(browser()
+                                                  ->tab_strip_model()
+                                                  ->GetTabAtIndex(0)
+                                                  ->GetHandle()))),
             tabs::GetAccessibleTabLabel(
                 browser()->tab_strip_model()->GetTabAtIndex(0), false));
   EXPECT_EQ(l10n_util::GetStringFUTF16(
                 IDS_TAB_AX_LABEL_PINNED_FORMAT,
                 l10n_util::GetStringFUTF16(
                     IDS_TAB_AX_LABEL_SPLIT_TAB_RIGHT_VIEW_FORMAT,
-                    browser()->GetTitleForTab(1))),
+                    browser()->GetTitleForTab(browser()
+                                                  ->tab_strip_model()
+                                                  ->GetTabAtIndex(1)
+                                                  ->GetHandle()))),
             tabs::GetAccessibleTabLabel(
                 browser()->tab_strip_model()->GetTabAtIndex(1), false));
 
@@ -911,13 +940,17 @@ IN_PROC_BROWSER_TEST_F(BrowserViewTest, AccessibleTabLabel) {
       {3}, split_tabs::SplitTabVisualData(),
       split_tabs::SplitTabCreatedSource::kToolbarButton);
   EXPECT_EQ(
-      l10n_util::GetStringFUTF16(IDS_TAB_AX_LABEL_SPLIT_TAB_LEFT_VIEW_FORMAT,
-                                 browser()->GetTitleForTab(2)),
+      l10n_util::GetStringFUTF16(
+          IDS_TAB_AX_LABEL_SPLIT_TAB_LEFT_VIEW_FORMAT,
+          browser()->GetTitleForTab(
+              browser()->tab_strip_model()->GetTabAtIndex(2)->GetHandle())),
       tabs::GetAccessibleTabLabel(
           browser()->tab_strip_model()->GetTabAtIndex(2), false));
   EXPECT_EQ(
-      l10n_util::GetStringFUTF16(IDS_TAB_AX_LABEL_SPLIT_TAB_RIGHT_VIEW_FORMAT,
-                                 browser()->GetTitleForTab(3)),
+      l10n_util::GetStringFUTF16(
+          IDS_TAB_AX_LABEL_SPLIT_TAB_RIGHT_VIEW_FORMAT,
+          browser()->GetTitleForTab(
+              browser()->tab_strip_model()->GetTabAtIndex(3)->GetHandle())),
       tabs::GetAccessibleTabLabel(
           browser()->tab_strip_model()->GetTabAtIndex(3), false));
 
@@ -933,14 +966,20 @@ IN_PROC_BROWSER_TEST_F(BrowserViewTest, AccessibleTabLabel) {
                 IDS_TAB_AX_LABEL_UNNAMED_GROUP_FORMAT,
                 l10n_util::GetStringFUTF16(
                     IDS_TAB_AX_LABEL_SPLIT_TAB_LEFT_VIEW_FORMAT,
-                    browser()->GetTitleForTab(4))),
+                    browser()->GetTitleForTab(browser()
+                                                  ->tab_strip_model()
+                                                  ->GetTabAtIndex(4)
+                                                  ->GetHandle()))),
             tabs::GetAccessibleTabLabel(
                 browser()->tab_strip_model()->GetTabAtIndex(4), false));
   EXPECT_EQ(l10n_util::GetStringFUTF16(
                 IDS_TAB_AX_LABEL_UNNAMED_GROUP_FORMAT,
                 l10n_util::GetStringFUTF16(
                     IDS_TAB_AX_LABEL_SPLIT_TAB_RIGHT_VIEW_FORMAT,
-                    browser()->GetTitleForTab(5))),
+                    browser()->GetTitleForTab(browser()
+                                                  ->tab_strip_model()
+                                                  ->GetTabAtIndex(5)
+                                                  ->GetHandle()))),
             tabs::GetAccessibleTabLabel(
                 browser()->tab_strip_model()->GetTabAtIndex(5), false));
 }
@@ -1136,8 +1175,7 @@ IN_PROC_BROWSER_TEST_F(BrowserViewDataProtectionTest, DC_Screenshot) {
 #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
 
 #if BUILDFLAG(IS_CHROMEOS)
-IN_PROC_BROWSER_TEST_F(BrowserViewChromeOSTestNoWebUiTabStrip,
-                       EnsureViewTreeOrder) {
+IN_PROC_BROWSER_TEST_F(BrowserViewChromeOSTest, EnsureViewTreeOrder) {
   BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser());
   auto* const immersive_mode_controller =
       ImmersiveModeController::From(browser());
@@ -1182,7 +1220,7 @@ IN_PROC_BROWSER_TEST_F(BrowserViewChromeOSTestNoWebUiTabStrip,
   EXPECT_EQ(children_before, children_after);
 }
 
-IN_PROC_BROWSER_TEST_F(BrowserViewChromeOSTestNoWebUiTabStrip,
+IN_PROC_BROWSER_TEST_F(BrowserViewChromeOSTest,
                        TabStripParentedToTopContainer) {
   BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser());
   EXPECT_EQ(browser_view->tab_strip_view()->parent(), browser_view);
@@ -1233,4 +1271,43 @@ class BrowserViewScrimPixelTest : public UiBrowserTest {
 
 IN_PROC_BROWSER_TEST_F(BrowserViewScrimPixelTest, InvokeUi_content_scrim) {
   ShowAndVerifyUi();
+}
+
+class TabAddingWidgetObserver : public views::WidgetObserver {
+ public:
+  explicit TabAddingWidgetObserver(BrowserWindowInterface* browser)
+      : browser_(browser) {}
+  ~TabAddingWidgetObserver() override = default;
+
+  // views::WidgetObserver:
+  void OnWidgetDestroying(views::Widget* widget) override {
+    chrome::AddTabAt(browser_, GURL("about:blank"), -1, true);
+    browser_ = nullptr;
+  }
+
+ private:
+  raw_ptr<BrowserWindowInterface> browser_;
+};
+
+// Regression test for crbug.com/456102314 crash in
+// ContentsWebView::CloneWebContentsLayer during synchronous widget destruction.
+IN_PROC_BROWSER_TEST_F(BrowserViewTest, CloseWidgetWithTabsNoCrash) {
+  BrowserWindowInterface* browser2 =
+      Browser::Create(Browser::CreateParams(browser()->profile(), true));
+  chrome::AddTabAt(browser2, GURL("about:blank"), -1, true);
+  EXPECT_EQ(1, browser2->GetTabStripModel()->count());
+
+  // Directly closing the NativeWidget is a multi-step process. Tabs are removed
+  // first in BrowserView::OnWidgetDestroying, and again later when the
+  // associated Browser and Widget are destroyed. Add a tab after the
+  // BrowserView has processed OnWidgetDestroying to exercise tabs closing in
+  // the latter step (at which point the NativeWidget has been destroyed).
+  TabAddingWidgetObserver observer(browser2);
+  views::Widget* widget =
+      BrowserView::GetBrowserViewForBrowser(browser2)->GetWidget();
+  widget->AddObserver(&observer);
+
+  // Synchronously close the associated widget and ensure the browser does not
+  // crash due to operations on detached layers.
+  BrowserView::GetBrowserViewForBrowser(browser2)->GetWidget()->CloseNow();
 }

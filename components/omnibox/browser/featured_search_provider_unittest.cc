@@ -399,25 +399,6 @@ TEST_F(FeaturedSearchProviderTest, FeaturedEnterpriseSearch) {
   RunTest(typing_scheme_cases);
 }
 
-TEST_F(FeaturedSearchProviderTest, AssociatedKeyword) {
-  base::test::ScopedFeatureList features;
-  features.InitWithFeatures(
-      {omnibox::kStarterPackExpansion, omnibox::kAiModeStartPack}, {});
-
-  AddStarterPackEntriesToTemplateUrlService();
-  AddFeaturedEnterpriseSearchEngine(FeaturedKeywordN(1), FeaturedUrlN(1),
-                                    TemplateURLData::PolicyOrigin::kSiteSearch);
-
-  AutocompleteInput input(u"@", metrics::OmniboxEventProto::OTHER,
-                          TestSchemeClassifier());
-  provider_->Start(input, false);
-
-  for (const auto& match : provider_->matches()) {
-    EXPECT_FALSE(match.keyword.empty());
-    EXPECT_EQ(match.associated_keyword, match.keyword);
-  }
-}
-
 TEST_F(FeaturedSearchProviderTest, ZeroSuggestStarterPackIPHSuggestion) {
   base::test::ScopedFeatureList features;
   features.InitWithFeatures(
@@ -459,8 +440,11 @@ TEST_F(FeaturedSearchProviderTest,
       }));
   base::test::ScopedFeatureList features;
   features.InitWithFeaturesAndParameters(
-      {{history_embeddings::kHistoryEmbeddings, {}},
-       {omnibox::kStarterPackIPH, {}}},
+      {
+          {history_embeddings::kHistoryEmbeddings, {}},
+          {omnibox::kStarterPackExpansion, {}},
+          {omnibox::kStarterPackIPH, {}},
+      },
       {});
   PrefService* prefs = client_->GetPrefs();
 
@@ -969,9 +953,10 @@ TEST_F(FeaturedSearchProviderTest, HistoryEmbedding_Iphs) {
 
 TEST_F(FeaturedSearchProviderTest, IphShownLimit) {
   base::test::ScopedFeatureList features;
-  features.InitWithFeatures(
-      {{omnibox::kStarterPackIPH}, {history_embeddings::kHistoryEmbeddings}},
-      {});
+  features.InitWithFeatures({{omnibox::kStarterPackExpansion},
+                             {omnibox::kStarterPackIPH},
+                             {history_embeddings::kHistoryEmbeddings}},
+                            {});
   AddStarterPackEntriesToTemplateUrlService();
   AutocompleteInput input;
   input.set_focus_type(metrics::INTERACTION_FOCUS);

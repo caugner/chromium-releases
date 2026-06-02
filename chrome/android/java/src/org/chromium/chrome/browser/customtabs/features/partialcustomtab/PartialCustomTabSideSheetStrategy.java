@@ -14,6 +14,8 @@ import static androidx.browser.customtabs.CustomTabsIntent.ACTIVITY_SIDE_SHEET_D
 import static androidx.browser.customtabs.CustomTabsIntent.ACTIVITY_SIDE_SHEET_POSITION_START;
 import static androidx.browser.customtabs.CustomTabsIntent.ACTIVITY_SIDE_SHEET_ROUNDED_CORNERS_POSITION_NONE;
 
+import static org.chromium.build.NullUtil.assumeNonNull;
+
 import android.animation.ValueAnimator;
 import android.animation.ValueAnimator.AnimatorUpdateListener;
 import android.app.Activity;
@@ -35,6 +37,7 @@ import androidx.browser.customtabs.CustomTabsIntent;
 import org.chromium.base.SysUtils;
 import org.chromium.build.annotations.Initializer;
 import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.browserservices.intents.BrowserServicesIntentDataProvider;
 import org.chromium.chrome.browser.customtabs.CustomTabIntentDataProvider;
@@ -63,7 +66,7 @@ public class PartialCustomTabSideSheetStrategy extends PartialCustomTabBaseStrat
     private final int mDecorationType;
     private boolean mSlideDownAnimation; // Slide down to bottom when closing the sheet.
     private boolean mSheetOnRight;
-    private CustomTabToolbarButtonsCoordinator mToolbarButtonsCoordinator;
+    private @Nullable CustomTabToolbarButtonsCoordinator mToolbarButtonsCoordinator;
 
     /** Callback used to notify the maximize button on side sheet PCCT click event. */
     public interface MaximizeButtonCallback {
@@ -159,13 +162,14 @@ public class PartialCustomTabSideSheetStrategy extends PartialCustomTabBaseStrat
             View coordinatorView,
             CustomTabToolbar toolbar,
             @Px int toolbarCornerRadius,
-            CustomTabToolbarButtonsCoordinator toolbarButtonsCoordinator) {
+            @Nullable CustomTabToolbarButtonsCoordinator toolbarButtonsCoordinator) {
         super.onToolbarInitialized(
                 coordinatorView, toolbar, toolbarCornerRadius, toolbarButtonsCoordinator);
 
         mToolbarButtonsCoordinator = toolbarButtonsCoordinator;
         if (mShowMaximizeButton) {
             if (ChromeFeatureList.sCctToolbarRefactor.isEnabled()) {
+                assumeNonNull(mToolbarButtonsCoordinator);
                 mToolbarButtonsCoordinator.showSideSheetMaximizeButton(
                         mIsMaximized, () -> toggleMaximize(true));
             } else {
@@ -173,6 +177,7 @@ public class PartialCustomTabSideSheetStrategy extends PartialCustomTabBaseStrat
             }
         }
         if (ChromeFeatureList.sCctToolbarRefactor.isEnabled()) {
+            assumeNonNull(mToolbarButtonsCoordinator);
             mToolbarButtonsCoordinator.setMinimizeButtonEnabled(false);
         } else {
             toolbar.setMinimizeButtonEnabled(false);
@@ -503,7 +508,9 @@ public class PartialCustomTabSideSheetStrategy extends PartialCustomTabBaseStrat
         super.destroy();
         if (mShowMaximizeButton) {
             if (ChromeFeatureList.sCctToolbarRefactor.isEnabled()) {
-                mToolbarButtonsCoordinator.removeSideSheetMaximizeButton();
+                if (mToolbarButtonsCoordinator != null) {
+                    mToolbarButtonsCoordinator.removeSideSheetMaximizeButton();
+                }
             } else {
                 mToolbarView.removeSideSheetMaximizeButton();
             }

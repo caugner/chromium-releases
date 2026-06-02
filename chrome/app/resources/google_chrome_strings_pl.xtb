@@ -276,6 +276,7 @@
 
           **Zasugeruj pytania:** wygeneruj listę 3–5 pytań pobudzających do myślenia, które użytkownik może zadać, aby lepiej zrozumieć zrzut ekranu. Te pytania powinny zawierać co najmniej 1 pytanie dotyczące konkretnego obiektu wizualnego, jego wyglądu lub umiejscowienia.</translation>
 <translation id="386202838227397562">Zamknij wszystkie okna przeglądarki Google Chrome i spróbuj ponownie.</translation>
+<translation id="3869083394918739976">Możesz kontynuować czat w Trybie AI bez przełączania kart. Aby rozpocząć, zaloguj się w Chrome. Będziesz też mieć dostęp do haseł i innych danych na wszystkich swoich urządzeniach.</translation>
 <translation id="3873044882194371212">Otwórz link w oknie inco&amp;gnito Chrome</translation>
 <translation id="3885770153807205175">Selektor języka</translation>
 <translation id="3889417619312448367">Odinstaluj Google Chrome</translation>
@@ -325,6 +326,9 @@
 <translation id="4348548358339558429">Aby korzystać z personalizacji, uwzględnij Chrome w Aktywności w internecie i aplikacjach</translation>
 <translation id="436060642166082913">Pobieranie zostało zablokowane przez Chrome, ponieważ plik może zaszkodzić Twoim kontom osobistym i tym w sieciach społecznościowych</translation>
 <translation id="4367027658822022112">Możesz przypiąć Obiektyw Google, aby mieć do niego łatwy dostęp. Kliknij przycisk Przypnij u góry panelu bocznego</translation>
+<translation id="4380616334811859000">Gdy odwiedzasz witrynę po raz pierwszy, Chromium wyłącza optymalizację JavaScriptu.
+
+Jeśli ta strona nie działa zgodnie z oczekiwaniami, spróbuj zezwolić na optymalizację.</translation>
 <translation id="4389991535395284064">Podczas przeglądania w trybie incognito Chrome będzie Cię ostrzegać przed wczytaniem strony korzystającej z niezabezpieczonego połączenia</translation>
 <translation id="4427306783828095590">Silniejsza ochrona lepiej chroni przed phishingiem i złośliwym oprogramowaniem</translation>
 <translation id="4434353761996769206">Błąd instalatora: <ph name="INSTALLER_ERROR" /></translation>
@@ -415,6 +419,7 @@
 <translation id="547202872422499512">Chrome uruchamia się teraz po uruchomieniu systemu Windows, dzięki czemu możesz od razu zacząć przeglądać strony. Możesz to wyłączyć w ustawieniach.</translation>
 <translation id="5486346529181556467">Zgłoś witrynę, która Twoim zdaniem jest szkodliwa, aby zwiększyć bezpieczeństwo online wszystkich użytkowników. Więcej informacji o <ph name="BEGIN_LINK" />zasadach Google dotyczących niebezpiecznych witryn<ph name="END_LINK" /></translation>
 <translation id="5524890928877629608">lewy górny róg obszaru wyszukiwania: po lewej stronie <ph name="LEFT" />%, u góry <ph name="TOP" />%</translation>
+<translation id="5529390769101499214">Aby zarządzać rozszerzeniami, kliknij Rozszerzenia w menu głównym Chrome.</translation>
 <translation id="5550137307985173298">Kliknij przycisk Dostosuj Chrome na stronie nowej karty, aby zmienić wygląd przeglądarki</translation>
 <translation id="5566025111015594046">Google Chrome (mDNS-In)</translation>
 <translation id="5579324208890605088">Błąd uruchamiania: uruchom instalator jako zwykły użytkownik, a nie jako administrator.</translation>
@@ -775,7 +780,6 @@ Dopóki nie usuniesz niektórych zakładek, nie będzie można zapisywać nowych
 <translation id="8862326446509486874">Nie masz odpowiednich uprawnień do przeprowadzenia instalacji na poziomie systemowym. Uruchom ponownie program instalacyjny jako administrator.</translation>
 <translation id="8865415417596392024">Dane z Chrome na Twoim koncie</translation>
 <translation id="8883862939660515976">Zapytaj Obiektyw Google o ten obraz</translation>
-<translation id="8892956691293410744">Aby zapytać w Trybie AI o daną kartę bez opuszczania strony, zaloguj się w Chrome. Będziesz też mieć dostęp do haseł i innych danych na wszystkich swoich urządzeniach.</translation>
 <translation id="8914504000324227558">Uruchom Chrome ponownie</translation>
 <translation id="8922193594870374009">Aby wysłać numer z <ph name="ORIGIN" /> na swój telefon z Androidem, zaloguj się w Chrome na obu urządzeniach.</translation>
 <translation id="8922998289262614701">Usuń dane tej aplikacji z Chrome</translation>

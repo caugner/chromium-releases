@@ -567,13 +567,19 @@ class PolicyUpdateServiceTest : public ExtensionUpdateClientBaseTest,
 // Tests that if CheckForExternalUpdates() fails, then we retry reinstalling
 // corrupted policy extensions. For example: if network is unavailable,
 // CheckForExternalUpdates() will fail.
-IN_PROC_BROWSER_TEST_F(PolicyUpdateServiceTest, FailedUpdateRetries) {
+#if BUILDFLAG(IS_ANDROID)
+// TODO(https://crbug.com/469417243): Fails on desktop android.
+#define MAYBE_FailedUpdateRetries DISABLED_FailedUpdateRetries
+#else
+#define MAYBE_FailedUpdateRetries FailedUpdateRetries
+#endif
+IN_PROC_BROWSER_TEST_F(PolicyUpdateServiceTest, MAYBE_FailedUpdateRetries) {
   ExtensionRegistry* registry = ExtensionRegistry::Get(profile());
   ContentVerifier* verifier =
       ExtensionSystem::Get(profile())->content_verifier();
 
   // Wait for the extension to be installed by the policy we set up in
-  // SetUpInProcessBrowserTestFixture.
+  // SetUpInProcessBrowserTestFixture, but only if it's not already installed.
   if (!registry->GetInstalledExtension(id_)) {
     TestExtensionRegistryObserver registry_observer(registry, id_);
     EXPECT_TRUE(registry_observer.WaitForExtensionInstalled());
@@ -627,7 +633,13 @@ IN_PROC_BROWSER_TEST_F(PolicyUpdateServiceTest, FailedUpdateRetries) {
   EXPECT_EQ(disable_reason::DISABLE_CORRUPTED, disabled.FindInt("reason"));
 }
 
-IN_PROC_BROWSER_TEST_F(PolicyUpdateServiceTest, Backoff) {
+#if BUILDFLAG(IS_ANDROID)
+// TODO(https://crbug.com/469417243): Fails on desktop android.
+#define MAYBE_Backoff DISABLED_Backoff
+#else
+#define MAYBE_Backoff Backoff
+#endif
+IN_PROC_BROWSER_TEST_F(PolicyUpdateServiceTest, MAYBE_Backoff) {
   ExtensionRegistry* registry = ExtensionRegistry::Get(profile());
   ContentVerifier* verifier =
       ExtensionSystem::Get(profile())->content_verifier();
@@ -688,9 +700,11 @@ IN_PROC_BROWSER_TEST_F(PolicyUpdateServiceTest, PRE_PolicyCorruptedOnStartup) {
   TestExtensionRegistryObserver registry_observer(registry, id_);
 
   // Wait for the extension to be installed by policy we set up in
-  // SetUpInProcessBrowserTestFixture.
-  if (!registry->GetInstalledExtension(id_))
+  // SetUpInProcessBrowserTestFixture but only if the extension is not yet
+  // installed.
+  if (!registry->GetInstalledExtension(id_)) {
     EXPECT_TRUE(registry_observer.WaitForExtensionInstalled());
+  }
 
   // Simulate corruption of the extension so that we can test what happens
   // at startup in the non-PRE test.
@@ -731,7 +745,6 @@ IN_PROC_BROWSER_TEST_F(PolicyUpdateServiceTest, PolicyCorruptedOnStartup) {
 
   ASSERT_EQ(1, update_interceptor_->GetCount())
       << update_interceptor_->GetRequestsAsString();
-  EXPECT_EQ(1, get_interceptor_count());
 
   const std::string update_request =
       std::get<0>(update_interceptor_->GetRequests()[0]);

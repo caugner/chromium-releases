@@ -10,10 +10,13 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import android.content.Context;
+import android.graphics.Paint;
+import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.text.StaticLayout;
 import android.view.LayoutInflater;
 import android.view.View.OnLayoutChangeListener;
+import android.widget.ImageView;
 import android.widget.TextView;
 
 import androidx.test.core.app.ApplicationProvider;
@@ -152,6 +155,17 @@ public class EducationalTipModuleViewUnitTest {
         verifySetCompleted();
     }
 
+    @Test
+    @SmallTest
+    public void testSetUseTransparentIconBackground() {
+        ImageView imageView = mModuleView.findViewById(R.id.educational_tip_module_content_image);
+        Drawable background = imageView.getBackground();
+        Assert.assertNotNull(background);
+
+        mModuleView.setUseTransparentIconBackground(true);
+        Assert.assertNull(imageView.getBackground());
+    }
+
     private void verifySetCompleted() {
         TextView contentTitleView =
                 mModuleView.findViewById(R.id.educational_tip_module_content_title);
@@ -162,14 +176,10 @@ public class EducationalTipModuleViewUnitTest {
         int disabledColor = mContext.getColor(R.color.default_text_color_disabled_list);
 
         Assert.assertEquals(disabledColor, contentTitleView.getCurrentTextColor());
-        Assert.assertTrue(
-                (contentTitleView.getPaintFlags() & android.graphics.Paint.STRIKE_THRU_TEXT_FLAG)
-                        != 0);
+        Assert.assertTrue((contentTitleView.getPaintFlags() & Paint.STRIKE_THRU_TEXT_FLAG) != 0);
         Assert.assertEquals(disabledColor, contentDescriptionView.getCurrentTextColor());
         Assert.assertTrue(
-                (contentDescriptionView.getPaintFlags()
-                                & android.graphics.Paint.STRIKE_THRU_TEXT_FLAG)
-                        != 0);
+                (contentDescriptionView.getPaintFlags() & Paint.STRIKE_THRU_TEXT_FLAG) != 0);
 
         Assert.assertFalse(buttonView.isEnabled());
         Assert.assertEquals(disabledColor, buttonView.getCurrentTextColor());

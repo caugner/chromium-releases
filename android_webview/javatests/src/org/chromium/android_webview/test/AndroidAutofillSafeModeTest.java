@@ -8,7 +8,6 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
-
 import androidx.test.filters.SmallTest;
 
 import org.junit.After;
@@ -24,8 +23,6 @@ import org.chromium.android_webview.common.SafeModeActionIds;
 import org.chromium.android_webview.common.SafeModeController;
 import org.chromium.android_webview.test.AwActivityTestRule.TestDependencyFactory;
 import org.chromium.base.test.util.Feature;
-
-import java.util.Set;
 
 /** Tests for WebView AndroidAutofillSafeMode. */
 @RunWith(Parameterized.class)
@@ -52,7 +49,7 @@ public class AndroidAutofillSafeModeTest extends AwParameterizedTest {
         SafeModeController safeModeController = SafeModeController.getInstance();
         safeModeController.registerActions(
                 new SafeModeAction[] {new AndroidAutofillSafeModeAction()});
-        safeModeController.executeActions(Set.of(SafeModeActionIds.DISABLE_ANDROID_AUTOFILL));
+        safeModeController.enableAllRegisteredActionsForTesting();
 
         // When
         AwTestContainerView mTestContainerView =
@@ -67,13 +64,19 @@ public class AndroidAutofillSafeModeTest extends AwParameterizedTest {
     @SmallTest
     @Feature({"AndroidWebView"})
     public void testSafeModeActionSavesState() throws Throwable {
+        SafeModeController controller = SafeModeController.getInstance();
+        controller.registerActions(new SafeModeAction[] {new AndroidAutofillSafeModeAction()});
         // Given
-        assertFalse(AndroidAutofillSafeModeAction.isAndroidAutofillDisabled());
+        assertFalse(
+                SafeModeController.getInstance()
+                        .isActionEnabled(SafeModeActionIds.DISABLE_ANDROID_AUTOFILL));
 
         // When
-        new AndroidAutofillSafeModeAction().execute();
+        controller.enableAllRegisteredActionsForTesting();
 
         // Then
-        assertTrue(AndroidAutofillSafeModeAction.isAndroidAutofillDisabled());
+        assertTrue(
+                SafeModeController.getInstance()
+                        .isActionEnabled(SafeModeActionIds.DISABLE_ANDROID_AUTOFILL));
     }
 }

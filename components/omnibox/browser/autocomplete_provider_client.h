@@ -21,6 +21,7 @@ class AutocompleteClassifier;
 class AutocompleteSchemeClassifier;
 class AutocompleteScoringModelService;
 class DocumentSuggestionsService;
+class GeolocationHeaderService;
 class UnscopedExtensionProvider;
 class UnscopedExtensionProviderDelegate;
 class GURL;
@@ -96,6 +97,7 @@ class AutocompleteProviderClient : public OmniboxAction::Client {
   virtual InMemoryURLIndex* GetInMemoryURLIndex() = 0;
   virtual TemplateURLService* GetTemplateURLService() = 0;
   virtual const TemplateURLService* GetTemplateURLService() const = 0;
+  virtual GeolocationHeaderService* GetGeolocationHeaderService() const;
   virtual DocumentSuggestionsService* GetDocumentSuggestionsService() const;
   virtual RemoteSuggestionsService* GetRemoteSuggestionsService(
       bool create_if_necessary) const = 0;
@@ -260,6 +262,9 @@ class AutocompleteProviderClient : public OmniboxAction::Client {
 
   // Whether the "Omnibox Next" AIM popup is enabled.
   virtual bool IsOmniboxNextAimPopupEnabled() const;
+
+  // Returns whether the Gemini starter pack is enabled by enterprise policy.
+  virtual bool IsGeminiStarterPackEnabled() const;
 
   // Gets a weak pointer to the client. Used when providers need to use the
   // client when the client may no longer be around.
