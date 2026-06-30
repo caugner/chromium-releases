@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_GLIC_HOST_GLIC_COOKIE_SYNCHRONIZER_H_
 
 #include <memory>
+#include <string>
 
 #include "base/functional/callback_forward.h"
 #include "base/gtest_prod_util.h"
@@ -17,6 +18,7 @@
 #include "components/signin/public/identity_manager/accounts_cookie_mutator.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/storage_partition_config.h"
 
 namespace content {
 class BrowserContext;
@@ -28,6 +30,22 @@ enum class SetAccountsInCookieResult;
 }  // namespace signin
 
 namespace glic {
+
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+// LINT.IfChange(GlicCookieSyncResult)
+enum class GlicCookieSyncResult {
+  kSuccess = 0,
+  kDestroyedWithPendingCallbacks = 1,
+  kNoStoragePartition = 2,
+  kDevSyncFailure = 3,
+  kUserNotSignedIn = 4,
+  kAuthTransientError = 5,
+  kAuthPersistentError = 6,
+  kTimeout = 7,
+  kMaxValue = kTimeout,
+};
+// LINT.ThenChange(tools/metrics/histograms/metadata/glic/enums.xml:GlicCookieSyncResult)
 
 // Helper to sync cookies to the webview storage partition.
 class GlicCookieSynchronizer
@@ -42,8 +60,16 @@ class GlicCookieSynchronizer
   // underlying multilogin operation hangs.
   static constexpr base::TimeDelta kCookieSyncDefaultTimeout = base::Seconds(7);
 
+  // Create with the default glic storage partition as the target storage
+  // partition.
   GlicCookieSynchronizer(content::BrowserContext* context,
                          signin::IdentityManager* identity_manager);
+
+  // Create with the provided target storage partition.
+  GlicCookieSynchronizer(
+      content::BrowserContext* context,
+      signin::IdentityManager* identity_manager,
+      content::StoragePartitionConfig target_storage_partition_config);
   GlicCookieSynchronizer(const GlicCookieSynchronizer&) = delete;
   GlicCookieSynchronizer& operator=(const GlicCookieSynchronizer&) = delete;
   ~GlicCookieSynchronizer() override;
@@ -72,7 +98,7 @@ class GlicCookieSynchronizer
   class Metrics {
    public:
     void BeginSync();
-    void EndSync(bool success);
+    void EndSync(GlicCookieSyncResult result);
 
    private:
     base::TimeTicks sync_start_time_;
@@ -99,12 +125,13 @@ class GlicCookieSynchronizer
 
   // Handles the webview authentication result.
   void OnAuthFinished(signin::SetAccountsInCookieResult cookie_result);
-  void CompleteAuth(bool is_success);
+  void CompleteAuth(GlicCookieSyncResult result);
   void OnTimeout();
 
   bool has_cleared_cookies_ = false;
   const raw_ptr<content::BrowserContext> context_;
   const raw_ptr<signin::IdentityManager> identity_manager_;
+  content::StoragePartitionConfig target_storage_partition_config_;
   base::ScopedObservation<signin::IdentityManager,
                           signin::IdentityManager::Observer>
       observation_{this};

@@ -275,6 +275,7 @@ source_set("browser_tests") {
     "lens_overlay_wait_for_paint_utils.cc",
     "lens_overlay_wait_for_paint_utils.h",
     "lens_search_controller_contextual_tasks_browsertest.cc",
+    "lens_search_controller_unification_browsertest.cc",
     "lens_search_feature_flag_utils_browsertest.cc",
   ]
   deps = [
@@ -284,6 +285,7 @@ source_set("browser_tests") {
     "//base/test:test_support",
     "//chrome/browser",
     "//chrome/browser/autocomplete:aim_eligibility_service",
+    "//chrome/browser/contextual_tasks:test_support",
     "//chrome/browser/contextual_tasks:ui",
     "//chrome/browser/lens/core/mojom:mojo_bindings",
     "//chrome/browser/profiles:profile",
@@ -416,6 +418,7 @@ source_set("unit_tests") {
     "//base/test:test_support",
     "//chrome/browser",
     "//chrome/browser:browser_process",
+    "//chrome/browser/contextual_tasks:test_support",
     "//chrome/browser/contextual_tasks:ui",
     "//chrome/browser/lens/core/mojom:mojo_bindings",
     "//chrome/browser/search_engines",

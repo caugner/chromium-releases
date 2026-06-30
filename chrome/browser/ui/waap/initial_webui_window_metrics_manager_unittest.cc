@@ -47,12 +47,12 @@ TEST_F(InitialWebUIWindowMetricsManagerTest,
       waap::NewWindowCreationSource::kBrowserInitiated, start_time);
   base::HistogramTester tester;
   tester.ExpectUniqueTimeSample(
-      "InitialWebUI.NewWindow.AllSources.BrowserWindow.FirstPaint."
-      "FromConstructor",
+      "InitialWebUI.NewWindow.AllSources.WithoutExistingWindow.BrowserWindow."
+      "FirstPaint.FromConstructor",
       kTestLatency, 0);
   tester.ExpectUniqueTimeSample(
-      "InitialWebUI.NewWindow.BrowserInitiated.BrowserWindow.FirstPaint."
-      "FromConstructor",
+      "InitialWebUI.NewWindow.BrowserInitiated.WithoutExistingWindow."
+      "BrowserWindow.FirstPaint.FromConstructor",
       kTestLatency, 0);
 
   manager.SkipStartupForTesting();
@@ -61,12 +61,12 @@ TEST_F(InitialWebUIWindowMetricsManagerTest,
   manager.OnBrowserWindowFirstPresentation(timestamp);
 
   tester.ExpectUniqueTimeSample(
-      "InitialWebUI.NewWindow.AllSources.BrowserWindow.FirstPaint."
-      "FromConstructor",
+      "InitialWebUI.NewWindow.AllSources.WithoutExistingWindow.BrowserWindow."
+      "FirstPaint.FromConstructor",
       kTestLatency, 1);
   tester.ExpectUniqueTimeSample(
-      "InitialWebUI.NewWindow.BrowserInitiated.BrowserWindow.FirstPaint."
-      "FromConstructor",
+      "InitialWebUI.NewWindow.BrowserInitiated.WithoutExistingWindow."
+      "BrowserWindow.FirstPaint.FromConstructor",
       kTestLatency, 1);
 }
 
@@ -209,9 +209,7 @@ TEST_F(InitialWebUIWindowMetricsManagerTest,
 
   // Verify the startup metric was NOT recorded because the gap is negative.
   tester.ExpectTotalCount(
-      "InitialWebUI.Startup.WithoutExistingWindow.BrowserWindowToReloadButton."
-      "FirstPaintGap",
-      0);
+      "InitialWebUI.Startup.BrowserWindowToReloadButton.FirstPaintGap", 0);
 
   base::TimeDelta webui_delay = base::Milliseconds(50);
   {
@@ -233,11 +231,62 @@ TEST_F(InitialWebUIWindowMetricsManagerTest,
   // The critical verification: This window must incorrectly NOT be logged as
   // Startup, but correctly as a New Window.
   tester.ExpectTotalCount(
-      "InitialWebUI.Startup.WithoutExistingWindow.BrowserWindowToReloadButton."
-      "FirstPaintGap",
-      0);
+      "InitialWebUI.Startup.BrowserWindowToReloadButton.FirstPaintGap", 0);
   tester.ExpectUniqueTimeSample(
       "InitialWebUI.NewWindow.AllSources.WithoutExistingWindow."
       "BrowserWindowToReloadButton.FirstPaintGap",
       webui_delay, 1);
+}
+
+TEST_F(InitialWebUIWindowMetricsManagerTest,
+       RecordsClosedBeforeFirstPaintForNewWindow) {
+  InitialWebUIWindowMetricsManager::ResetForTesting();
+  const base::TimeTicks start_time = base::TimeTicks::Now();
+  base::HistogramTester tester;
+
+  {
+    InitialWebUIWindowMetricsManager manager(&browser_window_);
+    manager.SetWindowCreationInfo(
+        waap::NewWindowCreationSource::kBrowserInitiated, start_time);
+    manager.SkipStartupForTesting();
+
+    // Simulate show request.
+    base::TimeDelta show_request_delay = base::Milliseconds(30);
+    base::TimeTicks show_request_time = start_time + show_request_delay;
+    manager.OnBrowserWindowShowRequested(show_request_time);
+
+    // Destruction happens here when 'manager' goes out of scope.
+  }
+
+  // Verify metric was recorded.
+  tester.ExpectTotalCount(
+      "InitialWebUI.NewWindow.AllSources.WithoutExistingWindow.BrowserWindow."
+      "ClosedBeforeFirstPaint",
+      1);
+  tester.ExpectTotalCount(
+      "InitialWebUI.NewWindow.BrowserInitiated.WithoutExistingWindow."
+      "BrowserWindow.ClosedBeforeFirstPaint",
+      1);
+}
+
+TEST_F(InitialWebUIWindowMetricsManagerTest,
+       RecordsClosedBeforeFirstPaintForStartupWindow) {
+  InitialWebUIWindowMetricsManager::ResetForTesting();
+  const base::TimeTicks start_time = base::TimeTicks::Now();
+  base::HistogramTester tester;
+
+  {
+    InitialWebUIWindowMetricsManager manager(&browser_window_);
+
+    // Simulate show request.
+    base::TimeDelta show_request_delay = base::Milliseconds(30);
+    base::TimeTicks show_request_time = start_time + show_request_delay;
+    manager.OnBrowserWindowShowRequested(show_request_time);
+
+    // Destruction happens here when 'manager' goes out of scope.
+  }
+
+  // Verify metric was recorded.
+  tester.ExpectTotalCount(
+      "InitialWebUI.Startup.BrowserWindow.ClosedBeforeFirstPaint", 1);
 }

@@ -7,13 +7,14 @@
 
 #include <memory>
 
-#include "base/gtest_prod_util.h"
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/scoped_observation.h"
 #include "chrome/browser/ui/views/drive_picker_host/drive_picker_result_handler.mojom.h"
+#include "chrome/browser/ui/webui/drive_picker_host/drive_picker_host_request.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "mojo/public/cpp/bindings/pending_remote.h"
-#include "ui/views/widget/widget.h"
+#include "ui/views/widget/widget_observer.h"
 
 namespace views {
 class Widget;
@@ -28,22 +29,19 @@ class BrowserWindowInterface;
 // either the user consent dialog and/or the Google Drive Picker UI. It is only
 // responsible for a single active picker session at a time.
 //
-// Ownership and Lifetime:
-// This class is owned by ContextualSearchboxHandler and follows its
-// lifetime. It is instantiated to manage the UI flow triggered when a user
-// selects "Upload from Drive". When the user selects "Upload from Drive", the
-// DrivePickerHostController::ShowDrivePickerHost is called, which creates and
-// shows the DrivePickerHostView, which hosts a WebUI that will be
-// responsible for rendering the consent dialog and/or the Google Drive Picker
-// UI and relaying the results to the provided result handler.
+// UI Presentation & Architecture:
+// The controller hosts the `DrivePickerHostView` inside a standard
+// browser-modal dialog widget using the `constrained_window` framework. This
+// blocks all mouse and keyboard interaction with the parent browser window,
+// intercepts browser window shortcuts (like Cmd+T), and displays the standard
+// browser-modal scrim under the dialog.
 //
-// Scope and Concurrency:
-// As a window-level orchestrator, it renders the picker UI over the entire
-// browser window's contents to prevent spoofing and ensure visibility.
-// It is designed to manage a single active picker session at a time;
-// the controller handles re-entrancy by ensuring only one instance of the
-// picker UI (consent or file selection) is active for the associated window.
-class DrivePickerHostController : public content::WebContentsObserver {
+// Ownership and Lifetime:
+// This class is owned by `ContextualSearchboxHandler` and follows its
+// lifetime. It is instantiated to manage the UI flow triggered when a user
+// selects "Upload from Drive".
+class DrivePickerHostController : public content::WebContentsObserver,
+                                  public views::WidgetObserver {
  public:
   explicit DrivePickerHostController(
       BrowserWindowInterface* browser_window_interface);
@@ -53,35 +51,58 @@ class DrivePickerHostController : public content::WebContentsObserver {
   ~DrivePickerHostController() override;
 
   // Shows the Drive Picker Host (either a consent dialog or the picker
-  // UI), and relays results to the provided result handler.
-  void ShowDrivePickerHost(
-      mojo::PendingRemote<drive_picker_host::mojom::DrivePickerResultHandler>
-          result_handler);
+  // UI), and relays results to the provided result handler in the request.
+  virtual void ShowDrivePickerHost(
+      std::unique_ptr<drive_picker_host::DrivePickerHostRequest> request);
+
+  // Sets a callback to be executed asynchronously when the hosted picker widget
+  // is closed or destroyed. Callers are expected to use this
+  // to cleanly tear down and reset the controller and the Mojo result receiver.
+  void set_on_close_callback(base::OnceClosure callback) {
+    on_close_callback_ = std::move(callback);
+  }
+
+  views::Widget* GetWidgetForTesting() { return picker_widget_.get(); }
+  DrivePickerHostView* GetViewForTesting() { return picker_view_; }
+  void ResetControllerStateForTesting() { ResetControllerState(); }
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(DrivePickerHostControllerTest,
-                           ShowDrivePickerHostCreatesView);
-  FRIEND_TEST_ALL_PREFIXES(DrivePickerHostControllerTest,
-                           WidgetCloseResetsState);
 
   // content::WebContentsObserver:
   void DocumentOnLoadCompletedInPrimaryMainFrame() override;
 
-  // Resets the controller's state, destroying the widget and clearing
-  // observations and pending handlers.
-  void ResetControllerState(views::Widget::ClosedReason reason);
+  // Reports an error back to the result handler in the request.
+  void SendErrorToRequest(
+      std::unique_ptr<drive_picker_host::DrivePickerHostRequest> request,
+      drive_picker_host::mojom::DrivePickerError error);
 
-  // Whether the Drive Picker document has completed loading in the WebView.
+  // Resets the controller's state, destroying the overlay view and clearing
+  // observations and pending handlers.
+  void ResetControllerState();
+
+  // views::WidgetObserver:
+  void OnWidgetDestroying(views::Widget* widget) override;
+  void OnWidgetBoundsChanged(views::Widget* widget,
+                             const gfx::Rect& new_bounds) override;
+
+  // Whether the Drive Picker document has completed loading in the `WebView`.
   bool is_picker_document_loaded_ = false;
 
   raw_ptr<BrowserWindowInterface> browser_window_interface_;
-  std::unique_ptr<views::DialogDelegate> delegate_;
-  std::unique_ptr<views::Widget> widget_;
+  raw_ptr<DrivePickerHostView> picker_view_ = nullptr;
+  std::unique_ptr<views::Widget> picker_widget_;
+  std::unique_ptr<views::DialogDelegate> picker_delegate_;
 
-  // Stores the result handler if the picker document is not yet loaded when
-  // ShowDrivePickerHost is called.
-  mojo::PendingRemote<drive_picker_host::mojom::DrivePickerResultHandler>
-      pending_picker_result_handler_;
+  base::OnceClosure on_close_callback_;
+
+  // Stores the request if the picker document is not yet loaded when
+  // `ShowDrivePickerHost` is called.
+  std::unique_ptr<drive_picker_host::DrivePickerHostRequest> pending_request_;
+
+  base::ScopedObservation<views::Widget, views::WidgetObserver>
+      picker_widget_observation_{this};
+  base::ScopedObservation<views::Widget, views::WidgetObserver>
+      browser_widget_observation_{this};
 
   base::WeakPtrFactory<DrivePickerHostController> weak_ptr_factory_{this};
 };

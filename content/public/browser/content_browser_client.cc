@@ -330,6 +330,12 @@ ContentBrowserClient::GetBaselinePermissionsPolicyForIsolatedApp(
   return {};
 }
 
+void ContentBrowserClient::EnsureRequiredHeadersForIsolatedApp(
+    BrowserContext* browser_context,
+    const GURL& url,
+    network::mojom::URLResponseHead* response_head,
+    const std::optional<FrameTreeNodeId>& frame_tree_node) {}
+
 bool ContentBrowserClient::ShouldTryToUseExistingProcessHost(
     BrowserContext* browser_context,
     const GURL& url) {
@@ -426,6 +432,12 @@ bool ContentBrowserClient::IsTopChromeWebUIURL(const GURL& url) {
 bool ContentBrowserClient::IsMultiCaptureAllowed(
     content::RenderFrameHost* render_frame_host) {
   return false;
+}
+
+content::WebContents*
+ContentBrowserClient::GetWebContentsFromWindowIfCaptureHandleAllowed(
+    gfx::NativeWindow window) {
+  return nullptr;
 }
 
 size_t ContentBrowserClient::GetMaxRendererProcessCountOverride() {
@@ -1783,12 +1795,29 @@ bool ContentBrowserClient::ShouldUseFirstPartyStorageKey(
   return false;
 }
 
+RenderFrameHost* ContentBrowserClient::GetEffectiveTopFrameForPartitioning(
+    RenderFrameHost* render_frame_host) {
+  return nullptr;
+}
+
 RenderFrameHost* ContentBrowserClient::GetPostMessageTargetOverride(
     RenderFrameHost* target_rfh,
     const std::optional<blink::LocalFrameToken>& source_frame_token,
     const url::Origin& source_origin,
     const std::optional<url::Origin>& target_origin) {
   return nullptr;
+}
+
+bool ContentBrowserClient::IsCrossOriginSubframeAllowedToShowFilePicker(
+    RenderFrameHost* render_frame_host,
+    const url::Origin& requesting_origin) {
+  return false;
+}
+
+std::optional<network::ParsedPermissionsPolicy>
+ContentBrowserClient::GetContainerPolicyOverrideForCommit(
+    NavigationHandle& navigation_handle) {
+  return std::nullopt;
 }
 
 bool ContentBrowserClient::ShouldSkipBeforeUnloadDialog(

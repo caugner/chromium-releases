@@ -160,16 +160,14 @@ typedef NS_ENUM(NSInteger, ItemType) {
       addItemWithTitle:l10n_util::GetNSString(
                            IDS_IOS_VIEW_CONTROLLER_DISMISS_SAVE_CHANGES)
                 action:^{
-                  [weakSelf saveFolder];
-                  [weakSelf dismissActionSheetCoordinator];
+                  [weakSelf saveChangesAction];
                 }
                  style:UIAlertActionStyleDefault];
   [_actionSheetCoordinator
       addItemWithTitle:l10n_util::GetNSString(
                            IDS_IOS_VIEW_CONTROLLER_DISMISS_DISCARD_CHANGES)
                 action:^{
-                  [weakSelf dismiss];
-                  [weakSelf dismissActionSheetCoordinator];
+                  [weakSelf saveChangesDismiss];
                 }
                  style:UIAlertActionStyleDestructive];
   // IDS_IOS_NAVIGATION_BAR_CANCEL_BUTTON
@@ -177,9 +175,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
       addItemWithTitle:l10n_util::GetNSString(
                            IDS_IOS_VIEW_CONTROLLER_DISMISS_CANCEL_CHANGES)
                 action:^{
-                  weakSelf.navigationItem.leftBarButtonItem.enabled = YES;
-                  weakSelf.navigationItem.rightBarButtonItem.enabled = YES;
-                  [weakSelf dismissActionSheetCoordinator];
+                  [weakSelf saveChangesCancel];
                 }
                  style:UIAlertActionStyleCancel];
 
@@ -347,12 +343,12 @@ typedef NS_ENUM(NSInteger, ItemType) {
   }
   base::RecordAction(base::UserMetricsAction(
       "MobileBookmarksFolderEditorOpenedFolderChooser"));
-  std::set<raw_ptr<const bookmarks::BookmarkNode>> editedNodes;
+  std::set<raw_ptr<const bookmarks::BookmarkNode>> hiddenNodes;
   if (_folder) {
-    editedNodes.insert(_folder);
+    hiddenNodes.insert(_folder);
   }
   [self.delegate showBookmarksFolderChooserWithParentFolder:_parentFolder
-                                                editedNodes:editedNodes];
+                                                hiddenNodes:hiddenNodes];
 }
 
 #pragma mark - BookmarkModelBridgeObserver
@@ -468,6 +464,22 @@ typedef NS_ENUM(NSInteger, ItemType) {
 }
 
 #pragma mark - Private
+
+- (void)saveChangesAction {
+  [self saveFolder];
+  [self dismissActionSheetCoordinator];
+}
+
+- (void)saveChangesDismiss {
+  [self dismiss];
+  [self dismissActionSheetCoordinator];
+}
+
+- (void)saveChangesCancel {
+  self.navigationItem.leftBarButtonItem.enabled = YES;
+  self.navigationItem.rightBarButtonItem.enabled = YES;
+  [self dismissActionSheetCoordinator];
+}
 
 // Returns the profile.
 - (ProfileIOS*)profile {

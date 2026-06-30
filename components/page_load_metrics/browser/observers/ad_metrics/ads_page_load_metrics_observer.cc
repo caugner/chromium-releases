@@ -257,6 +257,9 @@ base::ByteCount AdsPageLoadMetricsObserver::HeavyAdThresholdNoiseProvider::
           : 0);
 }
 
+const char AdsPageLoadMetricsObserver::kObserverName[] =
+    "AdsPageLoadMetricsObserver";
+
 AdsPageLoadMetricsObserver::AdsPageLoadMetricsObserver(
     heavy_ad_intervention::HeavyAdService* heavy_ad_service,
     history::HistoryService* history_service,
@@ -283,8 +286,7 @@ AdsPageLoadMetricsObserver::AdsPageLoadMetricsObserver(
 AdsPageLoadMetricsObserver::~AdsPageLoadMetricsObserver() = default;
 
 const char* AdsPageLoadMetricsObserver::GetObserverName() const {
-  static const char kName[] = "AdsPageLoadMetricsObserver";
-  return kName;
+  return kObserverName;
 }
 
 PageLoadMetricsObserver::ObservePolicy AdsPageLoadMetricsObserver::OnStart(
@@ -794,6 +796,18 @@ void AdsPageLoadMetricsObserver::OnAdAuctionComplete(
                                              is_on_device_auction, result);
 }
 
+base::TimeDelta AdsPageLoadMetricsObserver::GetTotalAdCpuTime() const {
+  return aggregate_frame_data_ ? aggregate_frame_data_->live_ad_cpu_usage()
+                               : base::TimeDelta();
+}
+
+int64_t AdsPageLoadMetricsObserver::GetTotalAdNetworkBytes() const {
+  return aggregate_frame_data_ ? aggregate_frame_data_->resource_data()
+                                     .ad_network_bytes()
+                                     .InBytes()
+                               : 0;
+}
+
 void AdsPageLoadMetricsObserver::OnSubresourceFilterGoingAway() {
   subresource_observation_.Reset();
 }
@@ -1290,9 +1304,14 @@ void AdsPageLoadMetricsObserver::RecordPerFrameHistogramsForHeavyAds(
 
 void AdsPageLoadMetricsObserver::ProcessOngoingNavigationResource(
     content::NavigationHandle* navigation_handle) {
-  const auto& frame_id_and_request = ongoing_navigation_resources_.find(
+  // Extract the entry up front so the resource is owned locally for the rest
+  // of this call. Processing it can synchronously re-enter this method: the
+  // heavy ad intervention destroys the frame's in-flight NavigationRequest,
+  // which dispatches DidFinishNavigation. The re-entrant call must not observe
+  // or remove this entry again.
+  auto request_node = ongoing_navigation_resources_.extract(
       navigation_handle->GetFrameTreeNodeId());
-  if (frame_id_and_request == ongoing_navigation_resources_.end()) {
+  if (request_node.empty()) {
     return;
   }
 
@@ -1304,8 +1323,7 @@ void AdsPageLoadMetricsObserver::ProcessOngoingNavigationResource(
           : content::RenderFrameHost::FromID(
                 navigation_handle->GetPreviousRenderFrameHostId());
 
-  ProcessResourceForFrame(rfh, frame_id_and_request->second);
-  ongoing_navigation_resources_.erase(frame_id_and_request);
+  ProcessResourceForFrame(rfh, request_node.mapped());
 }
 
 FrameTreeData* AdsPageLoadMetricsObserver::FindFrameData(

@@ -65,6 +65,10 @@ const char kContextualSearchFileSizeAll[] =
     "ContextualSearch.File.Size.Unknown";
 const char kContextualSearchFileSizeImage[] =
     "ContextualSearch.File.Size.Image.Unknown";
+const char kContextualSearchFileSizeTabViewportScreenshot[] =
+    "ContextualSearch.File.Size.Tab.ViewportScreenshot.Unknown";
+const char kContextualSearchFileSizeTabPageContents[] =
+    "ContextualSearch.File.Size.Tab.PageContents.Unknown";
 const char kContextualSearchToolMode[] = "ContextualSearch.Tools.Unknown";
 const char kContextualSearchModelMode[] = "ContextualSearch.Models.Unknown";
 const char kContextualSearchToolModeOnSubmission[] =
@@ -81,6 +85,21 @@ const char kContextualSearchTabContextAddedFromPlusButton[] =
     "ContextualSearch.TabContextAddedFromPlusButton.Unknown";
 const char kContextualSearchTabWithDuplicateTitleClicked[] =
     "ContextualSearch.TabWithDuplicateTitleClicked.V2.Unknown";
+
+const char kContextualSearchFilePickedCountTabPicker[] =
+    "ContextualSearch.File.PickedCount.TabPicker.Unknown";
+const char kContextualSearchQueryAttachmentCountPdf[] =
+    "ContextualSearch.Query.AttachmentCount.Pdf.Unknown";
+const char kContextualSearchToolsSelected[] =
+    "ContextualSearch.Tools.Selected.Unknown";
+const char kContextualSearchModelsSelected[] =
+    "ContextualSearch.Models.Selected.Unknown";
+const char kContextualSearchAttachmentButtonShown[] =
+    "ContextualSearch.AttachmentButtonShown.Unknown";
+const char kContextualSearchAttachmentButtonUsed[] =
+    "ContextualSearch.AttachmentButtonUsed.Unknown";
+const char kContextualSearchAttachmentsMenuToggled[] =
+    "ContextualSearch.AttachmentsMenuToggled.Unknown";
 
 const char kContextualSearchToolModeShown[] =
     "ContextualSearch.Tools.Shown.Unknown";
@@ -163,7 +182,7 @@ TEST_F(ContextualSearchMetricsRecorderTest, SubmitQueryWithoutContext) {
   metrics().NotifySessionStateChanged(SessionState::kSessionStarted);
   metrics().NotifyQuerySubmitted(/*has_tab_context=*/false,
                                  /*has_non_tab_context=*/false,
-                                 /*query_text_length=*/0,
+                                 /*query_text_length=*/10,
                                  /*file_count=*/0,
                                  /*has_drive_context=*/false);
 
@@ -268,7 +287,7 @@ TEST_F(ContextualSearchMetricsRecorderTest, SessionCompleted) {
   task_environment().FastForwardBy(base::Seconds(10));
   metrics().NotifyQuerySubmitted(/*has_tab_context=*/false,
                                  /*has_non_tab_context=*/false,
-                                 /*query_text_length=*/0,
+                                 /*query_text_length=*/10,
                                  /*file_count=*/0,
                                  /*has_drive_context=*/false);
   metrics().NotifySessionStateChanged(SessionState::kNavigationOccurred);
@@ -304,7 +323,7 @@ TEST_F(ContextualSearchMetricsRecorderTest, MultiQuerySubmissionSession) {
   task_environment().FastForwardBy(base::Seconds(60));
   metrics().NotifyQuerySubmitted(/*has_tab_context=*/false,
                                  /*has_non_tab_context=*/false,
-                                 /*query_text_length=*/0,
+                                 /*query_text_length=*/10,
                                  /*file_count=*/0,
                                  /*has_drive_context=*/false);
   metrics().NotifySessionStateChanged(SessionState::kNavigationOccurred);
@@ -415,6 +434,55 @@ TEST_F(ContextualSearchMetricsRecorderTest, ModelMode) {
   DestructMetricsRecorder();
   histogram_tester().ExpectUniqueSample(
       kContextualSearchModelMode, omnibox::ModelMode::MODEL_MODE_GEMINI_PRO, 1);
+}
+
+TEST_F(ContextualSearchMetricsRecorderTest, FilePickedCount) {
+  metrics().RecordFilePickedCount(
+      ContextualSearchAttachmentButtonType::kTabPicker, 5);
+  histogram_tester().ExpectUniqueSample(
+      kContextualSearchFilePickedCountTabPicker, 5, 1);
+}
+
+TEST_F(ContextualSearchMetricsRecorderTest, AttachmentCountAtSubmission) {
+  metrics().RecordAttachmentCountAtSubmission(lens::MimeType::kPdf, 3);
+  histogram_tester().ExpectUniqueSample(
+      kContextualSearchQueryAttachmentCountPdf, 3, 1);
+}
+
+TEST_F(ContextualSearchMetricsRecorderTest, ToolSelected) {
+  metrics().RecordToolSelected(omnibox::ToolMode::TOOL_MODE_IMAGE_GEN);
+  histogram_tester().ExpectUniqueSample(kContextualSearchToolsSelected,
+                                        omnibox::ToolMode::TOOL_MODE_IMAGE_GEN,
+                                        1);
+}
+
+TEST_F(ContextualSearchMetricsRecorderTest, ModelSelected) {
+  metrics().RecordModelSelected(omnibox::ModelMode::MODEL_MODE_GEMINI_PRO);
+  histogram_tester().ExpectUniqueSample(
+      kContextualSearchModelsSelected,
+      omnibox::ModelMode::MODEL_MODE_GEMINI_PRO, 1);
+}
+
+TEST_F(ContextualSearchMetricsRecorderTest, AttachmentButtonShown) {
+  metrics().RecordAttachmentButtonShown(
+      ContextualSearchAttachmentButtonType::kCamera);
+  histogram_tester().ExpectUniqueSample(
+      kContextualSearchAttachmentButtonShown,
+      static_cast<int>(ContextualSearchAttachmentButtonType::kCamera), 1);
+}
+
+TEST_F(ContextualSearchMetricsRecorderTest, AttachmentButtonUsed) {
+  metrics().RecordAttachmentButtonUsed(
+      ContextualSearchAttachmentButtonType::kCamera);
+  histogram_tester().ExpectUniqueSample(
+      kContextualSearchAttachmentButtonUsed,
+      static_cast<int>(ContextualSearchAttachmentButtonType::kCamera), 1);
+}
+
+TEST_F(ContextualSearchMetricsRecorderTest, AttachmentsMenuToggled) {
+  metrics().RecordAttachmentsMenuToggled(true);
+  histogram_tester().ExpectUniqueSample(kContextualSearchAttachmentsMenuToggled,
+                                        true, 1);
 }
 
 TEST_F(ContextualSearchMetricsRecorderTest, ModesOnSubmission) {
@@ -606,6 +674,17 @@ TEST_F(ContextualSearchMetricsRecorderTest, AggregatedFileSizeMetrics) {
   histogram_tester().ExpectTotalCount(kContextualSearchFileSizeAll, 2);
   histogram_tester().ExpectBucketCount(kContextualSearchFileSizeAll, 100, 1);
   histogram_tester().ExpectBucketCount(kContextualSearchFileSizeAll, 200, 1);
+}
+
+TEST_F(ContextualSearchMetricsRecorderTest, RecordTabPartsSizes) {
+  metrics().NotifySessionStateChanged(SessionState::kSessionStarted);
+  metrics().RecordTabPartsSizes(100, 500);
+  DestructMetricsRecorder();
+
+  histogram_tester().ExpectUniqueSample(
+      kContextualSearchFileSizeTabViewportScreenshot, 100, 1);
+  histogram_tester().ExpectUniqueSample(
+      kContextualSearchFileSizeTabPageContents, 500, 1);
 }
 
 TEST_F(ContextualSearchMetricsRecorderTest, MultiFileUpload) {

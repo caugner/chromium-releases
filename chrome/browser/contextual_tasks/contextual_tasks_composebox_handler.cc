@@ -31,10 +31,7 @@
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/contextual_search/desktop_query_contextualizer_delegate.h"
 #include "chrome/browser/ui/contextual_search/tab_contextualization_controller.h"
-#include "chrome/browser/ui/lens/lens_overlay_controller.h"
-#include "chrome/browser/ui/lens/lens_search_controller.h"
 #include "chrome/browser/ui/select_file_policy/chrome_select_file_policy.h"
-#include "chrome/browser/ui/tabs/public/tab_features.h"
 #include "chrome/browser/ui/webui/cr_components/composebox/composebox_handler.h"
 #include "chrome/browser/ui/webui/cr_components/searchbox/contextual_searchbox_handler.h"
 #include "chrome/browser/ui/webui/new_tab_page/composebox/variations/composebox_fieldtrial.h"
@@ -44,10 +41,13 @@
 #include "components/contextual_tasks/public/contextual_task_context.h"
 #include "components/contextual_tasks/public/contextual_tasks_service.h"
 #include "components/contextual_tasks/public/features.h"
+#include "components/contextual_tasks/public/query_contextualizer.h"
 #include "components/contextual_tasks/public/utils.h"
 #include "components/lens/contextual_input.h"
 #include "components/lens/lens_features.h"
 #include "components/lens/lens_overlay_invocation_source.h"
+#include "components/omnibox/common/composebox_features.h"
+#include "components/omnibox/common/input_state.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "components/tabs/public/tab_interface.h"
 #include "components/url_deduplication/url_deduplication_helper.h"
@@ -59,19 +59,48 @@
 #include "ui/gfx/skia_util.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
 
+#if !BUILDFLAG(IS_ANDROID)
+#include "chrome/browser/ui/lens/lens_overlay_controller.h"
+#include "chrome/browser/ui/lens/lens_search_controller.h"
+#else
+#include "base/android/content_uri_utils.h"
+#endif
+
 namespace {
 
+std::string ExtractMimeType(const base::FilePath& path) {
+#if BUILDFLAG(IS_ANDROID)
+  if (path.IsContentUri()) {
+    return base::GetContentUriMimeType(path);
+  }
+#endif
 
-std::unique_ptr<FileData> ReadFileAndProcess(const base::FilePath& local_path) {
+  std::string mime_type;
+  const base::FilePath::StringType extension = path.Extension();
+  if (!extension.empty()) {
+    // substr(1) strips the leading dot from the extension
+    net::GetMimeTypeFromExtension(extension.substr(1), &mime_type);
+  }
+  return mime_type;
+}
+
+std::unique_ptr<FileData> ReadFileAndProcess(
+    const base::FilePath& local_path,
+    const base::FilePath::StringType& display_name) {
   auto file_data = std::make_unique<FileData>();
 
   if (!base::ReadFileToString(local_path, &file_data->bytes)) {
     LOG(ERROR) << "Failed to read file from path: "
                << local_path.AsUTF8Unsafe();
   }
-  net::GetMimeTypeFromExtension(local_path.Extension().substr(1),
-                                &file_data->mime_type);
-  file_data->name = local_path.BaseName().AsUTF8Unsafe();
+
+  file_data->mime_type = ExtractMimeType(local_path);
+
+  const base::FilePath name_path = display_name.empty()
+                                       ? local_path.BaseName()
+                                       : base::FilePath(display_name);
+  file_data->name = name_path.AsUTF8Unsafe();
+
   return file_data;
 }
 
@@ -139,6 +168,7 @@ void ContextualTasksOmniboxClient::OnAutocompleteAccept(
                                                  /*is_voice_search=*/false);
 }
 
+#if !BUILDFLAG(IS_ANDROID)
 lens::LensOverlayDismissalSource ToLensOverlayDismissalSource(
     composebox::mojom::LensOverlayDismissalSource dismissal_source) {
   switch (dismissal_source) {
@@ -150,6 +180,7 @@ lens::LensOverlayDismissalSource ToLensOverlayDismissalSource(
   NOTREACHED() << "Unknown dismissal source: "
                << static_cast<int>(dismissal_source);
 }
+#endif
 
 }  // namespace
 
@@ -230,6 +261,8 @@ void ContextualTasksComposeboxHandler::OnContextUploadStatusChanged(
     contextual_search::ContextUploadStatus context_upload_status,
     const std::optional<contextual_search::ContextUploadErrorType>&
         error_type) {
+  // Lens is not enabled on Android.
+#if !BUILDFLAG(IS_ANDROID)
   // If the file token corresponds to the token uploaded via Lens when the
   // overlay is opened, then there is no need to do anything about the file
   // upload status.
@@ -240,6 +273,7 @@ void ContextualTasksComposeboxHandler::OnContextUploadStatusChanged(
       return;
     }
   }
+#endif  // !BUILDFLAG(IS_ANDROID)
 
   ContextualSearchboxHandler::OnContextUploadStatusChanged(
       context_token, mime_type, context_upload_status, error_type);
@@ -293,6 +327,10 @@ void ContextualTasksComposeboxHandler::OnContextUploadStatusChanged(
   }
 }
 
+void ContextualTasksComposeboxHandler::StartPlatformVoiceRecognition() {
+  web_ui_interface_->StartPlatformVoiceRecognition();
+}
+
 void ContextualTasksComposeboxHandler::SubmitQuery(
     const std::string& query_text,
     uint8_t mouse_button,
@@ -309,15 +347,23 @@ void ContextualTasksComposeboxHandler::SubmitQuery(
 void ContextualTasksComposeboxHandler::CreateAndSendQueryMessage(
     const std::string& query,
     bool is_voice_search) {
+  base::RecordAction(base::UserMetricsAction(
+      "ContextualTasks.Composebox.UserAction.QuerySubmitted"));
+  auto* session_handle = GetContextualSessionHandle();
+
   // Retrieve the overlay token before closing the overlay, as the controller
   // might be destroyed or reset during closure.
+#if !BUILDFLAG(IS_ANDROID)
   std::optional<base::UnguessableToken> overlay_token = GetLensOverlayToken();
   bool has_visual_selection = overlay_token.has_value();
-  auto* session_handle = GetContextualSessionHandle();
 
   // Every time a query is submitted, close the Lens overlay if it's open.
   CloseLensOverlay(
       lens::LensOverlayDismissalSource::kContextualTasksQuerySubmitted);
+#else
+  std::optional<base::UnguessableToken> overlay_token;
+  bool has_visual_selection = false;
+#endif
   std::optional<base::Uuid> task_id = web_ui_interface_->GetTaskId();
   auto* contextual_tasks_service = GetContextualTasksService();
 
@@ -417,6 +463,16 @@ void ContextualTasksComposeboxHandler::OnTaskChanged() {
   InitializeInputStateModel();
 }
 
+std::vector<int32_t> ContextualTasksComposeboxHandler::GetSelectedTabIds()
+    const {
+  std::vector<int32_t> tab_ids =
+      ContextualSearchboxHandler::GetSelectedTabIds();
+  for (const auto& [token, tab_id] : delayed_tabs_) {
+    tab_ids.push_back(tab_id);
+  }
+  return tab_ids;
+}
+
 void ContextualTasksComposeboxHandler::InitializeInputStateModel() {
   if (take_input_model_callback_) {
     std::unique_ptr<contextual_search::InputStateModel> current_input_state =
@@ -454,6 +510,12 @@ void ContextualTasksComposeboxHandler::InitializeInputStateModel() {
     ContextualSearchboxHandler::InitializeInputStateModel();
   }
 
+  if (base::FeatureList::IsEnabled(omnibox::kContextManagementInComposebox)) {
+    std::vector<int32_t> restored_tab_ids =
+        web_ui_interface_->GetRestoredTabIds();
+    SearchboxHandler::page_->SetRestoredTabIds(restored_tab_ids);
+  }
+
   if (input_state_model_) {
     // crbug.com/488112121: Temporary implementation to disable file and deep
     // search when the aegc=1 URL parameter is present on the AI page.
@@ -467,6 +529,12 @@ void ContextualTasksComposeboxHandler::InitializeInputStateModel() {
       input_state_model_->SetPermanentlyDisabledInputTypes(
           {omnibox::InputType::INPUT_TYPE_LENS_FILE});
     }
+  }
+}
+void ContextualTasksComposeboxHandler::SetAimThreadRestoredTabs(
+    std::vector<searchbox::mojom::TabInfoPtr> tabs) {
+  if (SearchboxHandler::page_) {
+    SearchboxHandler::page_->SetAimThreadRestoredTabs(std::move(tabs));
   }
 }
 
@@ -501,7 +569,16 @@ void ContextualTasksComposeboxHandler::ContinueCreateAndSendQueryMessage(
   }
   // Create a client to aim message and send it to the page.
   if (auto* session_handle = GetContextualSessionHandle()) {
-    session_handle->set_previous_query(query);
+    if (auto* metrics_recorder = session_handle->GetMetricsRecorder()) {
+      if (metrics_recorder->source() !=
+          contextual_search::ContextualSearchSource::kContextualTasks) {
+        metrics_recorder->UpdateContextualSearchSource(
+            contextual_search::ContextualSearchSource::kContextualTasks);
+      }
+    }
+    contextual_tasks::ThreadTurn turn;
+    turn.query = query;
+    session_handle->AddThreadTurn(turn);
     // If there is an auto-added tab, the user sending the query means the
     // system should upload it.
     UploadSnapshotTabContextIfPresent();
@@ -550,7 +627,7 @@ void ContextualTasksComposeboxHandler::HandleFileUpload(bool is_image) {
   }
   file_types.include_all_files = true;
 
-  file_dialog_->SelectFile(ui::SelectFileDialog::SELECT_OPEN_FILE,
+  file_dialog_->SelectFile(ui::SelectFileDialog::SELECT_OPEN_MULTI_FILE,
                            /*title=*/std::u16string(),
                            /*default_path=*/base::FilePath(), &file_types,
                            /*file_type_index=*/0,
@@ -561,13 +638,54 @@ void ContextualTasksComposeboxHandler::HandleFileUpload(bool is_image) {
 void ContextualTasksComposeboxHandler::FileSelected(
     const ui::SelectedFileInfo& file,
     int index) {
-  scoped_refptr<base::SequencedTaskRunner> task_runner =
-      base::ThreadPool::CreateSequencedTaskRunner(
-          {base::MayBlock(), base::TaskPriority::USER_VISIBLE});
-  task_runner->PostTaskAndReplyWithResult(
-      FROM_HERE, base::BindOnce(&ReadFileAndProcess, file.path()),
-      base::BindOnce(&ContextualTasksComposeboxHandler::OnFileRead,
-                     weak_factory_.GetWeakPtr()));
+  MultiFilesSelected({file});
+}
+
+void ContextualTasksComposeboxHandler::MultiFilesSelected(
+    const std::vector<ui::SelectedFileInfo>& files) {
+  auto* session_handle = GetContextualSessionHandle();
+  size_t valid_files_count =
+      (session_handle ? session_handle->GetUploadedContextFileInfos().size()
+                      : 0) +
+      pending_context_uploads_.size();
+  auto composebox_config =
+      ntp_composebox::FeatureConfig::Get().config.composebox();
+  size_t max_files = composebox_config.max_num_files();
+  if (GetInputState().max_total_inputs > 0) {
+    max_files = GetInputState().max_total_inputs;
+  }
+  if (max_files == 0) {
+    max_files = omnibox::kDefaultMaxTotalInputs;
+  }
+
+  for (const auto& file : files) {
+    if (valid_files_count >= max_files) {
+      // To trigger the limit error banner on the WebUI frontend without reading
+      // the exceeded file from disk or allocating memory for its contents, this
+      // fakes its registration long enough to report a validation error.
+      // The frontend immediately displays the global limit error toast and
+      // deletes this dummy context silently, rendering no failed chip.
+      auto dummy_token = base::UnguessableToken::Create();
+      auto dummy_info = searchbox::mojom::SelectedFileInfo::New();
+      dummy_info->file_name = file.path().BaseName().AsUTF8Unsafe();
+      dummy_info->mime_type = "application/octet-stream";
+      dummy_info->is_deletable = true;
+      ContextualSearchboxHandler::page_->AddFileContext(dummy_token,
+                                                        std::move(dummy_info));
+      ContextualSearchboxHandler::page_->OnContextualInputStatusChanged(
+          dummy_token,
+          contextual_search::ContextUploadStatus::kValidationFailed,
+          contextual_search::ContextUploadErrorType::
+              kBrowserProcessingMaxFilesExceededError);
+      break;
+    }
+    valid_files_count++;
+    base::ThreadPool::PostTaskAndReplyWithResult(
+        FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
+        base::BindOnce(&ReadFileAndProcess, file.path(), file.display_name),
+        base::BindOnce(&ContextualTasksComposeboxHandler::OnFileRead,
+                       weak_factory_.GetWeakPtr()));
+  }
   file_dialog_.reset();
 }
 
@@ -716,15 +834,23 @@ void ContextualTasksComposeboxHandler::ClearFiles(
   pending_delayed_tab_ids_.clear();
   pending_context_uploads_.clear();
   pending_query_request_info_.reset();
+#if !BUILDFLAG(IS_ANDROID)
   visual_selection_token_.reset();
   visual_selection_overlay_token_.reset();
+#endif
 
   if (should_block_auto_suggested_tabs) {
     web_ui_interface_->GetAutoSuggestionManager()->OnAutoSuggestionDismissed();
   }
 }
 
+#if !BUILDFLAG(IS_ANDROID)
 void ContextualTasksComposeboxHandler::HandleLensButtonClick() {
+  base::RecordAction(base::UserMetricsAction(
+      "ContextualTasks.Composebox.UserAction.LensButtonClicked"));
+  base::UmaHistogramBoolean(
+      "ContextualTasks.Composebox.UserAction.LensButtonClicked", true);
+
   if (auto* controller = GetLensSearchController()) {
     if (controller->IsShowingUI()) {
       if (controller->invocation_source() ==
@@ -821,6 +947,7 @@ void ContextualTasksComposeboxHandler::OnVisualSelectionAdded(
     visual_selection_overlay_token_ = std::nullopt;
   }
 }
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 void ContextualTasksComposeboxHandler::DeleteContext(
     const base::UnguessableToken& file_token,
@@ -854,6 +981,7 @@ void ContextualTasksComposeboxHandler::DeleteContext(
     MarkContextUploadFinished(file_token);
   }
 
+#if !BUILDFLAG(IS_ANDROID)
   // Clear the visual selection token if it matches the deleted token.
   if (visual_selection_token_ && *visual_selection_token_ == file_token) {
     visual_selection_token_ = std::nullopt;
@@ -867,6 +995,7 @@ void ContextualTasksComposeboxHandler::DeleteContext(
       }
     }
   }
+#endif  // !BUILDFLAG(IS_ANDROID)
   if (was_delayed) {
     OnContextUploadStatusChanged(
         file_token, lens::MimeType::kUnknown,
@@ -914,6 +1043,7 @@ void ContextualTasksComposeboxHandler::UpdateSuggestedTabContext(
       std::move(filtered_suggestion));
 }
 
+#if !BUILDFLAG(IS_ANDROID)
 void ContextualTasksComposeboxHandler::CloseLensOverlay(
     lens::LensOverlayDismissalSource dismissal_source) {
   if (auto* controller = GetLensSearchController()) {
@@ -967,6 +1097,7 @@ ContextualTasksComposeboxHandler::GetLensOverlayToken() {
   }
   return std::nullopt;
 }
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 std::optional<int64_t>
 ContextualTasksComposeboxHandler::GetActiveTabContextId() {

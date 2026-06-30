@@ -144,6 +144,7 @@ class WebViewChromium
     private static boolean sRecordWholeDocumentEnabledByApi;
 
     private boolean mEvaluateJavaScriptCalled;
+    private boolean mGetAccessibilityNodeProviderCalledWhenAwContentsNull;
 
     static void enableSlowWholeDocumentDraw() {
         sRecordWholeDocumentEnabledByApi = true;
@@ -1468,6 +1469,12 @@ class WebViewChromium
             mAwContents.getViewMethods().setLayerType(mWebView.getLayerType(), null);
 
             mSharedWebViewChromium.initForReal(mAwContents);
+
+            // Send this event so that `getAccessibilityNodeProvider` is called again after
+            // AwContents is created.
+            if (mGetAccessibilityNodeProviderCalledWhenAwContentsNull) {
+                mWebView.sendAccessibilityEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED);
+            }
         }
     }
 
@@ -1543,8 +1550,9 @@ class WebViewChromium
     @Override
     public boolean overlayHorizontalScrollbar() {
         forbidBuilderConfiguration();
-        mAwInit.triggerAndWaitForChromiumStarted(
-                CallSite.WEBVIEW_INSTANCE_OVERLAY_HORIZONTAL_SCROLLBAR);
+        if (!mAwInit.isChromiumInitStarted()) {
+            return true;
+        }
         if (checkNeedsPost()) {
             boolean ret =
                     mFactory.runOnUiThreadBlocking(
@@ -1568,8 +1576,9 @@ class WebViewChromium
     @Override
     public boolean overlayVerticalScrollbar() {
         forbidBuilderConfiguration();
-        mAwInit.triggerAndWaitForChromiumStarted(
-                CallSite.WEBVIEW_INSTANCE_OVERLAY_VERTICAL_SCROLLBAR);
+        if (!mAwInit.isChromiumInitialized()) {
+            return false;
+        }
         if (checkNeedsPost()) {
             boolean ret =
                     mFactory.runOnUiThreadBlocking(
@@ -1600,7 +1609,9 @@ class WebViewChromium
     @Override
     public SslCertificate getCertificate() {
         forbidBuilderConfiguration();
-        mAwInit.triggerAndWaitForChromiumStarted(CallSite.WEBVIEW_INSTANCE_GET_CERTIFICATE);
+        if (!mAwInit.isChromiumInitialized()) {
+            return null;
+        }
         if (checkNeedsPost()) {
             SslCertificate ret =
                     mFactory.runOnUiThreadBlocking(
@@ -3019,8 +3030,6 @@ class WebViewChromium
                     ApiCall.SET_WEBCHROME_CLIENT,
                     ApiCallUserAction.WEBVIEW_INSTANCE_SET_WEBCHROME_CLIENT);
             mAwContents.cancelAllPrerendering();
-            mAwContents.setOnReceivedIconOverridden(
-                    ApiImplementationUtils.isOnReceivedIconOverridden(client));
             mWebSettings.getAwSettings().setFullscreenSupported(doesSupportFullscreen(client));
             mSharedWebViewChromium.setWebChromeClient(client);
             mContentsClientAdapter.setWebChromeClient(mSharedWebViewChromium.getWebChromeClient());
@@ -3477,10 +3486,18 @@ class WebViewChromium
     @Override
     public void onProvideContentCaptureStructure(ViewStructure structure, int flags) {
         // This is a View method - don't forbid builder.
-        mAwInit.triggerAndWaitForChromiumStarted(
-                CallSite.WEBVIEW_INSTANCE_ON_PROVIDE_CONTENT_CAPTURE_STRUCTURE);
         if (ContentCaptureFeatures.isDumpForTestingEnabled()) {
             Log.i("ContentCapture", "onProvideContentCaptureStructure");
+        }
+        if (checkNeedsPost()) {
+            mFactory.addTask(
+                    new Runnable() {
+                        @Override
+                        public void run() {
+                            onProvideContentCaptureStructure(structure, flags);
+                        }
+                    });
+            return;
         }
         try (TraceEvent event =
                 TraceEvent.scoped(
@@ -3533,11 +3550,16 @@ class WebViewChromium
         return true;
     }
 
+    // This method could be called from the framework during AwContents construction.
     @Override
     public AccessibilityNodeProvider getAccessibilityNodeProvider() {
-        mAwInit.triggerAndWaitForChromiumStarted(
-                CallSite.WEBVIEW_INSTANCE_GET_ACCESSIBILITY_NODE_PROVIDER);
-        if (checkNeedsPost()) {
+        if (mAwContents == null) {
+            mGetAccessibilityNodeProviderCalledWhenAwContentsNull = true;
+            return null;
+        }
+        // Startup is guaranteed to have completed here since AwContents can be non-null only
+        // after Chromium has started.
+        if (!ThreadUtils.runningOnUiThread()) {
             AccessibilityNodeProvider ret =
                     mFactory.runOnUiThreadBlocking(
                             new Callable<AccessibilityNodeProvider>() {
@@ -3595,17 +3617,10 @@ class WebViewChromium
 
     @Override
     public boolean performAccessibilityAction(final int action, final Bundle arguments) {
-        mAwInit.triggerAndWaitForChromiumStarted(
-                CallSite.WEBVIEW_INSTANCE_PERFORM_ACCESSIBILITY_ACTION);
-        if (checkNeedsPost()) {
+        if (!ThreadUtils.runningOnUiThread()) {
             boolean ret =
-                    mFactory.runOnUiThreadBlocking(
-                            new Callable<Boolean>() {
-                                @Override
-                                public Boolean call() {
-                                    return performAccessibilityAction(action, arguments);
-                                }
-                            });
+                    ThreadUtils.runOnUiThreadBlocking(
+                            () -> performAccessibilityAction(action, arguments));
             return ret;
         }
         return mWebViewPrivate.super_performAccessibilityAction(action, arguments);
@@ -4157,7 +4172,6 @@ class WebViewChromium
 
     @Override
     public void setBackgroundColor(final int color) {
-        mAwInit.triggerAndWaitForChromiumStarted(CallSite.WEBVIEW_INSTANCE_SET_BACKGROUND_COLOR);
         if (checkNeedsPost()) {
             mFactory.addTask(
                     new Runnable() {

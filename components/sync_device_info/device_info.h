@@ -170,44 +170,51 @@ class DeviceInfo {
     kTv = 6,
   };
 
+  // Tracks the per-device user opt-in and readiness state for the Glic
+  // experimental triggering feature.
+  // These values are persisted to logs. Entries should not be renumbered and
+  // numeric values should never be reused.
   // LINT.IfChange(GlicExperimentalTriggeringState)
   enum class GlicExperimentalTriggeringState {
     kUnavailable = 0,
     kNeedsOptIn = 1,
     kReady = 2,
+    kMaxValue = kReady,
   };
-  // LINT.ThenChange(//components/sync/protocol/sync_enums.proto:GlicExperimentalTriggeringState)
+  // LINT.ThenChange(//components/sync/protocol/sync_enums.proto:GlicExperimentalTriggeringState,
+  // //tools/metrics/histograms/metadata/glic/enums.xml:GlicExperimentalTriggeringState)
 
-  DeviceInfo(
-      const std::string& guid,
-      const std::string& client_name,
-      const std::string& chrome_version,
-      const std::string& sync_user_agent,
-      DeviceType device_type,
-      OsType os_type,
-      FormFactor form_factor,
-      const std::string& signin_scoped_device_id,
-      const std::string& manufacturer_name,
-      const std::string& model_name,
-      const std::string& full_hardware_class,
-      base::Time last_updated_timestamp,
-      base::TimeDelta pulse_interval,
-      bool send_tab_to_self_receiving_enabled,
-      SendTabReceivingType send_tab_to_self_receiving_type,
-      const std::optional<SharingInfo>& sharing_info,
-      const std::optional<PhoneAsASecurityKeyInfo>& paask_info,
-      const std::string& fcm_registration_token,
-      const DataTypeSet& interested_data_types,
-      std::optional<base::Time> auto_sign_out_last_signin_timestamp,
-      bool desktop_to_ios_promo_receiving_enabled,
-      const MobilePromoOnDesktopPromoTypeSet&
-          desktop_to_ios_promo_receiving_types,
-      GlicExperimentalTriggeringState glic_experimental_triggering_state);
+  DeviceInfo(const std::string& guid,
+             const std::string& client_name,
+             const std::string& chrome_version,
+             const std::string& sync_user_agent,
+             DeviceType device_type,
+             OsType os_type,
+             FormFactor form_factor,
+             const std::string& signin_scoped_device_id,
+             const std::string& manufacturer_name,
+             const std::string& model_name,
+             const std::string& full_hardware_class,
+             base::Time last_updated_timestamp,
+             base::TimeDelta pulse_interval,
+             bool send_tab_to_self_receiving_enabled,
+             SendTabReceivingType send_tab_to_self_receiving_type,
+             const std::optional<SharingInfo>& sharing_info,
+             const std::optional<PhoneAsASecurityKeyInfo>& paask_info,
+             const std::string& fcm_registration_token,
+             const DataTypeSet& interested_data_types,
+             std::optional<base::Time> auto_sign_out_last_signin_timestamp,
+             bool desktop_to_ios_promo_receiving_enabled,
+             const MobilePromoOnDesktopPromoTypeSet&
+                 desktop_to_ios_promo_receiving_types,
+             GlicExperimentalTriggeringState glic_experimental_triggering_state,
+             std::optional<int> glic_experimental_triggering_version);
 
-  DeviceInfo(const DeviceInfo&) = delete;
   DeviceInfo& operator=(const DeviceInfo&) = delete;
 
   ~DeviceInfo();
+
+  std::unique_ptr<DeviceInfo> DeepCopyForTesting() const;
 
   // Sync specific unique identifier for the device. Note if a device
   // is wiped and sync is set up again this id WILL be different.
@@ -290,8 +297,12 @@ class DeviceInfo {
   const MobilePromoOnDesktopPromoTypeSet& desktop_to_ios_promo_receiving_types()
       const;
 
-  // Returns the state of experimental triggering.
+  // Returns the experimental triggering state for Glic.
   GlicExperimentalTriggeringState glic_experimental_triggering_state() const;
+
+  // Returns the capability version of the experimental triggering protocol for
+  // Glic, or std::nullopt if unavailable.
+  std::optional<int> glic_experimental_triggering_version() const;
 
   // Apps can set ids for a device that is meaningful to them but
   // not unique enough so the user can be tracked. Exposing |guid|
@@ -321,10 +332,18 @@ class DeviceInfo {
   void set_desktop_to_ios_promo_receiving_types(
       const MobilePromoOnDesktopPromoTypeSet& new_types);
 
+  // Sets the experimental triggering state for Glic.
   void set_glic_experimental_triggering_state(
       GlicExperimentalTriggeringState state);
 
+  // Sets the capability version of the experimental triggering protocol for
+  // Glic. Pass std::nullopt if unavailable.
+  void set_glic_experimental_triggering_version(std::optional<int> version);
+
  private:
+  // Used by DeepCopyForTesting().
+  DeviceInfo(const DeviceInfo& other);
+
   const std::string guid_;
 
   std::string client_name_;
@@ -385,7 +404,12 @@ class DeviceInfo {
   bool desktop_to_ios_promo_receiving_enabled_;
   MobilePromoOnDesktopPromoTypeSet desktop_to_ios_promo_receiving_types_;
 
+  // The opt-in state of Glic experimental triggering for the device.
   GlicExperimentalTriggeringState glic_experimental_triggering_state_;
+
+  // The version of the Glic experimental triggering protocol supported by the
+  // device.
+  std::optional<int> glic_experimental_triggering_version_;
 
   // NOTE: when adding a member, don't forget to update
   // |StoredDeviceInfoStillAccurate| in device_info_sync_bridge.cc or else

@@ -832,50 +832,6 @@ TEST_P(GLES3DecoderTest, ReadPixels2PixelPackBuffer) {
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
 
-TEST_P(GLES3DecoderTest, ReadPixelsPixelPackBufferMapped) {
-  const GLsizei kWidth = 5;
-  const GLsizei kHeight = 3;
-  const GLint kBytesPerPixel = 4;
-  GLint size = kWidth * kHeight * kBytesPerPixel;
-
-  DoBindBuffer(GL_PIXEL_PACK_BUFFER, client_buffer_id_, kServiceBufferId);
-  DoBufferData(GL_PIXEL_PACK_BUFFER, size);
-
-  std::vector<int8_t> mapped_data(size);
-
-  uint32_t result_shm_id = shared_memory_id_;
-  uint32_t result_shm_offset = kSharedMemoryOffset;
-  uint32_t data_shm_id = shared_memory_id_;
-  // uint32_t is Result for both MapBufferRange and UnmapBuffer commands.
-  uint32_t data_shm_offset = kSharedMemoryOffset + sizeof(uint32_t);
-  EXPECT_CALL(*gl_,
-              MapBufferRange(GL_PIXEL_PACK_BUFFER, 0, size, GL_MAP_READ_BIT))
-        .WillOnce(Return(mapped_data.data()))
-        .RetiresOnSaturation();
-  cmds::MapBufferRange map_buffer_range;
-  map_buffer_range.Init(GL_PIXEL_PACK_BUFFER, 0, size, GL_MAP_READ_BIT,
-                        data_shm_id, data_shm_offset,
-                        result_shm_id, result_shm_offset);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(map_buffer_range));
-  EXPECT_EQ(GL_NO_ERROR, GetGLError());
-
-  EXPECT_CALL(*gl_, ReadPixels(_, _, _, _, _, _, _)).Times(0);
-  cmds::ReadPixels cmd;
-  cmd.Init(0,
-           0,
-           kWidth,
-           kHeight,
-           GL_RGBA,
-           GL_UNSIGNED_BYTE,
-           0,
-           0,
-           0,
-           0,
-           false);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
-}
-
 TEST_P(GLES3DecoderManualInitTest, ReadPixelsR16ExtZeroSizeValidationOOB) {
   InitState init;
   init.extensions = "GL_EXT_texture_norm16";
@@ -1036,6 +992,50 @@ TEST_P(GLES2DecoderManualInitTest, ReadPixels2RowLengthWorkaround) {
            kFormat, kType,
            0, 0, 0, 0,
            false);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES2DecoderManualInitTest, ReadPixels2LargeRowLengthWorkaround) {
+  gpu::GpuDriverBugWorkarounds workarounds;
+  workarounds.pack_large_row_length_separately_pack_buffer = true;
+  InitState init;
+  init.gl_version = "OpenGL ES 3.0";
+  init.context_type = CONTEXT_TYPE_OPENGLES3;
+  InitDecoderWithWorkarounds(init, workarounds);
+
+  const GLsizei kWidth = 1;
+  const GLsizei kHeight = 2;
+  const GLenum kFormat = GL_RGBA;
+  const GLenum kType = GL_UNSIGNED_BYTE;
+  const GLint kLargeRowLength = 0x7fffffc;
+  constexpr GLsizeiptr kByteOffsetToVerify = 0x1ffffff0;
+  GLsizeiptr size = kByteOffsetToVerify + 256;
+
+  DoBindBuffer(GL_PIXEL_PACK_BUFFER, client_buffer_id_, kServiceBufferId);
+  DoBufferData(GL_PIXEL_PACK_BUFFER, size);
+
+  DoPixelStorei(GL_PACK_ROW_LENGTH, kLargeRowLength);
+
+  EXPECT_CALL(*gl_, GetError())
+      .WillOnce(Return(GL_NO_ERROR))
+      .RetiresOnSaturation();
+
+  EXPECT_CALL(*gl_, PixelStorei(GL_PACK_ROW_LENGTH, 0))
+      .Times(1)
+      .RetiresOnSaturation();
+  for (GLint ii = 0; ii < kHeight; ++ii) {
+    void* offset = reinterpret_cast<void*>(ii * kByteOffsetToVerify);
+    EXPECT_CALL(*gl_, ReadPixels(0, ii, kWidth, 1, kFormat, kType, offset))
+        .Times(1)
+        .RetiresOnSaturation();
+  }
+  EXPECT_CALL(*gl_, PixelStorei(GL_PACK_ROW_LENGTH, kLargeRowLength))
+      .Times(1)
+      .RetiresOnSaturation();
+
+  cmds::ReadPixels cmd;
+  cmd.Init(0, 0, kWidth, kHeight, kFormat, kType, 0, 0, 0, 0, false);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }

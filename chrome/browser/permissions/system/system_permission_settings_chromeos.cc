@@ -33,7 +33,7 @@ class PlatformHandleImpl : public PlatformHandle {
   bool CanPrompt(ContentSettingsType type) override { return false; }
 
   bool IsDenied(ContentSettingsType type) override {
-      return ash::privacy_hub_util::ContentBlocked(type);
+    return ash::privacy_hub_util::ContentBlocked(type);
   }
 
   bool IsAllowed(ContentSettingsType type) override { return !IsDenied(type); }

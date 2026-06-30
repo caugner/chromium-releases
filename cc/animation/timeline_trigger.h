@@ -5,6 +5,7 @@
 #ifndef CC_ANIMATION_TIMELINE_TRIGGER_H_
 #define CC_ANIMATION_TIMELINE_TRIGGER_H_
 
+#include "base/check.h"
 #include "cc/animation/animation_trigger.h"
 
 namespace cc {
@@ -29,6 +30,7 @@ class CC_ANIMATION_EXPORT TimelineTrigger : public AnimationTrigger {
 
   static scoped_refptr<TimelineTrigger> Create(
       int id,
+      State state,
       scoped_refptr<AnimationTimeline> timeline,
       Boundaries Boundaries);
 
@@ -43,8 +45,11 @@ class CC_ANIMATION_EXPORT TimelineTrigger : public AnimationTrigger {
               AnimationEvents* events,
               base::TimeTicks monotonic_time);
 
+  State GetStateForTest() const { return state_; }
+
  protected:
   explicit TimelineTrigger(int id,
+                           State state,
                            scoped_refptr<AnimationTimeline> timeline,
                            Boundaries boundaries);
   ~TimelineTrigger() override;
@@ -62,8 +67,21 @@ class CC_ANIMATION_EXPORT TimelineTrigger : public AnimationTrigger {
   // ranges.
   Boundaries boundaries_;
   // The most recently observed state of the trigger.
+  // TODO(crbug.com/451238244): Move state_ to AnimationTrigger class. It
+  // applies to all types of triggers.
   State state_ = State::kIdle;
 };
+
+inline TimelineTrigger* ToTimelineTrigger(AnimationTrigger* trigger) {
+  CHECK(trigger->IsTimelineTrigger());
+  return static_cast<TimelineTrigger*>(trigger);
+}
+
+inline const TimelineTrigger* ToTimelineTrigger(
+    const AnimationTrigger* trigger) {
+  CHECK(trigger->IsTimelineTrigger());
+  return static_cast<const TimelineTrigger*>(trigger);
+}
 
 }  // namespace cc
 

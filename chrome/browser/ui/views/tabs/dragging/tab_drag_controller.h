@@ -301,6 +301,17 @@ class TabDragController : public views::WidgetObserver,
   };
   // LINT.ThenChange(//tools/metrics/histograms/metadata/tab/enums.xml:TabDraggingDestination)
 
+  // These values are persisted to logs. Entries should not be renumbered and
+  // numeric values should never be reused.
+  // LINT.IfChange(TabDragPinnedness)
+  enum class TabDragPinnedness {
+    kAllUnpinned = 0,
+    kAllPinned = 1,
+    kMixed = 2,
+    kMaxValue = kMixed
+  };
+  // LINT.ThenChange(//tools/metrics/histograms/metadata/tab/enums.xml:TabDragPinnedness)
+
   // Overridden from views::WidgetObserver:
   void OnWidgetBoundsChanged(views::Widget* widget,
                              const gfx::Rect& new_bounds) override;
@@ -587,6 +598,10 @@ class TabDragController : public views::WidgetObserver,
   // operation. This is used to calculate minimum elasticity before a
   // DraggedTabView is constructed.
   gfx::Point start_point_in_screen_;
+
+  // The restored bounds size of the source window at the start of the drag
+  // session. Used to calculate the dragged window size.
+  gfx::Size initial_window_size_;
 
   // Used to track the view that had focus in the window containing
   // `source_view_`. This is saved so that focus can be restored properly when

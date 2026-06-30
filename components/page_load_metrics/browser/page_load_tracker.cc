@@ -1221,6 +1221,9 @@ const PageLoadMetricsObserverDelegate::BackForwardCacheRestore&
 PageLoadTracker::GetBackForwardCacheRestore(size_t index) const {
   return back_forward_cache_restores_[index];
 }
+size_t PageLoadTracker::GetNumBackForwardCacheRestores() const {
+  return back_forward_cache_restores_.size();
+}
 
 bool PageLoadTracker::StartedInForeground() const {
   return started_in_foreground_;
@@ -1319,6 +1322,11 @@ PageLoadTracker::GetSoftNavigationIntervalInteractionToNextPaintCalculator()
 const std::optional<blink::SubresourceLoadMetrics>&
 PageLoadTracker::GetSubresourceLoadMetrics() const {
   return metrics_update_dispatcher_.subresource_load_metrics();
+}
+
+const mojom::FontLoadingMetricsPtr& PageLoadTracker::GetFontLoadingMetrics()
+    const {
+  return metrics_update_dispatcher_.font_loading_metrics();
 }
 
 const PageRenderData& PageLoadTracker::GetMainFrameRenderData() const {
@@ -1480,14 +1488,16 @@ void PageLoadTracker::UpdateMetrics(
         subresource_load_metrics,
     std::vector<mojom::SoftNavigationMetricsPtr> soft_navigation_metrics,
     std::vector<mojom::LargestContentfulPaintTimingPtr>
-        soft_largest_contentful_paint) {
+        soft_largest_contentful_paint,
+    mojom::FontLoadingMetricsPtr font_loading_metrics) {
   if (parent_tracker_) {
     parent_tracker_->UpdateMetrics(
         render_frame_host, new_timing.Clone(), new_metadata.Clone(), features,
         resources, render_data.Clone(), cpu_timing.Clone(),
         mojo::Clone(event_timings), subresource_load_metrics,
         mojo::Clone(soft_navigation_metrics),
-        mojo::Clone(soft_largest_contentful_paint));
+        mojo::Clone(soft_largest_contentful_paint),
+        font_loading_metrics.Clone());
   }
 
   metrics_update_dispatcher_.UpdateMetrics(
@@ -1495,7 +1505,8 @@ void PageLoadTracker::UpdateMetrics(
       std::move(features), resources, std::move(render_data),
       std::move(cpu_timing), std::move(event_timings), subresource_load_metrics,
       std::move(soft_navigation_metrics),
-      std::move(soft_largest_contentful_paint), page_type_);
+      std::move(soft_largest_contentful_paint), std::move(font_loading_metrics),
+      page_type_);
 }
 
 void PageLoadTracker::AddCustomUserTimings(

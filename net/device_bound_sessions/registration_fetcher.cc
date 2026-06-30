@@ -581,8 +581,6 @@ class RegistrationFetcherImpl : public RegistrationFetcher {
     request.set_site_for_cookies(isolation_info_.site_for_cookies());
     request.set_initiator(original_request_initiator_);
     request.set_isolation_info(isolation_info_);
-    request.set_force_ignore_site_for_cookies(
-        context_->network_delegate()->ShouldForceIgnoreSiteForCookies(request));
 
     if (IsForRefreshRequest()) {
       request.SetExtraRequestHeaderByName(
@@ -672,8 +670,12 @@ class RegistrationFetcherImpl : public RegistrationFetcher {
       }
     }
 
+    // Use the final URL after redirects for validation checks to ensure we
+    // validate the origin that actually served the response.
+    GURL final_registration_url = url_fetcher_->request().url();
+
     base::expected<SessionParams, SessionError> params_or_error =
-        ParseSessionInstructionJson(url_fetcher_->request().url(), *key_id_,
+        ParseSessionInstructionJson(final_registration_url, *key_id_,
                                     session_identifier_,
                                     url_fetcher_->data_received());
     if (!params_or_error.has_value()) {
@@ -683,8 +685,9 @@ class RegistrationFetcherImpl : public RegistrationFetcher {
       return;
     }
 
+    const SessionParams& params = *params_or_error;
     base::expected<std::unique_ptr<Session>, SessionError> session_or_error =
-        Session::CreateIfValid(params_or_error.value());
+        Session::CreateIfValid(params);
     if (!session_or_error.has_value()) {
       RunCallback(
           CreateErrorRegistrationResult(std::move(session_or_error).error()));
@@ -692,10 +695,6 @@ class RegistrationFetcherImpl : public RegistrationFetcher {
       return;
     }
     std::unique_ptr<Session> session = std::move(*session_or_error);
-
-    // Use the final URL after redirects for validation checks to ensure we
-    // validate the origin that actually served the response.
-    GURL final_registration_url = url_fetcher_->request().url();
 
     // Re-process challenge headers now that a session exists so that cached
     // challenges work for the registration case as well.
@@ -730,11 +729,15 @@ class RegistrationFetcherImpl : public RegistrationFetcher {
     }
 
     // Session::CreateIfValid confirms that the registration endpoint is
-    // same-site with the scope origin. But we still need to validate
-    // that this subdomain is allowed to register a session for the
-    // whole site.
+    // same-site with the scope origin and allowed to register a session for the
+    // scope origin. But for cross-origin same-site registrations, we still need
+    // to validate that this subdomain is allowed to register a session for the
+    // scope origin via a .well-known check.
     if (features::kDeviceBoundSessionsCheckSubdomainRegistration.Get() &&
-        !IsForRefreshRequest() && params_or_error->scope.include_site &&
+        !IsForRefreshRequest() && params.scope.include_site &&
+        // We compare hosts rather than origins here because the DBSC spec
+        // (https://w3c.github.io/webappsec-dbsc/#algo-create-session) defines
+        // the scope of .well-known files to be the host.
         // Skip all validations if the fetcher endpoint is not a subdomain but
         // rather the top-level site (which matches the origin when including
         // the site).

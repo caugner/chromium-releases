@@ -997,6 +997,7 @@ IN_PROC_BROWSER_TEST_F(TabListBridgeBrowserTest, OpenTab) {
   const GURL url1("about:blank?q=1");
   const GURL url2("about:blank?q=2");
   const GURL url3("about:blank?q=3");
+  const GURL url4("about:blank?q=4");
 
   ASSERT_TRUE(ui_test_utils::NavigateToURLWithDisposition(
       browser(), url1, WindowOpenDisposition::CURRENT_TAB,
@@ -1022,6 +1023,15 @@ IN_PROC_BROWSER_TEST_F(TabListBridgeBrowserTest, OpenTab) {
   EXPECT_THAT(tab_list_interface->GetAllTabs(),
               testing::ElementsAre(MatchesTab(url2), MatchesTab(url1),
                                    MatchesTab(url3)));
+
+  // Open a tab at the end of the tab strip by specifying the tab strip size
+  // as the index.
+  tab_list_interface->OpenTab(url4, tab_list_interface->GetTabCount());
+  EXPECT_EQ(3, tab_list_interface->GetActiveIndex());
+  EXPECT_TRUE(content::WaitForLoadStop(tab_strip_model->GetWebContentsAt(3)));
+  EXPECT_THAT(tab_list_interface->GetAllTabs(),
+              testing::ElementsAre(MatchesTab(url2), MatchesTab(url1),
+                                   MatchesTab(url3), MatchesTab(url4)));
 }
 
 IN_PROC_BROWSER_TEST_F(TabListBridgeBrowserTest, InsertWebContentsAt) {
@@ -1110,8 +1120,8 @@ IN_PROC_BROWSER_TEST_F(TabListBridgeBrowserTest, MoveTabGroupToWindow) {
   EXPECT_EQ("0g0 1g0 2",
             GetTabStripStateString(source_model, /*annotate_groups=*/true));
 
-  source_list_interface->MoveTabGroupToWindow(*group_id,
-                                              second_browser->session_id(), 1);
+  EXPECT_TRUE(source_list_interface->MoveTabGroupToWindow(
+      *group_id, second_browser->session_id(), 1));
 
   // Verify that the group has been moved to the destination window.
   EXPECT_EQ("2",
@@ -1159,8 +1169,8 @@ IN_PROC_BROWSER_TEST_F(TabListBridgeBrowserTest,
   // Now move the group to the second window. The group should be moved to the
   // end since the closest valid index that isn't in the middle of another tab
   // group is 3.
-  source_list_interface->MoveTabGroupToWindow(*group_id,
-                                              second_browser->session_id(), 2);
+  EXPECT_TRUE(source_list_interface->MoveTabGroupToWindow(
+      *group_id, second_browser->session_id(), 2));
 
   EXPECT_EQ("2",
             GetTabStripStateString(source_model, /*annotate_groups=*/true));

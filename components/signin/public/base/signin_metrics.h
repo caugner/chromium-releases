@@ -153,8 +153,11 @@ enum class ProfileSignout {
   // A forced sign-out when the account capability CanSignInToChrome restricts
   // signin.
   kSignoutFromCanSignInToChromeCapability = 45,
+  // User tapped 'Undo' in a snackbar that is shown right after sign-in through
+  // Autofill and Passwords Sign-in promo. Android only.
+  kUserTappedUndoRightAfterSignInFromAutofillAndPasswords = 46,
   // Keep this as the last enum.
-  kMaxValue = kSignoutFromCanSignInToChromeCapability,
+  kMaxValue = kUserTappedUndoRightAfterSignInFromAutofillAndPasswords,
 };
 // LINT.ThenChange(/tools/metrics/histograms/metadata/signin/enums.xml)
 
@@ -342,10 +345,21 @@ enum class AccessPoint : int {
   kIosPageActionMenu = 100,
   // Autofill and passwords settings page on iOS and Android.
   kSettingsAutofillAndPasswords = 101,
+  // Deep link to the sign-in flow (e.g. from cross-device QR code sharing).
+  kDeepLinkDefault = 102,
+  // From the AgeMismatchSignout screen after the user is forced sign-out. iOS
+  // only.
+  kAgeMismatchSignout = 103,
+  // Sign in via the iOS assistant button toolbar button on iPad.
+  kIosGeminiButtonToolbar = 104,
+  // Sign in via Indigo.
+  kIndigo = 105,
+  // Access point from the overflow menu (three dots menu on iOS).
+  kOverflowMenu = 106,
   // Add values above this line with a corresponding label to the
   // "SigninAccessPoint" enum in
   // tools/metrics/histograms/metadata/signin/enums.xml.
-  kMaxValue = kSettingsAutofillAndPasswords,  // This must be last.
+  kMaxValue = kOverflowMenu,  // This must be last.
 };
 // LINT.ThenChange(/tools/metrics/histograms/metadata/signin/enums.xml)
 

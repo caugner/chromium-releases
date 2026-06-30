@@ -18,6 +18,7 @@
 #include "components/omnibox/browser/vector_icons.h"  // nogncheck
 #include "components/prefs/pref_service.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/gfx/paint_vector_icon.h"
 
 @interface RunningAppsListener : NSObject
@@ -192,7 +193,9 @@ gfx::ImageSkia OSIconProviderMac::GetIcon() const {
                                    features::kGlicChromeStatusIconSizePx.Get(),
                                    SK_ColorWHITE);
     }
-    return gfx::CreateVectorIcon(omnibox::kProductChromeRefreshIcon,
+    return gfx::CreateVectorIcon(features::IsRoundedIconsEnabled()
+                                     ? omnibox::kChromeProductIcon
+                                     : omnibox::kProductChromeRefreshOldIcon,
                                  features::kGlicChromeStatusIconSizePx.Get(),
                                  SK_ColorWHITE);
   }

@@ -11,11 +11,15 @@
 #include "base/memory/raw_ref.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/indigo/api_client.h"
 #include "chrome/browser/indigo/indigo_service.h"
+#include "chrome/browser/ui/page_action/page_action_observer.h"
 #include "chrome/browser/ui/tabs/contents_observing_tab_feature.h"
 #include "chrome/browser/ui/views/indigo/indigo_toolbar.h"
 #include "components/optimization_guide/core/hints/optimization_guide_decision.h"
+#include "components/viz/common/surfaces/tracked_element_rects.h"
+#include "content/public/browser/tracked_element_observer.h"
 #include "ui/base/unowned_user_data/scoped_unowned_user_data.h"
 #include "ui/base/unowned_user_data/unowned_user_data_host.h"
 #include "ui/gfx/geometry/rect.h"
@@ -25,9 +29,7 @@ class OptimizationGuideDecider;
 class OptimizationMetadata;
 }  // namespace optimization_guide
 
-namespace page_actions {
-class PageActionController;
-}  // namespace page_actions
+#include "chrome/browser/ui/page_action/page_action_controller.h"
 
 namespace tabs {
 class TabInterface;
@@ -56,15 +58,38 @@ enum class IndigoTransformationResult {
   kMissingUserImage = 8,
   kNotOnboarded = 9,
   kGenerateImageError = 10,
-  kMaxValue = kGenerateImageError,
+  kRefreshTokenInPersistentErrorState = 11,
+  kManagedDomain = 12,
+  kGlicDisabledForProfile = 13,
+  kMaxValue = kGlicDisabledForProfile,
 };
 
 // LINT.ThenChange(//tools/metrics/histograms/metadata/indigo/enums.xml:IndigoTransformationResult)
 
+enum class ResetType {
+  kResetReplacementsAndContentScript,
+  kResetReplacementsOnly,
+};
+
+enum class OnboardingDisposition {
+  // Triggered in the normal course of using the feature.
+  kDefault,
+  // Triggered to replace the existing image.
+  kReplacePhoto,
+};
+
+enum class EntryPoint {
+  kSuggestionChip = 0,
+  kAnchoredMessage = 1,
+  kErrorToast = 2,
+};
+
 // Manages the Indigo page action and its various entry points, ensuring they
 // are correctly displayed.
 class IndigoPageActionController : public tabs::ContentsObservingTabFeature,
-                                   public IndigoToolbar::Delegate {
+                                   public content::TrackedElementObserver,
+                                   public IndigoToolbar::Delegate,
+                                   public page_actions::PageActionObserver {
  public:
   DECLARE_USER_DATA(IndigoPageActionController);
 
@@ -83,20 +108,41 @@ class IndigoPageActionController : public tabs::ContentsObservingTabFeature,
   // it does not exist.
   static IndigoPageActionController* From(tabs::TabInterface* tab);
 
-  void InvokeAction();
+  void InvokeAction(EntryPoint entry_point);
 
-  // Shows the toolbar at the specified rectangle in the web contents view.
-  void ShowToolbarInside(const gfx::Rect& rect);
+  // Resets all image replacements and hides the toolbar.
+  void Reset(ResetType reset_type);
+  // Shows the toolbar using the latest tracked bounds, if available.
+  void ShowToolbar();
+
+  void SetTrackedBoundsForTesting(const std::optional<gfx::Rect>& bounds) {
+    tracked_bounds_ = bounds;
+  }
+
+  // Shows a toast notification informing the user that an error has occurred.
+  void ShowInvocationErrorToast();
 
   // content::WebContentsObserver:
   void DidFinishNavigation(
       content::NavigationHandle* navigation_handle) override;
+  void RenderViewHostChanged(content::RenderViewHost* old_host,
+                             content::RenderViewHost* new_host) override;
+  void FrameSizeChanged(content::RenderFrameHost* render_frame_host,
+                        const gfx::Size& frame_size) override;
+
+  // content::TrackedElementObserver:
+  void OnTrackedElementRectsChanged(const viz::TrackedElementRects& rects,
+                                    float device_scale_factor) override;
 
   // IndigoToolbar::Delegate:
   void OnClose(IndigoToolbar* toolbar) override;
   void OnRegenerate(IndigoToolbar* toolbar) override;
   void OnReplaceOriginalPhoto(IndigoToolbar* toolbar) override;
   void OnDeleteOriginalPhoto(IndigoToolbar* toolbar) override;
+
+  // page_actions::PageActionObserver:
+  void OnPageActionAnchoredMessageShown(
+      const page_actions::PageActionState& page_action) override;
 
   class TestApi {
    public:
@@ -107,8 +153,9 @@ class IndigoPageActionController : public tabs::ContentsObservingTabFeature,
       controller_->CheckEligibilityForOnboarding(eligibility);
     }
 
-    void CheckOnboardingResult(const OnboardingResult& result) {
-      controller_->OnOnboardingDialogClosed(result);
+    void CheckOnboardingResult(OnboardingDisposition disposition,
+                               const OnboardingResult& result) {
+      controller_->OnOnboardingDialogClosed(disposition, result);
     }
 
     void SetOnboardingDialogFactory(OnboardingDialogFactory factory) {
@@ -123,14 +170,23 @@ class IndigoPageActionController : public tabs::ContentsObservingTabFeature,
   // Updates the visibility and states of all entry points.
   void UpdateEntryPointsState();
 
+  // Shows the onboarding dialog with the appropriate URL based on disposition.
+  void ShowOnboardingDialog(OnboardingDisposition disposition);
+
   // Called when the eligibility has been fetched.
   void CheckEligibilityForOnboarding(const CombinedEligibility& eligibility);
 
   // Called when eligibility is known and onboarding is completed (if needed).
   void ContinueInvoke(const CombinedEligibility& eligibility);
 
+  // Helper to invoke IndigoAgent.
+  void TriggerIndigoAgent();
+  // Same as above, but introduces a delay before invoking.
+  void TriggerIndigoAgentWithDelay();
+
   // Updates state and handles preference changes when the dialog closes.
-  void OnOnboardingDialogClosed(const OnboardingResult& result);
+  void OnOnboardingDialogClosed(OnboardingDisposition disposition,
+                                const OnboardingResult& result);
 
   // Called when the delete request completes.
   void OnDeleteOriginalPhotoComplete(base::expected<void, DeleteError> result);
@@ -153,6 +209,12 @@ class IndigoPageActionController : public tabs::ContentsObservingTabFeature,
   // the tab is currently invisible (backgrounded) or has no active browser
   // window.
   views::View* GetIndigoOverlayView() const;
+
+  // Hides the toolbar if it is currently shown.
+  void DestroyToolbar();
+
+  // Shows the page action anchored message and notifies IndigoService.
+  void ShowAnchoredMessage(page_actions::PageActionPriorityCategory priority);
 
   // `page_action_controller_` is owned by the same `TabFeatures` that owns
   // `this`. Since `page_action_controller_` is initialized before `this` and
@@ -183,6 +245,13 @@ class IndigoPageActionController : public tabs::ContentsObservingTabFeature,
   // The floating toolbar, if shown.
   std::unique_ptr<IndigoToolbar> toolbar_;
 
+  // The latest tracked bounds of the primary image, in DIPs.
+  std::optional<gfx::Rect> tracked_bounds_;
+
+  // Timer to delay the invocation of IndigoAgent after Glic is invoked and the
+  // side panel is opened, to allow for the page to stabilize.
+  base::OneShotTimer delay_agent_invoke_timer_;
+
   base::CallbackListSubscription tab_became_hidden_subscription_;
   base::CallbackListSubscription tab_became_visible_subscription_;
 
@@ -190,6 +259,12 @@ class IndigoPageActionController : public tabs::ContentsObservingTabFeature,
 
   ui::ScopedUnownedUserData<IndigoPageActionController>
       scoped_unowned_user_data_;
+
+  void RegisterObserverWithHost(content::RenderWidgetHost* host);
+  void UnregisterObserverFromHost(content::RenderWidgetHost* host);
+  void ClearTrackedBoundsAndHideToolbar();
+
+  raw_ptr<content::RenderWidgetHost> current_host_ = nullptr;
 
   // Weak pointer factory used for the invocation flow. This is invalidated on
   // navigation to ensure that if a user starts an action (like onboarding) and

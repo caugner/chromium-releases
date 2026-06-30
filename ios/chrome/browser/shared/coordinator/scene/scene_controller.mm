@@ -48,6 +48,7 @@
 #import "ios/chrome/browser/authentication/ui_bundled/change_profile/change_profile_authentication_continuation.h"
 #import "ios/chrome/browser/authentication/ui_bundled/change_profile/change_profile_signout_continuation.h"
 #import "ios/chrome/browser/authentication/ui_bundled/continuation.h"
+#import "ios/chrome/browser/authentication/ui_bundled/signin/deeplink_signin/cross_device_signin_scene_agent.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/features.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_constants.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_utils.h"
@@ -76,6 +77,7 @@
 #import "ios/chrome/browser/intents/model/user_activity_compatibility_util.h"
 #import "ios/chrome/browser/lens/ui_bundled/lens_entrypoint.h"
 #import "ios/chrome/browser/lens_overlay/model/lens_overlay_tab_helper.h"
+#import "ios/chrome/browser/level_up/model/level_up_scene_agent.h"
 #import "ios/chrome/browser/main/ui_bundled/browser_lifecycle_manager.h"
 #import "ios/chrome/browser/main/ui_bundled/default_browser_promo_scene_agent.h"
 #import "ios/chrome/browser/main/ui_bundled/incognito_blocker_scene_agent.h"
@@ -1476,6 +1478,10 @@ bool IsProfileUnmanaged(ProfileIOS* profile) {
   [sceneState addAgent:[[WhatsNewSceneAgent alloc]
                            initWithPromosManager:promosManager]];
 
+  if (IsLevelUpEnabled()) {
+    [sceneState addAgent:[[LevelUpSceneAgent alloc] init]];
+  }
+
   if (IsDockingPromoV2Enabled()) {
     [sceneState addAgent:[[DockingPromoSceneAgent alloc]
                              initWithPromosManager:promosManager]];
@@ -1503,6 +1509,14 @@ bool IsProfileUnmanaged(ProfileIOS* profile) {
                                           profile)
                           syncService:SyncServiceFactory::GetForProfile(profile)
                           prefService:prefService]];
+  }
+
+  if (base::FeatureList::IsEnabled(switches::kCrossDeviceSignin)) {
+    [sceneState
+        addAgent:[[CrossDeviceSigninSceneAgent alloc]
+                     initWithSceneURLLoadingService:_sceneURLLoadingService
+                                                        .get()
+                                       sceneHandler:sceneHandler]];
   }
 
   // Add Cobalt scene agent if the feature is enabled and the profile management
@@ -1793,15 +1807,8 @@ bool IsProfileUnmanaged(ProfileIOS* profile) {
 }
 
 - (void)openLatestTab {
-  WebStateList* webStateList = self.currentInterface.browser->GetWebStateList();
-  web::WebState* webState = StartSurfaceRecentTabBrowserAgent::FromBrowser(
-                                self.currentInterface.browser)
-                                ->most_recent_tab();
-  if (!webState) {
-    return;
-  }
-  int index = webStateList->GetIndexOfWebState(webState);
-  webStateList->ActivateWebStateAt(index);
+  StartSurfaceRecentTabBrowserAgent::FromBrowser(self.currentInterface.browser)
+      ->ActivateMostRecentTab();
 }
 
 - (void)addBookmarks:(NSArray<NSURL*>*)URLs {
@@ -2410,6 +2417,9 @@ bool IsProfileUnmanaged(ProfileIOS* profile) {
       [targetInterface.bvc appendTabAddedCompletion:tabOpenedCompletion];
       UrlLoadParams savedParams = urlLoadParams;
       savedParams.in_incognito = targetMode == ApplicationMode::INCOGNITO;
+      if (IsChromeNextIaEnabled()) {
+        savedParams.switch_mode_if_needed = false;
+      }
       UrlLoadingBrowserAgent::FromBrowser(targetInterface.browser)
           ->Load(savedParams);
     } else {
@@ -2420,15 +2430,28 @@ bool IsProfileUnmanaged(ProfileIOS* profile) {
           [self.startupParameters postOpeningAction];
       [self setStartupParameters:nil];
 
-      UrlLoadParams paramsToLoad = urlLoadParams;
-      // If the url to load is empty (such as with Lens) open a new tab page.
-      if (urlLoadParams.web_params.url.is_empty()) {
-        paramsToLoad = UrlLoadParams(urlLoadParams);
-        paramsToLoad.web_params.url = GURL(kChromeUINewTabURL);
-      }
+      BOOL isURLEmpty = urlLoadParams.web_params.url.is_empty();
+      BOOL isBrowserEmpty = targetInterface.browser->GetWebStateList()->empty();
+      BOOL shouldAvoidNewTab =
+          (urlLoadParams.disposition == WindowOpenDisposition::SWITCH_TO_TAB) ||
+          (self.NTPActionAfterTabSwitcherDismissal == OPEN_LATEST_TAB);
 
-      [self addANewTabAndPresentBrowser:targetInterface.browser
-                      withURLLoadParams:paramsToLoad];
+      if (isURLEmpty && shouldAvoidNewTab && !isBrowserEmpty) {
+        // Specific case for Open Latest Tab: Just dismiss Tab Grid and show
+        // active tab.
+        [self beginActivatingBrowser:targetInterface.browser focusOmnibox:NO];
+      } else if (isURLEmpty) {
+        // Default behavior for other empty URL actions (like Lens): Open a new
+        // NTP.
+        UrlLoadParams paramsToLoad = UrlLoadParams(urlLoadParams);
+        paramsToLoad.web_params.url = GURL(kChromeUINewTabURL);
+        [self addANewTabAndPresentBrowser:targetInterface.browser
+                        withURLLoadParams:paramsToLoad];
+      } else {
+        // A specific URL was provided -> Open it in a new tab.
+        [self addANewTabAndPresentBrowser:targetInterface.browser
+                        withURLLoadParams:urlLoadParams];
+      }
 
       // In this particular usage, there should be no postOpeningAction,
       // as triggering voice search while there are multiple windows opened is
@@ -2584,7 +2607,20 @@ bool IsProfileUnmanaged(ProfileIOS* profile) {
       self.currentInterface.browser->GetCommandDispatcher(), BWGCommands);
   GeminiStartupState* startupState = [[GeminiStartupState alloc]
       initWithEntryPoint:gemini::EntryPoint::ExternalAppStoreEvent];
-  [geminiHandler startGeminiFlowWithStartupState:startupState];
+
+  if (IsGeneralizedGeminiEntryFlowEnabled()) {
+    [geminiHandler
+        startGeminiEntryFlowWithStartupState:startupState
+                          baseViewController:self.activeViewController
+                                 accessPoint:signin_metrics::AccessPoint::
+                                                 kDeepLinkDefault
+                    showSnackbarOnCompletion:YES
+                                  completion:nil];
+  } else {
+    // TODO(crbug.com/515476625): Remove this fallback path, the associated
+    // method and string when the generalized Gemini entry flow is rolled out.
+    [geminiHandler startGeminiFlowWithStartupState:startupState];
+  }
 }
 
 // Triggers the switcher view when the last WebState is closed on a device

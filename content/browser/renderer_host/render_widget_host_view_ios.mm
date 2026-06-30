@@ -93,11 +93,11 @@ class UIViewHolder {
 
 RenderWidgetHostViewIOS::RenderWidgetHostViewIOS(RenderWidgetHost* widget)
     : RenderWidgetHostViewBase(widget),
-      gesture_provider_(
+      gesture_provider_(base::MakeRefCounted<ui::FilteredGestureProvider>(
           ui::GetGestureProviderConfig(
               ui::GestureProviderConfigType::CURRENT_PLATFORM,
               GetUIThreadTaskRunner({BrowserTaskType::kUserInput})),
-          this) {
+          this)) {
   ui_view_ = std::make_unique<UIViewHolder>();
   ui_view_->view_ =
       [[RenderWidgetUIView alloc] initWithWidget:weak_factory_.GetWeakPtr()];
@@ -136,7 +136,9 @@ RenderWidgetHostViewIOS::RenderWidgetHostViewIOS(RenderWidgetHost* widget)
   host()->SetView(this);
 }
 
-RenderWidgetHostViewIOS::~RenderWidgetHostViewIOS() = default;
+RenderWidgetHostViewIOS::~RenderWidgetHostViewIOS() {
+  gesture_provider_->Shutdown();
+}
 
 void RenderWidgetHostViewIOS::Destroy() {
   [ui_view_->view_ removeView];
@@ -173,7 +175,7 @@ void RenderWidgetHostViewIOS::CopyFromSurface(
 
 ui::FilteredGestureProvider*
 RenderWidgetHostViewIOS::GetFilteredGestureProviderForTesting() {
-  return &gesture_provider_;
+  return gesture_provider_.get();
 }
 
 void RenderWidgetHostViewIOS::InitAsChild(gfx::NativeView parent_view) {
@@ -354,6 +356,21 @@ gfx::Size RenderWidgetHostViewIOS::GetRequestedRendererSize() {
   return GetViewBounds().size();
 }
 
+#if !BUILDFLAG(IS_IOS_TVOS)
+gfx::Size RenderWidgetHostViewIOS::GetVisibleViewportSize() {
+  int bottom_adjust =
+      std::max(0, static_cast<int>([ui_view_->view_ keyboardHeight]));
+  gfx::Rect requested_rect(GetRequestedRendererSize());
+  requested_rect.Inset(gfx::Insets::TLBR(0, 0, bottom_adjust, 0));
+  return requested_rect.size();
+}
+
+gfx::Size RenderWidgetHostViewIOS::GetVisibleViewportSizeDevicePx() {
+  return gfx::ScaleToCeiledSize(GetVisibleViewportSize(),
+                                GetDeviceScaleFactor());
+}
+#endif  // !BUILDFLAG(IS_IOS_TVOS)
+
 std::optional<DisplayFeature> RenderWidgetHostViewIOS::GetDisplayFeature() {
   return display_feature_;
 }
@@ -475,11 +492,11 @@ void RenderWidgetHostViewIOS::UpdateCALayerTree(
 void RenderWidgetHostViewIOS::OnOldViewDidNavigatePreCommit() {
   CHECK(browser_compositor_) << "Shouldn't be called during destruction!";
   browser_compositor_->DidNavigateMainFramePreCommit();
-  gesture_provider_.ResetDetection();
+  gesture_provider_->ResetDetection();
 }
 
 void RenderWidgetHostViewIOS::OnNewViewDidNavigatePostCommit() {
-  gesture_provider_.ResetDetection();
+  gesture_provider_->ResetDetection();
 }
 
 void RenderWidgetHostViewIOS::DidEnterBackForwardCache() {
@@ -602,8 +619,13 @@ bool RenderWidgetHostViewIOS::ShouldRouteEvents() const {
 }
 
 void RenderWidgetHostViewIOS::OnTouchEvent(blink::WebTouchEvent web_event) {
+  auto weak_this = weak_factory_.GetWeakPtr();
+  scoped_refptr<ui::FilteredGestureProvider> protector(gesture_provider_);
   ui::FilteredGestureProvider::TouchHandlingResult result =
-      gesture_provider_.OnTouchEvent(MotionEventWeb(web_event));
+      protector->OnTouchEvent(MotionEventWeb(web_event));
+  if (!weak_this) {
+    return;
+  }
   if (!result.succeeded) {
     return;
   }
@@ -625,9 +647,14 @@ void RenderWidgetHostViewIOS::ProcessAckedTouchEvent(
     blink::mojom::InputEventResultState ack_result) {
   const bool event_consumed =
       ack_result == blink::mojom::InputEventResultState::kConsumed;
-  gesture_provider_.OnTouchEventAck(
+  auto weak_this = weak_factory_.GetWeakPtr();
+  scoped_refptr<ui::FilteredGestureProvider> protector(gesture_provider_);
+  protector->OnTouchEventAck(
       touch.event.unique_touch_event_id, event_consumed,
       input::InputEventResultStateIsSetBlocking(ack_result));
+  if (!weak_this) {
+    return;
+  }
   if (touch.event.touch_start_or_first_touch_move && event_consumed &&
       ShouldRouteEvents()) {
     host()
@@ -664,8 +691,13 @@ void RenderWidgetHostViewIOS::SendGestureEvent(
 void RenderWidgetHostViewIOS::InjectTouchEvent(
     const blink::WebTouchEvent& event,
     const ui::LatencyInfo& latency_info) {
+  auto weak_this = weak_factory_.GetWeakPtr();
+  scoped_refptr<ui::FilteredGestureProvider> protector(gesture_provider_);
   ui::FilteredGestureProvider::TouchHandlingResult result =
-      gesture_provider_.OnTouchEvent(MotionEventWeb(event));
+      protector->OnTouchEvent(MotionEventWeb(event));
+  if (!weak_this) {
+    return;
+  }
   if (!result.succeeded) {
     return;
   }
@@ -904,7 +936,7 @@ void RenderWidgetHostViewIOS::ChildDidAckGestureEvent(
 }
 
 void RenderWidgetHostViewIOS::OnUnconfirmedTapConvertedToTap() {
-  gesture_provider_.OnUnconfirmedTapConvertedToTap();
+  gesture_provider_->OnUnconfirmedTapConvertedToTap();
 }
 
 void RenderWidgetHostViewIOS::UpdateFrameBounds() {
@@ -962,6 +994,19 @@ void RenderWidgetHostViewIOS::ContentInsetChanged() {
     host()->SynchronizeVisualProperties();
   }
 }
+
+#if !BUILDFLAG(IS_IOS_TVOS)
+void RenderWidgetHostViewIOS::OnKeyboardVisibilityChanged() {
+  host()->SynchronizeVisualProperties();
+
+  if ([ui_view_->view_ keyboardHeight] > 0) {
+    auto* input_handler = GetFrameWidgetInputHandlerForFocusedWidget();
+    if (input_handler) {
+      input_handler->ScrollFocusedEditableNodeIntoView();
+    }
+  }
+}
+#endif  // !BUILDFLAG(IS_IOS_TVOS)
 
 void RenderWidgetHostViewIOS::ExtendSelectionAndDelete(int32_t before,
                                                        int32_t after) {

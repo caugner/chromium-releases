@@ -197,6 +197,18 @@ class PageHandler : public DevToolsDomainHandler,
       std::optional<bool> include_actionable_information,
       std::unique_ptr<GetAnnotatedPageContentCallback> callback) override;
 
+  Response AddScriptToEvaluateOnNewDocument(
+      const std::string& source,
+      std::optional<std::string> world_name,
+      std::optional<bool> include_command_line_api,
+      std::optional<bool> run_immediately,
+      std::string* identifier) override;
+  Response RemoveScriptToEvaluateOnNewDocument(
+      const std::string& identifier) override;
+  Response AddScriptToEvaluateOnLoad(const std::string& source,
+                                     std::string* identifier) override;
+  Response RemoveScriptToEvaluateOnLoad(const std::string& identifier) override;
+
   Response AssureTopLevelActiveFrame();
 
  private:
@@ -283,6 +295,12 @@ class PageHandler : public DevToolsDomainHandler,
   base::RepeatingCallback<void(std::string)> prepare_for_reload_callback_;
   bool have_pending_reload_ = false;
   std::string pending_script_to_evaluate_on_load_;
+
+  Response AddScriptToEvaluateOnNewDocumentInternal(
+      const std::string& source,
+      std::optional<std::string> world_name,
+      std::optional<bool> include_command_line_api,
+      std::string* identifier);
 
   base::WeakPtrFactory<PageHandler> weak_factory_{this};
 };

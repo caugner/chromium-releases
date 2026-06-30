@@ -8,6 +8,8 @@
 #include <string>
 
 #include "ash/public/cpp/app_types_util.h"
+#include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
@@ -30,15 +32,21 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chromeos/ash/experiences/arc/arc_util.h"
 #include "components/exo/shell_surface_util.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/drop_data.h"
+#include "services/viz/privileged/mojom/compositing/features.mojom-features.h"
 #include "storage/browser/file_system/external_mount_points.h"
 #include "storage/browser/file_system/file_system_context.h"
 #include "storage/browser/file_system/file_system_url.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "ui/base/clipboard/file_info.h"
 #include "ui/base/data_transfer_policy/data_transfer_endpoint.h"
+#include "ui/gl/gl_switches.h"
 
 namespace ash {
+
+BASE_FEATURE(kChromeSecurityDelegateIgnoreArcVm,
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 namespace {
 
@@ -113,6 +121,12 @@ base::FilePath GetVmMount(const std::string& vm_name) {
 // Translate |vm_paths| from |source| VM to host paths.
 std::vector<FileInfo> TranslateVMToHost(const std::string& vm_name,
                                         std::vector<ui::FileInfo> vm_paths) {
+  // Arc doesn't currently support drag-drop or clipboard via exo.
+  // If Arc ever adds support, we must map paths correctly like other VMs.
+  if (vm_name == arc::kArcVmName &&
+      base::FeatureList::IsEnabled(kChromeSecurityDelegateIgnoreArcVm)) {
+    return {};
+  }
   std::vector<FileInfo> file_infos;
   Profile* primary_profile = ProfileManager::GetPrimaryUserProfile();
   bool is_crostini = vm_name == crostini::kCrostiniDefaultVmName;
@@ -280,11 +294,20 @@ void ShareWithVMAndTranslateToFileUrls(
   ShareAndTranslateHostToVM(vm_name, CrackPaths(files), std::move(callback));
 }
 
-ChromeSecurityDelegate::ChromeSecurityDelegate() = default;
+ChromeSecurityDelegate::ChromeSecurityDelegate() {
+  // We allow tests to self activate when testing Viz/GPU code.
+  self_activation_test_override_ =
+      base::FeatureList::IsEnabled(viz::mojom::EnableVizTestApis) ||
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kUseGpuInTests);
+}
 
 ChromeSecurityDelegate::~ChromeSecurityDelegate() = default;
 
 bool ChromeSecurityDelegate::CanSelfActivate(aura::Window* window) const {
+  if (self_activation_test_override_) {
+    return true;
+  }
   // TODO(b/233691818): The default should be "false", and clients should
   // override that if they need to self-activate.
   //

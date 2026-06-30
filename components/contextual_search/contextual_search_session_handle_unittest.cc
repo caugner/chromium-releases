@@ -6,11 +6,13 @@
 
 #include <memory>
 
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/unguessable_token.h"
 #include "components/contextual_search/contextual_search_metrics_recorder.h"
 #include "components/contextual_search/contextual_search_service.h"
 #include "components/contextual_search/mock_contextual_search_context_controller.h"
+#include "components/contextual_tasks/public/query_contextualizer.h"
 #include "components/lens/contextual_input.h"
 #include "components/lens/lens_features.h"
 #include "components/prefs/testing_pref_service.h"
@@ -114,8 +116,12 @@ TEST_F(ContextualSearchSessionHandleTest,
                       CONTEXTUAL_INPUT_UPLOAD_TYPE_EXPLICIT);
       });
 
-  handle_->StartDriveContextUploadFlow(token, test_drive_id, test_resource_key,
-                                       test_mime_type);
+  ContextualSearchSessionHandle::DriveUploadParams params;
+  params.drive_id = test_drive_id;
+  params.resource_key = test_resource_key;
+  params.mime_type = test_mime_type;
+  params.file_name = "test.doc";
+  handle_->StartDriveContextUploadFlow(token, params);
 }
 
 TEST_F(ContextualSearchSessionHandleTest,
@@ -124,7 +130,12 @@ TEST_F(ContextualSearchSessionHandleTest,
 
   EXPECT_CALL(*mock_controller_ptr_, StartFileUploadFlow(_, _, _)).Times(0);
 
-  handle_->StartDriveContextUploadFlow(token, "id", "key", "type");
+  ContextualSearchSessionHandle::DriveUploadParams params;
+  params.drive_id = "id";
+  params.resource_key = "key";
+  params.mime_type = "type";
+  params.file_name = "name";
+  handle_->StartDriveContextUploadFlow(token, params);
 }
 
 TEST_F(ContextualSearchSessionHandleTest,
@@ -157,6 +168,63 @@ TEST_F(ContextualSearchSessionHandleTest,
       });
 
   handle_->StartModalityChipUploadFlow(token, std::move(modality_chip_props));
+}
+
+TEST_F(ContextualSearchSessionHandleTest, PreviousTurnsAppended) {
+  EXPECT_TRUE(handle_->previous_turns().empty());
+
+  contextual_tasks::ThreadTurn turn1;
+  turn1.query = "first query";
+  handle_->AddThreadTurn(turn1);
+  ASSERT_EQ(handle_->previous_turns().size(), 1u);
+  EXPECT_EQ(handle_->previous_turns()[0].query, "first query");
+
+  contextual_tasks::ThreadTurn turn2;
+  turn2.query = "second query";
+  handle_->AddThreadTurn(turn2);
+  ASSERT_EQ(handle_->previous_turns().size(), 2u);
+  EXPECT_EQ(handle_->previous_turns()[0].query, "first query");
+  EXPECT_EQ(handle_->previous_turns()[1].query, "second query");
+}
+
+TEST_F(ContextualSearchSessionHandleTest, GetSubmittedContextTabTitles) {
+  base::UnguessableToken token1 = handle_->CreateContextToken();
+  base::UnguessableToken token2 = handle_->CreateContextToken();
+
+  FileInfo file_info1;
+  file_info1.file_token = token1;
+  file_info1.tab_title = "title 1";
+
+  FileInfo file_info2;
+  file_info2.file_token = token2;
+
+  EXPECT_CALL(*mock_controller_ptr_, GetFileInfo(token1))
+      .WillRepeatedly(testing::Return(&file_info1));
+  EXPECT_CALL(*mock_controller_ptr_, GetFileInfo(token2))
+      .WillRepeatedly(testing::Return(&file_info2));
+
+  handle_->set_submitted_context_tokens({token1, token2});
+
+  std::vector<std::string> tab_titles = handle_->GetSubmittedContextTabTitles();
+  ASSERT_EQ(tab_titles.size(), 1u);
+  EXPECT_EQ(tab_titles[0], "title 1");
+}
+
+TEST_F(ContextualSearchSessionHandleTest,
+       NotifyQuerySubmittedSessionState_TabAttachmentCount) {
+  base::HistogramTester histogram_tester;
+
+  FileInfo tab_info;
+  tab_info.file_token = base::UnguessableToken::Create();
+  tab_info.mime_type = lens::MimeType::kAnnotatedPageContent;
+  tab_info.tab_url = GURL("https://www.google.com");
+
+  std::vector<FileInfo> file_infos = {tab_info};
+
+  handle_->NotifyQuerySubmittedSessionState(file_infos, /*query_text_length=*/5);
+
+  histogram_tester.ExpectUniqueSample(
+      "ContextualSearch.Query.AttachmentCount.Tab.Unknown", 1, 1);
 }
 
 }  // namespace contextual_search

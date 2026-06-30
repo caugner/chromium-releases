@@ -13,6 +13,7 @@
 #include "components/vector_icons/vector_icons.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/color/color_id.h"
 #include "ui/gfx/vector_icon_types.h"
 #include "ui/views/accessibility/view_accessibility.h"
@@ -37,10 +38,12 @@ const int kLayoutInteriorMarginTop = 4;
 const int kLayoutInteriorMarginRight = 8;
 
 const gfx::VectorIcon& GetRowIcon(actor::ActorTask::State state) {
-  if (tabs::GlicActorTaskIconManager::RequiresAttention(state)) {
-    return kHourglassIcon;
+  if (glic::GlicActorTaskIconManager::RequiresAttention(state)) {
+    return features::IsRoundedIconsEnabled() ? kHourglassIcon
+                                             : kHourglassOldIcon;
   } else if (state == actor::ActorTask::State::kFinished) {
-    return kTaskSparkIcon;
+    return features::IsRoundedIconsEnabled() ? kTaskSparkIcon
+                                             : kTaskSparkOldIcon;
   }
   return glic::GlicVectorIconManager::GetVectorIcon(IDR_ACTOR_AUTO_BROWSE_ICON);
 }
@@ -56,7 +59,7 @@ ui::ColorId GetRowColor(actor::ActorTask::State state,
     return ui::kColorSysStateDisabled;
   }
   if (requires_processing &&
-      tabs::GlicActorTaskIconManager::RequiresAttention(state)) {
+      glic::GlicActorTaskIconManager::RequiresAttention(state)) {
     return ui::kColorSysPrimary;
   }
   return ui::kColorMenuIcon;
@@ -65,24 +68,24 @@ ui::ColorId GetRowColor(actor::ActorTask::State state,
 std::u16string GetRowSubtitle(actor::ActorTask::State state, bool has_tab) {
   if (!has_tab) {
     return l10n_util::GetStringUTF16(
-        IDR_ACTOR_TASK_LIST_BUBBLE_ROW_TAB_CLOSED_SUBTITLE);
+        IDS_ACTOR_TASK_LIST_BUBBLE_ROW_TAB_CLOSED_SUBTITLE);
   }
-  if (tabs::GlicActorTaskIconManager::RequiresAttention(state)) {
+  if (glic::GlicActorTaskIconManager::RequiresAttention(state)) {
     return l10n_util::GetStringUTF16(
-        IDR_ACTOR_TASK_LIST_BUBBLE_ROW_CHECK_TASK_SUBTITLE);
+        IDS_ACTOR_TASK_LIST_BUBBLE_ROW_CHECK_TASK_SUBTITLE);
   }
   if (state == actor::ActorTask::State::kFinished) {
     return l10n_util::GetStringUTF16(
-        IDR_ACTOR_TASK_LIST_BUBBLE_ROW_COMPLETED_TASK_SUBTITLE);
+        IDS_ACTOR_TASK_LIST_BUBBLE_ROW_COMPLETED_TASK_SUBTITLE);
   } else if (state == actor::ActorTask::State::kFailed) {
     return l10n_util::GetStringUTF16(
-        IDR_ACTOR_TASK_LIST_BUBBLE_ROW_FAILED_TASK_SUBTITLE);
+        IDS_ACTOR_TASK_LIST_BUBBLE_ROW_FAILED_TASK_SUBTITLE);
   } else if (state == actor::ActorTask::State::kPausedByUser) {
     return l10n_util::GetStringUTF16(
-        IDR_ACTOR_TASK_LIST_BUBBLE_ROW_PAUSED_TASK_SUBTITLE);
+        IDS_ACTOR_TASK_LIST_BUBBLE_ROW_PAUSED_TASK_SUBTITLE);
   }
   return l10n_util::GetStringUTF16(
-      IDR_ACTOR_TASK_LIST_BUBBLE_ROW_ACTING_TASK_SUBTITLE);
+      IDS_ACTOR_TASK_LIST_BUBBLE_ROW_ACTING_TASK_SUBTITLE);
 }
 
 }  // namespace
@@ -141,18 +144,24 @@ ActorTaskListBubbleRowButton::ActorTaskListBubbleRowButton(
       std::make_unique<views::Label>(title_text));
   title_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   title_->SetTextStyle(views::style::STYLE_BODY_3_MEDIUM);
+  title_->SetSubpixelRenderingEnabled(false);
 
   subtitle_ = labels_container->AddChildView(
       std::make_unique<views::Label>(GetRowSubtitle(state, has_tab)));
   subtitle_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   subtitle_->SetTextStyle(views::style::STYLE_BODY_5);
   subtitle_->SetEnabledColor(GetRowColor(state, has_tab, requires_processing));
+  subtitle_->SetSubpixelRenderingEnabled(false);
 
   redirect_icon_ = AddChildView(views::CreateVectorImageButtonWithNativeTheme(
       base::BindRepeating(&ActorTaskListBubbleRowButton::OnRedirectIconPressed,
                           base::Unretained(this)),
-      vector_icons::kLaunchIcon, kRedirectIconSize, ui::kColorMenuIcon,
-      ui::kColorMenuIcon, ui::kColorMenuIcon));
+      features::IsRoundedIconsEnabled() ? vector_icons::kOpenInNewFlippableIcon
+                                        : vector_icons::kLaunchOldIcon,
+      kRedirectIconSize, ui::kColorMenuIcon, ui::kColorMenuIcon,
+      ui::kColorMenuIcon));
+  redirect_icon_->SetTooltipText(
+      l10n_util::GetStringUTF16(IDS_TAB_SEARCH_A11Y_OPEN_TAB));
 
   // Set the preferred size on the button directly to accommodate the circle
   // highlight

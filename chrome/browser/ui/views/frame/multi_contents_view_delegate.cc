@@ -63,7 +63,8 @@ void MultiContentsViewDelegateImpl::ResizeWebContents(double start_ratio,
       tab_strip_model_->GetActiveTab()->GetSplit();
 
   CHECK(split_tab_id.has_value());
-  tab_strip_model_->UpdateSplitRatio(split_tab_id.value(), start_ratio);
+  tab_strip_model_->UpdateSplitRatio(split_tab_id.value(), start_ratio,
+                                     !done_resizing);
 
   if (done_resizing) {
     const split_tabs::SplitTabId split_id =
@@ -108,7 +109,7 @@ void MultiContentsViewDelegateImpl::HandleLinkDrop(
 
   // TODO(crbug.com/406792273): Support entrypoint for horizontal splits.
   const split_tabs::SplitTabVisualData split_data(
-      split_tabs::SplitTabLayout::kVertical);
+      split_tabs::SplitTabLayout::kSideBySide);
 
   // We currently only support creating a split with one link; i.e., the first
   // link in the provided list.
@@ -144,7 +145,7 @@ void MultiContentsViewDelegateImpl::HandleTabDrop(
 
   // TODO(crbug.com/406792273): Support entrypoint for horizontal splits.
   const split_tabs::SplitTabVisualData split_data(
-      split_tabs::SplitTabLayout::kVertical);
+      split_tabs::SplitTabLayout::kSideBySide);
 
   std::unique_ptr<tabs::TabModel> detached_tab =
       drag_controller.DetachTabAtForInsertion(

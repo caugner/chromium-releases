@@ -14,15 +14,18 @@ export function getHtml(this: ToolbarAppElement) {
 ${this.isBackForwardButtonEnabled_ ? html`
   <back-forward-button id="back" direction="back"
    .state="${this.navigationControlsState_.backForwardControlState.backButtonState}"
-   .leadingMargin="${this.navigationControlsState_.backForwardControlState.backButtonLeadingMargin}">
+   .leadingMargin="${this.navigationControlsState_.backForwardControlState.backButtonLeadingMargin}"
+   .touchUi="${this.navigationControlsState_.touchUi}">
   </back-forward-button>
   <back-forward-button id="forward" direction="forward"
    .state="${this.navigationControlsState_.backForwardControlState.forwardButtonState}"
-   .hidden="${!this.navigationControlsState_.backForwardControlState.forwardButtonState.shouldBeShown}">
+   .hidden="${!this.navigationControlsState_.backForwardControlState.forwardButtonState.shouldBeShown}"
+   .touchUi="${this.navigationControlsState_.touchUi}">
   </back-forward-button>` : ''}
   ${this.isReloadButtonEnabled_ ? html`
     <reload-button id="reload"
-      .state="${this.navigationControlsState_.reloadControlState}">
+      .state="${this.navigationControlsState_.reloadControlState}"
+      .touchUi="${this.navigationControlsState_.touchUi}">
     </reload-button>
   ` : ''}
   ${this.isHomeButtonEnabled_ ? html`
@@ -38,11 +41,6 @@ ${this.isBackForwardButtonEnabled_ ? html`
                    !this.navigationControlsState_.splitTabsControlState.isCurrentTabSplit}">
     </split-tabs-button>
   ` : ''}
-  ${this.isAvatarButtonEnabled_ ? html`
-    <avatar-button id="avatar"
-        .state="${null}">
-    </avatar-button>
-  ` : ''}
   ${this.isLocationBarEnabled_ ? html`
     <location-bar id="location-bar"
         .locationBarState="${this.navigationControlsState_.locationBarState}">
@@ -53,6 +51,11 @@ ${this.isBackForwardButtonEnabled_ ? html`
         .state="${this.navigationControlsState_.pinnedToolbarActionsState}"
         .hidden="${this.navigationControlsState_.pinnedToolbarActionsState.length === 0}">
     </pinned-toolbar-actions>
+  ` : ''}
+  ${this.isAvatarButtonEnabled_ ? html`
+    <avatar-button id="avatar"
+        .state="${this.navigationControlsState_.avatarControlState}">
+    </avatar-button>
   ` : ''}
 <!--_html_template_end_-->`;
   // clang-format on

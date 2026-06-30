@@ -411,6 +411,12 @@ public class WebContentsImpl
     }
 
     @Override
+    public boolean isBeingCaptured() {
+        return mNativeWebContentsAndroid != 0
+                && WebContentsImplJni.get().isBeingCaptured(mNativeWebContentsAndroid);
+    }
+
+    @Override
     public boolean isDestroyed() {
         return mNativeWebContentsAndroid == 0
                 || WebContentsImplJni.get().isBeingDestroyed(mNativeWebContentsAndroid);
@@ -948,7 +954,7 @@ public class WebContentsImpl
     }
 
     @Override
-    public void setOverscrollRefreshHandler(OverscrollRefreshHandler handler) {
+    public void setOverscrollRefreshHandler(@Nullable OverscrollRefreshHandler handler) {
         checkNotDestroyed();
         WebContentsImplJni.get().setOverscrollRefreshHandler(mNativeWebContentsAndroid, handler);
     }
@@ -1480,7 +1486,7 @@ public class WebContentsImpl
 
         void setOverscrollRefreshHandler(
                 long nativeWebContentsAndroid,
-                OverscrollRefreshHandler nativeOverscrollRefreshHandler);
+                @Nullable OverscrollRefreshHandler nativeOverscrollRefreshHandler);
 
         void setSpatialNavigationDisabled(long nativeWebContentsAndroid, boolean disabled);
 
@@ -1507,6 +1513,8 @@ public class WebContentsImpl
         int getWidth(long nativeWebContentsAndroid);
 
         int getHeight(long nativeWebContentsAndroid);
+
+        boolean isBeingCaptured(long nativeWebContentsAndroid);
 
         EventForwarder getOrCreateEventForwarder(long nativeWebContentsAndroid);
 

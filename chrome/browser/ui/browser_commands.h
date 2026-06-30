@@ -37,6 +37,7 @@ class WebContents;
 
 namespace bookmarks {
 class BookmarkModel;
+enum class BookmarkBarVisibilityState;
 }  // namespace bookmarks
 
 namespace split_tabs {
@@ -171,6 +172,7 @@ void MuteSite(BrowserWindowInterface* browser);
 void PinTab(BrowserWindowInterface* browser);
 void GroupTab(BrowserWindowInterface* browser);
 void NewSplitTab(BrowserWindowInterface* browser,
+                 split_tabs::SplitTabLayout layout,
                  split_tabs::SplitTabCreatedSource source);
 
 // Tab group commands
@@ -302,6 +304,8 @@ void OpenFeedbackDialog(BrowserWindowInterface* browser,
 void OpenReportUnsafeSiteDialog(BrowserWindowInterface* browser);
 #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 void ToggleBookmarkBar(BrowserWindowInterface* browser);
+void SetBookmarkBarVisibilityState(BrowserWindowInterface* browser,
+                                   bookmarks::BookmarkBarVisibilityState state);
 void ToggleShowFullURLs(BrowserWindowInterface* browser);
 void ToggleShowGoogleLensShortcut(BrowserWindowInterface* browser);
 void ToggleShowAiModeOmniboxButton(BrowserWindowInterface* browser);

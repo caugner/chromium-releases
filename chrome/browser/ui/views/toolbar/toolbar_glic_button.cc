@@ -19,6 +19,7 @@
 #include "chrome/browser/ui/views/toolbar/toolbar_ink_drop_util.h"
 #include "components/vector_icons/vector_icons.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/color/color_id.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/rounded_corners_f.h"
@@ -29,20 +30,18 @@
 namespace {
 constexpr int kCloseButtonSize = 16;
 constexpr int kSpaceBetweenButtons = 2;
+constexpr int kLabelToolbarButtonRightMargin = 6;
+constexpr int kIconToolbarButtonLeftMargin = 3;
 }  // namespace
 
 namespace glic {
 
 ToolbarGlicButton::ToolbarGlicButton(
     BrowserWindowInterface* browser_window_interface,
-    base::RepeatingClosure hovered_callback,
-    base::RepeatingClosure mouse_down_callback,
     base::RepeatingClosure expansion_animation_done_callback,
     const std::u16string& tooltip,
     PressedCallback pressed_callback)
     : GlicButton<ToolbarButton>(browser_window_interface,
-                                hovered_callback,
-                                mouse_down_callback,
                                 expansion_animation_done_callback,
                                 tooltip,
                                 kToolbarGlicIconSize,
@@ -51,7 +50,7 @@ ToolbarGlicButton::ToolbarGlicButton(
   auto* image_view = static_cast<views::ImageView*>(image_container_view());
   image_view->SetImageSize({kToolbarGlicIconSize, kToolbarGlicIconSize});
   image_view->SetProperty(views::kMarginsKey,
-                          gfx::Insets().set_left(kIconLeftMargin));
+                          gfx::Insets().set_left(kIconToolbarButtonLeftMargin));
 
   SetLabelMargins();
 
@@ -154,6 +153,16 @@ void ToolbarGlicButton::UpdateStyle(bool should_match_toolbar) {
 void ToolbarGlicButton::SetCloseButtonFocusBehavior(
     views::View::FocusBehavior focus_behavior) {}
 
+void ToolbarGlicButton::SetLabelMargins() {
+  const bool close_button_visible =
+      close_button() && close_button()->GetVisible();
+  this->label()->SetProperty(
+      views::kMarginsKey,
+      gfx::Insets().set_right(close_button_visible
+                                  ? kLabelWithCloseButtonRightMargin
+                                  : kLabelToolbarButtonRightMargin));
+}
+
 void ToolbarGlicButton::AddCloseButton(PressedCallback pressed_callback) {
   auto close_button =
       std::make_unique<views::LabelButton>(std::move(pressed_callback));
@@ -161,7 +170,9 @@ void ToolbarGlicButton::AddCloseButton(PressedCallback pressed_callback) {
       l10n_util::GetStringUTF16(IDS_TOOLTIP_GLIC_CLOSE));
 
   const ui::ImageModel icon_image_model = ui::ImageModel::FromVectorIcon(
-      vector_icons::kCloseChromeRefreshIcon,
+      features::IsRoundedIconsEnabled()
+          ? vector_icons::kCloseIcon
+          : vector_icons::kCloseChromeRefreshOldIcon,
       kColorTabSearchButtonCRForegroundFrameActive, kCloseButtonSize);
 
   close_button->SetImageModel(views::Button::STATE_NORMAL, icon_image_model);
@@ -242,8 +253,9 @@ void ToolbarGlicButton::OnBoundsChanged(const gfx::Rect& previous_bounds) {
   } else {
     if (!label()->GetVisible()) {
       label()->SetVisible(true);
-      image_view->SetProperty(views::kMarginsKey,
-                              gfx::Insets().set_left(kIconLeftMargin));
+      image_view->SetProperty(
+          views::kMarginsKey,
+          gfx::Insets().set_left(kIconToolbarButtonLeftMargin));
       box_layout->set_main_axis_alignment(
           views::BoxLayout::MainAxisAlignment::kCenter);
     }

@@ -119,13 +119,18 @@ std::pair<base::ScopedFD, bool> LoadDrmFD(const base::FilePath& dev_path) {
     return std::make_pair(base::ScopedFD(drm_file.TakePlatformFile()),
                           /*should_skip=*/true);
   }
-  // Skip NVIDIA device because their VA-API drivers do not support
-  // Chromium and can sometimes cause crashes (see crbug.com/1492880).
-  if (base::EqualsCaseInsensitiveASCII(version_name, "nvidia-drm") &&
-      !base::FeatureList::IsEnabled(kVaapiOnNvidiaGPUs)) {
-    LOG(WARNING) << "Should skip nVidia device named: " << version_name;
-    return std::make_pair(base::ScopedFD(drm_file.TakePlatformFile()),
-                          /*should_skip=*/true);
+
+  if (base::EqualsCaseInsensitiveASCII(version_name, "nvidia-drm")) {
+    // Special handling for nvidia drivers - we will support a correct driver
+    // implementation on linux ARM64, but the driver landscape on x64 linux
+    // tends to be shaky and can sometimes cause crashes: crbug.com/1492880
+    // We do need more checks to ensure that the driver supports linear textures
+    // or a picture processor, which is somewhat driver-version dependent.
+    if (!base::FeatureList::IsEnabled(kVaapiOnNvidiaGPUs)) {
+      LOG(WARNING) << "Should skip nVidia device named: " << version_name;
+      return std::make_pair(base::ScopedFD(drm_file.TakePlatformFile()),
+                            /*should_skip=*/true);
+    }
   }
   return std::make_pair(base::ScopedFD(drm_file.TakePlatformFile()),
                         /*should_skip=*/false);
@@ -732,6 +737,13 @@ bool IsUsingHybridDriverForDecoding(VAProfile va_profile) {
   // Note that Skylake (not gen8) also needs the hybrid decoder for VP9
   // decoding. However, it is disabled today on ChromeOS
   // (see crrev.com/c/390511).
+  // The hybrid driver is exclusively part of the i965 driver. Checking the
+  // implementation type prevents false positives on Gen8 processors when using
+  // other drivers (e.g., kChromiumFakeDriver during VM testing, where Cloud
+  // passes through a Gen8 host CPU model).
+  if (VaapiWrapper::GetImplementationType() != VAImplementation::kIntelI965) {
+    return false;
+  }
   return va_profile == VAProfileVP9Profile0 && IsGen8Gpu();
 }
 
@@ -1679,6 +1691,34 @@ void VADisplayStateSingleton::PreSandboxInitialization(
     if (drm_fd.is_valid() && !should_skip) {
       va_display_state.drm_fd_ = std::move(drm_fd);
       break;
+    }
+  }
+
+  // Fallback to primary nodes if no render node is found.
+  // Useful for VMs that may only expose a primary node without PCI.
+  // Note: This is separate from the fallback in platform_video_frame_utils.cc.
+  // While platform_video_frame_utils.cc finds a DRM node for minigbm buffer
+  // allocation, libva requires its own open DRM file descriptor to initialize
+  // the VA display.
+  if (!va_display_state.drm_fd_.is_valid() &&
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnablePrimaryNodeAccessForVkmsTesting)) {
+    for (const drmDevicePtr& device : devices) {
+      if (!device) {
+        continue;
+      }
+      if (!(device->available_nodes & (1u << DRM_NODE_PRIMARY))) {
+        continue;
+      }
+
+      // SAFETY: libdrm ensures that device->nodes is of size=DRM_NODE_MAX and
+      // DRM_NODE_PRIMARY<DRM_NODE_MAX.
+      base::FilePath dev_path(UNSAFE_BUFFERS(device->nodes[DRM_NODE_PRIMARY]));
+      auto [drm_fd, should_skip] = LoadDrmFD(dev_path);
+      if (drm_fd.is_valid() && !should_skip) {
+        va_display_state.drm_fd_ = std::move(drm_fd);
+        break;
+      }
     }
   }
 
@@ -2695,7 +2735,7 @@ std::unique_ptr<ScopedVASurface> VaapiWrapper::CreateVASurfaceWithUsageHints(
                                            va_rt_format);
 }
 
-std::unique_ptr<NativePixmapAndSizeInfo>
+VaapiStatus::Or<std::unique_ptr<NativePixmapAndSizeInfo>>
 VaapiWrapper::ExportVASurfaceAsNativePixmapDmaBufUnwrapped(
     VASurfaceID va_surface_id,
     const gfx::Size& va_surface_size) {
@@ -2706,13 +2746,33 @@ VaapiWrapper::ExportVASurfaceAsNativePixmapDmaBufUnwrapped(
   {
     base::AutoLockMaybe auto_lock(va_lock_.get());
     VAStatus va_res = vaSyncSurface(va_display_, va_surface_id);
-    VA_SUCCESS_OR_RETURN(va_res, VaapiFunctions::kVASyncSurface, nullptr);
+    VA_SUCCESS_OR_RETURN(va_res, VaapiFunctions::kVASyncSurface,
+                         VaapiStatus::Codes::kNoSurface);
     va_res = vaExportSurfaceHandle(
         va_display_, va_surface_id, VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2,
         VA_EXPORT_SURFACE_READ_ONLY | VA_EXPORT_SURFACE_SEPARATE_LAYERS,
         &descriptor);
     VA_SUCCESS_OR_RETURN(va_res, VaapiFunctions::kVAExportSurfaceHandle,
-                         nullptr);
+                         VaapiStatus::Codes::kFailedToExportSurface);
+  }
+
+  gfx::NativePixmapHandle handle;
+  CHECK_GE(descriptor.num_objects, 1u);
+  handle.modifier = descriptor.objects[0].drm_format_modifier;
+  std::vector<base::ScopedFD> fds;
+  for (size_t index = 0; index < descriptor.num_objects; ++index) {
+    const auto& object = UNSAFE_TODO(descriptor.objects[index]);
+    // The modifier should not change for different planes.
+    CHECK_EQ(handle.modifier, object.drm_format_modifier);
+
+    // The file descriptor (FD) should be owned by us: per va/va.h, "the
+    // exported handles are owned by the caller." |fds| will own the file
+    // descriptors. Any FD's that are referenced by a plane will be moved into
+    // |handle.planes| for that plane. If an FD is referenced by two or more
+    // planes, it will be duplicated the minimal number of times to build
+    // |handle.planes|. If an FD is not referenced by any plane, it will be
+    // closed when |fds| goes out of scope, which is fine.
+    fds.emplace_back(object.fd);
   }
 
   // Translate the pixel format to a viz::SharedImageFormat.
@@ -2737,28 +2797,9 @@ VaapiWrapper::ExportVASurfaceAsNativePixmapDmaBufUnwrapped(
       si_format = viz::SinglePlaneFormat::kBGRA_8888;
       break;
     default:
-      LOG(ERROR) << "Cannot export a surface with FOURCC "
-                 << FourccToString(descriptor.fourcc);
-      return nullptr;
-  }
-
-  gfx::NativePixmapHandle handle;
-  CHECK_GE(descriptor.num_objects, 1u);
-  handle.modifier = descriptor.objects[0].drm_format_modifier;
-  std::vector<base::ScopedFD> fds;
-  for (size_t index = 0; index < descriptor.num_objects; ++index) {
-    const auto& object = UNSAFE_TODO(descriptor.objects[index]);
-    // The modifier should not change for different planes.
-    CHECK_EQ(handle.modifier, object.drm_format_modifier);
-
-    // The file descriptor (FD) should be owned by us: per va/va.h, "the
-    // exported handles are owned by the caller." |fds| will own the file
-    // descriptors. Any FD's that are referenced by a plane will be moved into
-    // |handle.planes| for that plane. If an FD is referenced by two or more
-    // planes, it will be duplicated the minimal number of times to build
-    // |handle.planes|. If an FD is not referenced by any plane, it will be
-    // closed when |fds| goes out of scope, which is fine.
-    fds.emplace_back(object.fd);
+      return VaapiStatus{VaapiStatus::Codes::kFailedToExportSurface,
+                         "Cannot export surface with unknown FOURCC", "fourcc",
+                         FourccToString(descriptor.fourcc)};
   }
 
   for (uint32_t index = 0; index < descriptor.num_layers; ++index) {
@@ -2802,24 +2843,24 @@ VaapiWrapper::ExportVASurfaceAsNativePixmapDmaBufUnwrapped(
       base::strict_cast<size_t>(descriptor.objects[0].size);
   if (!gfx::Rect(exported_pixmap->va_surface_resolution)
            .Contains(gfx::Rect(va_surface_size))) {
-    LOG(ERROR) << "A " << va_surface_size.ToString()
-               << " surface cannot be contained by a "
-               << exported_pixmap->va_surface_resolution.ToString()
-               << " buffer";
-    return nullptr;
+    VaapiStatus error = {VaapiStatus::Codes::kFailedToExportSurface,
+                         "Surface is too large for buffer"};
+    return std::move(error)
+        .WithData("surface_size", va_surface_size.ToString())
+        .WithData("buffer_size",
+                  exported_pixmap->va_surface_resolution.ToString());
   }
   exported_pixmap->pixmap = base::MakeRefCounted<gfx::NativePixmapDmaBuf>(
       va_surface_size, si_format, std::move(handle));
   return exported_pixmap;
 }
 
-std::unique_ptr<NativePixmapAndSizeInfo>
+VaapiStatus::Or<std::unique_ptr<NativePixmapAndSizeInfo>>
 VaapiWrapper::ExportVASurfaceAsNativePixmapDmaBuf(
     const ScopedVASurface& scoped_va_surface) {
   VAAPI_CHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (!scoped_va_surface.IsValid()) {
-    LOG(ERROR) << "Cannot export an invalid surface";
-    return nullptr;
+    return VaapiStatus::Codes::kFailedToExportSurface;
   }
   return ExportVASurfaceAsNativePixmapDmaBufUnwrapped(scoped_va_surface.id(),
                                                       scoped_va_surface.size());

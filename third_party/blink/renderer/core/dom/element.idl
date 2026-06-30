@@ -37,6 +37,9 @@ dictionary SetHTMLUnsafeOptions {
   (Sanitizer or SanitizerConfig or SanitizerPresets) sanitizer = {};
   boolean runScripts = false;
 };
+dictionary ParseHTMLUnsafeOptions {
+  (Sanitizer or SanitizerConfig or SanitizerPresets) sanitizer = {};
+};
 
 // https://dom.spec.whatwg.org/#interface-element
 
@@ -193,7 +196,7 @@ dictionary SetHTMLUnsafeOptions {
     [CEReactions, RuntimeEnabled=HeadingOffset] attribute boolean headingReset;
 
     // Scoped Custom Element Registries
-    [RuntimeEnabled=ScopedCustomElementRegistry] readonly attribute CustomElementRegistry? customElementRegistry;
+    [CallWith=ScriptState, RuntimeEnabled=ScopedCustomElementRegistry] readonly attribute CustomElementRegistry? customElementRegistry;
 };
 
 Element includes ParentNode;

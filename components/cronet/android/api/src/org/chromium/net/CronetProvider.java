@@ -32,6 +32,8 @@ import java.util.Set;
  * <p><b>NOTE:</b> This class is for advanced users that want to select a particular Cronet
  * implementation. Most users should simply use {@code new} {@link
  * CronetEngine.Builder#CronetEngine.Builder(android.content.Context)}.
+ *
+ * @hide
  */
 public abstract class CronetProvider {
     @VisibleForTesting

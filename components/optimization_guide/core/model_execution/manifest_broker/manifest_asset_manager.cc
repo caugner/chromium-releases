@@ -22,14 +22,17 @@
 #include "base/notimplemented.h"
 #include "base/power_monitor/power_monitor.h"
 #include "base/sequence_checker.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/thread_annotations.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "base/version.h"
+#include "components/crx_file/id_util.h"
 #include "components/optimization_guide/core/model_execution/manifest_broker/manifest.h"
 #include "components/optimization_guide/core/model_execution/model_execution_prefs.h"
 #include "components/optimization_guide/core/model_execution/model_execution_util.h"
+#include "components/optimization_guide/core/model_execution/on_device_model_names.h"
 #include "components/optimization_guide/core/optimization_guide_features.h"
 #include "components/optimization_guide/public/mojom/model_broker_debug.mojom.h"
 #include "components/prefs/pref_service.h"
@@ -41,41 +44,6 @@ namespace optimization_guide {
 namespace {
 // TTL for disk space evaluation result.
 constexpr base::TimeDelta kDiskSpaceFreshnessThreshold = base::Seconds(10);
-
-// Possible base models. `ManifestAssetManager` does not serve any model earlier
-// than Nano V3, therefore the earlier UMA enums are not listed here.
-// LINT.IfChange(OnDeviceBaseModelEnum)
-enum class BaseModel {
-  kUnknown = 0,
-  kV3NanoCpu = 5,
-  kV3NanoGpu = 6,
-  kMaxValue = kV3NanoGpu,
-};
-// LINT.ThenChange(//tools/metrics/histograms/metadata/optimization/enums.xml:OnDeviceBaseModelEnum)
-
-BaseModel ConvertComponentKeyToEnum(const std::string& key) {
-  if (key == "nano_v3_component_gpu") {
-    return BaseModel::kV3NanoGpu;
-  } else if (key == "nano_v3_component_cpu") {
-    return BaseModel::kV3NanoCpu;
-  } else {
-    return BaseModel::kUnknown;
-  }
-}
-
-// LINT.IfChange(OnDeviceBaseModelName)
-std::string ConvertComponentKeyToUmaModelName(const std::string& key) {
-  if (key == "nano_v3_component_gpu") {
-    return "V3NanoGpu";
-  } else if (key == "nano_v3_component_cpu") {
-    return "V3NanoCpu";
-  } else if (key == "tinymodel_summarizer_component") {
-    return "TinyModelSummarizer";
-  } else {
-    return "Unknown";
-  }
-}
-// LINT.ThenChange(//tools/metrics/histograms/metadata/optimization/histograms.xml:OnDeviceBaseModelName)
 
 // Delay to give consumers time to unload the model before it's deleted.
 constexpr base::TimeDelta kUninstallDelay = base::Seconds(1);
@@ -343,8 +311,12 @@ ManifestAssetManager::ManifestAssetManager(
     PrefService& local_state,
     UsageTracker& usage_tracker,
     Delegate& delegate,
+    component_updater::ComponentUpdateService* component_update_service,
     std::unique_ptr<ManifestSolutionFactory> factory)
-    : usage_tracker_(usage_tracker), delegate_(delegate), ledger_(local_state) {
+    : usage_tracker_(usage_tracker),
+      delegate_(delegate),
+      component_update_service_(component_update_service),
+      ledger_(local_state) {
   // Load persistent state from the ledger immediately on startup.
   ledger_.Load();
 
@@ -359,6 +331,43 @@ ManifestAssetManager::~ManifestAssetManager() {
   TRACE_EVENT("optimization_guide",
               "ManifestAssetManager::~ManifestAssetManager",
               perfetto::TerminatingFlow::FromPointer(this));
+}
+
+void ManifestAssetManager::AddDownloadProgressObserver(
+    const std::string& use_case,
+    mojo::PendingRemote<on_device_model::mojom::DownloadObserver> observer) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (!factory_) {
+    return;
+  }
+
+  std::optional<absl::flat_hash_set<Manifest::AssetId>> required_assets =
+      factory_->manifest().GetRequiredAssets(use_case);
+
+  if (!required_assets) {
+    return;
+  }
+
+  base::flat_set<std::string> component_ids;
+  for (const auto& asset_id : *required_assets) {
+    const auto& on_demand_components =
+        factory_->manifest().GetAssets().on_demand_components();
+    auto it = on_demand_components.find(asset_id);
+    if (it != on_demand_components.end()) {
+      std::vector<uint8_t> public_key_hash;
+      if (base::HexStringToBytes(it->second.public_key(), &public_key_hash)) {
+        component_ids.insert(
+            crx_file::id_util::GenerateIdFromHash(public_key_hash));
+      }
+    }
+  }
+
+  auto& progress_manager = progress_managers_[use_case];
+  if (!progress_manager) {
+    progress_manager = std::make_unique<OnDeviceModelDownloadProgressManager>(
+        component_update_service_, std::move(component_ids));
+  }
+  progress_manager->AddObserver(std::move(observer));
 }
 
 void ManifestAssetManager::UpdateSolutionFactory(
@@ -462,6 +471,14 @@ bool ManifestAssetManager::ShouldInstall(
     return true;
   }
   if (!disk_space_status_.CanSupportOnDemandInstall()) {
+    std::optional<base::ByteCount> free_space =
+        disk_space_status_.GetFreeSpace();
+    if (free_space) {
+      base::UmaHistogramCounts100(
+          "OptimizationGuide.ModelExecution.OnDeviceModelInstallCriteria."
+          "AtRegistration.DiskSpaceWhenNotEnoughAvailable",
+          free_space->InGiB());
+    }
     return false;
   }
   if (active_assets_by_id_.contains(context.asset_id())) {
@@ -588,6 +605,11 @@ void ManifestAssetManager::InstallerRegistered(const std::string& public_key,
   } else {
     context->SetRegistered();
   }
+  base::UmaHistogramBoolean(
+      "OptimizationGuide.ModelExecution."
+      "OnDeviceModelInstalledAtRegistrationTime." +
+          ConvertComponentKeyToUmaModelName(context->asset_id()),
+      is_already_installed);
 
   const proto::OnDemandComponent* component =
       factory_->manifest().GetAssetByPublicKey(public_key);
@@ -618,7 +640,7 @@ void ManifestAssetManager::OnAssetReady(const std::string& public_key,
        context->state() == ComponentState::kOnDemandDownloading);
   context->SetReady(install_dir, version);
 
-  BaseModel model_enum = ConvertComponentKeyToEnum(context->asset_id());
+  OnDeviceBaseModel model_enum = ConvertComponentKeyToEnum(context->asset_id());
   base::UmaHistogramEnumeration(
       "OptimizationGuide.OnDeviceModel.InstalledModel", model_enum);
   if (is_new_installation) {

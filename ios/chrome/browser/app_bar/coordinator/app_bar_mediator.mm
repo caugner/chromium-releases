@@ -10,7 +10,17 @@
 #import "base/memory/raw_ptr.h"
 #import "base/metrics/user_metrics.h"
 #import "base/metrics/user_metrics_action.h"
+#import "base/strings/string_util.h"
+#import "components/country_codes/country_codes.h"
+#import "components/omnibox/browser/aim_eligibility_service.h"
+#import "components/policy/core/common/policy_pref_names.h"
+#import "components/prefs/ios/pref_observer_bridge.h"
+#import "components/prefs/pref_change_registrar.h"
+#import "components/regional_capabilities/regional_capabilities_service.h"
+#import "components/search/search.h"
 #import "components/signin/public/base/signin_metrics.h"
+#import "components/signin/public/identity_manager/objc/identity_manager_observer_bridge.h"
+#import "components/variations/service/variations_service.h"
 #import "ios/chrome/browser/app_bar/ui/app_bar_consumer.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_constants.h"
 #import "ios/chrome/browser/cobrowse/model/cobrowse_context.h"
@@ -20,11 +30,15 @@
 #import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_ui_element.h"
 #import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_ui_updater.h"
 #import "ios/chrome/browser/intelligence/bwg/metrics/gemini_metrics.h"
+#import "ios/chrome/browser/intelligence/bwg/model/gemini_browser_agent.h"
+#import "ios/chrome/browser/intelligence/bwg/model/gemini_browser_agent_observer_bridge.h"
 #import "ios/chrome/browser/intelligence/bwg/model/gemini_service.h"
 #import "ios/chrome/browser/intelligence/bwg/utils/gemini_constants.h"
 #import "ios/chrome/browser/intelligence/bwg/utils/gemini_entry_flow_result.h"
+#import "ios/chrome/browser/intelligence/bwg/utils/gemini_prefs.h"
 #import "ios/chrome/browser/intelligence/features/features.h"
 #import "ios/chrome/browser/intents/model/intents_donation_helper.h"
+#import "ios/chrome/browser/lens/ui_bundled/lens_availability.h"
 #import "ios/chrome/browser/lens/ui_bundled/lens_entrypoint.h"
 #import "ios/chrome/browser/policy/model/policy_util.h"
 #import "ios/chrome/browser/search_engines/model/search_engine_observer_bridge.h"
@@ -48,21 +62,30 @@
 #import "ios/chrome/browser/shared/public/commands/tab_groups_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/signin/model/authentication_service.h"
+#import "ios/chrome/browser/signin/model/avatar/avatar_provider.h"
+#import "ios/chrome/browser/signin/model/constants.h"
 #import "ios/chrome/browser/toolbar/ui/buttons/toolbar_button_menu_factory.h"
 #import "ios/chrome/browser/toolbar/ui/buttons/toolbar_button_menu_factory_delegate.h"
 #import "ios/chrome/browser/url_loading/model/url_loading_browser_agent.h"
 #import "ios/chrome/browser/url_loading/model/url_loading_params.h"
 #import "ios/web/public/web_state.h"
+#import "ios/web/public/web_state_observer_bridge.h"
 #import "url/gurl.h"
 
-@interface AppBarMediator () <IncognitoStateObserver,
+@interface AppBarMediator () <GeminiBrowserAgentObserving,
+                              IdentityManagerObserverBridgeDelegate,
+                              IncognitoStateObserver,
+                              PrefObserverDelegate,
                               SearchEngineObserving,
-                              TabGridStateObserver,
+                              TabGridStateObserving,
                               ToolbarButtonMenuFactoryDelegate,
                               WebStateListObserving>
 
 // The web state list currently observed by this mediator.
 @property(nonatomic, assign) WebStateList* currentWebStateList;
+
+// Override Lens availability for testing.
+@property(nonatomic, assign) BOOL overrideLensAvailabilityForTesting;
 
 // The TabGroup currently visible.
 @property(nonatomic, assign) const TabGroup* currentTabGroup;
@@ -85,7 +108,12 @@
       _incognitoFullscreenObserver;
   raw_ptr<PrefService> _prefService;
   raw_ptr<AuthenticationService> _authenticationService;
+  raw_ptr<signin::IdentityManager> _identityManager;
+  std::unique_ptr<signin::IdentityManagerObserverBridge>
+      _identityManagerObserver;
   raw_ptr<GeminiService> _geminiService;
+  raw_ptr<GeminiBrowserAgent> _geminiBrowserAgent;
+  std::unique_ptr<GeminiBrowserAgentObserverBridge> _geminiObserver;
   raw_ptr<UrlLoadingBrowserAgent> _URLLoader;
   raw_ptr<TemplateURLService> _templateURLService;
   // Observer for the TemplateURLService.
@@ -95,6 +123,8 @@
   IncognitoState* _incognitoState;
   ToolbarButtonMenuFactory* _regularButtonMenuFactory;
   ToolbarButtonMenuFactory* _incognitoButtonMenuFactory;
+  std::unique_ptr<PrefChangeRegistrar> _prefChangeRegistrar;
+  std::unique_ptr<PrefObserverBridge> _prefObserverBridge;
 }
 
 - (instancetype)
@@ -115,7 +145,9 @@
                  templateURLService:(TemplateURLService*)templateURLService
               authenticationService:
                   (AuthenticationService*)authenticationService
+                    identityManager:(signin::IdentityManager*)identityManager
                       geminiService:(GeminiService*)geminiService
+                 geminiBrowserAgent:(GeminiBrowserAgent*)geminiBrowserAgent
                           URLLoader:(UrlLoadingBrowserAgent*)URLLoader
                        tabGridState:(TabGridState*)tabGridState
                      incognitoState:(IncognitoState*)incognitoState {
@@ -138,8 +170,19 @@
         std::make_unique<SearchEngineObserverBridge>(self, _templateURLService);
 
     _authenticationService = authenticationService;
+    _identityManager = identityManager;
+    if (_identityManager) {
+      _identityManagerObserver =
+          std::make_unique<signin::IdentityManagerObserverBridge>(
+              _identityManager, self);
+    }
 
     _geminiService = geminiService;
+    _geminiBrowserAgent = geminiBrowserAgent;
+    if (_geminiBrowserAgent) {
+      _geminiObserver = std::make_unique<GeminiBrowserAgentObserverBridge>(
+          self, _geminiBrowserAgent);
+    }
 
     _tabGridState = tabGridState;
     [_tabGridState addObserver:self];
@@ -162,6 +205,14 @@
                 templateURLService:_templateURLService
                       tabGridState:_tabGridState];
     _incognitoButtonMenuFactory.delegate = self;
+
+    CHECK(_prefService);
+    _prefChangeRegistrar = std::make_unique<PrefChangeRegistrar>();
+    _prefChangeRegistrar->Init(_prefService);
+    _prefObserverBridge = std::make_unique<PrefObserverBridge>(self);
+    _prefObserverBridge->ObserveChangesForPreference(
+        policy::policy_prefs::kIncognitoModeAvailability,
+        _prefChangeRegistrar.get());
 
     if (_tabGridState.tabGridVisible) {
       [self updateForTabGridPage:_tabGridState.currentPage];
@@ -273,19 +324,34 @@
   _incognitoFullscreenBrowserAgent = nullptr;
   _regularFullscreenHandler = nil;
   _incognitoFullscreenHandler = nil;
+  _lensHandler = nil;
   [_tabGridState removeObserver:self];
   [_incognitoState removeObserver:self];
   _observerBridge.reset();
   _regularWebStateList = nullptr;
   _incognitoWebStateList = nullptr;
   _prefService = nullptr;
+  _prefChangeRegistrar.reset();
+  _prefObserverBridge.reset();
   _searchEngineObserver.reset();
   _templateURLService = nullptr;
   _authenticationService = nullptr;
   _geminiService = nullptr;
+  _geminiBrowserAgent = nullptr;
+  _geminiObserver.reset();
   _URLLoader = nullptr;
   _incognitoState = nil;
   _tabGridState = nil;
+  _identityManagerObserver.reset();
+  _identityManager = nullptr;
+}
+
+#pragma mark - PrefObserverDelegate
+
+- (void)onPreferenceChanged:(const std::string&)preferenceName {
+  if (preferenceName == policy::policy_prefs::kIncognitoModeAvailability) {
+    [self updateConsumer];
+  }
 }
 
 #pragma mark - WebStateListObserving
@@ -359,7 +425,7 @@
   [self didUpdateAuthenticationRequirementForState:incognitoState];
 }
 
-#pragma mark - TabGridStateObserver
+#pragma mark - TabGridStateObserving
 
 - (void)willEnterTabGrid {
   _currentPage = _tabGridState.currentPage;
@@ -468,18 +534,9 @@
   [self createNewTabGroupWithTabs:{}];
 }
 
-- (void)assistantButtonTappedWithState:(AppBarAssistantButtonState)state {
+- (void)assistantButtonTappedWithState:(AppBarAssistantButtonState)state
+                              fromView:(UIView*)sender {
   switch (state) {
-    case AppBarAssistantButtonState::kLens: {
-      OpenLensInputSelectionCommand* command =
-          [[OpenLensInputSelectionCommand alloc]
-                  initWithEntryPoint:LensEntrypoint::AppBar
-                   presentationStyle:LensInputSelectionPresentationStyle::
-                                         SlideFromRight
-              presentationCompletion:nil];
-      [self.lensHandler openLensInputSelection:command];
-      break;
-    }
     case AppBarAssistantButtonState::kAsk: {
       __weak __typeof(self) weakSelf = self;
       [self.geminiHandler
@@ -500,6 +557,23 @@
       [self.sceneHandler showAssistant];
       break;
     }
+    case AppBarAssistantButtonState::kLens: {
+      OpenLensInputSelectionCommand* command =
+          [[OpenLensInputSelectionCommand alloc]
+                  initWithEntryPoint:LensEntrypoint::AppBar
+                   presentationStyle:LensInputSelectionPresentationStyle::
+                                         SlideFromRight
+              presentationCompletion:nil];
+      [self.lensHandler openLensInputSelection:command];
+      break;
+    }
+    case AppBarAssistantButtonState::kAccount:
+      if (_authenticationService->HasPrimaryIdentity()) {
+        [self.delegate showAccountMenu:sender];
+      } else {
+        [self.delegate showSignin:sender];
+      }
+      break;
   }
 }
 
@@ -520,6 +594,16 @@
 - (void)navigateToPageForItem:(web::NavigationItem*)item {
   // App bar does not have web navigation functionality in its button menus.
   NOTREACHED();
+}
+
+#pragma mark - GeminiBrowserAgentObserverBridge
+
+- (void)geminiFloatyInvokedChanged:(BOOL)isInvoked {
+  [self updateAssistantButton];
+}
+
+- (void)geminiAvailabilityChanged:(BOOL)available {
+  [self updateAssistantButton];
 }
 
 #pragma mark - Properties
@@ -628,15 +712,73 @@
 
 // Updates the consumer with the latest state of the assistant button.
 - (void)updateAssistantButton {
-  AppBarAssistantButtonState state = AppBarAssistantButtonState::kLens;
-
-  if (IsPageActionMenuEnabled()) {
-    state = AppBarAssistantButtonState::kAsk;
-  } else if (IsAimCobrowseEnabled() && IsAssistantContainerEnabled()) {
-    state = AppBarAssistantButtonState::kAIM;
+  AppBarAssistantButtonState state = AppBarAssistantButtonState::kAccount;
+  BOOL geminiAllowed = NO;
+  if (_geminiService) {
+    geminiAllowed = _geminiService->IsProfileEligibleForGemini();
+    if (!geminiAllowed && _authenticationService &&
+        !_authenticationService->HasPrimaryIdentity()) {
+      // If the profile is ineligible, it might be just because the user is
+      // signed out. We still want to show the Gemini button (disabled) for
+      // signed-out users to encourage sign-in, unless a local enterprise
+      // policy explicitly disables it.
+      geminiAllowed = gemini::GeminiAllowedByPolicy(_prefService);
+    }
+  }
+  BOOL useLens = _overrideLensAvailabilityForTesting;
+  if (!useLens) {
+    useLens = lens_availability::CheckAvailabilityForLensEntryPoint(
+        LensEntrypoint::AppBar,
+        search::DefaultSearchProviderIsGoogle(_templateURLService));
   }
 
-  [self.consumer setAssistantButtonState:state];
+  BOOL isEEAOrJapan = NO;
+  variations::VariationsService* variationsService =
+      GetApplicationContext()->GetVariationsService();
+  if (variationsService) {
+    country_codes::CountryId countryId(
+        base::ToUpperASCII(variationsService->GetStoredPermanentCountry()));
+    isEEAOrJapan = regional_capabilities::RegionalCapabilitiesService::
+                       IsInAnySearchEngineChoiceScreenRegion(countryId) ||
+                   countryId == country_codes::CountryId("JP");
+  }
+
+  if (IsPageActionMenuEnabled() && geminiAllowed && !isEEAOrJapan) {
+    state = AppBarAssistantButtonState::kAsk;
+  } else if (IsAimCobrowseEnabled() && IsAssistantContainerEnabled() &&
+             AimEligibilityService::IsAimAllowedByPolicy(_prefService)) {
+    state = AppBarAssistantButtonState::kAIM;
+  } else if (useLens) {
+    state = AppBarAssistantButtonState::kLens;
+  }
+
+  BOOL highlighted = NO;
+  BOOL enabled = YES;
+  if (state == AppBarAssistantButtonState::kAsk) {
+    enabled = _geminiBrowserAgent &&
+              _geminiBrowserAgent->IsGeminiAvailableForActiveWebState();
+    highlighted = enabled && _geminiBrowserAgent &&
+                  _geminiBrowserAgent->is_floaty_invoked();
+  }
+
+  UIImage* avatar = nil;
+  if (state == AppBarAssistantButtonState::kAccount) {
+    id<SystemIdentity> identity = _authenticationService->GetPrimaryIdentity();
+    ApplicationContext* context = GetApplicationContext();
+    signin::AvatarProvider* avatarProvider =
+        context ? context->GetIdentityAvatarProvider() : nullptr;
+    if (avatarProvider && identity) {
+      avatar = avatarProvider->GetIdentityAvatar(
+          identity, IdentityAvatarSize::TableViewIcon);
+    }
+  }
+
+  BOOL signedIn = _authenticationService->HasPrimaryIdentity();
+  [self.consumer setAssistantButtonState:state
+                             highlighted:highlighted
+                                 enabled:enabled
+                                  avatar:avatar
+                                signedIn:signedIn];
 }
 
 // Updates for `incognito` being visible.
@@ -712,6 +854,7 @@
   CHECK(_URLLoader);
 
   UrlLoadParams params = UrlLoadParams::InNewTab(GURL(kChromeUINewTabURL));
+  params.from_chrome = YES;
   params.in_incognito = incognito;
   params.append_to = OpenPosition::kLastTab;
   params.switch_mode_if_needed = true;
@@ -761,6 +904,7 @@
 
   GURL URL(kChromeUINewTabURL);
   UrlLoadParams params = UrlLoadParams::InNewTab(URL);
+  params.from_chrome = YES;
   params.in_incognito = incognito;
   params.load_in_group = true;
   params.tab_group = group->GetWeakPtr();
@@ -787,4 +931,16 @@
       break;
   }
 }
+
+#pragma mark - IdentityManagerObserverBridgeDelegate
+
+- (void)onPrimaryAccountChanged:
+    (const signin::PrimaryAccountChangeEvent&)event {
+  [self updateAssistantButton];
+}
+
+- (void)onExtendedAccountInfoUpdated:(const AccountInfo&)info {
+  [self updateAssistantButton];
+}
+
 @end

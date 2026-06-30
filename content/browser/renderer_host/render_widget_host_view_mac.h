@@ -14,6 +14,7 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
@@ -44,6 +45,7 @@ class RenderWidgetHostNSViewBridge;
 }  // namespace remote_cocoa
 
 namespace ui {
+class Compositor;
 enum class DomCode : uint32_t;
 class Layer;
 class ScopedPasswordInputEnabler;
@@ -91,6 +93,21 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
       public ui::AcceleratedWidgetMacNSView,
       public ui::AccessibilityFocusOverrider::Client {
  public:
+  // These values are persisted to logs. Entries should not be renumbered and
+  // numeric values should never be reused.
+  // LINT.IfChange(GetCachedFirstRectResult)
+  enum class GetCachedFirstRectResult {
+    kFound = 0,
+    kNoTextInputManager = 1,
+    kNoTextSelection = 2,
+    kNotBoundedBySelection = 3,
+    kNoCompositionBounds = 4,
+    kInvalidCompositionRange = 5,
+    kInvalidSelection = 6,
+    kMaxValue = kInvalidSelection,
+  };
+  // LINT.ThenChange(//tools/metrics/histograms/metadata/input/enums.xml:GetCachedFirstRectResult)
+
   // The view will associate itself with the given widget. The native view must
   // be hooked up immediately to the view hierarchy, or else when it is
   // deleted it will delete this out from under the caller.
@@ -110,7 +127,8 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   CONTENT_EXPORT void SetDelegate(
     NSObject<RenderWidgetHostViewMacDelegate>* delegate);
 
-  // RenderWidgetHostView implementation.
+  // RenderWidgetHostViewBase implementation.
+  ui::Compositor* GetCompositor() override;
   void InitAsChild(gfx::NativeView parent_view) override;
   void SetSize(const gfx::Size& size) override;
   void SetBounds(const gfx::Rect& rect) override;
@@ -119,7 +137,6 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   bool HasFocus() override;
   void Hide() override;
   bool IsShowing() override;
-  void WasUnOccluded() override;
   void WasOccluded() override;
   gfx::Rect GetViewBounds() override;
   bool IsPointerLocked() override;
@@ -133,6 +150,7 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void TakeFallbackContentFrom(RenderWidgetHostView* view) override;
   bool IsHTMLFormPopup() const override;
   uint64_t GetNSViewId() const override;
+  void SetShouldUseDefaultDeadlineOnResize(bool enable) override;
 
   // Implementation of RenderWidgetHostViewBase.
   void InitAsPopup(RenderWidgetHostView* parent_host_view,
@@ -268,10 +286,10 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   // Returns true and stores first rectangle for character range if the
   // requested |range| is already cached, otherwise returns false.
   // Exposed for testing.
-  CONTENT_EXPORT bool GetCachedFirstRectForCharacterRange(
-      const gfx::Range& requested_range,
-      gfx::Rect* rect,
-      gfx::Range* actual_range);
+  CONTENT_EXPORT GetCachedFirstRectResult
+  GetCachedFirstRectForCharacterRange(const gfx::Range& requested_range,
+                                      gfx::Rect* rect,
+                                      gfx::Range* actual_range);
 
   // Returns true if there is line break in |range| and stores line breaking
   // point to |line_breaking_point|. The |line_break_point| is valid only if
@@ -291,7 +309,8 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   // range at the composition end as a heuristic result.
   // If the conversion failed, return gfx::Range::InvalidRange.
   gfx::Range ConvertCharacterRangeToCompositionRange(
-      const gfx::Range& request_range);
+      const gfx::Range& request_range,
+      const TextInputManager::CompositionRangeInfo* composition_info);
 
   WebContents* GetWebContents();
 
@@ -434,7 +453,7 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   std::vector<viz::SurfaceId> CollectSurfaceIdsForEviction() override;
   display::ScreenInfo GetCurrentScreenInfo() const override;
   void SetCurrentDeviceScaleFactor(float device_scale_factor) override;
-  bool ShouldWaitRemoteCompositorFrameOnResize() const override;
+  bool ShouldUseDefaultDeadlineOnResize() const override;
 
   // AcceleratedWidgetMacNSView implementation.
   void AcceleratedWidgetCALayerParamsUpdated(
@@ -578,6 +597,15 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   // but no NSWindow, like when in headless.
   bool IsHeadless() const;
 
+  // If `requested_range` is within the selection region, stores the first rect
+  // of the region in `rect` and the selection range in `actual_range`, and
+  // returns true. Otherwise returns false.
+  GetCachedFirstRectResult GetFirstRectFromSelection(
+      const gfx::Range& requested_range,
+      const TextInputManager::TextSelection* selection,
+      gfx::Rect* rect,
+      gfx::Range* actual_range);
+
   // Interface through which the NSView is to be manipulated. This points either
   // to |in_process_ns_view_bridge_| or to |remote_ns_view_|.
   raw_ptr<remote_cocoa::mojom::RenderWidgetHostNSView> ns_view_ = nullptr;
@@ -650,7 +678,7 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
 
   // Provides gesture synthesis given a stream of touch events and touch event
   // acks. This is for generating gesture events from injected touch events.
-  ui::FilteredGestureProvider gesture_provider_;
+  scoped_refptr<ui::FilteredGestureProvider> gesture_provider_;
 
   // Used to ensure that a consistent RenderWidgetHost is targeted throughout
   // the duration of a keyboard event.
@@ -709,6 +737,8 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   std::optional<DisplayFeature> display_feature_;
 
   const uint64_t ns_view_id_;
+
+  bool use_default_deadline_on_resize_ = false;
 
   // See description of `kDelayUpdateWindowsAfterTextInputStateChanged` for
   // details.

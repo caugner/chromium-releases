@@ -13,7 +13,12 @@
 #import "ios/chrome/browser/assistant/ui/assistant_container_layout_utils.h"
 #import "ios/chrome/browser/assistant/ui/assistant_container_presenter.h"
 #import "ios/chrome/browser/assistant/ui/assistant_container_view_controller.h"
+#import "ios/chrome/browser/fullscreen/model/fullscreen_browser_agent.h"
+#import "ios/chrome/browser/fullscreen/model/fullscreen_browser_agent_observer_bridge.h"
+#import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_animator.h"
 #import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_controller.h"
+#import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_ui_element.h"
+#import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_ui_updater.h"
 #import "ios/chrome/browser/shared/coordinator/layout_guide/layout_guide_util.h"
 #import "ios/chrome/browser/shared/coordinator/scene/scene_state.h"
 #import "ios/chrome/browser/shared/coordinator/scene/state/layout_state.h"
@@ -26,9 +31,18 @@
 #import "ios/chrome/browser/shared/ui/util/util_swift.h"
 #import "ios/chrome/common/ui/util/constraints_ui_util.h"
 
+@interface AssistantContainerCoordinator () <FullscreenUIElement,
+                                             FullscreenBrowserAgentObserving>
+@end
+
 @implementation AssistantContainerCoordinator {
   // The view controller for the assistant container.
   AssistantContainerViewController* _containerViewController;
+  // Observer for the fullscreen controller.
+  std::unique_ptr<FullscreenUIUpdater> _fullscreenUIUpdater;
+  // Bridge to observe the FullscreenBrowserAgent.
+  std::unique_ptr<FullscreenBrowserAgentObserverBridge>
+      _fullscreenBrowserAgentObserverBridge;
   // The content view controller to be displayed inside the container.
   UIViewController* _contentViewController;
   AssistantContainerAnimator* _animator;
@@ -105,12 +119,20 @@
   }
 
   // Set up fullscreen observation.
-  FullscreenController* fullscreenController =
-      FullscreenController::FromBrowser(self.browser);
-  [_containerViewController setUpFullscreenObservation:fullscreenController];
+  if (IsFullscreenRefactoringEnabled()) {
+    FullscreenBrowserAgent* agent =
+        FullscreenBrowserAgent::FromBrowser(self.browser);
+    _fullscreenBrowserAgentObserverBridge =
+        std::make_unique<FullscreenBrowserAgentObserverBridge>(self, agent);
+  } else {
+    FullscreenController* fullscreenController =
+        FullscreenController::FromBrowser(self.browser);
+    _fullscreenUIUpdater =
+        std::make_unique<FullscreenUIUpdater>(fullscreenController, self);
+  }
 
   __weak __typeof(self) weakSelf = self;
-  if (IsAssistantSidePanelEnabled()) {
+  if (IsUseSceneViewControllerEnabled()) {
     [self.presenter
         addAssistantContainerViewController:_containerViewController];
 
@@ -174,9 +196,6 @@
 
 - (void)setAssistantContainerDetents:
     (std::vector<AssistantContainerDetent>)detents {
-  if (IsAssistantContainerDebugEnabled()) {
-    return;
-  }
   _detents = detents;
   [_containerViewController setDetents:detents];
 }
@@ -278,9 +297,10 @@
   _dismissalInProgress = NO;
 
   // Cleanup view controller and state.
-  [_containerViewController setUpFullscreenObservation:nullptr];
+  _fullscreenUIUpdater = nullptr;
+  _fullscreenBrowserAgentObserverBridge = nullptr;
 
-  if (IsAssistantSidePanelEnabled()) {
+  if (IsUseSceneViewControllerEnabled()) {
     [self.presenter removeAssistantContainerViewController];
   } else {
     [_containerViewController willMoveToParentViewController:nil];
@@ -309,7 +329,7 @@
 // When the Assistant Side Panel is disabled, the baseVC might not conform to
 // this protocol.
 - (UIViewController<AssistantContainerPresenter>*)presenter {
-  if (IsAssistantSidePanelEnabled()) {
+  if (IsUseSceneViewControllerEnabled()) {
     CHECK([self.baseViewController
               conformsToProtocol:@protocol(AssistantContainerPresenter)],
           base::NotFatalUntil::M152);
@@ -320,6 +340,27 @@
         self.baseViewController;
   }
   return nil;
+}
+
+#pragma mark - FullscreenUIElement
+
+- (void)updateForFullscreenProgress:(CGFloat)progress {
+  [_animator animateFullscreenWithProgress:progress
+                                animatable:_containerViewController];
+}
+
+- (void)animateFullscreenWithAnimator:(FullscreenAnimator*)animator {
+  CGFloat finalProgress = animator.finalProgress;
+  __weak __typeof__(self) weakSelf = self;
+  [animator addAnimations:^{
+    [weakSelf updateForFullscreenProgress:finalProgress];
+  }];
+}
+
+#pragma mark - FullscreenBrowserAgentObserving
+
+- (void)fullscreenWillUpdateState:(FullscreenBrowserAgent*)agent {
+  [self updateForFullscreenProgress:agent->bottom_progress()];
 }
 
 @end

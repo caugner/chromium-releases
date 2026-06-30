@@ -218,6 +218,19 @@ public class UrlBarCoordinator
         mUrlBar.setBoundsEllipsisEnabled(enabled);
     }
 
+    /** Sets the accessibility warning text. */
+    public void setAccessibilityWarning(@Nullable String warning) {
+        mMediator.setAccessibilityWarning(warning);
+    }
+
+    /**
+     * Clears text selection, which also has the side effect of dismissing the Android selection
+     * handles and context menu if showing.
+     */
+    public void clearTextSelection() {
+        mUrlBar.clearTextSelection();
+    }
+
     @Override
     public int getSelectionStart() {
         return mUrlBar.getSelectionStart();
@@ -425,5 +438,9 @@ public class UrlBarCoordinator
         } else {
             mUrlBar.clearFocus();
         }
+        // The above call may not actually trigger a focus change, e.g. if focus was lost during
+        // reparenting and the target post-reparenting focus is false, there is no apparent change
+        // from the View's point of view, but the mediator still needs to know.
+        mMediator.onUrlFocusChange(postReparentingFocus);
     }
 }

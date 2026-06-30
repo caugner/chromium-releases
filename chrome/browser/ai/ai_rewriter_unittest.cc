@@ -9,23 +9,30 @@
 #include "base/run_loop.h"
 #include "base/test/bind.h"
 #include "base/test/gmock_expected_support.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/mock_callback.h"
 #include "base/test/protobuf_matchers.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "base/test/test_future.h"
 #include "base/types/expected.h"
+#include "base/version_info/channel.h"
+#include "base/version_info/version_info.h"
 #include "chrome/browser/ai/ai_test_utils.h"
 #include "chrome/browser/ai/features.h"
 #include "chrome/browser/optimization_guide/mock_optimization_guide_keyed_service.h"
+#include "chrome/common/channel_info.h"
+#include "components/optimization_guide/core/model_execution/manifest_broker/test/fake_manifest_broker.h"
+#include "components/optimization_guide/core/model_execution/manifest_broker/test/scenario_builder.h"
 #include "components/optimization_guide/core/model_execution/test/mock_on_device_capability.h"
 #include "components/optimization_guide/core/model_execution/test/substitution_builder.h"
 #include "components/optimization_guide/core/optimization_guide_proto_util.h"
 #include "components/optimization_guide/core/optimization_guide_switches.h"
 #include "components/optimization_guide/core/optimization_guide_util.h"
+#include "components/optimization_guide/proto/feature_configs.pb.h"
 #include "components/optimization_guide/proto/features/writing_assistance_api.pb.h"
 #include "components/optimization_guide/proto/string_value.pb.h"
-#include "content/public/browser/render_widget_host_view.h"
+#include "content/public/browser/web_contents.h"
 #include "mojo/public/cpp/test_support/test_utils.h"
 #include "services/network/public/mojom/permissions_policy/permissions_policy_feature.mojom.h"
 #include "services/on_device_model/public/cpp/features.h"
@@ -129,33 +136,37 @@ optimization_guide::proto::FeatureTextSafetyConfiguration CreateSafetyConfig() {
   return safety_config;
 }
 
+optimization_guide::proto::OnDeviceModelExecutionFeatureConfig
+CreateRewriterConfig() {
+  optimization_guide::proto::OnDeviceModelExecutionFeatureConfig config;
+  config.set_can_skip_text_safety(true);
+  config.set_feature(optimization_guide::proto::ModelExecutionFeature::
+                         MODEL_EXECUTION_FEATURE_WRITING_ASSISTANCE_API);
+
+  auto& input_config = *config.mutable_input_config();
+  input_config.set_request_base_name(
+      WritingAssistanceApiRequest().GetTypeName());
+
+  *input_config.add_execute_substitutions() = FieldSubstitution(
+      "%s", ProtoField({WritingAssistanceApiRequest::kContextFieldNumber}));
+  *input_config.add_execute_substitutions() = FieldSubstitution(
+      "%s",
+      ProtoField({WritingAssistanceApiRequest::kSharedContextFieldNumber}));
+  *input_config.add_execute_substitutions() = FieldSubstitution(
+      "%s", ProtoField({WritingAssistanceApiRequest::kRewriteTextFieldNumber}));
+
+  auto& output_config = *config.mutable_output_config();
+  output_config.set_proto_type(WritingAssistanceApiResponse().GetTypeName());
+  *output_config.mutable_proto_field() = StringValueField();
+
+  return config;
+}
+
 class AIRewriterTest : public AITestUtils::AITestBase {
  protected:
   optimization_guide::proto::OnDeviceModelExecutionFeatureConfig CreateConfig()
       override {
-    optimization_guide::proto::OnDeviceModelExecutionFeatureConfig config;
-    config.set_can_skip_text_safety(true);
-    config.set_feature(optimization_guide::proto::ModelExecutionFeature::
-                           MODEL_EXECUTION_FEATURE_WRITING_ASSISTANCE_API);
-
-    auto& input_config = *config.mutable_input_config();
-    input_config.set_request_base_name(
-        WritingAssistanceApiRequest().GetTypeName());
-
-    *input_config.add_execute_substitutions() = FieldSubstitution(
-        "%s", ProtoField({WritingAssistanceApiRequest::kContextFieldNumber}));
-    *input_config.add_execute_substitutions() = FieldSubstitution(
-        "%s",
-        ProtoField({WritingAssistanceApiRequest::kSharedContextFieldNumber}));
-    *input_config.add_execute_substitutions() = FieldSubstitution(
-        "%s",
-        ProtoField({WritingAssistanceApiRequest::kRewriteTextFieldNumber}));
-
-    auto& output_config = *config.mutable_output_config();
-    output_config.set_proto_type(WritingAssistanceApiResponse().GetTypeName());
-    *output_config.mutable_proto_field() = StringValueField();
-
-    return config;
+    return CreateRewriterConfig();
   }
 
   optimization_guide::proto::OnDeviceModelExecutionFeatureConfig
@@ -169,7 +180,8 @@ class AIRewriterTest : public AITestUtils::AITestBase {
       blink::mojom::AIRewriterCreateOptionsPtr options = GetDefaultOptions()) {
     TestCreateRewriterClient create_rewriter_client;
     GetAIManagerRemote()->CreateRewriter(
-        create_rewriter_client.BindNewPipeAndPassRemote(), std::move(options));
+        create_rewriter_client.BindNewPipeAndPassRemote(), std::move(options),
+        /*monitor=*/mojo::NullRemote());
 
     CreateRewriterResult result = create_rewriter_client.result().Take();
     EXPECT_OK(result);
@@ -207,7 +219,8 @@ class AIRewriterTest : public AITestUtils::AITestBase {
   void EnsureModelIsReady() {
     TestCreateRewriterClient rewriter_client;
     GetAIManagerRemote()->CreateRewriter(
-        rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions());
+        rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions(),
+        /*monitor=*/mojo::NullRemote());
 
     auto result = rewriter_client.result().Take();
     EXPECT_OK(result);
@@ -219,12 +232,30 @@ TEST_F(AIRewriterTest, CreateRewriterNoService) {
 
   TestCreateRewriterClient create_rewriter_client;
   GetAIManagerRemote()->CreateRewriter(
-      create_rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions());
+      create_rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions(),
+      /*monitor=*/mojo::NullRemote());
 
   CreateRewriterResult result = create_rewriter_client.result().Take();
   EXPECT_FALSE(result.has_value());
   EXPECT_EQ(result.error().error,
             blink::mojom::AIManagerCreateClientError::kUnableToCreateSession);
+}
+
+TEST_F(AIRewriterTest, RewriterTelemetry) {
+  base::HistogramTester histogram_tester;
+  EXPECT_CALL(
+      *mock_optimization_guide_keyed_service_,
+      GetOnDeviceModelEligibility(
+          optimization_guide::mojom::OnDeviceFeature::kWritingAssistanceApi))
+      .WillRepeatedly(testing::Return(
+          optimization_guide::OnDeviceModelEligibilityReason::kSuccess));
+  EnsureModelIsReady();
+  GetAIRewriterRemote();
+
+  histogram_tester.ExpectUniqueSample(
+      "OptimizationGuide.ModelExecution."
+      "OnDeviceModelEligibilityReason.WritingAssistanceApi",
+      optimization_guide::OnDeviceModelEligibilityReason::kSuccess, 2);
 }
 
 TEST_F(AIRewriterTest, CreateRewriterModelNotEligible) {
@@ -239,7 +270,8 @@ TEST_F(AIRewriterTest, CreateRewriterModelNotEligible) {
 
   TestCreateRewriterClient create_rewriter_client;
   GetAIManagerRemote()->CreateRewriter(
-      create_rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions());
+      create_rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions(),
+      /*monitor=*/mojo::NullRemote());
 
   CreateRewriterResult result = create_rewriter_client.result().Take();
   EXPECT_FALSE(result.has_value());
@@ -252,7 +284,8 @@ TEST_F(AIRewriterTest, CreateRewriterWaitsForBaseModel) {
 
   TestCreateRewriterClient create_rewriter_client;
   GetAIManagerRemote()->CreateRewriter(
-      create_rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions());
+      create_rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions(),
+      /*monitor=*/mojo::NullRemote());
 
   TestFuture<CreateRewriterResult>& future = create_rewriter_client.result();
   task_environment()->FastForwardBy(base::Hours(1));
@@ -271,7 +304,8 @@ TEST_F(AIRewriterTest, CreateRewriterWaitsForModelAdaptation) {
 
   TestCreateRewriterClient create_rewriter_client;
   GetAIManagerRemote()->CreateRewriter(
-      create_rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions());
+      create_rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions(),
+      /*monitor=*/mojo::NullRemote());
 
   TestFuture<CreateRewriterResult>& future = create_rewriter_client.result();
   task_environment()->FastForwardBy(base::Hours(1));
@@ -291,7 +325,8 @@ TEST_F(AIRewriterTest, CreateRewriterWaitsForTextSafetyModel) {
 
   TestCreateRewriterClient create_rewriter_client;
   GetAIManagerRemote()->CreateRewriter(
-      create_rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions());
+      create_rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions(),
+      /*monitor=*/mojo::NullRemote());
 
   TestFuture<CreateRewriterResult>& future = create_rewriter_client.result();
   task_environment()->FastForwardBy(base::Hours(1));
@@ -318,7 +353,8 @@ TEST_F(AIRewriterTest, CreateRewriterSafetyConfigNotAvailable) {
 
   TestCreateRewriterClient create_rewriter_client;
   GetAIManagerRemote()->CreateRewriter(
-      create_rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions());
+      create_rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions(),
+      /*monitor=*/mojo::NullRemote());
 
   CreateRewriterResult result = create_rewriter_client.result().Take();
   EXPECT_FALSE(result.has_value());
@@ -338,7 +374,8 @@ TEST_F(AIRewriterTest, CreateRewriterUnableToCalculateTokenSize) {
 
   TestCreateRewriterClient create_rewriter_client;
   GetAIManagerRemote()->CreateRewriter(
-      create_rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions());
+      create_rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions(),
+      /*monitor=*/mojo::NullRemote());
 
   CreateRewriterResult result = create_rewriter_client.result().Take();
   EXPECT_FALSE(result.has_value());
@@ -353,7 +390,8 @@ TEST_F(AIRewriterTest, CreateRewriterContextLimitExceededError) {
 
   TestCreateRewriterClient create_rewriter_client;
   GetAIManagerRemote()->CreateRewriter(
-      create_rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions());
+      create_rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions(),
+      /*monitor=*/mojo::NullRemote());
 
   CreateRewriterResult result = create_rewriter_client.result().Take();
   EXPECT_FALSE(result.has_value());
@@ -526,11 +564,11 @@ TEST_F(AIRewriterTest, Priority) {
   EXPECT_THAT(Rewrite(*rewriter_remote, kInputString, kContextString),
               ElementsAre("hi"));
 
-  main_rfh()->GetRenderWidgetHost()->GetView()->Hide();
+  web_contents()->WasHidden();
   EXPECT_THAT(Rewrite(*rewriter_remote, kInputString, kContextString),
               ElementsAre("Priority: background", "hi"));
 
-  main_rfh()->GetRenderWidgetHost()->GetView()->Show();
+  web_contents()->WasShown();
   EXPECT_THAT(Rewrite(*rewriter_remote, kInputString, kContextString),
               ElementsAre("hi"));
 }
@@ -695,7 +733,8 @@ TEST_F(AIRewriterTest, CreatePermissionsPolicyDisabled) {
   mojo::test::BadMessageObserver observer;
   TestCreateRewriterClient create_rewriter_client;
   GetAIManagerRemote()->CreateRewriter(
-      create_rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions());
+      create_rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions(),
+      /*monitor=*/mojo::NullRemote());
   EXPECT_EQ(observer.WaitForBadMessage(), "Policy or user setting disabled");
 }
 
@@ -710,7 +749,8 @@ TEST_F(AIRewriterTest, CreateBuiltInAIAPIsEnterprisePolicyDisabled) {
   mojo::test::BadMessageObserver observer;
   TestCreateRewriterClient create_rewriter_client;
   GetAIManagerRemote()->CreateRewriter(
-      create_rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions());
+      create_rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions(),
+      /*monitor=*/mojo::NullRemote());
   EXPECT_EQ(observer.WaitForBadMessage(), "Policy or user setting disabled");
   SetBuiltInAIAPIsEnterprisePolicy(true);
 }
@@ -726,7 +766,8 @@ TEST_F(AIRewriterTest, CreateGenAILocalEnterprisePolicyDisabled) {
   mojo::test::BadMessageObserver observer;
   TestCreateRewriterClient create_rewriter_client;
   GetAIManagerRemote()->CreateRewriter(
-      create_rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions());
+      create_rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions(),
+      /*monitor=*/mojo::NullRemote());
   EXPECT_EQ(observer.WaitForBadMessage(), "Policy or user setting disabled");
   SetGenAILocalEnterprisePolicy(true);
 }
@@ -742,9 +783,134 @@ TEST_F(AIRewriterTest, CreateOnDeviceAiUserSettingDisabled) {
   mojo::test::BadMessageObserver observer;
   TestCreateRewriterClient create_rewriter_client;
   GetAIManagerRemote()->CreateRewriter(
-      create_rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions());
+      create_rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions(),
+      /*monitor=*/mojo::NullRemote());
   EXPECT_EQ(observer.WaitForBadMessage(), "Policy or user setting disabled");
   SetOnDeviceAiUserSetting(true);
+}
+
+class AIRewriterManifestTest : public AITestUtils::AITestManifestBase {
+ public:
+  AIRewriterManifestTest() {
+    scoped_feature_list_.InitWithFeatures(
+        {optimization_guide::kOptimizationGuideManifestBroker,
+         on_device_model::features::kOnDeviceModelLitertLmBackend},
+        {});
+  }
+
+ protected:
+  void SetupManifest() override {
+    optimization_guide::proto::WritingAssistanceApiFeatureConfig rewriter_cfg;
+    rewriter_cfg.set_default_use_case("rewriter_api");
+    (*rewriter_cfg.mutable_experimental_use_cases())["v4"] = "rewriter_gemma4";
+
+    optimization_guide::proto::Any any_cfg;
+    any_cfg.set_type_url(
+        "type.googleapis.com/"
+        "optimization_guide.proto.WritingAssistanceApiFeatureConfig");
+    any_cfg.set_value(rewriter_cfg.SerializeAsString());
+
+    constexpr uint32_t kTestMaxTokens = 100u;
+
+    optimization_guide::proto::SolutionConfig solution_config;
+    *solution_config.mutable_feature() = CreateConfig();
+    solution_config.mutable_safety()->set_feature(
+        optimization_guide::proto::ModelExecutionFeature::
+            MODEL_EXECUTION_FEATURE_WRITING_ASSISTANCE_API);
+
+    optimization_guide::ScenarioBuilder(
+        fake_manifest_broker_->component_state())
+        .AddBaseModel(
+            "rewriter_gemma4_solution",
+            optimization_guide::BaseModelRecipeArgs(
+                optimization_guide::proto::BaseModelRecipe::BACKEND_TYPE_GPU,
+                optimization_guide::proto::BaseModelRecipe::
+                    PERFORMANCE_HINT_HIGHEST_QUALITY,
+                {}, kTestMaxTokens))
+        .AddBaseModel(
+            "rewriter_api_solution",
+            optimization_guide::BaseModelRecipeArgs(
+                optimization_guide::proto::BaseModelRecipe::BACKEND_TYPE_GPU,
+                optimization_guide::proto::BaseModelRecipe::
+                    PERFORMANCE_HINT_HIGHEST_QUALITY,
+                {}, kTestMaxTokens))
+        .AddSafetyModel("safety")
+        .AddSafeSolution("rewriter_api", "rewriter_api_solution", "safety",
+                         solution_config)
+        .AddSafeSolution("rewriter_gemma4", "rewriter_gemma4_solution",
+                         "safety", solution_config)
+        .SetFeatureConfig(optimization_guide::DeviceCategory::kGpuHighTier,
+                          "writing_assistance_api", any_cfg)
+        .Finish();
+
+    fake_manifest_broker_->settings().performance_class =
+        on_device_model::mojom::PerformanceClass::kHigh;
+  }
+
+  optimization_guide::proto::OnDeviceModelExecutionFeatureConfig CreateConfig()
+      override {
+    return CreateRewriterConfig();
+  }
+
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+TEST_F(AIRewriterManifestTest, CanCreateAndCreateWithManifestGemma4) {
+  version_info::Channel channel = chrome::GetChannel();
+  if (channel != version_info::Channel::CANARY &&
+      channel != version_info::Channel::DEV &&
+      channel != version_info::Channel::UNKNOWN &&
+      version_info::IsOfficialBuild()) {
+    GTEST_SKIP() << "Experimental use case support is limited to "
+                    "Canary/Dev/Unknown channels and unofficial builds.";
+  }
+
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeatureWithParameters(
+      kAIApiFoundationalModel, {{"model_version", "v4"}});
+
+  fake_manifest_broker_->client().RequestAssetsFor("rewriter_gemma4");
+
+  // Verify CanCreateRewriter check passes successfully for default options
+  // mapping to gemma4. We requested assets only for rewriter_gemma4,
+  // so receiving kAvailable implicitly verifies the correct use case mapping.
+  base::test::TestFuture<blink::mojom::ModelAvailabilityCheckResult> future;
+  ai_manager_->CanCreateRewriter(GetDefaultOptions(), future.GetCallback());
+  EXPECT_EQ(future.Get(),
+            blink::mojom::ModelAvailabilityCheckResult::kAvailable);
+
+  // Verify CreateRewriter can retrieve the model successfully.
+  TestCreateRewriterClient create_rewriter_client;
+  GetAIManagerRemote()->CreateRewriter(
+      create_rewriter_client.BindNewPipeAndPassRemote(), GetDefaultOptions(),
+      /*monitor=*/mojo::NullRemote());
+
+  auto result = create_rewriter_client.result().Take();
+  EXPECT_TRUE(result.has_value());
+}
+
+TEST_F(AIRewriterManifestTest, CanCreateBeforeDownloadGemma4) {
+  version_info::Channel channel = chrome::GetChannel();
+  if (channel != version_info::Channel::CANARY &&
+      channel != version_info::Channel::DEV &&
+      channel != version_info::Channel::UNKNOWN &&
+      version_info::IsOfficialBuild()) {
+    GTEST_SKIP() << "Experimental use case support is limited to "
+                    "Canary/Dev/Unknown channels and unofficial builds.";
+  }
+
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeatureWithParameters(
+      kAIApiFoundationalModel, {{"model_version", "v4"}});
+
+  // Assets are requested for rewriter_api, but since gemma4 is the configured
+  // model_version, we should get kDownloadable for gemma4.
+  fake_manifest_broker_->client().RequestAssetsFor("rewriter_api");
+
+  base::test::TestFuture<blink::mojom::ModelAvailabilityCheckResult> future;
+  ai_manager_->CanCreateRewriter(GetDefaultOptions(), future.GetCallback());
+  EXPECT_EQ(future.Get(),
+            blink::mojom::ModelAvailabilityCheckResult::kDownloadable);
 }
 
 }  // namespace

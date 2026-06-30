@@ -63,7 +63,8 @@ bool IsUserTriggeredMainFrameNavigation(
       return false;
     }
 
-    if (navigation_handle->GetPageTransition() & ui::PAGE_TRANSITION_RELOAD) {
+    if (ui::PageTransitionCoreTypeIs(navigation_handle->GetPageTransition(),
+                                     ui::PAGE_TRANSITION_RELOAD)) {
       return false;
     }
   }

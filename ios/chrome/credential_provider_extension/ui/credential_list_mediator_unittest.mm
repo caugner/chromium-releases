@@ -310,11 +310,6 @@ TEST_F(CredentialListMediatorTest, FetchAllCredentialsPasskeysOnly) {
 
 // Tests that fetching all credentials filters out hidden passkeys.
 TEST_F(CredentialListMediatorTest, FetchAllCredentialsWithHiddenPasskeys) {
-  NSUserDefaults* defaults = app_group::GetGroupUserDefaults();
-  [defaults setBool:YES
-             forKey:AppGroupUserDefaulsCredentialProviderSignalAPIEnabled()];
-  [defaults synchronize];
-
   ArchivableCredential* passkey_credential = TestPasskeyCredential();
   ArchivableCredential* hidden_passkey = TestPasskeyCredential(/*hidden=*/YES);
 
@@ -570,6 +565,151 @@ TEST_F(CredentialListMediatorTest,
                              credentialResponseHandler:nil];
   mediator.allCredentials = [mediator fetchAllCredentials];
   EXPECT_EQ([mediator filterCredentials].count, 0u);
+}
+
+// Tests that password credential matches registry controlled domain correctly.
+TEST_F(CredentialListMediatorTest,
+       PasswordCredentialMatchesRegistryControlledDomain) {
+  ArchivableCredential* credential =
+      [[ArchivableCredential alloc] initWithFavicon:nil
+                                               gaia:nil
+                                           password:@"qwerty123"
+                                               rank:1
+                                   recordIdentifier:@"recordIdentifier"
+                                  serviceIdentifier:@"https://railway.app/"
+                                        serviceName:@"railway.app"
+                           registryControlledDomain:@"railway.app"
+                                           username:@"username_value"
+                                               note:@"note"
+                                       lastUsedTime:0];
+
+  CredentialListMediator* credentialListMediator =
+      [[CredentialListMediator alloc] initWithConsumer:nil
+                                             UIHandler:nil
+                                       credentialStore:nil
+                                    serviceIdentifiers:nil
+                             credentialResponseHandler:nil];
+
+  // Exact match.
+  EXPECT_TRUE([credentialListMediator passwordCredential:credential
+                         matchesRegistryControlledDomain:@"railway.app"]);
+
+  // Subdomain match.
+  EXPECT_TRUE([credentialListMediator passwordCredential:credential
+                         matchesRegistryControlledDomain:@"login.railway.app"]);
+
+  // Attacker website (e.g. attacker app hosted on private public suffix).
+  // The test should expect the attacker website to fail to match.
+  EXPECT_FALSE([credentialListMediator
+                   passwordCredential:credential
+      matchesRegistryControlledDomain:@"attacker.up.railway.app"]);
+
+  // False matches.
+  EXPECT_FALSE([credentialListMediator passwordCredential:credential
+                          matchesRegistryControlledDomain:@"evil-railway.app"]);
+  EXPECT_FALSE([credentialListMediator
+                   passwordCredential:credential
+      matchesRegistryControlledDomain:@"railway.app.evil.com"]);
+  EXPECT_FALSE([credentialListMediator passwordCredential:credential
+                          matchesRegistryControlledDomain:@"railway.app.evil"]);
+  EXPECT_FALSE([credentialListMediator passwordCredential:credential
+                          matchesRegistryControlledDomain:@"evil.com"]);
+
+  // Empty registryControlledDomain should not match anything.
+  ArchivableCredential* credentialWithEmptyDomain =
+      [[ArchivableCredential alloc] initWithFavicon:nil
+                                               gaia:nil
+                                           password:@"qwerty123"
+                                               rank:1
+                                   recordIdentifier:@"recordIdentifier"
+                                  serviceIdentifier:@"https://railway.app/"
+                                        serviceName:@"railway.app"
+                           registryControlledDomain:@""
+                                           username:@"username_value"
+                                               note:@"note"
+                                       lastUsedTime:0];
+  EXPECT_FALSE([credentialListMediator
+                   passwordCredential:credentialWithEmptyDomain
+      matchesRegistryControlledDomain:@"railway.app"]);
+
+  // Nil registryControlledDomain should not match anything.
+  ArchivableCredential* credentialWithNilDomain =
+      [[ArchivableCredential alloc] initWithFavicon:nil
+                                               gaia:nil
+                                           password:@"qwerty123"
+                                               rank:1
+                                   recordIdentifier:@"recordIdentifier"
+                                  serviceIdentifier:@"https://railway.app/"
+                                        serviceName:@"railway.app"
+                           registryControlledDomain:nil
+                                           username:@"username_value"
+                                               note:@"note"
+                                       lastUsedTime:0];
+  EXPECT_FALSE([credentialListMediator
+                   passwordCredential:credentialWithNilDomain
+      matchesRegistryControlledDomain:@"railway.app"]);
+}
+
+// Tests that fallback password credential matching (when
+// registryControlledDomain is empty) matches domain subdomains correctly but
+// rejects public suffix / private registry subdomains.
+TEST_F(CredentialListMediatorTest,
+       PasswordCredentialMatchesFallbackServiceIdentifiers) {
+  ArchivableCredential* credential =
+      [[ArchivableCredential alloc] initWithFavicon:nil
+                                               gaia:nil
+                                           password:@"qwerty123"
+                                               rank:1
+                                   recordIdentifier:@"recordIdentifier"
+                                  serviceIdentifier:@"https://railway.app/"
+                                        serviceName:@"railway.app"
+                           registryControlledDomain:@""
+                                           username:@"username_value"
+                                               note:@"note"
+                                       lastUsedTime:0];
+
+  CredentialListMediator* credentialListMediator =
+      [[CredentialListMediator alloc] initWithConsumer:nil
+                                             UIHandler:nil
+                                       credentialStore:nil
+                                    serviceIdentifiers:nil
+                             credentialResponseHandler:nil];
+
+  // Exact matches.
+  ASCredentialServiceIdentifier* serviceIdentifierExact =
+      [[ASCredentialServiceIdentifier alloc]
+          initWithIdentifier:@"railway.app"
+                        type:ASCredentialServiceIdentifierTypeDomain];
+  EXPECT_TRUE([credentialListMediator
+             passwordCredential:credential
+      matchesServiceIdentifiers:@[ serviceIdentifierExact ]]);
+
+  // Subdomain matches.
+  ASCredentialServiceIdentifier* serviceIdentifierSubdomain =
+      [[ASCredentialServiceIdentifier alloc]
+          initWithIdentifier:@"login.railway.app"
+                        type:ASCredentialServiceIdentifierTypeDomain];
+  EXPECT_TRUE([credentialListMediator
+             passwordCredential:credential
+      matchesServiceIdentifiers:@[ serviceIdentifierSubdomain ]]);
+
+  // Attacker matches (should NOT match!).
+  ASCredentialServiceIdentifier* serviceIdentifierAttacker =
+      [[ASCredentialServiceIdentifier alloc]
+          initWithIdentifier:@"attacker.up.railway.app"
+                        type:ASCredentialServiceIdentifierTypeDomain];
+  EXPECT_FALSE([credentialListMediator
+             passwordCredential:credential
+      matchesServiceIdentifiers:@[ serviceIdentifierAttacker ]]);
+
+  // False matches.
+  ASCredentialServiceIdentifier* serviceIdentifierEvilSuffix =
+      [[ASCredentialServiceIdentifier alloc]
+          initWithIdentifier:@"railway.app.evil.com"
+                        type:ASCredentialServiceIdentifierTypeDomain];
+  EXPECT_FALSE([credentialListMediator
+             passwordCredential:credential
+      matchesServiceIdentifiers:@[ serviceIdentifierEvilSuffix ]]);
 }
 
 }  // namespace credential_provider_extension

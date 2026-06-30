@@ -40,8 +40,6 @@ enum class GuidedTourStep;
                        alignment:(BubbleAlignment)alignment
                       bubbleType:(BubbleViewType)type
     backgroundCutoutCornerRadius:(CGFloat)cornerRadius
-               dismissalCallback:
-                   (CallbackWithIPHDismissalReasonType)dismissalCallback
               completionCallback:(ProceduralBlock)completionCallback
     NS_DESIGNATED_INITIALIZER;
 
@@ -55,6 +53,17 @@ enum class GuidedTourStep;
                (CallbackWithIPHDismissalReasonType)dismissalCallback
     NS_UNAVAILABLE;
 
+- (instancetype)initWithText:(NSString*)text
+                       title:(NSString*)titleString
+              arrowDirection:(BubbleArrowDirection)arrowDirection
+                   alignment:(BubbleAlignment)alignment
+                  bubbleType:(BubbleViewType)type
+             pageControlPage:(BubblePageControlPage)page
+       customNextButtonTitle:(NSString*)customNextButtonTitle
+           dismissalCallback:
+               (CallbackWithIPHDismissalReasonType)dismissalCallback
+    NS_UNAVAILABLE;
+
 // Presents the bubble in `parentViewController`'s view. The underlying
 // BubbleViewController is added as a child view controller of
 // `parentViewController`. `anchorPoint` determines where the bubble is anchored
@@ -64,7 +73,11 @@ enum class GuidedTourStep;
                     anchorPoint:(CGPoint)anchorPoint
                      anchorView:(UIView*)anchorView;
 
+// Dismisses the bubble.
 - (void)dismiss;
+
+// Dismisses the bubble and don't call the `dismissalCallback`.
+- (void)dismissWithoutCallback;
 
 @property(nonatomic, weak) id<GuidedTourBubbleViewControllerPresenterDelegate>
     delegate;

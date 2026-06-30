@@ -13,10 +13,8 @@
 
 namespace features {
 
-BASE_DECLARE_FEATURE(kGlicTabRestoration);
 BASE_DECLARE_FEATURE(kGlicAndroidSidePanel);
 
-BASE_DECLARE_FEATURE(kGlicDaisyChainViaCoordinator);
 BASE_DECLARE_FEATURE(kGlicClearTurnIdOnPanelWillOpen);
 BASE_DECLARE_FEATURE(kGlicChromeStatusIcon);
 extern const base::FeatureParam<int> kGlicChromeStatusIconSizePx;
@@ -102,6 +100,19 @@ BASE_DECLARE_FEATURE(kGlicContextualCueingV2AutoSubmit);
 BASE_DECLARE_FEATURE(kGlicWebDragAndDropFileUpload);
 
 BASE_DECLARE_FEATURE(kGlicOptInImpressionMetrics);
+
+BASE_DECLARE_FEATURE(kGlicContentsInitiallyHidden);
+BASE_DECLARE_FEATURE(kGlicShowForSignedOut);
+
+BASE_DECLARE_FEATURE(kGlicSetWebContentsVisibilityWhenToggling);
+
+BASE_DECLARE_FEATURE(kGlicSetWebContentsVisibilityWhenToggling);
+
+BASE_DECLARE_FEATURE(kGlicAnchorEntryPointForOnboardedUsers);
+BASE_DECLARE_FEATURE(kGlicProcessCounterAbuseVerdict);
+BASE_DECLARE_FEATURE(kGlicNoWebUiLoader);
+BASE_DECLARE_FEATURE(kGlicGeminiEnterpriseSettingsEnabled);
+
 }  // namespace features
 
 #endif  // CHROME_BROWSER_GLIC_PUBLIC_FEATURES_H_

@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "base/auto_reset.h"
 #include "base/check.h"
 #include "base/feature_list.h"
 #include "base/logging.h"
@@ -13,10 +14,11 @@
 #include "components/signin/public/base/gaia_id_hash.h"
 #include "components/signin/public/base/signin_switches.h"
 #include "components/signin/public/identity_manager/account_info.h"
+#include "components/sync/base/custom_passphrase_bootstrap_token.h"
 #include "components/sync/base/features.h"
 #include "components/sync/base/passphrase_enums.h"
 #include "components/sync/base/user_selectable_type.h"
-#include "components/sync/engine/nigori/nigori.h"
+#include "components/sync/nigori/nigori.h"
 #include "components/sync/service/sync_prefs.h"
 #include "components/sync/service/sync_service_crypto.h"
 #include "components/version_info/version_info.h"
@@ -168,6 +170,18 @@ void SyncUserSettingsImpl::SetSelectedType(UserSelectableType type,
     case SyncPrefs::SyncAccountState::kSignedInWithoutSyncConsent: {
       prefs_->SetSelectedTypeForAccount(
           type, is_type_on, delegate_->GetSyncAccountInfoForPrefs().gaia);
+#if BUILDFLAG(IS_CHROMEOS)
+      // TODO(crbug.com/524514663): This is for the possible migration of users
+      // from kSignedInWithoutSyncConsent to kSyncing. Remove upon migrating all
+      // users.
+      if (IsReplaceSyncPromosWithSignInPromosEnabled()) {
+        base::AutoReset<bool> auto_reset(&suppress_notifications_, true);
+        prefs_->SetSelectedTypesForSyncingUser(
+            /*keep_everything_synced=*/false, GetRegisteredSelectableTypes(),
+            is_type_on ? base::Union(GetSelectedTypes(), {type})
+                       : base::Difference(GetSelectedTypes(), {type}));
+      }
+#endif  // BUILDFLAG(IS_CHROMEOS)
       break;
     }
     case SyncPrefs::SyncAccountState::kSyncing: {
@@ -209,6 +223,11 @@ UserSelectableTypeSet SyncUserSettingsImpl::GetRegisteredSelectableTypes()
 #if BUILDFLAG(IS_CHROMEOS)
 void SyncUserSettingsImpl::SetSyncFeatureDisabledViaDashboard() {
   prefs_->SetSyncFeatureDisabledViaDashboard();
+  if (delegate_->GetSyncAccountStateForPrefs() ==
+          SyncPrefs::SyncAccountState::kSignedInWithoutSyncConsent &&
+      IsReplaceSyncPromosWithSignInPromosEnabled()) {
+    SetSelectedOsTypes(/*sync_all_os_types=*/false, UserSelectableOsTypeSet());
+  }
 }
 
 void SyncUserSettingsImpl::ClearSyncFeatureDisabledViaDashboard() {
@@ -228,6 +247,11 @@ bool SyncUserSettingsImpl::IsSyncAllOsTypesEnabled() const {
 }
 
 UserSelectableOsTypeSet SyncUserSettingsImpl::GetSelectedOsTypes() const {
+  if (delegate_->GetSyncAccountStateForPrefs() ==
+      SyncPrefs::SyncAccountState::kNotSignedIn) {
+    return UserSelectableOsTypeSet();
+  }
+
   UserSelectableOsTypeSet types = prefs_->GetSelectedOsTypes();
   types.RetainAll(GetRegisteredSelectableOsTypes());
   return types;
@@ -293,6 +317,10 @@ bool SyncUserSettingsImpl::IsTrustedVaultKeyRequired() const {
   return crypto_->IsTrustedVaultKeyRequired();
 }
 
+bool SyncUserSettingsImpl::IsKeystoreKeyRequiredForTesting() const {
+  return crypto_->IsKeystoreKeyRequired();
+}
+
 bool SyncUserSettingsImpl::IsTrustedVaultKeyRequiredForPreferredDataTypes()
     const {
   return IsEncryptedDatatypePreferred() && crypto_->IsTrustedVaultKeyRequired();
@@ -342,7 +370,10 @@ DataTypeSet SyncUserSettingsImpl::GetPreferredDataTypes() const {
   DataTypeSet types = UserSelectableTypesToDataTypes(GetSelectedTypes());
 
 #if BUILDFLAG(IS_CHROMEOS)
-  if (IsSyncFeatureDisabledViaDashboard()) {
+  if (IsSyncFeatureDisabledViaDashboard() &&
+      (delegate_->GetSyncAccountStateForPrefs() ==
+           SyncPrefs::SyncAccountState::kSyncing ||
+       !IsReplaceSyncPromosWithSignInPromosEnabled())) {
     // If sync is disabled via dashboard, only a minimal set of datatypes should
     // sync. This prevents code changes from causing accidental behavioral
     // differences in this ChromeOS-specific edge case, as a side effect of
@@ -360,7 +391,7 @@ DataTypeSet SyncUserSettingsImpl::GetPreferredDataTypes() const {
   // though they're technically not registered.
   types.PutAll(ControlTypes());
 
-  static_assert(64 == GetNumDataTypes(),
+  static_assert(63 == GetNumDataTypes(),
                 "If adding a new sync data type, update the list below below if"
                 " you want to disable the new data type for local sync, aka"
                 " roaming profiles on Windows.");
@@ -398,7 +429,6 @@ DataTypeSet SyncUserSettingsImpl::GetPreferredDataTypes() const {
     types.Remove(SKILL);
     types.Remove(GEMINI_THREAD);
     types.Remove(THEMES_IOS);
-    types.Remove(ACCESSIBILITY_ANNOTATION);
     types.Remove(THEMES_ANDROID);
   }
   return types;
@@ -415,16 +445,19 @@ bool SyncUserSettingsImpl::IsEncryptedDatatypePreferred() const {
   return !Intersection(preferred_types, encrypted_types).empty();
 }
 
-std::string SyncUserSettingsImpl::GetEncryptionBootstrapToken() const {
+CustomPassphraseBootstrapToken
+SyncUserSettingsImpl::GetEncryptionBootstrapToken(
+    const os_crypt_async::Encryptor& encryptor) const {
   const GaiaId& gaia_id = delegate_->GetSyncAccountInfoForPrefs().gaia;
   if (gaia_id.empty()) {
-    return std::string();
+    return CustomPassphraseBootstrapToken();
   }
-  return prefs_->GetEncryptionBootstrapTokenForAccount(gaia_id);
+  return prefs_->GetEncryptionBootstrapTokenForAccount(encryptor, gaia_id);
 }
 
 void SyncUserSettingsImpl::SetEncryptionBootstrapToken(
-    const std::string& token) {
+    const CustomPassphraseBootstrapToken& token,
+    const os_crypt_async::Encryptor& encryptor) {
   const GaiaId& gaia_id = delegate_->GetSyncAccountInfoForPrefs().gaia;
   if (gaia_id.empty()) {
     // The user must be signed in, so the only legit scenario where SyncService
@@ -432,7 +465,7 @@ void SyncUserSettingsImpl::SetEncryptionBootstrapToken(
     CHECK(prefs_->IsLocalSyncEnabled());
     return;
   }
-  prefs_->SetEncryptionBootstrapTokenForAccount(token, gaia_id);
+  prefs_->SetEncryptionBootstrapTokenForAccount(token, encryptor, gaia_id);
 }
 
 bool SyncUserSettingsImpl::IsSyncClientDisabledByPolicy() const {
@@ -444,6 +477,9 @@ void SyncUserSettingsImpl::OnSyncManagedPrefChange(bool is_sync_managed) {
 }
 
 void SyncUserSettingsImpl::OnSelectedTypesPrefChange() {
+  if (suppress_notifications_) {
+    return;
+  }
   delegate_->OnSelectedTypesChanged();
 }
 

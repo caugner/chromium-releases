@@ -76,6 +76,7 @@ class ActorOverlayMediator
         mLayoutManagerSupplier = layoutManagerSupplier;
         mBackPressCallback = backPressCallback;
         mDismissSnackbarCallback = dismissSnackbarCallback;
+        updateTakeOverButtonVisibility();
 
         mTabObserver =
                 new EmptyTabObserver() {
@@ -133,6 +134,18 @@ class ActorOverlayMediator
     @Override
     public void onUiTabStateChanged(ActorUiTabController.UiTabState state) {
         updateVisibility();
+        updateTakeOverButtonVisibility();
+    }
+
+    private boolean isHandoffButtonActive() {
+        if (mTabController == null) return false;
+        ActorUiTabController.UiTabState state = mTabController.getUiTabState();
+        return state != null && state.handoffButton.isActive;
+    }
+
+    private void updateTakeOverButtonVisibility() {
+        boolean visible = isHandoffButtonActive();
+        mModel.set(ActorOverlayProperties.TAKE_OVER_TASK_BUTTON_VISIBLE, visible);
     }
 
     /** Called when a task state changes, to re-evaluate visibility. */
@@ -172,6 +185,7 @@ class ActorOverlayMediator
         }
 
         updateVisibility();
+        updateTakeOverButtonVisibility();
     }
 
     private boolean calculateCanShowOverlay(@Nullable Tab tab) {

@@ -169,10 +169,10 @@
 - (void)
     showBookmarksFolderChooserWithParentFolder:
         (const bookmarks::BookmarkNode*)parent
-                                   editedNodes:
+                                   hiddenNodes:
                                        (const std::set<raw_ptr<
                                             const bookmarks::BookmarkNode>>&)
-                                           editedNodes {
+                                           hiddenNodes {
   if (_folderChooserCoordinator || _viewController.UIDisabled) {
     // This can occur if the user tap on the button while the previous folder
     // chooser is being dismissed.
@@ -183,7 +183,7 @@
                                             ? _baseNavigationController
                                             : _navigationController)
                                browser:self.browser
-                            movedNodes:editedNodes];
+                           hiddenNodes:hiddenNodes];
   _folderChooserCoordinator.allowsNewFolders = NO;
   [_folderChooserCoordinator setSelectedFolder:parent];
   _folderChooserCoordinator.delegate = self;

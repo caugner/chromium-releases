@@ -16,6 +16,7 @@
 #include "base/compiler_specific.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/posix/safe_strerror.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task/single_thread_task_runner.h"
@@ -1156,6 +1157,15 @@ void RequestManager::SubmitCapturedJpegBuffer(uint32_t frame_number,
   CaptureResult& pending_result = pending_results_[frame_number];
   gfx::Size buffer_dimension =
       stream_buffer_manager_->GetBufferDimension(stream_type);
+  // Validate the JPEG buffer size to prevent underflow when calculating the
+  // header pointer (crbug.com/502782711).
+  if (static_cast<size_t>(buffer_dimension.width()) < sizeof(Camera3JpegBlob)) {
+    device_context_->SetErrorState(
+        media::VideoCaptureError::kCrosHalV3BufferManagerInvalidJpegBlob,
+        FROM_HERE, "Invalid JPEG buffer size");
+    return;
+  }
+
   auto shared_image =
       stream_buffer_manager_->GetSharedImageById(stream_type, buffer_ipc_id);
   CHECK(shared_image);
@@ -1167,20 +1177,29 @@ void RequestManager::SubmitCapturedJpegBuffer(uint32_t frame_number,
         FROM_HERE, "Failed to map the shared image.");
     return;
   }
-  const Camera3JpegBlob* header = reinterpret_cast<Camera3JpegBlob*>(
+  // The blob buffer is shared with the camera HAL, so copy the header to a
+  // local before validating and using its fields.
+  const Camera3JpegBlob header = *reinterpret_cast<const Camera3JpegBlob*>(
       reinterpret_cast<const uintptr_t>(
           scoped_mapping->GetMemoryForPlane(0).data()) +
       buffer_dimension.width() - sizeof(Camera3JpegBlob));
-  if (header->jpeg_blob_id != kCamera3JpegBlobId) {
+  if (header.jpeg_blob_id != kCamera3JpegBlobId) {
     device_context_->SetErrorState(
         media::VideoCaptureError::kCrosHalV3BufferManagerInvalidJpegBlob,
         FROM_HERE, "Invalid JPEG blob");
     return;
   }
+  // Validate the JPEG size to prevent out-of-bounds read (crbug.com/502782711).
+  if (header.jpeg_size > buffer_dimension.width() - sizeof(Camera3JpegBlob)) {
+    device_context_->SetErrorState(
+        media::VideoCaptureError::kCrosHalV3BufferManagerInvalidJpegBlob,
+        FROM_HERE, "Invalid JPEG size");
+    return;
+  }
   // Still capture result from HALv3 already has orientation info in EXIF,
   // so just provide 0 as screen rotation in |blobify_callback_| parameters.
   mojom::BlobPtr blob = blobify_callback_.Run(
-      scoped_mapping->GetMemoryForPlane(0).data(), header->jpeg_size,
+      scoped_mapping->GetMemoryForPlane(0).data(), header.jpeg_size,
       stream_buffer_manager_->GetStreamCaptureFormat(stream_type), 0);
   if (blob) {
     if (stream_type == StreamType::kJpegOutput &&

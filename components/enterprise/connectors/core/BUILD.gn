@@ -164,6 +164,27 @@ if (enterprise_cloud_content_analysis || is_android) {
     if (!is_ios) {
       deps += [ "//components/safe_browsing/content/browser/web_ui" ]
     }
+
+    if (is_chromeos) {
+      sources += [
+        "cloud_content_scanning/chunked_file_data_pipe_producer.cc",
+        "cloud_content_scanning/chunked_file_data_pipe_producer.h",
+      ]
+    }
+  }
+
+  source_set("cloud_content_scanning_test_support") {
+    testonly = true
+    sources = [
+      "cloud_content_scanning/upload_request_test_server.cc",
+      "cloud_content_scanning/upload_request_test_server.h",
+    ]
+    deps = [
+      "//base/test:test_support",
+      "//components/enterprise/common/proto:connectors_proto",
+      "//net",
+      "//net:test_support",
+    ]
   }
 }
 
@@ -216,6 +237,8 @@ source_set("test_support") {
 
   if (enterprise_cloud_content_analysis || is_android) {
     sources += [
+      "cloud_content_scanning/mock_content_analysis_info.cc",
+      "cloud_content_scanning/mock_content_analysis_info.h",
       "uploader_test_utils.cc",
       "uploader_test_utils.h",
     ]
@@ -280,7 +303,7 @@ source_set("unit_tests") {
 }
 
 if (enterprise_cloud_content_analysis || is_android) {
-  source_set("cloud_content_scanning_unittests") {
+  source_set("cloud_content_scanning_unit_tests") {
     testonly = true
 
     sources = [
@@ -319,6 +342,11 @@ if (enterprise_cloud_content_analysis || is_android) {
       "//testing/gtest",
       "//ui/gfx/range",
     ]
+    if (is_chromeos) {
+      sources += [
+        "cloud_content_scanning/chunked_file_data_pipe_producer_unittest.cc",
+      ]
+    }
   }
 }
 

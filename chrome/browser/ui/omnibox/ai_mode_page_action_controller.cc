@@ -13,9 +13,10 @@
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/omnibox/omnibox_controller.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
+#include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
+#include "chrome/browser/ui/page_action/page_action_controller.h"
 #include "chrome/browser/ui/page_action/page_action_icon_type.h"
-#include "chrome/browser/ui/page_actions/page_action_controller.h"
 #include "chrome/browser/ui/search/omnibox_utils.h"
 #include "chrome/browser/ui/tabs/public/tab_features.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
@@ -29,6 +30,7 @@
 #include "components/tabs/public/tab_interface.h"
 #include "third_party/metrics_proto/omnibox_event.pb.h"
 #include "ui/base/models/image_model.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/view.h"
@@ -54,7 +56,9 @@ void SetPageActionVisibility(
         ui::ImageModel::FromImageGenerator(
             base::BindRepeating([](const ui::ColorProvider* color_provider) {
               return gfx::CreateVectorIcon(
-                  omnibox::kSearchSparkIcon,
+                  features::IsRoundedIconsEnabled()
+                      ? omnibox::kSearchSparkIcon
+                      : omnibox::kSearchSparkOldIcon,
                   GetLayoutConstant(LayoutConstant::kLocationBarChipIconSize),
                   color_provider->GetColor(kColorOmniboxIconForegroundTonal));
             }),
@@ -139,7 +143,9 @@ bool AiModePageActionController::ShouldShowPageAction(
   // If the feature is enabled to hide the AIM entrypoint for URL suggestions,
   // don't show the AIM entrypoint if the default match is a URL suggestion.
   if (base::FeatureList::IsEnabled(
-          omnibox::kHideAimEntrypointForUrlSuggestions)) {
+          omnibox::kHideAimEntrypointForUrlSuggestions) ||
+      base::FeatureList::IsEnabled(
+          omnibox::kWebUIOmniboxDynamicAiModeButton)) {
     const AutocompleteResult& result =
         omnibox_controller->autocomplete_controller()->result();
     if (result.default_match() &&
@@ -156,6 +162,16 @@ bool AiModePageActionController::ShouldShowPageAction(
   const bool has_focus = focus_manager && location_bar_view.Contains(
                                               focus_manager->GetFocusedView());
 
+  const auto page_classification = edit_model->GetPageClassification();
+
+  // Suppress the AI Mode page action button when OnFocus on web pages.
+  if (base::FeatureList::IsEnabled(omnibox::kWebUIOmniboxDynamicAiModeButton)) {
+    if (has_focus && !edit_model->user_input_in_progress() &&
+        !omnibox::IsNTPPage(page_classification)) {
+      return false;
+    }
+  }
+
   // TODO(crbug.com/448234135): Remove this logic from the migrated path when
   // Page Action framework supports suggestion chip queueing.
   //
@@ -163,7 +179,6 @@ bool AiModePageActionController::ShouldShowPageAction(
   // popup. In this case, we suppress the AIM page action in order to ensure
   // that it doesn't get visually "sandwiched" in between the other page actions
   // that show up in this state.
-  const auto page_classification = edit_model->GetPageClassification();
   if (has_focus && !edit_model->user_input_in_progress() &&
       !location_bar_view.GetOmniboxController()->IsPopupOpen() &&
       !omnibox::IsNTPPage(page_classification)) {

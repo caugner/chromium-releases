@@ -34,6 +34,7 @@
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/digital_identity_provider.h"
+#include "content/public/browser/frame_tree_node_id.h"
 #include "content/public/browser/legacy_tech_cookie_issue_details.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/alternative_error_page_override_info.mojom-forward.h"
@@ -269,6 +270,11 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   GetBaselinePermissionsPolicyForIsolatedApp(
       content::BrowserContext* browser_context,
       const url::Origin& app_origin) override;
+  void EnsureRequiredHeadersForIsolatedApp(
+      content::BrowserContext* browser_context,
+      const GURL& url,
+      network::mojom::URLResponseHead* response_head,
+      const std::optional<content::FrameTreeNodeId>& frame_tree_node) override;
   bool ShouldTryToUseExistingProcessHost(
       content::BrowserContext* browser_context,
       const GURL& url) override;
@@ -307,6 +313,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   bool IsTopChromeWebUIURL(const GURL& url) override;
   bool IsMultiCaptureAllowed(
       content::RenderFrameHost* render_frame_host) override;
+  content::WebContents* GetWebContentsFromWindowIfCaptureHandleAllowed(
+      gfx::NativeWindow window) override;
   bool IsFileAccessAllowed(const base::FilePath& path,
                            const base::FilePath& absolute_path,
                            const base::FilePath& profile_path) override;
@@ -1067,11 +1075,19 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::WebContents* web_contents) override;
 
   bool ShouldUseFirstPartyStorageKey(const url::Origin& origin) override;
+  content::RenderFrameHost* GetEffectiveTopFrameForPartitioning(
+      content::RenderFrameHost* render_frame_host) override;
   content::RenderFrameHost* GetPostMessageTargetOverride(
       content::RenderFrameHost* target_rfh,
       const std::optional<blink::LocalFrameToken>& source_frame_token,
       const url::Origin& source_origin,
       const std::optional<url::Origin>& target_origin) override;
+  bool IsCrossOriginSubframeAllowedToShowFilePicker(
+      content::RenderFrameHost* render_frame_host,
+      const url::Origin& requesting_origin) override;
+  std::optional<network::ParsedPermissionsPolicy>
+  GetContainerPolicyOverrideForCommit(
+      content::NavigationHandle& navigation_handle) override;
 
   bool ShouldSkipBeforeUnloadDialog(content::RenderFrameHost* rfh) override;
 

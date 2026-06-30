@@ -33,6 +33,8 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/bookmarks/browser/bookmark_model.h"
+#include "components/bookmarks/common/bookmark_bar_visibility_state.h"
+#include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
 #include "components/input/native_web_keyboard_event.h"
 #include "components/performance_manager/public/features.h"
@@ -623,6 +625,62 @@ TEST_F(BrowserCommandControllerWithBookmarksTest,
       BookmarkModelFactory::GetForBrowserContext(profile()));
   // Command should be enabled after the bookmark model is loaded.
   EXPECT_TRUE(command_controller.IsCommandEnabled(IDC_BOOKMARK_THIS_TAB));
+}
+
+TEST_F(BrowserCommandControllerWithBookmarksTest,
+       BookmarkBarSubmenuCommandsExecuteCorrectly) {
+  bookmarks::test::WaitForBookmarkModelToLoad(
+      BookmarkModelFactory::GetForBrowserContext(profile()));
+  AddTab();
+  browser()->tab_strip_model()->ActivateTabAt(/*index=*/0);
+
+  chrome::BrowserCommandController command_controller(browser());
+  EXPECT_TRUE(command_controller.IsCommandEnabled(IDC_BOOKMARK_BAR_SUBMENU));
+  EXPECT_TRUE(command_controller.IsCommandEnabled(
+      IDC_BOOKMARK_BAR_SUBMENU_ALWAYS_SHOW));
+  EXPECT_TRUE(command_controller.IsCommandEnabled(
+      IDC_BOOKMARK_BAR_SUBMENU_ALWAYS_HIDE));
+  EXPECT_TRUE(command_controller.IsCommandEnabled(
+      IDC_BOOKMARK_BAR_SUBMENU_ONLY_ON_NTP));
+
+  base::UserActionTester user_action_tester;
+
+  // Test executing visibility commands updates the pref correctly.
+  EXPECT_EQ(0, user_action_tester.GetActionCount(
+                   "WrenchMenu_Bookmarks_AlwaysShowBookmarkBar"));
+  command_controller.ExecuteCommand(
+      IDC_BOOKMARK_BAR_SUBMENU_ALWAYS_SHOW,
+      blink::WebInputEvent::GetStaticTimeStampForTests());
+  EXPECT_EQ(
+      profile()->GetPrefs()->GetInteger(
+          bookmarks::prefs::kBookmarkBarVisibilityState),
+      static_cast<int>(bookmarks::BookmarkBarVisibilityState::kAlwaysShow));
+  EXPECT_EQ(1, user_action_tester.GetActionCount(
+                   "WrenchMenu_Bookmarks_AlwaysShowBookmarkBar"));
+
+  EXPECT_EQ(0, user_action_tester.GetActionCount(
+                   "WrenchMenu_Bookmarks_AlwaysHideBookmarkBar"));
+  command_controller.ExecuteCommand(
+      IDC_BOOKMARK_BAR_SUBMENU_ALWAYS_HIDE,
+      blink::WebInputEvent::GetStaticTimeStampForTests());
+  EXPECT_EQ(
+      profile()->GetPrefs()->GetInteger(
+          bookmarks::prefs::kBookmarkBarVisibilityState),
+      static_cast<int>(bookmarks::BookmarkBarVisibilityState::kAlwaysHide));
+  EXPECT_EQ(1, user_action_tester.GetActionCount(
+                   "WrenchMenu_Bookmarks_AlwaysHideBookmarkBar"));
+
+  EXPECT_EQ(0, user_action_tester.GetActionCount(
+                   "WrenchMenu_Bookmarks_OnlyShowBookmarkBarOnNtp"));
+  command_controller.ExecuteCommand(
+      IDC_BOOKMARK_BAR_SUBMENU_ONLY_ON_NTP,
+      blink::WebInputEvent::GetStaticTimeStampForTests());
+  EXPECT_EQ(
+      profile()->GetPrefs()->GetInteger(
+          bookmarks::prefs::kBookmarkBarVisibilityState),
+      static_cast<int>(bookmarks::BookmarkBarVisibilityState::kOnlyShowOnNtp));
+  EXPECT_EQ(1, user_action_tester.GetActionCount(
+                   "WrenchMenu_Bookmarks_OnlyShowBookmarkBarOnNtp"));
 }
 
 TEST_F(BrowserCommandControllerTest,

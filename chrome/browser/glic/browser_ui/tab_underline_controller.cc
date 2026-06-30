@@ -30,15 +30,14 @@ TabUnderlineController::~TabUnderlineController() = default;
 // already adopts the "pinning" term and so that continues to be used here.
 // TODO(crbug.com/433131600): update glic multitab sharing code to use less
 // conflicting terminology.
-void TabUnderlineController::Initialize(
-    UiDelegate* ui_delegate,
-    BrowserWindowInterface* browser_window_interface) {
+void TabUnderlineController::Initialize(UiDelegate* ui_delegate) {
   ui_delegate_ = ui_delegate;
-  browser_window_interface_ = browser_window_interface;
 
   if (ShouldUseSignalsForGlicUnderlines()) {
-    glic_service_ = GlicKeyedServiceFactory::GetGlicKeyedService(
-        browser_window_interface_->GetProfile());
+    tabs::TabInterface* tab = GetTabInterface();
+    CHECK(tab);
+    glic_service_ =
+        GlicKeyedServiceFactory::GetGlicKeyedService(tab->GetProfile());
 
     GlicSharingManager& sharing_manager =
         glic_service_->active_instance_sharing_manager();
@@ -56,12 +55,7 @@ void TabUnderlineController::Initialize(
                                 base::Unretained(this)));
   }
 
-  if (ShouldUseSignalsForContextualTasks()) {
-    contextual_tasks::ActiveTaskContextProvider* active_task_context_provider =
-        contextual_tasks::ActiveTaskContextProvider::From(
-            browser_window_interface_);
-    contextual_task_observation_.Observe(active_task_context_provider);
-  }
+  MaybeObserveContextualTasks();
 
   if (glic_service_) {
     // Fetch the latest context access indicator status from service. We can't
@@ -150,7 +144,7 @@ void TabUnderlineController::OnIndicatorStatusChanged(bool enabled) {
 }
 
 void TabUnderlineController::OnPinnedTabsChanged(
-    const std::vector<content::WebContents*>& pinned_contents) {
+    const std::vector<tabs::TabInterface*>& pinned_tabs) {
   if (!GetTabInterface()) {
     // If the TabInterface is invalid at this point, there is no relevant UI
     // to handle.
@@ -232,7 +226,7 @@ void TabUnderlineController::UpdateUnderlineView(UpdateUnderlineReason reason) {
   SCOPED_CRASH_KEY_BOOL("crbug-398319435", "glic_focused_contents",
                         !!glic_current_focused_contents_);
   SCOPED_CRASH_KEY_BOOL("crbug-398319435", "is_glic_window_showing",
-                        glic_service_ && IsGlicWindowShowing());
+                        glic_service_ && IsAnyGlicPanelShowing());
 
   switch (reason) {
     case UpdateUnderlineReason::kContextAccessIndicatorOn: {
@@ -388,7 +382,7 @@ void TabUnderlineController::ShowOrAnimatePinnedUnderline(
     return;
   }
   // Pinned underlines should never be visible if the glic window is closed.
-  if (!IsGlicWindowShowing()) {
+  if (!IsAnyGlicPanelShowing()) {
     return;
   }
   if (ui_delegate_->IsShowing()) {
@@ -398,8 +392,9 @@ void TabUnderlineController::ShowOrAnimatePinnedUnderline(
   }
 }
 
-bool TabUnderlineController::IsGlicWindowShowing() const {
-  return glic_service_ && glic_service_->IsWindowShowing();
+bool TabUnderlineController::IsAnyGlicPanelShowing() const {
+  return glic_service_ &&
+         glic_service_->instance_coordinator().IsAnyPanelShowing();
 }
 
 std::string TabUnderlineController::UpdateReasonToString(
@@ -453,12 +448,34 @@ std::string TabUnderlineController::UpdateReasonsToString() const {
 }
 
 bool TabUnderlineController::ShouldUseSignalsForGlicUnderlines() {
-  return glic::GlicEnabling::IsProfileEligible(
-      browser_window_interface_->GetProfile());
+  tabs::TabInterface* tab = GetTabInterface();
+  if (!tab) {
+    return false;
+  }
+  return glic::GlicEnabling::IsProfileEligible(tab->GetProfile());
 }
 
 bool TabUnderlineController::ShouldUseSignalsForContextualTasks() {
   return base::FeatureList::IsEnabled(contextual_tasks::kContextualTasks);
+}
+
+BrowserWindowInterface* TabUnderlineController::GetBrowserWindowInterface() {
+  tabs::TabInterface* tab = GetTabInterface();
+  return tab ? tab->GetBrowserWindowInterface() : nullptr;
+}
+
+void TabUnderlineController::MaybeObserveContextualTasks() {
+  BrowserWindowInterface* window = GetBrowserWindowInterface();
+  if (!window) {
+    return;
+  }
+  if (ShouldUseSignalsForContextualTasks() &&
+      !contextual_task_observation_.IsObserving()) {
+    if (auto* active_task_context_provider =
+            contextual_tasks::ActiveTaskContextProvider::From(window)) {
+      contextual_task_observation_.Observe(active_task_context_provider);
+    }
+  }
 }
 
 }  // namespace glic

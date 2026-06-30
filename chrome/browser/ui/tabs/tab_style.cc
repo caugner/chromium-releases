@@ -8,23 +8,25 @@
 
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/tabs/features.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/color/color_provider.h"
 #include "ui/gfx/color_utils.h"
+#include "ui/gfx/favicon_size.h"
 #include "ui/views/layout/layout_provider.h"
 
 namespace {
 
 // Thickness in DIPs of the separator painted on the left and right edges of
 // the tab.
-constexpr int kChromeRefreshSeparatorThickness = 2;
-constexpr int kChromeRefreshSeparatorHorizontalMargin = 2;
+constexpr int kSeparatorThickness = 2;
+constexpr int kSeparatorHorizontalMargin = 2;
 // TODO (crbug.com/40915785): This constant should be in LayoutConstants.
-constexpr int kChromeRefreshSeparatorHeight = 16;
+constexpr int kSeparatorHeight = 16;
 
 // The padding from the top of the tab to the content area.
-constexpr int kChromeRefreshTabVerticalPadding = 6;
-constexpr int kChromeRefreshTabHorizontalPadding = 8;
+constexpr int kTabVerticalPadding = 6;
+constexpr int kTabHorizontalPadding = 8;
 
 // The standard tab width is 232 DIP, excluding separators and overlap.
 constexpr int kTabWidth = 232;
@@ -62,15 +64,22 @@ int TabStyle::GetPinnedWidth(const bool is_split) const {
 }
 
 int TabStyle::GetMinimumActiveWidth(const bool is_split) const {
-  const int close_button_size =
-      GetLayoutConstant(LayoutConstant::kTabCloseButtonSize);
   const gfx::Insets insets = GetContentsInsets();
+  // Rounded icons decreased `kTabCloseButtonSize` to less than
+  // `gfx::kFaviconSize`. We do not want the min size of the
+  // active tab to change from this, so we set the size large enough
+  // so that the active tab can always fit the favicon and close button.
+  static const int min_content_width =
+      features::IsRoundedIconsEnabled()
+          ? std::max(gfx::kFaviconSize,
+                     GetLayoutConstant(LayoutConstant::kTabCloseButtonSize))
+          : GetLayoutConstant(LayoutConstant::kTabCloseButtonSize);
   const int min_active_width =
-      close_button_size + insets.left() + insets.right();
+      min_content_width + insets.left() + insets.right();
 
   if (is_split) {
     // Only have one set of horizontal padding between tabs in an active split.
-    return min_active_width - kChromeRefreshTabHorizontalPadding / 2;
+    return min_active_width - kTabHorizontalPadding / 2;
   }
 
   return min_active_width;
@@ -110,23 +119,18 @@ gfx::Size TabStyle::GetPreviewImageSize() const {
 }
 
 gfx::Size TabStyle::GetSeparatorSize() const {
-  return gfx::Size(kChromeRefreshSeparatorThickness,
-                   kChromeRefreshSeparatorHeight);
+  return gfx::Size(kSeparatorThickness, kSeparatorHeight);
 }
 
 gfx::Insets TabStyle::GetSeparatorMargins() const {
   return gfx::Insets::TLBR(GetLayoutConstant(LayoutConstant::kTabStripPadding),
-                           kChromeRefreshSeparatorHorizontalMargin,
+                           kSeparatorHorizontalMargin,
                            GetLayoutConstant(LayoutConstant::kTabStripPadding),
-                           kChromeRefreshSeparatorHorizontalMargin);
+                           kSeparatorHorizontalMargin);
 }
 
 int TabStyle::GetSeparatorCornerRadius() const {
   return GetSeparatorSize().width() / 2;
-}
-
-int TabStyle::GetDragHandleExtension(int height) const {
-  return 6;
 }
 
 std::tuple<float, float, float, SkColor> TabStyle::GetContrastRatioValues(
@@ -265,12 +269,10 @@ SkColor TabStyle::GetCurrentTabBackgroundColor(
 
 gfx::Insets TabStyle::GetContentsInsets() const {
   return gfx::Insets::TLBR(
-      kChromeRefreshTabVerticalPadding +
-          GetLayoutConstant(LayoutConstant::kTabStripPadding),
-      GetBottomCornerRadius() + kChromeRefreshTabHorizontalPadding,
-      kChromeRefreshTabVerticalPadding +
-          GetLayoutConstant(LayoutConstant::kTabStripPadding),
-      GetBottomCornerRadius() + kChromeRefreshTabHorizontalPadding);
+      kTabVerticalPadding + GetLayoutConstant(LayoutConstant::kTabStripPadding),
+      GetBottomCornerRadius() + kTabHorizontalPadding,
+      kTabVerticalPadding + GetLayoutConstant(LayoutConstant::kTabStripPadding),
+      GetBottomCornerRadius() + kTabHorizontalPadding);
 }
 
 float TabStyle::GetSelectedTabOpacity() const {

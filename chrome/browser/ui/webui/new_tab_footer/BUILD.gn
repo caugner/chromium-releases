@@ -16,10 +16,12 @@ source_set("new_tab_footer") {
   public_deps = [
     ":mojo_bindings",
     "//chrome/browser/search/background",
+    "//chrome/browser/ui/webui:webui_load_timer",
     "//chrome/browser/ui/webui/customize_buttons:mojo_bindings",
     "//chrome/browser/ui/webui/top_chrome",
     "//components/policy/core/browser",
     "//components/prefs",
+    "//components/themes",
     "//components/user_education/webui",
     "//extensions/browser",
     "//ui/menus",
@@ -56,6 +58,7 @@ source_set("impl") {
     "//components/search",
     "//content/public/browser",
     "//ui/base",
+    "//ui/webui/tracked_element",
     "//url",
   ]
 }
@@ -95,6 +98,7 @@ source_set("unit_tests") {
   deps = [
     ":test_support",
     "//chrome/browser/enterprise/browser_management:management_identity",
+    "//components/themes",
   ]
 }
 

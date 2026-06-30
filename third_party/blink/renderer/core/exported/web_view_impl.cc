@@ -35,6 +35,7 @@
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/debug/crash_logging.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/observer_list.h"
@@ -1050,11 +1051,19 @@ WebInputEventResult WebViewImpl::SendContextMenuEvent() {
 }
 
 WebPagePopupImpl* WebViewImpl::OpenPagePopup(PagePopupClient* client) {
-  DCHECK(client);
+  CHECK(client);
 
   // This guarantees there is never more than 1 PagePopup active at a time.
+  // CancelPagePopup may fire a synchronous change event when a select element
+  // is closed, but that event handler shouldn't be able to open another picker
+  // because it would require multiple user activations to be created and
+  // consumed within the same task.
   CancelPagePopup();
-  DCHECK(!page_popup_);
+  if (RuntimeEnabledFeatures::FileColorPickerConsumeActivationEnabled()) {
+    CHECK(!page_popup_);
+  } else {
+    DCHECK(!page_popup_);
+  }
 
   LocalFrame* opener_frame = client->OwnerElement().GetDocument().GetFrame();
   WebLocalFrameImpl* web_opener_frame =
@@ -1578,6 +1587,8 @@ void WebView::ApplyWebPreferences(const web_pref::WebPreferences& prefs,
       prefs.javascript_can_access_clipboard);
   settings->SetDNSPrefetchingEnabled(prefs.dns_prefetching_enabled);
   blink::WebNetworkStateNotifier::SetSaveDataEnabled(prefs.data_saver_enabled);
+  settings->SetBatterySaverEnabled(prefs.battery_saver_enabled);
+  settings->SetPreloadingDisabled(prefs.preloading_disabled);
   settings->SetLocalStorageEnabled(prefs.local_storage_enabled);
   settings->SetSyncXHRInDocumentsEnabled(prefs.sync_xhr_in_documents_enabled);
   settings->SetTargetBlankImpliesNoOpenerEnabledWillBeRemoved(
@@ -2552,8 +2563,13 @@ void WebViewImpl::SetPageLifecycleStateInternal(
     SetHistoryIndexAndLength(page_restore_params->pending_history_list_index,
                              page_restore_params->current_history_list_length);
   }
-  if (eviction_changed)
+  if (eviction_changed) {
+    SCOPED_CRASH_KEY_BOOL("BFCache", "eviction_enabled",
+                          new_state->eviction_enabled);
+    SCOPED_CRASH_KEY_BOOL("BFCache", "is_in_back_forward_cache",
+                          new_state->is_in_back_forward_cache);
     HookBackForwardCacheEviction(new_state->eviction_enabled);
+  }
   if (resuming_page) {
     // TODO(https://crbug.com/427130212): Consider moving this to happen earlier
     // and together with other page state updates so that the ordering is clear.
@@ -2790,7 +2806,7 @@ void ValidatePausedStateConsistency() {
       }
       const bool microtasks_are_paused =
           window->GetAgent()->event_loop()->AreMicrotasksPaused();
-      CHECK(!microtasks_are_paused, base::NotFatalUntil::M150);
+      CHECK(!microtasks_are_paused, base::NotFatalUntil::M153) << window->Url();
     }
   }
 }

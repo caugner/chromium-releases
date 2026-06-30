@@ -17,7 +17,6 @@
 #include "chrome/browser/ui/lens/lens_overlay_controller.h"
 #include "chrome/browser/ui/lens/lens_search_feature_flag_utils.h"
 #include "chrome/grit/branded_strings.h"
-#include "chrome/grit/generated_resources.h"
 #include "components/lens/lens_features.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/vector_icons/vector_icons.h"
@@ -26,6 +25,7 @@
 #include "ui/base/models/image_model.h"
 #include "ui/base/mojom/dialog_button.mojom.h"
 #include "ui/base/mojom/menu_source_type.mojom.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/color/color_provider.h"
 #include "ui/display/screen.h"
 #include "ui/gfx/geometry/insets.h"
@@ -111,7 +111,9 @@ void LensPreselectionBubble::Init() {
   icon_view_ = AddChildView(std::make_unique<views::ImageView>());
   const gfx::VectorIcon* icon;
   if (offline_) {
-    icon = &vector_icons::kErrorOutlineIcon;
+    icon = &(::features::IsRoundedIconsEnabled()
+                 ? vector_icons::kErrorIcon
+                 : vector_icons::kErrorOutlineOldIcon);
   } else {
     icon = icon_;
   }
@@ -125,8 +127,10 @@ void LensPreselectionBubble::Init() {
   if (lens::IsLensOverlayContextualSearchboxEnabled(
           tab_handle_.Get()->GetBrowserWindowInterface()->GetProfile())) {
     auto button = views::CreateVectorImageButtonWithNativeTheme(
-        base::RepeatingClosure(), kHelpMenuIcon, 20,
-        kColorLensOverlayToastForeground, kColorLensOverlayToastForeground,
+        base::RepeatingClosure(),
+        ::features::IsRoundedIconsEnabled() ? kHelpCustomIcon
+                                            : kHelpMenuOldIcon,
+        20, kColorLensOverlayToastForeground, kColorLensOverlayToastForeground,
         kColorLensOverlayToastForeground);
     views::HighlightPathGenerator::Install(
         button.get(),

@@ -36,6 +36,9 @@ ToastIdEnumSet GetActiveToastIds() {
   for (auto toast_id : kDeprecatedToastIds) {
     result.Remove(static_cast<ToastId>(toast_id));
   }
+#if BUILDFLAG(IS_CHROMEOS)
+  result.Remove(ToastId::kDefaultBrowserUpdateSuccess);
+#endif
   return result;
 }
 
@@ -49,7 +52,8 @@ class ToastServiceBrowserTest : public InProcessBrowserTest {
          {data_sharing::features::kDataSharingFeature, {}},
          {toast_features::kTranslateToast, {}},
          {features::kGlicActorUi, {{features::kGlicActorUiToastName, "true"}}},
-         {multistep_filter::kMultistepFilter, {}}},
+         {multistep_filter::kMultistepFilter, {}},
+         {features::kIndigo, {}}},
         /*disabled_features*/ {});
     InProcessBrowserTest::SetUp();
   }

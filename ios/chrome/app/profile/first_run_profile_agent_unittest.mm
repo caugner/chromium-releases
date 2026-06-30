@@ -170,11 +170,16 @@ TEST_F(FirstRunProfileAgentTest, GuidedTourStepMetrics) {
       startDispatchingToTarget:scene_commands_handler
                    forProtocol:@protocol(SceneCommands)];
 
+  id guided_tour_handler = OCMProtocolMock(@protocol(GuidedTourCommands));
+  [browser_->GetCommandDispatcher()
+      startDispatchingToTarget:guided_tour_handler
+                   forProtocol:@protocol(GuidedTourCommands)];
+
   base::HistogramTester tester;
 
   // Start and stop step 1 (NTP).
   [profile_agent_ startGuidedTour];
-  [profile_agent_ stepCompleted:GuidedTourStep::kNTP];
+  [profile_agent_ guidedTourNTPStepCompleted];
   tester.ExpectBucketCount("IOS.GuidedTour.DidFinishStep", 0, 1);
 
   // Tab grid being presented is the signal to start step 2.
@@ -258,4 +263,21 @@ TEST_F(FirstRunProfileAgentTest, SyncedSetUpDoesNotTriggerInIncognito) {
       "IOS.SyncedSetUp.TriggerSource",
       static_cast<int>(SyncedSetUpTriggerSource::kPostFirstRun), 0);
   histogram_tester.ExpectTotalCount("IOS.SyncedSetUp.TriggerSource", 0);
+}
+
+// Validates that stopGuidedTour does not crash when the command dispatcher
+// is not dispatching for GuidedTourCommands or SceneCommands.
+TEST_F(FirstRunProfileAgentTest, StopGuidedTourWithoutHandlers) {
+  enabled_feature_list_.InitAndEnableFeatureWithParameters(
+      kBestOfAppFRE, {{kWelcomeBackParam, "4"}});
+
+  InitializeActiveSceneState();
+  InitializeTestBrowser();
+  [profile_agent_ profileState:profile_state_
+      firstSceneHasInitializedUI:scene_state_];
+
+  [profile_agent_ startGuidedTour];
+
+  // This should not crash even if handlers are missing.
+  [profile_agent_ stopGuidedTour];
 }

@@ -170,8 +170,6 @@ component("gpu") {
       "android/video_frame_factory.h",
       "android/video_frame_factory_impl.cc",
       "android/video_frame_factory_impl.h",
-      "android/video_frame_gl_surface_renderer.cc",
-      "android/video_frame_gl_surface_renderer.h",
     ]
     if (proprietary_codecs) {
       sources += [
@@ -444,7 +442,10 @@ source_set("common") {
       "av1_picture.cc",
       "av1_picture.h",
     ]
-    public_deps += [ "//third_party/libgav1:libgav1_parser" ]
+    public_deps += [
+      "//third_party/libgav1:libgav1_parser",
+      "//third_party/libgav1:libgav1_utils_constants",
+    ]
   }
 }
 
@@ -592,7 +593,6 @@ source_set("android_video_decode_accelerator_unittests") {
       "android/promotion_hint_aggregator_impl_unittest.cc",
       "android/surface_chooser_helper_unittest.cc",
       "android/video_frame_factory_impl_unittest.cc",
-      "android/video_frame_gl_surface_renderer_test.cc",
     ]
     deps = [
       ":gpu",

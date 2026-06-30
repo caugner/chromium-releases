@@ -514,6 +514,13 @@ void MultipleFieldsTemporalInputTypeView::HandleKeydownEvent(
   }
 }
 
+void MultipleFieldsTemporalInputTypeView::AccessKeyAction(
+    SimulatedClickCreationScope creation_scope) {
+  GetElement().Focus(FocusParams(
+      SelectionBehaviorOnFocus::kReset, mojom::blink::FocusType::kNone, nullptr,
+      FocusOptions::Create(), FocusTrigger::kUserGesture));
+}
+
 bool MultipleFieldsTemporalInputTypeView::HasBadInput() const {
   DateTimeEditElement* edit = GetDateTimeEditElementIfCreated();
   return edit && GetElement().Value().empty() &&
@@ -728,7 +735,7 @@ void MultipleFieldsTemporalInputTypeView::UpdateClearButtonVisibility() {
 }
 
 TextDirection MultipleFieldsTemporalInputTypeView::ComputedTextDirection() {
-  return GetElement().GetLocale().IsRTL() ? TextDirection::kRtl
+  return GetElement().GetLocale().IsRtl() ? TextDirection::kRtl
                                           : TextDirection::kLtr;
 }
 

@@ -419,7 +419,7 @@ class CONTENT_EXPORT RenderFrameHost : public IPC::Listener {
   // The callback returns a FrameIterationAction which determines if/how
   // iteration on subsequent frames continues. The FrameIterationAction may be
   // omitted, in which case kContinue will be assumed.
-  enum class FrameIterationAction {
+  enum class [[nodiscard]] FrameIterationAction {
     // Includes the children of the visited frame for subsequent traversal and
     // continues traversal to the next frame.
     kContinue,
@@ -516,6 +516,15 @@ class CONTENT_EXPORT RenderFrameHost : public IPC::Listener {
   // Note that this does not reflect navigations in other RenderFrameHosts,
   // frames, or pages within the same WebContents, so it may differ from
   // NavigationController::GetLastCommittedEntry().
+  //
+  // Note: When a navigation fails and commits an error page (e.g.
+  // `chrome-error://chromewebdata/`), `GetLastCommittedURL()` continues to
+  // return the failed destination target URL rather than an error URL.
+  // Therefore, this should not be used directly for security, authorization,
+  // or permission checks without verifying `!IsErrorDocument()`.
+  // Higher-level layers (such as extensions) should use their dedicated
+  // permission-check URL helper (e.g.,
+  // `extensions::util::GetURLForExtensionPermissionCheck()`).
   virtual const GURL& GetLastCommittedURL() const = 0;
 
   // Returns the last committed origin of this RenderFrameHost.
@@ -872,6 +881,11 @@ class CONTENT_EXPORT RenderFrameHost : public IPC::Listener {
   // process.
   virtual service_manager::InterfaceProvider* GetJavaInterfaces() = 0;
 #endif  // BUILDFLAG(IS_ANDROID)
+
+  // Returns true if this frame has a beforeunload handler and has received
+  // a user activation, which would allow it to display a beforeunload dialog
+  // if the user attempted to close the page or navigate away.
+  virtual bool CouldDisplayBeforeUnloadDialog() const = 0;
 
   // Stops and disables the hang monitor for beforeunload. This avoids flakiness
   // in tests that need to observe beforeunload dialogs, which could fail if the

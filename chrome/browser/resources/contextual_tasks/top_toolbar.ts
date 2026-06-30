@@ -73,6 +73,10 @@ export class TopToolbarElement extends CrLitElement {
       isPinButtonEnabled: {type: Boolean},
       isPinned: {type: Boolean},
       contextManagementInComposeboxEnabled_: {type: Boolean},
+      isAimEligible: {
+        type: Boolean,
+        reflect: true,
+      },
     };
   }
 
@@ -80,6 +84,7 @@ export class TopToolbarElement extends CrLitElement {
   accessor contextInfos: ContextInfo[] = [];
   accessor darkMode: boolean = false;
   accessor isAiPage: boolean = loadTimeData.getBoolean('isAiPage');
+  accessor isAimEligible: boolean = loadTimeData.getBoolean('isAimEligible');
   accessor enableOpenInNewTabButton: boolean = false;
   accessor showReopenTabs_: boolean = false;
   private browserProxy_: BrowserProxy = BrowserProxyImpl.getInstance();
@@ -148,11 +153,6 @@ export class TopToolbarElement extends CrLitElement {
 
   protected onPinClick_() {
     this.isPinned = !this.isPinned;
-    if (this.isPinned) {
-      this.browserProxy_.handler.pinSidePanel();
-    } else {
-      this.browserProxy_.handler.unpinSidePanel();
-    }
   }
 
   protected onCloseButtonClick_() {
@@ -170,6 +170,7 @@ export class TopToolbarElement extends CrLitElement {
   }
 
   protected onOverflowMenuButtonClick_(e: Event) {
+    recordAction('ContextualTasks.WebUI.UserAction.OpenOverflowMenu');
     this.$.overflowMenu.get().showAt(e.target as HTMLElement);
   }
 

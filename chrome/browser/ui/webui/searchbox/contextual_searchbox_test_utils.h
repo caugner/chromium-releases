@@ -98,6 +98,16 @@ class MockQueryController
     files_[file_token] = std::move(file_info);
   }
 
+  void AddTabFileInfoForTesting(const base::UnguessableToken& file_token,
+                                GURL tab_url,
+                                lens::MimeType mime_type = lens::MimeType::kAnnotatedPageContent) {
+    auto file_info = std::make_unique<contextual_search::FileInfo>();
+    file_info->file_token = file_token;
+    file_info->mime_type = mime_type;
+    file_info->tab_url = tab_url;
+    files_[file_token] = std::move(file_info);
+  }
+
   void InitializeIfNeededBase() {
     TestComposeboxQueryController::InitializeIfNeeded();
   }

@@ -30,6 +30,8 @@ BASE_DECLARE_FEATURE(kDynamicMaxAutocomplete);
 
 // Local history zero-prefix (aka zero-suggest) and prefix suggestions.
 BASE_DECLARE_FEATURE(kFocusTriggersWebAndSRPZeroSuggest);
+BASE_DECLARE_FEATURE(kOmniboxCrossDeviceTabZeroSuggest);
+BASE_DECLARE_FEATURE_PARAM(int, kOmniboxCrossDeviceTabZeroSuggestMaxAge);
 BASE_DECLARE_FEATURE(kOnClobberSuggestIOS);
 BASE_DECLARE_FEATURE(kHideContextualGroupHeaders);
 BASE_DECLARE_FEATURE(kHideSuggestionGroupHeaders);
@@ -127,9 +129,6 @@ BASE_DECLARE_FEATURE(kOmniboxXGeoPermissionGranularity);
 BASE_DECLARE_FEATURE(kOmniboxItemDecoration);
 BASE_DECLARE_FEATURE(kExactMatchFavicons);
 
-// Whether to use short suggest path.
-BASE_DECLARE_FEATURE(kUseShortSuggestPathV1);
-
 // Omnibox suggestions tuning
 BASE_DECLARE_FEATURE(kNumNtpZpsRecentSearches);
 BASE_DECLARE_FEATURE(kNumNtpZpsTrendingSearches);
@@ -169,6 +168,14 @@ BASE_DECLARE_FEATURE(kComposeboxAttachmentsTypedState);
 
 // Whether to enable Google Drive context menu option in the composebox.
 BASE_DECLARE_FEATURE(kComposeboxDriveContextMenuOption);
+extern const base::FeatureParam<bool> kComposeboxDriveIdentityFallback;
+
+// Whether to enable Google Drive context menu option's disclaimer flow in the
+// composebox.
+BASE_DECLARE_FEATURE(kComposeboxDriveContextMenuOptionDisclaimer);
+
+// Whether to force the Google Drive disclaimer to be accepted.
+BASE_DECLARE_FEATURE(kForceDriveDisclaimerAccepted);
 
 // Whether the composebox should show a verbatim match for context in
 // zero-suggest.
@@ -200,11 +207,11 @@ extern const base::FeatureParam<bool>
 
 #if BUILDFLAG(IS_ANDROID)
 BASE_DECLARE_FEATURE(kDiagnostics);
+BASE_DECLARE_FEATURE(kForceAndroidRealbox);
 BASE_DECLARE_FEATURE(kJumpStartOmnibox);
 BASE_DECLARE_FEATURE(kSuppressIntermediateACUpdatesOnLowEndDevices);
 // Delay focusTab to prioritize navigation (https://crbug.com/374852568).
 BASE_DECLARE_FEATURE(kPostDelayedTaskFocusTab);
-BASE_DECLARE_FEATURE(kAndroidHubSearchTabGroups);
 BASE_DECLARE_FEATURE(kOmniboxImprovementForLFF);
 BASE_DECLARE_FEATURE(kResetSuggestionsScroll);
 #endif  // BUILDFLAG(IS_ANDROID)
@@ -216,6 +223,22 @@ BASE_DECLARE_FEATURE(kPlatformAgnosticXGeo);
 // If enabled, Inline Location Signaling is enabled gating all development
 // and experimentation for the feature.
 BASE_DECLARE_FEATURE(kInlineLocationSignaling);
+
+enum class InlineLocationSignalingDisplayOrder {
+  kDisplayBelow = 0,
+  kDisplayAbove = 1,
+};
+
+enum class InlineLocationSignalingWording {
+  kUseApproximateLocation = 0,
+  kUseLocation = 1,
+};
+
+extern const base::FeatureParam<InlineLocationSignalingDisplayOrder>
+    kInlineLocationSignalingDisplayOrder;
+
+extern const base::FeatureParam<InlineLocationSignalingWording>
+    kInlineLocationSignalingWording;
 
 // Note: no new flags beyond this point.
 

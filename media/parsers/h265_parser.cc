@@ -622,8 +622,9 @@ H265Parser::Result H265Parser::ParseSPS(int* sps_id) {
   }
   READ_UE_OR_RETURN(&sps->pic_width_in_luma_samples);
   READ_UE_OR_RETURN(&sps->pic_height_in_luma_samples);
-  TRUE_OR_RETURN(sps->pic_width_in_luma_samples != 0);
-  TRUE_OR_RETURN(sps->pic_height_in_luma_samples != 0);
+  // H.265 Level 6.2 restricts max frame dimensions to 16888 luma samples.
+  IN_RANGE_OR_RETURN(sps->pic_width_in_luma_samples, 1, 16888);
+  IN_RANGE_OR_RETURN(sps->pic_height_in_luma_samples, 1, 16888);
 
   // Equation A-2: Calculate max_dpb_size.
   int max_luma_ps = sps->profile_tier_level.GetMaxLumaPs();
@@ -1155,6 +1156,11 @@ H265Parser::Result H265Parser::ParseSliceHeader(const H265NALU& nalu,
       std::min(shdr->temporal_id, sps->sps_max_sub_layers_minus1);
 
   if (!shdr->first_slice_segment_in_pic_flag) {
+    if (validate_extended_bitstream_ && !prior_shdr) {
+      DVLOG(1) << "First slice segment in picture must have "
+               << "first_slice_segment_in_pic_flag equal to 1";
+      return kInvalidStream;
+    }
     if (pps->dependent_slice_segments_enabled_flag)
       READ_BOOL_OR_RETURN(&shdr->dependent_slice_segment_flag);
     READ_BITS_OR_RETURN(base::bits::Log2Ceiling(sps->pic_size_in_ctbs_y),

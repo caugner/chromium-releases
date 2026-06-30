@@ -12,6 +12,7 @@
 #include "base/check_is_test.h"
 #include "base/debug/dump_without_crashing.h"
 #include "base/feature_list.h"
+#include "base/strings/strcat.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
@@ -20,6 +21,7 @@
 #include "chrome/browser/ui/webui/theme_source.h"
 #include "chrome/common/chrome_features.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/url_utils.h"
 #include "third_party/blink/public/mojom/loader/local_resource_loader_config.mojom.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/color/color_provider.h"
@@ -67,12 +69,15 @@ void ThemeColorsSourceManager::PopulateLocalResourceLoaderConfig(
       auto* theme_service = ThemeServiceFactory::GetForProfile(profile_);
       if (theme_service) {
         color_provider = theme_service->GetColorProvider();
-        // When `WebUIReloadButtonPrewarmWebUI` is enabled, the
-        // ThemeColorsSourceManager needs to be set up before the WebContents is
-        // added to the Widget. In this case, it's expected that we will fetch
-        // the theme service using the `profile_` instead.
-        if (!(features::IsWebUIToolbarEnabled() &&
-              features::kWebUIReloadButtonPrewarmWebUI.Get())) {
+        // When `WebUIToolbarProcessOverheadExperiment` or
+        // `WebUIReloadButtonPrewarmWebUI` is enabled, the
+        // `ThemeColorsSourceManager` needs to be set up before the WebContents
+        // is added to the Widget. In this case, it's expected that we will
+        // fetch the theme service using the `profile_` instead.
+        if (!(base::FeatureList::IsEnabled(
+                  features::kWebUIToolbarProcessOverheadExperiment) ||
+              (features::IsWebUIToolbarEnabled() &&
+               features::kWebUIReloadButtonPrewarmWebUI.Get()))) {
           base::debug::DumpWithoutCrashing();
         }
       }
@@ -119,6 +124,11 @@ void ThemeColorsSourceManager::PopulateLocalResourceLoaderConfig(
   auto resource_path = std::string(theme_url.path());
   if (!resource_path.empty() && resource_path[0] == '/') {
     resource_path = resource_path.substr(1);
+  }
+
+  std::string canonical_query = content::GetCanonicalQuery(theme_url);
+  if (!canonical_query.empty()) {
+    base::StrAppend(&resource_path, {"?", canonical_query});
   }
 
   source->path_to_resource_map[resource_path] =

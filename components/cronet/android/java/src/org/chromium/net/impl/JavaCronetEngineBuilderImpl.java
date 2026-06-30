@@ -4,6 +4,7 @@
 
 package org.chromium.net.impl;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 
 import org.chromium.net.ExperimentalCronetEngine;
@@ -12,11 +13,7 @@ import org.chromium.net.impl.CronetLogger.CronetSource;
 
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * Implementation of {@link ICronetEngineBuilder} that builds Java-based Cronet engine.
- *
- * @hide
- */
+/** Implementation of {@link ICronetEngineBuilder} that builds Java-based Cronet engine. */
 public class JavaCronetEngineBuilderImpl extends CronetEngineBuilderImpl {
     private static final AtomicLong sLogCronetInitializationRef = new AtomicLong(0);
 
@@ -36,6 +33,7 @@ public class JavaCronetEngineBuilderImpl extends CronetEngineBuilderImpl {
     }
 
     @Override
+    @SuppressLint("ReferencesHidden")
     public ExperimentalCronetEngine build() {
         if (getUserAgent() == null) {
             setUserAgent(getDefaultUserAgent());

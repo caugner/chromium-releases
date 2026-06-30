@@ -52,7 +52,7 @@ import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabObscuringHandler;
 import org.chromium.chrome.browser.tabmodel.IncognitoStateProvider;
 import org.chromium.chrome.browser.theme.ThemeColorProvider;
-import org.chromium.chrome.browser.theme.TopUiThemeColorProvider;
+import org.chromium.chrome.browser.theme.ToolbarThemeColorProvider;
 import org.chromium.chrome.browser.toolbar.ControlContainer;
 import org.chromium.chrome.browser.toolbar.R;
 import org.chromium.chrome.browser.toolbar.ToolbarDataProvider;
@@ -335,7 +335,8 @@ public class TopToolbarCoordinator implements Toolbar, TopControlLayer {
                 mSigninButtonCoordinator,
                 normalThemeColorProvider,
                 incognitoStateProvider,
-                incognitoWindowCountSupplier);
+                incognitoWindowCountSupplier,
+                windowAndroid);
         mAppMenuButtonHelperSupplier = appMenuButtonHelperSupplier;
         new OneShotCallback<>(mAppMenuButtonHelperSupplier, this::setAppMenuButtonHelper);
         homepageEnabledSupplier.addSyncObserverAndCallIfNonNull(
@@ -350,7 +351,6 @@ public class TopToolbarCoordinator implements Toolbar, TopControlLayer {
             mTabStripTransitionCoordinator =
                     maybeInitializeTabStripTransitionCoordinator(
                             mToolbarLayout,
-                            browserControlsVisibilityManager,
                             mControlContainer,
                             mTabObscuringHandler,
                             mDesktopWindowStateManager,
@@ -361,6 +361,11 @@ public class TopToolbarCoordinator implements Toolbar, TopControlLayer {
         // Add the layer after toolbar / control container is initialized.
         mTopControlsStacker.addControl(this);
         mTopControlsStacker.requestLayerUpdatePost(false);
+
+        if (ChromeFeatureList.sToolbarSnapshotRefactor.isEnabled()) {
+            // Remove the top margin directly from the toolbar.
+            mControlContainer.mutateToolbarLayoutParams().topMargin = 0;
+        }
     }
 
     /**
@@ -383,7 +388,7 @@ public class TopToolbarCoordinator implements Toolbar, TopControlLayer {
      * @param tabSupplier Supplier of the activity tab.
      * @param browserControlsVisibilityManager {@link BrowserControlsVisibilityManager} to access
      *     browser controls offsets and visibility.
-     * @param topUiThemeColorProvider {@link ThemeColorProvider} for top UI.
+     * @param toolbarThemeColorProvider {@link ThemeColorProvider} for top UI.
      * @param bottomToolbarControlsOffsetSupplier Supplier of the offset, relative to the bottom of
      *     the viewport, of the bottom-anchored toolbar.
      * @param suppressToolbarSceneLayerSupplier Supplier for whether suppress the update to the
@@ -401,7 +406,7 @@ public class TopToolbarCoordinator implements Toolbar, TopControlLayer {
             LayoutManager layoutManager,
             NullableObservableSupplier<Tab> tabSupplier,
             BrowserControlsVisibilityManager browserControlsVisibilityManager,
-            TopUiThemeColorProvider topUiThemeColorProvider,
+            ToolbarThemeColorProvider toolbarThemeColorProvider,
             NonNullObservableSupplier<Integer> bottomToolbarControlsOffsetSupplier,
             NonNullObservableSupplier<Boolean> suppressToolbarSceneLayerSupplier,
             Callback<DrawingInfo> progressInfoCallback,
@@ -432,7 +437,7 @@ public class TopToolbarCoordinator implements Toolbar, TopControlLayer {
                             tabSupplier,
                             browserControlsVisibilityManager,
                             mResourceManagerSupplier,
-                            topUiThemeColorProvider,
+                            toolbarThemeColorProvider,
                             bottomToolbarControlsOffsetSupplier,
                             suppressToolbarSceneLayerSupplier,
                             layoutsToShowOn,
@@ -441,11 +446,13 @@ public class TopToolbarCoordinator implements Toolbar, TopControlLayer {
                             mToolbarLayout.getProgressBar());
             layoutManager.addSceneOverlay(mOverlayCoordinator);
             mToolbarLayout.setOverlayCoordinator(mOverlayCoordinator);
+            if (mToolbarLayout.isToolbarHairlineSuppressed()) {
+                mOverlayCoordinator.onToolbarHairlineSuppressedChanged(true);
+            }
 
             // mOverlayCoordinator needs to receive the latest yOffset and offset tags to position
             // the scene layer. It's better to request another update to avoid stale values.
-            if (BrowserControlsUtils.isTopControlsRefactorOffsetEnabled()
-                    && mBrowserControls.getControlsPosition() == ControlsPosition.TOP) {
+            if (mBrowserControls.getControlsPosition() == ControlsPosition.TOP) {
                 mTopControlsStacker.requestLayerUpdatePost(false);
             }
         }
@@ -454,7 +461,6 @@ public class TopToolbarCoordinator implements Toolbar, TopControlLayer {
             mTabStripTransitionCoordinator =
                     maybeInitializeTabStripTransitionCoordinator(
                             mToolbarLayout,
-                            browserControlsVisibilityManager,
                             mControlContainer,
                             mTabObscuringHandler,
                             mDesktopWindowStateManager,
@@ -466,7 +472,6 @@ public class TopToolbarCoordinator implements Toolbar, TopControlLayer {
     private static @Nullable TabStripTransitionCoordinator
             maybeInitializeTabStripTransitionCoordinator(
                     ToolbarLayout toolbarLayout,
-                    BrowserControlsVisibilityManager browserControlsVisibilityManager,
                     ControlContainer controlContainer,
                     TabObscuringHandler tabObscuringHandler,
                     @Nullable DesktopWindowStateManager desktopWindowStateManager,
@@ -477,7 +482,6 @@ public class TopToolbarCoordinator implements Toolbar, TopControlLayer {
 
         var coordinator =
                 new TabStripTransitionCoordinator(
-                        browserControlsVisibilityManager,
                         controlContainer,
                         tabStripHeightResource,
                         tabObscuringHandler,
@@ -641,6 +645,14 @@ public class TopToolbarCoordinator implements Toolbar, TopControlLayer {
     /** Sets whether the urlbar should be hidden on first page load. */
     public void setUrlBarHidden(boolean hidden) {
         mToolbarLayout.setUrlBarHidden(hidden);
+    }
+
+    /** Sets whether the toolbar hairline should be suppressed. */
+    public void onToolbarHairlineSuppressedChanged(boolean suppressed) {
+        if (mToolbarLayout != null) mToolbarLayout.onToolbarHairlineSuppressedChanged(suppressed);
+        if (mOverlayCoordinator != null) {
+            mOverlayCoordinator.onToolbarHairlineSuppressedChanged(suppressed);
+        }
     }
 
     /** Tells the Toolbar to update what buttons it is currently displaying. */
@@ -927,14 +939,12 @@ public class TopToolbarCoordinator implements Toolbar, TopControlLayer {
 
     @Override
     public void onCaptureSizeUpdated() {
-        // Y Offset is used when isTopControlsRefactorOffsetEnabled.
-        if (!BrowserControlsUtils.isTopControlsRefactorOffsetEnabled()
-                || mBrowserControls.getControlsPosition() != ControlsPosition.TOP
+        if (mBrowserControls.getControlsPosition() != ControlsPosition.TOP
                 || mOverlayCoordinator == null) {
             return;
         }
 
-        updateSceneLayerYOffset();
+        updateSceneLayerYOffset(/* includeMinHeightBoundary= */ true);
     }
 
     public void onTransitionStart() {
@@ -994,7 +1004,6 @@ public class TopToolbarCoordinator implements Toolbar, TopControlLayer {
     @Override
     public void updateOffsetTag(@Nullable BrowserControlsOffsetTagsInfo offsetTagsInfo) {
         if (mBrowserControls.getControlsPosition() != ControlsPosition.TOP
-                || !BrowserControlsUtils.isTopControlsRefactorOffsetEnabled()
                 || mOverlayCoordinator == null) {
             return;
         }
@@ -1010,20 +1019,23 @@ public class TopToolbarCoordinator implements Toolbar, TopControlLayer {
 
         mLayerYOffset = layerYOffset;
         if (mOverlayCoordinator != null) {
-            updateSceneLayerYOffset();
+            updateSceneLayerYOffset(/* includeMinHeightBoundary= */ false);
         }
 
         // Skip the layout params in non-resting position to avoid trigger layout during browser
         // controls reposition.
         if (reachRestingPosition) {
-            mControlContainer.mutateToolbarLayoutParams().topMargin = getTabStripHeight();
+            if (ChromeFeatureList.sToolbarSnapshotRefactor.isEnabled()) {
+                mControlContainer.mutateToolbarLayoutParams().topMargin = 0;
+            } else {
+                mControlContainer.mutateToolbarLayoutParams().topMargin = getTabStripHeight();
+            }
         }
     }
 
     @Override
     public void prepForHeightAdjustmentAnimation(int latestYOffset) {
         if (mBrowserControls.getControlsPosition() != ControlsPosition.TOP
-                || !BrowserControlsUtils.isTopControlsRefactorOffsetEnabled()
                 || mOverlayCoordinator == null) {
             return;
         }
@@ -1031,7 +1043,7 @@ public class TopToolbarCoordinator implements Toolbar, TopControlLayer {
         // Remove the offset tag on animation starts, so the toolbar does not set the yOffset
         // while the compositor moves the layer with offset tags.
         mOverlayCoordinator.setOffsetTagInfo(null);
-        updateSceneLayerYOffset();
+        updateSceneLayerYOffset(/* includeMinHeightBoundary= */ true);
     }
 
     // In compositor, the position of the toolbar depends on the capture. As of Nov 2025, the
@@ -1039,7 +1051,7 @@ public class TopToolbarCoordinator implements Toolbar, TopControlLayer {
     // the size of the tab strip.
     // To place the toolbar at its desired position, we have to subtract the diffs of the capture a
     // nd the toolbar, in order to put the toolbar at the desired yOffset.
-    private void updateSceneLayerYOffset() {
+    private void updateSceneLayerYOffset(boolean includeMinHeightBoundary) {
         // Edge case: When Chrome launches on NTP, the browser controls might not dispatch
         // a valid yOffset for the toolbar. If the capture size changes (e.g. resize screen), we
         // we will not have a valid yOffset.
@@ -1102,11 +1114,38 @@ public class TopToolbarCoordinator implements Toolbar, TopControlLayer {
         // is fully scrolled off.
         // TODO(crbug.com/448641122): Let hairline layer owns the adjustment logic.
         int hairlineAdjustment = 0;
-        if (mBrowserControls.getBrowserVisibilityDelegate().get() == BrowserControlsState.HIDDEN
-                && mIsHairlineVisible) {
+        if (shouldHideHairlineInSceneLayer(includeMinHeightBoundary)) {
             hairlineAdjustment = -mControlContainer.getToolbarHairlineHeight();
         }
 
         assertNonNull(mOverlayCoordinator).setYOffset(mLayerYOffset - diff + hairlineAdjustment);
+    }
+
+    /**
+     * Returns whether the toolbar scene layer should be shifted up to keep the hairline hidden.
+     *
+     * @param includeMinHeightBoundary Whether to include content offsets exactly at the top
+     *     controls min-height boundary. When false, the adjustment only applies after the content
+     *     offset has moved past the min-height boundary.
+     */
+    private boolean shouldHideHairlineInSceneLayer(boolean includeMinHeightBoundary) {
+        // When mIsHairlineVisible is false, the hairline view is hidden and therefore is not
+        // drawn into the toolbar capture. With no hairline in the capture there is nothing to
+        // hide, so no scene layer adjustment is needed.
+        if (!mIsHairlineVisible) return false;
+        if (mBrowserControls.getBrowserVisibilityDelegate().get() == BrowserControlsState.HIDDEN) {
+            return true;
+        }
+
+        int topControlsMinHeight = mBrowserControls.getTopControlsMinHeight();
+        int topControlsHairlineHeight = mBrowserControls.getTopControlsHairlineHeight();
+        int contentOffset = mBrowserControls.getContentOffset();
+        return (includeMinHeightBoundary || contentOffset > topControlsMinHeight)
+                && BrowserControlsUtils.shouldContentOffsetHideTopControlsHairline(
+                        contentOffset, topControlsMinHeight, topControlsHairlineHeight);
+    }
+
+    void setOverlayCoordinatorForTesting(TopToolbarOverlayCoordinator overlayCoordinator) {
+        mOverlayCoordinator = overlayCoordinator;
     }
 }

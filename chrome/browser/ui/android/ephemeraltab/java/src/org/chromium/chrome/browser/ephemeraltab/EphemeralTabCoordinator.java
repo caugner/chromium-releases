@@ -17,6 +17,7 @@ import org.chromium.build.annotations.EnsuresNonNull;
 import org.chromium.build.annotations.MonotonicNonNull;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
+import org.chromium.chrome.browser.actor.ui.ActorUiTabController;
 import org.chromium.chrome.browser.content.ContentUtils;
 import org.chromium.chrome.browser.content.WebContentsFactory;
 import org.chromium.chrome.browser.desktop_site.DesktopSiteUtils;
@@ -145,8 +146,49 @@ public class EphemeralTabCoordinator implements View.OnLayoutChangeListener {
      * @param profile Profile associated with the ephemeral tab.
      * @param canPromoteToNewTab Whether the tab can be promoted to a normal tab.
      * @param shouldHaveContextMenu Whether the tab should have a context menu.
+     * @param requestDeniedCallback Callback invoked if the request is denied.
      */
     public void requestOpenSheet(
+            GURL url,
+            @Nullable GURL fullPageUrl,
+            String title,
+            Profile profile,
+            boolean canPromoteToNewTab,
+            boolean shouldHaveContextMenu,
+            @Nullable Origin initiatorOrigin,
+            Runnable requestDeniedCallback) {
+        Runnable openSheetRunnable =
+                () ->
+                        requestOpenSheetInternal(
+                                url,
+                                fullPageUrl,
+                                title,
+                                profile,
+                                canPromoteToNewTab,
+                                shouldHaveContextMenu,
+                                initiatorOrigin);
+
+        Tab activeTab = mTabProvider.get();
+        if (activeTab != null) {
+            ActorUiTabController controller = ActorUiTabController.from(activeTab);
+            if (controller != null && controller.isActorActive()) {
+                // Intercept, show abort confirmation dialog, and stop task if confirmed.
+                controller.showTaskAbortConfirmationDialog(
+                        (confirmed) -> {
+                            if (!confirmed) {
+                                requestDeniedCallback.run();
+                                return;
+                            }
+                            openSheetRunnable.run();
+                        });
+                return;
+            }
+        }
+
+        openSheetRunnable.run();
+    }
+
+    private void requestOpenSheetInternal(
             GURL url,
             @Nullable GURL fullPageUrl,
             String title,
@@ -274,7 +316,10 @@ public class EphemeralTabCoordinator implements View.OnLayoutChangeListener {
             assumeNonNull(mSheetContent);
             mBottomSheetController.hideContent(
                     mSheetContent, /* animate= */ true, StateChangeReason.PROMOTE_TAB);
-            var params = new LoadUrlParams(mFullPageUrl != null ? mFullPageUrl : mUrl);
+            if (mFullPageUrl == null) {
+                mFullPageUrl = assumeNonNull(mWebContents).getLastCommittedUrl();
+            }
+            var params = new LoadUrlParams(mFullPageUrl);
             mTabCreator.get().createNewTab(params, TabLaunchType.FROM_LINK, mTabProvider.get());
         }
     }

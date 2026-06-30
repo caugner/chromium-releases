@@ -20,9 +20,11 @@ import org.chromium.base.FeatureList;
 import org.chromium.base.supplier.MonotonicObservableSupplier;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
+import org.chromium.chrome.browser.theme.ThemeUtils;
 import org.chromium.chrome.browser.toolbar.adaptive.AdaptiveToolbarButtonVariant;
 import org.chromium.chrome.browser.toolbar.adaptive.AdaptiveToolbarFeatures;
 import org.chromium.chrome.browser.toolbar.optional_button.OptionalButtonProperties.OnBeforeWidthTransitionCallback;
+import org.chromium.chrome.browser.ui.theme.BrandedColorScheme;
 import org.chromium.chrome.browser.user_education.IphCommandBuilder;
 import org.chromium.chrome.browser.user_education.UserEducationHelper;
 import org.chromium.components.browser_ui.widget.highlight.PulseDrawable.Bounds;
@@ -52,6 +54,7 @@ public class OptionalButtonCoordinator {
     private @Nullable Callback<Integer> mTransitionFinishedCallback;
     private @Nullable IphCommandBuilder mIphCommandBuilder;
     private boolean mAlwaysShowActionChip;
+    private @BrandedColorScheme int mBrandedColorScheme = BrandedColorScheme.APP_DEFAULT;
 
     @IntDef({
         TransitionType.SWAPPING,
@@ -96,6 +99,9 @@ public class OptionalButtonCoordinator {
                         .with(
                                 OptionalButtonProperties.IS_ANIMATION_ALLOWED_PREDICATE,
                                 isAnimationAllowedPredicate)
+                        .with(
+                                OptionalButtonProperties.BRANDED_COLOR_SCHEME,
+                                BrandedColorScheme.APP_DEFAULT)
                         .build();
 
         assert view instanceof OptionalButtonView;
@@ -106,14 +112,15 @@ public class OptionalButtonCoordinator {
 
         mMediator = new OptionalButtonMediator(model);
         mFeatureEngagementTrackerSupplier = featureEngagementTrackerSupplier;
+        updateIconTint();
     }
 
     /**
-     * Suppresses the background of the optional button. This is useful for cases where the optional
-     * button is placed on a background that is not the toolbar.
+     * Suppresses the collapsed background of the optional button. This is useful for cases where
+     * the optional button is placed on a background that is not the toolbar.
      */
-    public void setSuppressBackground(boolean suppressBackground) {
-        mView.setSuppressBackground(suppressBackground);
+    public void setSuppressCollapsedBackground(boolean suppressCollapsedBackground) {
+        mView.setSuppressCollapsedBackground(suppressCollapsedBackground);
     }
 
     public void setPaddingStart(int paddingStart) {
@@ -162,6 +169,23 @@ public class OptionalButtonCoordinator {
      */
     public void setTransitionStartedCallback(Callback<Integer> transitionStartedCallback) {
         mMediator.setTransitionStartedCallback(transitionStartedCallback);
+    }
+
+    /**
+     * Sets the branded color scheme of the toolbar.
+     *
+     * @param brandedColorScheme The current {@link BrandedColorScheme}.
+     */
+    public void setBrandedColorScheme(@BrandedColorScheme int brandedColorScheme) {
+        mBrandedColorScheme = brandedColorScheme;
+        mMediator.setBrandedColorScheme(brandedColorScheme);
+        updateIconTint();
+    }
+
+    private void updateIconTint() {
+        ColorStateList tint =
+                ThemeUtils.getThemedToolbarIconTint(mView.getContext(), mBrandedColorScheme);
+        mMediator.setIconForegroundColor(tint);
     }
 
     /**
@@ -266,13 +290,6 @@ public class OptionalButtonCoordinator {
      */
     public void cancelTransition() {
         mMediator.cancelTransition();
-    }
-
-    /**
-     * Updates the foreground color on the icons and label to match the current theme/website color.
-     */
-    public void setIconForegroundColor(@Nullable ColorStateList colorStateList) {
-        mMediator.setIconForegroundColor(colorStateList);
     }
 
     /**

@@ -8,6 +8,10 @@
 
 #import "base/apple/foundation_util.h"
 #import "base/strings/sys_string_conversions.h"
+#import "base/test/ios/wait_util.h"
+#import "base/test/metrics/histogram_tester.h"
+#import "base/test/run_until.h"
+#import "base/test/task_environment.h"
 #import "components/application_locale_storage/application_locale_storage.h"
 #import "components/autofill/core/browser/payments/payments_autofill_client.h"
 #import "ios/chrome/browser/autofill/ui_bundled/autofill_credit_card_ui_type.h"
@@ -17,6 +21,7 @@
 #import "ios/chrome/browser/shared/model/application_context/application_context.h"
 #import "ios/chrome/browser/shared/ui/table_view/cells/table_view_text_edit_item.h"
 #import "ios/chrome/browser/shared/ui/table_view/cells/table_view_text_edit_item_delegate.h"
+#import "ios/chrome/common/ui/util/chrome_button.h"
 #import "ios/chrome/grit/ios_strings.h"
 #import "testing/gtest/include/gtest/gtest.h"
 #import "testing/gtest_mac.h"
@@ -28,6 +33,8 @@
 - (void)tableViewItemDidChange:(TableViewTextEditItem*)item;
 - (void)updateSaveButtonStatus;
 - (void)validateAndReconfigureItems:(NSArray<TableViewItem*>*)items;
+- (void)didTapSave;
+- (void)didTapCancel;
 @end
 
 @interface TableViewTextEditItem (Testing)
@@ -36,8 +43,7 @@
 
 namespace {
 // Test constants for sections to avoid magic numbers.
-const NSInteger kSectionIdentifierEnumZero = 0;
-const NSInteger kSectionIdentifierEnumOne = 1;
+const NSInteger kSectionIdentifierCardDetails = 0;
 }  // namespace
 
 @interface FakePaymentsScanSaveAndFillEditMutator
@@ -158,6 +164,8 @@ const NSInteger kSectionIdentifierEnumOne = 1;
 
 class PaymentsScanSaveAndFillEditViewControllerTest : public PlatformTest {
  protected:
+  base::test::TaskEnvironment task_environment_;
+
   void SetUp() override {
     PlatformTest::SetUp();
 
@@ -217,18 +225,13 @@ TEST_F(PaymentsScanSaveAndFillEditViewControllerTest, TestLoadModel) {
   // Retrieve the snapshot representing the current UI state.
   NSDiffableDataSourceSnapshot* snapshot = GetSnapshot();
 
-  // Verify the number of sections (Card Details and Nickname).
-  EXPECT_EQ(2u, snapshot.sectionIdentifiers.count);
+  // Verify the number of sections (only Card Details).
+  EXPECT_EQ(1u, snapshot.sectionIdentifiers.count);
 
   // Card Details.
   NSArray* cardDetailsItems = [snapshot
-      itemIdentifiersInSectionWithIdentifier:@(kSectionIdentifierEnumZero)];
-  EXPECT_EQ(4u, cardDetailsItems.count);
-
-  // Nickname.
-  NSArray* nicknameItems = [snapshot
-      itemIdentifiersInSectionWithIdentifier:@(kSectionIdentifierEnumOne)];
-  EXPECT_EQ(1u, nicknameItems.count);
+      itemIdentifiersInSectionWithIdentifier:@(kSectionIdentifierCardDetails)];
+  EXPECT_EQ(5u, cardDetailsItems.count);
 }
 
 // Tests if the UI Model is updated correctly when data is passed from the
@@ -244,7 +247,7 @@ TEST_F(PaymentsScanSaveAndFillEditViewControllerTest, TestScannerUpdatesUI) {
 
   NSDiffableDataSourceSnapshot* snapshot = GetSnapshot();
   NSArray* cardDetailsItems = [snapshot
-      itemIdentifiersInSectionWithIdentifier:@(kSectionIdentifierEnumZero)];
+      itemIdentifiersInSectionWithIdentifier:@(kSectionIdentifierCardDetails)];
 
   // Card Number.
   TableViewTextEditItem* numberItem =
@@ -264,19 +267,18 @@ TEST_F(PaymentsScanSaveAndFillEditViewControllerTest, TestPlaceholders) {
   NSDiffableDataSourceSnapshot* snapshot = GetSnapshot();
   NSArray* cardDetailsItems =
       [snapshot itemIdentifiersInSectionWithIdentifier:@(0)];
-  NSArray* nicknameItems =
-      [snapshot itemIdentifiersInSectionWithIdentifier:@(1)];
 
   // Card Number.
   TableViewTextEditItem* numberItem =
       base::apple::ObjCCastStrict<TableViewTextEditItem>(cardDetailsItems[0]);
-  EXPECT_NSEQ(l10n_util::GetNSString(
-                  IDS_IOS_AUTOFILL_SCAN_CARD_PLACEHOLDER_CARD_NUMBER),
+  EXPECT_NSEQ(l10n_util::GetNSString(IDS_IOS_AUTOFILL_CARD_NUMBER),
               numberItem.textFieldPlaceholder);
 
   // Expiration Date.
   TableViewTextEditItem* expItem =
       base::apple::ObjCCastStrict<TableViewTextEditItem>(cardDetailsItems[1]);
+  EXPECT_NSEQ(l10n_util::GetNSString(IDS_IOS_AUTOFILL_SCAN_CARD_EXP_DATE),
+              expItem.fieldNameLabelText);
   EXPECT_NSEQ(l10n_util::GetNSString(
                   IDS_IOS_AUTOFILL_SCAN_CARD_PLACEHOLDER_EXPIRY_DATE),
               expItem.textFieldPlaceholder);
@@ -284,20 +286,22 @@ TEST_F(PaymentsScanSaveAndFillEditViewControllerTest, TestPlaceholders) {
   // Cardholder Name.
   TableViewTextEditItem* nameItem =
       base::apple::ObjCCastStrict<TableViewTextEditItem>(cardDetailsItems[2]);
-  EXPECT_NSEQ(nil, nameItem.textFieldPlaceholder);
+  EXPECT_NSEQ(l10n_util::GetNSString(
+                  IDS_IOS_AUTOFILL_DIALOG_PLACEHOLDER_CARD_HOLDER_NAME),
+              nameItem.textFieldPlaceholder);
 
   // CVC.
   TableViewTextEditItem* cvcItem =
       base::apple::ObjCCastStrict<TableViewTextEditItem>(cardDetailsItems[3]);
   EXPECT_NSEQ(
-      l10n_util::GetNSString(IDS_IOS_AUTOFILL_DIALOG_PLACEHOLDER_CVC_OPTIONAL),
+      l10n_util::GetNSString(IDS_IOS_AUTOFILL_DIALOG_PLACEHOLDER_OPTIONAL),
       cvcItem.textFieldPlaceholder);
 
   // Nickname.
   TableViewTextEditItem* nicknameItem =
-      base::apple::ObjCCastStrict<TableViewTextEditItem>(nicknameItems[0]);
+      base::apple::ObjCCastStrict<TableViewTextEditItem>(cardDetailsItems[4]);
   EXPECT_NSEQ(
-      l10n_util::GetNSString(IDS_IOS_AUTOFILL_DIALOG_PLACEHOLDER_NICKNAME),
+      l10n_util::GetNSString(IDS_IOS_AUTOFILL_DIALOG_PLACEHOLDER_OPTIONAL),
       nicknameItem.textFieldPlaceholder);
 }
 
@@ -332,21 +336,22 @@ TEST_F(PaymentsScanSaveAndFillEditViewControllerTest, TestDidTapSave) {
                          expirationYear:@"29"];
 
   // Populate optional fields manually.
-  TableViewTextEditItem* nameItem = GetItem(kSectionIdentifierEnumZero, 2);
+  TableViewTextEditItem* nameItem = GetItem(kSectionIdentifierCardDetails, 2);
   nameItem.textFieldValue = @"John Doe";
-  TableViewTextEditItem* cvcItem = GetItem(kSectionIdentifierEnumZero, 3);
+  TableViewTextEditItem* cvcItem = GetItem(kSectionIdentifierCardDetails, 3);
   cvcItem.textFieldValue = @"123";
-  TableViewTextEditItem* nicknameItem = GetItem(kSectionIdentifierEnumOne, 0);
+  TableViewTextEditItem* nicknameItem =
+      GetItem(kSectionIdentifierCardDetails, 4);
   nicknameItem.textFieldValue = @"My Card";
 
   [view_controller_
       validateAndReconfigureItems:@[ nameItem, cvcItem, nicknameItem ]];
 
-  // Simulate tapping the save button.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wundeclared-selector"
   [view_controller_ performSelector:@selector(didTapSave)];
-#pragma clang diagnostic pop
+
+  // Wait for the mutator task to execute.
+  EXPECT_TRUE(
+      base::test::RunUntil([&]() { return fake_mutator_.saveAndFillCalled; }));
 
   // Verify that onUpdatedAndAcceptedForSaveAndFill was called with correct
   // details.
@@ -360,6 +365,25 @@ TEST_F(PaymentsScanSaveAndFillEditViewControllerTest, TestDidTapSave) {
   EXPECT_EQ(u"123", fake_mutator_.savedDetails.security_code.value());
   EXPECT_TRUE(fake_mutator_.savedDetails.nickname.has_value());
   EXPECT_EQ(u"My Card", fake_mutator_.savedDetails.nickname.value());
+
+  // Verify that the save button transitioned to the loading state.
+  UIButton* saveButton = [view_controller_ valueForKey:@"_saveButton"];
+  EXPECT_FALSE(saveButton.enabled);
+  EXPECT_NSEQ(nil, [saveButton valueForKey:@"title"]);
+  EXPECT_TRUE(saveButton.configuration.showsActivityIndicator);
+}
+
+// Tests the behavior of showLoadingStateWithAccessibilityLabel.
+TEST_F(PaymentsScanSaveAndFillEditViewControllerTest, TestShowLoadingState) {
+  CreateController();
+
+  [view_controller_ showLoadingStateWithAccessibilityLabel:@"Loading"];
+
+  UIButton* saveButton = [view_controller_ valueForKey:@"_saveButton"];
+  EXPECT_FALSE(saveButton.enabled);
+  EXPECT_NSEQ(nil, [saveButton valueForKey:@"title"]);
+  EXPECT_TRUE(saveButton.configuration.showsActivityIndicator);
+  EXPECT_NSEQ(@"Loading", saveButton.accessibilityLabel);
 }
 
 // Tests the behavior of showConfirmationState.
@@ -372,10 +396,12 @@ TEST_F(PaymentsScanSaveAndFillEditViewControllerTest,
   UIButton* saveButton = [view_controller_ valueForKey:@"_saveButton"];
   EXPECT_FALSE(saveButton.enabled);
   EXPECT_NSEQ(nil, [saveButton valueForKey:@"title"]);
+  EXPECT_FALSE(saveButton.configuration.showsActivityIndicator);
 
-  // 3 corresponds to PrimaryButtonImageCustom
+  // PrimaryButtonImageCheckmark corresponds to confirmation state
   NSNumber* imageValue = [saveButton valueForKey:@"primaryButtonImage"];
-  EXPECT_EQ(3, [imageValue intValue]);
+  EXPECT_EQ(static_cast<int>(PrimaryButtonImageCheckmark),
+            [imageValue intValue]);
 }
 
 // Tests if the expiration date properly validates.
@@ -384,7 +410,7 @@ TEST_F(PaymentsScanSaveAndFillEditViewControllerTest,
   CreateController();
   view_controller_.mutator = fake_mutator_;
 
-  TableViewTextEditItem* expItem = GetItem(kSectionIdentifierEnumZero, 1);
+  TableViewTextEditItem* expItem = GetItem(kSectionIdentifierCardDetails, 1);
   id<TableViewTextEditItemDelegate> delegate =
       (id<TableViewTextEditItemDelegate>)view_controller_;
 
@@ -423,7 +449,7 @@ TEST_F(PaymentsScanSaveAndFillEditViewControllerTest, TestValidationTiming) {
   CreateController();
   view_controller_.mutator = fake_mutator_;
 
-  TableViewTextEditItem* numberItem = GetItem(kSectionIdentifierEnumZero, 0);
+  TableViewTextEditItem* numberItem = GetItem(kSectionIdentifierCardDetails, 0);
   id<TableViewTextEditItemDelegate> delegate =
       (id<TableViewTextEditItemDelegate>)view_controller_;
 
@@ -465,4 +491,151 @@ TEST_F(PaymentsScanSaveAndFillEditViewControllerTest, TestSaveButtonState) {
 
   [view_controller_ setSaveButtonEnabled:NO];
   EXPECT_FALSE(saveButton.enabled);
+}
+
+// Tests that the accept action is logged when the save button is tapped.
+TEST_F(PaymentsScanSaveAndFillEditViewControllerTest, TestMetricsOnSave) {
+  base::HistogramTester histogram_tester;
+  CreateController();
+
+  [view_controller_ didTapSave];
+
+  histogram_tester.ExpectUniqueSample(
+      "IOS.ScanCardOfferToSave",
+      static_cast<int>(ScanCardOfferToSaveAction::kAccept), 1);
+}
+
+// Tests that the reject action is logged when the cancel button is tapped.
+TEST_F(PaymentsScanSaveAndFillEditViewControllerTest, TestMetricsOnCancel) {
+  base::HistogramTester histogram_tester;
+  CreateController();
+
+  [view_controller_ didTapCancel];
+
+  histogram_tester.ExpectUniqueSample(
+      "IOS.ScanCardOfferToSave",
+      static_cast<int>(ScanCardOfferToSaveAction::kReject), 1);
+}
+
+// Tests that the ignore action is logged when the view disappears without any
+// prior action.
+TEST_F(PaymentsScanSaveAndFillEditViewControllerTest, TestMetricsOnDismiss) {
+  base::HistogramTester histogram_tester;
+  CreateController();
+
+  [view_controller_ viewDidDisappear:NO];
+
+  histogram_tester.ExpectUniqueSample(
+      "IOS.ScanCardOfferToSave",
+      static_cast<int>(ScanCardOfferToSaveAction::kIgnore), 1);
+}
+
+// Tests that user actions are logged only once.
+TEST_F(PaymentsScanSaveAndFillEditViewControllerTest,
+       TestMetricsLoggedOnlyOnce) {
+  base::HistogramTester histogram_tester;
+  CreateController();
+
+  [view_controller_ didTapSave];
+  [view_controller_ viewDidDisappear:NO];
+
+  histogram_tester.ExpectUniqueSample(
+      "IOS.ScanCardOfferToSave",
+      static_cast<int>(ScanCardOfferToSaveAction::kAccept), 1);
+
+  histogram_tester.ExpectBucketCount(
+      "IOS.ScanCardOfferToSave",
+      static_cast<int>(ScanCardOfferToSaveAction::kIgnore), 0);
+}
+
+TEST_F(PaymentsScanSaveAndFillEditViewControllerTest, TestMetricsOnScan) {
+  base::HistogramTester histogram_tester;
+  [view_controller_ loadViewIfNeeded];
+
+  NSCalendar* calendar = NSCalendar.currentCalendar;
+  NSDateComponents* calendarComponents = [calendar components:NSCalendarUnitYear
+                                                     fromDate:[NSDate date]];
+  NSInteger currentYear = [calendarComponents year];
+  NSString* expirationYear =
+      [NSString stringWithFormat:@"%ld", (long)currentYear];
+
+  // Simulate incoming scanned results.
+  [view_controller_ setCreditCardNumber:@"4242424242424242"
+                        expirationMonth:@"12"
+                         expirationYear:expirationYear];
+
+  histogram_tester.ExpectUniqueSample("IOS.ScanCardOfferToSave.ValidNumber",
+                                      true, 1);
+  histogram_tester.ExpectUniqueSample("IOS.ScanCardOfferToSave.ValidExpMonth",
+                                      true, 1);
+  histogram_tester.ExpectUniqueSample("IOS.ScanCardOfferToSave.ValidExpYear",
+                                      true, 1);
+  histogram_tester.ExpectTotalCount("IOS.ScanCard.EndToEndLatency", 1);
+}
+
+TEST_F(PaymentsScanSaveAndFillEditViewControllerTest,
+       TestMetricsOnScanInvalid) {
+  base::HistogramTester histogram_tester;
+  [view_controller_ loadViewIfNeeded];
+
+  // Simulate incoming scanned results.
+  [view_controller_ setCreditCardNumber:@"122"
+                        expirationMonth:@"13"
+                         expirationYear:@"20"];
+
+  histogram_tester.ExpectUniqueSample("IOS.ScanCardOfferToSave.ValidNumber",
+                                      false, 1);
+  histogram_tester.ExpectUniqueSample("IOS.ScanCardOfferToSave.ValidExpMonth",
+                                      false, 1);
+  histogram_tester.ExpectUniqueSample("IOS.ScanCardOfferToSave.ValidExpYear",
+                                      false, 1);
+}
+
+TEST_F(PaymentsScanSaveAndFillEditViewControllerTest,
+       TestMetricsOnSaveWithEdits) {
+  base::HistogramTester histogram_tester;
+  CreateController();
+  [view_controller_ loadViewIfNeeded];
+
+  // Populate initial scanned data.
+  [view_controller_ setCreditCardNumber:@"1234567812345678"
+                        expirationMonth:@"12"
+                         expirationYear:@"26"];
+
+  // Simulate manual edits.
+  TableViewTextEditItem* numberItem =
+      [view_controller_ valueForKey:@"_cardNumberItem"];
+  numberItem.textFieldValue = @"1234567812340000";
+
+  TableViewTextEditItem* expDateItem =
+      [view_controller_ valueForKey:@"_expirationDateItem"];
+  expDateItem.textFieldValue = @"11/26";
+
+  [view_controller_ didTapSave];
+
+  histogram_tester.ExpectUniqueSample("IOS.ScannedCard.NumberEdited", true, 1);
+  histogram_tester.ExpectUniqueSample("IOS.ScannedCard.ExpMonthEdited", true,
+                                      1);
+  histogram_tester.ExpectUniqueSample("IOS.ScannedCard.ExpYearEdited", false,
+                                      1);
+}
+
+TEST_F(PaymentsScanSaveAndFillEditViewControllerTest,
+       TestMetricsOnSaveWithoutEdits) {
+  base::HistogramTester histogram_tester;
+  CreateController();
+  [view_controller_ loadViewIfNeeded];
+
+  // Populate initial scanned data.
+  [view_controller_ setCreditCardNumber:@"1234567812345678"
+                        expirationMonth:@"12"
+                         expirationYear:@"26"];
+
+  [view_controller_ didTapSave];
+
+  histogram_tester.ExpectUniqueSample("IOS.ScannedCard.NumberEdited", false, 1);
+  histogram_tester.ExpectUniqueSample("IOS.ScannedCard.ExpMonthEdited", false,
+                                      1);
+  histogram_tester.ExpectUniqueSample("IOS.ScannedCard.ExpYearEdited", false,
+                                      1);
 }

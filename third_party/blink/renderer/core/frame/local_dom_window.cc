@@ -147,6 +147,7 @@
 #include "third_party/blink/renderer/core/trustedtypes/trusted_types_util.h"
 #include "third_party/blink/renderer/core/view_transition/view_transition_supplement.h"
 #include "third_party/blink/renderer/platform/back_forward_cache_buffer_limit_tracker.h"
+#include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
 #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/bindings/source_location.h"
@@ -995,6 +996,12 @@ void LocalDOMWindow::DispatchPagehideEvent(
     return;
   }
 
+  // The navigation that triggered this pagehide is past the point of being
+  // canceled (beforeunload has run without canceling). Promote any pending
+  // navigationDestinationURL stashed during the navigate event so that JS
+  // pagehide handlers can observe it via performance.getSpeculations().
+  DOMWindowPerformance::performance(*this)->PromoteNavigationDestinationURL();
+
   DispatchEvent(
       *PageTransitionEvent::Create(event_type_names::kPagehide, persistence),
       document_.Get());
@@ -1376,6 +1383,20 @@ void LocalDOMWindow::DispatchMessageEventWithOriginCheck(
     // TODO(crbug.com/1412770): Add use counter.
     display_capture_request_token_.Activate();
   }
+  if (RuntimeEnabledFeatures::CapabilityDelegationDigitalCredentialsEnabled(
+          this)) {
+    if (event->delegatedCapability() ==
+        mojom::blink::DelegatedCapability::kDigitalCredentialsCreate) {
+      UseCounter::Count(
+          this, WebFeature::kCapabilityDelegationOfDigitalCredentialsCreate);
+      digital_credentials_create_token_.Activate();
+    } else if (event->delegatedCapability() ==
+               mojom::blink::DelegatedCapability::kDigitalCredentialsGet) {
+      UseCounter::Count(
+          this, WebFeature::kCapabilityDelegationOfDigitalCredentialsGet);
+      digital_credentials_get_token_.Activate();
+    }
+  }
 
   event->SetShouldMeasureDataAccessBeforeOrigin();
 
@@ -1390,7 +1411,7 @@ void LocalDOMWindow::DispatchMessageEventWithOriginCheck(
   }
 }
 
-DOMSelection* LocalDOMWindow::getSelection() {
+DomSelection* LocalDOMWindow::getSelection() {
   if (!IsCurrentlyDisplayedInFrame())
     return nullptr;
 
@@ -2082,7 +2103,8 @@ CustomElementRegistry* LocalDOMWindow::customElements(
 
 CustomElementRegistry* LocalDOMWindow::customElements() const {
   if (!custom_elements_ && document_) {
-    custom_elements_ = MakeGarbageCollected<CustomElementRegistry>(this);
+    custom_elements_ = MakeGarbageCollected<CustomElementRegistry>(
+        this, DOMWrapperWorld::kMainWorldId);
     custom_elements_->MarkAsGlobalRegistry();
     custom_elements_->AssociatedWith(*document_);
     document_->SetCustomElementRegistry(custom_elements_);
@@ -2581,6 +2603,22 @@ bool LocalDOMWindow::IsFullscreenRequestTokenActive() const {
 
 bool LocalDOMWindow::ConsumeFullscreenRequestToken() {
   return fullscreen_request_token_.ConsumeIfActive();
+}
+
+bool LocalDOMWindow::IsDigitalCredentialsCreateTokenActive() const {
+  return digital_credentials_create_token_.IsActive();
+}
+
+bool LocalDOMWindow::ConsumeDigitalCredentialsCreateToken() {
+  return digital_credentials_create_token_.ConsumeIfActive();
+}
+
+bool LocalDOMWindow::IsDigitalCredentialsGetTokenActive() const {
+  return digital_credentials_get_token_.IsActive();
+}
+
+bool LocalDOMWindow::ConsumeDigitalCredentialsGetToken() {
+  return digital_credentials_get_token_.ConsumeIfActive();
 }
 
 bool LocalDOMWindow::IsDisplayCaptureRequestTokenActive() const {

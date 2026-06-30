@@ -176,7 +176,9 @@ class TestChromeDownloadManagerDelegate : public ChromeDownloadManagerDelegate {
       const base::FilePath& virtual_path,
       bool create_directory,
       DownloadPathReservationTracker::FilenameConflictAction conflict_action,
-      DownloadPathReservationTracker::ReservedPathCallback callback) override {
+      const base::FilePath& containment_directory,
+      DownloadTargetDeterminerDelegate::ReservedPathCallback callback)
+      override {
     PathValidationResult result = PathValidationResult::SUCCESS;
     base::FilePath path_to_return = MockReserveVirtualPath(
         download, virtual_path, create_directory, conflict_action, &result);
@@ -2002,6 +2004,43 @@ class ChromeDownloadManagerDelegateTestWithSafeBrowsing
     return download_item;
   }
 
+  void RunUnknownVerdictTest(base::FilePath::StringViewType file_name,
+                             download::DownloadDangerType expected) {
+#if BUILDFLAG(IS_ANDROID)
+    // Enable telemetry-only mode to prevent UNKNOWN verdicts from triggering the
+    // DangerousDownloadDialog, which would block the UI thread and timeout the test.
+    base::test::ScopedFeatureList feature_list;
+    base::FieldTrialParams params = {
+        {std::string(
+             safe_browsing::kMaliciousApkDownloadCheckTelemetryOnly.name),
+         "true"}};
+    feature_list.InitAndEnableFeatureWithParameters(
+        safe_browsing::kMaliciousApkDownloadCheck, params);
+#endif
+
+    std::unique_ptr<download::MockDownloadItem> download_item =
+        CreateActiveDownloadItem(0);
+    EXPECT_CALL(*delegate(), GetDownloadProtectionService());
+    EXPECT_CALL(*download_protection_service(), MockCheckClientDownload())
+        .WillOnce(Return(safe_browsing::DownloadCheckResult::UNKNOWN));
+    EXPECT_CALL(*download_item, GetDangerType())
+        .WillRepeatedly(Return(download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS));
+    EXPECT_CALL(*download_item, RequireSafetyChecks())
+        .WillRepeatedly(Return(true));
+
+    ON_CALL(*download_item, GetFileNameToReportUser())
+        .WillByDefault(Return(base::FilePath(file_name)));
+
+    EXPECT_CALL(*download_item,
+                OnContentCheckCompleted(
+                    expected, download::DOWNLOAD_INTERRUPT_REASON_NONE));
+
+    base::RunLoop run_loop;
+    ASSERT_FALSE(delegate()->ShouldCompleteDownload(download_item.get(),
+                                                    run_loop.QuitClosure()));
+    run_loop.Run();
+  }
+
  private:
   std::unique_ptr<TestDownloadProtectionService>
       test_download_protection_service_;
@@ -2346,6 +2385,40 @@ TEST_P(ChromeDownloadManagerDelegateTestWithSafeBrowsing,
   ASSERT_TRUE(delegate()->ShouldCompleteDownload(download_item.get(),
                                                  run_loop.QuitClosure()));
 }
+
+#if BUILDFLAG(IS_ANDROID)
+TEST_F(ChromeDownloadManagerDelegateTestWithSafeBrowsing,
+       AndroidApkCheck_UnknownApk_IsDangerous) {
+  RunUnknownVerdictTest(FILE_PATH_LITERAL("test.apk"),
+                        download::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE);
+  RunUnknownVerdictTest(FILE_PATH_LITERAL("test.APK"),
+                        download::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE);
+  RunUnknownVerdictTest(FILE_PATH_LITERAL("test.txt.apk"),
+                        download::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE);
+}
+
+TEST_F(ChromeDownloadManagerDelegateTestWithSafeBrowsing,
+       AndroidApkCheck_UnknownNonApk_IsNotDangerous) {
+  RunUnknownVerdictTest(FILE_PATH_LITERAL("test.txt"),
+                        download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS);
+  RunUnknownVerdictTest(FILE_PATH_LITERAL("test.apk.txt"),
+                        download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS);
+}
+#else
+TEST_F(ChromeDownloadManagerDelegateTestWithSafeBrowsing,
+       NonAndroidApkCheck_IsNotDangerous) {
+  RunUnknownVerdictTest(FILE_PATH_LITERAL("test.apk"),
+                        download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS);
+  RunUnknownVerdictTest(FILE_PATH_LITERAL("test.APK"),
+                        download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS);
+  RunUnknownVerdictTest(FILE_PATH_LITERAL("test.txt.apk"),
+                        download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS);
+  RunUnknownVerdictTest(FILE_PATH_LITERAL("test.txt"),
+                        download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS);
+  RunUnknownVerdictTest(FILE_PATH_LITERAL("test.apk.txt"),
+                        download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS);
+}
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 // Auto cancel is only available on platforms with download bubble.
 // TODO(crbug.com/397407934): Support auto cancel reports on Android.

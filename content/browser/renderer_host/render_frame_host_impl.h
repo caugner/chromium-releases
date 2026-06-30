@@ -269,6 +269,7 @@ namespace features {
 
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kDoNotEvictOnAXLocationChange);
 
+CONTENT_EXPORT BASE_DECLARE_FEATURE(kEnforceUserActivationForBeforeUnload);
 }  // namespace features
 
 namespace content {
@@ -278,6 +279,7 @@ class BrowsingContextState;
 class CodeCacheHostImpl;
 class CrossOriginEmbedderPolicyReporter;
 class CrossOriginOpenerPolicyAccessReportManager;
+class EmbedderIsolationInfo;
 class FeatureObserver;
 class FencedFrame;
 class FileSystemManagerImpl;
@@ -564,6 +566,7 @@ class CONTENT_EXPORT RenderFrameHostImpl
   BindingsPolicySet GetEnabledBindings() override;
   void SetWebUIProperty(const std::string& name,
                         const std::string& value) override;
+  bool CouldDisplayBeforeUnloadDialog() const override;
   void DisableBeforeUnloadHangMonitorForTesting() override;
   bool IsBeforeUnloadHangMonitorDisabledForTesting() override;
   bool GetSuddenTerminationDisablerState(
@@ -779,7 +782,7 @@ class CONTENT_EXPORT RenderFrameHostImpl
                          const ChildProcessTerminationInfo& info) override;
 
   // LockObserver
-  void OnLockContention() override;
+  bool OnLockContention() override;
 
   // ui::AXActionHandlerBase:
   void PerformAction(const ui::AXActionData& data) override;
@@ -1659,11 +1662,12 @@ class CONTENT_EXPORT RenderFrameHostImpl
       FrameTreeNode* child_frame,
       base::TimeTicks start_time,
       base::TimeTicks redirect_time,
+      base::TimeTicks completion_time,
       const GURL& initial_url,
       const GURL& final_url,
       network::mojom::URLResponseHeadPtr response_head,
       bool allow_response_details,
-      const network::URLLoaderCompletionStatus& completion_status);
+      blink::mojom::SubframeResourceLengthsPtr resource_lengths);
 
   // Sends a renderer-debug URL to the renderer process for handling.
   void HandleRendererDebugURL(const GURL& url);
@@ -1821,6 +1825,10 @@ class CONTENT_EXPORT RenderFrameHostImpl
     return broker_holder_->broker_receiver();
   }
   bool has_broker_holder_for_testing() { return broker_holder_.has_value(); }
+  const blink::mojom::LocalResourceLoaderConfigPtr&
+  local_resource_loader_config_for_testing() const {
+    return local_resource_loader_config_;
+  }
   void SetKeepAliveTimeoutForTesting(base::TimeDelta timeout);
 
   network::mojom::WebSandboxFlags active_sandbox_flags();
@@ -2655,6 +2663,12 @@ class CONTENT_EXPORT RenderFrameHostImpl
   void InitializeCrashReportContext(
       uint64_t length,
       InitializeCrashReportContextCallback callback) override;
+  void RequestUnboundedSurface(
+      mojo::PendingAssociatedReceiver<blink::mojom::UnboundedSurfaceHost> host,
+      mojo::PendingAssociatedRemote<blink::mojom::UnboundedSurfaceClient>
+          client,
+      const gfx::Rect& bounds) override;
+  void DismissUnboundedSurface();
 
   // blink::mojom::BackForwardCacheControllerHost:
   void EvictFromBackForwardCache(
@@ -3735,11 +3749,12 @@ class CONTENT_EXPORT RenderFrameHostImpl
   // in cases where it is applicable. This is a more conservative check than
   // RenderProcessHost::FilterURL, since it will be used to kill processes that
   // commit unauthorized origins.
-  CanCommitStatus CanCommitOriginAndUrl(const url::Origin& origin,
-                                        const GURL& url,
-                                        bool is_same_document_navigation,
-                                        bool is_pdf,
-                                        bool is_sandboxed);
+  CanCommitStatus CanCommitOriginAndUrl(
+      const url::Origin& origin,
+      const GURL& url,
+      bool is_same_document_navigation,
+      const EmbedderIsolationInfo& embedder_isolation_info,
+      bool is_sandboxed);
 
   // Returns whether a subframe navigation request should be allowed to commit
   // to the current RenderFrameHost.
@@ -3864,6 +3879,7 @@ class CONTENT_EXPORT RenderFrameHostImpl
   CreateNavigationRequestForSynchronousRendererCommit(
       const GURL& url,
       const url::Origin& origin,
+      const std::optional<url::Origin>& initiator_origin,
       const std::optional<GURL>& initiator_base_url,
       blink::mojom::ReferrerPtr referrer,
       const ui::PageTransition& transition,
@@ -4891,6 +4907,13 @@ class CONTENT_EXPORT RenderFrameHostImpl
   // remote will be valid when the frame is the active main frame.
   mojo::AssociatedRemote<blink::mojom::LocalMainFrame> local_main_frame_;
 
+  // Holder of Mojo connection with the UnboundedSurfaceClient in Blink for
+  // visual isolation updates and notifications (e.g., dismissal). This
+  // connection is only established for trusted renderers (such as WebUI and
+  // chrome:// scheme callers).
+  mojo::AssociatedRemote<blink::mojom::UnboundedSurfaceClient>
+      unbounded_surface_client_;
+
   // Holds the cross-document NavigationRequests that are waiting to commit.
   // These are navigations that have passed ReadyToCommit stage and are waiting
   // for a matching commit IPC.
@@ -5627,6 +5650,14 @@ class CONTENT_EXPORT RenderFrameHostImpl
   // `SetOriginDependentStateOfNewFrame()`, for use in tests to verify the
   // pre-commit opaque origin was derived from the expected token.
   std::optional<base::UnguessableToken> last_sandbox_origin_token_for_testing_;
+
+  // True if this rfh was created via a window creation with user activation.
+  bool opener_had_user_gesture_ = false;
+
+  // Tracks the frame with the active unbounded surface inside this page/frame
+  // tree. Only set on the outermost main frame. When set, this frame is
+  // strictly either the outermost main frame itself or one of its descendants.
+  base::WeakPtr<RenderFrameHostImpl> active_unbounded_frame_;
 
   // WeakPtrFactories are the last members, to ensure they are destroyed before
   // all other fields of `this`.

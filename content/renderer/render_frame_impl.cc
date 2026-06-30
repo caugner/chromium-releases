@@ -306,6 +306,21 @@ using blink::WebView;
 using blink::mojom::SelectionMenuBehavior;
 using network::mojom::ReferrerPolicy;
 
+namespace features {
+
+// Used to add an artificial delay for UI rendering during testing and
+// debugging.
+BASE_FEATURE(kArtificialUIDelay, base::FEATURE_DISABLED_BY_DEFAULT);
+
+// The duration of the artificial delay injected into WebUI HTML UI rendering.
+BASE_FEATURE_PARAM(base::TimeDelta,
+                   kInitialWebUIDelayDuration,
+                   &features::kArtificialUIDelay,
+                   "initial_web_ui_delay_duration",
+                   base::Seconds(3));
+
+}  // namespace features
+
 namespace content {
 
 namespace {
@@ -492,11 +507,18 @@ void FillNavigationParamsRequest(
     const blink::mojom::CommonNavigationParams& common_params,
     const blink::mojom::CommitNavigationParams& commit_params,
     blink::WebNavigationParams* navigation_params) {
-  // Use the original navigation url to start with. We'll replay the redirects
-  // afterwards and will eventually arrive to the final url.
-  navigation_params->url = !commit_params.original_url.is_empty()
-                               ? commit_params.original_url
-                               : common_params.url;
+  // Use the original navigation URL to start with. Note that when the browser
+  // enables redirect sanitization (via
+  // `features::kSanitizeOriginalUrlDuringNavigation`), it populates
+  // `commit_params->original_url` with only the sanitized origin of the
+  // original URL instead of the full URL by calling DeprecatedGetOriginAsURL().
+  // We'll replay the redirects afterwards and will eventually arrive at the
+  // final URL. For non-redirecting navigations, use the final URL to be
+  // committed (as that is the same as the original URL).
+  const bool should_use_original_url = !commit_params.redirect_infos.empty() &&
+                                       !commit_params.original_url.is_empty();
+  navigation_params->url =
+      should_use_original_url ? commit_params.original_url : common_params.url;
   navigation_params->http_method = WebString::FromAscii(
       !commit_params.original_method.empty() ? commit_params.original_method
                                              : common_params.method);
@@ -561,8 +583,16 @@ void FillNavigationParamsRequest(
   navigation_params->force_enabled_origin_trials = base::ToVector(
       commit_params.force_enabled_origin_trials, &WebString::FromAscii);
 
-  navigation_params->early_hints_preloaded_resources = base::ToVector(
-      commit_params.early_hints_preloaded_resources, blink::ToWebURL);
+  navigation_params->early_hints_preloaded_resources.reserve(
+      commit_params.early_hints_preloaded_resources.size());
+  for (const auto& link : commit_params.early_hints_preloaded_resources) {
+    blink::WebEarlyHintsPreloadInfo web_info;
+    web_info.url = blink::ToWebURL(link->href);
+    web_info.as = link->as;
+    web_info.cross_origin = link->cross_origin;
+    navigation_params->early_hints_preloaded_resources.push_back(
+        std::move(web_info));
+  }
 
   // Pass on the `initiator_base_url` sent via the common_params for srcdoc and
   // about:blank documents. This will be picked up in DocumentLoader.
@@ -2617,6 +2647,11 @@ void RenderFrameImpl::CommitNavigation(
     CHECK(!is_initial_webui_);
   }
 
+  if (IsForInitialWebUI() &&
+      base::FeatureList::IsEnabled(features::kArtificialUIDelay)) {
+    base::PlatformThread::Sleep(features::kInitialWebUIDelayDuration.Get());
+  }
+
   RendererNavigationMetricsManager::Instance().MarkCommitStart(
       commit_params->navigation_metrics_token);
   if (!response_head->client_side_content_decoding_types.empty()) {
@@ -3333,12 +3368,22 @@ void RenderFrameImpl::CommitSameDocumentNavigation(
     bool should_skip_screenshot =
         navigation_state->commit_params().should_skip_screenshot;
 
-    // Load the request.
-    commit_status = frame_->CommitSameDocumentNavigation(
-        url, load_type, item_for_history_navigation, is_client_redirect,
-        started_with_transient_activation, initiator_origin,
-        is_browser_initiated, has_ua_visual_transition,
-        soft_navigation_heuristics_task_id, should_skip_screenshot);
+    {
+      // Load the request.
+      // Guard the commit call so reentrant calls to
+      // DidFailAsyncSameDocumentCommit know that a new same-document navigation
+      // commit is actively in progress.
+      is_committing_same_document_navigation_ = true;
+      auto self = GetWeakPtr();
+      commit_status = frame_->CommitSameDocumentNavigation(
+          url, load_type, item_for_history_navigation, is_client_redirect,
+          started_with_transient_activation, initiator_origin,
+          is_browser_initiated, has_ua_visual_transition,
+          soft_navigation_heuristics_task_id, should_skip_screenshot);
+      if (self) {
+        self->is_committing_same_document_navigation_ = false;
+      }
+    }
 
     // If `commit_status` is Ok, RunCommitSameDocumentNavigationCallback() was
     // called in DidCommitNavigationInternal() or the NavigationApi deferred the
@@ -4196,7 +4241,8 @@ void RenderFrameImpl::DidFinishSameDocumentNavigation(
     bool is_client_redirect,
     const std::optional<blink::SameDocNavigationScreenshotDestinationToken>&
         screenshot_destination,
-    base::UnguessableToken same_document_metrics_token) {
+    base::UnguessableToken same_document_metrics_token,
+    bool caused_by_ad) {
   TRACE_EVENT1("navigation,rail",
                "RenderFrameImpl::didFinishSameDocumentNavigation",
                "frame_token", frame_token_);
@@ -4227,12 +4273,7 @@ void RenderFrameImpl::DidFinishSameDocumentNavigation(
       screenshot_destination;
   same_document_params->same_document_metrics_token =
       same_document_metrics_token;
-
-  // `IsAdScriptInStack()` is the primary check. The IsAdFrame() check really
-  // only covers an edge scenario of a genuine user click (e.g., <a> tag) within
-  // an ad frame triggering a fragment navigation.
-  same_document_params->caused_by_ad =
-      GetWebFrame()->IsAdFrame() || GetWebFrame()->IsAdScriptInStack();
+  same_document_params->caused_by_ad = caused_by_ad;
 
   DidCommitNavigationInternal(
       commit_type, transition, navigation_state.get(),
@@ -4253,6 +4294,9 @@ void RenderFrameImpl::DidFailAsyncSameDocumentCommit() {
   // callback if this commit was browser-initiated. If the commit is aborted
   // due to frame detach or another navigation preempting it, NavigationState's
   // destructor will run the callback instead.
+  if (is_committing_same_document_navigation_) {
+    return;
+  }
   DocumentState* document_state =
       DocumentState::FromDocumentLoader(frame_->GetDocumentLoader());
   if (auto navigation_state = document_state->TakeNavigationState()) {

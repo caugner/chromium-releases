@@ -30,13 +30,17 @@
 #include "components/input/native_web_keyboard_event.h"
 #include "components/omnibox/common/omnibox_features.h"
 #include "components/permissions/permission_request_manager.h"
+#include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
+#include "third_party/blink/public/common/input/web_mouse_event.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/mojom/menu_source_type.mojom.h"
 #include "ui/gfx/geometry/rounded_corners_f.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_runner.h"
+#include "ui/views/layout/layout_provider.h"
 #include "ui/views/widget/widget.h"
 
 OmniboxPopupWebUIBaseContent::OmniboxPopupWebUIBaseContent(
@@ -59,13 +63,21 @@ OmniboxPopupWebUIBaseContent::~OmniboxPopupWebUIBaseContent() {
 
 void OmniboxPopupWebUIBaseContent::AddedToWidget() {
   views::WebView::AddedToWidget();
+  holder()->SetCornerRadii(GetRoundedCornerRadii());
+}
+
+gfx::RoundedCornersF OmniboxPopupWebUIBaseContent::GetRoundedCornerRadii()
+    const {
   const float corner_radius =
       views::LayoutProvider::Get()->GetCornerRadiusMetric(
           views::ShapeContextTokens::kOmniboxExpandedRadius);
-  gfx::RoundedCornersF rounded_corner_radii = gfx::RoundedCornersF(
-      top_rounded_corners_ ? corner_radius : 0,
-      top_rounded_corners_ ? corner_radius : 0, corner_radius, corner_radius);
-  holder()->SetCornerRadii(rounded_corner_radii);
+  return gfx::RoundedCornersF(top_rounded_corners_ ? corner_radius : 0,
+                              top_rounded_corners_ ? corner_radius : 0,
+                              corner_radius, corner_radius);
+}
+
+bool OmniboxPopupWebUIBaseContent::EscClosesUI() const {
+  return true;
 }
 
 void OmniboxPopupWebUIBaseContent::OnLocationBarBoundsChanged() {
@@ -90,9 +102,11 @@ void OmniboxPopupWebUIBaseContent::OnLocationBarBoundsChanged() {
   // than intended.
   gfx::Size min_size(width, 1);
   gfx::Size max_size(width, INT_MAX);
-  if (auto* render_widget_host_view =
-          GetWrappedWebContents()->GetRenderWidgetHostView()) {
-    render_widget_host_view->EnableAutoResize(min_size, max_size);
+  if (auto* web_contents = GetWrappedWebContents()) {
+    if (auto* render_widget_host_view =
+            web_contents->GetRenderWidgetHostView()) {
+      render_widget_host_view->EnableAutoResize(min_size, max_size);
+    }
   }
 
   // Defer synchronizing the View popup widget (the actual visible popup)
@@ -237,7 +251,8 @@ void OmniboxPopupWebUIBaseContent::SetContentURL(std::string_view url) {
 void OmniboxPopupWebUIBaseContent::LoadContent() {
   DCHECK(!content_url_.is_empty());
   contents_wrapper_ = std::make_unique<WebUIContentsWrapperT<OmniboxPopupUI>>(
-      content_url_, location_bar_->GetProfile(), IDS_TASK_MANAGER_OMNIBOX);
+      content_url_, location_bar_->GetProfile(), IDS_TASK_MANAGER_OMNIBOX,
+      EscClosesUI());
   contents_wrapper_->SetHost(weak_factory_.GetWeakPtr());
   SetWebContents(contents_wrapper_->web_contents());
   // LocationBarView can be instantiated in windows that do not have a
@@ -287,11 +302,24 @@ void OmniboxPopupWebUIBaseContent::Detach() {
 }
 
 content::WebContents* OmniboxPopupWebUIBaseContent::GetWrappedWebContents() {
-  return contents_wrapper_->web_contents();
+  return contents_wrapper_ ? contents_wrapper_->web_contents() : nullptr;
 }
 
 void OmniboxPopupWebUIBaseContent::OnMenuClosed() {
   std::move(context_menu_).reset();
+  OnContextMenuClosed();
+  // Synthesize a mouse leave event from the context menu to trigger
+  // re-rendering of the web ui pop up state. This is to ensure entrypoint
+  // button to the context menu does not get stuck in the :hover state.
+  if (auto* web_contents = GetWebContents()) {
+    if (auto* rwh =
+            web_contents->GetPrimaryMainFrame()->GetRenderWidgetHost()) {
+      blink::WebMouseEvent mouse_event(blink::WebInputEvent::Type::kMouseLeave,
+                                       blink::WebInputEvent::kNoModifiers,
+                                       base::TimeTicks::Now());
+      rwh->ForwardMouseEvent(mouse_event);
+    }
+  }
 }
 
 void OmniboxPopupWebUIBaseContent::PrimaryMainFrameRenderProcessGone(

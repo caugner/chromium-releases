@@ -117,7 +117,7 @@ class ChromePermissionsClient : public permissions::PermissionsClient {
       const GURL& embedding_origin) override;
   std::optional<GURL> GetEmbeddingOriginOverride(
       const GURL& requesting_origin,
-      content::WebContents* web_contents) override;
+      content::RenderFrameHost* render_frame_host) override;
 
   bool IsFromNewTabPage(content::WebContents* web_contents,
                         const GURL& requester,
@@ -135,7 +135,7 @@ class ChromePermissionsClient : public permissions::PermissionsClient {
                    const url::Origin& origin) override;
   std::unique_ptr<PermissionMessageDelegate> MaybeCreateMessageUI(
       content::WebContents* web_contents,
-      ContentSettingsType type,
+      const permissions::PermissionRequest& request,
       base::WeakPtr<permissions::PermissionPromptAndroid> prompt) override;
   void RepromptForAndroidPermissions(
       content::WebContents* web_contents,

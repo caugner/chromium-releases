@@ -47,11 +47,25 @@ public class GlicEnabling {
         return GlicEnablingJni.get().isEnabledForProfile(profile);
     }
 
+    /** Returns true if the user was previously determined to be ineligible for Glic. */
+    public static boolean wasPreviouslyNotAllowed(@Nullable Profile profile) {
+        if (profile == null) return false;
+        if (sIsEnabledForTesting != null) return sIsEnabledForTesting;
+        return GlicEnablingJni.get().wasPreviouslyNotAllowed(profile);
+    }
+
     /** Returns true if the Glic settings page should be shown for the given profile. */
     public static boolean shouldShowSettingsPage(@Nullable Profile profile) {
         if (profile == null) return false;
         if (sIsEnabledForTesting != null) return sIsEnabledForTesting;
         return GlicEnablingJni.get().shouldShowSettingsPage(profile);
+    }
+
+    /** Returns true if the web actuation / auto browse toggle should be shown for the profile. */
+    public static boolean shouldShowWebActuationToggle(@Nullable Profile profile) {
+        if (profile == null) return false;
+        if (sIsEnabledForTesting != null) return sIsEnabledForTesting;
+        return GlicEnablingJni.get().shouldShowWebActuationToggle(profile);
     }
 
     /** Returns true if Glic is ready to be used for the given profile. */
@@ -64,10 +78,48 @@ public class GlicEnabling {
     /**
      * Sets the global Glic feature to the given value for testing. This value will override the
      * value returned by all eligible checks in this file.
+     *
+     * <p>Note: This only sets up the current state for java testing. To forward the value to native
+     * side during browser test, use {@link #setEnabledForTesting(boolean, boolean)}
+     *
+     * @see #setEnabledForTesting(boolean, boolean)
      */
     public static void setEnabledForTesting(boolean isEnabled) {
+        setEnabledForTesting(isEnabled, /* forwardToNative= */ false);
+    }
+
+    /**
+     * Sets the global Glic feature to the given value for testing. This value will override the
+     * value returned by all eligible checks in this file.
+     *
+     * <p>Note: When calling this method in unit tests, ensure that native JNI mocks are properly
+     * set up (e.g. via {@link GlicEnablingJni#setInstanceForTesting}) to avoid native resolution
+     * errors.
+     */
+    public static void setEnabledForTesting(boolean isEnabled, boolean forwardToNative) {
         sIsEnabledForTesting = isEnabled;
-        ResettersForTesting.register(() -> sIsEnabledForTesting = null);
+        if (forwardToNative && isEnabled) {
+            GlicEnablingJni.get().setBypassEnablementChecksForTesting(true);
+        }
+        ResettersForTesting.register(
+                () -> {
+                    sIsEnabledForTesting = null;
+                    if (forwardToNative) {
+                        GlicEnablingJni.get().setBypassEnablementChecksForTesting(false);
+                    }
+                });
+    }
+
+    /** Returns true if Glic is disabled by policy for the given profile. */
+    public static boolean isDisabledByPolicy(@Nullable Profile profile) {
+        if (profile == null) return false;
+        return GlicEnablingJni.get().isDisabledByPolicy(profile);
+    }
+
+    /** Returns true if the profile is managed by enterprise. */
+    public static boolean isProfileManaged(@Nullable Profile profile) {
+        if (profile == null) return false;
+        return GlicEnablingJni.get().isProfileManaged(profile);
     }
 
     @NativeMethods
@@ -78,8 +130,18 @@ public class GlicEnabling {
 
         boolean isEnabledForProfile(@JniType("Profile*") Profile profile);
 
+        boolean wasPreviouslyNotAllowed(@JniType("Profile*") Profile profile);
+
         boolean shouldShowSettingsPage(@JniType("Profile*") Profile profile);
 
+        boolean shouldShowWebActuationToggle(@JniType("Profile*") Profile profile);
+
         boolean isReadyForProfile(@JniType("Profile*") Profile profile);
+
+        boolean isDisabledByPolicy(@JniType("Profile*") Profile profile);
+
+        boolean isProfileManaged(@JniType("Profile*") Profile profile);
+
+        void setBypassEnablementChecksForTesting(boolean bypass);
     }
 }

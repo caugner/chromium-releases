@@ -18,6 +18,7 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
 #include "net/http/http_util.h"
+#include "net/shared_dictionary/shared_dictionary_constants.h"
 #include "services/network/public/cpp/cors/cors.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
@@ -84,6 +85,26 @@ bool IsRequestHeaderSafe(std::string_view key, std::string_view value) {
   for (const auto* header : kUnsafeHeaders) {
     if (base::EqualsCaseInsensitiveASCII(header, key))
       return false;
+  }
+
+  // The Accept-Encoding header can be set by the media pipeline (e.g.
+  // "identity;q=1, *;q=0"), but must not be used to negotiate shared
+  // dictionary compression (dcb, dcz) which is managed by the network stack.
+  if (base::EqualsCaseInsensitiveASCII(
+          key, net::HttpRequestHeaders::kAcceptEncoding)) {
+    net::HttpUtil::ValuesIterator encodings(value, ',');
+    while (encodings.GetNext()) {
+      if (base::StartsWith(
+              encodings.value(),
+              net::shared_dictionary::kSharedBrotliContentEncodingName,
+              base::CompareCase::INSENSITIVE_ASCII) ||
+          base::StartsWith(
+              encodings.value(),
+              net::shared_dictionary::kSharedZstdContentEncodingName,
+              base::CompareCase::INSENSITIVE_ASCII)) {
+        return false;
+      }
+    }
   }
 
   for (const auto& header : kUnsafeHeaderValues) {
@@ -256,18 +277,8 @@ mojom::ReferrerPolicy ParseReferrerPolicy(
 
 bool ShouldSniffContent(const GURL& url,
                         const mojom::URLResponseHead& response) {
-  std::string content_type_options;
-  if (response.headers) {
-    content_type_options =
-        response.headers->GetNormalizedHeader("x-content-type-options")
-            .value_or(std::string());
-  }
-  bool sniffing_blocked =
-      base::EqualsCaseInsensitiveASCII(content_type_options, "nosniff");
-  bool we_would_like_to_sniff =
-      net::ShouldSniffMimeType(url, response.mime_type);
-
-  return !sniffing_blocked && we_would_like_to_sniff;
+  return net::ShouldSniffMimeType(url, response.headers.get(),
+                                  response.mime_type);
 }
 
 bool IsSuccessfulStatus(int status) {

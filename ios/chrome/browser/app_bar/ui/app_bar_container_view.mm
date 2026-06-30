@@ -6,6 +6,7 @@
 
 #import "ios/chrome/browser/app_bar/ui/app_bar_constants.h"
 #import "ios/chrome/browser/app_bar/ui/app_bar_container_view_delegate.h"
+#import "ios/chrome/browser/shared/coordinator/scene/state/layout_state.h"
 
 namespace {
 constexpr CGFloat kDefaultAppBarWidth = 300;
@@ -67,6 +68,19 @@ constexpr CGFloat kDefaultAppBarWidth = 300;
   [self updatePositioning];
 }
 
+- (void)setAppBarPosition:(AppBarPosition)appBarPosition {
+  if (_appBarPosition == appBarPosition) {
+    return;
+  }
+  _appBarPosition = appBarPosition;
+  [self updatePositioning];
+}
+
+- (void)layoutSubviews {
+  [super layoutSubviews];
+  [self updatePositioning];
+}
+
 #pragma mark - UIView
 
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent*)event {
@@ -93,19 +107,38 @@ constexpr CGFloat kDefaultAppBarWidth = 300;
   if (!self.window || !_appBar) {
     return;
   }
-  UIWindowScene* windowScene = self.window.windowScene;
-  CGSize sceneSize = windowScene.screen.bounds.size;
-  CGFloat tallSideLength = MAX(sceneSize.width, sceneSize.height);
+  CGSize windowSize = self.window.bounds.size;
+  CGFloat tallSideLength = MAX(windowSize.width, windowSize.height);
   CGFloat containerLength = tallSideLength * 1.5;
   _heightConstraint.constant = containerLength;
 
-  CGFloat shortSideLength = MIN(sceneSize.width, sceneSize.height);
-  _appBarWidthConstraint.constant = shortSideLength;
+  CGFloat extraOffset = 0;
+  CGFloat appBarWidth = 0;
+  // This is the "height" of the window when looked in AppBar coordinates (so
+  // with a fixed orientation).
+  CGFloat heightInAppCoordinates = 0;
+  switch (self.appBarPosition) {
+    case AppBarPosition::kBottom:
+      appBarWidth = windowSize.width;
+      heightInAppCoordinates = windowSize.height;
+      extraOffset = (1 - self.fullscreenProgress) *
+                    (kAppBarHeight - kAppBarHeightFullscreen);
+      break;
 
-  CGFloat offset = (containerLength - tallSideLength) / 2;
+    case AppBarPosition::kLeft:
+      [[fallthrough]];
+    case AppBarPosition::kRight:
+      appBarWidth = windowSize.height;
+      heightInAppCoordinates = windowSize.width;
+      extraOffset = kAppBarHeight - kAppBarHeightLandscape;
+      break;
+    case AppBarPosition::kNone:
+      break;
+  }
 
-  CGFloat extraOffset =
-      (1 - self.fullscreenProgress) * (kAppBarHeight - kAppBarHeightFullscreen);
+  _appBarWidthConstraint.constant = appBarWidth;
+
+  CGFloat offset = (containerLength - heightInAppCoordinates) / 2;
 
   _appBarVerticalPositioning.constant = -offset + extraOffset;
 }

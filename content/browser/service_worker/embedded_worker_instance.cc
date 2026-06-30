@@ -606,6 +606,7 @@ void EmbeddedWorkerInstance::SendStartWorker(
 }
 
 void EmbeddedWorkerInstance::RequestTermination(
+    uint64_t observed_keepalive_sequence_number,
     RequestTerminationCallback callback) {
   if (status() != blink::EmbeddedWorkerStatus::kRunning &&
       status() != blink::EmbeddedWorkerStatus::kStopping) {
@@ -615,7 +616,8 @@ void EmbeddedWorkerInstance::RequestTermination(
     std::move(callback).Run(true /* will_be_terminated */);
     return;
   }
-  const bool will_be_terminated = owner_version_->OnRequestTermination();
+  const bool will_be_terminated =
+      owner_version_->OnRequestTermination(observed_keepalive_sequence_number);
   TRACE_EVENT1("ServiceWorker", "EmbeddedWorkerInstance::RequestTermination",
                "will_be_terminated", will_be_terminated);
 
@@ -876,7 +878,7 @@ EmbeddedWorkerInstance::CreateFactoryBundle(
           std::move(dip_reporter),
           static_cast<StoragePartitionImpl*>(rph->GetStoragePartition())
               ->CreateURLLoaderNetworkObserverForServiceOrSharedWorker(
-                  ToOriginatingProcessId(rph->GetID()), origin),
+                  ToOriginatingProcessId(rph->GetID()), origin, storage_key),
           NetworkServiceDevToolsObserver::MakeSelfOwned(devtools_worker_token),
           std::move(client_security_state),
           /*network_restrictions_id=*/std::nullopt,

@@ -10,16 +10,21 @@
 #if BUILDFLAG(IOS_USE_BRANDED_ASSETS)
 NSString* const kGeminiFullSymbol = @"gemini_full";
 NSString* const kGeminiBrandedLogoSymbol = @"gemini_logo";
+NSString* const kGeminiLiveLogoSymbol = @"gemini_live";
 NSString* const kGoogleDriveSymbol = @"google_drive";
 NSString* const kGoogleFullSymbol = @"google_full";
 NSString* const kGoogleIconSymbol = @"google_icon";
 NSString* const kGoogleShieldSymbol = @"google_shield";
 NSString* const kGoogleMapsSymbol = @"google_maps";
 NSString* const kGooglePaySymbol = @"google_pay";
+NSString* const kGooglePayV2Symbol = @"google_pay_v2";
 NSString* const kGoogleWalletIconSymbol = @"google_wallet_icon";
+NSString* const kGoogleWalletIconV2Symbol = @"google_wallet_icon_v2";
 NSString* const kGoogleWalletSymbol = @"google_wallet";
+NSString* const kGoogleWalletV2Symbol = @"google_wallet_v2";
 NSString* const kGooglePhotosSymbol = @"google_photos";
 NSString* const kGPayPillIconSymbol = @"gpay_pill_icon";
+NSString* const kGPayPillIconV2Symbol = @"gpay_pill_icon_v2";
 NSString* const kMulticolorChromeballSymbol = @"multicolor_chromeball";
 NSString* const kPageInsightsSymbol = @"page_insights";
 #else
@@ -81,7 +86,6 @@ NSString* const kPDFFillSymbol = @"pdf_fill";
 NSString* const kLineThreeSparkSymbol = @"line_three_spark";
 NSString* const kDocumentBadgeSpark = @"document_badge_spark";
 NSString* const kDeepSearchSymbol = @"deep_search";
-NSString* const kGeminiLiveLogoSymbol = @"gemini_live";
 
 // Use custom symbol for camera because the default video icon in iOS should
 // always represent “Apple Facetime”.
@@ -297,7 +301,6 @@ NSString* const kArrowUpTrashSymbol = @"arrow.up.trash";
 NSString* const kRectangleGroupBubble = @"rectangle.3.group.bubble";
 NSString* const kHomeSymbol = @"house";
 NSString* const kWorkSymbol = @"case";
-NSString* const kShieldedEnvelope = @"envelope.badge.shield.half.filled";
 NSString* const kReaderModeSymbolPreIOS18 = @"doc.plaintext";
 NSString* const kReaderModeSymbolPostIOS18 = @"text.page";
 NSString* const kCircleBadgeFill = @"circlebadge.fill";
@@ -320,6 +323,7 @@ NSString* const kSparkles2Symbol = @"sparkles.2";
 NSString* const kEnvelopeSymbol = @"envelope";
 NSString* const kSquareAndPencilSymbol = @"square.and.pencil";
 NSString* const kCreditCardFinderActionSymbol = @"creditcard.viewfinder";
+NSString* const kPuzzlePieceExtensionSymbol = @"puzzlepiece.extension";
 
 // Names of the default symbol being non-monochrome by default. When using them,
 // you probably want to set their color to monochrome.

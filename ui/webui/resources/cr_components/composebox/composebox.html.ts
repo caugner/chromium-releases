@@ -23,16 +23,58 @@ export function getHtml(this: ComposeboxElement) {
         .receivedSpeech="${this.receivedSpeech}"
         .energyEffectAnimationEnabled="${this.energyEffectAnimationEnabled}"
         .isZeroState="${this.isZeroState}"
+        .darkThemeColorsEnabled="${this.entrypointName !== ''}"
+        .showingOnlyCarouselOnTopOfInput="${this.showFileCarousel
+            && !this.inToolMode
+            && this.carouselOnTop_
+            && this.voiceSearchCoherenceEnabled}"
         exportparts="composebox-background">
+      ${this.showFileCarousel && this.shouldShowVoiceSearchAnimation() &&
+          this.voiceSearchCoherenceEnabled ? html`
+        <div id="voiceCarouselContainer"
+            slot="carousel"
+            part="carousel-container">
+          <div id="voiceCarouselContainerInner"
+              class="carousel-container-inner">
+            <cr-composebox-file-carousel
+              id="voiceSearchCarousel"
+              class="${this.carouselOnTop_ ? 'top'
+                  : ''}"
+              .files="${this.getFilteredCarouselFiles()}"
+              enable-scrolling
+              @delete-file="${this.onDeleteFile}">
+            </cr-composebox-file-carousel>
+          </div>
+        </div>
+      ` : ''}
+      ${this.shouldShowVoiceSearchAnimation() &&
+            this.voiceSearchCoherenceEnabled && this.inToolMode
+          ? html`<div class=
+              "context-menu-container voice-context-menu-container"
+                    id="voiceToolChipsContainer"
+                    slot="tool-chip"
+                    part="tool-chips-container">
+                  <cr-composebox-tool-chip
+                    exportparts="tool-chip-label"
+                    .inputState="${this.inputState}"
+                    .isCanvasQuerySubmitted="
+                        ${this.isCanvasQuerySubmitted}"
+                    @tool-click="${this.onToolClick}"
+                    part="tool-chip">
+                  </cr-composebox-tool-chip>
+                </div>
+      ` : ''}
     </search-animated-glow>
   ` : ''}
-    <ntp-error-scrim id="errorScrim" part="error-scrim"
-        ?compact-mode="${this.searchboxLayoutMode === 'Compact' &&
-                         this.files.size === 0}"
-        .errorMessage="${this.errorMessage}"
-        @dismiss-error-scrim="${this.onDismissErrorScrim}">
-    </ntp-error-scrim>
-    <div id="composebox" part="composebox" ?inert="${!!this.errorMessage}"
+  ${this.errorMessage ?
+      html`<ntp-error-scrim id="errorScrim" part="error-scrim"
+          ?compact-mode="${this.searchboxLayoutMode === 'Compact' &&
+                          this.files.size === 0}"
+          .errorMessage="${this.errorMessage}"
+          @dismiss-error-scrim="${this.onDismissErrorScrim}">
+      </ntp-error-scrim>`
+  : ''}
+  <div id="composebox" part="composebox" ?inert="${!!this.errorMessage}"
         @keydown="${this.onKeydown}"
         @focusin="${this.onComposeboxFocusin_}"
         @focusout="${this.onComposeboxFocusout_}"
@@ -54,16 +96,17 @@ export function getHtml(this: ComposeboxElement) {
             .isCollapsible="${this.isCollapsible}"
             .submitEnabled="${this.submitEnabled}"
             .entrypointName="${this.entrypointName}"
-            .cancelButtonTitle="${this.computeCancelButtonTitle_()}"
+            .cancelButtonTitle="${this.computeCancelButtonTitle()}"
             @input-input="${this.onInputInput}"
             @input-focusin="${this.onInputFocusin}"
-            @cancel-click="${this.onCancelClick}">
+            @cancel-click="${this.onCancelClick}"
+            @clear-smart-compose="${this.onClearSmartCompose}">
         </cr-composebox-input>
         <div id="context" part="context-entrypoint"
             class="${this.carouselOnTop_ && this.isCollapsible ? 'icon-fade' : ''}">
           <cr-composebox-file-inputs id="fileInputs"
               @file-change="${this.onFileChange}"
-              .disableFileInputs="${this.shouldDisableFileInputs_()}">
+              .disableFileInputs="${this.shouldDisableFileInputs()}">
            ${this.searchboxLayoutMode === 'Compact' && !this.isOmniboxInCompactMode_ ?
               (this.hasTabs() ? '' : getContextMenuHtml.bind(this)())
             : ''}
@@ -77,7 +120,7 @@ export function getHtml(this: ComposeboxElement) {
                     class="${this.carouselOnTop_ ? 'top' : ''}"
                     .files="${this.getFilteredCarouselFiles()}"
                     ?enable-scrolling="${this.enableCarouselScrolling}"
-                    @delete-file="${this.onDeleteFile_}">
+                    @delete-file="${this.onDeleteFile}">
                   </cr-composebox-file-carousel> ` : ''}
                   ${this.searchboxLayoutMode === 'Compact' && !this.isOmniboxInCompactMode_ && this.hasTabs() ? html`
                     ${this.contextMenuEnabled ? getContextMenuHtml.bind(this)() : ''}
@@ -190,12 +233,12 @@ export function getHtml(this: ComposeboxElement) {
         exportparts="voice-close-button, voice-details-link, voice-stop-button, voice-submit-button">
     </cr-composebox-voice-search>
   ` : ''}
-  ${this.shouldShowSuggestionActivityLink_()
+  ${this.shouldShowSuggestionActivityLink()
       && this.suggestionActivityEnabled ? html`
     <div id="suggestionActivity">
       <localized-link
         .localizedString="${this.i18nAdvanced('suggestionActivityLink')}"
-        @link-clicked="${this.onLinkClicked_}">
+        @link-clicked="${this.onLinkClicked}">
       </localized-link>
     </div>
   `: ''}

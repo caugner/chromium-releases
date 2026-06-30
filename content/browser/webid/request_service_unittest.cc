@@ -627,8 +627,11 @@ class TestDialogController
             config.idp_signin_status_mismatch_dialog_action),
         error_dialog_action_(config.error_dialog_action),
         loading_dialog_action_(config.loading_dialog_action),
-        should_show_accounts_passive_dialog_(
-            !config.suppressed_by_segmentation_platform) {}
+        passive_dialog_volume_(
+            config.suppressed_by_segmentation_platform
+                ? IdentityRequestDialogController::PassiveDialogVolume::kAmbient
+                : IdentityRequestDialogController::PassiveDialogVolume::
+                      kDefault) {}
 
   ~TestDialogController() override = default;
   TestDialogController(TestDialogController&) = delete;
@@ -641,9 +644,8 @@ class TestDialogController
     idp_signin_status_mismatch_dialog_action_ = action;
   }
 
-  void ShouldShowAccountsPassiveDialog(
-      ShouldShowAccountsPassiveDialogCallback cb) override {
-    std::move(cb).Run(should_show_accounts_passive_dialog_);
+  void GetPassiveDialogVolume(GetPassiveDialogVolumeCallback cb) override {
+    std::move(cb).Run(passive_dialog_volume_);
   }
 
   bool ShowAccountsDialog(
@@ -852,7 +854,7 @@ class TestDialogController
   ErrorDialogAction error_dialog_action_{ErrorDialogAction::kNone};
   LoadingDialogAction loading_dialog_action_{LoadingDialogAction::kNone};
   bool did_show_ui_ = false;
-  bool should_show_accounts_passive_dialog_;
+  IdentityRequestDialogController::PassiveDialogVolume passive_dialog_volume_;
 
   // Pointer so that the state can be queried after RequestService
   // destroys TestDialogController.
@@ -1464,6 +1466,14 @@ class RequestServiceTest : public RenderViewHostImplTestHarness {
   void CloseDialog() {
     federated_auth_request_impl_->OnDialogDismissed(
         IdentityRequestDialogController::DismissReason::kCloseButton);
+  }
+
+  void CallRedirectTo(const GURL& idp_config_url,
+                      blink::mojom::RedirectParams::Tag method,
+                      const GURL& redirect_to,
+                      const std::string& request_body) {
+    federated_auth_request_impl_->RedirectTo(idp_config_url, method,
+                                             redirect_to, request_body);
   }
 
   void CompleteDisconnectRequest() {
@@ -8529,17 +8539,12 @@ TEST_F(RequestServiceTest, CancelReasonMetrics) {
           IdentityRequestDialogController::DismissReason::kCloseButton));
 }
 
-// Tests that the correct FederatedAuthRequestResult is returned when the
-// accounts dialog is suppressed by segmentation platform.
-TEST_F(RequestServiceTest, SuppressedBySegmentationPlatform) {
+// Tests that the request is successful when the segmentation platform
+// recommends the ambient UI volume.
+TEST_F(RequestServiceTest, SegmentationPlatformRecommendsAmbientVolume) {
   MockConfiguration configuration = kConfigurationValid;
   configuration.suppressed_by_segmentation_platform = true;
-  RequestExpectations expectations = {
-      RequestTokenStatus::kError,
-      FederatedAuthRequestResult::kSuppressedBySegmentationPlatform,
-      /*standalone_console_message=*/std::nullopt,
-      /*selected_idp_config_url=*/std::nullopt};
-  RunAuthTest(kDefaultRequestParameters, expectations, configuration);
+  RunAuthTest(kDefaultRequestParameters, kExpectationSuccess, configuration);
 }
 
 TEST_F(RequestServiceTest, MetricsForConsecutiveSuccessfulRequests) {
@@ -9061,5 +9066,85 @@ INSTANTIATE_TEST_SUITE_P(
                                                /*show_modal=*/true},
                       NotifyAutofillTestParams{/*unknown_idp=*/false,
                                                /*show_modal=*/false}));
+
+TEST_F(RequestServiceTest, DismissIgnoredDuringRedirectTo) {
+  base::HistogramTester histogram_tester;
+
+  MockConfiguration config = kConfigurationValid;
+  config.delay_token_response = true;
+
+  federated_auth_request_impl_->SetForceAllowRedirectToForTesting(true);
+
+  // Start the request flow.
+  RunAuthDontWaitForCallback(kDefaultRequestParameters, config);
+
+  content::MockWebContentsObserver observer(web_contents());
+  EXPECT_CALL(observer, DidStartNavigation(_))
+      .WillOnce([&](content::NavigationHandle* handle) { CloseDialog(); });
+
+  // Call RedirectTo. This should trigger navigation and thus the observer.
+  CallRedirectTo(GURL(kProviderUrlFull),
+                 blink::mojom::RedirectParams::Tag::kGet,
+                 GURL("https://rp.example/redirect"), "");
+
+  WaitForCurrentAuthRequest(/*should_fast_forward=*/true);
+
+  // Verify that the request completed successfully.
+  EXPECT_EQ(auth_helper_->status(), RequestTokenStatus::kSuccess);
+  // In the success case via RedirectTo, the token is explicitly returned as a
+  // null base::Value (type NONE). So token().has_value() is true (it contains
+  // the null value), but is_none() is true.
+  EXPECT_TRUE(auth_helper_->token().has_value());
+  EXPECT_TRUE(auth_helper_->token()->is_none());
+
+  // Verify that the histogram records success (53) instead of dismiss (5).
+  histogram_tester.ExpectUniqueSample(
+      "Blink.FedCm.Status.RequestIdToken",
+      static_cast<int>(RequestIdTokenStatus::kSuccessUsingRedirectTo), 1);
+}
+
+// Verifies that calling LoginToIdP when the login popup is already open
+// refocuses the popup without re-registering the IdpSigninStatus observer or
+// resetting state, and that query parameters are preserved.
+TEST_F(RequestServiceTest, LoginToIdPRefocusesWhenPopupAlreadyOpen) {
+  RequestParameters parameters = kDefaultRequestParameters;
+  parameters.identity_providers[0].domain_hint = kDomainHint;
+
+  test_permission_delegate_
+      ->idp_signin_statuses_[OriginFromString(kProviderUrlFull)] = true;
+
+  auto dialog_controller =
+      std::make_unique<TestDialogController>(kConfigurationValid);
+  base::WeakPtr<TestDialogController> weak_dialog_controller =
+      dialog_controller->AsWeakPtr();
+  SetDialogController(std::move(dialog_controller));
+
+  std::string expected_url =
+      std::string(kIdpLoginUrl) + "?domain_hint=domain%40corp.com";
+  std::unique_ptr<WebContents> modal(CreateTestWebContents());
+  EXPECT_CALL(*weak_dialog_controller,
+              ShowModalDialog(GURL(expected_url), _, _, _))
+      .Times(2)
+      .WillRepeatedly(::testing::Return(modal.get()));
+
+  // AddIdpSigninStatusObserver should only be called once when opening the
+  // popup the first time, and NOT again when LoginToIdP is called while the
+  // popup is already open.
+  EXPECT_CALL(*test_permission_delegate_, AddIdpSigninStatusObserver).Times(1);
+
+  RunAuthDontWaitForCallback(parameters, kConfigurationValid);
+  EXPECT_TRUE(did_show_idp_signin_status_mismatch_dialog());
+
+  // First LoginToIdP call: opens the popup, adds observer, sets dialog_type_.
+  SimulateLoginToIdP();
+  EXPECT_EQ(federated_auth_request_impl_->GetDialogType(),
+            RequestService::DialogType::kLoginToIdpPopup);
+
+  // Second LoginToIdP call while popup is already open: refocuses the popup
+  // without re-registering observer or resetting state.
+  SimulateLoginToIdP();
+  EXPECT_EQ(federated_auth_request_impl_->GetDialogType(),
+            RequestService::DialogType::kLoginToIdpPopup);
+}
 
 }  // namespace content::webid

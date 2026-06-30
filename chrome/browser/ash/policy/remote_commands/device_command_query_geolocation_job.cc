@@ -23,12 +23,19 @@
 #include "components/strings/grit/components_strings.h"
 #include "components/vector_icons/vector_icons.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/message_center/public/cpp/notification.h"
 #include "ui/message_center/public/cpp/notification_delegate.h"
 
 namespace policy {
 
 namespace {
+
+// Expiration time for the command is this high because this command is
+// persisted on the server side for a year in case the device comes back online.
+constexpr base::TimeDelta kRemoteQueryGeolocationCommandExpirationTime =
+    base::Days(365);  // 1 year.
+
 constexpr char kResultCode[] = "result_code";
 constexpr char kLatitude[] = "latitude";
 constexpr char kLongitude[] = "longitude";
@@ -97,7 +104,8 @@ void DeviceCommandQueryGeolocationJob::
       /*display_source=*/std::u16string(), /*origin_url=*/GURL(), notifier_id,
       notification_data,
       base::MakeRefCounted<LocationSavedNotificationDelegate>(),
-      vector_icons::kBusinessIcon,
+      features::IsRoundedIconsEnabled() ? vector_icons::kDomainIcon
+                                        : vector_icons::kBusinessOldIcon,
       message_center::SystemNotificationWarningLevel::NORMAL);
 
   SystemNotificationHelper::GetInstance()->Display(notification);
@@ -137,6 +145,10 @@ DeviceCommandQueryGeolocationJob::CheckIfCommandIsAllowed() const {
         LOCATION_TRACKING_DISABLED;
   }
   return std::nullopt;
+}
+
+bool DeviceCommandQueryGeolocationJob::IsExpired(base::TimeTicks now) {
+  return now > issued_time() + kRemoteQueryGeolocationCommandExpirationTime;
 }
 
 void DeviceCommandQueryGeolocationJob::RunImpl(

@@ -42,13 +42,20 @@ class InputStateModelTest : public testing::Test {
         contextual_search::kSearchContentSharingSettings,
         static_cast<int>(
             contextual_search::SearchContentSharingSettingsValue::kEnabled));
+    pref_service_.registry()->RegisterIntegerPref(
+        contextual_search::kDriveConsentState, 0);
+
     input_state_model_ = std::make_unique<InputStateModel>(
         session_handle_, config_, active_url_, /*is_off_the_record=*/false,
-        /*is_signed_in=*/false);
+        /*browser_identity_matches_aim_identity=*/false);
     input_state_model_->SetPrefService(&pref_service_);
   }
 
  protected:
+  DriveConsentState GetDriveConsentState(const InputStateModel* model) const {
+    return model->drive_consent_state_for_testing();
+  }
+
   TestingPrefServiceSimple pref_service_;
   std::unique_ptr<InputStateModel> input_state_model_;
   MockContextualSearchSessionHandle session_handle_;
@@ -74,7 +81,11 @@ TEST_F(InputStateModelTest, DoesNotRemoveDriveInputWhenSignedInAndFlagEnabled) {
 
   input_state_model_ = std::make_unique<InputStateModel>(
       session_handle_, config, active_url_, /*is_off_the_record=*/false,
-      /*is_signed_in=*/true);
+      /*browser_identity_matches_aim_identity=*/true);
+  input_state_model_->SetPrefService(&pref_service_);
+  pref_service_.SetInteger(
+      contextual_search::kDriveConsentState,
+      static_cast<int>(contextual_search::DriveConsentState::kConsent));
   const auto& state = input_state_model_->get_state_for_testing();
 
   EXPECT_THAT(state.allowed_input_types,
@@ -98,7 +109,7 @@ TEST_F(InputStateModelTest, RemovesDriveInputWhenFlagDisabled) {
 
   input_state_model_ = std::make_unique<InputStateModel>(
       session_handle_, config, active_url_, /*is_off_the_record=*/false,
-      /*is_signed_in=*/true);
+      /*browser_identity_matches_aim_identity=*/true);
   const auto& state = input_state_model_->get_state_for_testing();
 
   EXPECT_THAT(state.allowed_input_types,
@@ -122,7 +133,7 @@ TEST_F(InputStateModelTest, RemovesDriveInputWhenNotSignedIn) {
 
   input_state_model_ = std::make_unique<InputStateModel>(
       session_handle_, config, active_url_, /*is_off_the_record=*/false,
-      /*is_signed_in=*/false);
+      /*browser_identity_matches_aim_identity=*/false);
   const auto& state = input_state_model_->get_state_for_testing();
 
   EXPECT_THAT(state.allowed_input_types,
@@ -157,7 +168,7 @@ TEST_F(InputStateModelTest,
 
   input_state_model_ = std::make_unique<InputStateModel>(
       session_handle_, config, active_url_, /*is_off_the_record=*/false,
-      /*is_signed_in=*/false);
+      /*browser_identity_matches_aim_identity=*/false);
   const auto& state = input_state_model_->get_state_for_testing();
 
   EXPECT_THAT(state.allowed_input_types,
@@ -195,7 +206,7 @@ TEST_F(InputStateModelTest, DefaultToFirstAllowedModel) {
   // Initialize Model.
   input_state_model_ = std::make_unique<InputStateModel>(
       session_handle_, config, active_url_, /*is_off_the_record=*/false,
-      /*is_signed_in=*/false);
+      /*browser_identity_matches_aim_identity=*/false);
   const auto& state = input_state_model_->get_state_for_testing();
 
   // Verify Initialization Logic.
@@ -230,7 +241,7 @@ TEST_F(InputStateModelTest, ParsesActiveModelFromUrl) {
   GURL regular_url("https://example.com/?abc=1");
   auto state_model_regular = std::make_unique<InputStateModel>(
       session_handle_, config, regular_url, /*is_off_the_record=*/false,
-      /*is_signed_in=*/false);
+      /*browser_identity_matches_aim_identity=*/false);
 
   EXPECT_EQ(state_model_regular->get_state_for_testing().active_model,
             omnibox::ModelMode::MODEL_MODE_GEMINI_REGULAR);
@@ -238,7 +249,7 @@ TEST_F(InputStateModelTest, ParsesActiveModelFromUrl) {
   GURL pro_url("https://example.com/?xyz=1");
   auto state_model_pro = std::make_unique<InputStateModel>(
       session_handle_, config, pro_url, /*is_off_the_record=*/false,
-      /*is_signed_in=*/false);
+      /*browser_identity_matches_aim_identity=*/false);
 
   EXPECT_EQ(state_model_pro->get_state_for_testing().active_model,
             omnibox::ModelMode::MODEL_MODE_GEMINI_PRO);
@@ -246,7 +257,7 @@ TEST_F(InputStateModelTest, ParsesActiveModelFromUrl) {
   GURL unknown_url("https://example.com/?qwe=1");
   auto state_model_unknown = std::make_unique<InputStateModel>(
       session_handle_, config, unknown_url, /*is_off_the_record=*/false,
-      /*is_signed_in=*/false);
+      /*browser_identity_matches_aim_identity=*/false);
 
   // Fallback to the default model which is the first one in the list.
   EXPECT_EQ(state_model_unknown->get_state_for_testing().active_model,
@@ -271,7 +282,7 @@ TEST_F(InputStateModelTest, ParsesActiveToolFromUrl) {
   GURL ds_url("https://example.com/?dr=1");
   auto state_model_ds = std::make_unique<InputStateModel>(
       session_handle_, config, ds_url, /*is_off_the_record=*/false,
-      /*is_signed_in=*/false);
+      /*browser_identity_matches_aim_identity=*/false);
 
   EXPECT_EQ(state_model_ds->get_state_for_testing().active_tool,
             omnibox::ToolMode::TOOL_MODE_DEEP_SEARCH);
@@ -279,7 +290,7 @@ TEST_F(InputStateModelTest, ParsesActiveToolFromUrl) {
   GURL canvas_url("https://example.com/?rc=1");
   auto state_model_canvas = std::make_unique<InputStateModel>(
       session_handle_, config, canvas_url, /*is_off_the_record=*/false,
-      /*is_signed_in=*/false);
+      /*browser_identity_matches_aim_identity=*/false);
 
   EXPECT_EQ(state_model_canvas->get_state_for_testing().active_tool,
             omnibox::ToolMode::TOOL_MODE_CANVAS);
@@ -287,7 +298,7 @@ TEST_F(InputStateModelTest, ParsesActiveToolFromUrl) {
   GURL unknown_url("https://example.com/?qwe=1");
   auto state_model_unknown = std::make_unique<InputStateModel>(
       session_handle_, config, unknown_url, /*is_off_the_record=*/false,
-      /*is_signed_in=*/false);
+      /*browser_identity_matches_aim_identity=*/false);
 
   // Defaults to ToolMode::TOOL_MODE_UNSPECIFIED if not in the URL.
   EXPECT_EQ(state_model_unknown->get_state_for_testing().active_tool,
@@ -305,7 +316,7 @@ TEST_F(InputStateModelTest, UpdateToolFromUrl) {
 
   auto state_model = std::make_unique<InputStateModel>(
       session_handle_, config, GURL(), /*is_off_the_record=*/false,
-      /*is_signed_in=*/false);
+      /*browser_identity_matches_aim_identity=*/false);
 
   EXPECT_EQ(state_model->get_state_for_testing().active_tool,
             omnibox::ToolMode::TOOL_MODE_UNSPECIFIED);
@@ -325,6 +336,44 @@ TEST_F(InputStateModelTest, UpdateToolFromUrl) {
   EXPECT_EQ(state_model->get_state_for_testing().active_tool,
             omnibox::ToolMode::TOOL_MODE_CANVAS);
   EXPECT_TRUE(state_model->get_state_for_testing().is_canvas_query_submitted);
+}
+
+TEST_F(InputStateModelTest, UpdateToolFromUrl_ThreadChangedResetsTool) {
+  omnibox::SearchboxConfig config;
+
+  auto* canvas_config = config.add_tool_configs();
+  canvas_config->set_tool(omnibox::ToolMode::TOOL_MODE_CANVAS);
+  auto* canvas_param = canvas_config->add_aim_url_params();
+  canvas_param->set_param_key("rc");
+  canvas_param->set_param_value("1");
+
+  // Start with Canvas thread (thread ID 123).
+  GURL canvas_url("https://example.com/?rc=1&mtid=123");
+  auto state_model = std::make_unique<InputStateModel>(
+      session_handle_, config, canvas_url, /*is_off_the_record=*/false,
+      /*browser_identity_matches_aim_identity=*/false);
+
+  EXPECT_EQ(state_model->get_state_for_testing().active_tool,
+            omnibox::ToolMode::TOOL_MODE_CANVAS);
+  EXPECT_TRUE(state_model->get_state_for_testing().is_canvas_query_submitted);
+
+  // Soft navigate within the SAME thread (thread ID 123) to unrelated URL.
+  GURL other_url_same_thread("https://example.com/?other=1&mtid=123");
+  state_model->UpdateStateFromUrl(other_url_same_thread);
+
+  // Assert: Tool is preserved because thread is the same.
+  EXPECT_EQ(state_model->get_state_for_testing().active_tool,
+            omnibox::ToolMode::TOOL_MODE_CANVAS);
+  EXPECT_TRUE(state_model->get_state_for_testing().is_canvas_query_submitted);
+
+  // Switch to a DIFFERENT thread (thread ID 456) with no tool parameters.
+  GURL normal_url_new_thread("https://example.com/?mtid=456");
+  state_model->UpdateStateFromUrl(normal_url_new_thread);
+
+  // Assert: Tool is reset because thread changed.
+  EXPECT_EQ(state_model->get_state_for_testing().active_tool,
+            omnibox::ToolMode::TOOL_MODE_UNSPECIFIED);
+  EXPECT_FALSE(state_model->get_state_for_testing().is_canvas_query_submitted);
 }
 
 TEST_F(InputStateModelTest, RegularModelAllowsAllToolsAndInputsWithEmptyLists) {
@@ -361,7 +410,7 @@ TEST_F(InputStateModelTest, RegularModelAllowsAllToolsAndInputsWithEmptyLists) {
   // 3. Initialize the model.
   input_state_model_ = std::make_unique<InputStateModel>(
       session_handle_, config, active_url_, /*is_off_the_record=*/false,
-      /*is_signed_in=*/false);
+      /*browser_identity_matches_aim_identity=*/false);
   input_state_model_->SetPrefService(&pref_service_);
 
   const auto& state = input_state_model_->get_state_for_testing();
@@ -401,7 +450,7 @@ TEST_F(InputStateModelTest, ModelWithAllowAllToolsIsNotDisabled) {
 
   input_state_model_ = std::make_unique<InputStateModel>(
       session_handle_, config, active_url_, /*is_off_the_record=*/false,
-      /*is_signed_in=*/false);
+      /*browser_identity_matches_aim_identity=*/false);
   input_state_model_->SetPrefService(&pref_service_);
 
   // Select Deep Search tool.
@@ -442,7 +491,7 @@ TEST_F(InputStateModelTest, ModelWithAllowAllInputsIsNotDisabled) {
 
   input_state_model_ = std::make_unique<InputStateModel>(
       session_handle_, config, active_url_, /*is_off_the_record=*/false,
-      /*is_signed_in=*/false);
+      /*browser_identity_matches_aim_identity=*/false);
   input_state_model_->SetPrefService(&pref_service_);
 
   // Simulate adding a file.
@@ -637,7 +686,7 @@ TEST_F(InputStateModelTest, GetAdditionalQueryParams) {
   // Recreate the model with the new config.
   input_state_model_ = std::make_unique<InputStateModel>(
       session_handle_, config_, active_url_, /*is_off_the_record=*/false,
-      /*is_signed_in=*/false);
+      /*browser_identity_matches_aim_identity=*/false);
   input_state_model_->SetPrefService(&pref_service_);
 
   // No tool or model added.
@@ -682,24 +731,39 @@ TEST_F(InputStateModelTest, GetAdditionalQueryParams) {
 }
 
 TEST_F(InputStateModelCompatibilityTest, PolicyDisablesInputs) {
-  // 1. Initial Setup: Explicitly allow restricted inputs.
-  state_.allowed_input_types = {
-      omnibox::InputType::INPUT_TYPE_LENS_IMAGE,
-      omnibox::InputType::INPUT_TYPE_LENS_FILE,
-      omnibox::InputType::INPUT_TYPE_BROWSER_TAB,
-      omnibox::InputType::INPUT_TYPE_DRIVE,
-  };
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitWithFeatures({omnibox::kComposeboxDriveContextMenuOption},
+                                {});
 
-  // Enable content sharing policy.
+  // 1. Initial Setup: Create custom config containing Drive and enable content
+  // sharing & Drive consent.
+  omnibox::SearchboxConfig custom_config = config_;
+  custom_config.add_input_type_configs()->set_input_type(
+      omnibox::InputType::INPUT_TYPE_DRIVE);
+
+  auto local_model = std::make_unique<InputStateModel>(
+      session_handle_, custom_config, active_url_, /*is_off_the_record=*/false,
+      /*browser_identity_matches_aim_identity=*/true);
+  local_model->SetPrefService(&pref_service_);
+
+  pref_service_.SetInteger(
+      contextual_search::kDriveConsentState,
+      static_cast<int>(contextual_search::DriveConsentState::kConsent));
   pref_service_.SetInteger(
       contextual_search::kSearchContentSharingSettings,
       static_cast<int>(
           contextual_search::SearchContentSharingSettingsValue::kEnabled));
 
-  input_state_model_->set_state_for_testing(state_);
-  input_state_model_->setActiveModel(
-      omnibox::ModelMode::MODEL_MODE_UNSPECIFIED);
-  auto new_state = input_state_model_->get_state_for_testing();
+  InputState local_state = state_;
+  local_state.allowed_input_types = {
+      omnibox::InputType::INPUT_TYPE_LENS_IMAGE,
+      omnibox::InputType::INPUT_TYPE_LENS_FILE,
+      omnibox::InputType::INPUT_TYPE_BROWSER_TAB,
+      omnibox::InputType::INPUT_TYPE_DRIVE,
+  };
+  local_model->set_state_for_testing(local_state);
+  local_model->setActiveModel(omnibox::ModelMode::MODEL_MODE_UNSPECIFIED);
+  auto new_state = local_model->get_state_for_testing();
 
   // Verify: Inputs remain allowed and are not disabled.
   EXPECT_FALSE(new_state.allowed_input_types.empty());
@@ -712,13 +776,10 @@ TEST_F(InputStateModelCompatibilityTest, PolicyDisablesInputs) {
           contextual_search::SearchContentSharingSettingsValue::kDisabled));
 
   // Trigger update.
-  input_state_model_->setActiveModel(
-      omnibox::ModelMode::MODEL_MODE_UNSPECIFIED);
-  new_state = input_state_model_->get_state_for_testing();
+  local_model->setActiveModel(omnibox::ModelMode::MODEL_MODE_UNSPECIFIED);
+  new_state = local_model->get_state_for_testing();
 
   // Verify: Restricted inputs are removed from the allowed list entirely.
-  // Consequently, the disabled list remains empty as the inputs no longer
-  // exist.
   EXPECT_TRUE(new_state.allowed_input_types.empty());
   EXPECT_TRUE(new_state.disabled_input_types.empty());
 
@@ -729,18 +790,17 @@ TEST_F(InputStateModelCompatibilityTest, PolicyDisablesInputs) {
           contextual_search::SearchContentSharingSettingsValue::kEnabled));
 
   // Reset the state with the original inputs, as they were erased in step 2.
-  state_.allowed_input_types = {
+  local_state.allowed_input_types = {
       omnibox::InputType::INPUT_TYPE_LENS_IMAGE,
       omnibox::InputType::INPUT_TYPE_LENS_FILE,
       omnibox::InputType::INPUT_TYPE_BROWSER_TAB,
       omnibox::InputType::INPUT_TYPE_DRIVE,
   };
-  input_state_model_->set_state_for_testing(state_);
+  local_model->set_state_for_testing(local_state);
 
   // Trigger update.
-  input_state_model_->setActiveModel(
-      omnibox::ModelMode::MODEL_MODE_UNSPECIFIED);
-  new_state = input_state_model_->get_state_for_testing();
+  local_model->setActiveModel(omnibox::ModelMode::MODEL_MODE_UNSPECIFIED);
+  new_state = local_model->get_state_for_testing();
 
   // Verify: Inputs are restored and enabled.
   EXPECT_THAT(new_state.allowed_input_types,
@@ -757,7 +817,7 @@ TEST_F(InputStateModelCompatibilityTest, MaxTotalInputsDisablesInputs) {
   // Recreate the model with the new config.
   input_state_model_ = std::make_unique<InputStateModel>(
       session_handle_, config_, active_url_, /*is_off_the_record=*/false,
-      /*is_signed_in=*/false);
+      /*browser_identity_matches_aim_identity=*/false);
   input_state_model_->SetPrefService(&pref_service_);
   input_state_model_->setActiveModel(
       omnibox::ModelMode::MODEL_MODE_UNSPECIFIED);
@@ -846,7 +906,7 @@ TEST_F(InputStateModelCompatibilityTest, ToolWithAllowAllInputs) {
   // Re-create the model with the modified config.
   input_state_model_ = std::make_unique<InputStateModel>(
       session_handle_, config_, active_url_, /*is_off_the_record=*/false,
-      /*is_signed_in=*/false);
+      /*browser_identity_matches_aim_identity=*/false);
   input_state_model_->SetPrefService(&pref_service_);
   input_state_model_->setActiveModel(
       omnibox::ModelMode::MODEL_MODE_UNSPECIFIED);
@@ -885,7 +945,7 @@ TEST_F(InputStateModelCompatibilityTest, ToolWithSpecificInputs) {
   // Re-create the model with the modified config.
   input_state_model_ = std::make_unique<InputStateModel>(
       session_handle_, config_, active_url_, /*is_off_the_record=*/false,
-      /*is_signed_in=*/false);
+      /*browser_identity_matches_aim_identity=*/false);
   input_state_model_->SetPrefService(&pref_service_);
   input_state_model_->setActiveModel(
       omnibox::ModelMode::MODEL_MODE_UNSPECIFIED);
@@ -963,7 +1023,7 @@ TEST_F(InputStateModelTest, FiltersImageGenInIncognito) {
   // Initialize with is_off_the_record = true.
   input_state_model_ = std::make_unique<InputStateModel>(
       session_handle_, config, active_url_, /*is_off_the_record=*/true,
-      /*is_signed_in=*/false);
+      /*browser_identity_matches_aim_identity=*/false);
   const auto& state = input_state_model_->get_state_for_testing();
 
   // Verify that IMAGE_GEN is filtered out but DEEP_SEARCH remains.
@@ -981,7 +1041,7 @@ TEST_F(InputStateModelTest,
 
   auto local_model = std::make_unique<InputStateModel>(
       *local_session, config, GURL(), /*is_off_the_record=*/false,
-      /*is_signed_in=*/false);
+      /*browser_identity_matches_aim_identity=*/false);
 
   local_session.reset();  // Destroy session.
 
@@ -997,6 +1057,8 @@ TEST_F(InputStateModelTest,
       contextual_search::kSearchContentSharingSettings,
       static_cast<int>(
           contextual_search::SearchContentSharingSettingsValue::kDisabled));
+  prefs.registry()->RegisterIntegerPref(contextual_search::kDriveConsentState,
+                                        0);
 
   omnibox::SearchboxConfig config;
   config.add_input_type_configs()->set_input_type(
@@ -1004,7 +1066,7 @@ TEST_F(InputStateModelTest,
 
   auto model_with_image = std::make_unique<InputStateModel>(
       session_handle_, config, active_url_, /*is_off_the_record=*/false,
-      /*is_signed_in=*/false);
+      /*browser_identity_matches_aim_identity=*/false);
   model_with_image->SetPrefService(&prefs);
 
   const auto& state = model_with_image->get_state_for_testing();
@@ -1107,7 +1169,7 @@ TEST_F(InputStateModelTest, UpdateModelFromUrl) {
   GURL pro_url("https://example.com/?udm=50&arv=1");
   input_state_model_ = std::make_unique<InputStateModel>(
       session_handle_, config, pro_url, /*is_off_the_record=*/false,
-      /*is_signed_in=*/false);
+      /*browser_identity_matches_aim_identity=*/false);
 
   EXPECT_EQ(input_state_model_->get_state_for_testing().active_model,
             omnibox::ModelMode::MODEL_MODE_GEMINI_PRO);
@@ -1150,6 +1212,178 @@ TEST_F(InputStateModelTest, UpdateModelFromUrl) {
   // Default fallback: No match retains previous active model.
   EXPECT_EQ(input_state_model_->get_state_for_testing().active_model,
             omnibox::ModelMode::MODEL_MODE_GEMINI_PRO_AUTOROUTE);
+}
+
+TEST_F(InputStateModelTest, DriveConsentStateTogglesDriveInput) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitWithFeatures(
+      {omnibox::kComposeboxDriveContextMenuOption}, {});
+
+  omnibox::SearchboxConfig config;
+  config.add_input_type_configs()->set_input_type(
+      omnibox::InputType::INPUT_TYPE_LENS_IMAGE);
+  config.add_input_type_configs()->set_input_type(
+      omnibox::InputType::INPUT_TYPE_LENS_FILE);
+  config.add_input_type_configs()->set_input_type(
+      omnibox::InputType::INPUT_TYPE_DRIVE);
+
+  input_state_model_ = std::make_unique<InputStateModel>(
+      session_handle_, config, active_url_, /*is_off_the_record=*/false,
+      /*browser_identity_matches_aim_identity=*/true);
+  input_state_model_->SetPrefService(&pref_service_);
+
+  // 1. Starts as kNotReady, Drive should be disallowed.
+  EXPECT_THAT(input_state_model_->get_state_for_testing().allowed_input_types,
+              testing::UnorderedElementsAre(omnibox::INPUT_TYPE_LENS_IMAGE,
+                                            omnibox::INPUT_TYPE_LENS_FILE,
+                                            omnibox::INPUT_TYPE_BROWSER_TAB));
+
+  // 2. Set to kConsent, Drive should be allowed.
+  pref_service_.SetInteger(contextual_search::kDriveConsentState,
+                           static_cast<int>(DriveConsentState::kConsent));
+  EXPECT_THAT(input_state_model_->get_state_for_testing().allowed_input_types,
+              testing::UnorderedElementsAre(
+                  omnibox::INPUT_TYPE_LENS_IMAGE, omnibox::INPUT_TYPE_LENS_FILE,
+                  omnibox::INPUT_TYPE_BROWSER_TAB, omnibox::INPUT_TYPE_DRIVE));
+
+  // 3. Set to kNotConsent, Drive should be removed.
+  pref_service_.SetInteger(contextual_search::kDriveConsentState,
+                           static_cast<int>(DriveConsentState::kNotConsent));
+  EXPECT_THAT(input_state_model_->get_state_for_testing().allowed_input_types,
+              testing::UnorderedElementsAre(omnibox::INPUT_TYPE_LENS_IMAGE,
+                                            omnibox::INPUT_TYPE_LENS_FILE,
+                                            omnibox::INPUT_TYPE_BROWSER_TAB));
+
+  // 4. Set back to kConsent, Drive should be allowed again.
+  pref_service_.SetInteger(contextual_search::kDriveConsentState,
+                           static_cast<int>(DriveConsentState::kConsent));
+  EXPECT_THAT(input_state_model_->get_state_for_testing().allowed_input_types,
+              testing::UnorderedElementsAre(
+                  omnibox::INPUT_TYPE_LENS_IMAGE, omnibox::INPUT_TYPE_LENS_FILE,
+                  omnibox::INPUT_TYPE_BROWSER_TAB, omnibox::INPUT_TYPE_DRIVE));
+
+  // 5. Set to kRestricted, Drive should be removed.
+  pref_service_.SetInteger(contextual_search::kDriveConsentState,
+                           static_cast<int>(DriveConsentState::kRestricted));
+  EXPECT_THAT(input_state_model_->get_state_for_testing().allowed_input_types,
+              testing::UnorderedElementsAre(omnibox::INPUT_TYPE_LENS_IMAGE,
+                                            omnibox::INPUT_TYPE_LENS_FILE,
+                                            omnibox::INPUT_TYPE_BROWSER_TAB));
+}
+
+TEST_F(InputStateModelTest, SetPrefServiceInitializesConsentState) {
+  // Test Case 1: Initial state is 0 (kNotReady) -> mapped to kNotReady.
+  pref_service_.SetInteger(contextual_search::kDriveConsentState,
+                           static_cast<int>(DriveConsentState::kNotReady));
+  auto model1 = std::make_unique<InputStateModel>(
+      session_handle_, config_, active_url_, /*is_off_the_record=*/false,
+      /*browser_identity_matches_aim_identity=*/true);
+  model1->SetPrefService(&pref_service_);
+  EXPECT_EQ(GetDriveConsentState(model1.get()), DriveConsentState::kNotReady);
+
+  // Test Case 2: State is kConsent -> mapped to kConsent.
+  pref_service_.SetInteger(contextual_search::kDriveConsentState,
+                           static_cast<int>(DriveConsentState::kConsent));
+  auto model2 = std::make_unique<InputStateModel>(
+      session_handle_, config_, active_url_, /*is_off_the_record=*/false,
+      /*browser_identity_matches_aim_identity=*/true);
+  model2->SetPrefService(&pref_service_);
+  EXPECT_EQ(GetDriveConsentState(model2.get()), DriveConsentState::kConsent);
+
+  // Test Case 3: State is kRestricted -> mapped to kRestricted.
+  pref_service_.SetInteger(contextual_search::kDriveConsentState,
+                           static_cast<int>(DriveConsentState::kRestricted));
+  auto model3 = std::make_unique<InputStateModel>(
+      session_handle_, config_, active_url_, /*is_off_the_record=*/false,
+      /*browser_identity_matches_aim_identity=*/true);
+  model3->SetPrefService(&pref_service_);
+  EXPECT_EQ(GetDriveConsentState(model3.get()), DriveConsentState::kRestricted);
+
+  // Test Case 4: State is kNotConsent -> mapped to kNotConsent.
+  pref_service_.SetInteger(contextual_search::kDriveConsentState,
+                           static_cast<int>(DriveConsentState::kNotConsent));
+  auto model4 = std::make_unique<InputStateModel>(
+      session_handle_, config_, active_url_, /*is_off_the_record=*/false,
+      /*browser_identity_matches_aim_identity=*/true);
+  model4->SetPrefService(&pref_service_);
+  EXPECT_EQ(GetDriveConsentState(model4.get()), DriveConsentState::kNotConsent);
+}
+
+TEST_F(InputStateModelTest, PrefChangesDynamicallyUpdateInputTypes) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitWithFeatures({omnibox::kComposeboxDriveContextMenuOption},
+                                {});
+
+  omnibox::SearchboxConfig config;
+  config.add_input_type_configs()->set_input_type(
+      omnibox::InputType::INPUT_TYPE_LENS_IMAGE);
+  config.add_input_type_configs()->set_input_type(
+      omnibox::InputType::INPUT_TYPE_LENS_FILE);
+  config.add_input_type_configs()->set_input_type(
+      omnibox::InputType::INPUT_TYPE_DRIVE);
+  config.add_input_type_configs()->set_input_type(
+      omnibox::InputType::INPUT_TYPE_BROWSER_TAB);
+
+  auto model = std::make_unique<InputStateModel>(
+      session_handle_, config, active_url_, /*is_off_the_record=*/false,
+      /*browser_identity_matches_aim_identity=*/true);
+
+  pref_service_.SetInteger(
+      contextual_search::kDriveConsentState,
+      static_cast<int>(contextual_search::DriveConsentState::kConsent));
+  pref_service_.SetInteger(
+      contextual_search::kSearchContentSharingSettings,
+      static_cast<int>(
+          contextual_search::SearchContentSharingSettingsValue::kEnabled));
+
+  model->SetPrefService(&pref_service_);
+
+  EXPECT_EQ(GetDriveConsentState(model.get()), DriveConsentState::kConsent);
+  EXPECT_THAT(model->get_state_for_testing().allowed_input_types,
+              testing::UnorderedElementsAre(
+                  omnibox::INPUT_TYPE_LENS_IMAGE, omnibox::INPUT_TYPE_LENS_FILE,
+                  omnibox::INPUT_TYPE_BROWSER_TAB, omnibox::INPUT_TYPE_DRIVE));
+
+  pref_service_.SetInteger(
+      contextual_search::kDriveConsentState,
+      static_cast<int>(contextual_search::DriveConsentState::kNotConsent));
+
+  EXPECT_EQ(GetDriveConsentState(model.get()), DriveConsentState::kNotConsent);
+  EXPECT_THAT(model->get_state_for_testing().allowed_input_types,
+              testing::UnorderedElementsAre(omnibox::INPUT_TYPE_LENS_IMAGE,
+                                            omnibox::INPUT_TYPE_LENS_FILE,
+                                            omnibox::INPUT_TYPE_BROWSER_TAB));
+
+  pref_service_.SetInteger(
+      contextual_search::kDriveConsentState,
+      static_cast<int>(contextual_search::DriveConsentState::kRestricted));
+
+  EXPECT_EQ(GetDriveConsentState(model.get()), DriveConsentState::kRestricted);
+  EXPECT_THAT(model->get_state_for_testing().allowed_input_types,
+              testing::UnorderedElementsAre(omnibox::INPUT_TYPE_LENS_IMAGE,
+                                            omnibox::INPUT_TYPE_LENS_FILE,
+                                            omnibox::INPUT_TYPE_BROWSER_TAB));
+
+  pref_service_.SetInteger(
+      contextual_search::kSearchContentSharingSettings,
+      static_cast<int>(
+          contextual_search::SearchContentSharingSettingsValue::kDisabled));
+
+  EXPECT_TRUE(model->get_state_for_testing().allowed_input_types.empty());
+
+  pref_service_.SetInteger(
+      contextual_search::kDriveConsentState,
+      static_cast<int>(contextual_search::DriveConsentState::kConsent));
+  pref_service_.SetInteger(
+      contextual_search::kSearchContentSharingSettings,
+      static_cast<int>(
+          contextual_search::SearchContentSharingSettingsValue::kEnabled));
+
+  EXPECT_EQ(GetDriveConsentState(model.get()), DriveConsentState::kConsent);
+  EXPECT_THAT(model->get_state_for_testing().allowed_input_types,
+              testing::UnorderedElementsAre(
+                  omnibox::INPUT_TYPE_LENS_IMAGE, omnibox::INPUT_TYPE_LENS_FILE,
+                  omnibox::INPUT_TYPE_BROWSER_TAB, omnibox::INPUT_TYPE_DRIVE));
 }
 
 }  // namespace contextual_search

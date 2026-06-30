@@ -47,8 +47,7 @@ class TabUnderlineController
   TabUnderlineController& operator=(const TabUnderlineController&) = delete;
   ~TabUnderlineController() override;
 
-  void Initialize(UiDelegate* ui_delegate,
-                  BrowserWindowInterface* browser_window_interface);
+  void Initialize(UiDelegate* ui_delegate);
   void OnUiReady();
 
   // contextual_tasks::ActiveTaskContextProvider::Observer overrides:
@@ -65,8 +64,7 @@ class TabUnderlineController
   void OnIndicatorStatusChanged(bool enabled);
 
   // Called when the glic set of pinned tabs changes.
-  void OnPinnedTabsChanged(
-      const std::vector<content::WebContents*>& pinned_contents);
+  void OnPinnedTabsChanged(const std::vector<tabs::TabInterface*>& pinned_tabs);
 
   // GlicInstanceCoordinator::StateObserver:
   void PanelStateChanged(const glic::mojom::PanelState& panel_state) override;
@@ -132,6 +130,9 @@ class TabUnderlineController
   // being shared via pinning or active following.
   void UpdateUnderlineView(UpdateUnderlineReason reason);
 
+  // Helper to observe contextual tasks if enabled and not already observing.
+  void MaybeObserveContextualTasks();
+
   // Off to On. Throw away everything we have and start the animation from
   // the beginning.
   void ShowAndAnimateUnderline(bool triggered_by_glic);
@@ -143,7 +144,7 @@ class TabUnderlineController
 
   void ShowOrAnimatePinnedUnderline(bool triggered_by_glic);
 
-  bool IsGlicWindowShowing() const;
+  bool IsAnyGlicPanelShowing() const;
 
   std::string UpdateReasonToString(UpdateUnderlineReason reason);
 
@@ -159,9 +160,7 @@ class TabUnderlineController
   raw_ptr<UiDelegate> ui_delegate_;
   tabs::TabHandle tab_handle_;
 
-  // The pointer to the browser in which the underline view lives. Outlives the
-  // underline view.
-  raw_ptr<BrowserWindowInterface> browser_window_interface_;
+  BrowserWindowInterface* GetBrowserWindowInterface();
 
   // The Glic keyed service. This is only assigned if
   // ShouldUseSignalsForGlicUnderlines() returns true. Otherwise, it will stay

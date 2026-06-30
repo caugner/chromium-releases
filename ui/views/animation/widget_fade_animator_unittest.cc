@@ -6,6 +6,8 @@
 
 #include <memory>
 
+#include "base/i18n/rtl.h"
+#include "base/memory/raw_ptr.h"
 #include "base/test/bind.h"
 #include "base/time/time.h"
 #include "ui/gfx/animation/animation_test_api.h"
@@ -71,6 +73,36 @@ class WidgetFadeAnimatorTest : public test::WidgetTest {
   std::optional<gfx::ScopedAnimationDurationScaleMode> non_zero_duration_;
 };
 
+class WidgetFadeAnimatorSlideTest
+    : public WidgetFadeAnimatorTest,
+      public testing::WithParamInterface<WidgetFadeAnimator::SlideDirection> {
+ public:
+  WidgetFadeAnimator::SlideDirection slide_direction() const {
+    return GetParam();
+  }
+
+  int slide_distance() const { return slide_distance_; }
+
+  gfx::Vector2d GetExpectedDisplacement() const {
+    switch (slide_direction()) {
+      case WidgetFadeAnimator::SlideDirection::kUp:
+        return gfx::Vector2d(0, slide_distance());
+      case WidgetFadeAnimator::SlideDirection::kDown:
+        return gfx::Vector2d(0, -slide_distance());
+      case WidgetFadeAnimator::SlideDirection::kLeading:
+        return gfx::Vector2d(
+            base::i18n::IsRTL() ? -slide_distance() : slide_distance(), 0);
+      case WidgetFadeAnimator::SlideDirection::kTrailing:
+        return gfx::Vector2d(
+            base::i18n::IsRTL() ? slide_distance() : -slide_distance(), 0);
+      default:
+        NOTREACHED();
+    }
+  }
+
+  int slide_distance_ = 10;
+};
+
 TEST_F(WidgetFadeAnimatorTest, FadeIn) {
   EXPECT_FALSE(widget_->IsVisible());
   delegate_->FadeIn();
@@ -79,6 +111,85 @@ TEST_F(WidgetFadeAnimatorTest, FadeIn) {
   EXPECT_TRUE(delegate_->IsFadingIn());
   EXPECT_FALSE(delegate_->IsFadingOut());
 }
+
+TEST_P(WidgetFadeAnimatorSlideTest, FadeInWithSlide) {
+  const gfx::Rect target_bounds(100, 100, 50, 50);
+  widget_->SetBounds(target_bounds);
+
+  delegate_->FadeIn(slide_distance(), slide_direction());
+
+  delegate_->test_api()->IncrementTime(kHalfFadeDuration);
+
+  // The widget should slide along the slide direction. At the end,
+  // it should reach the target bounds.
+  const double value = gfx::Tween::CalculateValue(delegate_->tween_type(), 0.5);
+  const gfx::Rect expected_bounds = gfx::Tween::RectValueBetween(
+      value, target_bounds + GetExpectedDisplacement(), target_bounds);
+  EXPECT_EQ(expected_bounds, widget_->GetWindowBoundsInScreen());
+
+  // At the end, it should be at the target bounds.
+  delegate_->test_api()->IncrementTime(kHalfFadeDuration);
+  EXPECT_EQ(target_bounds, widget_->GetWindowBoundsInScreen());
+}
+
+TEST_P(WidgetFadeAnimatorSlideTest, FadeOutWithSlide) {
+  const gfx::Rect start_bounds(100, 100, 50, 50);
+  widget_->SetBounds(start_bounds);
+  widget_->Show();
+
+  delegate_->FadeOut(slide_distance(), slide_direction());
+
+  delegate_->test_api()->IncrementTime(kHalfFadeDuration);
+
+  // The widget should slide opposite the slide direction. At the end,
+  // it should be displaced from its starting bounds.
+  const double value = gfx::Tween::CalculateValue(delegate_->tween_type(), 0.5);
+  const gfx::Rect expected_bounds = gfx::Tween::RectValueBetween(
+      value, start_bounds, start_bounds + GetExpectedDisplacement());
+  EXPECT_EQ(expected_bounds, widget_->GetWindowBoundsInScreen());
+
+  delegate_->test_api()->IncrementTime(kHalfFadeDuration);
+
+  // At the end, it should be at the target bounds.
+  EXPECT_EQ(start_bounds + GetExpectedDisplacement(),
+            widget_->GetWindowBoundsInScreen());
+}
+
+TEST_P(WidgetFadeAnimatorSlideTest, CancelSlideAndSkipToTarget) {
+  const gfx::Rect target_bounds(100, 100, 50, 50);
+  widget_->SetBounds(target_bounds);
+
+  delegate_->FadeIn(slide_distance(), slide_direction());
+  delegate_->test_api()->IncrementTime(kHalfFadeDuration);
+  EXPECT_NE(target_bounds, widget_->GetWindowBoundsInScreen());
+
+  // Cancel and skip to target.
+  delegate_->CancelSlide(true);
+  EXPECT_EQ(target_bounds, widget_->GetWindowBoundsInScreen());
+}
+
+TEST_P(WidgetFadeAnimatorSlideTest, CancelSlideWithoutSkip) {
+  const gfx::Rect target_bounds(100, 100, 50, 50);
+  widget_->SetBounds(target_bounds);
+
+  delegate_->FadeIn(slide_distance(), slide_direction());
+  delegate_->test_api()->IncrementTime(kHalfFadeDuration);
+  EXPECT_NE(target_bounds, widget_->GetWindowBoundsInScreen());
+  delegate_->CancelSlide(false);
+  const gfx::Rect intermediate_bounds = widget_->GetWindowBoundsInScreen();
+  delegate_->test_api()->IncrementTime(kHalfFadeDuration);
+  // The widget bounds should not have moved if we did not skip
+  // the slide to the final position.
+  EXPECT_EQ(intermediate_bounds, widget_->GetWindowBoundsInScreen());
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    All,
+    WidgetFadeAnimatorSlideTest,
+    testing::Values(WidgetFadeAnimator::SlideDirection::kUp,
+                    WidgetFadeAnimator::SlideDirection::kDown,
+                    WidgetFadeAnimator::SlideDirection::kLeading,
+                    WidgetFadeAnimator::SlideDirection::kTrailing));
 
 TEST_F(WidgetFadeAnimatorTest, FadeInAnimationProgressesToEnd) {
   delegate_->FadeIn();
@@ -305,6 +416,67 @@ TEST_F(WidgetFadeAnimatorTest, FadeInShowTypeNone) {
 
   // Widget should not be shown.
   EXPECT_FALSE(widget_->IsVisible());
+}
+
+namespace {
+
+class DestroysAnimatorOnVisibilityChangeObserver : public WidgetObserver {
+ public:
+  explicit DestroysAnimatorOnVisibilityChangeObserver(
+      std::unique_ptr<WidgetFadeAnimator>* animator)
+      : animator_(animator) {}
+
+  void OnWidgetVisibilityChanged(Widget* widget, bool visible) override {
+    if (visible && *animator_) {
+      animator_->reset();
+    }
+  }
+
+ private:
+  raw_ptr<std::unique_ptr<WidgetFadeAnimator>> animator_;
+};
+
+class CancelsAnimatorOnVisibilityChangeObserver : public WidgetObserver {
+ public:
+  explicit CancelsAnimatorOnVisibilityChangeObserver(
+      WidgetFadeAnimator* animator)
+      : animator_(animator) {}
+
+  void OnWidgetVisibilityChanged(Widget* widget, bool visible) override {
+    if (visible && animator_) {
+      animator_->CancelFadeIn();
+    }
+  }
+
+ private:
+  raw_ptr<WidgetFadeAnimator> animator_;
+};
+
+}  // namespace
+
+TEST_F(WidgetFadeAnimatorTest, DestroyingAnimatorDuringFadeInDoesNotCrash) {
+  auto animator = std::make_unique<WidgetFadeAnimator>(widget_.get());
+  DestroysAnimatorOnVisibilityChangeObserver observer(&animator);
+  widget_->AddObserver(&observer);
+
+  // Showing the widget triggers OnWidgetVisibilityChanged synchronously,
+  // destroying `animator`. This should safely return without crashing or UAF.
+  animator->FadeIn();
+  EXPECT_EQ(nullptr, animator);
+
+  widget_->RemoveObserver(&observer);
+}
+
+TEST_F(WidgetFadeAnimatorTest, CancellingAnimatorDuringFadeInDoesNotCrash) {
+  CancelsAnimatorOnVisibilityChangeObserver observer(delegate_.get());
+  widget_->AddObserver(&observer);
+
+  // Cancelling the animation synchronously during widget show should not
+  // cause the animation to resume.
+  delegate_->FadeIn();
+  EXPECT_FALSE(delegate_->IsFadingIn());
+
+  widget_->RemoveObserver(&observer);
 }
 
 }  // namespace views

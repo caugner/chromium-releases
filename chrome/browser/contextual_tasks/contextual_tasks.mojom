@@ -36,6 +36,7 @@ struct TabContext {
   url.mojom.Url url;
   string title;
   int32 tab_id;
+  bool has_chrome_tab_data;
 };
 
 // Represents the the visual information needed to display a single context row
@@ -70,12 +71,14 @@ struct ComposeboxPosition {
   int32? margin_left;
 };
 
+// Keep in sync with AimIconType proto.
 enum IconType {
   kUnspecified = 0,
   kAdd = 9,
   kCheck = 30,
   kFormatQuoteFilled = 79,
   kImage = 84,
+  kFollowUp = 100,
   kDrivePdf = 101,
   kInvertedFormatQuoteFilled = 186,
 };
@@ -184,6 +187,17 @@ interface PageHandler {
   // Unpins the side panel from the toolbar.
   UnpinSidePanel();
 
+  // Called when the user opens the composebox contextual action menu dialog.
+  OnContextMenuOpened();
+
+  // Reports the result of the SmartTabSharingTryIt IPH interaction. If
+  // `accepted` is true, turns on tab sharing for the session.
+  NotifySmartTabSharingTryItIphResult(bool accepted);
+
+  // Reports the result of the SmartTabSharingDefaultOn IPH interaction. If
+  // `accepted` is true, turns on tab sharing by default.
+  NotifySmartTabSharingDefaultOnIphResult(bool accepted);
+
   // Registers a tracked window with its ID, associated task ID, and URL.
   RegisterWindow(ContextualTaskId task_id,
                  url.mojom.Url url,
@@ -200,11 +214,10 @@ interface Page {
   // Sets the title of the active thread in the UI.
   SetThreadTitle(string title);
 
-  // Sets the task ID for the active task.
-  SetTaskDetails(mojo_base.mojom.Uuid uuid);
-
-  // Preserve the aim URL to the search param of contextual tasks URL.
-  SetAimUrl(url.mojom.Url url);
+  // Sets the task ID, URL and whether to replace or append to the current
+  // navigation entry.
+  SetTaskDetails(mojo_base.mojom.Uuid uuid, url.mojom.Url url,
+                 bool replace_navigation_entry);
 
   // A notification that WebUI has moved into or out of the side panel. The UI
   // code should query the `IsShownInTab` method to get the current state.
@@ -311,6 +324,15 @@ interface Page {
   // Called by the browser process (C++) to notify the UI whether the expand
   // button should be enabled.
   SetExpandButtonEnabled(bool enabled);
+
+  // Called by the browser process to turn on smart tab sharing in the WebUI.
+  TurnOnSmartTabSharing();
+
+  // Triggers the SmartTabSharingTryIt IPH UI to be shown.
+  ShowSmartTabSharingTryItIph();
+
+  // Triggers the SmartTabSharingDefaultOn IPH UI to be shown.
+  ShowSmartTabSharingDefaultOnIph();
 
   // Called by the browser process (C++) to notify the UI that a tracked window
   // was closed.

@@ -7,6 +7,7 @@
 #include <stddef.h>
 
 #include <algorithm>
+#include <limits>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -64,7 +65,6 @@
 #include "extensions/common/extension_features.h"
 #include "extensions/common/features/feature.h"
 #include "extensions/common/features/feature_provider.h"
-#include "extensions/common/manifest_handlers/background_info.h"
 #include "extensions/common/mojom/context_type.mojom.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/common/url_pattern.h"
@@ -248,7 +248,7 @@ void WebRequestAPI::Proxy::HandleAuthRequest(
   // Default implementation cancels the request.
   base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
       FROM_HERE, base::BindOnce(std::move(callback), std::nullopt,
-                                false /* should_cancel */));
+                                /*should_cancel=*/false));
 }
 
 WebRequestAPI::ProxySet::ProxySet() {
@@ -322,7 +322,7 @@ void WebRequestAPI::ProxySet::MaybeProxyAuthRequest(
     // their auth credentials.
     base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE, base::BindOnce(std::move(callback), std::nullopt,
-                                  false /* should_cancel */));
+                                  /*should_cancel=*/false));
     return;
   }
 
@@ -340,11 +340,10 @@ void WebRequestAPI::ProxySet::OnDNRExtensionUnloaded(
 WebRequestAPI::RequestIDGenerator::RequestIDGenerator() = default;
 WebRequestAPI::RequestIDGenerator::~RequestIDGenerator() = default;
 
-int64_t WebRequestAPI::RequestIDGenerator::Generate(
-    int32_t routing_id,
-    int32_t network_service_request_id) {
+int64_t WebRequestAPI::RequestIDGenerator::Generate(int32_t routing_id,
+                                                    int32_t client_request_id) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  auto it = saved_id_map_.find({routing_id, network_service_request_id});
+  auto it = saved_id_map_.find({routing_id, client_request_id});
   if (it != saved_id_map_.end()) {
     int64_t id = it->second;
     saved_id_map_.erase(it);
@@ -353,16 +352,22 @@ int64_t WebRequestAPI::RequestIDGenerator::Generate(
   return ++id_;
 }
 
-void WebRequestAPI::RequestIDGenerator::SaveID(
-    int32_t routing_id,
-    int32_t network_service_request_id,
-    uint64_t request_id) {
-  // If |network_service_request_id| is 0, we cannot reliably match the
-  // generated ID to a future request, so ignore it.
-  if (network_service_request_id != 0) {
-    saved_id_map_.insert(
-        {{routing_id, network_service_request_id}, request_id});
+void WebRequestAPI::RequestIDGenerator::SaveID(int32_t routing_id,
+                                               int32_t client_request_id,
+                                               uint64_t request_id) {
+  // If `client_request_id` is 0, we cannot reliably match the generated ID to a
+  // restarted request, so ignore it.
+  if (client_request_id != 0) {
+    saved_id_map_.insert({{routing_id, client_request_id}, request_id});
   }
+}
+
+int32_t WebRequestAPI::RequestIDGenerator::GenerateNetworkRequestId() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  if (network_request_id_ == std::numeric_limits<int32_t>::max()) {
+    network_request_id_ = 0;
+  }
+  return ++network_request_id_;
 }
 
 WebRequestAPI::WebRequestAPI(content::BrowserContext* context)
@@ -415,12 +420,6 @@ WebRequestAPI::TestObserver::~TestObserver() = default;
 
 void WebRequestAPI::OnListenerAdded(const EventListenerInfo& details) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  if (!base::FeatureList::IsEnabled(
-          extensions_features::
-              kWebRequestPersistFilteredEventsViaEventRouter)) {
-    return;
-  }
 
   WebRequestEventRouter::RequestFilter filter;
   std::string error;
@@ -658,6 +657,30 @@ void WebRequestAPI::OnListenerRemoved(const EventListenerInfo& details) {
     // cleanup.
     std::move(remove_listener).Run();
   }
+}
+
+void WebRequestAPI::OnListenerUpdated(const EventListenerInfo& details) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  // Only lazy listeners can be updated. See `EventListenerMap::UpdateFilter()`.
+  CHECK(details.is_lazy);
+
+  std::string event_name = EventRouter::GetBaseEventName(details.event_name);
+  auto* event_router = WebRequestEventRouter::Get(details.browser_context);
+
+  // A sub-event-named listener was re-registered with a different filter. This
+  // is neither an add nor a remove: firing `OnListenerRemoved()` here would
+  // post an async `RemoveLazyListener()` keyed only by sub-event name, which
+  // would tear down the just-registered replacement. Route through the add path
+  // instead: for a lazy listener `WebRequestEventRouter::AddEventListener()`
+  // replaces any inactive listener for the same sub-event name with the new
+  // filter, which is exactly the update we want.
+  const size_t inactive_count_before = event_router->GetInactiveListenerCount(
+      details.browser_context, event_name);
+  OnListenerAdded(details);
+  const size_t inactive_count_after = event_router->GetInactiveListenerCount(
+      details.browser_context, event_name);
+  // Ensure no listeners were added.
+  CHECK_EQ(inactive_count_before, inactive_count_after);
 }
 
 bool WebRequestAPI::MaybeProxyURLLoaderFactory(
@@ -940,7 +963,8 @@ bool WebRequestAPI::IsAvailableToWebViewEmbedderWebUIFrame(
       render_frame_host->GetBrowserContext();
   content::RenderFrameHost* embedder_frame =
       render_frame_host->GetOutermostMainFrameOrEmbedder();
-  const auto& embedder_url = embedder_frame->GetLastCommittedURL();
+  const GURL& embedder_url =
+      util::GetURLForExtensionPermissionCheck(embedder_frame);
   // TODO(crbug.com/40288053): Remove the scheme check once we're sure
   // that WebUIs with WebView run in real WebUI processes and check the
   // context type using |IsAvailableToWebViewEmbedderWebPageFrame()| below.
@@ -1001,7 +1025,8 @@ bool WebRequestAPI::IsAvailableToWebViewEmbedderWebPageFrame(
   Feature::Availability availability =
       ExtensionAPI::GetSharedInstance()->IsAvailable(
           "webRequestInternal", /*extension=*/nullptr,
-          mojom::ContextType::kWebPage, embedder_frame->GetLastCommittedURL(),
+          mojom::ContextType::kWebPage,
+          util::GetURLForExtensionPermissionCheck(embedder_frame),
           CheckAliasStatus::ALLOWED, util::GetBrowserContextId(browser_context),
           BrowserFrameContextData(embedder_frame));
   return availability.is_available();
@@ -1024,7 +1049,7 @@ void WebRequestAPI::ResetURLLoaderFactories() {
 
 void WebRequestAPI::UpdateMayHaveProxies() {
   bool may_have_proxies = MayHaveProxies();
-  if (!may_have_proxies_ && may_have_proxies) {
+  if (may_have_proxies_ != may_have_proxies) {
     ResetURLLoaderFactories();
   }
   may_have_proxies_ = may_have_proxies;
@@ -1037,10 +1062,6 @@ void WebRequestAPI::OnExtensionLoaded(content::BrowserContext* browser_context,
   if (HasAnyWebRequestPermissions(*extension)) {
     ++web_request_extension_count_;
     update_may_have_proxies = true;
-    if (BackgroundInfo::IsServiceWorkerBased(extension)) {
-      WebRequestEventRouter::Get(browser_context)
-          ->LoadPersistedLazyListeners(browser_context, extension->id());
-    }
   }
   if (HasAnyDeclarativeWebRequestPermissions(*extension)) {
     ++declarative_request_extension_count_;

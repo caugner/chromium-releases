@@ -40,7 +40,7 @@ class WorkletAnimationTest : public AnimationTimelinesTest {
   ~WorkletAnimationTest() override = default;
 
   void AttachWorkletAnimation() {
-    client_.RegisterElementId(element_id_, ElementListType::ACTIVE);
+    delegate_.RegisterElementId(element_id_, ElementListType::ACTIVE);
 
     worklet_animation_ = WrapRefCounted(
         new WorkletAnimation(1, worklet_animation_id_, "test_name", 1, nullptr,
@@ -111,10 +111,10 @@ TEST_F(WorkletAnimationTest, LocalTimeIsUsedWhenTicking) {
   worklet_animation_->Tick(base::TimeTicks());
 
   TestLayer* layer =
-      client_.FindTestLayer(element_id_, ElementListType::ACTIVE);
+      delegate_.FindTestLayer(element_id_, ElementListType::ACTIVE);
   EXPECT_TRUE(layer->is_property_mutated(TargetProperty::OPACITY));
-  client_.ExpectOpacityPropertyMutated(element_id_, ElementListType::ACTIVE,
-                                       expected_opacity);
+  delegate_.ExpectOpacityPropertyMutated(element_id_, ElementListType::ACTIVE,
+                                         expected_opacity);
 }
 
 // Test generation of animation events by worklet animations.
@@ -423,7 +423,7 @@ TEST_F(WorkletAnimationTest, UpdateInputStateProducesCorrectState) {
 
   // Operating on individual KeyframeModel doesn't affect the state of
   // WorkletAnimation.
-  keyframe_model->SetRunState(KeyframeModel::FINISHED, time);
+  keyframe_model->SetRunState(KeyframeModel::FINISHED);
   state = std::make_unique<MutatorInputState>();
   time += base::Seconds(0.1);
   worklet_animation_->UpdateInputState(state.get(), time, scroll_tree, true);
@@ -546,6 +546,26 @@ TEST_F(WorkletAnimationTest, SkipLockedAnimations) {
   worklet_animation->UpdateInputState(state.get(), time, scroll_tree, true);
   input = state->TakeWorkletState(worklet_animation_id_.worklet_id);
   EXPECT_EQ(input->updated_animations.size(), 1u);
+}
+
+TEST_F(WorkletAnimationTest, ToWorkletAnimation) {
+  scoped_refptr<WorkletAnimation> worklet_animation =
+      WorkletAnimation::Create(worklet_animation_id_, "test_name", 1.0,
+                               /* options */ nullptr,
+                               /* effect_timings */ nullptr);
+  scoped_refptr<Animation> plain_animation = Animation::Create(1);
+
+  EXPECT_EQ(ToWorkletAnimation(worklet_animation.get()),
+            worklet_animation.get());
+  const Animation* const_worklet_animation = worklet_animation.get();
+  EXPECT_EQ(ToWorkletAnimation(const_worklet_animation),
+            worklet_animation.get());
+
+#if GTEST_HAS_DEATH_TEST
+  EXPECT_DEATH_IF_SUPPORTED(ToWorkletAnimation(plain_animation.get()), "");
+  const Animation* const_plain_animation = plain_animation.get();
+  EXPECT_DEATH_IF_SUPPORTED(ToWorkletAnimation(const_plain_animation), "");
+#endif
 }
 
 }  // namespace

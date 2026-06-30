@@ -401,6 +401,14 @@ void ComponentLoader::AddGlicExtension() {
   }
 }
 
+void ComponentLoader::AddContextualTasksExtension() {
+  if (base::FeatureList::IsEnabled(
+          extensions_features::kApiContextualTasksPrivate)) {
+    Add(IDR_CONTEXTUAL_TASKS_EXTENSION_MANIFEST,
+        base::FilePath(FILE_PATH_LITERAL("contextual_tasks_extension")));
+  }
+}
+
 void ComponentLoader::AddWithNameAndDescription(
     int manifest_resource_id,
     const base::FilePath& root_directory,
@@ -433,10 +441,12 @@ void ComponentLoader::AddWebStoreApp() {
   }
 #endif
 
-  AddWithNameAndDescription(
-      IDR_WEBSTORE_MANIFEST, base::FilePath(FILE_PATH_LITERAL("web_store")),
-      l10n_util::GetStringUTF8(IDS_WEBSTORE_NAME_STORE),
-      l10n_util::GetStringUTF8(IDS_WEBSTORE_APP_DESCRIPTION));
+  if (base::FeatureList::IsEnabled(extensions_features::kWebstoreHostedApp)) {
+    AddWithNameAndDescription(
+        IDR_WEBSTORE_MANIFEST, base::FilePath(FILE_PATH_LITERAL("web_store")),
+        l10n_util::GetStringUTF8(IDS_WEBSTORE_NAME_STORE),
+        l10n_util::GetStringUTF8(IDS_WEBSTORE_APP_DESCRIPTION));
+  }
 }
 
 #if BUILDFLAG(IS_CHROMEOS)
@@ -614,6 +624,7 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
   }
 
   AddGlicExtension();
+  AddContextualTasksExtension();
 
 // http://crbug.com/41070702
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING) && !BUILDFLAG(IS_CHROMEOS)

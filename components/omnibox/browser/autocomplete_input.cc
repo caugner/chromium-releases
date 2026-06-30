@@ -114,7 +114,7 @@ AutocompleteInput::AutocompleteInput()
       prevent_inline_autocomplete_(false),
       prefer_keyword_(false),
       allow_exact_keyword_match_(true),
-      keyword_mode_entry_method_(metrics::OmniboxEventProto::INVALID),
+      in_keyword_mode_(false),
       omit_asynchronous_matches_(false),
       should_use_https_as_default_scheme_(false),
       added_default_scheme_to_typed_url_(false),
@@ -964,6 +964,7 @@ void AutocompleteInput::Clear() {
   terms_prefixed_by_http_or_https_.clear();
   lens_overlay_suggest_inputs_.reset();
   input_state_ = omnibox::InputState();
+  suggest_inventory_ = omnibox::SuggestInventory::SUGGEST_INVENTORY_DEFAULT;
   https_port_for_testing_ = 0;
   use_fake_https_for_https_upgrade_testing_ = false;
   context_tab_title_.clear();
@@ -997,10 +998,6 @@ void AutocompleteInput::WriteIntoTrace(perfetto::TracedValue context) const {
 
 bool AutocompleteInput::IsZeroSuggest() const {
   return focus_type_ != metrics::OmniboxFocusType::INTERACTION_DEFAULT;
-}
-
-bool AutocompleteInput::InKeywordMode() const {
-  return keyword_mode_entry_method_ != metrics::OmniboxEventProto::INVALID;
 }
 
 AutocompleteInput::FeaturedKeywordMode

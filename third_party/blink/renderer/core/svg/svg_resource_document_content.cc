@@ -42,11 +42,6 @@ namespace blink {
 
 namespace {
 
-bool CanReuseContent(const SVGResourceDocumentContent& content) {
-  // Don't reuse if loading failed.
-  return !content.ErrorOccurred();
-}
-
 bool AllowedRequestMode(const ResourceRequest& request) {
   return request.GetMode() == network::mojom::blink::RequestMode::kSameOrigin ||
          request.GetMode() == network::mojom::blink::RequestMode::kCors;
@@ -69,6 +64,7 @@ class SVGResourceDocumentContent::ChromeClient final
   void ChromeDestroyed() override { content_.Clear(); }
   void InvalidateContainer() override { content_->ContentChanged(); }
   void ScheduleAnimation(const LocalFrameView*,
+                         cc::BeginMainFrameReason,
                          base::TimeDelta,
                          bool) override {
     content_->ContentChanged();
@@ -135,6 +131,9 @@ SVGResourceDocumentContent::UpdateDocument(scoped_refptr<SharedBuffer> data,
   auto* chrome_client = MakeGarbageCollected<ChromeClient>(this);
   document_host_ = MakeGarbageCollected<IsolatedSVGDocumentHost>(
       *chrome_client, *agent_group_scheduler_, std::move(data),
+      RuntimeEnabledFeatures::SvgUseNestedResourceDocumentsEnabled()
+          ? request_url
+          : NullUrl(),
       BindOnce(&SVGResourceDocumentContent::AsyncLoadingFinished,
                WrapWeakPersistent(this)),
       /* inherited_settings */ nullptr, /* inherited_color_maps */ nullptr,
@@ -289,16 +288,6 @@ SVGResourceDocumentContent* SVGResourceDocumentContent::Fetch(
 
   Page* page = document.GetPage();
   auto& cache = page->GetSVGDocumentResourceTracker();
-  const SVGDocumentResourceTracker::CacheKey key =
-      SVGDocumentResourceTracker::MakeCacheKey(params);
-
-  if (!RuntimeEnabledFeatures::
-          SvgPartitionSVGDocumentResourcesInMemoryCacheEnabled()) {
-    auto* cached_content = cache.Get(key);
-    if (cached_content && CanReuseContent(*cached_content)) {
-      return cached_content;
-    }
-  }
 
   SVGDocumentResource* resource = SVGDocumentResource::Fetch(
       params, document.Fetcher(), page->GetAgentGroupScheduler());
@@ -306,13 +295,8 @@ SVGResourceDocumentContent* SVGResourceDocumentContent::Fetch(
     return nullptr;
   }
 
-  if (RuntimeEnabledFeatures::
-          SvgPartitionSVGDocumentResourcesInMemoryCacheEnabled()) {
-    cache.AddResource(resource);
-    UseCounter::Count(document, WebFeature::kExternalSVGDocumentResources);
-  } else {
-    cache.Put(key, resource->GetContent());
-  }
+  cache.AddResource(resource);
+  UseCounter::Count(document, WebFeature::kExternalSVGDocumentResources);
 
   return resource->GetContent();
 }

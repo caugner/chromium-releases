@@ -338,7 +338,9 @@ export enum AiPageInteractions {
   AUTOFILL_AI_CLICK = 5,
   PASSWORD_CHANGE_CLICK = 6,
   AI_SUGGESTIONS_CLICK = 7,
-  MAX_VALUE = 8,
+  SKILLS_CLICK = 8,
+  INDIGO_CLICK = 9,
+  MAX_VALUE = 10,
 }
 // LINT.ThenChange(/tools/metrics/histograms/metadata/settings/enums.xml:SettingsAiPageInteractions)
 

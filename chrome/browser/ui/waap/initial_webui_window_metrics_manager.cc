@@ -33,7 +33,22 @@ InitialWebUIWindowMetricsManager::InitialWebUIWindowMetricsManager(
           ProfileBrowserCollection::GetForProfile(browser->GetProfile())
               ->GetSize() > 0) {}
 
-InitialWebUIWindowMetricsManager::~InitialWebUIWindowMetricsManager() = default;
+InitialWebUIWindowMetricsManager::~InitialWebUIWindowMetricsManager() {
+  if (!waap_service_) {
+    return;
+  }
+  if (!g_is_startup_first_paint_recorded &&
+      !skip_startup_metrics_for_testing_ &&
+      window_show_first_requested_time_.has_value()) {
+    waap_service_->OnStartupBrowserWindowClosedBeforeFirstPaint(
+        *window_show_first_requested_time_, base::TimeTicks::Now());
+  } else if (!is_new_window_first_paint_recorded_ &&
+             new_window_start_time_.has_value()) {
+    waap_service_->OnNewWindowBrowserWindowClosedBeforeFirstPaint(
+        creation_source_, was_created_with_existing_windows_,
+        *new_window_start_time_, base::TimeTicks::Now());
+  }
+}
 
 InitialWebUIWindowMetricsManager* InitialWebUIWindowMetricsManager::From(
     BrowserWindowInterface* browser_window_interface) {
@@ -77,7 +92,6 @@ void InitialWebUIWindowMetricsManager::OnBrowserWindowFirstPresentation(
     if (!is_startup_first_paint_recorded &&
         !skip_startup_metrics_for_testing_) {
       waap_service_->OnStartupBrowserWindowShowRequestedToFirstPaint(
-          was_created_with_existing_windows_,
           *window_show_first_requested_time_, timestamp);
     } else if (!is_new_window_first_paint_recorded_ &&
                new_window_start_time_.has_value()) {
@@ -95,13 +109,13 @@ void InitialWebUIWindowMetricsManager::OnBrowserWindowFirstPresentation(
   if (!is_startup_first_paint_recorded && !skip_startup_metrics_for_testing_) {
     is_startup_first_paint_recorded = true;
     is_new_window_first_paint_recorded_ = true;
-    waap_service_->OnBrowserWindowFirstPresentation(
-        was_created_with_existing_windows_, timestamp);
+    waap_service_->OnBrowserWindowFirstPresentation(timestamp);
   } else if (!is_new_window_first_paint_recorded_ &&
              new_window_start_time_.has_value()) {
     is_new_window_first_paint_recorded_ = true;
     waap_service_->OnNewWindowBrowserWindowFirstPresentation(
-        creation_source_, *new_window_start_time_, timestamp);
+        creation_source_, was_created_with_existing_windows_,
+        *new_window_start_time_, timestamp);
   }
 }
 
@@ -137,12 +151,13 @@ void InitialWebUIWindowMetricsManager::OnReloadButtonFirstPaint(
   if (!is_startup_first_paint_recorded && !skip_startup_metrics_for_testing_) {
     is_startup_first_paint_recorded = true;
     is_new_window_reload_button_first_paint_recorded_ = true;
-    waap_service_->OnFirstPaint(was_created_with_existing_windows_, timestamp);
+    waap_service_->OnFirstPaint(timestamp);
   } else if (!is_new_window_reload_button_first_paint_recorded_ &&
              new_window_start_time_.has_value()) {
     is_new_window_reload_button_first_paint_recorded_ = true;
     waap_service_->OnNewWindowReloadButtonFirstPaint(
-        creation_source_, *new_window_start_time_, timestamp);
+        creation_source_, was_created_with_existing_windows_,
+        *new_window_start_time_, timestamp);
   }
 }
 
@@ -162,13 +177,13 @@ void InitialWebUIWindowMetricsManager::OnReloadButtonFirstContentfulPaint(
       !skip_startup_metrics_for_testing_) {
     is_startup_first_contentful_paint_recorded = true;
     is_new_window_reload_button_first_contentful_paint_recorded_ = true;
-    waap_service_->OnFirstContentfulPaint(was_created_with_existing_windows_,
-                                          timestamp);
+    waap_service_->OnFirstContentfulPaint(timestamp);
   } else if (!is_new_window_reload_button_first_contentful_paint_recorded_ &&
              new_window_start_time_.has_value()) {
     is_new_window_reload_button_first_contentful_paint_recorded_ = true;
     waap_service_->OnNewWindowReloadButtonFirstContentfulPaint(
-        creation_source_, *new_window_start_time_, timestamp);
+        creation_source_, was_created_with_existing_windows_,
+        *new_window_start_time_, timestamp);
   }
 }
 
@@ -188,8 +203,7 @@ void InitialWebUIWindowMetricsManager::
   if (!is_startup_process_recorded && !skip_startup_metrics_for_testing_) {
     is_startup_process_recorded = true;
     waap_service_->OnReloadButtonRendererProcessCreatedAndLaunched(
-        was_created_with_existing_windows_, created_timestamp,
-        launched_timestamp);
+        created_timestamp, launched_timestamp);
   }
 }
 
@@ -225,8 +239,7 @@ void InitialWebUIWindowMetricsManager::RecordPaintDeltaIfAvailable() {
   if (is_startup_metric && !skip_startup_metrics_for_testing_) {
     startup_delta_recorded_ = true;
     waap_service_->OnStartupBrowserWindowToReloadButtonFirstPaintGap(
-        was_created_with_existing_windows_, *browser_window_first_paint_time_,
-        *reload_button_first_paint_time_);
+        *browser_window_first_paint_time_, *reload_button_first_paint_time_);
   } else if (!new_window_delta_recorded_ &&
              new_window_start_time_.has_value()) {
     // Handle New Window metrics once per window.

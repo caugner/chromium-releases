@@ -30,6 +30,7 @@
 #import "ios/chrome/browser/lens_overlay/ui/lens_overlay_entrypoint_view.h"
 #import "ios/chrome/browser/location_bar/ui_bundled/badges_container_view.h"
 #import "ios/chrome/browser/location_bar/ui_bundled/fakebox_buttons_snapshot_provider.h"
+#import "ios/chrome/browser/location_bar/ui_bundled/highlight_utils.h"
 #import "ios/chrome/browser/location_bar/ui_bundled/location_bar_constants.h"
 #import "ios/chrome/browser/location_bar/ui_bundled/location_bar_metrics.h"
 #import "ios/chrome/browser/location_bar/ui_bundled/location_bar_mutator.h"
@@ -58,6 +59,7 @@
 #import "ios/chrome/browser/sharing/ui_bundled/sharing_metrics.h"
 #import "ios/chrome/browser/toolbar/legacy/ui_bundled/public/toolbar_type.h"
 #import "ios/chrome/common/NSString+Chromium.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #import "ios/chrome/common/ui/util/constraints_ui_util.h"
 #import "ios/chrome/common/ui/util/pointer_interaction_util.h"
 #import "ios/chrome/grit/ios_strings.h"
@@ -77,6 +79,9 @@ typedef NS_ENUM(int, TrailingButtonState) {
 // The scale factor of the steady view in fullscreen.
 const CGFloat kFullscreenScaleFactor = 0.87;
 
+// Spacing between the custom leading view (Gemini Live icon) and the URL label.
+const CGFloat kGeminiLiveIconToLabelSpacing = 8.0;
+
 // The size of the symbol image.
 const CGFloat kSymbolImagePointSize = 18.;
 
@@ -88,7 +93,27 @@ const NSString* kScribbleOmniboxElementId = @"omnibox";
 // the white space on top.
 const CGFloat kShareIconBalancingHeightPadding = 1;
 
+// The minimum width of the plus button.
+const CGFloat kPlusButtonMinimumWidth = 44.0;
+
+// The point size of the Gemini Live symbol.
+const CGFloat kGeminiLiveSymbolPointSize = 10.0;
+
+// The size of the Gemini Live circle container.
+const CGFloat kGeminiLiveCircleSize = 20.0;
 }  // namespace
+
+// Helper view to maintain a round background.
+@interface RoundGeminiLiveView : UIView
+@end
+
+@implementation RoundGeminiLiveView
+- (void)layoutSubviews {
+  [super layoutSubviews];
+  self.layer.cornerRadius = self.bounds.size.height / 2.0;
+  self.clipsToBounds = YES;
+}
+@end
 
 @interface LocationBarViewController () <UIContextMenuInteractionDelegate,
                                          UIIndirectScribbleInteractionDelegate>
@@ -136,11 +161,14 @@ const CGFloat kShareIconBalancingHeightPadding = 1;
 // edit menu option to do an image search.
 @property(nonatomic, assign) BOOL lensImageEnabled;
 
-// Search provider name (used for placeholder text).
-@property(nonatomic, copy) NSString* searchProviderName;
+// Placeholder text.
+@property(nonatomic, copy) NSString* placeholderText;
 
 // Type of the current placeholder view.
 @property(nonatomic, assign) LocationBarPlaceholderType placeholderType;
+
+// The icon for the default search engine.
+@property(nonatomic, strong) UIImage* placeholderDefaultSearchEngineIcon;
 
 // Starts voice search, updating the layout guide to be constrained to the
 // trailing button.
@@ -154,6 +182,9 @@ const CGFloat kShareIconBalancingHeightPadding = 1;
   // Bar and anchored to the trailing edge during focus transitions (when it is
   // faded out) and defocus transitions (when it is faded in).
   UIView* _fakeboxButtonsSnapshot;
+
+  // The AIM plus button.
+  ExtendedTouchTargetButton* _plusButton;
 
   // The location bar button to access Lens.
   LensOverlayEntrypointButton* _lensOverlayPlaceholderView;
@@ -324,6 +355,8 @@ const CGFloat kShareIconBalancingHeightPadding = 1;
         forControlEvents:UIControlEventTouchUpInside];
   }
 
+  [self createAIMPlusButton];
+
   [_locationBarSteadyView.locationButton
              addTarget:self
                 action:@selector(locationBarSteadyViewTapped)
@@ -348,6 +381,58 @@ const CGFloat kShareIconBalancingHeightPadding = 1;
   self.locationBarSteadyView.translatesAutoresizingMaskIntoConstraints = NO;
   AddSameConstraints(self.locationBarSteadyView, self.view);
 
+  if (IsGeminiLiveEnabled()) {
+    // Use the Gemini Live symbol.
+#if BUILDFLAG(IOS_USE_BRANDED_ASSETS)
+    UIImage* image = CustomSymbolWithPointSize(kGeminiLiveLogoSymbol,
+                                               kGeminiLiveSymbolPointSize);
+#else
+    UIImage* image =
+        DefaultSymbolWithPointSize(kWaveformSymbol, kGeminiLiveSymbolPointSize);
+#endif
+
+    // Create the round container view.
+    RoundGeminiLiveView* geminiBadgeContainer =
+        [[RoundGeminiLiveView alloc] init];
+    geminiBadgeContainer.translatesAutoresizingMaskIntoConstraints = NO;
+    geminiBadgeContainer.hidden = YES;
+
+    UIImageView* iconView = [[UIImageView alloc] initWithImage:image];
+    iconView.translatesAutoresizingMaskIntoConstraints = NO;
+
+    if (IsChromeNextIaEnabled()) {
+      UIView* gradientView = CreateIPHGradientView();
+      gradientView.translatesAutoresizingMaskIntoConstraints = NO;
+      [geminiBadgeContainer addSubview:gradientView];
+      AddSameConstraints(gradientView, geminiBadgeContainer);
+      ConfigureIPHImageStyleForImageView(iconView);
+    } else {
+      geminiBadgeContainer.backgroundColor =
+          [UIColor colorNamed:kStaticBlueColor];
+      iconView.tintColor = [UIColor whiteColor];
+    }
+
+    [geminiBadgeContainer addSubview:iconView];
+
+    // Force width to match height to keep it square/round.
+    [NSLayoutConstraint activateConstraints:@[
+      [geminiBadgeContainer.widthAnchor
+          constraintEqualToConstant:kGeminiLiveCircleSize],
+      [geminiBadgeContainer.heightAnchor
+          constraintEqualToConstant:kGeminiLiveCircleSize],
+      [iconView.centerXAnchor
+          constraintEqualToAnchor:geminiBadgeContainer.centerXAnchor],
+      [iconView.centerYAnchor
+          constraintEqualToAnchor:geminiBadgeContainer.centerYAnchor],
+    ]];
+
+    // Inject it directly next to the location label.
+    [self.locationBarSteadyView
+        addCustomLeadingView:geminiBadgeContainer
+                 targetWidth:kGeminiLiveCircleSize
+                     spacing:kGeminiLiveIconToLabelSpacing];
+  }
+
   [self updatePlaceholderView];
   [self updateTrailingButtonState];
   [self switchToEditing:NO];
@@ -362,6 +447,10 @@ const CGFloat kShareIconBalancingHeightPadding = 1;
   _defaultSearchEngineIconView = [[UIImageView alloc] init];
   _defaultSearchEngineIconView.translatesAutoresizingMaskIntoConstraints = NO;
   _defaultSearchEngineIconView.contentMode = UIViewContentModeCenter;
+  _defaultSearchEngineIconView.image = self.placeholderDefaultSearchEngineIcon;
+  if (self.placeholderDefaultSearchEngineIcon) {
+    _defaultSearchEngineIconView.accessibilityIdentifier = @"DSEIconNonEmpty";
+  }
   AddSizeConstraints(
       _defaultSearchEngineIconView,
       CGSizeMake(kOmniboxLeadingImageSize + 12.0f, kOmniboxLeadingImageSize));
@@ -382,7 +471,8 @@ const CGFloat kShareIconBalancingHeightPadding = 1;
   self.locationBarSteadyView.trailingButton.alpha = alphaValue;
   self.locationBarSteadyView.badgesContainerView.placeholderView.alpha =
       alphaValue;
-  if (IsProactiveSuggestionsFrameworkEnabled() && !self.incognito) {
+  if (IsProactiveSuggestionsFrameworkEnabled() &&
+      (!self.incognito || IsChromeNextIaEnabled())) {
     self.locationBarSteadyView.badgesContainerView.alpha = alphaValue;
   }
   BOOL badgeViewShouldCollapse = progress <= kFullscreenProgressThreshold;
@@ -411,22 +501,25 @@ const CGFloat kShareIconBalancingHeightPadding = 1;
   [self.dispatcher hideComposebox];
 }
 
-- (void)setPlaceholderText:(NSString*)searchProviderName {
-  if (_searchProviderName == searchProviderName) {
+- (void)setPlaceholderText:(NSString*)placeholderText {
+  if ([_placeholderText isEqualToString:placeholderText]) {
     return;
   }
-  _searchProviderName = searchProviderName;
+  _placeholderText = [placeholderText copy];
   if (_isNTP) {
     [self updatePlaceholder];
   }
 }
 
 - (void)setPlaceholderDefaultSearchEngineIcon:(UIImage*)icon {
-  _defaultSearchEngineIconView.image = icon;
-  if (icon) {
-    _defaultSearchEngineIconView.accessibilityIdentifier = @"DSEIconNonEmpty";
-  } else {
-    _defaultSearchEngineIconView.accessibilityIdentifier = nil;
+  _placeholderDefaultSearchEngineIcon = icon;
+  if (_defaultSearchEngineIconView) {
+    _defaultSearchEngineIconView.image = icon;
+    if (icon) {
+      _defaultSearchEngineIconView.accessibilityIdentifier = @"DSEIconNonEmpty";
+    } else {
+      _defaultSearchEngineIconView.accessibilityIdentifier = nil;
+    }
   }
 }
 
@@ -814,15 +907,28 @@ const CGFloat kShareIconBalancingHeightPadding = 1;
 
 // Updates placeholder in the steady view.
 - (void)updatePlaceholder {
-  NSString* placeholderString = self.searchOrTypeURLPlaceholderText;
   [self.locationBarSteadyView
-      setLocationLabelPlaceholderText:placeholderString];
+      setLocationLabelPlaceholderText:self.placeholderText];
 }
 
-// Computes correct placeholder text.
-- (NSString*)searchOrTypeURLPlaceholderText {
-  return l10n_util::GetNSStringF(IDS_OMNIBOX_EMPTY_HINT_WITH_DSE_NAME,
-                                 self.searchProviderName.cr_UTF16String);
+- (void)createAIMPlusButton {
+  _plusButton = [ExtendedTouchTargetButton buttonWithType:UIButtonTypeSystem];
+  [_plusButton
+      setImage:DefaultSymbolWithPointSize(kPlusSymbol, kSymbolActionPointSize)
+      forState:UIControlStateNormal];
+  _plusButton.translatesAutoresizingMaskIntoConstraints = NO;
+  _plusButton.imageView.contentMode = UIViewContentModeScaleAspectFit;
+  _plusButton.tintColor = [UIColor colorNamed:kToolbarButtonColor];
+  _plusButton.accessibilityLabel = l10n_util::GetNSString(
+      IDS_IOS_COMPOSEBOX_ADD_ATTACHMENT_BUTTON_ACCESSIBILITY_LABEL);
+  [NSLayoutConstraint activateConstraints:@[
+    [_plusButton.widthAnchor
+        constraintGreaterThanOrEqualToConstant:kPlusButtonMinimumWidth]
+  ]];
+
+  [_plusButton addTarget:self
+                  action:@selector(handlePlusButtonPressed)
+        forControlEvents:UIControlEventTouchUpInside];
 }
 
 #pragma mark - UIContextMenuInteractionDelegate
@@ -1152,6 +1258,12 @@ const CGFloat kShareIconBalancingHeightPadding = 1;
   [self.delegate locationBarHideToolbarTapped];
 }
 
+- (void)handlePlusButtonPressed {
+  RecordAction(UserMetricsAction("MobileToolbarPlusButtonTap"));
+  TriggerHapticFeedbackForSelectionChange();
+  [self.dispatcher showMultimodalActionsMenu];
+}
+
 - (void)handleLensEntrypointPressed {
   RecordAction(UserMetricsAction("MobileToolbarLensOverlayTap"));
   if (self.lensOverlayVisible) {
@@ -1175,6 +1287,12 @@ const CGFloat kShareIconBalancingHeightPadding = 1;
   } else {
     RecordAIHubIconTapped();
     [self.pageActionMenuHandler showPageActionMenu];
+  }
+}
+
+- (void)updateAIHubNewBadgeVisibility {
+  if (_placeholderType == LocationBarPlaceholderType::kPageActionMenu) {
+    [self updatePlaceholderView];
   }
 }
 
@@ -1213,6 +1331,10 @@ const CGFloat kShareIconBalancingHeightPadding = 1;
   switch (_placeholderType) {
     case LocationBarPlaceholderType::kNone:
       [self.locationBarSteadyView setPlaceholderView:nil type:_placeholderType];
+      break;
+    case LocationBarPlaceholderType::kPlusButton:
+      [self.locationBarSteadyView setPlaceholderView:_plusButton
+                                                type:_placeholderType];
       break;
     case LocationBarPlaceholderType::kLensOverlay:
       [self.locationBarSteadyView setPlaceholderView:_lensOverlayPlaceholderView
@@ -1272,6 +1394,11 @@ const CGFloat kShareIconBalancingHeightPadding = 1;
   copyView.frame = self.locationBarSteadyView.frame;
 
   return copyView;
+}
+
+- (void)setCustomLeadingViewVisible:(BOOL)visible animated:(BOOL)animated {
+  [self.locationBarSteadyView updateCustomLeadingViewVisibility:visible
+                                                       animated:animated];
 }
 
 @end

@@ -66,10 +66,10 @@ using bookmarks::BookmarkNode;
   BOOL _allowsNewFolders;
   // A linear list of folders. This will be populated in `reloadView` when the
   // UI is updated.
-  std::vector<int64_t> _accountFolderNodeIds;
+  std::vector<raw_ptr<const BookmarkNode>> _accountFolderNodes;
   // A linear list of folders. This will be populated in `reloadView` when the
   // UI is updated.
-  std::vector<int64_t> _localOrSyncableFolderNodeIds;
+  std::vector<raw_ptr<const BookmarkNode>> _localOrSyncableFolderNodes;
   // This ViewController's searchController;
   UISearchController* _searchController;
   // What the user is currently searching.
@@ -177,9 +177,9 @@ using bookmarks::BookmarkNode;
   NSInteger sectionID =
       [self.tableViewModel sectionIdentifierForSectionIndex:indexPath.section];
   if (sectionID == SectionIdentifierAccountBookmarks) {
-    return !_accountFolderNodeIds.empty();
+    return !_accountFolderNodes.empty();
   } else {
-    return !_localOrSyncableFolderNodeIds.empty();
+    return !_localOrSyncableFolderNodes.empty();
   }
 }
 
@@ -191,9 +191,9 @@ using bookmarks::BookmarkNode;
   NSInteger sectionID =
       [self.tableViewModel sectionIdentifierForSectionIndex:indexPath.section];
   if (sectionID == SectionIdentifierAccountBookmarks) {
-    return !_accountFolderNodeIds.empty();
+    return !_accountFolderNodes.empty();
   } else {
-    return !_localOrSyncableFolderNodeIds.empty();
+    return !_localOrSyncableFolderNodes.empty();
   }
 }
 
@@ -233,23 +233,14 @@ using bookmarks::BookmarkNode;
     folderIndex--;
   }
 
-  int64_t folderId = 0;
+  raw_ptr<const BookmarkNode> folder;
   if (sectionID == SectionIdentifierAccountBookmarks) {
-    CHECK(folderIndex < _accountFolderNodeIds.size(),
-          base::NotFatalUntil::M152);
-    folderId = _accountFolderNodeIds[folderIndex];
+    CHECK(folderIndex < _accountFolderNodes.size(), base::NotFatalUntil::M152);
+    folder = _accountFolderNodes[folderIndex];
   } else {
-    CHECK(folderIndex < _localOrSyncableFolderNodeIds.size(),
+    CHECK(folderIndex < _localOrSyncableFolderNodes.size(),
           base::NotFatalUntil::M152);
-    folderId = _localOrSyncableFolderNodeIds[folderIndex];
-  }
-  const BookmarkNode* folder =
-      (sectionID == SectionIdentifierAccountBookmarks)
-          ? [self.dataSource.accountDataSource bookmarkNodeForId:folderId]
-          : [self.dataSource.localOrSyncableDataSource
-                bookmarkNodeForId:folderId];
-  if (!folder) {
-    return;
+    folder = _localOrSyncableFolderNodes[folderIndex];
   }
   [_mutator setSelectedFolderNode:folder];
   [self delayedNotifyDelegateOfSelection];
@@ -353,11 +344,11 @@ using bookmarks::BookmarkNode;
       query.word_phrase_query = std::make_unique<std::u16string>(
           base::SysNSStringToUTF16(_searchTerm));
 
-      _accountFolderNodeIds = [self.dataSource.accountDataSource
-          visibleFolderNodeIdsForQuery:query];
+      _accountFolderNodes =
+          [self.dataSource.accountDataSource visibleFolderNodesForQuery:query];
     } else {
-      _accountFolderNodeIds =
-          [self.dataSource.accountDataSource visibleFolderNodeIds];
+      _accountFolderNodes =
+          [self.dataSource.accountDataSource visibleFolderNodes];
     }
     [self reloadSectionWithIdentifier:SectionIdentifierAccountBookmarks];
   }
@@ -366,11 +357,11 @@ using bookmarks::BookmarkNode;
     query.word_phrase_query =
         std::make_unique<std::u16string>(base::SysNSStringToUTF16(_searchTerm));
 
-    _localOrSyncableFolderNodeIds = [self.dataSource.localOrSyncableDataSource
-        visibleFolderNodeIdsForQuery:query];
+    _localOrSyncableFolderNodes = [self.dataSource.localOrSyncableDataSource
+        visibleFolderNodesForQuery:query];
   } else {
-    _localOrSyncableFolderNodeIds =
-        [self.dataSource.localOrSyncableDataSource visibleFolderNodeIds];
+    _localOrSyncableFolderNodes =
+        [self.dataSource.localOrSyncableDataSource visibleFolderNodes];
   }
 
   [self reloadSectionWithIdentifier:SectionIdentifierLocalOrSyncableBookmarks];
@@ -412,10 +403,10 @@ using bookmarks::BookmarkNode;
   }
 
   // Add Folders entries.
-  const std::vector<int64_t>& folders =
+  const std::vector<raw_ptr<const bookmarks::BookmarkNode>>& folders =
       (sectionID == SectionIdentifierAccountBookmarks)
-          ? _accountFolderNodeIds
-          : _localOrSyncableFolderNodeIds;
+          ? _accountFolderNodes
+          : _localOrSyncableFolderNodes;
   if (folders.empty()) {
     TableViewTextItem* item =
         [[TableViewTextItem alloc] initWithType:ItemTypeMessage];
@@ -424,15 +415,7 @@ using bookmarks::BookmarkNode;
     [self.tableViewModel addItem:item toSectionWithIdentifier:sectionID];
     return;
   }
-  for (int64_t folderId : folders) {
-    const BookmarkNode* folderNode =
-        (sectionID == SectionIdentifierAccountBookmarks)
-            ? [self.dataSource.accountDataSource bookmarkNodeForId:folderId]
-            : [self.dataSource.localOrSyncableDataSource
-                  bookmarkNodeForId:folderId];
-    if (!folderNode) {
-      continue;
-    }
+  for (const BookmarkNode* folderNode : folders) {
     TableViewBookmarksFolderItem* folderItem =
         [[TableViewBookmarksFolderItem alloc]
             initWithType:ItemTypeBookmarkFolder

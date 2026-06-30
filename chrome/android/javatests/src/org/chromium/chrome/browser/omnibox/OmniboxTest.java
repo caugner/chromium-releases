@@ -363,7 +363,7 @@ public class OmniboxTest {
                     locationBar.getStatusCoordinatorForTesting();
             final int firstIcon = statusCoordinator.getSecurityIconResourceIdForTesting();
 
-            UrlBar urlBar = (UrlBar) mActivityTestRule.getActivity().findViewById(R.id.url_bar);
+            UrlBar urlBar = mActivityTestRule.getActivity().findViewById(R.id.url_bar);
             ThreadUtils.runOnUiThreadBlocking(() -> urlBar.requestFocus());
             CriteriaHelper.pollUiThread(
                     () -> statusCoordinator.getSecurityIconResourceIdForTesting() != firstIcon);
@@ -568,6 +568,7 @@ public class OmniboxTest {
 
     @Test
     @SmallTest
+    @DisableFeatures({ChromeFeatureList.ANDROID_PAGE_INFO_AS_APP_MENU_ITEM})
     public void testClickStatusIcon_ShowsPageInfo() {
         mActivityTestRule.startOnBlankPage();
         String testUrl =

@@ -939,15 +939,14 @@ void ReadAnythingUntrustedPageHandler::OnHighlightGranularityChanged(
 }
 
 void ReadAnythingUntrustedPageHandler::OnLineFocusChanged(
-    read_anything::mojom::LineFocus line_focus) {
+    read_anything::mojom::LineFocus current_line_focus,
+    read_anything::mojom::LineFocus last_non_disabled_line_focus) {
   if (features::IsReadAnythingLineFocusEnabled()) {
     profile_->GetPrefs()->SetInteger(prefs::kAccessibilityReadAnythingLineFocus,
-                                     static_cast<size_t>(line_focus));
-    if (line_focus != read_anything::mojom::LineFocus::kOff) {
-      profile_->GetPrefs()->SetInteger(
-          prefs::kAccessibilityReadAnythingLastNonDisabledLineFocus,
-          static_cast<size_t>(line_focus));
-    }
+                                     static_cast<size_t>(current_line_focus));
+    profile_->GetPrefs()->SetInteger(
+        prefs::kAccessibilityReadAnythingLastNonDisabledLineFocus,
+        static_cast<size_t>(last_non_disabled_line_focus));
   }
 }
 
@@ -1100,7 +1099,7 @@ void ReadAnythingUntrustedPageHandler::SendPinStateRequest() {
 void ReadAnythingUntrustedPageHandler::TogglePresentation() {
   if (features::IsImmersiveReadAnythingEnabled()) {
     CHECK(read_anything_controller_);
-    read_anything_controller_->TogglePresentation();
+    read_anything_controller_->TogglePresentation(/*is_user_initiated=*/true);
   }
 }
 
@@ -1121,6 +1120,13 @@ void ReadAnythingUntrustedPageHandler::OnSpeechEngineStalled() {
         extension_misc::kComponentUpdaterTTSEngineExtensionId);
   }
 #endif
+}
+
+void ReadAnythingUntrustedPageHandler::RequestReadabilityDistillation() {
+  if (!features::IsReadAnythingWithReadabilityEnabled()) {
+    return;
+  }
+  RequestDomDistillerDistillation(tab_->GetContents());
 }
 
 void ReadAnythingUntrustedPageHandler::PerformActionInTargetTree(
@@ -1202,7 +1208,8 @@ void ReadAnythingUntrustedPageHandler::SetDefaultLanguageCode(
 
 void ReadAnythingUntrustedPageHandler::Activate(
     bool active,
-    std::optional<ReadAnythingOpenTrigger> open_trigger) {
+    std::optional<ReadAnythingOpenTrigger> open_trigger,
+    std::optional<base::TimeDelta> completed_session_duration) {
   active_ = active;
   if (active_) {
     last_open_trigger_ = open_trigger;

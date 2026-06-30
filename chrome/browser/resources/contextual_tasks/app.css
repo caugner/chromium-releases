@@ -10,6 +10,7 @@
 
 :host {
   --color-composebox-cancel-button: rgba(10,10,10, 1);
+  --color-composebox-context-entrypoint-text-disabled: rgba(31, 31, 31, 0.38);
   --color-composebox-context-menu-checkbox-override: rgba(11, 87, 208, 1);
   --color-composebox-context-menu-text: rgba(31, 31, 31, 1);
   --color-composebox-document-chip-icon: rgba(86, 89, 94, 1);
@@ -37,8 +38,6 @@
   --color-composebox-input-plate-outline: rgba(220, 223, 229, 1);
   --color-composebox-loading-end: rgba(236, 237, 239, 1);
   --color-composebox-loading-start: rgba(241, 243, 244, 1);
-  --color-composebox-pdf-chip-icon-background: rgba(219, 69, 55, 1);
-  --color-composebox-pdf-chip-icon-border: rgba(255, 255, 255, 1);
   --color-composebox-suggestion-activity: rgba(86, 89, 94, 1);
   --color-composebox-type-ahead: #56595e;
   --color-composebox-type-ahead-chip: #f0f2f5;
@@ -442,6 +441,10 @@
 }
 
 [hidden] {
+  display: none !important;
+}
+
+#composeboxHeaderWrapper[hidden] {
   display: none !important;
 }
 
@@ -885,6 +888,11 @@ error-page {
   pointer-events: all;
 }
 
+#iphMenuSmartTabSharingAnchor {
+  position: fixed;
+  visibility: hidden;
+}
+
 :host([dark-mode_]) .name-shimmer {
   --bg-gradient: linear-gradient(
     to bottom,
@@ -911,8 +919,10 @@ error-page {
   }
 }
 
-:host(:not([is-dom-content-loaded_])) #composebox,
-:host(:not([is-dom-content-loaded_])) #composeboxHeaderWrapper {
+:host([is-initial-frame-load_]:not([is-dom-content-loaded_])) #composebox,
+:host([is-initial-frame-load_]:not([is-dom-content-loaded_])) #composeboxHeaderWrapper,
+:host([is-zero-state_]:not([is-dom-content-loaded_])) #composebox,
+:host([is-zero-state_]:not([is-dom-content-loaded_])) #composeboxHeaderWrapper {
   visibility: hidden;
   pointer-events: none;
 }

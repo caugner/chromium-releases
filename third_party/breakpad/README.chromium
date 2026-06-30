@@ -3,8 +3,8 @@ Short Name: breakpad
 URL: https://chromium.googlesource.com/breakpad/breakpad
 Version: N/A
 Revision: 8ef5673404a3bbc192b0997e1c2df559cc5bd79d
-Update Mechanism: Manual
-License: BSD-3-Clause, cURL, APSL-2.0, Apache-2.0
+Update Mechanism: Autoroll
+License: BSD-3-Clause, curl
 License File: LICENSE
 Security Critical: yes
 Shipped: no

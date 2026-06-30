@@ -9,10 +9,11 @@ import type {ReloadButtonElement} from './reload_button.js';
 export function getHtml(this: ReloadButtonElement) {
   return html`<!--_html_template_start_-->
 <cr-icon-button
-    class="${this.showStopIcon ? 'icon-clear' : 'icon-refresh'}"
+    iron-icon="${this.getIronIcon_()}"
     title="${this.tooltip}"
     aria-label="${this.accName_}"
     aria-haspopup="${this.state.canShowMenu}"
+    ?disabled="${this.isDisabled}"
     ?is-menu-open="${this.state.isContextMenuVisible}"
     @pointerdown="${this.onPointerdown_}"
     @pointerup="${this.onPointerup_}"

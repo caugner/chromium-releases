@@ -11,6 +11,7 @@
 #include <string>
 #include <utility>
 
+#include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
 #include "base/memory/ptr_util.h"
@@ -47,6 +48,8 @@
 
 #if BUILDFLAG(IS_CHROMEOS)
 #include "chrome/browser/ash/file_manager/fileapi_util.h"
+#include "chrome/browser/ash/fusebox/fusebox_server.h"
+#include "chrome/browser/enterprise/data_protection/data_protection_features.h"
 #include "content/public/browser/site_instance.h"
 #endif
 
@@ -309,6 +312,41 @@ void FileSelectHelper::ConvertToFileChooserFileInfoList(
   PerformContentAnalysisIfNeeded(std::move(chooser_files));
 }
 
+base::FilePath FileSelectHelper::MaybeSubstituteFuseboxFilePath(
+    const blink::mojom::FileSystemFileInfo& file_system_info) {
+#if BUILDFLAG(IS_CHROMEOS)
+  content::SiteInstance* site_instance = render_frame_host_->GetSiteInstance();
+  storage::FileSystemContext* file_system_context =
+      profile_->GetStoragePartition(site_instance)->GetFileSystemContext();
+  if (!file_system_context) {
+    return base::FilePath();
+  }
+
+  const storage::FileSystemURL cracked_url =
+      file_system_context->CrackURLInFirstPartyContext(file_system_info.url);
+  if (!cracked_url.is_valid()) {
+    return base::FilePath();
+  }
+
+  GURL external_gurl;
+  if (!file_manager::util::ConvertAbsoluteFilePathToFileSystemUrl(
+          profile_, cracked_url.path(), file_manager::util::GetFileManagerURL(),
+          &external_gurl)) {
+    return base::FilePath();
+  }
+
+  const storage::FileSystemURL external_cracked_url =
+      file_system_context->CrackURLInFirstPartyContext(external_gurl);
+  if (!external_cracked_url.is_valid()) {
+    return base::FilePath();
+  }
+
+  return fusebox::Server::SubstituteFuseboxFilePath(external_cracked_url);
+#else
+  return base::FilePath();
+#endif
+}
+
 void FileSelectHelper::PerformContentAnalysisIfNeeded(
     std::vector<FileChooserFileInfoPtr> list) {
   if (AbortIfWebContentsDestroyed())
@@ -323,8 +361,23 @@ void FileSelectHelper::PerformContentAnalysisIfNeeded(
         enterprise_connectors::ContentAnalysisRequest::FILE_PICKER_DIALOG;
     data.paths.reserve(list.size());
     for (const auto& file : list) {
-      if (file && file->is_native_file())
+      if (!file) {
+        continue;
+      }
+      if (file->is_native_file()) {
         data.paths.push_back(file->get_native_file()->file_path);
+      }
+#if BUILDFLAG(IS_CHROMEOS)
+      else if (base::FeatureList::IsEnabled(
+                   enterprise_data_protection::kEnableDlpFileSystemApi) &&
+               file->is_file_system()) {
+        base::FilePath path =
+            MaybeSubstituteFuseboxFilePath(*file->get_file_system());
+        if (!path.empty()) {
+          data.paths.push_back(std::move(path));
+        }
+      }
+#endif
     }
 
     if (data.paths.empty()) {
@@ -373,10 +426,23 @@ void FileSelectHelper::ContentAnalysisCompletionCallback(
   }
 
   // For single or multiple file uploads, remove any files that did not pass the
-  // deep scan. Non-native files are skipped.
+  // deep scan. Non-native files not backed by fusebox are skipped.
   size_t i = 0;
   for (auto it = list.begin(); it != list.end();) {
+    bool is_scanned = false;
     if ((*it)->is_native_file()) {
+      is_scanned = true;
+    }
+#if BUILDFLAG(IS_CHROMEOS)
+    else if (base::FeatureList::IsEnabled(
+                 enterprise_data_protection::kEnableDlpFileSystemApi) &&
+             (*it)->is_file_system()) {
+      is_scanned =
+          !MaybeSubstituteFuseboxFilePath(*(*it)->get_file_system()).empty();
+    }
+#endif
+
+    if (is_scanned) {
       if (!result.paths_results[i]) {
         it = list.erase(it);
       } else {
@@ -384,8 +450,6 @@ void FileSelectHelper::ContentAnalysisCompletionCallback(
       }
       ++i;
     } else {
-      // Skip non-native files by incrementing the iterator without changing `i`
-      // so that no result is skipped.
       ++it;
     }
   }
@@ -417,7 +481,7 @@ void FileSelectHelper::CleanUp() {
 
     // Now that the temporary files have been scheduled for deletion, there
     // is no longer any reason to keep this instance around.
-    Release();
+    self_ptr_.reset();
   }
 }
 
@@ -556,15 +620,7 @@ void FileSelectHelper::RunFileChooser(
   render_frame_host_ = render_frame_host;
   web_contents_ = WebContents::FromRenderFrameHost(render_frame_host);
   listener_ = std::move(listener);
-  content::WebContentsObserver::Observe(web_contents_);
-
-  tabs::TabInterface* tab_interface =
-      tabs::TabInterface::MaybeGetFromContents(web_contents_);
-  if (tab_interface) {
-    tab_deactivated_subscription_ =
-        tab_interface->RegisterWillDeactivate(base::BindRepeating(
-            &FileSelectHelper::OnTabDeactivated, base::Unretained(this)));
-  }
+  InitLifecycleObserver(web_contents_);
 
 #if !BUILDFLAG(IS_ANDROID)
   if (PictureInPictureWindowManager::GetInstance()
@@ -585,10 +641,10 @@ void FileSelectHelper::RunFileChooser(
 
   // Because this class returns notifications to the RenderViewHost, it is
   // difficult for callers to know how long to keep a reference to this
-  // instance. We AddRef() here to keep the instance alive after we return
-  // to the caller, until the last callback is received from the file dialog.
-  // At that point, we must call RunFileChooserEnd().
-  AddRef();
+  // instance. We keep a reference to ourself to keep the instance alive after
+  // we return to the caller, until the last callback is received from the
+  // file dialog. At that point, we must call RunFileChooserEnd().
+  self_ptr_ = this;
 }
 
 void FileSelectHelper::GetFileTypesInThreadPool(FileChooserParamsPtr params) {
@@ -686,15 +742,19 @@ void FileSelectHelper::RunFileChooserEnd() {
 #endif  // !BUILDFLAG(IS_ANDROID)
 
   tab_deactivated_subscription_ = {};
+  directory_enumeration_.reset();
 
   // If there are temporary files, then this instance needs to stick around
   // until web_contents_ is destroyed, so that this instance can delete the
   // temporary files.
-  if (!temporary_files_.empty())
+  if (!temporary_files_.empty()) {
     return;
+  }
 
-  if (listener_)
+  if (listener_) {
     listener_->FileSelectionCanceled();
+    listener_.reset();
+  }
   render_frame_host_ = nullptr;
   web_contents_ = nullptr;
   // If the dialog was actually opened, dispose of our reference.
@@ -703,7 +763,7 @@ void FileSelectHelper::RunFileChooserEnd() {
     select_file_dialog_.reset();
   }
 
-  Release();
+  self_ptr_.reset();
 }
 
 void FileSelectHelper::EnumerateDirectoryImpl(
@@ -715,12 +775,13 @@ void FileSelectHelper::EnumerateDirectoryImpl(
   dialog_type_ = ui::SelectFileDialog::SELECT_NONE;
   web_contents_ = tab;
   listener_ = std::move(listener);
+  InitLifecycleObserver(web_contents_);
   // Because this class returns notifications to the RenderViewHost, it is
   // difficult for callers to know how long to keep a reference to this
-  // instance. We AddRef() here to keep the instance alive after we return
-  // to the caller, until the last callback is received from the enumeration
-  // code. At that point, we must call EnumerateDirectoryEnd().
-  AddRef();
+  // instance. We keep a reference to ourself to keep the instance alive after
+  // we return to the caller, until the last callback is received from the
+  // enumeration code. At that point, we must call EnumerateDirectoryEnd().
+  self_ptr_ = this;
 #if BUILDFLAG(IS_ANDROID)
   if (path.IsContentUri()) {
     base::ThreadPool::PostTaskAndReplyWithResult(
@@ -736,7 +797,7 @@ void FileSelectHelper::EnumerateDirectoryImpl(
 // code. Perform any cleanup and release the reference we added in
 // EnumerateDirectoryImpl().
 void FileSelectHelper::EnumerateDirectoryEnd() {
-  Release();
+  RunFileChooserEnd();
 }
 
 void FileSelectHelper::RenderFrameHostChanged(
@@ -764,6 +825,20 @@ void FileSelectHelper::WebContentsDestroyed() {
   web_contents_ = nullptr;
   profile_ = nullptr;
   CleanUp();
+}
+
+void FileSelectHelper::InitLifecycleObserver(
+    content::WebContents* web_contents) {
+  DCHECK(web_contents);
+  content::WebContentsObserver::Observe(web_contents);
+
+  tabs::TabInterface* tab_interface =
+      tabs::TabInterface::MaybeGetFromContents(web_contents);
+  if (tab_interface) {
+    tab_deactivated_subscription_ =
+        tab_interface->RegisterWillDeactivate(base::BindRepeating(
+            &FileSelectHelper::OnTabDeactivated, base::Unretained(this)));
+  }
 }
 
 void FileSelectHelper::OnTabDeactivated(tabs::TabInterface* tab) {

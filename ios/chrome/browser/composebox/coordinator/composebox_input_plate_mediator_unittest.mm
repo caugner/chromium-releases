@@ -30,9 +30,12 @@
 #import "components/variations/variations_client.h"
 #import "components/version_info/channel.h"
 #import "ios/chrome/browser/composebox/coordinator/composebox_mode_holder.h"
+#import "ios/chrome/browser/composebox/public/composebox_attachment_selection.h"
+#import "ios/chrome/browser/composebox/public/composebox_focus_params.h"
 #import "ios/chrome/browser/composebox/public/composebox_input_plate_controls.h"
 #import "ios/chrome/browser/composebox/public/composebox_model_option.h"
 #import "ios/chrome/browser/composebox/public/features.h"
+#import "ios/chrome/browser/composebox/ui/composebox_input_item.h"
 #import "ios/chrome/browser/composebox/ui/composebox_input_plate_consumer.h"
 #import "ios/chrome/browser/composebox/ui/composebox_ui_input_state.h"
 #import "ios/chrome/browser/lens/ui_bundled/lens_availability.h"
@@ -52,6 +55,11 @@
 #import "testing/platform_test.h"
 #import "third_party/omnibox_proto/searchbox_config.pb.h"
 
+@interface ComposeboxInputPlateMediator (Testing)
+- (void)setState:(ComposeboxInputItemState)state
+          onItem:(ComposeboxInputItem*)item;
+@end
+
 // Mock consumer for the mediator.
 @interface TestComposeboxInputPlateConsumer
     : NSObject <ComposeboxInputPlateConsumer>
@@ -61,6 +69,9 @@
 @property(nonatomic, readonly) bool createImageDisabled;
 @property(nonatomic, readonly) bool canvasHidden;
 @property(nonatomic, readonly) bool deepSearchHidden;
+
+// Stored items for testing.
+@property(nonatomic, strong) NSArray<ComposeboxInputItem*>* items;
 
 // Whether the given control(s) are shown.
 - (BOOL)showsControls:(ComposeboxInputPlateControls)controls;
@@ -72,6 +83,7 @@
 }
 
 - (void)setItems:(NSArray<ComposeboxInputItem*>*)items {
+  _items = items;
 }
 - (void)updateState:(ComposeboxInputItemState)state
     forItemWithIdentifier:(const base::UnguessableToken&)identifier {
@@ -145,6 +157,14 @@ class ComposeboxInputPlateMediatorTest : public PlatformTest {
             pref_service_, template_url_service(),
             test_url_loader_factory->GetSafeWeakWrapper(),
             IdentityManagerFactory::GetForProfile(profile_.get()));
+
+    ON_CALL(*aim_eligibility_service_,
+            RegisterEligibilityChangedCallback(testing::_))
+        .WillByDefault([this](base::RepeatingClosure callback) {
+          this->aim_eligibility_callback_ = callback;
+          return base::CallbackListSubscription();
+        });
+
     auto session_handle = service_->CreateSession(
         std::move(config_params),
         contextual_search::ContextualSearchSource::kUnknown,
@@ -279,7 +299,11 @@ class ComposeboxInputPlateMediatorTest : public PlatformTest {
   }
 
   void ForwardSearchboxConfig() {
-    [mediator_ setSearchboxConfig:&searchbox_config_];
+    EXPECT_CALL(*aim_eligibility_service_, GetSearchboxConfig())
+        .WillRepeatedly(testing::Return(&searchbox_config_));
+    if (aim_eligibility_callback_) {
+      aim_eligibility_callback_.Run();
+    }
   }
 
   void EraseOmniboxText() { SetOmniboxText(u""); }
@@ -326,6 +350,7 @@ class ComposeboxInputPlateMediatorTest : public PlatformTest {
 
   base::test::TaskEnvironment task_environment_;
   TestingPrefServiceSimple pref_service_;
+  base::RepeatingClosure aim_eligibility_callback_;
   std::unique_ptr<TestProfileIOS> profile_;
   network::TestURLLoaderFactory test_factory_;
   scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory_;
@@ -349,7 +374,10 @@ TEST_F(ComposeboxInputPlateMediatorTest, ShowsSendButtonWithAttachments) {
   EXPECT_FALSE([consumer_ showsControls:ComposeboxInputPlateControls::kSend]);
   UIImage* image = [[UIImage alloc] init];
   NSItemProvider* provider = [[NSItemProvider alloc] initWithObject:image];
-  [mediator_ processImageItemProvider:provider assetID:@"123"];
+  [mediator_
+      processImageItemProvider:provider
+                       assetID:@"123"
+                        source:ComposeboxInputItemSource::kGalleryPicker];
   EXPECT_TRUE([consumer_ showsControls:ComposeboxInputPlateControls::kSend]);
 }
 
@@ -742,6 +770,166 @@ TEST_F(ComposeboxInputPlateMediatorTest, UploadsRawFilesWithDynamicMimeType) {
   ASSERT_TRUE(base::test::RunUntil([&]() { return called; }));
 
   [test_mediator disconnect];
+}
+
+#pragma mark - Awaiting Attachments Signals
+
+// Tests that the `awaitingAttachmentSignals` flag is set to `YES` when the
+// composebox is initialized with attachments during the focus flow.
+TEST_F(ComposeboxInputPlateMediatorTest, AwaitingSignalsSetOnFocus) {
+  SetAIMEligible(true);
+  SetDSEGoogle(true);
+
+  NSURL* url = [NSURL fileURLWithPath:@"/tmp/test.pdf"];
+  ComposeboxAttachmentSelection* selection =
+      [[ComposeboxAttachmentSelection alloc] initWithTabIDs:{}
+          cachedWebStateIDs:{}
+          images:@[]
+          files:@[ url ]];
+
+  ComposeboxFocusParams* params = [[ComposeboxFocusParams alloc]
+      initWithEntrypoint:ComposeboxEntrypoint::kOther
+                   query:nil
+                toolMode:ComposeboxMode::kRegularSearch
+               modelMode:ComposeboxModelOption::kNone
+          attachmentList:selection];
+
+  [mediator_ applyFocusParams:params];
+
+  id<ComposeboxOmniboxClientDelegate> delegate =
+      (id<ComposeboxOmniboxClientDelegate>)mediator_;
+  EXPECT_TRUE([delegate awaitingAttachmentSignals]);
+}
+
+// Tests that the `awaitingAttachmentSignals` flag remains `NO` when an
+// attachment is added manually after the session has started.
+TEST_F(ComposeboxInputPlateMediatorTest,
+       AwaitingSignalsNotSetOnManualAddition) {
+  SetAIMEligible(true);
+  SetDSEGoogle(true);
+
+  id<ComposeboxOmniboxClientDelegate> delegate =
+      (id<ComposeboxOmniboxClientDelegate>)mediator_;
+  EXPECT_FALSE([delegate awaitingAttachmentSignals]);
+
+  NSURL* url = [NSURL fileURLWithPath:@"/tmp/test.pdf"];
+  [mediator_ processFileURL:net::GURLWithNSURL(url) isPDF:YES];
+
+  EXPECT_FALSE([delegate awaitingAttachmentSignals]);
+}
+
+// Tests that the `awaitingAttachmentSignals` flag is cleared (set to `NO`)
+// when the last pending attachment is removed.
+TEST_F(ComposeboxInputPlateMediatorTest, AwaitingSignalsClearedOnItemRemoval) {
+  SetAIMEligible(true);
+  SetDSEGoogle(true);
+
+  NSURL* url = [NSURL fileURLWithPath:@"/tmp/test.pdf"];
+  ComposeboxAttachmentSelection* selection =
+      [[ComposeboxAttachmentSelection alloc] initWithTabIDs:{}
+          cachedWebStateIDs:{}
+          images:@[]
+          files:@[ url ]];
+
+  ComposeboxFocusParams* params = [[ComposeboxFocusParams alloc]
+      initWithEntrypoint:ComposeboxEntrypoint::kOther
+                   query:nil
+                toolMode:ComposeboxMode::kRegularSearch
+               modelMode:ComposeboxModelOption::kNone
+          attachmentList:selection];
+
+  [mediator_ applyFocusParams:params];
+
+  id<ComposeboxOmniboxClientDelegate> delegate =
+      (id<ComposeboxOmniboxClientDelegate>)mediator_;
+  EXPECT_TRUE([delegate awaitingAttachmentSignals]);
+
+  // Get the item from consumer.
+  NSArray<ComposeboxInputItem*>* items = consumer_.items;
+  ASSERT_EQ(items.count, 1U);
+  ComposeboxInputItem* item = items.firstObject;
+
+  // Remove the item.
+  [mediator_ removeItem:item];
+
+  EXPECT_FALSE([delegate awaitingAttachmentSignals]);
+}
+
+// Tests that the `awaitingAttachmentSignals` flag is cleared (set to `NO`)
+// when the last pending attachment enters an error state.
+TEST_F(ComposeboxInputPlateMediatorTest, AwaitingSignalsClearedOnItemError) {
+  SetAIMEligible(true);
+  SetDSEGoogle(true);
+
+  NSURL* url = [NSURL fileURLWithPath:@"/tmp/test.pdf"];
+  ComposeboxAttachmentSelection* selection =
+      [[ComposeboxAttachmentSelection alloc] initWithTabIDs:{}
+          cachedWebStateIDs:{}
+          images:@[]
+          files:@[ url ]];
+
+  ComposeboxFocusParams* params = [[ComposeboxFocusParams alloc]
+      initWithEntrypoint:ComposeboxEntrypoint::kOther
+                   query:nil
+                toolMode:ComposeboxMode::kRegularSearch
+               modelMode:ComposeboxModelOption::kNone
+          attachmentList:selection];
+
+  [mediator_ applyFocusParams:params];
+
+  id<ComposeboxOmniboxClientDelegate> delegate =
+      (id<ComposeboxOmniboxClientDelegate>)mediator_;
+  EXPECT_TRUE([delegate awaitingAttachmentSignals]);
+
+  // Get the item from consumer.
+  NSArray<ComposeboxInputItem*>* items = consumer_.items;
+  ASSERT_EQ(items.count, 1U);
+  ComposeboxInputItem* item = items.firstObject;
+
+  // Set state to error.
+  [mediator_ setState:ComposeboxInputItemState::kError onItem:item];
+
+  EXPECT_FALSE([delegate awaitingAttachmentSignals]);
+}
+
+// Tests that the `awaitingAttachmentSignals` flag is cleared (set to `NO`)
+// when AI Mode is removed and attachments are invalidated before they load.
+TEST_F(ComposeboxInputPlateMediatorTest,
+       AwaitingSignalsClearedOnModeChangeWithInvalidation) {
+  SetAIMEligible(true);
+  SetDSEGoogle(true);
+
+  NSURL* url = [NSURL fileURLWithPath:@"/tmp/test.pdf"];
+  ComposeboxAttachmentSelection* selection =
+      [[ComposeboxAttachmentSelection alloc] initWithTabIDs:{}
+          cachedWebStateIDs:{}
+          images:@[]
+          files:@[ url ]];
+
+  ComposeboxFocusParams* params = [[ComposeboxFocusParams alloc]
+      initWithEntrypoint:ComposeboxEntrypoint::kOther
+                   query:nil
+                toolMode:ComposeboxMode::kRegularSearch
+               modelMode:ComposeboxModelOption::kNone
+          attachmentList:selection];
+
+  [mediator_ applyFocusParams:params];
+
+  id<ComposeboxOmniboxClientDelegate> delegate =
+      (id<ComposeboxOmniboxClientDelegate>)mediator_;
+  EXPECT_TRUE([delegate awaitingAttachmentSignals]);
+
+  // Get the item from consumer.
+  NSArray<ComposeboxInputItem*>* items = consumer_.items;
+  ASSERT_EQ(items.count, 1U);
+  ComposeboxInputItem* item = items.firstObject;
+
+  // Simulate mode change to RegularSearch and invalidation of the item.
+  [mediator_ inputStateManager:nil
+                 didChangeMode:ComposeboxMode::kRegularSearch
+        invalidatedAttachments:@[ item ]];
+
+  EXPECT_FALSE([delegate awaitingAttachmentSignals]);
 }
 
 }  // namespace

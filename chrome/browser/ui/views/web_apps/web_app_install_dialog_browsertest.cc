@@ -21,23 +21,23 @@
 #include "chrome/browser/ui/test/test_browser_dialog.h"
 #include "chrome/browser/ui/views/web_apps/progress_delay.h"
 #include "chrome/browser/ui/views/web_apps/web_app_install_dialog_delegate.h"
-#include "chrome/browser/ui/views/web_apps/web_app_install_dialog_flow_view.h"
 #include "chrome/browser/ui/views/web_apps/web_app_install_flow_dialog_delegate.h"
 #include "chrome/browser/ui/views/web_apps/web_app_install_options_view.h"
 #include "chrome/browser/ui/web_applications/web_app_dialogs.h"
-#include "chrome/browser/web_applications/ui_manager/update_dialog_types.h"
 #include "chrome/browser/web_applications/web_app_install_info.h"
 #include "chrome/browser/web_applications/web_app_screenshot_fetcher.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/vector_icons/vector_icons.h"
 #include "components/webapps/browser/installable/ml_install_operation_tracker.h"
 #include "components/webapps/browser/installable/ml_installability_promoter.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/interaction/element_tracker.h"
+#include "ui/base/models/image_model.h"
+#include "ui/color/color_id.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/views/interaction/element_tracker_views.h"
 #include "ui/views/test/dialog_test.h"
@@ -69,16 +69,6 @@ int GetTimesToAcceptDialog(const std::string& name, InstallOsType os_type) {
 
 // The number of times the dialog could be accepted before the dialog closes.
 const int kAcceptsBeforeClosure = 3;
-
-WebAppInstallFlowView* GetWebAppInstallFlowView(views::Widget* widget) {
-  if (!widget) {
-    return nullptr;
-  }
-  return static_cast<WebAppInstallFlowView*>(
-      views::ElementTrackerViews::GetInstance()->GetFirstMatchingView(
-          WebAppInstallFlowDialogDelegate::kInstallDialogFlowViewId,
-          views::ElementTrackerViews::GetContextForWidget(widget)));
-}
 
 }  // namespace
 
@@ -121,7 +111,9 @@ class WebAppInstallDialogBrowserTest
  public:
   WebAppInstallDialogBrowserTest() {
     // TODO(b/492657940): Remove this once the feature is launched.
-    feature_list_.InitAndEnableFeature(features::kWebAppInstallDialog);
+    feature_list_.InitWithFeatures(
+        {features::kWebAppInstallDialog, features::kWebAppInstallDialogWinPin},
+        {});
   }
   WebAppInstallDialogBrowserTest(const WebAppInstallDialogBrowserTest&) =
       delete;
@@ -148,7 +140,20 @@ class WebAppInstallDialogBrowserTest
     auto install_tracker = promoter->RegisterCurrentInstallForWebContents(
         webapps::WebappInstallSource::MENU_BROWSER_TAB);
 
-    WebAppInstallFlowDialogDelegate::Show(
+    std::optional<ui::ImageModel> folder_image_model;
+    std::optional<std::u16string> folder_label;
+    // TODO(crbug.com/513311056): Mac uses the folder icon from the OS. Because
+    // screenshot tests are only built on Windows, we have to use a placeholder
+    // or skip these tests. We should explore the options for making Mac tests
+    // more robust.
+    if (os_type == InstallOsType::kMac) {
+      folder_image_model = ui::ImageModel::FromVectorIcon(
+          vector_icons::kFolderChromeRefreshOldIcon, ui::kColorIcon,
+          kLargeImageSize);
+      folder_label = u"Test Folder";
+    }
+
+    delegate_ = WebAppInstallFlowDialogDelegate::Show(
         browser()->tab_strip_model()->GetActiveWebContents(),
         std::move(install_info), std::move(install_tracker),
         base::BindOnce(&WebAppInstallDialogBrowserTest::OnDialogCompleted,
@@ -159,7 +164,8 @@ class WebAppInstallDialogBrowserTest
             : base::WeakPtr<WebAppScreenshotFetcher>(),
         /*show_initiating_origin=*/false, dialog_type, os_type,
         std::make_unique<ProgressDelay>(/*delay_time=*/base::Seconds(0),
-                                        /*steps=*/1));
+                                        /*steps=*/1),
+        folder_image_model, folder_label);
 
     views::Widget* widget = waiter.WaitIfNeededAndGet();
     ASSERT_NE(nullptr, widget);
@@ -194,9 +200,7 @@ class WebAppInstallDialogBrowserTest
 
       // Wait for the dialog to reach the Successful step.
       ASSERT_TRUE(base::test::RunUntil([&]() {
-        WebAppInstallFlowView* flow_view =
-            GetWebAppInstallFlowView(widget_.get());
-        return flow_view && flow_view->GetCurrentStepForTesting() ==
+        return delegate_ && delegate_->GetCurrentStepForTesting() ==
                                 InstallDialogStep::kSuccessful;
       }));
     }
@@ -222,6 +226,7 @@ class WebAppInstallDialogBrowserTest
   WebAppInstallationAcceptanceResultCallback install_result_callback_;
   TestWebAppScreenshotFetcher screenshot_fetcher_;
   base::WeakPtr<views::Widget> widget_ = nullptr;
+  base::WeakPtr<WebAppInstallFlowDialogDelegate> delegate_ = nullptr;
 
  private:
   InstallDialogType GetDialogType() { return std::get<1>(GetParam()); }
@@ -230,7 +235,13 @@ class WebAppInstallDialogBrowserTest
   base::WeakPtrFactory<WebAppInstallDialogBrowserTest> weak_ptr_factory_{this};
 };
 
-IN_PROC_BROWSER_TEST_P(WebAppInstallDialogBrowserTest, InvokeUi_Intro) {
+// TODO(crbug.com/510455863): Re-enable the test
+#if BUILDFLAG(IS_WIN)
+#define MAYBE_InvokeUi_Intro DISABLED_InvokeUi_Intro
+#else
+#define MAYBE_InvokeUi_Intro InvokeUi_Intro
+#endif
+IN_PROC_BROWSER_TEST_P(WebAppInstallDialogBrowserTest, MAYBE_InvokeUi_Intro) {
   ShowAndVerifyUi();
 }
 
@@ -312,6 +323,12 @@ INSTANTIATE_TEST_SUITE_P(
     });
 
 class WebAppInstallDialogCheckboxTest : public WebAppInstallDialogBrowserTest {
+ public:
+  WebAppInstallDialogCheckboxTest() {
+    checkbox_feature_list_.InitAndDisableFeature(
+        features::kWebAppInstallDialogWinPin);
+  }
+
  protected:
   WebAppInstallOptionsView* NavigateToAndGetOptionsView() {
     ShowUi("InstallOptions");
@@ -319,7 +336,7 @@ class WebAppInstallDialogCheckboxTest : public WebAppInstallDialogBrowserTest {
 
     views::View* options_view =
         views::ElementTrackerViews::GetInstance()->GetFirstMatchingView(
-            WebAppInstallOptionsView::kViewId,
+            WebAppInstallFlowDialogDelegate::kOptionsViewId,
             views::ElementTrackerViews::GetContextForWidget(widget_.get()));
     EXPECT_TRUE(options_view);
     if (!options_view) {
@@ -345,6 +362,9 @@ class WebAppInstallDialogCheckboxTest : public WebAppInstallDialogBrowserTest {
 
   bool IsWin() { return GetOsType() == InstallOsType::kWin; }
   bool IsCros() { return GetOsType() == InstallOsType::kCros; }
+
+ private:
+  base::test::ScopedFeatureList checkbox_feature_list_;
 };
 
 IN_PROC_BROWSER_TEST_P(WebAppInstallDialogCheckboxTest,
@@ -372,6 +392,49 @@ IN_PROC_BROWSER_TEST_P(WebAppInstallDialogCheckboxTest,
 }
 
 IN_PROC_BROWSER_TEST_P(WebAppInstallDialogCheckboxTest,
+                       VerifyWinCheckboxNotPresent) {
+  if (!IsWin()) {
+    GTEST_SKIP() << "Creating desktop shortcut and pinning to task bar only "
+                    "works for Windows";
+  }
+  WebAppInstallOptionsView* options_view = NavigateToAndGetOptionsView();
+  ASSERT_TRUE(options_view);
+
+  views::View* checkbox =
+      views::ElementTrackerViews::GetInstance()->GetFirstMatchingView(
+          WebAppInstallOptionsView::kPinToTaskbarCheckboxId,
+          views::ElementTrackerViews::GetContextForWidget(widget_.get()));
+  EXPECT_FALSE(checkbox);
+
+  CompleteInstallationAndVerifyDialogAccepted();
+  EXPECT_EQ(dialog_install_info_->add_to_quick_launch_bar, false);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    /* prefix */,
+    WebAppInstallDialogCheckboxTest,
+    testing::Combine(testing::Values(InstallOsType::kCros, InstallOsType::kWin),
+                     testing::Values(InstallDialogType::kSimple,
+                                     InstallDialogType::kDetailed,
+                                     InstallDialogType::kDiy)),
+    [](const testing::TestParamInfo<WebAppInstallDialogTestParams>& info) {
+      std::string os_type = base::ToString(std::get<0>(info.param));
+      std::string dialog_type = base::ToString(std::get<1>(info.param));
+      return os_type + "_" + dialog_type;
+    });
+
+class WebAppInstallDialogCheckboxEnabledTest
+    : public WebAppInstallDialogCheckboxTest {
+ public:
+  WebAppInstallDialogCheckboxEnabledTest() {
+    feature_list_.InitAndEnableFeature(features::kWebAppInstallDialogWinPin);
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_P(WebAppInstallDialogCheckboxEnabledTest,
                        VerifyWinCheckboxUnchecked) {
   if (!IsWin()) {
     GTEST_SKIP() << "Creating desktop shortcut and pinning to task bar only "
@@ -386,7 +449,7 @@ IN_PROC_BROWSER_TEST_P(WebAppInstallDialogCheckboxTest,
   EXPECT_EQ(dialog_install_info_->add_to_quick_launch_bar, false);
 }
 
-IN_PROC_BROWSER_TEST_P(WebAppInstallDialogCheckboxTest,
+IN_PROC_BROWSER_TEST_P(WebAppInstallDialogCheckboxEnabledTest,
                        VerifyWinCheckboxChecked) {
   if (!IsWin()) {
     GTEST_SKIP() << "Creating desktop shortcut and pinning to task bar only "
@@ -403,8 +466,8 @@ IN_PROC_BROWSER_TEST_P(WebAppInstallDialogCheckboxTest,
 
 INSTANTIATE_TEST_SUITE_P(
     /* prefix */,
-    WebAppInstallDialogCheckboxTest,
-    testing::Combine(testing::Values(InstallOsType::kCros, InstallOsType::kWin),
+    WebAppInstallDialogCheckboxEnabledTest,
+    testing::Combine(testing::Values(InstallOsType::kWin),
                      testing::Values(InstallDialogType::kSimple,
                                      InstallDialogType::kDetailed,
                                      InstallDialogType::kDiy)),

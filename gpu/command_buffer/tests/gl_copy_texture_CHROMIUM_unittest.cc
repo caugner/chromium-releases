@@ -1671,8 +1671,6 @@ TEST_P(GLCopyTextureCHROMIUMTest, UninitializedSource) {
   glBindTexture(GL_TEXTURE_2D, textures_[0]);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, kWidth, kHeight, 0, GL_RGBA,
                GL_UNSIGNED_BYTE, nullptr);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
   if (copy_type == TexImage) {
     glCopyTextureCHROMIUM(textures_[0], 0, GL_TEXTURE_2D, textures_[1], 0,
@@ -1711,8 +1709,6 @@ TEST_F(GLCopyTextureCHROMIUMTest, CopySubTextureDimension) {
   glBindTexture(GL_TEXTURE_2D, textures_[0]);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE,
                nullptr);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
   glBindTexture(GL_TEXTURE_2D, textures_[1]);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 3, 3, 0, GL_RGBA, GL_UNSIGNED_BYTE,
@@ -1751,8 +1747,6 @@ TEST_F(GLCopyTextureCHROMIUMTest, CopyTextureInvalidTextureIds) {
   glBindTexture(GL_TEXTURE_2D, textures_[0]);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE,
                nullptr);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
   glBindTexture(GL_TEXTURE_2D, textures_[1]);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 3, 3, 0, GL_RGBA, GL_UNSIGNED_BYTE,
@@ -1783,8 +1777,6 @@ TEST_F(GLCopyTextureCHROMIUMTest, CopySubTextureInvalidTextureIds) {
   glBindTexture(GL_TEXTURE_2D, textures_[0]);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE,
                nullptr);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
   glBindTexture(GL_TEXTURE_2D, textures_[1]);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 3, 3, 0, GL_RGBA, GL_UNSIGNED_BYTE,
@@ -1817,8 +1809,6 @@ TEST_F(GLCopyTextureCHROMIUMTest, CopySubTextureOffset) {
   glBindTexture(GL_TEXTURE_2D, textures_[0]);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE,
                rgba_pixels);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
   uint8_t transparent_pixels[4 * 4] = {0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u,
                                        0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u};
@@ -1955,6 +1945,106 @@ TEST_P(GLCopyTextureCHROMIUMES3Test, RasterizerDiscardDoesNotInterfere) {
   glDeleteFramebuffers(1, &fbo);
   glDeleteTextures(1, &src);
   glDeleteTextures(1, &dest);
+#endif  // !BUILDFLAG(ENABLE_VALIDATING_COMMAND_DECODER)
+}
+
+// A bound GL_PIXEL_UNPACK_BUFFER must not be picked up when allocating the
+// intermediate texture used by the DRAW_AND_COPY / DRAW_AND_READBACK paths.
+TEST_P(GLCopyTextureCHROMIUMES3Test, PixelUnpackBufferDoesNotInterfere) {
+#if !BUILDFLAG(ENABLE_VALIDATING_COMMAND_DECODER)
+  GTEST_SKIP() << "Test only reproduces with validating decoder";
+#else
+  if (gl_.gpu_preferences().use_passthrough_cmd_decoder) {
+    GTEST_SKIP() << "Skipping test because it's run with the passthrough "
+                    "command decoder";
+  }
+
+  if (!gl_.IsInitialized()) {
+    GTEST_SKIP() << "ES3 context unavailable";
+  }
+
+#if BUILDFLAG(IS_ANDROID) && defined(ARCH_CPU_X86_FAMILY)
+  GTEST_SKIP() << "Skipping test on Android x86/x64";
+#else
+
+  constexpr GLsizei kW = 8, kH = 8;
+  const uint8_t kGreen[4] = {0u, 255u, 0u, 255u};
+
+  GLuint src;
+  glGenTextures(1, &src);
+  glBindTexture(GL_TEXTURE_2D, src);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  std::vector<uint8_t> green(kW * kH * 4);
+  for (size_t i = 0; i < green.size(); i += 4) {
+    green[i + 0] = kGreen[0];
+    green[i + 1] = kGreen[1];
+    green[i + 2] = kGreen[2];
+    green[i + 3] = kGreen[3];
+  }
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, kW, kH, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+               green.data());
+  ASSERT_EQ(static_cast<GLenum>(GL_NO_ERROR), glGetError());
+
+  // Cube-map destination so the copy goes through an intermediate texture.
+  GLuint dest;
+  glGenTextures(1, &dest);
+  glBindTexture(GL_TEXTURE_CUBE_MAP, dest);
+  glTexParameterf(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameterf(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  std::vector<uint8_t> zeros(kW * kH * 4, 0);
+  for (int face = 0; face < 6; ++face) {
+    glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, 0, GL_RGBA8, kW, kH, 0,
+                 GL_RGBA, GL_UNSIGNED_BYTE, zeros.data());
+  }
+  ASSERT_EQ(static_cast<GLenum>(GL_NO_ERROR), glGetError());
+
+  // Bind a tiny pixel-unpack buffer and leave it bound across the copy. The
+  // copy must not source the intermediate texture's storage from it.
+  GLuint pbo;
+  glGenBuffers(1, &pbo);
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+  const uint8_t kByte = 0;
+  glBufferData(GL_PIXEL_UNPACK_BUFFER, sizeof(kByte), &kByte, GL_STATIC_DRAW);
+  ASSERT_EQ(static_cast<GLenum>(GL_NO_ERROR), glGetError());
+
+  // flip_y forces a draw-based path; cube-map dest requires an intermediate.
+  CopyType copy_type = GetParam();
+  if (copy_type == TexImage) {
+    glCopyTextureCHROMIUM(src, 0, GL_TEXTURE_CUBE_MAP_POSITIVE_X, dest, 0,
+                          GL_RGBA8, GL_UNSIGNED_BYTE, GL_TRUE, GL_FALSE,
+                          GL_FALSE);
+  } else {
+    glCopySubTextureCHROMIUM(src, 0, GL_TEXTURE_CUBE_MAP_POSITIVE_X, dest, 0, 0,
+                             0, 0, 0, kW, kH, GL_TRUE, GL_FALSE, GL_FALSE);
+  }
+  EXPECT_EQ(static_cast<GLenum>(GL_NO_ERROR), glGetError());
+
+  // The client binding must be preserved.
+  GLint bound_pbo = 0;
+  glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &bound_pbo);
+  EXPECT_EQ(pbo, static_cast<GLuint>(bound_pbo));
+
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+  GLuint fbo;
+  glGenFramebuffers(1, &fbo);
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                         GL_TEXTURE_CUBE_MAP_POSITIVE_X, dest, 0);
+  ASSERT_EQ(static_cast<GLenum>(GL_FRAMEBUFFER_COMPLETE),
+            glCheckFramebufferStatus(GL_FRAMEBUFFER));
+
+  EXPECT_TRUE(GLTestHelper::CheckPixels(0, 0, kW, kH, 0, kGreen, nullptr));
+  EXPECT_EQ(static_cast<GLenum>(GL_NO_ERROR), glGetError());
+
+  glDeleteFramebuffers(1, &fbo);
+  glDeleteBuffers(1, &pbo);
+  glDeleteTextures(1, &src);
+  glDeleteTextures(1, &dest);
+#endif  // BUILDFLAG(IS_ANDROID) && defined(ARCH_CPU_X86_FAMILY)
 #endif  // !BUILDFLAG(ENABLE_VALIDATING_COMMAND_DECODER)
 }
 

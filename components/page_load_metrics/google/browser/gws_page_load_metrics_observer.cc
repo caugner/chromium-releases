@@ -294,6 +294,10 @@ const char kHistogramAIOHasViewportEndTime[] =
 const char kHistogramAIOCompleteSuffix[] = ".Complete";
 const char kHistogramAIOInCompleteSuffix[] = ".Incomplete";
 
+const char kSuffixFCP[] = "FCP";
+const char kSuffixAFTEnd[] = "AFTEnd";
+const char kSuffixComplete[] = "Complete";
+
 }  // namespace internal
 
 namespace {
@@ -442,6 +446,27 @@ std::optional<base::TimeDelta> CalculateActualNavigationOffset(
     }
   }
   return std::nullopt;
+}
+void RecordFontMetrics(
+    const page_load_metrics::mojom::FontLoadingMetricsPtr& font_loading_metrics,
+    std::string_view suffix) {
+  if (!font_loading_metrics) {
+    return;
+  }
+
+  if (font_loading_metrics->fallback_duration) {
+    base::UmaHistogramCustomTimes(
+        base::StrCat(
+            {"PageLoad.Clients.GoogleSearch.FontLoading.FallbackDuration2.",
+             suffix}),
+        font_loading_metrics->fallback_duration.value(), base::Milliseconds(1),
+        base::Minutes(10), 100);
+  }
+
+  base::UmaHistogramCounts100(
+      base::StrCat(
+          {"PageLoad.Clients.GoogleSearch.FontLoading.FallbackCount.", suffix}),
+      font_loading_metrics->fallback_count);
 }
 
 }  // namespace
@@ -758,6 +783,20 @@ void GWSPageLoadMetricsObserver::OnFirstContentfulPaintInPage(
                       internal::kHistogramDuplicateIgnoredSuffix}),
         timing.paint_timing->first_contentful_paint.value());
   }
+
+  const page_load_metrics::mojom::FontLoadingMetricsPtr& font_loading_metrics =
+      GetDelegate().GetFontLoadingMetrics();
+  if (font_loading_metrics) {
+    RecordFontMetrics(font_loading_metrics, internal::kSuffixFCP);
+
+    uint32_t hits = font_loading_metrics->shape_cache_hit_count;
+    uint32_t misses = font_loading_metrics->shape_cache_miss_count;
+    if (hits + misses > 0) {
+      base::UmaHistogramPercentage(
+          "PageLoad.Clients.GoogleSearch.FontLoading.ShapeCacheHitRate.FCP",
+          100 * static_cast<uint64_t>(hits) / (hits + misses));
+    }
+  }
 }
 
 void GWSPageLoadMetricsObserver::OnDomContentLoadedEventStart(
@@ -898,6 +937,7 @@ void GWSPageLoadMetricsObserver::OnComplete(
     }
   }
   LogMetricsOnComplete(timing);
+  LogFontMetrics();
 }
 
 void GWSPageLoadMetricsObserver::OnCustomUserTimingMarkObserved(
@@ -926,6 +966,9 @@ void GWSPageLoadMetricsObserver::OnCustomUserTimingMarkObserved(
                        AdjustPerformanceMarkTiming(mark));
       if (mark_timing_info->timing_member) {
         this->*(*mark_timing_info->timing_member) = mark->start_time;
+      }
+      if (mark->mark_name == internal::kGwsAFTEndMarkName) {
+        LogFontMetricsAtAFTEnd();
       }
     }
   }
@@ -995,6 +1038,7 @@ page_load_metrics::PageLoadMetricsObserver::ObservePolicy
 GWSPageLoadMetricsObserver::FlushMetricsOnAppEnterBackground(
     const page_load_metrics::mojom::PageLoadTiming& timing) {
   LogMetricsOnComplete(timing);
+  LogFontMetrics();
   return STOP_OBSERVING;
 }
 
@@ -1128,6 +1172,55 @@ void GWSPageLoadMetricsObserver::LogMetricsOnComplete(
     PAGE_LOAD_HISTOGRAM(context_menu_histogram_name,
                         all_frames_largest_contentful_paint.Time().value());
   }
+}
+
+void GWSPageLoadMetricsObserver::LogFontMetrics() {
+  // Only log if the page was started in the foreground.
+  if (!GetDelegate().StartedInForeground()) {
+    return;
+  }
+
+  // If it is a prerendered page, only log if it was activated in the
+  // foreground.
+  if (is_prerendered_ &&
+      !GetDelegate().WasPrerenderedThenActivatedInForeground()) {
+    return;
+  }
+
+  const page_load_metrics::mojom::FontLoadingMetricsPtr& font_loading_metrics =
+      GetDelegate().GetFontLoadingMetrics();
+  if (font_loading_metrics) {
+    RecordFontMetrics(font_loading_metrics, internal::kSuffixComplete);
+
+    if (font_loading_metrics->fallback_initial_duration) {
+      PAGE_LOAD_HISTOGRAM2(
+          "PageLoad.Clients.GoogleSearch.FontLoading.InitialFallbackDuration2."
+          "Complete",
+          font_loading_metrics->fallback_initial_duration.value());
+    }
+  }
+}
+
+void GWSPageLoadMetricsObserver::LogFontMetricsAtAFTEnd() {
+  const page_load_metrics::mojom::FontLoadingMetricsPtr& font_loading_metrics =
+      GetDelegate().GetFontLoadingMetrics();
+  if (!font_loading_metrics) {
+    return;
+  }
+
+  // Only log if the page was started in the foreground.
+  if (!GetDelegate().StartedInForeground()) {
+    return;
+  }
+
+  // If it is a prerendered page, only log if it was activated in the
+  // foreground.
+  if (is_prerendered_ &&
+      !GetDelegate().WasPrerenderedThenActivatedInForeground()) {
+    return;
+  }
+
+  RecordFontMetrics(font_loading_metrics, internal::kSuffixAFTEnd);
 }
 
 void GWSPageLoadMetricsObserver::RecordNavigationTimingHistograms() {
