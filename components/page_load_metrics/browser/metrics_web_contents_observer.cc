@@ -585,14 +585,6 @@ void MetricsWebContentsObserver::OnCookiesAccessedImpl(
   }
 }
 
-void MetricsWebContentsObserver::DidActivatePreviewedPage(
-    base::TimeTicks activation_time) {
-  // TODO(b:334709645): Investigate how nullptr cases happen.
-  if (primary_page_) {
-    primary_page_->DidActivatePreviewedPage(activation_time);
-  }
-}
-
 void MetricsWebContentsObserver::OnStorageAccessed(
     content::RenderFrameHost* rfh,
     const GURL& url,
@@ -692,7 +684,11 @@ void MetricsWebContentsObserver::DidFinishNavigation(
   // don't commit, such as HTTP 204 responses and downloads.
   if (!navigation_handle->HasCommitted() &&
       navigation_handle->GetNetErrorCode() == net::ERR_ABORTED &&
-      navigation_handle->GetResponseHeaders()) {
+      navigation_handle->GetResponseHeaders() &&
+      // WebUI navigations (e.g. chrome://) always receive headers synchronously
+      // on start (see InitialWebUINavigationURLLoader), but they are not
+      // downloads or 204s, so we should not ignore them if they are aborted.
+      !navigation_handle->GetURL().SchemeIs("chrome")) {
     if (navigation_handle_tracker) {
       navigation_handle_tracker->DidInternalNavigationAbort(navigation_handle);
       navigation_handle_tracker->StopTracking();
@@ -1193,14 +1189,12 @@ void MetricsWebContentsObserver::OnTimingUpdated(
 void MetricsWebContentsObserver::OnCustomUserTimingUpdated(
     content::RenderFrameHost* rfh,
     mojom::CustomUserTimingMarkPtr custom_timing) {
-  // Buffer timing data before seinding to the tracker as the tracker may not
-  // exist in some cases, in that case the buffered timings are sent next time.
-  page_load_custom_timings_.push_back(std::move(custom_timing));
   TRACE_EVENT("loading",
-              "MetricsWebContentsObserver::OnCustomUserTimingUpdated",
-              "buffered_timings_count", page_load_custom_timings_.size());
+              "MetricsWebContentsObserver::OnCustomUserTimingUpdated");
   if (PageLoadTracker* tracker = GetPageLoadTrackerIfValid(rfh)) {
-    tracker->AddCustomUserTimings(std::move(page_load_custom_timings_));
+    std::vector<mojom::CustomUserTimingMarkPtr> custom_timings;
+    custom_timings.push_back(std::move(custom_timing));
+    tracker->AddCustomUserTimings(std::move(custom_timings));
   }
 }
 
@@ -1238,9 +1232,9 @@ void MetricsWebContentsObserver::UpdateTiming(
     mojom::FontLoadingMetricsPtr font_loading_metrics) {
   TRACE_EVENT("loading", "MetricsWebContentsObserver::UpdateTiming",
               "custom_timings_count", user_timings.size());
-  content::RenderFrameHost* render_frame_host =
-      page_load_metrics_receivers_.GetCurrentTargetFrame();
-  OnTimingUpdated(render_frame_host, std::move(timing), std::move(metadata),
+  content::RenderFrameHost& render_frame_host =
+      page_load_metrics_receivers_.CurrentTargetFrame();
+  OnTimingUpdated(&render_frame_host, std::move(timing), std::move(metadata),
                   new_features, resources, std::move(render_data),
                   std::move(cpu_timing), std::move(event_timings),
                   subresource_load_metrics, std::move(soft_navigation_metrics),
@@ -1252,9 +1246,9 @@ void MetricsWebContentsObserver::AddCustomUserTiming(
     mojom::CustomUserTimingMarkPtr custom_timing) {
   TRACE_EVENT("loading", "MetricsWebContentsObserver::AddCustomUserTiming",
               "mark_name", custom_timing->mark_name);
-  content::RenderFrameHost* render_frame_host =
-      page_load_metrics_receivers_.GetCurrentTargetFrame();
-  OnCustomUserTimingUpdated(render_frame_host, std::move(custom_timing));
+  content::RenderFrameHost& render_frame_host =
+      page_load_metrics_receivers_.CurrentTargetFrame();
+  OnCustomUserTimingUpdated(&render_frame_host, std::move(custom_timing));
 }
 
 bool MetricsWebContentsObserver::ShouldTrackMainFrameNavigation(

@@ -17,6 +17,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_selections.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -282,6 +283,7 @@ IN_PROC_BROWSER_TEST_F(ProfileKeyedServiceBrowserTest,
     // in chrome: using `BrowserContextKeyedServiceShutdownNotifierFactory`:
     // which does not yet have an implementation using `ProfileSelections`.
     "BrowserManagerService",
+    "ExtensionKeybindingRegistryShutdownNotifierFactory",
 #if BUILDFLAG(IS_CHROMEOS)
     "GalleryWatchManager",
     "MediaFileSystemRegistry",
@@ -290,6 +292,7 @@ IN_PROC_BROWSER_TEST_F(ProfileKeyedServiceBrowserTest,
     "PermissionsUpdaterShutdownFactory",
     "PluginInfoHostImpl",
     "TurnSyncOnHelperShutdownNotifier",
+    "WebRequestProxyingWebTransport",
 
     // This service is needed to handle navigations in the Profile Picker.
     "ChromePolicyBlocklistService",
@@ -336,6 +339,7 @@ IN_PROC_BROWSER_TEST_F(ProfileKeyedServiceBrowserTest,
     // in chrome: using `BrowserContextKeyedServiceShutdownNotifierFactory`:
     // which does not yet have an implementation using `ProfileSelections`.
     "BrowserManagerService",
+    "ExtensionKeybindingRegistryShutdownNotifierFactory",
 #if BUILDFLAG(IS_CHROMEOS)
     "GalleryWatchManager",
     "MediaFileSystemRegistry",
@@ -344,6 +348,7 @@ IN_PROC_BROWSER_TEST_F(ProfileKeyedServiceBrowserTest,
     "PermissionsUpdaterShutdownFactory",
     "PluginInfoHostImpl",
     "TurnSyncOnHelperShutdownNotifier",
+    "WebRequestProxyingWebTransport",
 
     // Those services are needed to be able to display IPHs in the Profile
     // Picker.
@@ -368,7 +373,15 @@ IN_PROC_BROWSER_TEST_F(ProfileKeyedServiceBrowserTest,
 class ProfileKeyedServiceGuestBrowserTest
     : public ProfileKeyedServiceBrowserTest {
  public:
-  ProfileKeyedServiceGuestBrowserTest() = default;
+  ProfileKeyedServiceGuestBrowserTest() {
+    // TODO(crbug.com/452061489): Fix tests that fail when the WebUI Omnibox is
+    // enabled and then remove this.
+    scoped_feature_list_.InitWithFeatures(
+        /*enabled_features=*/{},
+        /*disabled_features=*/
+        {omnibox::internal::kWebUIOmniboxPopup,
+         omnibox::internal::kWebUIOmniboxAimPopup});
+  }
   ~ProfileKeyedServiceGuestBrowserTest() override = default;
 
   // ProfileKeyedServiceBrowserTest:
@@ -380,15 +393,34 @@ class ProfileKeyedServiceGuestBrowserTest
         ash::switches::kLoginUser,
         user_manager::GuestAccountId().GetUserEmail());
   }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 #else
-using ProfileKeyedServiceGuestBrowserTest = ProfileKeyedServiceBrowserTest;
+class ProfileKeyedServiceGuestBrowserTest
+    : public ProfileKeyedServiceBrowserTest {
+ public:
+  ProfileKeyedServiceGuestBrowserTest() {
+    // TODO(crbug.com/452061489): Fix tests that fail when the WebUI Omnibox is
+    // enabled and then remove this.
+    scoped_feature_list_.InitWithFeatures(
+        /*enabled_features=*/{},
+        /*disabled_features=*/{omnibox::internal::kWebUIOmniboxPopup,
+                               omnibox::internal::kWebUIOmniboxAimPopup});
+  }
+  ~ProfileKeyedServiceGuestBrowserTest() override = default;
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
 #endif
 
 IN_PROC_BROWSER_TEST_F(ProfileKeyedServiceGuestBrowserTest,
                        GuestProfileOTR_NeededServices) {
   // clang-format off
   std::set<std::string> guest_otr_active_services {
+    "AimEligibilityExtensionBridge",
     "AlarmManager",
     "AXMainNodeAnnotatorController",
     "AutocompleteActionPredictor",
@@ -406,9 +438,7 @@ IN_PROC_BROWSER_TEST_F(ProfileKeyedServiceGuestBrowserTest,
 #endif  // BUILDFLAG(IS_CHROMEOS)
     "BrowserManagerService",
     "BrowsingDataLifetimeManager",
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
-    "ChromeDeviceAuthenticator",
-#endif
+
     "ContextualSearchService",
     "ContextualTasksService",
     "ContextualTasksUiService",
@@ -421,7 +451,6 @@ IN_PROC_BROWSER_TEST_F(ProfileKeyedServiceGuestBrowserTest,
 #endif  // BUILDFLAG(ENTERPRISE_CONTENT_ANALYSIS)
     "ChromeEnterpriseRealTimeUrlLookupService",
 #if !BUILDFLAG(IS_ANDROID)
-    "ChromePasswordProtectionService",
 #if BUILDFLAG(IS_CHROMEOS)
     "AshPolicyBlocklistService",
 #else
@@ -433,6 +462,7 @@ IN_PROC_BROWSER_TEST_F(ProfileKeyedServiceGuestBrowserTest,
 #endif
     "DeveloperToolsPolicyChecker",
     "EnterpriseReportingPrivateEventRouter",
+    "ExtensionKeybindingRegistryShutdownNotifierFactory",
     "ExtensionNavigationRegistry",
     "ExtensionSystem",
     "ExtensionProtocolShutdownNotifierFactory",
@@ -452,9 +482,7 @@ IN_PROC_BROWSER_TEST_F(ProfileKeyedServiceGuestBrowserTest,
     // TODO(crbug.com/374351946): Investigate if this is necessary on CrOS.
     "LiveTranslateController",
 #endif  // !BUILDFLAG(IS_CHROMEOS)
-#if !BUILDFLAG(IS_ANDROID)
-    "LookalikeUrlServiceFactory",
-#endif
+
     "MediaRouter",
     "MediaRouterUIService",
     "NotificationDisplayService",
@@ -470,6 +498,7 @@ IN_PROC_BROWSER_TEST_F(ProfileKeyedServiceGuestBrowserTest,
     "PrivacySandboxSettings",
     "ProcessManager",
     "ProfileNetworkContextService",
+    "ProtocolHandlersManager",
     "ProtocolHandlerRegistry",
     "ReadAnythingServiceFactory",
     "RealtimeReportingClient",
@@ -480,9 +509,7 @@ IN_PROC_BROWSER_TEST_F(ProfileKeyedServiceGuestBrowserTest,
     "ResumableUDPSocketManager",
     "RulesRegistryService",
     "SafeBrowsingPrivateEventRouter",
-#if !BUILDFLAG(IS_ANDROID)
-    "SafeSearch",
-#endif
+
 #if BUILDFLAG(IS_CHROMEOS)
     "SerialConnectionManager",
     "SerialPortManager",
@@ -598,6 +625,8 @@ IN_PROC_BROWSER_TEST_F(ProfileKeyedServiceGuestBrowserTest,
     "ActivityLog",
     "ActivityLogPrivateAPI",
     "AdvancedProtectionStatusManager",
+    "AiModeButtonService",
+    "AimEligibilityExtensionBridge",
     "AimEligibilityService",
     "AlarmManager",
     "AnnouncementNotificationService",
@@ -694,6 +723,7 @@ IN_PROC_BROWSER_TEST_F(ProfileKeyedServiceGuestBrowserTest,
 #if BUILDFLAG(ENTERPRISE_CONTENT_ANALYSIS)
     "ExtensionInstallEventRouter",
 #endif  // BUILDFLAG(ENTERPRISE_CONTENT_ANALYSIS)
+    "ExtensionKeybindingRegistryShutdownNotifierFactory",
     "ExtensionManagement",
     "ExtensionNavigationRegistry",
     "ExtensionPrefValueMap",
@@ -758,7 +788,7 @@ IN_PROC_BROWSER_TEST_F(ProfileKeyedServiceGuestBrowserTest,
     "ManagedConfigurationAPI",
     "ManagementAPI",
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-    "ManifestV2ExperimentManager",
+    "ManifestV2Handler",
 #endif
 #if BUILDFLAG(IS_CHROMEOS)
     "MediaGalleriesAPI",
@@ -766,9 +796,7 @@ IN_PROC_BROWSER_TEST_F(ProfileKeyedServiceGuestBrowserTest,
     "MediaRouter",
     "MediaRouterUIService",
     "MenuManager",
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-    "MimeHandlerRegistry",
-#endif
+
     "NavigationPredictorKeyedService",
     "NetworkingPrivateEventRouter",
     "NotificationDisplayService",
@@ -831,9 +859,7 @@ IN_PROC_BROWSER_TEST_F(ProfileKeyedServiceGuestBrowserTest,
     "RulesRegistryService",
     "RuntimeAPI",
     "SafeBrowsingMetricsCollector",
-#if !BUILDFLAG(IS_ANDROID)
-    "SafeBrowsingNetworkContextService",
-#endif
+
     "SafeBrowsingPrivateEventRouter",
     "SafeBrowsingTailoredSecurityService",
     "SearchEngineChoiceServiceFactory",

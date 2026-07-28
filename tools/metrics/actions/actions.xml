@@ -45,12 +45,17 @@ should be able to be added at any place in this file.
   <variant name=".kActionQrCodeGenerator" summary="QR code generator action"/>
   <variant name=".kActionRouteMedia" summary="Media router action"/>
   <variant name=".kActionSendTabToSelf" summary="Send tab to self action"/>
+  <variant name=".kActionShowAddresses" summary="Show addresses action"/>
   <variant name=".kActionShowAddressesBubbleOrPage"
       summary="Show addresses action"/>
   <variant name=".kActionShowChromeLabs" summary="Show Chrome Labs action"/>
   <variant name=".kActionShowDownloads" summary="Show downloads action"/>
+  <variant name=".kActionShowPasswordManager"
+      summary="Show passwords bubble or page action"/>
   <variant name=".kActionShowPasswordsBubbleOrPage"
       summary="Show passwords bubble or page action"/>
+  <variant name=".kActionShowPaymentMethods"
+      summary="Show payments bubble or page action"/>
   <variant name=".kActionShowPaymentsBubbleOrPage"
       summary="Show payments bubble or page action"/>
   <variant name=".kActionShowTranslate" summary="Show translate action"/>
@@ -232,6 +237,13 @@ should be able to be added at any place in this file.
       summary="For AddToHomescreen IPH feature."/>
   <variant name="_AddToHomescreenTextBubble"
       summary="For AddToHomescreen IPH feature using text bubble (obsolete)."/>
+  <variant name="_AimActivationHint"
+      summary="A hint to activate AI Mode on Android Desktop via keystrokes."/>
+  <variant name="_AndroidBottomBarAim"
+      summary="Describes the AI Mode button added in the bottom bar."/>
+  <variant name="_AndroidBottomBarAimPromoDialog"
+      summary="For the promo dialog shown to introduce AI Mode with the
+               bottom bar."/>
   <variant name="_AndroidBottomBarGlic"
       summary="Describes the GLIC button added in the bottom bar."/>
   <variant name="_AndroidBottomBarNewTab"
@@ -239,6 +251,8 @@ should be able to be added at any place in this file.
   <variant name="_AndroidBottomBarPromoDialog"
       summary="For the promo dialog shown to introduce the bottom bar."/>
   <variant name="_AndroidTabDeclutter" summary="For archived tabs on android."/>
+  <variant name="_AndroidVerticalTabsPromo"
+      summary="For the vertical tabs promo on android horizontal tab strip."/>
   <variant name="_AppRatingPrompt" summary="For App Rating Prompt feature."/>
   <variant name="_AppSpecificHistory"
       summary="For App Specific History feature."/>
@@ -653,6 +667,9 @@ should be able to be added at any place in this file.
   <variant name="_MostVisitedTilesCustomizationPin"
       summary="In product help for MVT Customization feature to pin a
                shortcut."/>
+  <variant name="_MultistepFilterPromo"
+      summary="In product help for a first time user about Multistep Filter
+               suggestions."/>
   <variant name="_NewTab" summary="For NewTab feature."/>
   <variant name="_NewTabPageButton" summary="Deprecated in M79-."/>
   <variant name="_NewTabPageHomeButton"
@@ -688,6 +705,8 @@ should be able to be added at any place in this file.
   <variant name="_PdfInkSignatures" summary="For PDF Ink Signatures feature."/>
   <variant name="_PdfPageDownload" summary="For the PdfPageDownload feature."/>
   <variant name="_PdfSearchifyFeature" summary="For PDF Searchify feature."/>
+  <variant name="_PdfTextAnnotations"
+      summary="For PDF Text Annotations feature."/>
   <variant name="_PerformanceInterventionDialog"
       summary="For triggering the performance intervention dialog and toolbar
                button feature."/>
@@ -787,6 +806,8 @@ should be able to be added at any place in this file.
       summary="For side by side split view pinning feature."/>
   <variant name="_SideBySideTabSwitchFeature"
       summary="For switching between tabs many times for split view feature."/>
+  <variant name="_SidePanelContextualTasksPinnableFeature"
+      summary="contextual tasks side panel pinnable"/>
   <variant name="_SidePanelGenericPinnableFeature"
       summary="For Side Panel Pinning pin feature."/>
   <variant name="_SidePanelLensOverlayPinnableFeature"
@@ -890,6 +911,26 @@ should be able to be added at any place in this file.
   <variant name=".UnfamiliarSite" summary="Recorded on an unfamiliar site."/>
 </variants>
 
+<variants name="PersonalContextEntryPoint">
+  <variant name="AutofillAndPasswordsSettings"
+      summary="Autofill and Passwords settings page"/>
+  <variant name="IdentityDocsSettings"
+      summary="Autofill Identity Docs settings page"/>
+  <variant name="ShoppingSettings" summary="Autofill Shopping settings page"/>
+  <variant name="TravelSettings" summary="Autofill Travel settings page"/>
+</variants>
+
+<variants name="PersonalContextManageTarget">
+  <variant name="ConnectedApps" summary="'Manage connected apps'"/>
+</variants>
+
+<variants name="PersonalContextToggleState">
+  <variant name="Off"
+      summary="switching it from the `on` state to the `off` state"/>
+  <variant name="On"
+      summary="switching it from the `off` state to the `on` state"/>
+</variants>
+
 <variants name="PopupType">
   <variant name="AimPopup" summary="Context menu opened from aim popup"/>
   <variant name="ClassicPopup"
@@ -984,7 +1025,7 @@ should be able to be added at any place in this file.
   <variant name=".SideBySide" summary="Split View"/>
   <variant name=".SidePanelPinning" summary="Side Panel Pinning"/>
   <variant name=".SyncAccountSettings"
-      summary="Wallet integration in Autofill"/>
+      summary="Wallet integration in Autofill (obsolete)"/>
   <variant name=".TabGroupsSync" summary="Tab Groups Sync (obsolete)"/>
   <variant name=".TabOrganizer" summary="Tab Organizer (obsolete)"/>
   <variant name=".TestDefaultModule" summary="Test default module"/>
@@ -5078,11 +5119,47 @@ should be able to be added at any place in this file.
   </description>
 </action>
 
+<action name="Android.TabStripMenu.TaskManager">
+  <owner>mwoj@google.com</owner>
+  <owner>cros-ui-foundations@google.com</owner>
+  <description>
+    User tapped 'Task Manager' on the tab strip context menu to launch the Task
+    Manager.
+  </description>
+</action>
+
+<action name="Android.TabStripMenu.ToggleTabLayout">
+  <owner>eleanorlee@google.com</owner>
+  <description>
+    User tapped 'Show tabs vertically' in the tab strip context menu or 'Show
+    tabs horizontally' in the Vertical Tabs empty context menu to toggle the tab
+    layout.
+  </description>
+</action>
+
 <action name="Android.TabStripMenu.UnpinGlic">
   <owner>mklw@google.com</owner>
   <description>
     User tapped 'Unpin Glic' on the tab strip context menu to unpin the Glic
     button in the tab strip.
+  </description>
+</action>
+
+<action name="Android.VerticalTabs.UndoCloseTab">
+  <owner>agazal@google.com</owner>
+  <owner>kije@google.com</owner>
+  <owner>clank-app-team@google.com</owner>
+  <description>
+    User undoes a closed tab that was closed from the Vertical Tabs pane.
+  </description>
+</action>
+
+<action name="Android.VerticalTabs.UndoCloseTabGroup">
+  <owner>agazal@google.com</owner>
+  <owner>kije@google.com</owner>
+  <owner>clank-app-team@google.com</owner>
+  <description>
+    User undoes a closed group that was closed from the Vertical Tabs pane.
   </description>
 </action>
 
@@ -6860,6 +6937,24 @@ should be able to be added at any place in this file.
   <description>
     This user action is logged when a user uses Undo to revert a previous
     autofill operation on a form filled with Payments data.
+  </description>
+</action>
+
+<action name="AutofillAddressesAdded">
+  <owner>josefraska@google.com</owner>
+  <owner>chrome-autofill-team@google.com</owner>
+  <description>
+    Recorded when the user adds an address via the Contact info settings page on
+    Android.
+  </description>
+</action>
+
+<action name="AutofillAddressesEdited">
+  <owner>josefraska@google.com</owner>
+  <owner>chrome-autofill-team@google.com</owner>
+  <description>
+    Recorded when the user edits an address via the Contact info settings page
+    on Android.
   </description>
 </action>
 
@@ -10936,36 +11031,6 @@ should be able to be added at any place in this file.
   </description>
 </action>
 
-<action name="ContextualSearch.AddTabsButton.Clicked.{ContextualSearchSource}">
-  <owner>samiraarabgol@google.com</owner>
-  <owner>chrome-desktop-search@google.com</owner>
-  <description>
-    Recorded when the user clicks the Add tabs (AI Mode) entrypoint button in a
-    WebUI searchbox on {ContextualSearchSource}.
-  </description>
-  <token key="ContextualSearchSource" variants="ContextualSearchSource"/>
-</action>
-
-<action name="ContextualSearch.AddTabsButton.Hovered.{ContextualSearchSource}">
-  <owner>samiraarabgol@google.com</owner>
-  <owner>chrome-desktop-search@google.com</owner>
-  <description>
-    Recorded when the user hovers over the Add tabs (AI Mode) entrypoint button
-    in a WebUI searchbox on {ContextualSearchSource}.
-  </description>
-  <token key="ContextualSearchSource" variants="ContextualSearchSource"/>
-</action>
-
-<action name="ContextualSearch.AddTabsButton.Shown.{ContextualSearchSource}">
-  <owner>samiraarabgol@google.com</owner>
-  <owner>chrome-desktop-search@google.com</owner>
-  <description>
-    Recorded when the Add tabs (AI Mode) entrypoint button is shown to the user
-    in a WebUI searchbox on {ContextualSearchSource}.
-  </description>
-  <token key="ContextualSearchSource" variants="ContextualSearchSource"/>
-</action>
-
 <action
     name="ContextualSearch.AiModeButtonClick.{ContextualSearchAiModeButtonSurface}">
   <owner>niharm@google.com</owner>
@@ -11345,6 +11410,14 @@ should be able to be added at any place in this file.
   </description>
 </action>
 
+<action name="ContextualTasks.AimFullTab.Shown">
+  <owner>niharm@google.com</owner>
+  <owner>chrome-contextual-tasks-eng@google.com</owner>
+  <description>
+    Recorded when a navigation leads to a full tab AIM page.
+  </description>
+</action>
+
 <action name="ContextualTasks.AiResponse.UserAction.LinkClicked{SurfaceType}">
   <owner>sophiechang@chromium.org</owner>
   <owner>chrome-contextual-tasks-eng@google.com</owner>
@@ -11459,6 +11532,7 @@ should be able to be added at any place in this file.
     <variant name=".ChangedThreads"
         summary="The user changed the active thread."/>
     <variant name=".CloseSidePanel" summary="The user closed the side panel."/>
+    <variant name=".OpenFullTab" summary="The user opened the full tab."/>
     <variant name=".OpenSidePanel" summary="The user opened the side panel."/>
     <variant name=".StayedOnThread"
         summary="The user stayed on the same thread."/>
@@ -11495,6 +11569,7 @@ should be able to be added at any place in this file.
   </description>
   <token key="ActionType">
     <variant name=".CloseSidePanel" summary="The user closed the side panel."/>
+    <variant name=".OpenFeedback" summary="The user opened the feedback page."/>
     <variant name=".OpenHelp" summary="The user opened the help page."/>
     <variant name=".OpenInNewTab"
         summary="The user opened the task in a new tab."/>
@@ -13809,17 +13884,6 @@ should be able to be added at any place in this file.
   </description>
 </action>
 
-<action
-    name="Extensions.Mv2Deprecation.Disabled.ManageExtension.DisabledDialog">
-  <owner>emiliapaz@chomium.org</owner>
-  <owner>extensions-core@chromium.org</owner>
-  <description>
-    Emitted when the user clicked on the manage button in the dialog informing
-    the user that some extensions were disabled during the MV2 'disable with
-    re-enable' experiment stage.
-  </description>
-</action>
-
 <action name="Extensions.Mv2Deprecation.Disabled.RemoveExtension">
   <owner>emiliapaz@chomium.org</owner>
   <owner>extensions-core@chromium.org</owner>
@@ -13827,17 +13891,6 @@ should be able to be added at any place in this file.
     The user clicked on the remove button for an extension in
     chrome://extensions during the MV2 'disable with re-enable' experiment
     stage.
-  </description>
-</action>
-
-<action
-    name="Extensions.Mv2Deprecation.Disabled.RemoveExtension.DisabledDialog">
-  <owner>emiliapaz@chomium.org</owner>
-  <owner>extensions-core@chromium.org</owner>
-  <description>
-    Emitted when the user clicked on the remove button in the dialog informing
-    the user that some extensions were disabled during the MV2 'disable with
-    re-enable' experiment stage.
   </description>
 </action>
 
@@ -13880,17 +13933,6 @@ should be able to be added at any place in this file.
   </description>
 </action>
 
-<action
-    name="Extensions.Mv2Deprecation.Unsupported.ManageExtension.DisabledDialog">
-  <owner>emiliapaz@chomium.org</owner>
-  <owner>extensions-core@chromium.org</owner>
-  <description>
-    Emitted when the user clicked on the manage button in the dialog informing
-    the user that some extensions were disabled during the MV2 'unsupported'
-    experiment stage.
-  </description>
-</action>
-
 <action name="Extensions.Mv2Deprecation.Unsupported.RemoveExtension">
   <owner>emiliapaz@chomium.org</owner>
   <owner>extensions-core@chromium.org</owner>
@@ -13906,17 +13948,6 @@ should be able to be added at any place in this file.
   <description>
     The user clicked on the remove button in the extension's detailed page in
     chrome://extensions during the MV2 'unsupported' experiment stage.
-  </description>
-</action>
-
-<action
-    name="Extensions.Mv2Deprecation.Unsupported.RemoveExtension.DisabledDialog">
-  <owner>emiliapaz@chomium.org</owner>
-  <owner>extensions-core@chromium.org</owner>
-  <description>
-    Emitted when the user clicked on the remove button in the dialog informing
-    the user that some extensions were disabled during the MV2 'unsupported'
-    experiment stage.
   </description>
 </action>
 
@@ -15133,7 +15164,7 @@ should be able to be added at any place in this file.
   <owner>chromeos-launcher@google.com</owner>
   <description>
     User performed an action in the tasks glanceables. This aggregates all user
-    actions that the user can perform intaskss glanceable.
+    actions that the user can perform in the tasks glanceable.
   </description>
 </action>
 
@@ -15141,7 +15172,7 @@ should be able to be added at any place in this file.
   <owner>perrier@google.com</owner>
   <owner>harringtond@chromium.org</owner>
   <description>
-    Logged anytime the Glic CookieSyncronizer timeout is reached.
+    Logged any time the Glic CookieSynchronizer timeout is reached.
   </description>
 </action>
 
@@ -15149,7 +15180,7 @@ should be able to be added at any place in this file.
   <owner>iwells@google.com</owner>
   <owner>erikchen@chromium.org</owner>
   <description>
-    Logged anytime glic is disabled, regardless of source. Note: Glic can only
+    Logged any time Glic is disabled, regardless of source. Note: Glic can only
     be disabled by account and policy changes that are not user initiated.
   </description>
 </action>
@@ -15260,8 +15291,8 @@ should be able to be added at any place in this file.
   <owner>andreaxg@google.com</owner>
   <owner>erikchen@chromium.org</owner>
   <description>
-    Logged if the user uses the focus hotkey while glic is open. Triggered by
-    hotkey presses captured in Chrome as well as in the glic window.
+    Logged if the user uses the focus hotkey while Glic is open. Triggered by
+    hotkey presses captured in Chrome as well as in the Glic window.
   </description>
 </action>
 
@@ -15272,6 +15303,7 @@ should be able to be added at any place in this file.
 </action>
 
 <action name="Glic.Fre.Accept.Onboarding">
+  <obsolete>Stopped recording in June 2026.</obsolete>
   <owner>tommasin@chromium.org</owner>
   <owner>zalmashni@google.com</owner>
   <description>
@@ -15291,6 +15323,7 @@ should be able to be added at any place in this file.
 </action>
 
 <action name="Glic.Fre.CloseByClickOutside">
+  <obsolete>Deprecated in M151. Glic Unified FRE has been removed.</obsolete>
   <owner>birnie@google.com</owner>
   <description>
     User clicked outside of the Glic First Run Experience dialog to close it.
@@ -15298,6 +15331,7 @@ should be able to be added at any place in this file.
 </action>
 
 <action name="Glic.Fre.CloseByClosingHostTab">
+  <obsolete>Deprecated in M151. Glic Unified FRE has been removed.</obsolete>
   <owner>birnie@google.com</owner>
   <description>
     User closed the tab hosting the First Run Experience dialog to close it.
@@ -15305,6 +15339,7 @@ should be able to be added at any place in this file.
 </action>
 
 <action name="Glic.Fre.CloseByMovingHostTab">
+  <obsolete>Deprecated in M151. Glic Unified FRE has been removed.</obsolete>
   <owner>birnie@google.com</owner>
   <description>
     User moved the tab hosting the First Run Experience dialog which closes it.
@@ -15320,14 +15355,16 @@ should be able to be added at any place in this file.
 </action>
 
 <action name="Glic.Fre.CloseWithToggle">
+  <obsolete>Deprecated in M151. Glic Unified FRE has been removed.</obsolete>
   <owner>birnie@google.com</owner>
   <owner>erikchen@chromium.org</owner>
   <description>
-    User closed the FRE by toggling the glic feature invocation source.
+    User closed the FRE by toggling the Glic feature invocation source.
   </description>
 </action>
 
 <action name="Glic.Fre.CloseWithX">
+  <obsolete>Deprecated in M151. Glic Unified FRE has been removed.</obsolete>
   <owner>birnie@google.com</owner>
   <description>
     User clicked the 'X' button to close the Glic First Run Experience dialog.
@@ -15353,6 +15390,7 @@ should be able to be added at any place in this file.
 </action>
 
 <action name="Glic.Fre.Dismissed.Onboarding">
+  <obsolete>Stopped recording in June 2026.</obsolete>
   <owner>tommasin@chromium.org</owner>
   <owner>zalmashni@google.com</owner>
   <description>
@@ -15371,6 +15409,7 @@ should be able to be added at any place in this file.
 </action>
 
 <action name="Glic.Fre.ErrorPanelTryAgainClicked">
+  <obsolete>Deprecated in M151. Glic Unified FRE has been removed.</obsolete>
   <owner>birnie@google.com</owner>
   <owner>erikchen@chromium.org</owner>
   <description>
@@ -15379,6 +15418,7 @@ should be able to be added at any place in this file.
 </action>
 
 <action name="Glic.Fre.HelpCenterLinkOpened">
+  <obsolete>Deprecated in M151. Glic Unified FRE has been removed.</obsolete>
   <owner>dullweber@chromium.org</owner>
   <owner>erikchen@chromium.org</owner>
   <description>
@@ -15405,6 +15445,7 @@ should be able to be added at any place in this file.
 </action>
 
 <action name="Glic.Fre.LoadSuccess">
+  <obsolete>Deprecated in M151. Glic Unified FRE has been removed.</obsolete>
   <owner>birnie@google.com</owner>
   <owner>erikchen@chromium.org</owner>
   <description>
@@ -15414,6 +15455,7 @@ should be able to be added at any place in this file.
 </action>
 
 <action name="Glic.Fre.MyActivityLinkOpened">
+  <obsolete>Deprecated in M151. Glic Unified FRE has been removed.</obsolete>
   <owner>dullweber@chromium.org</owner>
   <owner>erikchen@chromium.org</owner>
   <description>Logged if a myactivity link is opened from the FRE.</description>
@@ -15436,12 +15478,14 @@ should be able to be added at any place in this file.
 </action>
 
 <action name="Glic.Fre.PolicyLinkOpened">
+  <obsolete>Deprecated in M151. Glic Unified FRE has been removed.</obsolete>
   <owner>dullweber@chromium.org</owner>
   <owner>erikchen@chromium.org</owner>
   <description>Logged if a policy link is opened from the FRE.</description>
 </action>
 
 <action name="Glic.Fre.PrivacyNoticeLinkOpened">
+  <obsolete>Deprecated in M151. Glic Unified FRE has been removed.</obsolete>
   <owner>dullweber@chromium.org</owner>
   <owner>erikchen@chromium.org</owner>
   <description>
@@ -15460,12 +15504,13 @@ should be able to be added at any place in this file.
   <owner>iwells@google.com</owner>
   <owner>erikchen@chromium.org</owner>
   <description>
-    Logged if the glic FRE is shown. Logged as soon as the widget is visible.
+    Logged if the Glic FRE is shown. Logged as soon as the widget is visible.
     This occurs before the UI is fully loaded.
   </description>
 </action>
 
 <action name="Glic.Fre.Shown.Onboarding">
+  <obsolete>Stopped recording in June 2026.</obsolete>
   <owner>tommasin@chromium.org</owner>
   <owner>zalmashni@google.com</owner>
   <description>
@@ -15484,6 +15529,7 @@ should be able to be added at any place in this file.
 </action>
 
 <action name="Glic.Fre.WebviewLoadAborted" not_user_triggered="true">
+  <obsolete>Deprecated in M151. Glic Unified FRE has been removed.</obsolete>
   <owner>birnie@google.com</owner>
   <description>
     Recorded when the Glic FRE webview fails to load for any reason other than a
@@ -15492,6 +15538,7 @@ should be able to be added at any place in this file.
 </action>
 
 <action name="Glic.Fre.WebviewLoadTimedOut" not_user_triggered="true">
+  <obsolete>Deprecated in M151. Glic Unified FRE has been removed.</obsolete>
   <owner>birnie@google.com</owner>
   <description>
     Recorded when the Glic FRE webview fails to load due to a timeout.
@@ -15732,7 +15779,7 @@ should be able to be added at any place in this file.
   <owner>perrier@google.com</owner>
   <description>
     Logged when SwitchConversation is called from Floaty on a Glic instance to
-    switch to a different conversation (eg. loading a chat from 'recent'
+    switch to a different conversation (e.g. loading a chat from 'recent'
     conversations in the three-dots menu).
   </description>
 </action>
@@ -15742,7 +15789,7 @@ should be able to be added at any place in this file.
   <owner>perrier@google.com</owner>
   <description>
     Logged when SwitchConversation is called from Side Panel on a Glic instance
-    to switch to a different conversation (eg. loading a chat from 'recent'
+    to switch to a different conversation (e.g. loading a chat from 'recent'
     conversations in the three-dots menu).
   </description>
 </action>
@@ -15769,7 +15816,7 @@ should be able to be added at any place in this file.
   <owner>kenok@google.com</owner>
   <owner>chrstne@google.com</owner>
   <description>
-    Logged if the user activates a task controlled tab from a glic instance.
+    Logged if the user activates a task-controlled tab from a Glic instance.
   </description>
 </action>
 
@@ -15782,7 +15829,7 @@ should be able to be added at any place in this file.
 <action name="Glic.Instance.UnBind">
   <owner>birnie@google.com</owner>
   <owner>perrier@google.com</owner>
-  <description>Logged when a Glic instance is un bound from a tab.</description>
+  <description>Logged when a Glic instance is unbound from a tab.</description>
 </action>
 
 <action name="Glic.Instance.UninterruptActorTask">
@@ -15903,6 +15950,26 @@ should be able to be added at any place in this file.
   <description>The Glic instance WebUI is warmed.</description>
 </action>
 
+<action name="Glic.Onboarding.Invoked">
+  <owner>perrier@google.com</owner>
+  <owner>glic+metrics@google.com</owner>
+  <description>
+    Logged when Glic is invoked during onboarding. Invoked is defined as a new
+    embedder being shown for a tab or Floaty. Tab switching or focus events are
+    not considered invoking, but daisy chaining, conversation switching, or
+    re-opening on an already bound tab are considered invoking.
+  </description>
+</action>
+
+<action name="Glic.Onboarding.OptInAccept">
+  <owner>basiaz@google.com</owner>
+  <owner>dewittj@google.com</owner>
+  <owner>perrier@google.com</owner>
+  <description>
+    Logged when the opt-in is accepted after being shown.
+  </description>
+</action>
+
 <action name="Glic.Onboarding.OptInImpression">
   <owner>dewittj@google.com</owner>
   <owner>perrier@google.com</owner>
@@ -15913,11 +15980,19 @@ should be able to be added at any place in this file.
   </description>
 </action>
 
+<action name="Glic.Onboarding.PromptSubmitted">
+  <owner>perrier@google.com</owner>
+  <owner>glic+metrics@google.com</owner>
+  <description>
+    Logged when a prompt is submitted by the user during onboarding.
+  </description>
+</action>
+
 <action name="Glic.Pinned">
   <owner>charlesmeng@chromium.org</owner>
   <owner>erikchen@chromium.org</owner>
   <description>
-    Logged anytime glic is pinned to the tabstrip, regardless of source.
+    Logged any time Glic is pinned to the tabstrip, regardless of source.
   </description>
 </action>
 
@@ -15925,7 +16000,7 @@ should be able to be added at any place in this file.
   <owner>wry@chromium.org</owner>
   <owner>perrier@chromium.org</owner>
   <description>
-    Logged anytime a pinned tab is navigated to a new origin.
+    Logged any time a pinned tab is navigated to a new origin.
   </description>
 </action>
 
@@ -15933,7 +16008,7 @@ should be able to be added at any place in this file.
   <owner>wry@chromium.org</owner>
   <owner>perrier@chromium.org</owner>
   <description>
-    Logged anytime a pinned tab is navigated to a new origin and the tab is
+    Logged any time a pinned tab is navigated to a new origin and the tab is
     unpinned as a result.
   </description>
 </action>
@@ -16072,15 +16147,53 @@ should be able to be added at any place in this file.
   <owner>charlesmeng@chromium.org</owner>
   <owner>erikchen@chromium.org</owner>
   <description>
-    Logged anytime glic is unpinned from the tabstrip, regardless of source.
+    Logged any time Glic is unpinned from the tabstrip, regardless of source.
   </description>
 </action>
 
 <action name="Glic.Widget.ResetPositionOnOpen">
   <owner>perrier@chromium.org</owner>
   <description>
-    Logged eachtime the position of the glic widget is reset when reopening
+    Logged each time the position of the Glic widget is reset when reopening
     before a minimum delay is reached.
+  </description>
+</action>
+
+<action name="Glic.ZoomIn">
+  <owner>cuianthony@chromium.org</owner>
+  <description>
+    Logged when the user zooms in on the Glic webview using keyboard shortcuts.
+  </description>
+</action>
+
+<action name="Glic.ZoomInAtMax">
+  <owner>cuianthony@chromium.org</owner>
+  <description>
+    Logged when the user attempts to zoom in on the Glic webview using keyboard
+    shortcuts, but is already at the maximum zoom level.
+  </description>
+</action>
+
+<action name="Glic.ZoomOut">
+  <owner>cuianthony@chromium.org</owner>
+  <description>
+    Logged when the user zooms out on the Glic webview using keyboard shortcuts.
+  </description>
+</action>
+
+<action name="Glic.ZoomOutAtMin">
+  <owner>cuianthony@chromium.org</owner>
+  <description>
+    Logged when the user attempts to zoom out on the Glic webview using keyboard
+    shortcuts, but is already at the minimum zoom level.
+  </description>
+</action>
+
+<action name="Glic.ZoomReset">
+  <owner>cuianthony@chromium.org</owner>
+  <description>
+    Logged when the user resets the zoom level on the Glic webview using
+    keyboard shortcuts.
   </description>
 </action>
 
@@ -16214,7 +16327,7 @@ should be able to be added at any place in this file.
   <owner>pauladedeji@google.com</owner>
   <owner>erikchen@chromium.org</owner>
   <description>
-    Logged anytime glic shortcut (aka hotkey) is disabled from
+    Logged any time the Glic shortcut (aka hotkey) is disabled from
     chrome://settings.
   </description>
 </action>
@@ -16223,7 +16336,8 @@ should be able to be added at any place in this file.
   <owner>pauladedeji@google.com</owner>
   <owner>erikchen@chromium.org</owner>
   <description>
-    Logged anytime glic shortcut (aka hotkey) is edited from chrome://settings.
+    Logged any time the Glic shortcut (aka hotkey) is edited from
+    chrome://settings.
   </description>
 </action>
 
@@ -16231,7 +16345,8 @@ should be able to be added at any place in this file.
   <owner>pauladedeji@google.com</owner>
   <owner>erikchen@chromium.org</owner>
   <description>
-    Logged anytime glic shortcut (aka hotkey) is enabled from chrome://settings.
+    Logged any time the Glic shortcut (aka hotkey) is enabled from
+    chrome://settings.
   </description>
 </action>
 
@@ -16239,8 +16354,8 @@ should be able to be added at any place in this file.
   <owner>ananyaseelam@google.com</owner>
   <owner>erikchen@chromium.org</owner>
   <description>
-    Logged anytime glic OS launcher entrypoint (aka hotkey) is toggled off from
-    chrome://settings.
+    Logged any time the Glic OS launcher entrypoint (aka hotkey) is toggled off
+    from chrome://settings.
   </description>
 </action>
 
@@ -16248,8 +16363,8 @@ should be able to be added at any place in this file.
   <owner>ananyaseelam@google.com</owner>
   <owner>erikchen@chromium.org</owner>
   <description>
-    Logged anytime glic OS launcher entrypoint (aka hotkey) is toggled on from
-    chrome://settings.
+    Logged any time the Glic OS launcher entrypoint (aka hotkey) is toggled on
+    from chrome://settings.
   </description>
 </action>
 
@@ -16403,7 +16518,7 @@ should be able to be added at any place in this file.
   <owner>pauladedeji@google.com</owner>
   <owner>erikchen@chromium.org</owner>
   <description>
-    Logged when glic web client requests the main settings page (no section
+    Logged when the Glic web client requests the main settings page (no section
     specified).
   </description>
 </action>
@@ -16412,8 +16527,8 @@ should be able to be added at any place in this file.
   <owner>pauladedeji@google.com</owner>
   <owner>erikchen@chromium.org</owner>
   <description>
-    Logged when glic web client requests os entrypoint toggle section of the
-    settings page.
+    Logged when the Glic web client requests the OS entrypoint toggle section of
+    the settings page.
   </description>
 </action>
 
@@ -16421,7 +16536,8 @@ should be able to be added at any place in this file.
   <owner>pauladedeji@google.com</owner>
   <owner>erikchen@chromium.org</owner>
   <description>
-    Logged when glic web client requests os hotkey section of the settings page.
+    Logged when the Glic web client requests the OS hotkey section of the
+    settings page.
   </description>
 </action>
 
@@ -16436,7 +16552,7 @@ should be able to be added at any place in this file.
   <owner>carlosk@chromium.org</owner>
   <owner>harringtond@chromium.org</owner>
   <owner>erikchen@chromium.org</owner>
-  <description>Tracks when glic webui crashes.</description>
+  <description>Tracks when the Glic WebUI crashes.</description>
 </action>
 
 <action name="GlicTabContextPermissionDisabled">
@@ -18583,8 +18699,8 @@ should be able to be added at any place in this file.
     Recorded when the user clicks on the intent picker icon that pops up
     whenever a navigation occurs to a site that is already installed by a PWA
     and controlled by the PWA's scope. This is measured regardless of whether
-    the intent picker icon is extended or not. This is currently measured only
-    on Windows, Mac and Linux platforms.
+    the intent picker icon is extended or not. This is currently measured on all
+    desktop platforms (ChromeOS, Mac, Windows and Linux).
   </description>
 </action>
 
@@ -18594,7 +18710,8 @@ should be able to be added at any place in this file.
   <description>
     Recorded when the user clicks on a PWA that shows up in the intent picker,
     and clicks on Open, leading to the current site being launched in the PWA.
-    This is currently measured only on Windows, Mac and Linux platforms.
+    This is currently measured on all desktop platforms (ChromeOS, Mac, Windows
+    and Linux).
   </description>
 </action>
 
@@ -18615,7 +18732,7 @@ should be able to be added at any place in this file.
   <description>
     Recorded when the user manually closes the intent picker bubble view,
     leading to the site not being launched in a PWA. This is currently measured
-    only on Windows, Mac and Linux platforms.
+    on all desktop platforms (ChromeOS, Mac, Windows and Linux).
   </description>
 </action>
 
@@ -18625,7 +18742,7 @@ should be able to be added at any place in this file.
   <description>
     Recorded when the user navigates away from the current site with an open
     intent picker bubble view, leading to it being closed. This is currently
-    only meaasured on Windows, Mac and Linux.
+    measured on all desktop platforms (ChromeOS, Mac, Windows and Linux).
   </description>
 </action>
 
@@ -25190,6 +25307,16 @@ should be able to be added at any place in this file.
   </description>
 </action>
 
+<action name="ManualFallback_OpenAtMemory">
+  <owner>leozhao@google.com</owner>
+  <owner>novakovica@google.com</owner>
+  <owner>sugoi@google.com</owner>
+  <owner>tmartino@chromium.org</owner>
+  <description>
+    The user opened the AtMemory manual fallback view. iOS only.
+  </description>
+</action>
+
 <action name="ManualFallback_OpenCreditCard">
   <owner>tmartino@chromium.org</owner>
   <owner>olivierrobin@chromium.org</owner>
@@ -26655,6 +26782,40 @@ should be able to be added at any place in this file.
   <owner>joemerramos@google.com</owner>
   <owner>bling-alchemy@google.com</owner>
   <description>Reported when the user taps the New Feature Badge</description>
+</action>
+
+<action name="MobileAutofillAndPasswordsSettingsBack">
+  <owner>jsobiech@google.com</owner>
+  <owner>chrome-autofill-team@google.com</owner>
+  <description>
+    Reported when user goes back from Autofill and Passwords Settings UI to root
+    Settings screen. iOS only.
+  </description>
+</action>
+
+<action name="MobileAutofillAndPasswordsSettingsClose">
+  <owner>jsobiech@google.com</owner>
+  <owner>chrome-autofill-team@google.com</owner>
+  <description>
+    Reported when Autofill and Passwords Settings UI was dismissed. iOS only.
+  </description>
+</action>
+
+<action name="MobileAutofillSettingsBack">
+  <owner>jsobiech@google.com</owner>
+  <owner>chrome-autofill-team@google.com</owner>
+  <description>
+    Reported when user goes back from Autofill Settings UI to Autofill and
+    Passwords Settings screen. iOS only.
+  </description>
+</action>
+
+<action name="MobileAutofillSettingsClose">
+  <owner>jsobiech@google.com</owner>
+  <owner>chrome-autofill-team@google.com</owner>
+  <description>
+    Reported when Autofill Settings UI was dismissed. iOS only.
+  </description>
 </action>
 
 <action name="MobileBandwidthSettingsBack">
@@ -28201,6 +28362,22 @@ should be able to be added at any place in this file.
   </description>
 </action>
 
+<action name="MobileGeminiTabPickerDismissed">
+  <owner>joepeplowski@google.com</owner>
+  <owner>bling-alchemy@google.com</owner>
+  <description>
+    Reported when the Tab Picker UI is dismissed in a Gemini session. iOS only.
+  </description>
+</action>
+
+<action name="MobileGeminiTabPickerOpened">
+  <owner>joepeplowski@google.com</owner>
+  <owner>bling-alchemy@google.com</owner>
+  <description>
+    Reported when the Tab Picker UI is opened in a Gemini session. iOS only.
+  </description>
+</action>
+
 <action name="MobileGeminiURLOpened">
   <owner>kanouche@google.com</owner>
   <owner>bling-alchemy@google.com</owner>
@@ -28323,6 +28500,23 @@ should be able to be added at any place in this file.
   <owner>gambard@chromium.org</owner>
   <description>
     User confirmed provided credentials in HTTP Authentication dialog. iOS only.
+  </description>
+</action>
+
+<action name="MobileIdentityDocsSettingsBack">
+  <owner>jsobiech@google.com</owner>
+  <owner>chrome-autofill-team@google.com</owner>
+  <description>
+    Reported when user goes back from Identity Docs Settings UI to Autofill and
+    Passwords Settings screen. iOS only.
+  </description>
+</action>
+
+<action name="MobileIdentityDocsSettingsClose">
+  <owner>jsobiech@google.com</owner>
+  <owner>chrome-autofill-team@google.com</owner>
+  <description>
+    Reported when Identity Docs Settings UI was dismissed. iOS only.
   </description>
 </action>
 
@@ -29144,6 +29338,15 @@ should be able to be added at any place in this file.
   <description>User pressed the 'Homepage' item in the app menu.</description>
 </action>
 
+<action name="MobileMenuIdentityMenu">
+  <owner>jlebel@chromium.org</owner>
+  <owner>chrome-signin-mobile-team@google.com</owner>
+  <description>
+    User pressed the identity details button in the overflow menu to open the
+    account menu.
+  </description>
+</action>
+
 <action name="MobileMenuIncognitoSearch">
   <obsolete>Deprecated as of 3/2023</obsolete>
   <owner>gambard@chromium.org</owner>
@@ -29399,6 +29602,11 @@ should be able to be added at any place in this file.
   <description>User pressed 'Add to Reading List' in the app menu.</description>
 </action>
 
+<action name="MobileMenuRecentEntry">
+  <owner>massan@google.com</owner>
+  <description>User pressed a recent entry in the app menu.</description>
+</action>
+
 <action name="MobileMenuRecentTabs">
   <owner>justincohen@chromium.org</owner>
   <description>User pressed 'Recent tabs' in the app menu.</description>
@@ -29531,6 +29739,14 @@ should be able to be added at any place in this file.
   <description>User pressed 'Show reading list' in the app menu.</description>
 </action>
 
+<action name="MobileMenuSignin">
+  <owner>jlebel@chromium.org</owner>
+  <owner>chrome-signin-mobile-team@google.com</owner>
+  <description>
+    User pressed the identity button in the overflow menu.
+  </description>
+</action>
+
 <action name="MobileMenuSiteInformation">
   <owner>gambard@chromium.org</owner>
   <description>User pressed 'Site Information' in the app menu.</description>
@@ -29600,6 +29816,14 @@ should be able to be added at any place in this file.
   <owner>massan@google.com</owner>
   <description>
     User pressed 'Show / Hide bookmarks bar' in the app menu.
+  </description>
+</action>
+
+<action name="MobileMenuToggleTabLayout">
+  <owner>eleanorlee@google.com</owner>
+  <description>
+    User pressed 'Show tabs vertically' or 'Show tabs horizontally' in 'More
+    tools' in the app menu.
   </description>
 </action>
 
@@ -30547,9 +30771,12 @@ should be able to be added at any place in this file.
   </description>
 </action>
 
-<action name="MobilePasswordCheckupInteractionIgnoredOnCooldown">
+<action name="MobilePasswordCheckupInteractionIgnoredDuringNavigation">
   <owner>vincb@google.com</owner>
-  <description>TODO(crbug.com/483963166): Write the description.</description>
+  <description>
+    Reported when a user interaction (tap) on the Password Checkup homepage is
+    ignored because a navigation is already in progress. iOS only.
+  </description>
 </action>
 
 <action name="MobilePasswordCheckupSettingsBack">
@@ -33019,6 +33246,14 @@ should be able to be added at any place in this file.
   </description>
 </action>
 
+<action name="MobileToolbarNTPEntrypointShowMenu">
+  <owner>gambard@chromium.org</owner>
+  <description>
+    User pressed the overflow tools menu button directly from the New Tab Page
+    header entrypoint. iOS only.
+  </description>
+</action>
+
 <action name="MobileToolbarOmniboxAcceleratorTap">
   <owner>mdjones@chromium.org</owner>
   <owner>clank-app-team@google.com</owner>
@@ -33573,9 +33808,11 @@ should be able to be added at any place in this file.
     <variant name=".Shown.MultiTab"
         summary="Recorded when the tab context menu is shown with multiple
                  tabs selected."/>
-    <variant name=".ShowTabsVertically"
-        summary="User switched the layout to the vertical tabs view via the
-                 tab context menu on tab strip on Android."/>
+    <variant name=".ToggleTabLayout"
+        summary="Recorded when the user taps 'Show tabs vertically' in the
+                 Android tab strip context menu or 'Show tabs horizontally'
+                 in the Android Vertical Tabs context menu to switch the tab
+                 layout."/>
     <variant name=".UnmuteSite"
         summary="User unmuted a site via the tab context menu on tab strip on
                  Android."/>
@@ -33706,6 +33943,23 @@ should be able to be added at any place in this file.
   <owner>sdefresne@chromium.org</owner>
   <description>
     Reported when Translate Settings UI was dismissed. iOS only.
+  </description>
+</action>
+
+<action name="MobileTravelInfoSettingsBack">
+  <owner>jsobiech@google.com</owner>
+  <owner>chrome-autofill-team@google.com</owner>
+  <description>
+    Reported when user goes back from Travel Info Settings UI to Autofill and
+    Passwords Settings screen. iOS only.
+  </description>
+</action>
+
+<action name="MobileTravelInfoSettingsClose">
+  <owner>jsobiech@google.com</owner>
+  <owner>chrome-autofill-team@google.com</owner>
+  <description>
+    Reported when Travel Info Settings UI was dismissed. iOS only.
   </description>
 </action>
 
@@ -38325,6 +38579,15 @@ should be able to be added at any place in this file.
   </description>
 </action>
 
+<action name="PasswordManager.PasswordDropdownSelected.PasskeyQrCode">
+  <owner>derinel@google.com</owner>
+  <owner>markusheintz@google.com</owner>
+  <description>
+    Recorded when the user selected a passkey QR code entry in the password
+    dropdown.
+  </description>
+</action>
+
 <action name="PasswordManager.PasswordDropdownSelected.Password">
   <owner>derinel@google.com</owner>
   <owner>markusheintz@google.com</owner>
@@ -39062,6 +39325,39 @@ should be able to be added at any place in this file.
     Recorded when the user clicks the Manage Settings link in the Personal
     Context notice.
   </description>
+</action>
+
+<action name="PersonalContext.Settings.EntryPoint.{PersonalContextEntryPoint}">
+  <owner>kalinino@google.com</owner>
+  <owner>chrome-browser-privacy-team@google.com</owner>
+  <description>
+    Recorded when the user clicks the Personal Context settings link row from
+    the {PersonalContextEntryPoint}.
+  </description>
+  <token key="PersonalContextEntryPoint" variants="PersonalContextEntryPoint"/>
+</action>
+
+<action
+    name="PersonalContext.Settings.Manage{PersonalContextManageTarget}Click">
+  <owner>kalinino@google.com</owner>
+  <owner>chrome-browser-privacy-team@google.com</owner>
+  <description>
+    Recorded when the user clicks the {PersonalContextManageTarget} preference
+    on the Autofill Personal Context settings page.
+  </description>
+  <token key="PersonalContextManageTarget"
+      variants="PersonalContextManageTarget"/>
+</action>
+
+<action name="PersonalContext.Settings.Toggled{PersonalContextToggleState}">
+  <owner>kalinino@google.com</owner>
+  <owner>chrome-browser-privacy-team@google.com</owner>
+  <description>
+    Recorded when the user clicks the Personal Context toggle on the Personal
+    Context settings page, {PersonalContextToggleState}.
+  </description>
+  <token key="PersonalContextToggleState"
+      variants="PersonalContextToggleState"/>
 </action>
 
 <action name="PhishingInterstitial.Advanced">
@@ -41830,6 +42126,16 @@ should be able to be added at any place in this file.
   </description>
 </action>
 
+<action name="Settings.AiPage.GoogleSearchAiModeWorkspaceEntryPointClick">
+  <owner>adamyao@google.com</owner>
+  <owner>rainhard@chromium.org</owner>
+  <owner>chrome-browser-privacy-team@google.com</owner>
+  <description>
+    Reported when user clicks on the Google Search AI Mode Workspace row in the
+    chrome://settings/ai page.
+  </description>
+</action>
+
 <action name="Settings.AiPage.HistorySearch.Disabled">
   <owner>zalmashni@google.com</owner>
   <owner>rainhard@chromium.org</owner>
@@ -44303,7 +44609,7 @@ should be able to be added at any place in this file.
   <owner>kmilka@chromium.org</owner>
   <owner>src/components/send_tab_to_self/OWNERS</owner>
   <description>
-    The &quot;Send to your devices&quot; option was selected in the sharing hub.
+    The &quot;Send to your device&quot; option was selected in the sharing hub.
   </description>
 </action>
 
@@ -44578,6 +44884,14 @@ should be able to be added at any place in this file.
   <description>
     User interacts with the browser icon in the shelf on ChromeOS to show a
     context menu with all the windows.
+  </description>
+</action>
+
+<action name="Shelf_ContextMenu_Task_Manager">
+  <owner>oshima@chromium.org</owner>
+  <owner>cros-system-ui-eng@google.com</owner>
+  <description>
+    User selected Task Manager from the shelf context menu on ChromeOS.
   </description>
 </action>
 
@@ -47042,6 +47356,15 @@ should be able to be added at any place in this file.
   </description>
 </action>
 
+<action name="Signin_Signin_FromLevelUp">
+  <owner>pabouchard@google.com</owner>
+  <owner>bling-mony-pod@google.com</owner>
+  <description>
+    Recorded on sign in start from access point
+    signin_metrics::AccessPoint::kLevelUp. iOS only.
+  </description>
+</action>
+
 <action name="Signin_Signin_FromMachineLogon">
   <owner>rogerta@chromium.org</owner>
   <owner>tienmai@chromium.org</owner>
@@ -48896,6 +49219,24 @@ should be able to be added at any place in this file.
   <description>
     Recorded when the &quot;Send feedback&quot; Split View menu item was
     clicked.
+  </description>
+</action>
+
+<action name="SplitViewOrientationChanged.TabContextMenu">
+  <owner>kunaldaftari@google.com</owner>
+  <owner>top-chrome-desktop-ui@google.com</owner>
+  <description>
+    Recorded when the orientation of a Split View within the browser was changed
+    by clicking the tab context menu item.
+  </description>
+</action>
+
+<action name="SplitViewOrientationChanged.ToolbarButton">
+  <owner>kunaldaftari@google.com</owner>
+  <owner>top-chrome-desktop-ui@google.com</owner>
+  <description>
+    Recorded when the orientation of a Split View within the browser was changed
+    by clicking the toolbar button.
   </description>
 </action>
 
@@ -54480,6 +54821,24 @@ should be able to be added at any place in this file.
   </description>
 </action>
 
+<action name="VerticalTabs_TabStrip_KeyboardShortcutToggleCollapsed">
+  <owner>kunaldaftari@google.com</owner>
+  <owner>top-chrome-desktop-ui@google.com</owner>
+  <description>
+    Recorded when the user collapses the vertical tab strip using the keyboard
+    shortcut.
+  </description>
+</action>
+
+<action name="VerticalTabs_TabStrip_KeyboardShortcutToggleUncollapsed">
+  <owner>kunaldaftari@google.com</owner>
+  <owner>top-chrome-desktop-ui@google.com</owner>
+  <description>
+    Recorded when the user uncollapses the vertical tab strip using the keyboard
+    shortcut.
+  </description>
+</action>
+
 <action name="VerticalTabs_TabStrip_ResizeToCollapsed">
   <owner>charlesmeng@chromium.org</owner>
   <owner>top-chrome-desktop-ui@google.com</owner>
@@ -54495,6 +54854,24 @@ should be able to be added at any place in this file.
   <description>
     Recorded when the user ends dragging the vertical tab strip with it in the
     uncollapsed state.
+  </description>
+</action>
+
+<action name="VerticalTabs_TabStrip_ViewMenuToggleCollapsed">
+  <owner>kunaldaftari@google.com</owner>
+  <owner>top-chrome-desktop-ui@google.com</owner>
+  <description>
+    Recorded when the user collapses the vertical tab strip using the view menu
+    on mac.
+  </description>
+</action>
+
+<action name="VerticalTabs_TabStrip_ViewMenuToggleUncollapsed">
+  <owner>kunaldaftari@google.com</owner>
+  <owner>top-chrome-desktop-ui@google.com</owner>
+  <description>
+    Recorded when the user uncollapses the vertical tab strip using the view
+    menu on mac.
   </description>
 </action>
 

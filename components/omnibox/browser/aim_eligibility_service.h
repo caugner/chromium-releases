@@ -73,8 +73,10 @@ class AimEligibilityService
       const base::Feature& feature);
   // See comment for `WriteToPref()`.
   static void RegisterProfilePrefs(PrefRegistrySimple* registry);
-  // Returns true if the AIM is allowed per the policy.
+  // Returns if AIM is allowed by policy.
   static bool IsAimAllowedByPolicy(const PrefService* prefs);
+  // Returns if 3rd party AIM is allowed by policy.
+  static bool IsAimAllowedByThirdPartyPolicy(const PrefService* prefs);
 
   // Tracks the source of `most_recent_response_`.
   // These values are persisted to logs. Entries should not be renumbered and
@@ -141,15 +143,45 @@ class AimEligibilityService
   // Virtual for testing purposes.
   virtual bool IsServerEligibilityEnabled() const;
 
+  // TODO(b:525018060): The API to check AIM eligibility has gotten confusing:
+  //     - public `IsAimAllowedByDse()`
+  //     - public `IsAimAllowedByFeatureAndPolicy()`
+  //     - public `IsAimLocallyEligible()`
+  //     - public `IsAimEligible()`
+  //     - multiple public `Is<Feature>Eligible()`
+  //     - private `IsEligibleByServer()`.
+  //   It's not clear which a caller should call. We should:
+  //   a) move some of the internal helpers from public to private; many of them
+  //      are public only to make testing easier, but we shouldn't make code
+  //      more confusing for the sake of testing convenience, especially since
+  //      `friend` exists.
+  //   b) We should also rename them; e.g. both `IsEligibleByServer()` &
+  //      `IsAimEligible()` actually incorporate local and server eligibility.
+  //      The check hierarchy is something like:
+  //        Is<Feature>Eligible
+  //          IsEligibleByServer
+  //            IsAimEligible
+  //              IsAimLocallyEligible
+  //                IsAimAllowedByDse
+  //                IsAimAllowedByFeatureAndPolicy
+
   // Checks if AIM is allowed by default search engine (Google DSE).
   // Virtual for testing purposes.
   virtual bool IsAimAllowedByDse() const;
 
-  // Checks if user is locally eligible for AI mode (excludes server checks).
+  // Checks `kAimEnabled` feature and `kAIModeSettings` policy.
+  // Virtual for testing purposes.
+  virtual bool IsAimAllowedByFeatureAndPolicy() const;
+
+  // Checks `kThirdPartyAiChatSettings` policy.
+  // Virtual for testing purposes.
+  virtual bool IsAimAllowedByThirdPartyPolicy() const;
+
+  // Checks `IsAimAllowedByDse()` & `IsAimAllowedByFeatureAndPolicy()`.
   // Virtual for testing purposes.
   virtual bool IsAimLocallyEligible() const;
 
-  // Checks if user is eligible for AI mode (includes server checks).
+  // Checks `IsAimLocallyEligible()` and server eligibility `is_eligible` param.
   // Virtual for testing purposes.
   virtual bool IsAimEligible() const;
 
@@ -175,15 +207,44 @@ class AimEligibilityService
   // Checks if user is eligible for Canvas in AIM features.
   virtual bool IsCanvasEligible() const;
 
+  // Checks if the user is eligible for Co-Browse in AIM according to server
+  // and feature flag checks, regardless of Contextual Tasks enablement.
+  virtual bool IsCobrowseServerEligible() const;
+
   // Checks if the user is eligible for Co-Browse in AIM features.
   virtual bool IsCobrowseEligible() const;
 
   // Checks if the user is eligible for AIM Fuseboxes.
   virtual bool IsFuseboxEligible() const;
 
-  // Determining whether the provided URL is an AI page based on server-provided
-  // params.
+  // Returns whether `url` is a valid AIM URL (i.e. would navigate a user to the
+  // AIM feature). All of the host, path, and URL params are checked to
+  // determine this. This method does not incorporate checks for params that
+  // would cause the browser to skip features like cobrowse mode. The
+  // `host_override` param can be used to allow a host that isn't provided by
+  // the eligibility service backend. In practice, this method is primarily used
+  // to determine whether the browser should intercept a navigation and redirect
+  // to an internal page.
+  virtual bool IsAimUrl(const GURL& url,
+                        std::optional<std::string> host_override) const;
+
+  // Returns whether `url` has a host which would qualify it as an AIM URL. This
+  // method alone does not determine whether the URL would actually navigate a
+  // user to AIM, things like path and URL params would also need to be checked.
+  virtual bool IsAimHost(const GURL& url,
+                         std::optional<std::string> host_override) const;
+
+  // Returns whether `url` has the collection of URL params that qualify it as
+  // an AIM URL. This method alone does not determine whether the URL would
+  // actually navigate a user to AIM, things like host and path would still need
+  // to be checked. This is mainly a helper for `IsAimUrl()` above.
   virtual bool HasAimUrlParams(const GURL& url) const;
+
+  // Returns whether `url` has params that should prevent it from being
+  // intercepted and entering cobrowsing mode. This does not check that the
+  // provided `url` is an AIM URL, only whether specific URL params are
+  // present.
+  virtual bool HasNoCobrowseParams(const GURL& url) const;
 
   // Returns the most recent eligibility response proto.
   virtual const omnibox::AimEligibilityResponse& GetMostRecentResponse() const;
@@ -236,7 +297,6 @@ class AimEligibilityService
   virtual void FetchEligibility(RequestSource source);
 
  protected:
-
   // Returns the locale in the BCP 47 IETF standard.
   // Natively enforces that the result from platform overrides does not contain
   // underscores.
@@ -276,7 +336,7 @@ class AimEligibilityService
   };
   // LINT.ThenChange(//tools/metrics/histograms/metadata/omnibox/enums.xml:AimEligibilityRequestStatus)
 
-  // Returns server eligibility if the feature is AIM eligible.
+  // Checks `IsAimEligible()` and `server_eligibility`.
   bool IsEligibleByServer(bool server_eligibility) const;
 
   // signin::IdentityManager::Observer:
@@ -308,6 +368,12 @@ class AimEligibilityService
 
   // Callback for when the AIM policy changes.
   void OnPolicyChanged();
+
+  // Returns whether `url` has a path component which would qualify it as an AIM
+  // URL. This method alone does not determine whether the URL would actually
+  // navigate a user to AIM, things like host and URL params would still need to
+  // be checked. This is primarily a helper for `IsAimUrl()` above.
+  bool IsAimPath(const GURL& url) const;
 
  protected:
   // Callback for when the eligibility response changes. Notifies observers.

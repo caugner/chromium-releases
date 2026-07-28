@@ -19,6 +19,20 @@
 
 class GeminiSuggestionHandlerTest;
 
+// Object representing a Gemini suggestion.
+@interface ZeroStateSuggestion : NSObject
+
+// Display text for the suggestion.
+@property(nonatomic, copy) NSString* text;
+
+// Query to be used when the suggestion is used.
+@property(nonatomic, copy) NSString* query;
+
+// Identifier for the icon to be used for the suggestion.
+@property(nonatomic, copy) NSString* iconIdentifier;
+
+@end
+
 namespace web {
 class WebState;
 }  // namespace web
@@ -40,16 +54,10 @@ class ZeroStateSuggestionsService {
 
   // Fetches zero-state suggestions.
   void FetchZeroStateSuggestions(
-      base::OnceCallback<void(NSArray<NSString*>*)> callback);
+      base::OnceCallback<void(NSArray<ZeroStateSuggestion*>*)> callback);
 
-  // Clears cached suggestions and resets can_apply state.
+  // Clears cached suggestions.
   void ClearCachedSuggestions();
-
-  // Sets whether model-led suggestions can be applied.
-  void SetCanApply(bool can_apply);
-
-  // Returns whether model-led suggestions can be applied.
-  bool CanApply() const;
 
  private:
   // Adding test classes as friend to facilitate setting state.
@@ -58,9 +66,22 @@ class ZeroStateSuggestionsService {
 
   // Parses the response of a zero-state suggestions execution.
   void ParseSuggestionsResponse(
-      base::OnceCallback<void(NSArray<NSString*>*)> callback,
+      base::OnceCallback<void(NSArray<ZeroStateSuggestion*>*)> callback,
       GURL request_url,
       ai::mojom::ModelLedSuggestionsResponseResultPtr result);
+
+  // Builds a suggestions array from raw suggestions.
+  NSArray<ZeroStateSuggestion*>* BuildSuggestions(
+      const std::vector<std::string>& model_led_suggestions);
+
+  // Helper methods to create static suggestions.
+  ZeroStateSuggestion* CreateSummarizeAction();
+  ZeroStateSuggestion* CreateFAQAction();
+  ZeroStateSuggestion* CreateWhatCanGeminiDoAction();
+  ZeroStateSuggestion* CreateCustomAction(NSString* query);
+
+  // Returns whether the "What can Gemini do" action can be shown.
+  bool CanShowWhatCanGeminiDoAction();
 
   // Weak WebState.
   base::WeakPtr<web::WebState> web_state_;
@@ -76,9 +97,6 @@ class ZeroStateSuggestionsService {
 
   // The URL for which the suggestions are cached.
   GURL suggestions_url_;
-
-  // Whether the zero-state suggestions can be applied to the current page.
-  bool can_apply_ = false;
 
   // Weak pointer factory.
   base::WeakPtrFactory<ZeroStateSuggestionsService> weak_ptr_factory_{this};

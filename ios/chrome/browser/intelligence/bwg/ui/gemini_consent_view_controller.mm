@@ -7,7 +7,8 @@
 #import "ios/chrome/browser/intelligence/bwg/metrics/gemini_metrics.h"
 #import "ios/chrome/browser/intelligence/bwg/ui/gemini_consent_accordion_view.h"
 #import "ios/chrome/browser/intelligence/bwg/ui/gemini_consent_configuration.h"
-#import "ios/chrome/browser/intelligence/bwg/ui/gemini_consent_mutator.h"
+#import "ios/chrome/browser/intelligence/bwg/ui/gemini_first_run_mutator.h"
+#import "ios/chrome/browser/intelligence/bwg/ui/gemini_ui_utils.h"
 #import "ios/chrome/browser/intelligence/bwg/utils/gemini_constants.h"
 #import "ios/chrome/browser/shared/ui/symbols/symbols.h"
 #import "ios/chrome/browser/shared/ui/util/uikit_ui_util.h"
@@ -56,12 +57,12 @@ const CGFloat kHeaderIconSizeMultiplier = 0.55;
   [self configureMainStackView];
 }
 
-#pragma mark - GeminiFREViewControllerProtocol
+#pragma mark - GeminiFirstRunViewControllerProtocol
 
+// Returns the expected content height of this view.
 - (CGFloat)contentHeight {
-  return
-      [_mainStackView systemLayoutSizeFittingSize:UILayoutFittingCompressedSize]
-          .height;
+  return [GeminiUIUtils contentHeightForView:_mainStackView
+                          withContainerWidth:self.view.bounds.size.width];
 }
 
 #pragma mark - Private
@@ -176,7 +177,7 @@ const CGFloat kHeaderIconSizeMultiplier = 0.55;
 
 // Helper to handle link actions.
 - (void)handleLinkAction:(NSString*)actionString {
-  RecordFREConsentAction(IOSGeminiFREAction::kLinkClick);
+  RecordFirstRunConsentAction(IOSGeminiFirstRunAction::kLinkClick);
   if ([actionString isEqualToString:kGeminiFirstFootnoteLinkAction]) {
     [self.mutator openNewTabWithURL:GURL(kFirstFootnoteLinkURL)];
   } else if ([actionString isEqualToString:kGeminiSecondFootnoteLinkAction]) {
@@ -198,6 +199,9 @@ const CGFloat kHeaderIconSizeMultiplier = 0.55;
   } else if ([actionString
                  isEqualToString:kGeminiLivePrivacyPolicyLinkAction]) {
     [self.mutator openNewTabWithURL:GURL(kLivePrivacyPolicyLinkURL)];
+  } else if ([actionString
+                 isEqualToString:kGeminiLivePrivacyHubManagedLinkAction]) {
+    [self.mutator openNewTabWithURL:GURL(kLivePrivacyHubManagedLinkURL)];
   } else if ([actionString isEqualToString:kGeminiKoreanTermsLinkAction]) {
     [self.mutator openNewTabWithURL:GURL(kKoreanTermsFootnoteLinkURL)];
   } else if ([actionString isEqualToString:kGeminiWatchLinkAction]) {

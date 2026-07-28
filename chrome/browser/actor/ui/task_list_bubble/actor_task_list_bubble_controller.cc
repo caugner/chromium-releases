@@ -25,7 +25,6 @@
 #include "chrome/browser/ui/views/toolbar/toolbar_glic_actor_task_icon.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/common/chrome_features.h"
-#include "chrome/grit/generated_resources.h"
 #include "ui/base/base_window.h"
 #include "ui/base/l10n/l10n_util.h"
 

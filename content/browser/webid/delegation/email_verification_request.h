@@ -13,6 +13,7 @@
 #include "base/observer_list.h"
 #include "base/observer_list_types.h"
 #include "base/types/expected.h"
+#include "base/values.h"
 #include "content/browser/webid/delegation/dns_request.h"
 #include "content/browser/webid/delegation/email_verifier_network_request_manager.h"
 #include "content/browser/webid/delegation/evt_verifier.h"
@@ -52,7 +53,8 @@ using TokenResultOrError = base::RefCountedData<
     base::expected<EmailVerifierNetworkRequestManager::TokenResult,
                    blink::mojom::EmailVerificationRequestResult>>;
 using JwksResultOrError = base::RefCountedData<
-    base::expected<base::Value, blink::mojom::EmailVerificationRequestResult>>;
+    base::expected<base::DictValue,
+                   blink::mojom::EmailVerificationRequestResult>>;
 // Performs the email verification process, which involves making a DNS TXT
 // record request to determine the issuer, and then fetching a token from the
 // issuer.

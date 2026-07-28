@@ -25,6 +25,7 @@
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_history_sync/signin_and_history_sync_coordinator.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_in_progress.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_screen_provider.h"
+#import "ios/chrome/browser/metrics/model/activity_reporter.h"
 #import "ios/chrome/browser/shared/coordinator/chrome_coordinator/animated_coordinator.h"
 #import "ios/chrome/browser/shared/coordinator/scene/scene_state.h"
 #import "ios/chrome/browser/shared/model/browser/browser.h"
@@ -43,6 +44,7 @@ using signin_metrics::PromoAction;
 
 @implementation SigninCoordinator {
   std::unique_ptr<SigninInProgress> _signinInProgress;
+  ActivityReporter* _activityReporter;
 }
 
 - (instancetype)initWithBaseViewController:(UIViewController*)viewController
@@ -52,6 +54,8 @@ using signin_metrics::PromoAction;
                                    (signin_metrics::AccessPoint)accessPoint {
   self = [super initWithBaseViewController:viewController browser:browser];
   if (self) {
+    _activityReporter =
+        [[ActivityReporter alloc] initWithDomain:ActivityReportDomainSignin];
     CHECK(browser);
     CHECK_EQ(browser->type(), Browser::Type::kRegular,
              base::NotFatalUntil::M145);
@@ -108,6 +112,8 @@ using signin_metrics::PromoAction;
                                                          command.contextStyle
                                                       accessPoint:
                                                           command.accessPoint
+                                             confirmChangeProfile:
+                                                 command.confirmChangeProfile
                                              prepareChangeProfile:
                                                  command.prepareChangeProfile
                                              continuationProvider:provider];
@@ -306,6 +312,9 @@ using signin_metrics::PromoAction;
                                                 accessPoint:
                                                     (signin_metrics::
                                                          AccessPoint)accessPoint
+                                       confirmChangeProfile:
+                                           (SigninChangeProfileConfirmationBlock)
+                                               confirmChangeProfile
                                        prepareChangeProfile:
                                            (ProceduralBlock)prepareChangeProfile
                                        continuationProvider:
@@ -316,6 +325,7 @@ using signin_metrics::PromoAction;
                                 browser:browser
                            contextStyle:contextStyle
                             accessPoint:accessPoint
+                   confirmChangeProfile:confirmChangeProfile
                    prepareChangeProfile:prepareChangeProfile
                    continuationProvider:continuationProvider];
 }
@@ -394,6 +404,7 @@ using signin_metrics::PromoAction;
   // `signinCompletion` needs to be set by the owner to know when the sign-in
   // is finished.
   CHECK(self.signinCompletion, base::NotFatalUntil::M151);
+  [_activityReporter reportActive];
 }
 
 #pragma mark - AnimatedCoordinator
@@ -401,6 +412,7 @@ using signin_metrics::PromoAction;
 - (void)stopAnimated:(BOOL)animated {
   _signinInProgress.reset();
   [super stopAnimated:animated];
+  [_activityReporter reportInactive];
 }
 
 #pragma mark - Protected

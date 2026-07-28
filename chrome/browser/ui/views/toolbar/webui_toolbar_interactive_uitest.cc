@@ -29,7 +29,6 @@
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/interaction/browser_elements.h"
 #include "chrome/browser/ui/navigator/browser_navigator.h"
-#include "chrome/browser/ui/tabs/features.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model.h"
 #include "chrome/browser/ui/ui_features.h"
@@ -171,10 +170,9 @@ class WebUIToolbarPixelInteractiveUiTest : public InteractiveBrowserTest {
         {features::kInitialWebUI, features::kWebUIReloadButton,
          features::kWebUISplitTabsButton, features::kWebUIBackForwardButton,
          features::kWebUIHomeButton, features::kWebUIPinnedToolbarActions,
-         ::tabs::kHorizontalTabStripComboButton, features::kWebUILocationBar,
+         features::kWebUILocationBar, features::kWebUIAppMenuButton,
          features::kSkipIPCChannelPausingForNonGuests,
-         features::kWebUIInProcessResourceLoadingV2,
-         features::kInitialWebUISyncNavStartToCommit},
+         features::kWebUIInProcessResourceLoadingV2},
         {});
   }
 
@@ -226,7 +224,14 @@ IN_PROC_BROWSER_TEST_F(WebUIToolbarPixelInteractiveUiTest, Basic) {
   BasicPixelTest(browser(), "Basic");
 }
 
-IN_PROC_BROWSER_TEST_F(WebUIToolbarPixelInteractiveUiTest, IncognitoBasic) {
+// TODO(crbug.com/513510081): Flaky on linux-win-cross-rel.
+#if BUILDFLAG(IS_WIN)
+#define MAYBE_IncognitoBasic DISABLED_IncognitoBasic
+#else
+#define MAYBE_IncognitoBasic IncognitoBasic
+#endif
+IN_PROC_BROWSER_TEST_F(WebUIToolbarPixelInteractiveUiTest,
+                       MAYBE_IncognitoBasic) {
   BasicPixelTest(CreateIncognitoBrowser(), "IncognitoBasic");
 }
 
@@ -258,16 +263,14 @@ class WebUIToolbarViewsInteractiveUiTest
            features::kWebUIBackForwardButton,
 #endif  // BUILDFLAG(IS_MAC)
            features::kSkipIPCChannelPausingForNonGuests,
-           features::kWebUIInProcessResourceLoadingV2,
-           features::kInitialWebUISyncNavStartToCommit},
+           features::kWebUIInProcessResourceLoadingV2},
           {});
     } else {
       feature_list_.InitWithFeatures(
           {}, {features::kInitialWebUI, features::kWebUIReloadButton,
                features::kWebUIBackForwardButton,
                features::kSkipIPCChannelPausingForNonGuests,
-               features::kWebUIInProcessResourceLoadingV2,
-               features::kInitialWebUISyncNavStartToCommit});
+               features::kWebUIInProcessResourceLoadingV2});
     }
   }
 
@@ -1276,8 +1279,7 @@ class WebUIToolbarFocusMinimalInteractiveUiTest
          features::kWebUIReloadButton, features::kWebUIHomeButton,
          features::kWebUISplitTabsButton,
          features::kSkipIPCChannelPausingForNonGuests,
-         features::kWebUIInProcessResourceLoadingV2,
-         features::kInitialWebUISyncNavStartToCommit},
+         features::kWebUIInProcessResourceLoadingV2},
         {features::kWebUILocationBar, features::kWebUIPinnedToolbarActions});
   }
   ~WebUIToolbarFocusMinimalInteractiveUiTest() override = default;
@@ -1436,10 +1438,8 @@ class WebUIToolbarFocusFullInteractiveUiTest
          features::kWebUIReloadButton, features::kWebUIHomeButton,
          features::kWebUISplitTabsButton, features::kWebUILocationBar,
          features::kWebUIPinnedToolbarActions,
-         ::tabs::kHorizontalTabStripComboButton,
          features::kSkipIPCChannelPausingForNonGuests,
-         features::kWebUIInProcessResourceLoadingV2,
-         features::kInitialWebUISyncNavStartToCommit},
+         features::kWebUIInProcessResourceLoadingV2},
         {});
   }
   ~WebUIToolbarFocusFullInteractiveUiTest() override = default;

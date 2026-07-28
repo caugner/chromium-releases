@@ -16,6 +16,7 @@ import android.util.SparseIntArray;
 import androidx.annotation.IntDef;
 import androidx.annotation.VisibleForTesting;
 
+import org.chromium.base.Callback;
 import org.chromium.base.Log;
 import org.chromium.base.ObserverList;
 import org.chromium.base.StreamUtil;
@@ -33,6 +34,7 @@ import org.chromium.build.annotations.Initializer;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.app.tabmodel.AsyncTabParamsManagerSingleton;
+import org.chromium.chrome.browser.crash.ChromePureJavaExceptionReporter;
 import org.chromium.chrome.browser.crypto.CipherFactory;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
@@ -46,6 +48,7 @@ import org.chromium.chrome.browser.tab.TabSelectionType;
 import org.chromium.chrome.browser.tab.TabState;
 import org.chromium.chrome.browser.tab.TabStateAttributes;
 import org.chromium.chrome.browser.tab.TabStateAttributes.DirtinessState;
+import org.chromium.chrome.browser.tab.TabStateAttributesRegistry;
 import org.chromium.chrome.browser.tab.TabStateExtractor;
 import org.chromium.chrome.browser.tab.state.PersistedTabData;
 import org.chromium.chrome.browser.tabmodel.PersistentStoreMigrationManager.StoreType;
@@ -60,6 +63,7 @@ import org.chromium.chrome.browser.tabwindow.TabWindowManager;
 import org.chromium.components.browser_ui.util.ConversionUtils;
 import org.chromium.components.embedder_support.util.UrlUtilities;
 import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.url.GURL;
 
 import java.io.BufferedInputStream;
 import java.io.ByteArrayInputStream;
@@ -291,7 +295,9 @@ public class TabPersistentStoreImpl implements TabPersistentStore {
                 new TabModelSelectorTabRegistrationObserver.Observer() {
                     @Override
                     public void onTabRegistered(Tab tab) {
-                        TabStateAttributes attributes = TabStateAttributes.from(tab);
+                        TabStateAttributes attributes =
+                                TabStateAttributesRegistry.getAttributesFor(
+                                        tab, TabPersistentStoreImpl.class);
                         assumeNonNull(attributes);
                         if (attributes.addObserver(attributesObserver) == DirtinessState.DIRTY) {
                             addTabToSaveQueue(tab);
@@ -301,7 +307,9 @@ public class TabPersistentStoreImpl implements TabPersistentStore {
                     @Override
                     public void onTabUnregistered(Tab tab) {
                         if (!tab.isDestroyed()) {
-                            assumeNonNull(TabStateAttributes.from(tab))
+                            assumeNonNull(
+                                            TabStateAttributesRegistry.getAttributesFor(
+                                                    tab, TabPersistentStoreImpl.class))
                                     .removeObserver(attributesObserver);
                         }
                         if (tab.isClosing()) {
@@ -431,7 +439,9 @@ public class TabPersistentStoreImpl implements TabPersistentStore {
                 int id = tab.getId();
                 boolean incognito = tab.isIncognito();
                 try {
-                    TabStateAttributes attributes = TabStateAttributes.from(tab);
+                    TabStateAttributes attributes =
+                            TabStateAttributesRegistry.getAttributesFor(
+                                    tab, TabPersistentStoreImpl.class);
                     if (attributes != null) {
                         attributes.clearTabStateDirtiness();
                     }
@@ -609,8 +619,10 @@ public class TabPersistentStoreImpl implements TabPersistentStore {
             // If the active tab can't be restored, restore and select another tab. Otherwise, the
             // tab model won't have a valid index and the UI will break. http://crbug.com/41026812
             while (!mTabsToRestore.isEmpty()
-                    && assumeNonNull(mNormalTabsRestored).size() == 0
-                    && assumeNonNull(mIncognitoTabsRestored).size() == 0) {
+                    && mNormalTabsRestored != null
+                    && mIncognitoTabsRestored != null
+                    && mNormalTabsRestored.size() == 0
+                    && mIncognitoTabsRestored.size() == 0) {
                 try (TraceEvent e = TraceEvent.scoped("LoadFirstTabState")) {
                     TabRestoreDetails tabToRestore = mTabsToRestore.removeFirst();
                     restoreTab(tabToRestore, true);
@@ -678,7 +690,8 @@ public class TabPersistentStoreImpl implements TabPersistentStore {
         } catch (Exception e) {
             // Catch generic exception to prevent a corrupted state from crashing the app
             // at startup.
-            Log.i(TAG, "loadTabs exception: " + e, e);
+            Log.e(TAG, "loadTabs exception: " + e, e);
+            ChromePureJavaExceptionReporter.reportJavaException(e, false);
         } finally {
             StrictMode.setThreadPolicy(oldPolicy);
         }
@@ -742,18 +755,17 @@ public class TabPersistentStoreImpl implements TabPersistentStore {
                             + model.isIncognito());
         }
         SparseIntArray restoredTabs = isIncognito ? mIncognitoTabsRestored : mNormalTabsRestored;
-        assumeNonNull(restoredTabs);
         int restoredIndex = 0;
         if (tabToRestore.fromMerge) {
             // Put any tabs being merged into this list at the end.
             // TODO(ltian): need to figure out a way to add merged tabs before Browser Actions tabs
             // when tab restore and Browser Actions tab merging happen at the same time.
             restoredIndex = model.getCount();
-        } else if (restoredTabs.size() > 0
+        } else if (restoredTabs != null && restoredTabs.size() > 0
                 && tabToRestore.originalIndex > restoredTabs.keyAt(restoredTabs.size() - 1)) {
             // If the tab's index is too large, restore it at the end of the list.
             restoredIndex = Math.min(model.getCount(), restoredTabs.size());
-        } else {
+        } else if (restoredTabs != null) {
             // Otherwise try to find the tab we should restore before, if any.
             for (int i = 0; i < restoredTabs.size(); i++) {
                 if (restoredTabs.keyAt(i) > tabToRestore.originalIndex) {
@@ -871,7 +883,9 @@ public class TabPersistentStoreImpl implements TabPersistentStore {
                 mTabModelSelector.selectModel(wasIncognitoTabModelSelected);
             }
         }
-        restoredTabs.put(tabToRestore.originalIndex, tabId);
+        if (restoredTabs != null) {
+            restoredTabs.put(tabToRestore.originalIndex, tabId);
+        }
     }
 
     @Override
@@ -909,7 +923,10 @@ public class TabPersistentStoreImpl implements TabPersistentStore {
 
     private void addTabToSaveQueueIfApplicable(@Nullable Tab tab) {
         if (tab == null || tab.isDestroyed()) return;
-        TabStateAttributes tabStateAttributes = assumeNonNull(TabStateAttributes.from(tab));
+        TabStateAttributes tabStateAttributes =
+                assumeNonNull(
+                        TabStateAttributesRegistry.getAttributesFor(
+                                tab, TabPersistentStoreImpl.class));
         @DirtinessState int dirtinessState = tabStateAttributes.getDirtinessState();
         if (mTabsToSave.contains(tab) || dirtinessState == DirtinessState.CLEAN) {
             return;
@@ -1202,6 +1219,12 @@ public class TabPersistentStoreImpl implements TabPersistentStore {
     }
 
     private void saveTabListAsynchronously() {
+        // For headless mode only save after initialization is complete to prevent tabs from
+        // possibly ending up in a shuffled order. Keep regular mode behavior as is for now. We
+        // should try to reduce saving during restoration, but that is a riskier change.
+        if (CLIENT_TAG_HEADLESS.equals(mClientTag) && !mTabModelSelector.isTabStateInitialized()) {
+            return;
+        }
         if (ChromeFeatureList.sAndroidTabSkipSaveTabsKillswitch.isEnabled()
                 && mMetadataSaveMode != MetadataSaveMode.SAVING_ALLOWED) {
             if (mMetadataSaveMode == MetadataSaveMode.PAUSED_AND_CLEAN) {
@@ -1257,7 +1280,10 @@ public class TabPersistentStoreImpl implements TabPersistentStore {
         @Override
         protected void onPreExecute() {
             if (mDestroyed || isCancelled()) return;
-            assumeNonNull(TabStateAttributes.from(mTab)).clearTabStateDirtiness();
+            assumeNonNull(
+                            TabStateAttributesRegistry.getAttributesFor(
+                                    mTab, TabPersistentStoreImpl.class))
+                    .clearTabStateDirtiness();
             mState = TabStateExtractor.from(mTab);
         }
 
@@ -2021,6 +2047,83 @@ public class TabPersistentStoreImpl implements TabPersistentStore {
 
     public void setSequencedTaskRunnerForTesting(SequencedTaskRunner sequencedTaskRunner) {
         mSequencedTaskRunner = sequencedTaskRunner;
+    }
+
+    /** Information about a tab in a closed window instance. */
+    public static class ClosedWindowTabInfo {
+        public final int id;
+        public final GURL url;
+        public final boolean isActive;
+
+        /**
+         * Creates an instance of {@link ClosedWindowTabInfo}.
+         *
+         * @param id The ID of the tab.
+         * @param url The URL of the tab.
+         * @param isActive Whether the tab was the active tab in the window.
+         */
+        public ClosedWindowTabInfo(int id, GURL url, boolean isActive) {
+            this.id = id;
+            this.url = url;
+            this.isActive = isActive;
+        }
+    }
+
+    /**
+     * Retrieves the list of tabs for a closed window instance from its persisted state
+     * asynchronously.
+     *
+     * @param instanceId The instance ID of the closed window.
+     * @param callback The callback to receive the list of {@link ClosedWindowTabInfo}.
+     */
+    public static void getTabListForClosedWindow(
+            int instanceId, Callback<List<ClosedWindowTabInfo>> callback) {
+        PostTask.postTask(
+                TaskTraits.BEST_EFFORT,
+                () -> {
+                    List<ClosedWindowTabInfo> tabs = getTabListForClosedWindow(instanceId);
+                    PostTask.postTask(TaskTraits.UI_DEFAULT, callback.bind(tabs));
+                });
+    }
+
+    public static List<ClosedWindowTabInfo> getTabListForClosedWindow(int instanceId) {
+        List<ClosedWindowTabInfo> tabs = new ArrayList<>();
+        File file =
+                new File(
+                        TabStateDirectory.getOrCreateTabbedModeStateDirectory(),
+                        TabbedModeTabPersistencePolicy.getMetadataFileNameForIndex(instanceId));
+
+        if (!file.exists()) {
+            return tabs;
+        }
+
+        DataInputStream stream = null;
+        try {
+            stream = new DataInputStream(new BufferedInputStream(new FileInputStream(file)));
+            TabMetadataFileManager.readSavedMetadataFile(
+                    stream, createClosedWindowTabReader(tabs), /* tabIds= */ null);
+        } catch (Exception e) {
+            Log.i(TAG, "getTabListForClosedWindowSync exception: " + e.toString(), e);
+        } finally {
+            StreamUtil.closeQuietly(stream);
+        }
+
+        return tabs;
+    }
+
+    private static TabMetadataFileManager.OnTabStateReadCallback createClosedWindowTabReader(
+            final List<ClosedWindowTabInfo> tabs) {
+        return (int index,
+                int id,
+                String url,
+                @Nullable Boolean isIncognito,
+                boolean isStandardActiveIndex,
+                boolean isIncognitoActiveIndex) -> {
+            if (isIncognito != null && isIncognito) {
+                return;
+            }
+            tabs.add(new ClosedWindowTabInfo(id, new GURL(url), isStandardActiveIndex));
+        };
     }
 
     /**

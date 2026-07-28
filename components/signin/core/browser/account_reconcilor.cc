@@ -11,6 +11,7 @@
 #include <set>
 #include <utility>
 
+#include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
 #include "base/location.h"
@@ -22,11 +23,13 @@
 #include "base/strings/string_util.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
+#include "base/types/expected_macros.h"
 #include "components/content_settings/core/browser/content_settings_observer.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/account_reconcilor_delegate.h"
 #include "components/signin/public/base/account_consistency_method.h"
+#include "components/signin/public/base/bound_session_oauth_multilogin_delegate.h"
 #include "components/signin/public/base/consent_level.h"
 #include "components/signin/public/base/signin_client.h"
 #include "components/signin/public/base/signin_metrics.h"
@@ -40,7 +43,10 @@
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "google_apis/gaia/google_service_auth_error.h"
+#include "mojo/public/cpp/bindings/callback_helpers.h"
+#include "net/base/features.h"
 #include "net/base/net_errors.h"
+#include "net/base/schemeful_site.h"
 
 using signin::AccountReconcilorDelegate;
 using signin::ConsentLevel;
@@ -111,6 +117,10 @@ const char AccountReconcilor::kTriggerNoopHistogramName[] =
 // static
 const char AccountReconcilor::kTriggerThrottledHistogramName[] =
     "Signin.Reconciler.Trigger.Throttled";
+
+// static
+const char AccountReconcilor::kCookieJarIsFreshHistogramName[] =
+    "Signin.Reconciler.CookieJar.IsFresh";
 
 AccountReconcilor::Lock::Lock(AccountReconcilor* reconcilor)
     : reconcilor_(reconcilor->weak_factory_.GetWeakPtr()) {
@@ -185,6 +195,7 @@ void AccountReconcilor::Initialize(bool start_reconcile_if_tokens_available) {
   if (delegate_->IsReconcileEnabled()) {
     SetState(AccountReconcilorState::kScheduled);
     RegisterWithAllDependencies();
+    FetchDeviceBoundSessions();
 
     // Start a reconcile if the tokens are already loaded.
     if (start_reconcile_if_tokens_available && IsIdentityManagerReady()) {
@@ -195,6 +206,7 @@ void AccountReconcilor::Initialize(bool start_reconcile_if_tokens_available) {
 
 void AccountReconcilor::EnableReconcile() {
   RegisterWithAllDependencies();
+  FetchDeviceBoundSessions();
   if (IsIdentityManagerReady()) {
     StartReconcile(Trigger::kEnableReconcile);
   } else {
@@ -364,21 +376,29 @@ void AccountReconcilor::OnErrorStateOfRefreshTokenUpdatedForAccount(
 }
 
 void AccountReconcilor::PerformSetCookiesAction(
-    const signin::MultiloginParameters& parameters) {
+    const signin::MultiloginParameters& parameters,
+    bool is_cookie_upgrade) {
   reconcile_is_noop_ = false;
   VLOG(1) << "AccountReconcilor::PerformSetCookiesAction: "
           << base::JoinString(ToStringList(parameters.accounts_to_send), " ");
+
+  std::optional<base::TimeTicks> cookie_upgrade_start_time;
+  if (is_cookie_upgrade) {
+    cookie_upgrade_start_time = base::TimeTicks::Now();
+  }
+
   identity_manager_->GetAccountsCookieMutator()->SetAccountsInCookie(
-      parameters, delegate_->GetGaiaApiSource(),
+      parameters, delegate_->GetGaiaApiSource(is_cookie_upgrade),
       base::BindOnce(&AccountReconcilor::OnSetAccountsInCookieCompleted,
-                     weak_factory_.GetWeakPtr(), parameters.accounts_to_send));
+                     weak_factory_.GetWeakPtr(), parameters.accounts_to_send,
+                     cookie_upgrade_start_time));
 }
 
 void AccountReconcilor::PerformLogoutAllAccountsAction() {
   reconcile_is_noop_ = false;
   VLOG(1) << "AccountReconcilor::PerformLogoutAllAccountsAction";
   identity_manager_->GetAccountsCookieMutator()->LogOutAllAccounts(
-      delegate_->GetGaiaApiSource(),
+      delegate_->GetGaiaApiSource(/*is_cookie_upgrade=*/false),
       base::BindOnce(&AccountReconcilor::OnLogOutFromCookieCompleted,
                      weak_factory_.GetWeakPtr()));
 }
@@ -415,6 +435,12 @@ void AccountReconcilor::StartReconcile(Trigger trigger) {
     SetState(AccountReconcilorState::kScheduled);
     VLOG(1)
         << "AccountReconcilor::StartReconcile: token service *not* ready yet.";
+    return;
+  }
+
+  // Do not reconcile if device bound sessions are not fetched yet and we
+  // might need them.
+  if (MaybeDeferReconciliationForCookieUpgrade()) {
     return;
   }
 
@@ -461,10 +487,13 @@ void AccountReconcilor::StartReconcile(Trigger trigger) {
   // above).
   signin::AccountsInCookieJarInfo accounts_in_cookie_jar =
       identity_manager_->GetAccountsInCookieJar();
+  base::UmaHistogramBoolean(kCookieJarIsFreshHistogramName,
+                            accounts_in_cookie_jar.AreAccountsFresh());
   if (accounts_in_cookie_jar.AreAccountsFresh()) {
     OnAccountsInCookieUpdated(accounts_in_cookie_jar,
                               GoogleServiceAuthError::AuthErrorNone());
   }
+
 }
 
 void AccountReconcilor::FinishReconcileWithMultiloginEndpoint(
@@ -496,7 +525,9 @@ void AccountReconcilor::FinishReconcileWithMultiloginEndpoint(
         chrome_accounts, primary_account, gaia_accounts, first_execution_,
         primary_has_error);
   }
-  if (CookieNeedsUpdate(parameters_for_multilogin, gaia_accounts)) {
+  CookieBindingUpgradeStatus upgrade_status = NeedsCookieBindingUpgrade();
+  if (CookieNeedsUpdate(parameters_for_multilogin, gaia_accounts,
+                        upgrade_status)) {
     // Verify the account reconcilor is not trapped into a loop of repeating the
     // same request with the same params.
     if (throttler_.TryMultiloginOperation(parameters_for_multilogin)) {
@@ -513,7 +544,9 @@ void AccountReconcilor::FinishReconcileWithMultiloginEndpoint(
         // is_reconcile_started_ is set to false.
         RecordReconcileOperation(trigger_, Operation::kMultilogin);
         set_accounts_in_progress_ = true;
-        PerformSetCookiesAction(parameters_for_multilogin);
+        bool is_cookie_upgrade =
+            (upgrade_status == CookieBindingUpgradeStatus::kNeedsUpgrade);
+        PerformSetCookiesAction(parameters_for_multilogin, is_cookie_upgrade);
       }
     } else {
       // Too many requests with the same parameters led to a backoff time
@@ -731,15 +764,22 @@ void AccountReconcilor::ForceReconcile() {
 }
 #endif  // BUILDFLAG(ENABLE_MIRROR)
 
-bool AccountReconcilor::IsIdentityManagerReady() {
+bool AccountReconcilor::IsIdentityManagerReady() const {
   return identity_manager_->AreRefreshTokensLoaded();
 }
 
 void AccountReconcilor::OnSetAccountsInCookieCompleted(
     const std::vector<CoreAccountId>& accounts_to_send,
+    std::optional<base::TimeTicks> cookie_upgrade_start_time,
     signin::SetAccountsInCookieResult result) {
   VLOG(1) << "AccountReconcilor::OnSetAccountsInCookieCompleted: "
           << "Error was " << static_cast<int>(result);
+
+  if (cookie_upgrade_start_time.has_value()) {
+    base::UmaHistogramTimes(
+        "Signin.CookieBinding.UpgradeOAuthMultiloginDuration",
+        base::TimeTicks::Now() - *cookie_upgrade_start_time);
+  }
 
   if (!set_accounts_in_progress_ || !is_reconcile_started_) {
     return;
@@ -912,7 +952,19 @@ void AccountReconcilor::HandleReconcileTimeout() {
 
 bool AccountReconcilor::CookieNeedsUpdate(
     const signin::MultiloginParameters& parameters,
-    const std::vector<gaia::ListedAccount>& existing_accounts) {
+    const std::vector<gaia::ListedAccount>& existing_accounts,
+    CookieBindingUpgradeStatus upgrade_status) {
+  if (upgrade_status != CookieBindingUpgradeStatus::kNotFirstRun &&
+      upgrade_status != CookieBindingUpgradeStatus::kFeatureNotSupported) {
+    base::UmaHistogramEnumeration("Signin.CookieBinding.NeedsUpgradeStatus",
+                                  upgrade_status);
+  }
+  if (upgrade_status == CookieBindingUpgradeStatus::kNeedsUpgrade) {
+    VLOG(1) << "AccountReconcilor::CookieNeedsUpdate: triggering OAML for "
+               "cookie binding upgrade.";
+    return true;
+  }
+
   if (parameters.mode ==
           gaia::MultiloginMode::MULTILOGIN_UPDATE_COOKIE_ACCOUNTS_ORDER &&
       !existing_accounts.empty() && !parameters.accounts_to_send.empty() &&
@@ -967,4 +1019,142 @@ void AccountReconcilor::RecordReconcileOperation(Trigger trigger,
       UMA_HISTOGRAM_ENUMERATION(kTriggerThrottledHistogramName, trigger);
       break;
   }
+}
+
+void AccountReconcilor::FetchDeviceBoundSessions() {
+  if (has_standard_device_bound_session_ != signin::Tribool::kUnknown) {
+    return;
+  }
+  bool is_enabled = false;
+#if BUILDFLAG(ENABLE_DICE_SUPPORT)
+  is_enabled =
+      base::FeatureList::IsEnabled(switches::kEnableCookieBindingCookieUpgrade);
+#endif
+
+  if (!is_enabled) {
+    OnDeviceBoundSessionsFetched(std::nullopt, {});
+    return;
+  }
+
+  network::mojom::DeviceBoundSessionManager* dbsc_manager =
+      client_->GetDeviceBoundSessionManager();
+  if (!dbsc_manager) {
+    OnDeviceBoundSessionsFetched(std::nullopt, {});
+    return;
+  }
+  dbsc_manager->GetAllSessions(mojo::WrapCallbackWithDefaultInvokeIfNotRun(
+      base::BindOnce(&AccountReconcilor::OnDeviceBoundSessionsFetched,
+                     weak_factory_.GetWeakPtr(), base::TimeTicks::Now()),
+      std::vector<net::device_bound_sessions::SessionKey>()));
+}
+
+void AccountReconcilor::OnDeviceBoundSessionsFetched(
+    std::optional<base::TimeTicks> fetch_start_time,
+    const std::vector<net::device_bound_sessions::SessionKey>& sessions) {
+  if (WasShutDown()) {
+    return;
+  }
+
+  if (fetch_start_time.has_value()) {
+    base::UmaHistogramTimes("Signin.CookieBinding.UpgradeSessionFetchDuration",
+                            base::TimeTicks::Now() - *fetch_start_time);
+  }
+
+  bool has_bound_session = false;
+#if BUILDFLAG(ENABLE_DICE_SUPPORT)
+  net::SchemefulSite google_site =
+      net::SchemefulSite(GaiaUrls::GetInstance()->secure_google_url());
+  has_bound_session =
+      std::ranges::any_of(sessions, [&google_site](const auto& session) {
+        return session.site == google_site &&
+               session.id.value() ==
+                   switches::kCookieBindingUpgradeSessionId.Get();
+      });
+#endif
+  has_standard_device_bound_session_ =
+      signin::TriboolFromBool(has_bound_session);
+
+  if (reconcile_on_device_bound_sessions_fetched_) {
+    reconcile_on_device_bound_sessions_fetched_ = false;
+    StartReconcile(Trigger::kDeviceBoundSessionsFetched);
+  }
+}
+
+base::expected<void, AccountReconcilor::CookieBindingUpgradeStatus>
+AccountReconcilor::CheckCookieBindingUpgradePreconditions() const {
+#if BUILDFLAG(ENABLE_DICE_SUPPORT)
+  if (!first_execution_) {
+    return base::unexpected(CookieBindingUpgradeStatus::kNotFirstRun);
+  }
+
+  if (!base::FeatureList::IsEnabled(
+          switches::kEnableCookieBindingCookieUpgrade)) {
+    return base::unexpected(CookieBindingUpgradeStatus::kFeatureDisabled);
+  }
+
+  CHECK(IsIdentityManagerReady());
+  std::vector<uint8_t> wrapped_key = identity_manager_->GetWrappedBindingKey();
+  if (wrapped_key.empty()) {
+    return base::unexpected(CookieBindingUpgradeStatus::kNoWrappedKey);
+  }
+  return base::ok();
+#else
+  return base::unexpected(CookieBindingUpgradeStatus::kFeatureNotSupported);
+#endif
+}
+
+AccountReconcilor::CookieBindingUpgradeStatus
+AccountReconcilor::NeedsCookieBindingUpgrade() const {
+#if BUILDFLAG(ENABLE_DICE_SUPPORT)
+  RETURN_IF_ERROR(CheckCookieBindingUpgradePreconditions());
+
+  CHECK_NE(has_standard_device_bound_session_, signin::Tribool::kUnknown);
+  if (has_standard_device_bound_session_ == signin::Tribool::kTrue) {
+    return CookieBindingUpgradeStatus::kHasStandardSession;
+  }
+
+  // Check prototype DBSC sessions (in-memory Chrome layer)
+  std::unique_ptr<signin::BoundSessionOAuthMultiLoginDelegate>
+      prototype_delegate = client_->CreateBoundSessionOAuthMultiloginDelegate();
+  if (prototype_delegate) {
+    const GURL& secure_google_url =
+        GaiaUrls::GetInstance()->secure_google_url();
+    const net::SchemefulSite google_site(secure_google_url);
+    std::vector<std::pair<GURL, std::string>> sessions =
+        prototype_delegate->GetAllSessions();
+    bool has_prototype_sidts = std::ranges::any_of(
+        sessions, [&google_site](const std::pair<GURL, std::string>& session) {
+          return session.first == google_site.GetURL() &&
+                 session.second ==
+                     switches::kCookieBindingUpgradeSessionId.Get();
+        });
+    if (has_prototype_sidts) {
+      return CookieBindingUpgradeStatus::kHasPrototypeSession;
+    }
+  }
+
+  return CookieBindingUpgradeStatus::kNeedsUpgrade;
+#else
+  return CookieBindingUpgradeStatus::kFeatureNotSupported;
+#endif
+}
+
+bool AccountReconcilor::MaybeDeferReconciliationForCookieUpgrade() {
+  RETURN_IF_ERROR(CheckCookieBindingUpgradePreconditions(),
+                  [](auto) { return false; });
+
+  if (!reconciliation_deferred_logged_) {
+    reconciliation_deferred_logged_ = true;
+    base::UmaHistogramBoolean(
+        "Signin.CookieBinding.UpgradeReconciliationDeferredOnStartup",
+        has_standard_device_bound_session_ == signin::Tribool::kUnknown);
+  }
+  if (has_standard_device_bound_session_ == signin::Tribool::kUnknown) {
+    SetState(AccountReconcilorState::kScheduled);
+    VLOG(1) << "AccountReconcilor::MaybeDeferReconciliationForCookieUpgrade: "
+               "device bound sessions *not* fetched yet.";
+    reconcile_on_device_bound_sessions_fetched_ = true;
+    return true;
+  }
+  return false;
 }

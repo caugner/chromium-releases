@@ -21,7 +21,7 @@
 
 #menu::part(dialog) {
   max-height: var(--contextual-menu-max-height, min(540px, 100vh - 16px));
-  min-height: 144px;
+  min-height: var(--contextual-menu-min-height, 144px);
 }
 
 #menu[scrollable]::part(dialog)::-webkit-scrollbar {
@@ -202,7 +202,17 @@ composebox-favicon-group {
 }
 
 .share-tabs-container {
+  max-width: 320px;
   position: relative;
+  width: 100%;
+}
+
+:host([context-management-enabled]) .share-tabs-container {
+  max-width: 240px;
+}
+
+#shareTabsTrigger {
+  anchor-name: --share-tabs-anchor;
 }
 
 .share-tabs-arrow {
@@ -221,13 +231,42 @@ composebox-favicon-group {
   overflow-x: hidden;
   padding: 8px 0;
   position: fixed;
-  scrollbar-width: thin;
+  position-anchor: --share-tabs-anchor;
   width: 320px;
-  z-index: 1;
+  z-index: 10;
+}
+
+.share-tabs-flyout[data-position='right'] {
+  top: anchor(top);
+  left: anchor(right);
+  right: auto;
+}
+
+.share-tabs-flyout[data-position='left'] {
+  top: anchor(top);
+  left: auto;
+  right: anchor(left);
+}
+
+.share-tabs-flyout[data-position='bottom'] {
+  top: anchor(bottom);
+  inset-inline-start: anchor(start);
 }
 
 .share-tabs-flyout::-webkit-scrollbar {
-  width: 4px;
+  width: 12px;
+}
+
+.share-tabs-flyout::-webkit-scrollbar-thumb {
+  background-color: var(--color-sys-surface-variant, #E1E3E1);
+  background-clip: padding-box;
+  border: 4px solid transparent;
+  border-radius: 100px;
+}
+
+.share-tabs-flyout::-webkit-scrollbar-track {
+  margin-bottom: 15px;
+  margin-top: 15px;
 }
 
 .share-tabs-flyout[hidden] {

@@ -51,6 +51,7 @@
 #include "content/browser/renderer_host/render_widget_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_event_handler.h"
+#include "content/browser/renderer_host/unbounded_surface_window_aura.h"
 #include "content/browser/renderer_host/visible_time_request_trigger.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/device_service.h"
@@ -627,6 +628,11 @@ void RenderWidgetHostViewAura::HandleBoundsInRootChanged() {
 }
 
 void RenderWidgetHostViewAura::ParentHierarchyChanged() {
+  // The window is being destroyed, so just stop observing the position.
+  if (window_->is_destroying()) {
+    position_in_root_observer_.reset();
+    return;
+  }
   if (window_->parent()) {
     // Track changes of the window relative to the root. This is done to snap
     // `window_` to a pixel boundary, which could change when the bounds
@@ -666,12 +672,6 @@ bool RenderWidgetHostViewAura::HasFocus() {
 bool RenderWidgetHostViewAura::IsSurfaceAvailableForCopy() {
   CHECK(delegated_frame_host_) << "Cannot be invoked during destruction.";
   return delegated_frame_host_->CanCopyFromCompositingSurface();
-}
-
-void RenderWidgetHostViewAura::EnsureSurfaceSynchronizedForWebTest() {
-  ++latest_capture_sequence_number_;
-  SynchronizeVisualProperties(cc::DeadlinePolicy::UseInfiniteDeadline(),
-                              std::nullopt);
 }
 
 bool RenderWidgetHostViewAura::IsShowing() {
@@ -1144,10 +1144,6 @@ void RenderWidgetHostViewAura::ClearKeyboardTriggeredTooltip() {
 
   SetTooltipText(std::u16string());
   tooltip_client->UpdateTooltipFromKeyboard(gfx::Rect(), window_);
-}
-
-uint32_t RenderWidgetHostViewAura::GetCaptureSequenceNumber() const {
-  return latest_capture_sequence_number_;
 }
 
 void RenderWidgetHostViewAura::CopyFromSurface(
@@ -2483,7 +2479,10 @@ void RenderWidgetHostViewAura::OnMouseEvent(ui::MouseEvent* event) {
     StylusHandwritingControllerWin::Initialize();
   }
 #endif
-  last_pointer_type_ = ui::EventPointerType::kMouse;
+  last_pointer_type_ =
+      base::FeatureList::IsEnabled(features::kMouseEventPenPointerType)
+          ? event->pointer_details().pointer_type
+          : ui::EventPointerType::kMouse;
   event_handler_->OnMouseEvent(event);
 }
 
@@ -3320,7 +3319,9 @@ void RenderWidgetHostViewAura::DetachFromInputMethod(bool is_removed) {
       return;
     }
 #if BUILDFLAG(IS_CHROMEOS)
-    wm::RestoreWindowBoundsOnClientFocusLost(window_->GetToplevelWindow());
+    if (!window_->is_destroying()) {
+      wm::RestoreWindowBoundsOnClientFocusLost(window_->GetToplevelWindow());
+    }
 #endif  // BUILDFLAG(IS_CHROMEOS)
   }
 
@@ -3625,6 +3626,14 @@ void RenderWidgetHostViewAura::DidNavigate() {
   }
   delegated_frame_host_->DidNavigate();
   is_first_navigation_ = false;
+}
+
+void RenderWidgetHostViewAura::CreateUnboundedSurface(
+    mojo::PendingAssociatedReceiver<blink::mojom::UnboundedSurfaceHost> host,
+    mojo::PendingAssociatedRemote<blink::mojom::UnboundedSurfaceClient> client,
+    const gfx::Rect& bounds_in_dips) {
+  unbounded_surface_window_ = UnboundedSurfaceWindowAura::Create(
+      this, std::move(host), std::move(client), bounds_in_dips);
 }
 
 MouseWheelPhaseHandler* RenderWidgetHostViewAura::GetMouseWheelPhaseHandler() {

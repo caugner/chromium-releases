@@ -668,6 +668,11 @@ void WidgetBase::UpdateCompositorScrollState(
   client_->UpdateCompositorScrollState(commit_data);
 }
 
+void WidgetBase::UpdateAnimatedImageState(
+    const cc::CompositorCommitData& commit_data) {
+  client_->UpdateAnimatedImageState(commit_data);
+}
+
 void WidgetBase::OnDeferMainFrameUpdatesChanged(bool defer) {
   // LayerTreeHost::CreateThreaded() will defer main frame updates immediately
   // until it gets a LocalSurfaceId. That's before the
@@ -800,19 +805,6 @@ void WidgetBase::RequestNewLayerTreeFrameSink(
   // internal begin frame source is started.
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
-  if (base::FeatureList::IsEnabled(
-          ::features::kInternalBeginFrameSourceOnManyDidNotProduceFrame) &&
-      !params.embedder_params->synthetic_begin_frame_source &&
-      !settings.single_thread_proxy_scheduler &&
-      !settings.using_synchronous_renderer_compositor &&
-      !command_line.HasSwitch(switches::kAllowPreCommitInput)) {
-    static const uint64_t num_did_not_produce_frame = static_cast<uint64_t>(
-        ::features::kNumDidNotProduceFrameBeforeInternalBeginFrameSource.Get());
-    params.embedder_params
-        ->num_did_not_produce_frame_before_internal_begin_frame_source =
-        num_did_not_produce_frame;
-    params.embedder_params->auto_needs_begin_frame = true;
-  }
 
   if (base::FeatureList::IsEnabled(::features::kManualBeginFrame) &&
       !command_line.HasSwitch(switches::kAllowPreCommitInput)) {
@@ -981,6 +973,72 @@ void WidgetBase::FinishRequestNewLayerTreeFrameSink(
                gpu_channel_host->CreateClientSharedImageInterface(),
                params.embedder_params.get()),
            std::move(params.render_frame_metadata_observer));
+}
+
+std::unique_ptr<cc::LayerTreeFrameSink> WidgetBase::CreateUnboundedFrameSink(
+    CrossVariantMojoRemote<viz::mojom::blink::CompositorFrameSinkInterfaceBase>
+        unbounded_sink_remote,
+    CrossVariantMojoReceiver<
+        viz::mojom::blink::CompositorFrameSinkClientInterfaceBase>
+        unbounded_client_receiver) {
+  scoped_refptr<gpu::GpuChannelHost> gpu_channel_host =
+      Platform::Current()->EstablishGpuChannelSync();
+  if (!gpu_channel_host) {
+    return nullptr;
+  }
+
+  auto embedder_params = std::make_unique<
+      cc::mojo_embedder::AsyncLayerTreeFrameSink::InitParams>();
+  embedder_params->compositor_task_runner =
+      Platform::Current()->CompositorThreadTaskRunner();
+  if (!embedder_params->compositor_task_runner) {
+    embedder_params->compositor_task_runner =
+        main_thread_compositor_task_runner_;
+  }
+  embedder_params->io_thread_id = Platform::Current()->GetIOThreadId();
+  if (base::FeatureList::IsEnabled(::features::kEnableADPFRendererMain)) {
+    embedder_params->main_thread_id = main_thread_id_;
+  }
+  embedder_params->wants_animate_only_begin_frames = true;
+  embedder_params->no_compositor_frame_acks =
+      base::FeatureList::IsEnabled(::features::kNoCompositorFrameAcks);
+
+  embedder_params->pipes.compositor_frame_sink_remote =
+      mojo::PendingRemote<viz::mojom::CompositorFrameSink>(
+          std::move(unbounded_sink_remote));
+  embedder_params->pipes.client_receiver =
+      mojo::PendingReceiver<viz::mojom::CompositorFrameSinkClient>(
+          std::move(unbounded_client_receiver));
+
+  if (Platform::Current()->IsGpuCompositingDisabled()) {
+    return std::make_unique<cc::mojo_embedder::AsyncLayerTreeFrameSink>(
+        /*context_provider=*/nullptr,
+        /*worker_context_provider=*/nullptr,
+        gpu_channel_host->CreateClientSharedImageInterface(),
+        embedder_params.get());
+  }
+
+  scoped_refptr<viz::RasterContextProvider> worker_context_provider =
+      Platform::Current()->SharedCompositorWorkerContextProvider(
+          &RasterDarkModeFilterImpl::Instance());
+  if (!worker_context_provider) {
+    return nullptr;
+  }
+
+  gpu::SharedMemoryLimits limits = gpu::SharedMemoryLimits::ForMailboxContext();
+  auto context_provider = viz::ContextProviderCommandBuffer::CreateForRaster(
+      gpu_channel_host, kGpuStreamIdDefault, kGpuStreamPriorityDefault,
+      GURL("chrome://gpu/WidgetBase::CreateUnboundedFrameSink"),
+      /*automatic_flushes=*/false, /*support_locking=*/false, limits,
+      viz::command_buffer_metrics::ContextType::RENDERER_COMPOSITOR);
+  if (!context_provider) {
+    return nullptr;
+  }
+
+  return std::make_unique<cc::mojo_embedder::AsyncLayerTreeFrameSink>(
+      std::move(context_provider), std::move(worker_context_provider),
+      gpu_channel_host->CreateClientSharedImageInterface(),
+      embedder_params.get());
 }
 
 void WidgetBase::DidCommitAndDrawCompositorFrame() {
@@ -1427,7 +1485,8 @@ void WidgetBase::UpdateCompositionInfo(bool immediate_request) {
     frame_widget->UpdateCursorAnchorInfo(/*update_requested=*/true);
     return;
   }
-  if (auto host = widget_input_handler_manager_->GetWidgetInputHandlerHost()) {
+  if (mojom::blink::WidgetInputHandlerHost* host =
+          widget_input_handler_manager_->GetWidgetInputHandlerHost()) {
     host->ImeCompositionRangeChanged(composition_range_,
                                      composition_character_bounds_);
   }
@@ -1503,10 +1562,6 @@ void WidgetBase::SetHidden(bool hidden) {
     FlushInputProcessedCallback();
 
   SetCompositorVisible(!is_hidden_);
-
-  if (widget_input_handler_manager_) {
-    widget_input_handler_manager_->SetHidden(is_hidden_);
-  }
 }
 
 ui::TextInputType WidgetBase::GetTextInputType() {
@@ -1576,9 +1631,13 @@ void WidgetBase::ImeSetComposition(
     const gfx::Range& replacement_range,
     int selection_start,
     int selection_end,
-    mojom::blink::ImeState ime_state) {
-  if (!ShouldHandleImeEvents())
+    mojom::blink::ImeState ime_state,
+    DOMNodeIdType target_dom_node_id) {
+  // If the browser is setting a targeted composition, ignore normal IME focus
+  // requirements.
+  if (target_dom_node_id.is_null() && !ShouldHandleImeEvents()) {
     return;
+  }
 
   FrameWidget* frame_widget = client_->FrameWidget();
   if (!frame_widget)
@@ -1591,9 +1650,9 @@ void WidgetBase::ImeSetComposition(
   }
 
   ImeEventGuard guard(weak_ptr_factory_.GetWeakPtr());
-  bool success =
-      frame_widget->SetComposition(text, ime_text_spans, replacement_range,
-                                   selection_start, selection_end, ime_state);
+  bool success = frame_widget->SetComposition(
+      text, ime_text_spans, replacement_range, selection_start, selection_end,
+      ime_state, target_dom_node_id);
   if (!guard.IsValid()) {
     return;
   }
@@ -1601,7 +1660,7 @@ void WidgetBase::ImeSetComposition(
     // If we failed to set the composition text, then we need to let the browser
     // process to cancel the input method's ongoing composition session, to make
     // sure we are in a consistent state.
-    if (auto host =
+    if (mojom::blink::WidgetInputHandlerHost* host =
             widget_input_handler_manager_->GetWidgetInputHandlerHost()) {
       host->ImeCancelComposition();
     }
@@ -1612,9 +1671,13 @@ void WidgetBase::ImeSetComposition(
 void WidgetBase::ImeCommitText(const String& text,
                                const Vector<ui::ImeTextSpan>& ime_text_spans,
                                const gfx::Range& replacement_range,
-                               int relative_cursor_pos) {
-  if (!ShouldHandleImeEvents())
+                               int relative_cursor_pos,
+                               DOMNodeIdType target_dom_node_id) {
+  // If the browser is setting a targeted composition, ignore normal IME focus
+  // requirements.
+  if (target_dom_node_id.is_null() && !ShouldHandleImeEvents()) {
     return;
+  }
 
   FrameWidget* frame_widget = client_->FrameWidget();
   if (!frame_widget)
@@ -1628,7 +1691,7 @@ void WidgetBase::ImeCommitText(const String& text,
   ImeEventGuard guard(weak_ptr_factory_.GetWeakPtr());
   input_handler_.set_handling_input_event(true);
   frame_widget->CommitText(text, ime_text_spans, replacement_range,
-                           relative_cursor_pos);
+                           relative_cursor_pos, target_dom_node_id);
   if (!guard.IsValid()) {
     return;
   }
@@ -1701,7 +1764,7 @@ void WidgetBase::FlushInputProcessedCallback() {
 }
 
 void WidgetBase::CancelComposition() {
-  if (auto host =
+  if (mojom::blink::WidgetInputHandlerHost* host =
           widget_input_handler_manager_->GetWidgetInputHandlerHost()) {
     host->ImeCancelComposition();
   }
@@ -1761,7 +1824,8 @@ void WidgetBase::RequestAnimationAfterDelayTimerFired(TimerBase*) {
   bool urgent_for_input =
       input_handler_.handling_input_event() &&
       base::FeatureList::IsEnabled(features::kUrgentMainFrameForInput);
-  client_->ScheduleAnimation(/*urgent=*/urgent_for_input);
+  client_->ScheduleAnimation(cc::BeginMainFrameReason::kDelayedTimerFired,
+                             /*urgent=*/urgent_for_input);
 }
 
 float WidgetBase::GetOriginalDeviceScaleFactor() const {

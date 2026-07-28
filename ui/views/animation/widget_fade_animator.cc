@@ -31,7 +31,6 @@ void WidgetFadeAnimator::FadeIn(int slide_distance,
   // Widgets cannot be shown when visible and fully transparent.
   widget_->SetOpacity(0.01f);
 
-  base::WeakPtr<WidgetFadeAnimator> weak_this = weak_factory_.GetWeakPtr();
   switch (show_type_) {
     case WidgetShowType::kNone:
       break;
@@ -41,12 +40,6 @@ void WidgetFadeAnimator::FadeIn(int slide_distance,
     case WidgetShowType::kShowInactive:
       widget_->ShowInactive();
       break;
-  }
-
-  // Showing the widget can synchronously invoke native or observer callbacks
-  // that might destroy this animator or cancel the animation.
-  if (!weak_this || !IsFadingIn()) {
-    return;
   }
 
   SetBoundsForSliding(slide_distance, slide_direction);
@@ -147,7 +140,7 @@ void WidgetFadeAnimator::AnimationEnded(const gfx::Animation* animation) {
 
 void WidgetFadeAnimator::OnWidgetDestroying(Widget* widget) {
   widget_observation_.Reset();
-  fade_animation_.End();
+  fade_animation_.Stop();
   animation_type_ = FadeType::kNone;
   widget_ = nullptr;
 }

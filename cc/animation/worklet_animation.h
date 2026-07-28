@@ -9,7 +9,6 @@
 #include <optional>
 #include <string>
 
-#include "base/check.h"
 #include "base/time/time.h"
 #include "cc/animation/animation.h"
 #include "cc/animation/animation_export.h"
@@ -155,13 +154,8 @@ class CC_ANIMATION_EXPORT WorkletAnimation final : public Animation {
 };
 
 inline WorkletAnimation* ToWorkletAnimation(Animation* animation) {
-  CHECK(animation->IsWorkletAnimation());
+  DCHECK(animation->IsWorkletAnimation());
   return static_cast<WorkletAnimation*>(animation);
-}
-
-inline const WorkletAnimation* ToWorkletAnimation(const Animation* animation) {
-  CHECK(animation->IsWorkletAnimation());
-  return static_cast<const WorkletAnimation*>(animation);
 }
 
 }  // namespace cc

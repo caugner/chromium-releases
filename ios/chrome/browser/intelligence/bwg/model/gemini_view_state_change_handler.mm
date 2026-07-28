@@ -38,7 +38,19 @@
   if (!_target) {
     return;
   }
-  _target->OnProcessingStatusChanged(processingStatus);
+  _target->OnProcessingStatusChanged(
+      processingStatus, ios::provider::GeminiDormantReason::kUnknown);
+}
+
+- (void)
+    didUpdateProcessingStatus:(ios::provider::GeminiClientMode)processingStatus
+                dormantReason:(ios::provider::GeminiDormantReason)dormantReason
+                    sessionID:(NSString*)sessionID
+               conversationID:(NSString*)conversationID {
+  if (!_target) {
+    return;
+  }
+  _target->OnProcessingStatusChanged(processingStatus, dormantReason);
 }
 
 - (void)switchToViewState:(ios::provider::GeminiViewState)viewState {
@@ -59,11 +71,32 @@
   _target->OnLiveButtonTapped();
 }
 
+- (void)geminiLiveUserDidPressStopButton {
+  if (!_target) {
+    return;
+  }
+  _target->OnGeminiLiveUserDidPressStopButton();
+}
+
 - (void)geminiLiveUserDidBargeIn {
   if (!_target) {
     return;
   }
   _target->OnGeminiLiveUserDidBargeIn();
+}
+
+- (void)didSwitchToMode:(ios::provider::GeminiViewMode)mode {
+  if (!_target) {
+    return;
+  }
+  _target->OnModeChanged(mode);
+}
+
+- (void)geminiUIDidAppear {
+  if (!_target) {
+    return;
+  }
+  _target->OnGeminiUIDidAppear();
 }
 
 @end

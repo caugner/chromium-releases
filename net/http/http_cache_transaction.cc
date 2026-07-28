@@ -401,7 +401,8 @@ int HttpCache::Transaction::TransitionToReadingState() {
   // offset is behind the current offset else from the network.
   int disk_entry_size = entry_->GetEntry()->GetDataSize(kResponseContentIndex);
   if (read_offset_ == disk_entry_size ||
-      entry_->writers()->network_read_only()) {
+      entry_->writers()->network_read_only() ||
+      entry_->writers()->compressing_for_cache()) {
     next_state_ = STATE_NETWORK_READ_CACHE_WRITE;
   } else {
     DCHECK_LT(read_offset_, disk_entry_size);
@@ -1640,18 +1641,18 @@ int HttpCache::Transaction::DoCacheReadResponse() {
   TransitionToState(STATE_CACHE_READ_RESPONSE_COMPLETE);
 
   io_buf_len_ = entry_->GetEntry()->GetDataSize(kResponseInfoIndex);
-  cache_buf_ = base::MakeRefCounted<IOBufferWithSize>(io_buf_len_);
+  read_buf_ = base::MakeRefCounted<IOBufferWithSize>(io_buf_len_);
 
   net_log_.BeginEvent(NetLogEventType::HTTP_CACHE_READ_INFO);
   BeginDiskCacheAccessTimeCount();
-  return entry_->GetEntry()->ReadData(kResponseInfoIndex, 0, cache_buf_.get(),
+  return entry_->GetEntry()->ReadData(kResponseInfoIndex, 0, read_buf_.get(),
                                       io_buf_len_, io_callback_);
 }
 
 int HttpCache::Transaction::DoCacheReadResponseComplete(int result) {
   TRACE_EVENT_INSTANT(TRACE_DISABLED_BY_DEFAULT("net"),
                       "DoCacheReadResponseComplete", track_for_state_change_,
-                      "result", result, "io_buf_len", cache_buf_->size());
+                      "result", result, "io_buf_len", read_buf_->size());
   net_log_.EndEventWithNetErrorCode(NetLogEventType::HTTP_CACHE_READ_INFO,
                                     result);
   EndDiskCacheAccessTimeCount(DiskCacheAccessType::kRead);
@@ -1659,8 +1660,8 @@ int HttpCache::Transaction::DoCacheReadResponseComplete(int result) {
   // Record the time immediately before the cached response is parsed.
   read_headers_since_ = TimeTicks::Now();
 
-  if (result != cache_buf_->size() ||
-      !HttpCache::ParseResponseInfo(cache_buf_->span(), &response_,
+  if (result != read_buf_->size() ||
+      !HttpCache::ParseResponseInfo(read_buf_->span(), &response_,
                                     &truncated_)) {
     return OnCacheReadError(result, true);
   }
@@ -1714,7 +1715,6 @@ int HttpCache::Transaction::DoCacheReadResponseComplete(int result) {
     CHECK_EQ(compressed_disk_offset_, 0u);
     decompressor_ = std::make_unique<CacheBodyDecompressor>();
     if (!decompressor_->Init()) {
-      DVLOG(1) << "Failed to init zstd decompression for cached entry";
       decompressor_.reset();
       net_log_.AddEvent(NetLogEventType::HTTP_CACHE_DECOMPRESS, [&] {
         base::DictValue params;
@@ -2060,6 +2060,11 @@ int HttpCache::Transaction::DoSendRequestComplete(int result) {
     response_.cert_request_info = response->cert_request_info;
   } else if (result == ERR_INCONSISTENT_IP_ADDRESS_SPACE) {
     DoomInconsistentEntry();
+  } else if (entry_ && partial_ && truncated_) {
+    // Doom explicitly: `DoneWithEntry(false)` does not doom a partial
+    // transaction past the headers phase (see `DoomInconsistentEntry`).
+    cache_->DoomActiveEntry(cache_key_);
+    DoneWithEntry(/*entry_is_complete=*/false);
   } else if (response_.was_cached) {
     DoneWithEntry(/*entry_is_complete=*/true);
   }
@@ -4213,7 +4218,6 @@ void HttpCache::Transaction::RecordHistograms() {
       (!did_send_request &&
        (cache_entry_status_ == CacheEntryStatus::ENTRY_USED ||
         cache_entry_status_ == CacheEntryStatus::ENTRY_CANT_CONDITIONALIZE)));
-
 
   if (!did_send_request) {
     if (cache_entry_status_ == CacheEntryStatus::ENTRY_USED) {

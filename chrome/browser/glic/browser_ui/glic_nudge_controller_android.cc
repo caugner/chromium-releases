@@ -6,6 +6,7 @@
 
 #include "base/notimplemented.h"
 #include "chrome/browser/glic/browser_ui/glic_nudge_delegate.h"
+#include "chrome/browser/glic/browser_ui/glic_nudge_delegate_android.h"
 #include "chrome/browser/tab_list/tab_list_interface.h"
 
 namespace glic {
@@ -13,6 +14,9 @@ namespace glic {
 GlicNudgeControllerAndroid::GlicNudgeControllerAndroid(
     content::WebContents* web_contents) {
   // TODO(crbug.com/524810240): Observe tab changes.
+  delegate_ = std::make_unique<GlicNudgeDelegateAndroid>(
+      this, /*tab_list=*/nullptr, web_contents);
+  SetTabStripDelegate(delegate_.get());
 }
 GlicNudgeControllerAndroid::~GlicNudgeControllerAndroid() = default;
 

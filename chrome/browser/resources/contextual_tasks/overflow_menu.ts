@@ -11,6 +11,10 @@ import {AnchorAlignment} from '//resources/cr_elements/cr_action_menu/cr_action_
 import type {CrActionMenuElement} from '//resources/cr_elements/cr_action_menu/cr_action_menu.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 import {CrLitElement} from 'chrome://resources/lit/v3_0/lit.rollup.js';
+import type {PropertyValues} from 'chrome://resources/lit/v3_0/lit.rollup.js';
+// <if expr="not is_android">
+import {HelpBubbleMixinLit} from 'chrome://resources/cr_components/help_bubble/help_bubble_mixin_lit.js';
+// </if>
 
 import type {BrowserProxy} from './contextual_tasks_browser_proxy.js';
 import {BrowserProxyImpl} from './contextual_tasks_browser_proxy.js';
@@ -24,7 +28,14 @@ export interface OverflowMenuElement {
   };
 }
 
-export class OverflowMenuElement extends CrLitElement {
+// <if expr="is_android">
+const OverflowMenuElementBase = CrLitElement;
+// </if>
+// <if expr="not is_android">
+const OverflowMenuElementBase = HelpBubbleMixinLit(CrLitElement);
+// </if>
+
+export class OverflowMenuElement extends OverflowMenuElementBase {
   static get is() {
     return 'contextual-tasks-overflow-menu';
   }
@@ -44,6 +55,11 @@ export class OverflowMenuElement extends CrLitElement {
       isPinned: {type: Boolean},
       isPinButtonEnabled: {type: Boolean},
       isAiPage: {type: Boolean},
+      isUserFeedbackAllowed: {type: Boolean},
+      contextualTasksEnableSpatialModelToolbarLayout: {type: Boolean},
+      contextualTasksEnableSpatialModelToolbarLayoutNewThreadInOverflow:
+          {type: Boolean},
+      isAimEligible: {type: Boolean},
     };
   }
 
@@ -56,8 +72,19 @@ export class OverflowMenuElement extends CrLitElement {
       loadTimeData.getBoolean('enablePinButton');
   accessor isAiPage: boolean =
       loadTimeData.getBoolean('isAiPage');
+  accessor isUserFeedbackAllowed: boolean =
+      loadTimeData.getBoolean('isUserFeedbackAllowed');
+  accessor contextualTasksEnableSpatialModelToolbarLayout: boolean =
+      loadTimeData.getBoolean('contextualTasksEnableSpatialModelToolbarLayout');
+  accessor contextualTasksEnableSpatialModelToolbarLayoutNewThreadInOverflow:
+      boolean = loadTimeData.getBoolean(
+          'contextualTasksEnableSpatialModelToolbarLayoutNewThreadInOverflow');
+  accessor isAimEligible: boolean = false;
   private browserProxy_: BrowserProxy = BrowserProxyImpl.getInstance();
   private listenerIds_: number[] = [];
+// <if expr="not is_android">
+  private helpBubbleRegistered_: boolean = false;
+// </if>
 
   override connectedCallback() {
     super.connectedCallback();
@@ -79,6 +106,23 @@ export class OverflowMenuElement extends CrLitElement {
     this.listenerIds_.forEach(
         id => this.browserProxy_.callbackRouter.removeListener(id));
     this.listenerIds_ = [];
+  }
+
+  override updated(changedProperties: PropertyValues<this>) {
+    super.updated(changedProperties);
+
+    // <if expr="not is_android">
+    const showPin = this.shouldShowPinButton_();
+    if (showPin && !this.helpBubbleRegistered_) {
+      this.registerHelpBubble(
+          'kContextualTasksWebUIOverflowMenuPinButtonElementId', '#pinButton');
+      this.helpBubbleRegistered_ = true;
+    } else if (!showPin && this.helpBubbleRegistered_) {
+      this.unregisterHelpBubble(
+          'kContextualTasksWebUIOverflowMenuPinButtonElementId');
+      this.helpBubbleRegistered_ = false;
+    }
+    // </if>
   }
 
   showAt(target: HTMLElement) {
@@ -111,7 +155,7 @@ export class OverflowMenuElement extends CrLitElement {
       recordAction('ContextualTasks.WebUI.UserAction.UnpinSidePanel');
       this.browserProxy_.handler.unpinSidePanel();
     }
-    this.fire('pin-click');
+    this.dispatchEvent(new CustomEvent('pin-click'));
   }
 
   protected onThreadHistoryClick_() {
@@ -132,10 +176,49 @@ export class OverflowMenuElement extends CrLitElement {
     this.browserProxy_.handler.openMyActivityUi();
   }
 
-  protected onFeedbackClick_() {
+  protected onHelpClick_() {
     this.close();
     recordAction('ContextualTasks.WebUI.UserAction.OpenHelp');
+    this.browserProxy_.handler.openOnboardingHelpUi();
+  }
+
+
+  protected onFeedbackClick_() {
+    this.close();
+    recordAction('ContextualTasks.WebUI.UserAction.OpenFeedback');
     this.browserProxy_.handler.openFeedbackUi();
+  }
+
+  protected onNewThreadClick_() {
+    this.close();
+    this.fire('new-thread-click');
+  }
+
+  protected onOpenChanged_(e: CustomEvent<{value: boolean}>) {
+    this.fire('open-changed', {value: e.detail.value});
+  }
+
+  protected shouldShowNewThreadInMenu_(): boolean {
+    return this.isAimEligible &&
+        this.contextualTasksEnableSpatialModelToolbarLayout &&
+        this.contextualTasksEnableSpatialModelToolbarLayoutNewThreadInOverflow;
+  }
+
+  protected shouldShowThreadHistoryInMenu_(): boolean {
+    return this.isSmallDeviceFormFactor ||
+        (this.contextualTasksEnableSpatialModelToolbarLayout && this.isAiPage);
+  }
+
+  protected shouldShowOpenInNewTabInMenu_(): boolean {
+    return !this.isSmallDeviceFormFactor &&
+        !this.contextualTasksEnableSpatialModelToolbarLayout &&
+        !this.contextualTasksEnableSpatialModelToolbarLayoutNewThreadInOverflow;
+  }
+
+  protected shouldShowMenuHeaderDivider_(): boolean {
+    return this.shouldShowOpenInNewTabInMenu_() ||
+        this.shouldShowThreadHistoryInMenu_() ||
+        this.shouldShowPinButton_();
   }
 }
 

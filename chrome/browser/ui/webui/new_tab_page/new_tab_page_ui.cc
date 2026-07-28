@@ -258,6 +258,11 @@ content::WebUIDataSource* CreateAndAddNewTabPageUiHtmlSource(
 
   source->AddBoolean("energyEffectEnabled",
                      base::FeatureList::IsEnabled(ntp_features::kEnergyEffect));
+  source->AddString("energyEffectVariant",
+                    base::FeatureList::IsEnabled(ntp_features::kEnergyEffect)
+                        ? ntp_features::kEnergyEffectVariantParam.GetName(
+                              ntp_features::kEnergyEffectVariantParam.Get())
+                        : std::string());
   source->AddBoolean(
       "energyEffectAnimationEnabled",
       base::FeatureList::IsEnabled(ntp_features::kEnergyEffectAnimation));
@@ -286,6 +291,12 @@ content::WebUIDataSource* CreateAndAddNewTabPageUiHtmlSource(
   source->AddBoolean(
       "doodleMuralsEnabled",
       base::FeatureList::IsEnabled(ntp_features::kNtpDoodleMurals));
+  bool use_google_logo_26 = false;
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  use_google_logo_26 =
+      base::FeatureList::IsEnabled(ntp_features::kNtpGoogleLogo26);
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  source->AddBoolean("useGoogleLogo26", use_google_logo_26);
   source->AddBoolean(
       "middleSlotPromoEnabled",
       base::FeatureList::IsEnabled(ntp_features::kNtpMiddleSlotPromo) &&
@@ -330,6 +341,15 @@ content::WebUIDataSource* CreateAndAddNewTabPageUiHtmlSource(
   source->AddBoolean(
       "caretAnimationEnabled",
       base::FeatureList::IsEnabled(ntp_features::kNtpAnimatedCaret));
+  source->AddBoolean(
+      "voiceSearchCoherenceSearchboxEnabled",
+      base::FeatureList::IsEnabled(omnibox::kVoiceSearchCoherenceSearchbox));
+  source->AddBoolean(
+      "voiceSearchCoherenceAnySearchboxExperimentEnabled",
+      SearchboxHandler::GetVoiceSearchCoherenceAnySearchboxExperimentEnabled());
+  source->AddBoolean(
+      "voiceSearchCoherenceSearchboxWithLiveTranscriptionEnabled",
+      omnibox::kVoiceSearchCoherenceSearchboxWithLiveTranscription.Get());
 
   static constexpr webui::LocalizedString kStrings[] = {
       {"doneButton", IDS_DONE},
@@ -660,6 +680,12 @@ content::WebUIDataSource* CreateAndAddNewTabPageUiHtmlSource(
       "searchboxShowComposeEntrypoint",
       (aim_eligible || ntp_composebox::IsNtpComposeboxEnabled(profile)));
 
+  source->AddBoolean(
+      "ntpRealboxDynamicAiModeButton",
+      ntp_realbox::IsNtpRealboxNextEnabled(profile) &&
+          base::FeatureList::IsEnabled(
+              ntp_realbox::kNtpRealboxDynamicAiModeButton));
+
   if (ntp_realbox::IsNtpRealboxNextEnabled(profile)) {
     if (base::FeatureList::IsEnabled(
             ntp_realbox::kNtpRealboxCyclingPlaceholders)) {
@@ -689,16 +715,16 @@ content::WebUIDataSource* CreateAndAddNewTabPageUiHtmlSource(
   }
 
   source->AddBoolean("keepMenuOpenOnTabSelectForRealbox",
-                     base::FeatureList::IsEnabled(
-                         omnibox::kKeepMenuOpenOnTabSelectForRealbox));
+                     omnibox::kKeepMenuOpenOnTabSelectForRealbox.Get());
   source->AddBoolean("composeboxShowContextMenu",
                      ntp_composebox::kShowContextMenu.Get());
   source->AddBoolean("composeboxShowContextMenuTabPreviews",
                      ntp_composebox::kShowContextMenuTabPreviews.Get());
   source->AddBoolean("composeboxContextMenuEnableMultiTabSelection",
                      ntp_composebox::kContextMenuEnableMultiTabSelection.Get());
-  source->AddBoolean("contextManagementInComposeboxEnabled",
-  base::FeatureList::IsEnabled(omnibox::kContextManagementInComposebox));
+  source->AddBoolean(
+      "contextManagementInComposeboxEnabled",
+      base::FeatureList::IsEnabled(omnibox::kContextManagementInComposebox));
   source->AddBoolean(
       "tabFaviconChipsToCoinsEnabled",
       base::FeatureList::IsEnabled(omnibox::kContextManagementInComposebox) &&
@@ -711,7 +737,6 @@ content::WebUIDataSource* CreateAndAddNewTabPageUiHtmlSource(
   source->AddBoolean("composeboxShowImageSuggest",
                      ntp_composebox::kShowComposeboxImageSuggestions.Get());
 
-  source->AddBoolean("composeboxShowContextMenuDescription", false);
 
   source->AddBoolean("composeboxSmartComposeEnabled",
                      ntp_composebox::kShowSmartCompose.Get());
@@ -791,6 +816,15 @@ content::WebUIDataSource* CreateAndAddNewTabPageUiHtmlSource(
 #if !BUILDFLAG(OPTIMIZE_WEBUI)
   source->AddResourcePaths(kNewTabSharedResources);
 #endif  // BUILDFLAG(OPTIMIZE_WEBUI)
+
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  // Overrides the mapping installed by SetupWebUIDataSource() above, so the
+  // stable logo path serves the 2026 version of the Google logo.
+  if (use_google_logo_26) {
+    source->AddResourcePath("icons/google_logo.svg",
+                            IDR_NEW_TAB_PAGE_BRANDED_GOOGLE_LOGO_SVG);
+  }
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
   // Allow embedding of iframes for the doodle and
   // chrome-untrusted://new-tab-page for other external content and resources.
@@ -1221,6 +1255,14 @@ void NewTabPageUI::BindInterface(
 void NewTabPageUI::BindInterface(
     mojo::PendingReceiver<composebox::mojom::PageHandlerFactory>
         pending_receiver) {
+  auto* aim_service = AimEligibilityServiceFactory::GetForProfile(profile_);
+  bool aim_eligible = aim_service && aim_service->IsAimEligible();
+
+  if (!aim_eligible &&
+      !ntp_composebox::IsNtpComposeboxEnabled(profile_) &&
+      !SearchboxHandler::GetVoiceSearchCoherenceAnySearchboxExperimentEnabled()) {
+    return;
+  }
   if (composebox_page_factory_receiver_.is_bound()) {
     composebox_page_factory_receiver_.reset();
   }

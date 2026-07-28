@@ -221,6 +221,12 @@ public class MediaSessionTest {
         mFakeTimeTestRule.deepSleepMillis(1500);
         simulateScreenOn();
         DOMUtils.waitForMediaPauseBeforeEnd(tab.getWebContents(), VIDEO_ID);
+
+        // Verify that the system sleep pause did not grant user activation.
+        String result =
+                JavaScriptUtils.executeJavaScriptAndWaitForResult(
+                        tab.getWebContents(), "navigator.userActivation.isActive");
+        Assert.assertEquals("false", result);
     }
 
     @Test

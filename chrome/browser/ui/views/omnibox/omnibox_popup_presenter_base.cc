@@ -58,7 +58,12 @@ void OmniboxPopupPresenterBase::Show() {
     return;
   }
 
+  if (ShouldPreserveRequestedFocus()) {
+    focus_requested_ = false;
+  }
   has_logged_content_ready_since_open_ = false;
+  // Drop stale metrics callbacks.
+  metrics_weak_factory_.InvalidateWeakPtrs();
 
   EnsureWidgetCreated();
   SynchronizePopupBounds();
@@ -109,6 +114,9 @@ void OmniboxPopupPresenterBase::OnVisualStateReady(
     base::TimeTicks show_request_time,
     bool from_fallback,
     bool success) {
+  // TODO(crbug.com/507159575): Invalidate weak ptrs for this callback
+  // across rapid hide/show cycles to avoid race conditions overriding
+  // `is_deferred_` for a new popup session.
   if (!is_deferred_) {
     return;
   }
@@ -131,7 +139,12 @@ void OmniboxPopupPresenterBase::OnVisualStateReady(
 }
 
 void OmniboxPopupPresenterBase::ShowWidget(base::TimeTicks show_request_time) {
-  widget_->ShowInactive();
+  if (ShouldPreserveRequestedFocus() &&
+      (widget_->IsActive() || focus_requested_)) {
+    widget_->Show();
+  } else {
+    widget_->ShowInactive();
+  }
   // If the derived class requests hiding for the initial layout pass, make the
   // widget transparent until we receive a valid content height.
   if (ShouldHideForInitialLayout() && content_height_ == 1) {
@@ -153,27 +166,33 @@ void OmniboxPopupPresenterBase::ShowWidget(base::TimeTicks show_request_time) {
 
   if (auto* content = GetWebUIContent()) {
     content->GetWebContents()->WasShown();
-    if (ShouldReceiveFocus()) {
-      widget_->Activate();
+  }
+
+  if (!ShouldPreserveRequestedFocus() || focus_requested_) {
+    RequestFocus();
+  }
+}
+
+void OmniboxPopupPresenterBase::RequestFocus() {
+  if (ShouldPreserveRequestedFocus()) {
+    focus_requested_ = true;
+  }
+  if (widget_ && ShouldReceiveFocus()) {
+    widget_->Activate();
+    if (auto* content = GetWebUIContent()) {
       content->RequestFocus();
-      content->GetWebContents()->Focus();
+      if (content->GetWebContents()) {
+        content->GetWebContents()->Focus();
+      }
     }
   }
 }
 
 void OmniboxPopupPresenterBase::LogResultToContentReadyMetric(
     content::WebContents* web_contents) {
-  if (GetPopupMetricPrefix() != kWebUIPopupMetricPrefix &&
-      GetPopupMetricPrefix() != kFullWebUIPopupMetricPrefix) {
-    // TODO(crbug.com/491337216): Measure this for the AIM popup as well, with a
-    // consistent metric prefix for both popup types.
-    // Skipping AIM popups for now to maintain parity with the Views popups.
-    return;
-  }
-
   web_contents->GetPrimaryMainFrame()->InsertVisualStateCallback(base::BindOnce(
       &OmniboxPopupPresenterBase::OnVisualStateReadyForMetrics,
-      weak_factory_.GetWeakPtr(),
+      metrics_weak_factory_.GetWeakPtr(),
       controller()->autocomplete_controller()->result().result_ready_time()));
 }
 
@@ -182,32 +201,43 @@ void OmniboxPopupPresenterBase::OnVisualStateReadyForMetrics(
     bool success) {
   if (result_ready_time.is_null()) {
     omnibox::LogResultToContentReadyEarlyExitReason(
-        omnibox::ResultToContentReadyEarlyExitReason::kNoResultReadyTime);
+        omnibox::ResultToContentReadyEarlyExitReason::kNoResultReadyTime,
+        GetPopupMetricPrefix());
     return;
   }
 
   if (!success) {
     omnibox::LogResultToContentReadyEarlyExitReason(
-        omnibox::ResultToContentReadyEarlyExitReason::kVisualStateNotReady);
+        omnibox::ResultToContentReadyEarlyExitReason::kVisualStateNotReady,
+        GetPopupMetricPrefix());
     return;
   }
 
   const base::TimeDelta delta = base::TimeTicks::Now() - result_ready_time;
 
   if (!has_logged_content_ready_since_open_) {
-    base::UmaHistogramTimes("Omnibox.Popup.ResultToContentReadyPerShow", delta);
+    base::UmaHistogramTimes(
+        base::StrCat({GetPopupMetricPrefix(), ".ResultToContentReadyPerShow"}),
+        delta);
     has_logged_content_ready_since_open_ = true;
   }
 
   if (!has_logged_first_content_ready_) {
-    base::UmaHistogramTimes("Omnibox.Popup.ResultToContentReadyOnFirstShow",
+    base::UmaHistogramTimes(base::StrCat({GetPopupMetricPrefix(),
+                                          ".ResultToContentReadyOnFirstShow"}),
                             delta);
     has_logged_first_content_ready_ = true;
   }
 }
 
 void OmniboxPopupPresenterBase::Hide() {
+  if (ShouldPreserveRequestedFocus()) {
+    focus_requested_ = false;
+  }
   is_deferred_ = false;
+  // Drop stale metrics callbacks.
+  metrics_weak_factory_.InvalidateWeakPtrs();
+
   // Only close if UI DevTools settings allow.
   if (widget_ && widget_->ShouldHandleNativeWidgetActivationChanged(false)) {
     widget_->Hide();
@@ -251,33 +281,13 @@ void OmniboxPopupPresenterBase::SynchronizePopupBounds() {
     // so width is specified exactly; then only height adjusts dynamically.
     gfx::Rect widget_bounds = location_bar_->BoundsInScreen();
 
-    // For the Full popup, we trust the content height directly to avoid extra
-    // space. For other popups, we ensure it is at least the location bar
-    // height.
-    if (ShouldUseWebContentHeight()) {
-      bool has_results =
-          !controller_->autocomplete_controller()->result().empty();
-      if (!has_results) {
-        // The WebUI content should be the same height as the location bar when
-        // there are no results, so we don't need to update `widget_bounds`. We
-        // also don't apply alignment insets to avoid shifting.
-        GetResultsFrame()->SetElevation(0);
-      } else {
-        widget_bounds.Inset(
-            -RoundedOmniboxResultsFrame::GetLocationBarAlignmentInsets());
-        widget_bounds.set_height(content_height_);
-        GetResultsFrame()->SetElevation(
-            RoundedOmniboxResultsFrame::kDefaultElevation);
-      }
+    widget_bounds.Inset(
+        -RoundedOmniboxResultsFrame::GetLocationBarAlignmentInsets());
+    if (ShouldShowLocationBarCutout()) {
+      widget_bounds.set_height(widget_bounds.height() + content_height_);
     } else {
-      widget_bounds.Inset(
-          -RoundedOmniboxResultsFrame::GetLocationBarAlignmentInsets());
-      if (ShouldShowLocationBarCutout()) {
-        widget_bounds.set_height(widget_bounds.height() + content_height_);
-      } else {
-        widget_bounds.set_height(
-            std::max(content_height_, widget_bounds.height()));
-      }
+      widget_bounds.set_height(
+          std::max(content_height_, widget_bounds.height()));
     }
 
     // Set width and height to at least their minimums, or if larger,
@@ -288,14 +298,8 @@ void OmniboxPopupPresenterBase::SynchronizePopupBounds() {
         std::max(minimum_size_.height(), widget_bounds.height()));
 
     // Expand the widget bounds to accommodate the shadow borders around the
-    // content. We can't use `GetShadowInsets()` here because it assumes a
-    // static default elevation, but the Full popup uses dynamic elevation
-    // (e.g. 0 when empty, so insets should be 0).
-    if (ShouldUseWebContentHeight()) {
-      widget_bounds.Inset(-GetResultsFrame()->GetInsets());
-    } else {
-      widget_bounds.Inset(-RoundedOmniboxResultsFrame::GetShadowInsets());
-    }
+    // content.
+    widget_bounds.Inset(-RoundedOmniboxResultsFrame::GetShadowInsets());
     widget_->SetBounds(widget_bounds);
   }
 }
@@ -354,8 +358,8 @@ void OmniboxPopupPresenterBase::EnsureWidgetCreated() {
   widget_->SetNativeWindowProperty(
       views::kWidgetIdentifierKey,
       const_cast<void*>(omnibox::kOmniboxWebUIPopupWidgetId));
-  auto rounded_frame = std::make_unique<RoundedOmniboxResultsFrame>(
-      owned_omnibox_popup_webui_container_.release(), location_bar_,
+  auto rounded_frame = CreateResultsFrame(
+      std::move(owned_omnibox_popup_webui_container_), location_bar_,
       /*forward_mouse_events=*/ShouldShowLocationBarCutout());
   rounded_frame->SetProperty(views::kElementIdentifierKey,
                              kRoundedResultsFrame);
@@ -365,11 +369,16 @@ void OmniboxPopupPresenterBase::EnsureWidgetCreated() {
   GetResultsFrame()->SetCutoutVisibility(ShouldShowLocationBarCutout());
 }
 
-bool OmniboxPopupPresenterBase::ShouldShowLocationBarCutout() const {
-  return false;
+std::unique_ptr<RoundedOmniboxResultsFrame>
+OmniboxPopupPresenterBase::CreateResultsFrame(
+    std::unique_ptr<views::View> contents,
+    LocationBar* location_bar,
+    bool forward_mouse_events) {
+  return std::make_unique<RoundedOmniboxResultsFrame>(
+      contents.release(), location_bar, forward_mouse_events);
 }
 
-bool OmniboxPopupPresenterBase::ShouldUseWebContentHeight() const {
+bool OmniboxPopupPresenterBase::ShouldShowLocationBarCutout() const {
   return false;
 }
 
@@ -381,9 +390,15 @@ bool OmniboxPopupPresenterBase::ShouldHideForInitialLayout() const {
   return false;
 }
 
+bool OmniboxPopupPresenterBase::ShouldPreserveRequestedFocus() const {
+  return false;
+}
+
 void OmniboxPopupPresenterBase::OnWidgetClosed(
     views::Widget::ClosedReason closed_reason) {
   is_deferred_ = false;
+  // Drop metrics callbacks when the widget is closed.
+  metrics_weak_factory_.InvalidateWeakPtrs();
   owned_omnibox_popup_webui_container_ = GetResultsFrame()->ExtractContents();
   // Call WidgetDestroyed() before resetting the widget pointer. This ensures
   // that subclasses can safely access the widget (e.g., to reset observations)

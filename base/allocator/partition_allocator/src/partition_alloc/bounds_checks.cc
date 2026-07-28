@@ -10,6 +10,7 @@
 #include "partition_alloc/internal/partition_root_internal.h"
 #include "partition_alloc/partition_address_space.h"
 #include "partition_alloc/partition_alloc_base/compiler_specific.h"
+#include "partition_alloc/partition_alloc_base/numerics/checked_math.h"
 #include "partition_alloc/partition_alloc_check.h"
 #include "partition_alloc/partition_alloc_constants.h"
 #include "partition_alloc/partition_direct_map_extent.h"
@@ -28,6 +29,9 @@ PtrPosWithinAlloc IsPtrWithinSameAlloc(uintptr_t orig_address,
                                        size_t type_size,
                                        internal::pool_handle pool) {
   auto [slot_start, _] = SlotAddressAndSize::From(orig_address, pool);
+  if (slot_start.value() == 0) {
+    return PtrPosWithinAlloc::kInBounds;
+  }
   // Don't use |orig_address| beyond this point at all. It was needed to
   // pick the right slot, but now we're dealing with very concrete addresses.
   // Zero it just in case, to catch errors.
@@ -70,19 +74,25 @@ bool IsExtentOutOfBounds(const void* ptr,
                          size_t extent_bytes,
                          size_t type_size) {
 #if PA_BUILDFLAG(HAS_64_BIT_POINTERS)
-  const uintptr_t address = partition_alloc::UntagPtr(ptr);
+  if (!extent_bytes) {
+    return false;
+  }
 
+  const uintptr_t address = partition_alloc::UntagPtr(ptr);
   if (!partition_alloc::IsManagedByPartitionAlloc(address)) {
     return false;
   }
+
   const auto pool = partition_alloc::internal::GetPool(address);
   if (!partition_alloc::internal::ReservationOffsetTable::Get(pool)
            .IsManagedByNormalBucketsOrDirectMap(address)) {
     return false;
   }
 
-  return IsPtrWithinSameAlloc(address, address + extent_bytes, type_size,
-                              pool) == PtrPosWithinAlloc::kFarOOB;
+  return IsPtrWithinSameAlloc(
+             address,
+             internal::base::CheckAdd(address, extent_bytes).ValueOrDie(),
+             type_size, pool) == PtrPosWithinAlloc::kFarOOB;
 #else
   return false;
 #endif  // PA_BUILDFLAG(HAS_64_BIT_POINTERS)

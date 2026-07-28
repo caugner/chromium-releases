@@ -5,7 +5,6 @@
 #ifndef CC_ANIMATION_TIMELINE_TRIGGER_H_
 #define CC_ANIMATION_TIMELINE_TRIGGER_H_
 
-#include "base/check.h"
 #include "cc/animation/animation_trigger.h"
 
 namespace cc {
@@ -71,17 +70,6 @@ class CC_ANIMATION_EXPORT TimelineTrigger : public AnimationTrigger {
   // applies to all types of triggers.
   State state_ = State::kIdle;
 };
-
-inline TimelineTrigger* ToTimelineTrigger(AnimationTrigger* trigger) {
-  CHECK(trigger->IsTimelineTrigger());
-  return static_cast<TimelineTrigger*>(trigger);
-}
-
-inline const TimelineTrigger* ToTimelineTrigger(
-    const AnimationTrigger* trigger) {
-  CHECK(trigger->IsTimelineTrigger());
-  return static_cast<const TimelineTrigger*>(trigger);
-}
 
 }  // namespace cc
 

@@ -103,7 +103,8 @@ PrefetchStatus PrefetchStatusFromIneligibleReason(
       return PrefetchStatus::kPrefetchIneligibleRedirectFromServiceWorker;
     case PreloadingEligibility::kRedirectToServiceWorker:
       return PrefetchStatus::kPrefetchIneligibleRedirectToServiceWorker;
-
+    case PreloadingEligibility::kBlockedByConnectionAllowlist:
+      return PrefetchStatus::kPrefetchIneligibleBlockedByConnectionAllowlist;
     case PreloadingEligibility::kEligible:
     default:
       // Other ineligible cases are not used in `PrefetchService`.
@@ -142,6 +143,7 @@ std::optional<PreloadingTriggeringOutcome> TriggeringOutcomeFromStatus(
     case PrefetchStatus::kPrefetchIneligibleExistingProxy:
     case PrefetchStatus::kPrefetchIneligibleUserHasCookies:
     case PrefetchStatus::kPrefetchIneligibleRetryAfter:
+    case PrefetchStatus::kPrefetchIneligibleBlockedByConnectionAllowlist:
     case PrefetchStatus::kPrefetchNotUsedCookiesChanged:
     case PrefetchStatus::kPrefetchNotUsedProbeFailed:
     case PrefetchStatus::
@@ -193,6 +195,7 @@ bool StatusUpdateIsPossibleAfterFailure(PrefetchStatus status) {
     case PrefetchStatus::kPrefetchIneligibleExistingProxy:
     case PrefetchStatus::kPrefetchIneligibleUserHasCookies:
     case PrefetchStatus::kPrefetchIneligibleRetryAfter:
+    case PrefetchStatus::kPrefetchIneligibleBlockedByConnectionAllowlist:
     case PrefetchStatus::kPrefetchNotUsedCookiesChanged:
     case PrefetchStatus::kPrefetchNotUsedProbeFailed:
     case PrefetchStatus::
@@ -832,6 +835,7 @@ void PrefetchContainer::SetTriggeringOutcomeAndFailureReasonFromStatus(
       case PrefetchStatus::kPrefetchIneligiblePrefetchProxyNotAvailable:
       case PrefetchStatus::
           kPrefetchIneligibleSameSiteCrossOriginPrefetchRequiredProxy:
+      case PrefetchStatus::kPrefetchIneligibleBlockedByConnectionAllowlist:
         NOTIMPLEMENTED();
     }
   }
@@ -1340,19 +1344,6 @@ PrefetchContainer::OnPrefetchResponseStartedInternal(
     return PrefetchErrorOnResponseReceived::kFailedInvalidHeaders;
   }
 
-  if (base::FeatureList::IsEnabled(features::kPrefetchActivationBeacon) &&
-      head->parsed_headers &&
-      head->parsed_headers->prefetch_activation_beacon_endpoint.has_value()) {
-    const GURL& endpoint =
-        *head->parsed_headers->prefetch_activation_beacon_endpoint;
-    // TODO(crbug.com/499814382): Report to DevTools console when the endpoint
-    // specified by the header is not in the same origin for debuggability.
-    if (endpoint.is_valid() && url::Origin::Create(endpoint).IsSameOriginWith(
-                                   url::Origin::Create(GetCurrentURL()))) {
-      activation_beacon_url_ = endpoint;
-    }
-  }
-
   RecordPrefetchProxyPrefetchMainframeTotalTime(head);
   RecordPrefetchProxyPrefetchMainframeConnectTime(head);
 
@@ -1646,10 +1637,6 @@ void PrefetchContainer::SimulatePrefetchRedirectedForTest(  // IN-TEST
   auto headers_update_params =
       PrepareRedirectHeadersForPrefetch(redirect_info.new_url, request());
   UpdateResourceRequest(redirect_info, std::move(headers_update_params));
-}
-
-void PrefetchContainer::SimulatePrefetchCompletedForTest() {
-  SetPrefetchStatus(PrefetchStatus::kPrefetchSuccessful);
 }
 
 void PrefetchContainer::SimulatePrefetchFailedIneligibleForTest(

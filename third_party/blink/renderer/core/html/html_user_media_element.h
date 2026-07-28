@@ -12,6 +12,8 @@
 
 namespace blink {
 
+class DOMException;
+
 class CORE_EXPORT HTMLUserMediaElement
     : public HTMLCapabilityElementBase,
       public Supplementable<HTMLUserMediaElement> {
@@ -22,6 +24,9 @@ class CORE_EXPORT HTMLUserMediaElement
 
   explicit HTMLUserMediaElement(Document& document);
   void Trace(Visitor*) const override;
+
+  DOMException* error() const;
+  void SetError(DOMException* error) { error_ = error; }
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(stream, kStream)
 
@@ -36,9 +41,15 @@ class CORE_EXPORT HTMLUserMediaElement
   // HTMLCapabilityElementBase
   void OnPermissionStatusChange(mojom::blink::PermissionName permission_name,
                                 mojom::blink::PermissionStatus status) override;
+  void OnEmbeddedPermissionsDecided(
+      mojom::blink::EmbeddedPermissionControlResult result) override;
+
+  Node::InsertionNotificationRequest InsertedInto(ContainerNode&) override;
+
   void DefaultEventHandler(Event& event) override;
   mojom::blink::EmbeddedPermissionRequestDescriptorPtr
   CreateEmbeddedPermissionRequestDescriptor() override;
+  void OnActivationFailed(const String& error_message) override;
 
   Vector<mojom::blink::PermissionDescriptorPtr> ParseType(
       const AtomicString& type);
@@ -50,7 +61,7 @@ class CORE_EXPORT HTMLUserMediaElement
   // <usermedia> element is stable.
   bool IsLegacyMode() const;
 
-  void OnConstraintsSet(bool has_video, bool has_audio);
+  void ApplyDefaultConstraints();
 
   void ResetMediaStreamRequestTime();
 
@@ -64,8 +75,9 @@ class CORE_EXPORT HTMLUserMediaElement
 
  private:
   void StartMediaStreamRequest();
-  bool has_constraints_ = false;
+
   base::TimeTicks media_stream_request_start_time_;
+  Member<DOMException> error_;
 };
 
 // The custom type casting is required for the UserMediaElement OT because the

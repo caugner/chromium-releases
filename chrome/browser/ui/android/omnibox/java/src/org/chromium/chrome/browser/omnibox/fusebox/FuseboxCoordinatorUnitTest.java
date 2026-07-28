@@ -45,6 +45,7 @@ import org.robolectric.Robolectric;
 import org.robolectric.android.controller.ActivityController;
 import org.robolectric.annotation.Config;
 
+import org.chromium.base.supplier.NullableObservableSupplier;
 import org.chromium.base.supplier.ObservableSuppliers;
 import org.chromium.base.supplier.OneshotSupplierImpl;
 import org.chromium.base.supplier.SettableNonNullObservableSupplier;
@@ -73,6 +74,7 @@ import org.chromium.components.search_engines.TemplateUrlService;
 import org.chromium.ui.base.TestActivity;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.widget.RectProvider;
+import org.chromium.url.GURL;
 
 import java.util.Collections;
 import java.util.EnumSet;
@@ -111,6 +113,8 @@ public class FuseboxCoordinatorUnitTest {
     private final OneshotSupplierImpl<TemplateUrlService> mTemplateUrlServiceSupplier =
             new OneshotSupplierImpl<>();
     private final Function<Tab, @Nullable Bitmap> mTabFaviconFunction = (tab) -> mBitmap;
+    private final NullableObservableSupplier<GURL> mExactMatchUrlSupplier =
+            ObservableSuppliers.alwaysNull();
 
     @Before
     public void setUp() {
@@ -145,7 +149,11 @@ public class FuseboxCoordinatorUnitTest {
                         mTemplateUrlServiceSupplier,
                         mSnackbarManager,
                         /* scrimAnchorViewSupplier= */ () -> null,
-                        mBackPressManager);
+                        mBackPressManager,
+                        mExactMatchUrlSupplier,
+                        /* onActivationChipClickedWithQuery= */ () -> {},
+                        /* clearUrlBarTextRunnable= */ () -> {},
+                        /* urlBarTextSupplier= */ () -> "");
     }
 
     private FuseboxSessionState createSession() {
@@ -340,9 +348,9 @@ public class FuseboxCoordinatorUnitTest {
         RobolectricUtil.runAllBackgroundAndUiIncludingDelayed();
         mCoordinator.setMediatorForTesting(mMediator);
         var viewHolder = assumeNonNull(mCoordinator.getViewHolderForTesting());
-        viewHolder.addButton.setVisibility(View.VISIBLE);
+        viewHolder.plusButton.setVisibility(View.VISIBLE);
         mCoordinator.onContextPopupDismissed();
-        assertTrue(viewHolder.addButton.isFocused());
+        assertTrue(viewHolder.plusButton.isFocused());
     }
 
     @Test
@@ -353,12 +361,13 @@ public class FuseboxCoordinatorUnitTest {
     }
 
     @Test
+    @EnableFeatures(OmniboxFeatureList.OMNIBOX_MULTIMODAL_INPUT)
     public void testDseChangedToNonGoogleDuringSession() {
         // Start with Google DSE.
         doReturn(true).when(mTemplateUrlService).isDefaultSearchEngineGoogle();
         mTemplateUrlServiceSupplier.set(mTemplateUrlService);
-        mCoordinator.beginInput(createSession());
         mCoordinator.setMediatorForTesting(mMediator);
+        mCoordinator.beginInput(createSession());
         RobolectricUtil.runAllBackgroundAndUiIncludingDelayed();
 
         // Verify session is active (beginInput was called on mediator).

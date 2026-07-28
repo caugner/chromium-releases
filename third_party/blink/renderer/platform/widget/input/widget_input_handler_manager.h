@@ -71,8 +71,6 @@ class PLATFORM_EXPORT WidgetInputHandlerManager final
     kDeferCommits = 1 << 1,
     // if set, we have not painted a main frame from the current navigation yet
     kHasNotPainted = 1 << 2,
-    // if set, we are not visible, and should not accept any input
-    kHidden = 1 << 3,
   };
 
   // The `widget` and `frame_widget_input_handler` should be invalidated
@@ -120,7 +118,6 @@ class PLATFORM_EXPORT WidgetInputHandlerManager final
   bool RequestedMainFramePending() override;
 
   void OnFirstContentfulPaint();
-  void SetHidden(bool hidden);
   void OnDevToolsSessionConnectionChanged(bool attached);
 
   // InputHandlerProxyClient overrides.
@@ -141,8 +138,7 @@ class PLATFORM_EXPORT WidgetInputHandlerManager final
 
   void ProcessTouchAction(cc::TouchAction touch_action);
 
-  mojo::SharedRemote<mojom::blink::WidgetInputHandlerHost>
-  GetWidgetInputHandlerHost();
+  mojom::blink::WidgetInputHandlerHost* GetWidgetInputHandlerHost();
   mojo::SharedRemote<mojom::blink::WidgetInputHandlerHost>
   GetVizWidgetInputHandlerHost();
 
@@ -215,8 +211,8 @@ class PLATFORM_EXPORT WidgetInputHandlerManager final
   void SetInputHandlerProxyForTesting(
       std::unique_ptr<InputHandlerProxy> input_handler_proxy);
 
-  base::WeakPtr<WidgetInputHandlerManager> AsWeakPtr() {
-    return weak_ptr_factory_.GetWeakPtr();
+  void set_destruction_callback_for_testing(base::OnceClosure callback) {
+    destruction_callback_for_testing_ = std::move(callback);
   }
 
   uint16_t suppressing_input_events_state() const {
@@ -233,6 +229,7 @@ class PLATFORM_EXPORT WidgetInputHandlerManager final
   ~WidgetInputHandlerManager() override;
 
   void InitInputHandler();
+
   void InitOnInputHandlingThread(
       const base::WeakPtr<cc::CompositorDelegateForInput>& compositor_delegate,
       bool sync_compositing);
@@ -337,9 +334,7 @@ class PLATFORM_EXPORT WidgetInputHandlerManager final
 
   // The WidgetInputHandlerHost is bound on the compositor task runner
   // but class can be called on the compositor and main thread.
-  base::Lock host_lock_;
-  mojo::SharedRemote<mojom::blink::WidgetInputHandlerHost> host_
-      GUARDED_BY(host_lock_);
+  mojo::SharedRemote<mojom::blink::WidgetInputHandlerHost> host_;
   base::Lock viz_host_lock_;
   mojo::SharedRemote<mojom::blink::WidgetInputHandlerHost> viz_host_
       GUARDED_BY(viz_host_lock_);
@@ -409,12 +404,8 @@ class PLATFORM_EXPORT WidgetInputHandlerManager final
   const bool allow_scroll_resampling_ = true;
 
   std::atomic<bool> dev_tools_session_attached_ = false;
-  const bool ignore_hidden_input_;
-  // The timestamp when the widget was hidden. Used to track the duration of
-  // hidden state.
-  base::TimeTicks hidden_received_;
 
-  base::WeakPtrFactory<WidgetInputHandlerManager> weak_ptr_factory_{this};
+  base::OnceClosure destruction_callback_for_testing_;
 };
 
 }  // namespace blink

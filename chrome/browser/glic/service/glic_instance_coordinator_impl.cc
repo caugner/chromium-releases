@@ -14,6 +14,8 @@
 #include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/rand_util.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/actor/actor_keyed_service.h"
@@ -37,6 +39,7 @@
 #include "chrome/browser/glic/service/glic_instance_impl.h"
 #include "chrome/browser/glic/service/metrics/glic_instance_coordinator_metrics.h"
 #include "chrome/browser/glic/service/metrics/glic_instance_metrics.h"
+#include "chrome/browser/glic/service/metrics/glic_invoke_metrics.h"
 #include "chrome/browser/glic/widget/browser_conditions.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/tab_list/tab_list_interface.h"
@@ -96,10 +99,8 @@ constexpr base::FeatureParam<int> kGlicMaxAwakeInstancesLimit{
     &kGlicMaxAwakeInstances, "limit", 15};
 
 GlicInstanceCoordinatorImpl::GlicInstanceCoordinatorImpl(
-    Profile* profile,
-    signin::IdentityManager* identity_manager,
-    GlicKeyedService* service,
-    GlicEnabling* enabling,
+    Profile* profile, signin::IdentityManager* identity_manager,
+    GlicKeyedService* service, GlicEnabling* enabling,
     ContextualCueingService* contextual_cueing_service)
     : coordinator_uid_(
           base::RandGenerator(std::numeric_limits<int64_t>::max())),
@@ -107,10 +108,8 @@ GlicInstanceCoordinatorImpl::GlicInstanceCoordinatorImpl(
       service_(service),
       contextual_cueing_service_(contextual_cueing_service),
       memory_pressure_listener_registration_(
-          FROM_HERE,
-          base::MemoryPressureListenerTag::kGlicKeyedService,
-          this),
-      metrics_(this, profile->GetPrefs()),
+          FROM_HERE, base::MemoryPressureListenerTag::kGlicKeyedService, this),
+      metrics_(this),
       web_contents_warming_pool_(
           std::make_unique<GlicWebContentsWarmingPool>(profile)),
       active_instance_sharing_manager_(
@@ -124,6 +123,8 @@ GlicInstanceCoordinatorImpl::GlicInstanceCoordinatorImpl(
                                     weak_ptr_factory_.GetWeakPtr()));
   hotkey_manager_ =
       std::make_unique<InstanceIndependentHotkeyManager>(this, profile_);
+  onboarding_tracker_ =
+      std::make_unique<GlicOnboardingTracker>(profile_, enabling);
   metrics_.StartPeriodicMemoryMetricsRecording();
 }
 
@@ -162,7 +163,7 @@ void GlicInstanceCoordinatorImpl::OnInstanceActivationChanged(
   }
   if (active_instance_) {
     active_instance_sharing_manager_->SetActiveSharingManager(
-        &active_instance_->sharing_manager());
+        &active_instance_->GetSharingManagerInternal());
   } else {
     active_instance_sharing_manager_->SetActiveSharingManager(nullptr);
   }
@@ -178,6 +179,18 @@ void GlicInstanceCoordinatorImpl::OnInstanceVisibilityChanged(
     ComputeContentAccessIndicator();
   }
   metrics_.OnInstanceVisibilityChanged();
+}
+
+void GlicInstanceCoordinatorImpl::OnInvoked() {
+  if (onboarding_tracker_) {
+    onboarding_tracker_->OnInvoke();
+  }
+}
+
+void GlicInstanceCoordinatorImpl::OnUserInputSubmitted() {
+  if (onboarding_tracker_) {
+    onboarding_tracker_->OnPrompt();
+  }
 }
 
 void GlicInstanceCoordinatorImpl::OnPrimaryAccountChanged(
@@ -230,8 +243,7 @@ GlicInstanceImpl* GlicInstanceCoordinatorImpl::GetInstanceImplForTab(
   return nullptr;
 }
 
-std::vector<GlicInstanceImpl*>
-GlicInstanceCoordinatorImpl::GetInstancesForTesting() {
+std::vector<GlicInstanceImpl*> GlicInstanceCoordinatorImpl::GetInstances() {
   std::vector<GlicInstanceImpl*> instances;
   for (auto& entry : instances_) {
     instances.push_back(entry.second.get());
@@ -389,7 +401,8 @@ void GlicInstanceCoordinatorImpl::Toggle(BrowserWindowInterface* browser,
 }
 
 void GlicInstanceCoordinatorImpl::EnsurePreload() {
-  web_contents_warming_pool_->EnsurePreload();
+  web_contents_warming_pool_->EnsurePreload(
+      GlicWebContentsWarmingPool::ContainerCreationReason::kInitialColdWarming);
 }
 
 void GlicInstanceCoordinatorImpl::Shutdown() {
@@ -409,7 +422,7 @@ void GlicInstanceCoordinatorImpl::Close(const CloseOptions& options) {
 
 void GlicInstanceCoordinatorImpl::RemoveAllInstances() {
   while (!instances_.empty()) {
-    RemoveInstance(instances_.begin()->second.get());
+    RemoveInstance(instances_.begin()->first);
   }
 }
 
@@ -449,42 +462,75 @@ base::WeakPtr<GlicInstance> GlicInstanceCoordinatorImpl::InvokeInternal(
     std::optional<InvokeWithAutoSubmitPasskey> auto_submit_passkey,
     GlicInvokeOptions options,
     GlicInvokeWithAutoSubmitOptions auto_submit_options) {
+  if (!GlicEnabling::IsEnabledForProfile(profile_)) {
+    RecordInvokeError(options.GetInvocationSource(),
+                      GlicInvokeError::kProfileNotEnabled);
+    if (options.on_error) {
+      base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+          FROM_HERE, base::BindOnce(std::move(options.on_error),
+                                    GlicInvokeError::kProfileNotEnabled));
+    }
+    return nullptr;
+  }
+
+  if (const auto* tab_handle =
+          std::get_if<tabs::TabHandle>(&options.target.surface)) {
+    if (tab_handle->raw_value() == tabs::TabHandle::NullValue) {
+      if (options.on_error) {
+        std::move(options.on_error).Run(GlicInvokeError::kInvalidTab);
+      }
+      return nullptr;
+    }
+  }
+
   GlicInvokeHandler::ResolvedTarget resolved_target =
       GlicInvokeHandler::ResolveTargetSurface(profile_, options.target);
-  tabs::TabInterface* tab = resolved_target.tab;
-  options.target.surface = tab;
-
-  if (!tab || !GlicInstanceHelper::From(tab)) {
-    if (options.on_error) {
-      std::move(options.on_error).Run(GlicInvokeError::kInvalidTab);
+  tabs::TabInterface* tab = nullptr;
+  if (const auto* tab_surface =
+          std::get_if<GlicInvokeHandler::TabSurface>(&resolved_target)) {
+    tab = tab_surface->tab;
+    if (!tab || !GlicInstanceHelper::From(tab)) {
+      if (options.on_error) {
+        std::move(options.on_error).Run(GlicInvokeError::kTabClosed);
+      }
+      // TODO(crbug.com/483387751): Show default toast here once implemented.
+      return nullptr;
     }
-    // TODO(crbug.com/483387751): Show default toast here once implemented.
-    return nullptr;
+    options.target.surface = tab->GetHandle();
   }
 
   GlicInstanceImpl* instance = nullptr;
 
   instance = std::visit(
-      absl::Overload{[&](const ConversationId& conv_id) {
-                       if (conv_id.conversation_id.empty()) {
-                         if (options.on_error) {
-                           std::move(options.on_error)
-                               .Run(GlicInvokeError::kInvalidConversationId);
-                         }
-                         // TODO(crbug.com/483387751): Show default toast here
-                         // once implemented.
-                         return static_cast<GlicInstanceImpl*>(nullptr);
-                       }
-                       return GetOrCreateInstanceImplForConversationId(
-                           conv_id.conversation_id, conv_id.turn_id);
-                     },
-                     [&](NewConversation) { return CreateGlicInstance(); },
-                     [&](const InstanceId& id) {
-                       return GetInstanceImplFor(id);
-                     },
-                     [&](DefaultConversation) {
-                       return GetOrCreateGlicInstanceImplForTab(tab);
-                     }},
+      absl::Overload{
+          [&](const ConversationId& conv_id) {
+            if (conv_id.conversation_id.empty()) {
+              if (options.on_error) {
+                std::move(options.on_error)
+                    .Run(GlicInvokeError::kInvalidConversationId);
+              }
+              // TODO(crbug.com/483387751): Show default toast here
+              // once implemented.
+              return static_cast<GlicInstanceImpl*>(nullptr);
+            }
+            return GetOrCreateInstanceImplForConversationId(
+                conv_id.conversation_id, conv_id.turn_id);
+          },
+          [&](NewConversation) { return CreateGlicInstance(); },
+          [&](const InstanceId& id) {
+            GlicInstanceImpl* target_instance = GetInstanceImplFor(id);
+            if (!target_instance && options.on_error) {
+              std::move(options.on_error)
+                  .Run(GlicInvokeError::kInstanceNotFound);
+            }
+            return target_instance;
+          },
+          [&](DefaultConversation) {
+            if (std::holds_alternative<Floating>(resolved_target)) {
+              return GetOrCreateInstanceImplForFloaty();
+            }
+            return GetOrCreateGlicInstanceImplForTab(tab);
+          }},
       options.target.conversation);
 
   if (!instance) {
@@ -540,7 +586,7 @@ void GlicInstanceCoordinatorImpl::ArchiveInstanceWithFrame(
     content::RenderFrameHost* render_frame_host) {
   for (auto& [id, instance] : instances_) {
     if (instance->host().IsWebContentPresentAndMatches(render_frame_host)) {
-      RemoveInstance(instance.get());
+      RemoveInstance(id);
       return;
     }
   }
@@ -604,7 +650,7 @@ GlicInstance* GlicInstanceCoordinatorImpl::GetActiveInstance() {
   return active_instance_;
 }
 
-GlicSharingManager&
+GlicSharingManagerInternal&
 GlicInstanceCoordinatorImpl::active_instance_sharing_manager() {
   CHECK(active_instance_sharing_manager_);
   return *active_instance_sharing_manager_;
@@ -732,6 +778,16 @@ GlicInstanceImpl* GlicInstanceCoordinatorImpl::CreateGlicInstance(
   instance->instance_metrics().OnInstanceCreatedWithoutWarming();
   auto* instance_ptr = instance.get();
   instances_[instance->id()] = std::move(instance);
+
+  if (auto* task_manager = instance_ptr->GetActorTaskManager()) {
+    actuating_changed_subscriptions_[instance_ptr->id()] =
+        task_manager->AddActuatingChangedCallback(base::BindRepeating(
+            &GlicInstanceCoordinatorImpl::OnInstanceActuatingChanged,
+            base::Unretained(this)));
+  }
+
+  metrics_.RecordCountOnCreation();
+
   return instance_ptr;
 }
 
@@ -755,9 +811,11 @@ void GlicInstanceCoordinatorImpl::ShowInstanceForTabs(
     ShowOptions show_opts(side_panel_options);
     show_opts.focus_on_show =
         IsActive(tab->GetBrowserWindowInterface()) && tab->IsActivated();
-    // Explicitly pin the tabs for the context menu trigger.
     if (pin_trigger == GlicPinTrigger::kContextMenu) {
-      instance->sharing_manager().PinTabs({tab->GetHandle()}, pin_trigger);
+      // Explicitly pin the tabs for the context menu trigger.
+      instance->GetSharingManagerInternal().PinTabs({tab->GetHandle()},
+                                                    pin_trigger);
+      show_opts.invocation_source = mojom::InvocationSource::kSharedTab;
     }
     instance->Show(show_opts);
   }
@@ -826,23 +884,19 @@ void GlicInstanceCoordinatorImpl::ToggleSidePanel(
   instance->Toggle(std::move(options), prevent_close, source);
 }
 
-void GlicInstanceCoordinatorImpl::RemoveInstance(GlicInstanceImpl* instance) {
-  auto it = instances_.find(instance->id());
+void GlicInstanceCoordinatorImpl::RemoveInstance(InstanceId id) {
+  auto it = instances_.find(id);
   if (it == instances_.end()) {
     // This instance has already been removed, so there's no work to do.
     return;
   }
-  // If an entry exists for this ID, it must be the specific instance we are
-  // removing. We prohibit overwriting instances in the map, so a mismatch
-  // would indicate a logic bug or state corruption (e.g., during restoration).
-  CHECK_EQ(it->second.get(), instance);
-
+  GlicInstanceImpl* instance = it->second.get();
   OnInstanceActivationChanged(instance, false);
+  actuating_changed_subscriptions_.erase(id);
 
   // Remove the instance first, and then delete. This way,
   // instances_ will not include the instance being deleted while
   // it's being deleted.
-  InstanceId id = instance->id();
   instance->CloseInstanceAndShutdown();
   if (instance == last_active_instance_) {
     last_active_instance_ = nullptr;
@@ -859,6 +913,8 @@ void GlicInstanceCoordinatorImpl::SwitchConversation(
   ShowOptions mutable_options = options;
   mutable_options.focus_on_show = source_instance.HasFocus();
   mutable_options.reinitialize_if_already_active = true;
+  mutable_options.invocation_source =
+      mojom::InvocationSource::kConversationSwitch;
 
   GlicInstanceImpl* target_instance = nullptr;
   if (!info->conversation_id.empty()) {
@@ -886,8 +942,9 @@ void GlicInstanceCoordinatorImpl::SwitchConversation(
       // BindTab is not called again, so we must manually overwrite all
       // currently pinned tabs' pin triggers to kConversationChange to make the
       // pin trigger correct.
-      for (auto* tab : target_instance->sharing_manager().GetPinnedTabs()) {
-        target_instance->sharing_manager().SetPinTrigger(
+      for (auto* tab :
+           target_instance->GetSharingManagerInternal().GetPinnedTabs()) {
+        target_instance->GetSharingManagerInternal().SetPinTrigger(
             tab->GetHandle(), GlicPinTrigger::kConversationChange);
       }
     }
@@ -907,8 +964,12 @@ void GlicInstanceCoordinatorImpl::SwitchConversation(
 
 std::vector<glic::mojom::ConversationInfoPtr>
 GlicInstanceCoordinatorImpl::GetRecentlyActiveConversations(size_t limit) {
+  base::TimeDelta limit_delta = base::TimeDelta::Max();
+  if (base::FeatureList::IsEnabled(kGlicMaxRecency)) {
+    limit_delta = kGlicMaxRecencyValue.Get();
+  }
   std::vector<GlicInstanceImpl*> sorted_instances =
-      GetSortedRecentInstances(limit);
+      GetSortedRecentInstances(limit, limit_delta);
 
   std::vector<glic::mojom::ConversationInfoPtr> result;
   for (auto* instance : sorted_instances) {
@@ -920,9 +981,11 @@ GlicInstanceCoordinatorImpl::GetRecentlyActiveConversations(size_t limit) {
 }
 
 std::vector<ConversationInfo>
-GlicInstanceCoordinatorImpl::GetRecentlyActiveInstances(size_t limit) {
+GlicInstanceCoordinatorImpl::GetRecentlyActiveInstances(
+    size_t limit,
+    base::TimeDelta max_time_since_active) {
   std::vector<GlicInstanceImpl*> sorted_instances =
-      GetSortedRecentInstances(limit);
+      GetSortedRecentInstances(limit, max_time_since_active);
 
   std::vector<ConversationInfo> result;
   for (auto* instance : sorted_instances) {
@@ -936,7 +999,7 @@ GlicInstanceCoordinatorImpl::GetRecentlyActiveInstances(size_t limit) {
 bool GlicInstanceCoordinatorImpl::IsTabPinnedToAnyInstance(
     const tabs::TabHandle& tab_handle) const {
   return std::ranges::any_of(instances_, [&](const auto& entry) {
-    return entry.second->sharing_manager().IsTabPinned(tab_handle);
+    return entry.second->GetSharingManagerInternal().IsTabPinned(tab_handle);
   });
 }
 
@@ -944,12 +1007,14 @@ void GlicInstanceCoordinatorImpl::UnpinTabsFromAllInstances(
     base::span<const tabs::TabHandle> tab_handles,
     GlicUnpinTrigger trigger) {
   for (auto& entry : instances_) {
-    entry.second->sharing_manager().UnpinTabs(tab_handles, trigger);
+    entry.second->GetSharingManagerInternal().UnpinTabs(tab_handles, trigger);
   }
 }
 
 std::vector<GlicInstanceImpl*>
-GlicInstanceCoordinatorImpl::GetSortedRecentInstances(size_t limit) const {
+GlicInstanceCoordinatorImpl::GetSortedRecentInstances(
+    size_t limit,
+    base::TimeDelta max_time_since_active) const {
   // This will only cover recently active conversations that still have living
   // instances. If an instance is torn down because the user closed all bound
   // tabs, it will not be included in the list.
@@ -958,8 +1023,7 @@ GlicInstanceCoordinatorImpl::GetSortedRecentInstances(size_t limit) const {
     if (!instance->conversation_id()) {
       continue;
     }
-    if (base::FeatureList::IsEnabled(kGlicMaxRecency) &&
-        instance->GetTimeSinceLastActive() > kGlicMaxRecencyValue.Get()) {
+    if (instance->GetTimeSinceLastActive() > max_time_since_active) {
       continue;
     }
     sorted_instances.push_back(instance.get());
@@ -980,7 +1044,6 @@ GlicInstanceCoordinatorImpl::GetSortedRecentInstances(size_t limit) const {
 void GlicInstanceCoordinatorImpl::UnbindTabFromAnyInstance(
     tabs::TabInterface* tab) {
   if (auto* instance = GetInstanceImplForTab(tab)) {
-    // `instance` may be deleted after this call.
     instance->UnbindEmbedder(EmbedderKey(tab));
   }
 }
@@ -993,7 +1056,15 @@ void GlicInstanceCoordinatorImpl::ContextAccessIndicatorChanged(
 
 std::unique_ptr<WebUIContentsContainer>
 GlicInstanceCoordinatorImpl::CreateWebUIContentsContainer() {
+  metrics_.RecordCountAwakeOnContentsCreated();
   return web_contents_warming_pool_->TakeContainer();
+}
+
+void GlicInstanceCoordinatorImpl::OnInstanceActuatingChanged(bool actuating) {
+  if (!actuating) {
+    return;
+  }
+  metrics_.RecordCountActuatingOnTaskCreation();
 }
 
 void GlicInstanceCoordinatorImpl::SetWarmingEnabledForTesting(
@@ -1092,7 +1163,9 @@ void GlicInstanceCoordinatorImpl::MaybeDaisyChainNewTab(
   SidePanelShowOptions side_panel_options{*creation_event.new_tab};
   side_panel_options.suppress_opening_animation = true;
   side_panel_options.pin_trigger = GlicPinTrigger::kNewTabDaisyChain;
-  instance->Show(ShowOptions{side_panel_options});
+  auto show_options = ShowOptions{side_panel_options};
+  show_options.invocation_source = mojom::InvocationSource::kDaisyChainOnNewTab;
+  instance->Show(show_options);
 
   instance->instance_metrics().OnDaisyChain(
       DaisyChainSource::kNewTab,
@@ -1184,7 +1257,9 @@ void GlicInstanceCoordinatorImpl::RestoreTab(
       side_panel_options.suppress_opening_animation = true;
       side_panel_options.pin_on_bind = false;
       side_panel_options.prefer_peek = true;
-      bound_instance->Show(ShowOptions{side_panel_options});
+      auto show_options = ShowOptions{side_panel_options};
+      show_options.invocation_source = mojom::InvocationSource::kTabRestore;
+      bound_instance->Show(show_options);
     } else {
       bound_instance->BindTabWithoutShowing(tab, GlicPinTrigger::kUnknown,
                                             /*pin_on_bind=*/false);
@@ -1196,8 +1271,8 @@ void GlicInstanceCoordinatorImpl::RestoreTab(
             GetOrRestoreInstanceImpl(pinned_instance_info)) {
       // `GlicPinTrigger::kRestore` is used to prevent auto-binding during this
       // pinning process.
-      pinned_instance->sharing_manager().PinTabs({tab->GetHandle()},
-                                                 GlicPinTrigger::kRestore);
+      pinned_instance->GetSharingManagerInternal().PinTabs(
+          {tab->GetHandle()}, GlicPinTrigger::kRestore);
     }
   }
 }

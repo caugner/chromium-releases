@@ -227,14 +227,6 @@ blink::mojom::PointerLockResult RenderWidgetHostViewIOS::ChangePointerLock(
 }
 void RenderWidgetHostViewIOS::UnlockPointer() {}
 
-uint32_t RenderWidgetHostViewIOS::GetCaptureSequenceNumber() const {
-  return latest_capture_sequence_number_;
-}
-
-void RenderWidgetHostViewIOS::EnsureSurfaceSynchronizedForWebTest() {
-  ++latest_capture_sequence_number_;
-  browser_compositor_->ForceNewSurfaceId();
-}
 
 void RenderWidgetHostViewIOS::TakeFallbackContentFrom(
     RenderWidgetHostView* view) {}

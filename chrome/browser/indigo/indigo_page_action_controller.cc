@@ -16,6 +16,7 @@
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/notimplemented.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/types/pass_key.h"
 #include "chrome/browser/glic/host/glic.mojom.h"
 #include "chrome/browser/glic/public/glic_invoke_options.h"
@@ -26,6 +27,7 @@
 #include "chrome/browser/indigo/indigo_agent_host.h"
 #include "chrome/browser/indigo/indigo_image_replacement.h"
 #include "chrome/browser/indigo/indigo_image_replacement_manager.h"
+#include "chrome/browser/indigo/indigo_menu_model.h"
 #include "chrome/browser/indigo/indigo_prefs.h"
 #include "chrome/browser/indigo/indigo_service.h"
 #include "chrome/browser/indigo/indigo_service_factory.h"
@@ -38,11 +40,13 @@
 #include "chrome/browser/skills/skills_service_factory.h"
 #include "chrome/browser/ui/actions/chrome_action_id.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/page_action/page_action_controller.h"
 #include "chrome/browser/ui/toasts/api/toast_id.h"
 #include "chrome/browser/ui/toasts/toast_controller.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/common/chrome_features.h"
+#include "chrome/common/webui_url_constants.h"
 #include "components/optimization_guide/core/hints/optimization_guide_decider.h"
 #include "components/optimization_guide/core/hints/optimization_guide_decision.h"
 #include "components/page_content_annotations/core/tracked_element_feature.h"
@@ -50,18 +54,21 @@
 #include "components/skills/public/skill.h"
 #include "components/skills/public/skills_service.h"
 #include "content/public/browser/navigation_handle.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/storage_partition.h"
 #include "net/base/url_util.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/image_model.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/views/view.h"
+#include "url/origin.h"
 
 namespace indigo {
 
@@ -102,6 +109,9 @@ void RecordTransformationResultCannotGenerateImage(
       case LocalEligibility::kGlicDisabledForProfile:
         result = IndigoTransformationResult::kGlicDisabledForProfile;
         break;
+      case LocalEligibility::kEnterpriseDisallowed:
+        result = IndigoTransformationResult::kEnterpriseDisallowed;
+        break;
       case LocalEligibility::kEligible:
         NOTREACHED();
     }
@@ -139,6 +149,16 @@ void RecordInvokeEntryPointMetrics(EntryPoint entry_point) {
       break;
   }
 }
+
+class Require1PSkillRefreshObserver : public skills::SkillsService::Observer {
+ public:
+  Require1PSkillRefreshObserver() = default;
+  ~Require1PSkillRefreshObserver() override = default;
+
+  // skills::SkillsService::Observer:
+  bool Require1PSkillRefresh() override { return true; }
+};
+
 }  // namespace
 
 DEFINE_USER_DATA(IndigoPageActionController);
@@ -220,18 +240,20 @@ void IndigoPageActionController::InvokeAction(EntryPoint entry_point) {
     return;
   }
 
+  const bool skip_glic_invoke = (entry_point == EntryPoint::kErrorToast);
+
   switch (entry_point) {
     case EntryPoint::kErrorToast:
     case EntryPoint::kAnchoredMessage:
       indigo_service_->GetCombinedEligibility(base::BindOnce(
           &IndigoPageActionController::CheckEligibilityForOnboarding,
-          invoke_weak_ptr_factory_.GetWeakPtr()));
+          invoke_weak_ptr_factory_.GetWeakPtr(), skip_glic_invoke));
       return;
     case EntryPoint::kSuggestionChip:
       if (glic::GlicSidePanelCoordinator::IsShowing(&tab())) {
         indigo_service_->GetCombinedEligibility(base::BindOnce(
             &IndigoPageActionController::CheckEligibilityForOnboarding,
-            invoke_weak_ptr_factory_.GetWeakPtr()));
+            invoke_weak_ptr_factory_.GetWeakPtr(), skip_glic_invoke));
         return;
       }
       ShowAnchoredMessage(
@@ -241,6 +263,7 @@ void IndigoPageActionController::InvokeAction(EntryPoint entry_point) {
 }
 
 void IndigoPageActionController::CheckEligibilityForOnboarding(
+    bool skip_glic_invoke,
     const CombinedEligibility& eligibility) {
   if (eligibility.local_eligibility ==
       LocalEligibility::kRefreshTokenInPersistentErrorState) {
@@ -264,14 +287,15 @@ void IndigoPageActionController::CheckEligibilityForOnboarding(
 
   // Show onboarding if the user is ready to onboard, or if it's forced.
   if (eligibility.ReadyToOnboard() || force_onboarding) {
-    ShowOnboardingDialog(OnboardingDisposition::kDefault);
+    ShowOnboardingDialog(OnboardingDisposition::kDefault, skip_glic_invoke);
     return;
   }
 
-  ContinueInvoke(eligibility);
+  ContinueInvoke(skip_glic_invoke, eligibility);
 }
 
 void IndigoPageActionController::ContinueInvoke(
+    bool skip_glic_invoke,
     const CombinedEligibility& eligibility) {
   content::WebContents* web_contents = tab().GetContents();
   if (!web_contents) {
@@ -287,13 +311,14 @@ void IndigoPageActionController::ContinueInvoke(
     return;
   }
 
-  if (base::FeatureList::IsEnabled(features::kIndigoOpenGlic) &&
+  if (!skip_glic_invoke &&
+      base::FeatureList::IsEnabled(features::kIndigoOpenGlic) &&
       !glic::GlicSidePanelCoordinator::IsShowing(&tab())) {
     Profile* profile =
         Profile::FromBrowserContext(web_contents->GetBrowserContext());
     if (auto* glic_keyed_service = glic::GlicKeyedService::Get(profile)) {
       glic::GlicInvokeOptions options(
-          glic::Target(&tab()),
+          glic::Target(tab()),
           glic::mojom::InvocationSource::kIndigoPageAction);
 
       std::string skill_id = features::kIndigoGlicSkillId.Get();
@@ -366,8 +391,9 @@ void IndigoPageActionController::TriggerIndigoAgentWithDelay() {
 }
 
 void IndigoPageActionController::ShowOnboardingDialog(
-    OnboardingDisposition disposition) {
-  if (onboarding_dialog_) {
+    OnboardingDisposition disposition,
+    bool skip_glic_invoke) {
+  if (!indigo_service_ || onboarding_dialog_) {
     return;
   }
 
@@ -379,6 +405,12 @@ void IndigoPageActionController::ShowOnboardingDialog(
   }
 
   GURL url(onboarding_url);
+
+  const bool model_improvement_allowed =
+      indigo_service_->IsModelImprovementAllowed();
+  url = net::AppendQueryParameter(
+      url, "toyut", model_improvement_allowed ? "chrome-mi" : "chrome-nomi");
+
   if (disposition == OnboardingDisposition::kReplacePhoto) {
     url = net::AppendQueryParameter(url, "toyri", "1");
     base::RecordAction(base::UserMetricsAction("Indigo.ReplaceImage.Trigger"));
@@ -386,9 +418,9 @@ void IndigoPageActionController::ShowOnboardingDialog(
     base::RecordAction(base::UserMetricsAction("Indigo.Onboarding.Trigger"));
   }
 
-  auto callback =
-      base::BindOnce(&IndigoPageActionController::OnOnboardingDialogClosed,
-                     invoke_weak_ptr_factory_.GetWeakPtr(), disposition);
+  auto callback = base::BindOnce(
+      &IndigoPageActionController::OnOnboardingDialogClosed,
+      invoke_weak_ptr_factory_.GetWeakPtr(), disposition, skip_glic_invoke);
 
   if (onboarding_dialog_factory_for_testing_) {
     onboarding_dialog_ = onboarding_dialog_factory_for_testing_.Run(
@@ -398,6 +430,7 @@ void IndigoPageActionController::ShowOnboardingDialog(
         IndigoOnboardingDialog::Show(tab(), url, std::move(callback));
   }
 }
+
 void IndigoPageActionController::Reset(ResetType reset_type) {
   DestroyToolbar();
   tracked_bounds_ = std::nullopt;
@@ -419,6 +452,11 @@ void IndigoPageActionController::Reset(ResetType reset_type) {
     }
   }
 }
+
+void IndigoPageActionController::DismissAnchoredMessage() {
+  page_action_controller_->HideAnchoredMessage(kActionIndigo);
+}
+
 void IndigoPageActionController::ShowToolbar() {
   if (!toolbar_) {
     toolbar_ = std::make_unique<IndigoToolbar>(this);
@@ -430,12 +468,22 @@ void IndigoPageActionController::ShowToolbar() {
   }
 }
 
-void IndigoPageActionController::ShowInvocationErrorToast() {
+void IndigoPageActionController::ShowInvocationErrorToast(
+    IndigoTransformationResult result) {
+  CHECK_NE(result, IndigoTransformationResult::kSuccess);
+  base::UmaHistogramEnumeration("Indigo.Transformation.Result", result);
+
   ToastController* toast_controller =
       ToastController::MaybeGetForTabInterface(&tab());
   if (toast_controller) {
     toast_controller->MaybeShowToast(ToastParams(ToastId::kIndigoInvokeError));
   }
+}
+
+void IndigoPageActionController::OpenSettings() {
+  chrome::ShowSettingsSubPageForProfile(
+      tab().GetBrowserWindowInterface()->GetProfile(),
+      chrome::kSuggestionsSubPage);
 }
 
 void IndigoPageActionController::DidFinishNavigation(
@@ -446,7 +494,11 @@ void IndigoPageActionController::DidFinishNavigation(
   // the URL fragment. Notably we _do_ care about navigation within a
   // single-page application.
   if (!navigation_handle->HasCommitted() ||
-      !navigation_handle->IsInPrimaryMainFrame() ||
+      !navigation_handle->IsInPrimaryMainFrame()) {
+    return;
+  }
+
+  if (navigation_handle->IsSameDocument() &&
       navigation_handle->GetPreviousPrimaryMainFrameURL().EqualsIgnoringRef(
           navigation_handle->GetURL())) {
     return;
@@ -469,9 +521,17 @@ void IndigoPageActionController::DidFinishNavigation(
 
   invoke_weak_ptr_factory_.InvalidateWeakPtrs();
 
-  optimization_guide_decision_ =
-      optimization_guide::OptimizationGuideDecision::kUnknown;
-  UpdateEntryPointsState();
+  ResetTriggeringState();
+
+  if (navigation_handle->IsSameDocument()) {
+    base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
+        FROM_HERE,
+        base::BindOnce(
+            &IndigoPageActionController::TriggerMetadataClassification,
+            invoke_weak_ptr_factory_.GetWeakPtr()),
+        features::kIndigoMetadataKeywordHeuristicSameDocumentNavigationDelay
+            .Get());
+  }
 
   if (optimization_guide_) {
     const GURL& url = navigation_handle->GetURL();
@@ -522,7 +582,8 @@ void IndigoPageActionController::OnRegenerate(IndigoToolbar* toolbar) {
 
 void IndigoPageActionController::OnReplaceOriginalPhoto(
     IndigoToolbar* toolbar) {
-  ShowOnboardingDialog(OnboardingDisposition::kReplacePhoto);
+  ShowOnboardingDialog(OnboardingDisposition::kReplacePhoto,
+                       /*skip_glic_invoke=*/true);
 }
 
 void IndigoPageActionController::OnDeleteOriginalPhoto(IndigoToolbar* toolbar) {
@@ -547,6 +608,32 @@ void IndigoPageActionController::OnDeleteOriginalPhotoComplete(
   }
 }
 
+std::optional<IndigoTriggerSource>
+IndigoPageActionController::DetermineTriggerSource() const {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(kForceIndigoSwitch)) {
+    return IndigoTriggerSource::kForced;
+  }
+  if (!indigo_service_ || !indigo_service_->IsLocallyEligible()) {
+    return std::nullopt;
+  }
+  if (optimization_guide_decision_ ==
+      optimization_guide::OptimizationGuideDecision::kTrue) {
+    return IndigoTriggerSource::kOptimizationGuide;
+  }
+  if (page_has_allowed_category_by_heuristic_) {
+    return IndigoTriggerSource::kLocalProductKeywordHeuristic;
+  }
+  return std::nullopt;
+}
+
+void IndigoPageActionController::ResetTriggeringState() {
+  optimization_guide_decision_ =
+      optimization_guide::OptimizationGuideDecision::kUnknown;
+  page_has_allowed_category_by_heuristic_ = false;
+  metadata_remote_.reset();
+  UpdateEntryPointsState();
+}
+
 void IndigoPageActionController::UpdateEntryPointsState() {
   CHECK(base::FeatureList::IsEnabled(features::kIndigo));
 
@@ -554,21 +641,15 @@ void IndigoPageActionController::UpdateEntryPointsState() {
     return;
   }
 
-  const bool forced =
-      base::CommandLine::ForCurrentProcess()->HasSwitch(kForceIndigoSwitch);
-  const bool eligible =
-      optimization_guide_decision_ ==
-          optimization_guide::OptimizationGuideDecision::kTrue &&
-      indigo_service_->IsLocallyEligible();
-
-  const bool should_show = forced || eligible;
+  std::optional<IndigoTriggerSource> trigger_source = DetermineTriggerSource();
+  const bool should_show = trigger_source.has_value();
   if (should_show == is_shown_) {
     return;
   }
 
   if (should_show) {
     page_action_controller_->Show(kActionIndigo);
-    if (indigo_service_->CanShowAnchoredMessage() &&
+    if (indigo_service_->CanShowContextualCue() &&
         !glic::GlicSidePanelCoordinator::IsShowing(&tab())) {
       ShowAnchoredMessage(
           page_actions::PageActionPriorityCategory::kContextualCue);
@@ -576,6 +657,23 @@ void IndigoPageActionController::UpdateEntryPointsState() {
       page_action_controller_->ShowSuggestionChip(kActionIndigo);
     }
     base::RecordAction(base::UserMetricsAction("Indigo.PageAction.Show"));
+    base::UmaHistogramEnumeration("Indigo.PageAction.TriggerSource",
+                                  *trigger_source);
+
+    // Refresh discovery skills to make sure the latest skills are available for
+    // the user.
+    if (content::WebContents* web_contents = tab().GetContents()) {
+      if (Profile* profile =
+              Profile::FromBrowserContext(web_contents->GetBrowserContext())) {
+        if (skills::SkillsService* skills_service =
+                skills::SkillsServiceFactory::GetForProfile(profile)) {
+          Require1PSkillRefreshObserver observer;
+          skills_service->AddObserver(&observer);
+          skills_service->RefreshDiscoverySkills();
+          skills_service->RemoveObserver(&observer);
+        }
+      }
+    }
   } else {
     page_action_controller_->Hide(kActionIndigo);
   }
@@ -584,6 +682,7 @@ void IndigoPageActionController::UpdateEntryPointsState() {
 
 void IndigoPageActionController::OnOnboardingDialogClosed(
     OnboardingDisposition disposition,
+    bool skip_glic_invoke,
     const OnboardingResult& result) {
   const bool acknowledged = result.acknowledge_chrome_disclaimer;
   onboarding_dialog_.reset();
@@ -612,9 +711,9 @@ void IndigoPageActionController::OnOnboardingDialogClosed(
     if (disposition == OnboardingDisposition::kReplacePhoto) {
       OnRegenerate(toolbar_.get());
     } else {
-      indigo_service_->GetCombinedEligibility(
-          base::BindOnce(&IndigoPageActionController::ContinueInvoke,
-                         invoke_weak_ptr_factory_.GetWeakPtr()));
+      indigo_service_->GetCombinedEligibility(base::BindOnce(
+          &IndigoPageActionController::ContinueInvoke,
+          invoke_weak_ptr_factory_.GetWeakPtr(), skip_glic_invoke));
     }
   }
 }
@@ -627,7 +726,7 @@ void IndigoPageActionController::OnLocalEligibilityChanged(
 void IndigoPageActionController::OnPageActionAnchoredMessageShown(
     const page_actions::PageActionState& page_action) {
   if (indigo_service_) {
-    indigo_service_->AnchoredMessageShown();
+    indigo_service_->ContextualCueShown();
   }
   base::RecordAction(
       base::UserMetricsAction("Indigo.PageAction.ShowAnchoredMessage"));
@@ -672,6 +771,24 @@ void IndigoPageActionController::ShowAnchoredMessage(
   page_action_controller_->SetAnchoredMessageIcon(
       kActionIndigo,
       icon ? ui::ImageModel::FromImageSkia(*icon) : ui::ImageModel());
+
+  if (priority == page_actions::PageActionPriorityCategory::kUserInteraction) {
+    page_action_controller_->SetAnchoredMessageAction(
+        kActionIndigo, page_actions::AnchoredMessageActionIconType::kClose,
+        nullptr);
+  } else {
+    CHECK_EQ(priority,
+             page_actions::PageActionPriorityCategory::kContextualCue);
+    content::WebContents* web_contents = tab().GetContents();
+    Profile* profile =
+        web_contents
+            ? Profile::FromBrowserContext(web_contents->GetBrowserContext())
+            : nullptr;
+    page_action_controller_->SetAnchoredMessageAction(
+        kActionIndigo, page_actions::AnchoredMessageActionIconType::kMenu,
+        std::make_unique<IndigoMenuModel>(profile, GetWeakPtr()));
+  }
+
   page_action_controller_->ShowAnchoredMessage(kActionIndigo,
                                                {.priority = priority});
 }
@@ -714,7 +831,8 @@ void IndigoPageActionController::FrameSizeChanged(
 
   if (frame_size.IsEmpty()) {
     Reset(ResetType::kResetReplacementsAndContentScript);
-    ShowInvocationErrorToast();
+    ShowInvocationErrorToast(
+        IndigoTransformationResult::kEmptyPrimaryImageSize);
     return;
   }
 
@@ -725,7 +843,7 @@ void IndigoPageActionController::FrameSizeChanged(
   float width_dips = frame_size.width() / device_scale_factor;
   if (width_dips < kMinPrimaryImageWidthDips) {
     Reset(ResetType::kResetReplacementsAndContentScript);
-    ShowInvocationErrorToast();
+    ShowInvocationErrorToast(IndigoTransformationResult::kPrimaryImageTooSmall);
   }
 }
 
@@ -749,6 +867,18 @@ void IndigoPageActionController::UnregisterObserverFromHost(
       current_host_ = nullptr;
     }
   }
+}
+
+void IndigoPageActionController::OnDiscardContents(
+    tabs::TabInterface* tab,
+    content::WebContents* old_contents,
+    content::WebContents* new_contents) {
+  tabs::ContentsObservingTabFeature::OnDiscardContents(tab, old_contents,
+                                                       new_contents);
+
+  RegisterObserverWithHost(nullptr);
+  Reset(ResetType::kResetReplacementsAndContentScript);
+  ResetTriggeringState();
 }
 
 void IndigoPageActionController::OnTrackedElementRectsChanged(
@@ -803,6 +933,70 @@ void IndigoPageActionController::ClearTrackedBoundsAndHideToolbar() {
   if (toolbar_) {
     toolbar_->UpdateTrackedPosition(gfx::Rect());
   }
+}
+
+void IndigoPageActionController::DocumentOnLoadCompletedInPrimaryMainFrame() {
+  TriggerMetadataClassification();
+}
+
+void IndigoPageActionController::TriggerMetadataClassification() {
+  if (!base::FeatureList::IsEnabled(
+          features::kIndigoMetadataKeywordHeuristic)) {
+    return;
+  }
+  content::WebContents* web_contents = tab().GetContents();
+  if (!web_contents) {
+    return;
+  }
+
+  const GURL& url = web_contents->GetLastCommittedURL();
+
+  if (!indigo_service_) {
+    return;
+  }
+
+  if (!indigo_service_->IsConfigLoaded()) {
+    return;
+  }
+
+  url::Origin origin = url::Origin::Create(url);
+  if (!indigo_service_->IsOriginAllowed(origin)) {
+    return;
+  }
+
+  // If OptGuide already said YES, we don't need heuristic.
+  if (optimization_guide_decision_ ==
+      optimization_guide::OptimizationGuideDecision::kTrue) {
+    return;
+  }
+
+  content::RenderFrameHost* rfh = web_contents->GetPrimaryMainFrame();
+  if (!rfh || !rfh->IsRenderFrameLive()) {
+    return;
+  }
+
+  metadata_remote_.reset();
+  rfh->GetRemoteInterfaces()->GetInterface(
+      metadata_remote_.BindNewPipeAndPassReceiver());
+
+  metadata_remote_->ClassifyProductDetails(
+      indigo_service_->GetAllowedKeywords(),
+      indigo_service_->GetBlockedKeywords(),
+      base::BindOnce(&IndigoPageActionController::OnProductClassified,
+                     invoke_weak_ptr_factory_.GetWeakPtr()));
+}
+
+void IndigoPageActionController::OnProductClassified(
+    blink::mojom::ProductClassificationResultPtr result) {
+  if (!result) {
+    // Product not found.
+    page_has_allowed_category_by_heuristic_ = false;
+  } else {
+    // Product found.
+    page_has_allowed_category_by_heuristic_ =
+        result->allowed_keyword_found && !result->blocked_keyword_found;
+  }
+  UpdateEntryPointsState();
 }
 
 }  // namespace indigo

@@ -166,7 +166,7 @@ CreateQueryControllerConfigParams() {
   return config_params;
 }
 
-BASE_FEATURE(kNtpComposebox, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kNtpComposebox, base::FEATURE_ENABLED_BY_DEFAULT);
 
 const base::FeatureParam<std::string> kConfigParam(&kNtpComposebox,
                                                    "NtpComposeboxConfigParam",
@@ -189,11 +189,6 @@ const base::FeatureParam<bool> kShowContextMenuTabPreviews(
     &kNtpComposebox,
     "NtpComposeboxShowContextMenuTabPreviews",
     false);
-
-const base::FeatureParam<bool> kShowContextMenuDescription(
-    &kNtpComposebox,
-    "NtpComposeboxShowContextMenuDescription",
-    true);
 
 const base::FeatureParam<bool> kShowContextMenuHeaders(&kNtpComposebox,
                                                        "ShowContextMenuHeaders",
@@ -221,7 +216,7 @@ const base::FeatureParam<bool> kEnableThreadsRailLogo(&kNtpComposebox,
 
 const base::FeatureParam<bool> kUseNtpComposeboxFork(&kNtpComposebox,
                                                      "useNtpComposeboxFork",
-                                                     false);
+                                                     true);
 
 FeatureConfig::FeatureConfig() : config(GetNTPComposeboxConfig()) {}
 
@@ -268,7 +263,7 @@ bool IsNtpRealboxNextEnabled(Profile* profile) {
          aim_eligibility_service->IsFuseboxEligible();
 }
 
-BASE_FEATURE(kNtpRealboxNext, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kNtpRealboxNext, base::FEATURE_ENABLED_BY_DEFAULT);
 
 const base::FeatureParam<PlaceholderText>::Option kSteadyPlaceholderOptions[] =
     {

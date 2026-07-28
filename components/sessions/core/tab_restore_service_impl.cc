@@ -626,6 +626,10 @@ class TabRestoreServiceImpl::PersistenceDelegate
 
   void ScheduleRestoredEntryCommandsForTest(SessionID id);
 
+  CommandStorageManager* command_storage_manager() {
+    return command_storage_manager_.get();
+  }
+
   // Creates a window close command.
   static std::unique_ptr<SessionCommand> CreateWindowCommand(
       SessionID window_id,
@@ -1813,6 +1817,13 @@ void TabRestoreServiceImpl::RemoveObserver(
 std::optional<SessionID> TabRestoreServiceImpl::CreateHistoricalTab(
     LiveTab* live_tab,
     int index) {
+  // When history saving is disabled by policy, don't add tabs to the restore
+  // list.
+  if (pref_change_registrar_.prefs() &&
+      pref_change_registrar_.prefs()->GetBoolean(
+          prefs::kSavingBrowserHistoryDisabled)) {
+    return std::nullopt;
+  }
   return helper_.CreateHistoricalTab(live_tab, index);
 }
 
@@ -1937,6 +1948,9 @@ void TabRestoreServiceImpl::UpdatePersistenceDelegate(
       PersistenceDelegate persistence_delegate(client_.get(), os_crypt_async);
       persistence_delegate.DeleteLastSession();
     }
+    // Also clear in-memory entries so they are not shown in the UI after the
+    // policy is activated mid-session.
+    helper_.ClearEntries();
   } else if (!persistence_delegate_) {
     // When saving is NOT disabled (or there is no pref service available), and
     // there are no persistence delegate yet, one must be created and
@@ -1960,6 +1974,13 @@ void TabRestoreServiceImpl::CreateRestoredEntryCommandForTest(SessionID id) {
   if (persistence_delegate_) {
     persistence_delegate_->ScheduleRestoredEntryCommandsForTest(id);
   }
+}
+
+CommandStorageManager*
+TabRestoreServiceImpl::command_storage_manager_for_testing() {
+  return persistence_delegate_
+             ? persistence_delegate_->command_storage_manager()
+             : nullptr;
 }
 
 }  // namespace sessions

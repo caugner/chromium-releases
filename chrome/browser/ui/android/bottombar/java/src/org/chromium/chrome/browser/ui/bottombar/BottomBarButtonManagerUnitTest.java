@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.ui.bottombar;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.clearInvocations;
@@ -43,6 +44,7 @@ import java.util.List;
 public class BottomBarButtonManagerUnitTest {
     private static final int HOME = ActionId.HOME_BUTTON;
     private static final int GLIC = ActionId.GLIC;
+    private static final int AI_MODE = ActionId.AI_MODE;
     private static final int NEW_TAB = ActionId.NEW_TAB;
     private static final int TAB_SWITCHER = ActionId.TAB_SWITCHER;
     private static final int APP_MENU = ActionId.APP_MENU;
@@ -52,7 +54,7 @@ public class BottomBarButtonManagerUnitTest {
     @Mock private PropertyModelChangeProcessor.ViewBinder<PropertyModel, View, PropertyKey> mBinder;
     @Mock private BottomBarButtonManager.Listener mListener;
     @Mock private BottomBarButtonContainer mContainerHome;
-    @Mock private BottomBarButtonContainer mContainerGlic;
+    @Mock private BottomBarButtonContainer mContainerExtra;
     @Mock private BottomBarButtonContainer mContainerNewTab;
     @Mock private BottomBarButtonContainer mContainerTabSwitcher;
     @Mock private BottomBarButtonContainer mContainerAppMenu;
@@ -60,6 +62,7 @@ public class BottomBarButtonManagerUnitTest {
 
     private SettableNullableObservableSupplier<PropertyModel> mSupplierHome;
     private SettableNullableObservableSupplier<PropertyModel> mSupplierGlic;
+    private SettableNullableObservableSupplier<PropertyModel> mSupplierAiMode;
     private SettableNullableObservableSupplier<PropertyModel> mSupplierNewTab;
     private SettableNullableObservableSupplier<PropertyModel> mSupplierTabSwitcher;
     private SettableNullableObservableSupplier<PropertyModel> mSupplierAppMenu;
@@ -72,12 +75,14 @@ public class BottomBarButtonManagerUnitTest {
 
         mSupplierHome = ObservableSuppliers.createNullable();
         mSupplierGlic = ObservableSuppliers.createNullable();
+        mSupplierAiMode = ObservableSuppliers.createNullable();
         mSupplierNewTab = ObservableSuppliers.createNullable();
         mSupplierTabSwitcher = ObservableSuppliers.createNullable();
         mSupplierAppMenu = ObservableSuppliers.createNullable();
 
         when(mActionRegistry.get(HOME)).thenReturn(mSupplierHome);
         when(mActionRegistry.get(GLIC)).thenReturn(mSupplierGlic);
+        when(mActionRegistry.get(AI_MODE)).thenReturn(mSupplierAiMode);
         when(mActionRegistry.get(NEW_TAB)).thenReturn(mSupplierNewTab);
         when(mActionRegistry.get(TAB_SWITCHER)).thenReturn(mSupplierTabSwitcher);
         when(mActionRegistry.get(APP_MENU)).thenReturn(mSupplierAppMenu);
@@ -270,6 +275,96 @@ public class BottomBarButtonManagerUnitTest {
                 mBottomBarModel.get(BottomBarProperties.IS_HOME_BUTTON_VISIBLE));
     }
 
+    @Test
+    public void testActionConfig_initiallyVisibleFalse_doesNotShowUntilExplicitlyRequested() {
+        List<BottomBarButtonManager.ActionConfig> configs = new ArrayList<>();
+        configs.add(
+                new BottomBarButtonManager.ActionConfig(
+                        GLIC,
+                        mContainerExtra,
+                        mBinder,
+                        BottomBarProperties.IS_EXTRA_BUTTON_VISIBLE,
+                        /* initiallyVisible= */ false));
+        configs.add(
+                new BottomBarButtonManager.ActionConfig(
+                        NEW_TAB,
+                        mContainerNewTab,
+                        mBinder,
+                        BottomBarProperties.IS_NEW_TAB_BUTTON_VISIBLE,
+                        /* initiallyVisible= */ true));
+
+        mManager = new BottomBarButtonManager(configs, mActionRegistry, mBottomBarModel, NEW_TAB);
+        mManager.setListener(mListener);
+        clearInvocations(mListener);
+
+        PropertyModel glicModel = new PropertyModel();
+        mSupplierGlic.set(glicModel);
+
+        assertFalse(
+                "GLIC button should not be visible when initiallyVisible is false",
+                mBottomBarModel.get(BottomBarProperties.IS_EXTRA_BUTTON_VISIBLE));
+
+        mManager.setButtonVisibility(GLIC, true);
+
+        assertTrue(
+                "GLIC button should become visible after setButtonVisibility(true)",
+                mBottomBarModel.get(BottomBarProperties.IS_EXTRA_BUTTON_VISIBLE));
+    }
+
+    @Test
+    public void testSharedContainer_swappingActionsRebindsPropertyModelChangeProcessor() {
+        List<BottomBarButtonManager.ActionConfig> configs = new ArrayList<>();
+        configs.add(
+                new BottomBarButtonManager.ActionConfig(
+                        GLIC,
+                        mContainerExtra,
+                        mBinder,
+                        BottomBarProperties.IS_EXTRA_BUTTON_VISIBLE,
+                        /* initiallyVisible= */ false));
+        configs.add(
+                new BottomBarButtonManager.ActionConfig(
+                        AI_MODE,
+                        mContainerExtra,
+                        mBinder,
+                        BottomBarProperties.IS_EXTRA_BUTTON_VISIBLE,
+                        /* initiallyVisible= */ false));
+        configs.add(
+                new BottomBarButtonManager.ActionConfig(
+                        NEW_TAB,
+                        mContainerNewTab,
+                        mBinder,
+                        BottomBarProperties.IS_NEW_TAB_BUTTON_VISIBLE,
+                        /* initiallyVisible= */ true));
+
+        mManager = new BottomBarButtonManager(configs, mActionRegistry, mBottomBarModel, NEW_TAB);
+        mManager.setListener(mListener);
+
+        PropertyModel glicModel = new PropertyModel();
+        PropertyModel aiModeModel = new PropertyModel();
+        mSupplierGlic.set(glicModel);
+        mSupplierAiMode.set(aiModeModel);
+
+        // Neither is visible initially.
+        assertFalse(mBottomBarModel.get(BottomBarProperties.IS_EXTRA_BUTTON_VISIBLE));
+
+        // Show GLIC.
+        mManager.setButtonVisibility(GLIC, true);
+        assertTrue(mBottomBarModel.get(BottomBarProperties.IS_EXTRA_BUTTON_VISIBLE));
+        assertEquals(GLIC, mBottomBarModel.get(BottomBarProperties.EXTRA_BUTTON_ACTION_ID));
+
+        // Switch to AI_MODE.
+        mManager.setButtonVisibility(GLIC, false);
+        mManager.setButtonVisibility(AI_MODE, true);
+        assertTrue(mBottomBarModel.get(BottomBarProperties.IS_EXTRA_BUTTON_VISIBLE));
+        assertEquals(AI_MODE, mBottomBarModel.get(BottomBarProperties.EXTRA_BUTTON_ACTION_ID));
+
+        // Switch back to GLIC.
+        mManager.setButtonVisibility(AI_MODE, false);
+        mManager.setButtonVisibility(GLIC, true);
+        assertTrue(mBottomBarModel.get(BottomBarProperties.IS_EXTRA_BUTTON_VISIBLE));
+        assertEquals(GLIC, mBottomBarModel.get(BottomBarProperties.EXTRA_BUTTON_ACTION_ID));
+    }
+
     @Test(expected = AssertionError.class)
     public void testInitialize_ThrowsIfCenterActionIdNotFound() {
         mManager = initManager(GLIC, HOME);
@@ -292,7 +387,8 @@ public class BottomBarButtonManagerUnitTest {
                             action,
                             getContainerForAction(action),
                             mBinder,
-                            getPropertyKeyForAction(action)));
+                            getPropertyKeyForAction(action),
+                            /* initiallyVisible= */ true));
         }
         return configs;
     }
@@ -302,7 +398,8 @@ public class BottomBarButtonManagerUnitTest {
             case HOME:
                 return mContainerHome;
             case GLIC:
-                return mContainerGlic;
+            case AI_MODE:
+                return mContainerExtra;
             case NEW_TAB:
                 return mContainerNewTab;
             case TAB_SWITCHER:
@@ -319,7 +416,8 @@ public class BottomBarButtonManagerUnitTest {
             case HOME:
                 return BottomBarProperties.IS_HOME_BUTTON_VISIBLE;
             case GLIC:
-                return BottomBarProperties.IS_GLIC_BUTTON_VISIBLE;
+            case AI_MODE:
+                return BottomBarProperties.IS_EXTRA_BUTTON_VISIBLE;
             case NEW_TAB:
                 return BottomBarProperties.IS_NEW_TAB_BUTTON_VISIBLE;
             case TAB_SWITCHER:

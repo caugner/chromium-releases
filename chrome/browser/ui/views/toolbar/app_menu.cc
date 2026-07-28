@@ -705,7 +705,7 @@ class AppMenu::ZoomView : public AppMenuView, public views::WidgetObserver {
                                     base::Unretained(this)));
     // Disable full screen button when window is not resizable
     views::Widget* widget = views::Widget::GetWidgetForNativeWindow(
-        menu->browser_->window()->GetNativeWindow());
+        menu->browser_->GetWindow()->GetNativeWindow());
     if (widget) {
       widget_observation_.Observe(widget);
     }
@@ -882,8 +882,8 @@ class AppMenu::ZoomView : public AppMenuView, public views::WidgetObserver {
   }
 
   void UpdateFullScreenButton() {
-    const bool is_fullscreen = menu()->browser_->window() &&
-                               menu()->browser_->window()->IsFullscreen();
+    const bool is_fullscreen = menu()->browser_->GetWindow() &&
+                               menu()->browser_->GetWindow()->IsFullscreen();
     const bool can_fullscreen = menu()
                                     ->browser_->browser_window_features()
                                     ->exclusive_access_manager()
@@ -1740,7 +1740,7 @@ void AppMenu::CreateBookmarkMenu() {
 
   // TODO(oshima): Replace with views only API.
   views::Widget* parent = views::Widget::GetWidgetForNativeWindow(
-      browser_->window()->GetNativeWindow());
+      browser_->GetWindow()->GetNativeWindow());
   bookmark_menu_delegate_ = std::make_unique<BookmarkMenuDelegate>(
       browser_, parent, this, BookmarkLaunchLocation::kAppMenu);
   bookmark_menu_delegate_->BuildFullMenu(bookmark_menu_);

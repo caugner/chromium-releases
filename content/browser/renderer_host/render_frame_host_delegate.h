@@ -37,6 +37,7 @@
 #include "services/device/public/mojom/wake_lock.mojom.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/network/public/cpp/permissions_policy/permissions_policy_declaration.h"
+#include "third_party/blink/public/common/dom/dom_node_id.h"
 #include "third_party/blink/public/common/mediastream/media_stream_request.h"
 #include "third_party/blink/public/mojom/choosers/popup_menu.mojom.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom.h"
@@ -106,6 +107,7 @@ struct AXLocationAndScrollUpdates;
 }  // namespace ui
 
 namespace content {
+class BackForwardCacheImpl;
 class FrameTreeNode;
 class Page;
 class PrerenderHostRegistry;
@@ -217,7 +219,8 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // the renderer process.
   virtual void UpdateFaviconURL(
       RenderFrameHostImpl* source,
-      const std::vector<blink::mojom::FaviconURLPtr>& candidates) {}
+      const std::vector<blink::mojom::FaviconURLPtr>& candidates,
+      blink::mojom::FaviconUpdateReason reason) {}
 
   // The frame changed its window.name property.
   virtual void DidChangeName(RenderFrameHostImpl* render_frame_host,
@@ -411,7 +414,8 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   virtual void OnFocusedElementChangedInFrame(
       RenderFrameHostImpl* frame,
       const gfx::Rect& bounds_in_root_view,
-      blink::mojom::FocusType focus_type) {}
+      blink::mojom::FocusType focus_type,
+      blink::DOMNodeIdType editable_dom_node_id) {}
 
   // The page is trying to open a new page (e.g. a popup window). The window
   // should be created and associated with the process of |opener|, but it
@@ -639,6 +643,9 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // indication that the cache will be used.
   virtual bool IsBackForwardCacheSupported();
 
+  // Returns the BackForwardCache for this delegate.
+  virtual BackForwardCacheImpl& GetBackForwardCache();
+
   // The page is trying to open a new widget (e.g. a select popup). The
   // widget should be created associated with the given
   // |site_instance_group|, but it should not be shown yet. That should
@@ -706,8 +713,12 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
       RenderFrameHost::LifecycleState old_state,
       RenderFrameHost::LifecycleState new_state) {}
 
-  // The page is trying to move the main frame's representation in the client.
+  // SetWindowRect is the legacy window.move*/resize* path used while
+  // kMoveResizeWindowToIPCs is disabled, while MoveWindowTo and ResizeWindowTo
+  // carry just the changing component for window.moveTo / window.resizeTo.
   virtual void SetWindowRect(const gfx::Rect& new_bounds) {}
+  virtual void MoveWindowTo(const gfx::Point& origin) {}
+  virtual void ResizeWindowTo(const gfx::Size& size) {}
 
   // The page's preferred size changed.
   virtual void UpdateWindowPreferredSize(RenderFrameHostImpl* render_frame_host,

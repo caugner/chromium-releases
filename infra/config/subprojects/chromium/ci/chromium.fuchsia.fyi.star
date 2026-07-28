@@ -148,7 +148,6 @@ ci.builder(
             ),
         },
     ),
-    ssd = None,
     free_space = free_space.high,
     console_view_entry = [
         consoles.console_view_entry(
@@ -252,7 +251,6 @@ ci.builder(
             ),
         },
     ),
-    ssd = None,
     console_view_entry = [
         consoles.console_view_entry(
             branch_selector = branches.selector.MAIN,
@@ -310,7 +308,6 @@ ci.builder(
             ),
         ],
     ),
-    ssd = None,
     free_space = free_space.high,
     console_view_entry = [
         consoles.console_view_entry(
@@ -494,7 +491,6 @@ ci.builder(
             ),
         },
     ),
-    ssd = None,
     console_view_entry = [
         consoles.console_view_entry(
             branch_selector = branches.selector.MAIN,

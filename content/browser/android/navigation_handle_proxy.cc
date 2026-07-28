@@ -67,6 +67,7 @@ void NavigationHandleProxy::DidStart() {
       cpp_navigation_handle_->IsPageActivation(),
       cpp_navigation_handle_->IsPdf(),
       base::android::ConvertUTF8ToJavaString(env, GetMimeType()),
+      cpp_navigation_handle_->NavigationStart().ToUptimeMillis(),
       cpp_navigation_handle_->GetWebContents()->GetJavaWebContents());
 }
 
@@ -125,7 +126,8 @@ void NavigationHandleProxy::DidFinish() {
       cpp_navigation_handle_->IsPdf(),
       base::android::ConvertUTF8ToJavaString(env, GetMimeType()),
       cpp_navigation_handle_->GetWebContents()->GetPrimaryPage().GetJavaPage(),
-      is_same_origin);
+      is_same_origin,
+      cpp_navigation_handle_->GetIgnoredDuplicateNavigationCount());
 }
 
 NavigationHandleProxy::~NavigationHandleProxy() {

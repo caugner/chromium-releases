@@ -20,8 +20,10 @@
 #include "chrome/browser/ui/views/profiles/avatar_toolbar_button_types.h"
 #include "chrome/browser/ui/views/toolbar/avatar_toolbar_button_interface.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
+#include "components/subscription_eligibility/subscription_eligibility_service.h"
 #include "google_apis/gaia/gaia_id.h"
 #include "ui/base/models/image_model.h"
+#include "ui/gfx/geometry/insets.h"
 
 class Browser;
 class Profile;
@@ -76,7 +78,14 @@ class StateProvider {
   // Consider overriding `Init()` if you need to add a potential code to
   // `RequestUpdate()`. The init method will be
   // called right after all the main states are created.
-  explicit StateProvider(Profile* profile, StateObserver* state_observer);
+  // `should_consider_ai_subscription` specifies if this state may display
+  // the AI subscription ring to eligible users (subject to other conditions).
+  // The default behavior is to show it, but some error states that manipulate
+  // the avatar (e.g. they add a dotted ring around it) should set this to
+  // false.
+  explicit StateProvider(Profile* profile,
+                         StateObserver* state_observer,
+                         bool should_consider_ai_subscription);
 
   virtual ~StateProvider();
 
@@ -105,10 +114,14 @@ class StateProvider {
       const ui::ColorProvider& color_provider) const;
 
   // Returns the avatar icon and its type.
+  // Note: If you are overriding this method to show a custom icon that
+  // doesn't support the AI ring, make sure to pass `false` for
+  // `should_consider_ai_subscription` in the constructor.
   virtual std::pair<ui::ImageModel, AvatarIconType> GetAvatarIcon(
       int icon_size,
       SkColor /*icon_color*/,
       const ui::ColorProvider& color_provider) const;
+
 
   // Returns the tooltip text of the avatar button.
   virtual std::u16string GetAvatarTooltipText() const;
@@ -143,6 +156,14 @@ class StateProvider {
   // purposes.
   virtual void ClearForTesting();
 
+  // Returns whether we should show the AI avatar ring.
+  bool ShouldShowAiAvatarRing() const;
+
+  // Returns the layout insets for the button.
+  virtual gfx::Insets GetLayoutInsets(int total_size,
+                                      int avatar_size,
+                                      bool is_label_visible) const;
+
  protected:
   // This update request will attempt to update the text shown on the button.
   // The update will only go through if the requesting state was the main button
@@ -156,6 +177,7 @@ class StateProvider {
  private:
   const raw_ref<Profile> profile_;
   const raw_ref<StateObserver> state_observer_;
+  const bool should_consider_ai_subscription_;
 };
 
 class StateObserver {
@@ -178,7 +200,9 @@ class StateObserver {
 class AvatarToolbarButtonStateManager
     : public StateObserver,
       public signin::IdentityManager::Observer,
-      public ProfileAttributesStorage::Observer {
+      public ProfileAttributesStorage::Observer,
+      public subscription_eligibility::SubscriptionEligibilityService::
+          Observer {
  public:
   using ButtonState = AvatarToolbarButtonState;
 
@@ -210,7 +234,10 @@ class AvatarToolbarButtonStateManager
 
   Browser* browser() const { return browser_; }
 
+  // Returns the active state provider. This is guaranteed to be non-null after
+  // initialization.
   StateProvider* GetActiveStateProvider() const;
+  ::AvatarToolbarButtonState GetActiveState() const;
 
   // Methods to register or remove observers of the button.
   void AddObserver(AvatarToolbarButtonInterface::Observer* observer);
@@ -234,6 +261,11 @@ class AvatarToolbarButtonStateManager
 
   // Returns whether the explicit state is set.
   bool HasExplicitButtonState() const;
+
+  // Returns the layout insets for the button based on the active state.
+  gfx::Insets GetLayoutInsets(int total_size,
+                              int avatar_size,
+                              bool is_label_visible) const;
 
   // Shared button press logic.
   void HandleButtonPressed(bool is_source_accelerator);
@@ -298,6 +330,9 @@ class AvatarToolbarButtonStateManager
   // filter if this is impacting performance.
   void UpdateAvatarButton();
 
+  // subscription_eligibility::SubscriptionEligibilityService::Observer:
+  void OnAiSubscriptionTierUpdated(int32_t new_subscription_tier) override;
+
   // signin::IdentityManager::Observer:
   void OnIdentityManagerShutdown(signin::IdentityManager*) override;
 
@@ -346,6 +381,10 @@ class AvatarToolbarButtonStateManager
   base::ScopedObservation<ProfileAttributesStorage,
                           ProfileAttributesStorage::Observer>
       profile_observation_{this};
+  base::ScopedObservation<
+      subscription_eligibility::SubscriptionEligibilityService,
+      subscription_eligibility::SubscriptionEligibilityService::Observer>
+      subscription_service_observation_{this};
 
   const raw_ref<Profile> profile_;
 

@@ -25,11 +25,12 @@
 #include "components/services/storage/privileged/mojom/indexed_db_client_state_checker.mojom.h"
 #include "components/services/storage/public/mojom/storage_service.mojom-forward.h"
 #include "content/browser/background_sync/background_sync_context_impl.h"
-#include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/content_index/content_index_context_impl.h"
+#include "content/browser/declarative_performance_observer/declarative_performance_observer_store.h"
 #include "content/browser/dom_storage/dom_storage_context_wrapper.h"
 #include "content/browser/locks/lock_manager.h"
 #include "content/browser/notifications/platform_notification_context_impl.h"
+#include "content/browser/security/cpsp/child_process_security_policy_impl.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/browser/worker_host/dedicated_worker_service_impl.h"
 #include "content/common/content_export.h"
@@ -490,8 +491,7 @@ class CONTENT_EXPORT StoragePartitionImpl
   mojo::PendingRemote<network::mojom::URLLoaderNetworkServiceObserver>
   CreateURLLoaderNetworkObserverForServiceOrSharedWorker(
       const network::OriginatingProcessId& process_id,
-      const url::Origin& worker_origin,
-      const std::optional<blink::StorageKey>& storage_key = std::nullopt);
+      const url::Origin& worker_origin);
 
   mojo::PendingRemote<network::mojom::DeviceBoundSessionAccessObserver>
   CreateDeviceBoundSessionObserverForServiceWorker();
@@ -574,6 +574,11 @@ class CONTENT_EXPORT StoragePartitionImpl
   void DecrementActiveDocumentCount(const net::NetworkIsolationKey& nik);
   int GetActiveDocumentCount(const net::NetworkIsolationKey& nik);
 
+  DeclarativePerformanceObserverStore*
+  GetDeclarativePerformanceObserverStore() {
+    return declarative_performance_observer_store_.get();
+  }
+
   enum class ContextType {
     kRenderFrameHostContext,
     kNavigationRequestContext,
@@ -651,10 +656,8 @@ class CONTENT_EXPORT StoragePartitionImpl
         GlobalRenderFrameHostId global_render_frame_host_id);
 
     // Used when `type` is `kSharedOrServiceWorkerContext`.
-    URLLoaderNetworkContext(
-        const network::OriginatingProcessId& process_id,
-        const url::Origin& worker_origin,
-        const std::optional<blink::StorageKey>& storage_key = std::nullopt);
+    URLLoaderNetworkContext(const network::OriginatingProcessId& process_id,
+                            const url::Origin& worker_origin);
 
     // Used when `type` is `kNavigationRequestContext`.
     explicit URLLoaderNetworkContext(NavigationRequest& navigation_request);
@@ -671,9 +674,6 @@ class CONTENT_EXPORT StoragePartitionImpl
     network::OriginatingProcessId process_id() const { return process_id_; }
     const std::optional<url::Origin>& worker_origin() const {
       return worker_origin_;
-    }
-    const std::optional<blink::StorageKey>& storage_key() const {
-      return storage_key_;
     }
 
     // If `type_` is kSharedOrServiceWorkerContext, returns nullptr. Otherwise
@@ -692,14 +692,6 @@ class CONTENT_EXPORT StoragePartitionImpl
 
     // Only valid and non-nullopt when `type_` is kSharedOrServiceWorkerContext.
     std::optional<url::Origin> worker_origin_;
-
-    // Only valid when `type_` is kSharedOrServiceWorkerContext.
-    // Holds the storage key of the worker that owns this network context.
-    // When present, `CalculateStorageKey()` uses this key to scope
-    // Clear-Site-Data filter deletions to the worker's top-level site
-    // partition. Is `std::nullopt` for contexts that lack a worker storage
-    // key.
-    std::optional<blink::StorageKey> storage_key_;
   };
 
   // `relative_partition_path` is the relative path under `profile_path` to the
@@ -1011,6 +1003,9 @@ class CONTENT_EXPORT StoragePartitionImpl
       performance_scenarios::PerformanceScenarioObserverList,
       performance_scenarios::MatchingScenarioObserver>
       performance_scenario_observation_{this};
+
+  std::unique_ptr<DeclarativePerformanceObserverStore>
+      declarative_performance_observer_store_;
 
   base::WeakPtrFactory<StoragePartitionImpl> weak_factory_{this};
 };

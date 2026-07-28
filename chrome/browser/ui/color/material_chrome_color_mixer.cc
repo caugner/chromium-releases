@@ -242,8 +242,6 @@ void AddMaterialChromeColorMixer(ui::ColorProvider* provider,
   mixer[kColorContextualTasksBannerPromoText] = {ui::kColorSysOnSurface};
   mixer[kColorContextualTasksBannerPromoIconBackground] = {
       ui::kColorSysTonalContainer};
-  mixer[kColorContextualTasksBannerPromoIconForeground] = {
-      ui::kColorSysPrimary};
 
   // Read Anything (in the side panel) colors.
   mixer[kColorReadAnythingCurrentReadAloudHighlight] = {
@@ -270,6 +268,14 @@ void AddMaterialChromeColorMixer(ui::ColorProvider* provider,
   mixer[kColorFeaturePromoBubbleDefaultButtonForeground] = {
       kColorFeaturePromoBubbleBackground};
   mixer[kColorFeaturePromoBubbleForeground] = {ui::kColorSysOnPrimary};
+
+  // Feature Showcase colors.
+  mixer[kColorFeatureShowcaseStepperCheck] = {ui::kColorSysPrimary};
+  mixer[kColorFeatureShowcaseStepperDot] = {ui::kColorSysPrimary};
+  mixer[kColorFeatureShowcaseThemePickerWrapperBackground] = {
+      ui::kColorSysSurface5};
+  mixer[kColorFeatureShowcaseThemePickerBackground] = {ui::kColorSysSurface};
+  mixer[kColorFeatureShowcaseThemeColorBorder] = {ui::kColorSysPrimary};
 
   // WebAuthn modal dialog colors.
   mixer[kColorWebAuthnBackArrowButtonIcon] = {ui::kColorSysPrimary};

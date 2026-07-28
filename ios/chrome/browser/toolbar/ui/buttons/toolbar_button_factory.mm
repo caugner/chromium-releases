@@ -5,6 +5,8 @@
 #import "ios/chrome/browser/toolbar/ui/buttons/toolbar_button_factory.h"
 
 #import "base/check.h"
+#import "components/strings/grit/components_strings.h"
+#import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/shared/ui/symbols/symbols.h"
 #import "ios/chrome/browser/toolbar/ui/buttons/toolbar_button.h"
 #import "ios/chrome/browser/toolbar/ui/buttons/toolbar_button_visibility.h"
@@ -18,6 +20,8 @@
 namespace {
 // Default point size for toolbar buttons.
 constexpr CGFloat kDefaultSymbolPointSize = 19;
+// Symbol point size for the legacy toolbar button design.
+constexpr CGFloat kLegacySymbolPointSize = 24;
 }  // namespace
 
 @implementation ToolbarButtonFactory {
@@ -36,6 +40,7 @@ constexpr CGFloat kDefaultSymbolPointSize = 19;
                                               defaultImage:YES];
   button.visibilityMask = ToolbarButtonVisibility::kAlways;
   button.accessibilityIdentifier = kToolbarBackButtonIdentifier;
+  button.accessibilityLabel = l10n_util::GetNSString(IDS_ACCNAME_BACK);
   button.accessibilityHint =
       l10n_util::GetNSString(IDS_IOS_TOOLBAR_ACCESSIBILITY_HINT_BACK);
   return button;
@@ -46,6 +51,7 @@ constexpr CGFloat kDefaultSymbolPointSize = 19;
                                               defaultImage:YES];
   button.visibilityMask = ToolbarButtonVisibility::kWhenEnabled;
   button.accessibilityIdentifier = kToolbarForwardButtonIdentifier;
+  button.accessibilityLabel = l10n_util::GetNSString(IDS_ACCNAME_FORWARD);
   button.accessibilityHint =
       l10n_util::GetNSString(IDS_IOS_TOOLBAR_ACCESSIBILITY_HINT_FORWARD);
   return button;
@@ -124,10 +130,35 @@ constexpr CGFloat kDefaultSymbolPointSize = 19;
 }
 
 - (ToolbarButton*)makeShareButton {
-  ToolbarButton* button = [self toolbarButtonForImageNamed:kShareSymbol
-                                              defaultImage:YES];
+  // Shift the button up 2px by adding 4px of padding at the bottom.
+  UIImage* (^imageLoader)(void) = ^UIImage* {
+    CGFloat pointSize = IsNextOldDesignEnabled() ? kLegacySymbolPointSize
+                                                 : kDefaultSymbolPointSize;
+    UIImage* image = DefaultSymbolWithPointSize(kShareSymbol, pointSize);
+    CGSize newSize = CGSizeMake(image.size.width, image.size.height + 4);
+
+    UIGraphicsImageRendererFormat* format =
+        [UIGraphicsImageRendererFormat preferredFormat];
+    format.opaque = NO;
+    format.scale = image.scale;
+    UIGraphicsImageRenderer* renderer =
+        [[UIGraphicsImageRenderer alloc] initWithSize:newSize format:format];
+
+    UIImage* newImage = [renderer
+        imageWithActions:^(UIGraphicsImageRendererContext* rendererContext) {
+          [image
+              drawInRect:CGRectMake(0, 0, image.size.width, image.size.height)];
+        }];
+
+    return [newImage imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+  };
+
+  ToolbarButton* button =
+      [[ToolbarButton alloc] initWithImageLoader:imageLoader
+                                       incognito:_incognito];
   button.visibilityMask = ToolbarButtonVisibility::kCompactHeight;
   button.accessibilityIdentifier = kToolbarShareButtonIdentifier;
+  button.accessibilityLabel = l10n_util::GetNSString(IDS_IOS_TOOLS_MENU_SHARE);
   return button;
 }
 
@@ -147,6 +178,7 @@ constexpr CGFloat kDefaultSymbolPointSize = 19;
                                               defaultImage:YES];
   button.visibilityMask = ToolbarButtonVisibility::kAlways;
   button.accessibilityIdentifier = kToolbarToolsMenuButtonIdentifier;
+  button.accessibilityLabel = l10n_util::GetNSString(IDS_IOS_TOOLBAR_SETTINGS);
   return button;
 }
 
@@ -170,20 +202,21 @@ constexpr CGFloat kDefaultSymbolPointSize = 19;
 
 #pragma mark - Private
 
-// Returns a toolbar button with the given image, which can be a default symbol
-// or not.
+// Returns a toolbar button with the given symbol.
 - (ToolbarButton*)toolbarButtonForImageNamed:(NSString*)imageName
                                 defaultImage:(BOOL)defaultImage {
+  CGFloat pointSize = IsNextOldDesignEnabled() ? kLegacySymbolPointSize
+                                               : kDefaultSymbolPointSize;
   if (defaultImage) {
     return [[ToolbarButton alloc]
         initWithImageLoader:^UIImage* {
-          return DefaultSymbolWithPointSize(imageName, kDefaultSymbolPointSize);
+          return DefaultSymbolWithPointSize(imageName, pointSize);
         }
                   incognito:_incognito];
   }
   return [[ToolbarButton alloc]
       initWithImageLoader:^UIImage* {
-        return CustomSymbolWithPointSize(imageName, kDefaultSymbolPointSize);
+        return CustomSymbolWithPointSize(imageName, pointSize);
       }
                 incognito:_incognito];
 }

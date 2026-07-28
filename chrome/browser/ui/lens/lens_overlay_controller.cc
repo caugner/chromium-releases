@@ -71,8 +71,6 @@
 #include "chrome/browser/ui/tabs/public/tab_features.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/user_education/browser_user_education_interface.h"
-#include "chrome/browser/ui/views/interaction/browser_elements_views.h"
-#include "chrome/browser/ui/views/side_panel/side_panel.h"
 #include "chrome/browser/ui/webui/webui_embedding_context.h"
 #include "chrome/common/chrome_render_frame.mojom.h"
 #include "chrome/common/pref_names.h"
@@ -499,12 +497,19 @@ void LensOverlayController::NotifyOverlayInitialized() {
 }
 
 void LensOverlayController::CopyText(const std::string& text) {
+  if (!tab_->IsActivated()) {
+    return;
+  }
   ui::ScopedClipboardWriter clipboard_writer(ui::ClipboardBuffer::kCopyPaste);
   clipboard_writer.WriteText(base::UTF8ToUTF16(text));
 }
 
 void LensOverlayController::CopyImage(lens::mojom::CenterRotatedBoxPtr region) {
-  if (initialization_data_->initial_screenshot_.drawsNothing()) {
+  if (!tab_->IsActivated()) {
+    return;
+  }
+  if (!initialization_data_ ||
+      initialization_data_->initial_screenshot_.drawsNothing()) {
     return;
   }
 
@@ -531,6 +536,13 @@ void LensOverlayController::RecordLensOverlaySemanticEvent(
 
 void LensOverlayController::SaveAsImage(
     lens::mojom::CenterRotatedBoxPtr region) {
+  if (!tab_->IsActivated()) {
+    return;
+  }
+  if (!initialization_data_ ||
+      initialization_data_->initial_screenshot_.drawsNothing()) {
+    return;
+  }
   SkBitmap cropped = lens::CropBitmapToRegion(
       initialization_data_->initial_screenshot_, std::move(region));
   const GURL data_url = GURL(webui::GetBitmapDataUrl(cropped));
@@ -1310,7 +1322,7 @@ void LensOverlayController::InitializeOverlayUI(
           : init_data.primary_content_type_);
 
   // Only show the CSB if the results side panel is not open.
-  bool is_side_panel_open = IsResultsSidePanelShowing();
+  bool is_side_panel_open = IsResultsSidePanelShowingOrWillOpen();
   page_->ShouldShowContextualSearchBox(
       !is_side_panel_open && lens_search_controller_->should_show_csb());
   // If should show CSB, and the CSB viewport thumbnail is enabled, send it now.
@@ -2234,7 +2246,13 @@ void LensOverlayController::ReshowOverlayPart3(SkBitmap rgb_screenshot) {
 }
 
 bool LensOverlayController::IsResultsSidePanelShowing() {
-  return GetLensResultsPanelRouter()->IsEntryShowing();
+  auto* router = GetLensResultsPanelRouter();
+  return router && router->IsEntryShowing();
+}
+
+bool LensOverlayController::IsResultsSidePanelShowingOrWillOpen() {
+  return IsResultsSidePanelShowing() || !pending_region_.is_null() ||
+         !pending_contextual_search_request_.is_null();
 }
 
 void LensOverlayController::RequestSyncClose(DismissalSource source) {

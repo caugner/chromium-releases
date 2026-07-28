@@ -9,6 +9,7 @@
 #include "base/scoped_observation.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/mock_callback.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/test_future.h"
 #include "chrome/browser/enterprise/signin/managed_profile_required_navigation_throttle.h"
 #include "chrome/browser/profiles/profile.h"
@@ -18,20 +19,29 @@
 #include "chrome/browser/signin/signin_ui_util.h"
 #include "chrome/browser/sync/sync_service_factory.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/signin/chrome_signout_confirmation_prompt.h"
+#include "chrome/browser/ui/signin/cross_device_signin_qr_bubble.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/ui_features.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/frame/toolbar_button_provider.h"
+#include "chrome/browser/ui/views/toolbar/avatar_toolbar_button_interface.h"
 #include "chrome/browser/ui/webui/signin/signin_utils.h"
 #include "chrome/browser/ui/webui/signin/signout_confirmation/signout_confirmation_ui.h"
 #include "chrome/browser/ui/webui/signin/signout_confirmation/test_signout_confirmation_handler_waiter.h"
+#include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome_signout_confirmation_prompt.h"
+#include "components/infobars/content/content_infobar_manager.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/public/base/consent_level.h"
+#include "components/signin/public/base/signin_buildflags.h"
 #include "components/signin/public/base/signin_metrics.h"
 #include "components/signin/public/base/signin_pref_names.h"
+#include "components/signin/public/base/signin_switches.h"
 #include "components/signin/public/identity_manager/account_capabilities_test_mutator.h"
 #include "components/signin/public/identity_manager/account_info.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
@@ -41,10 +51,17 @@
 #include "components/sync/base/data_type_histogram.h"
 #include "components/sync/test/test_sync_service.h"
 #include "content/public/test/browser_test.h"
+#include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
+#include "device/bluetooth/bluetooth_adapter_factory.h"
+#include "device/bluetooth/test/mock_bluetooth_adapter.h"
 #include "extensions/browser/extension_registry.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/views/controls/webview/webview.h"
+#include "ui/views/interaction/element_tracker_views.h"
+#include "ui/views/test/widget_test.h"
+#include "ui/views/view_utils.h"
 #include "ui/views/widget/any_widget_observer.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -56,7 +73,6 @@
 #include "chrome/browser/extensions/scoped_test_mv2_enabler.h"
 #include "chrome/browser/extensions/signin_test_util.h"
 #include "chrome/browser/extensions/sync/extension_sync_util.h"
-#include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/webui/test_support/webui_interactive_test_mixin.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/interaction/interactive_browser_test.h"
@@ -491,7 +507,7 @@ IN_PROC_BROWSER_TEST_F(SigninViewControllerBrowserTest,
                        SignoutOrReauthWithPrompt_SignOutSupervisedUser) {
   // Setup a primary account for a supervised user.
   AccountInfo primary_account_info = SetPrimaryAccount();
-  AccountCapabilitiesTestMutator mutator(&primary_account_info.capabilities);
+  AccountCapabilitiesTestMutator mutator(&primary_account_info);
   mutator.set_is_subject_to_parental_controls(true);
   identity_test_env()->UpdateAccountInfoForAccount(primary_account_info);
 
@@ -804,6 +820,260 @@ IN_PROC_BROWSER_TEST_F(SigninViewControllerBrowserTest,
   EXPECT_FALSE(signin_ui_util::GetSignInTabWithAccessPoint(
       browser(), signin_metrics::AccessPoint::kPasswordBubble));
 }
+
+#if BUILDFLAG(ENABLE_DICE_SUPPORT)
+class AsyncMockBluetoothAdapter : public device::MockBluetoothAdapter {
+ public:
+  AsyncMockBluetoothAdapter() = default;
+
+  bool IsInitialized() const override { return is_initialized_; }
+  void SetInitialized(bool initialized) {
+    is_initialized_ = initialized;
+    if (is_initialized_ && init_callback_) {
+      std::move(init_callback_).Run();
+    }
+  }
+
+  void Initialize(base::OnceClosure callback) override {
+    init_callback_ = std::move(callback);
+  }
+
+ private:
+  bool is_initialized_ = false;
+  base::OnceClosure init_callback_;
+  ~AsyncMockBluetoothAdapter() override = default;
+};
+
+class SigninViewControllerSignInBanner
+    : public SigninViewControllerBrowserTestBase {
+ public:
+  SigninViewControllerSignInBanner() {
+    feature_list_.InitAndEnableFeatureWithParameters(
+        switches::kMagiChromePasskeySignIn, {{"flow_type", "banner"}});
+  }
+
+  void SetUpOnMainThread() override {
+    SigninViewControllerBrowserTestBase::SetUpOnMainThread();
+    mock_bluetooth_adapter_ = base::MakeRefCounted<AsyncMockBluetoothAdapter>();
+    ON_CALL(*mock_bluetooth_adapter_, IsPresent())
+        .WillByDefault(testing::Return(true));
+    device::BluetoothAdapterFactory::SetAdapterForTesting(
+        mock_bluetooth_adapter_);
+    // Other parts of Chrome may keep a reference to the bluetooth adapter.
+    testing::Mock::AllowLeak(mock_bluetooth_adapter_.get());
+
+    bluetooth_override_values_ =
+        device::BluetoothAdapterFactory::Get()->InitGlobalOverrideValues();
+    bluetooth_override_values_->SetLESupported(true);
+  }
+
+ protected:
+  scoped_refptr<AsyncMockBluetoothAdapter> mock_bluetooth_adapter_;
+  std::unique_ptr<device::BluetoothAdapterFactory::GlobalOverrideValues>
+      bluetooth_override_values_;
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(SigninViewControllerSignInBanner, Visibility) {
+  browser()->GetFeatures().signin_view_controller()->ShowDiceAddAccountTab(
+      signin_metrics::AccessPoint::kSettings, std::string());
+
+  mock_bluetooth_adapter_->SetInitialized(true);
+
+  content::WebContents* active_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(active_contents);
+
+  // Check that the infobar is shown.
+  infobars::ContentInfoBarManager* infobar_manager =
+      infobars::ContentInfoBarManager::FromWebContents(active_contents);
+  ASSERT_TRUE(infobar_manager);
+  EXPECT_EQ(1u, infobar_manager->infobars().size());
+
+  // Navigate away.
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), GURL("about:blank")));
+
+  // Check that it is no longer shown.
+  EXPECT_EQ(0u, infobar_manager->infobars().size());
+}
+
+IN_PROC_BROWSER_TEST_F(SigninViewControllerSignInBanner,
+                       NavigateAwayBeforeBluetoothResolved) {
+  browser()->GetFeatures().signin_view_controller()->ShowDiceAddAccountTab(
+      signin_metrics::AccessPoint::kSettings, std::string());
+
+  content::WebContents* active_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(active_contents);
+
+  // Navigate away immediately before resolving the initialization.
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), GURL("about:blank")));
+
+  // Resolve the bluetooth check. Since we are no longer on the signin page,
+  // it should not add the banner.
+  mock_bluetooth_adapter_->SetInitialized(true);
+
+  infobars::ContentInfoBarManager* infobar_manager =
+      infobars::ContentInfoBarManager::FromWebContents(active_contents);
+  ASSERT_TRUE(infobar_manager);
+  EXPECT_EQ(0u, infobar_manager->infobars().size());
+}
+
+IN_PROC_BROWSER_TEST_F(SigninViewControllerSignInBanner, WebUIEnabled) {
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  // Navigation should succeed when the feature flag is enabled.
+  bool success = ui_test_utils::NavigateToURL(
+      browser(), GURL(chrome::kChromeUISigninQRCodeBarURL));
+  EXPECT_TRUE(success);
+  EXPECT_EQ(web_contents->GetVisibleURL(), chrome::kChromeUISigninQRCodeBarURL);
+  EXPECT_NE(web_contents->GetWebUI(), nullptr);
+}
+
+class SigninViewControllerSignInBannerNoBluetooth
+    : public SigninViewControllerBrowserTestBase {
+ public:
+  SigninViewControllerSignInBannerNoBluetooth() {
+    feature_list_.InitAndEnableFeatureWithParameters(
+        switches::kMagiChromePasskeySignIn, {{"flow_type", "banner"}});
+  }
+
+  void SetUpOnMainThread() override {
+    SigninViewControllerBrowserTestBase::SetUpOnMainThread();
+    mock_bluetooth_adapter_ =
+        base::MakeRefCounted<testing::NiceMock<device::MockBluetoothAdapter>>();
+    // Bluetooth is supported (LE is true) but adapter is NOT present.
+    ON_CALL(*mock_bluetooth_adapter_, IsPresent())
+        .WillByDefault(testing::Return(false));
+    device::BluetoothAdapterFactory::SetAdapterForTesting(
+        mock_bluetooth_adapter_);
+
+    bluetooth_override_values_ =
+        device::BluetoothAdapterFactory::Get()->InitGlobalOverrideValues();
+    bluetooth_override_values_->SetLESupported(true);
+  }
+
+ protected:
+  scoped_refptr<testing::NiceMock<device::MockBluetoothAdapter>>
+      mock_bluetooth_adapter_;
+  std::unique_ptr<device::BluetoothAdapterFactory::GlobalOverrideValues>
+      bluetooth_override_values_;
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(SigninViewControllerSignInBannerNoBluetooth,
+                       BluetoothUnavailable) {
+  browser()->GetFeatures().signin_view_controller()->ShowDiceAddAccountTab(
+      signin_metrics::AccessPoint::kSettings, std::string());
+
+  content::WebContents* active_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(active_contents);
+
+  // Check that the infobar is NOT shown because bluetooth is unavailable.
+  infobars::ContentInfoBarManager* infobar_manager =
+      infobars::ContentInfoBarManager::FromWebContents(active_contents);
+  ASSERT_TRUE(infobar_manager);
+  EXPECT_EQ(0u, infobar_manager->infobars().size());
+}
+
+class SigninViewControllerCrossDeviceSigninBrowserTest
+    : public SigninViewControllerBrowserTestBase {
+ public:
+  SigninViewControllerCrossDeviceSigninBrowserTest() {
+    feature_list_.InitAndEnableFeature(switches::kCrossDeviceSigninFromDesktop);
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(SigninViewControllerCrossDeviceSigninBrowserTest,
+                       ShowCrossDeviceSigninQrBubble) {
+  SetPrimaryAccount();
+
+  views::AnyWidgetObserver observer(views::test::AnyWidgetTestPasskey{});
+  views::Widget* bubble_widget = nullptr;
+  base::RunLoop run_loop;
+  observer.set_shown_callback(base::BindRepeating(
+      [](views::Widget** out_widget, base::RepeatingClosure quit_closure,
+         views::Widget* widget) {
+        *out_widget = widget;
+        quit_closure.Run();
+      },
+      &bubble_widget, run_loop.QuitClosure()));
+
+  base::MockCallback<base::OnceClosure> closing_callback;
+  EXPECT_CALL(closing_callback, Run()).Times(1);
+  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser());
+  AvatarToolbarButtonInterface* avatar_button =
+      browser_view->toolbar_button_provider()
+          ->GetAvatarToolbarButtonInterface();
+  ASSERT_TRUE(avatar_button);
+  // Before showing, there should be no explicit state.
+  EXPECT_FALSE(avatar_button->HasExplicitButtonState());
+
+  browser()
+      ->GetFeatures()
+      .signin_view_controller()
+      ->ShowCrossDeviceSigninQrBubble(closing_callback.Get());
+
+  run_loop.Run();
+  ASSERT_TRUE(bubble_widget);
+
+  views::WidgetDelegate* delegate = bubble_widget->widget_delegate();
+  ASSERT_TRUE(delegate);
+  EXPECT_TRUE(delegate->ShouldShowCloseButton());
+  if (auto* bubble_delegate = delegate->AsBubbleDialogDelegate()) {
+    EXPECT_FALSE(bubble_delegate->ShouldCloseOnDeactivate());
+  }
+
+  views::WebView* web_view = views::AsViewClass<views::WebView>(
+      views::ElementTrackerViews::GetInstance()->GetUniqueView(
+          kCrossDeviceSigninQrBubbleWebViewElementId,
+          views::ElementTrackerViews::GetContextForWidget(bubble_widget)));
+  ASSERT_TRUE(web_view);
+
+  content::WebContents* web_contents = web_view->GetWebContents();
+  ASSERT_TRUE(web_contents);
+
+  // Note: This observer is attached after the WebContents has started loading,
+  // so it won't reliably catch load-time JS errors (like missing imports),
+  // but it will successfully catch post-load runtime errors or unhandled
+  // exceptions.
+  content::WebContentsConsoleObserver console_observer(web_contents);
+  if (web_contents->IsLoading()) {
+    content::WaitForLoadStop(web_contents);
+  }
+  for (const auto& message : console_observer.messages()) {
+    LOG(INFO) << "Console message: " << message.message;
+    EXPECT_NE(message.log_level, blink::mojom::ConsoleMessageLevel::kError)
+        << "JS Error on WebUI: " << message.message;
+  }
+
+  // After showing, the explicit state should be set.
+  EXPECT_TRUE(avatar_button->HasExplicitButtonState());
+
+  // Verify that the WebUI URL loaded successfully.
+  EXPECT_EQ(web_contents->GetVisibleURL(),
+            GURL(chrome::kChromeUICrossDeviceSigninQrBubbleURL));
+
+  views::test::WidgetDestroyedWaiter waiter(bubble_widget);
+  // Simulating a click on the avatar button should close the bubble because of
+  // the explicit action.
+  avatar_button->ButtonPressed(/*is_source_accelerator=*/false);
+  waiter.Wait();
+
+  // After closing, wait until the explicit state is cleared (reverted).
+  EXPECT_FALSE(avatar_button->HasExplicitButtonState());
+}
+
+#endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
 
 IN_PROC_BROWSER_TEST_F(SigninViewControllerBrowserTest,
                        ShowModalManagedUserNoticeDialog) {

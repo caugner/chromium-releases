@@ -31,7 +31,7 @@ import java.lang.annotation.RetentionPolicy;
 public class Snackbar {
     /**
      * Snackbars that are created as an immediate response to user's action. These snackbars are
-     * managed in a stack and will be swiped away altogether after timeout.
+     * managed in a stack and will be dismissed one by one.
      */
     public static final int TYPE_ACTION = 0;
 
@@ -94,10 +94,10 @@ public class Snackbar {
     public static final int UMA_PAINT_PREVIEW_UPGRADE_NOTIFICATION = 36;
     public static final int UMA_READING_LIST_BOOKMARK_ADDED = 37;
     public static final int UMA_PRIVACY_SANDBOX_PAGE_OPEN = 38;
-    public static final int UMA_WEB_FEED_FOLLOW_SUCCESS = 39;
-    public static final int UMA_WEB_FEED_FOLLOW_FAILURE = 40;
-    public static final int UMA_WEB_FEED_UNFOLLOW_SUCCESS = 41;
-    public static final int UMA_WEB_FEED_UNFOLLOW_FAILURE = 42;
+    // Obsolete; don't use: public static final int UMA_WEB_FEED_FOLLOW_SUCCESS = 39;
+    // Obsolete; don't use: public static final int UMA_WEB_FEED_FOLLOW_FAILURE = 40;
+    // Obsolete; don't use: public static final int UMA_WEB_FEED_UNFOLLOW_SUCCESS = 41;
+    // Obsolete; don't use: public static final int UMA_WEB_FEED_UNFOLLOW_FAILURE = 42;
     public static final int UMA_LANGUAGE_SPLIT_RESTART = 43;
     public static final int UMA_AUTOFILL_VIRTUAL_CARD_FILLED = 44;
     public static final int UMA_WINDOW_ERROR = 45;
@@ -148,10 +148,11 @@ public class Snackbar {
     public static final int UMA_GLIC = 90;
     public static final int UMA_TIPS_OPT_IN = 91;
     public static final int UMA_NTP_THEME_TIP = 92;
+    public static final int UMA_SEND_TAB_TO_SELF = 93;
     // LINT.ThenChange(//tools/metrics/histograms/metadata/ui/enums.xml:SnackbarIdentifier)
 
     private final @Nullable SnackbarController mController;
-    private final CharSequence mText;
+    private final @Nullable CharSequence mText;
     private @Nullable String mTemplateText;
     private @Nullable String mActionText;
     private @Nullable Object mActionData;
@@ -173,7 +174,10 @@ public class Snackbar {
     }
 
     private Snackbar(
-            CharSequence text, @Nullable SnackbarController controller, int type, int identifier) {
+            @Nullable CharSequence text,
+            @Nullable SnackbarController controller,
+            int type,
+            int identifier) {
         mText = text;
         mController = controller;
         mType = type;
@@ -192,7 +196,10 @@ public class Snackbar {
      */
     @Initializer
     public static Snackbar make(
-            CharSequence text, @Nullable SnackbarController controller, int type, int identifier) {
+            @Nullable CharSequence text,
+            @Nullable SnackbarController controller,
+            int type,
+            int identifier) {
         Snackbar s = new Snackbar(text, controller, type, identifier);
         if (type == TYPE_PERSISTENT) {
             // For persistent snackbars we set a default action text to ensure the snackbar can be
@@ -205,7 +212,7 @@ public class Snackbar {
     /**
      * Sets whether the snackbar is high priority. High priority snackbars are shielded from being
      * discarded by the timeout of other action-type snackbars in the queue (e.g. for security-
-     * critical notices).
+     * critical notices), and they stay at the front of the queue.
      */
     public Snackbar setHighPriority(boolean highPriority) {
         mIsHighPriority = highPriority;
@@ -297,7 +304,7 @@ public class Snackbar {
         return mController;
     }
 
-    CharSequence getText() {
+    @Nullable CharSequence getText() {
         return mText;
     }
 
@@ -376,7 +383,7 @@ public class Snackbar {
         return mIdentifier;
     }
 
-    public CharSequence getTextForTesting() {
+    public @Nullable CharSequence getTextForTesting() {
         return mText;
     }
 }

@@ -293,8 +293,7 @@ void HTMLSlotElement::ClearAssignedNodesAndFlatTreeChildren() {
 
 void HTMLSlotElement::UpdateFlatTreeNodeDataForAssignedNodes() {
   Node* previous = nullptr;
-  const HeapVector<Member<Node>> assigned_nodes = assigned_nodes_;
-  for (auto& current : assigned_nodes) {
+  for (auto& current : assigned_nodes_) {
     bool mark_parent_slot_changed = false;
     if (!current->NeedsStyleRecalc() && !current->GetLayoutObject()) {
       if (current->IsTextNode() ||
@@ -341,8 +340,7 @@ void HTMLSlotElement::DetachDisplayLockedAssignedNodesLayoutTreeIfNeeded() {
   // detach the node's layout tree.
   StyleEngine& style_engine = GetDocument().GetStyleEngine();
   StyleEngine::DetachLayoutTreeScope detach_scope(style_engine);
-  const HeapVector<Member<Node>> assigned_nodes = assigned_nodes_;
-  for (auto& current : assigned_nodes) {
+  for (auto& current : assigned_nodes_) {
     if (current->GetForceReattachLayoutTree()) {
       current->DetachLayoutTree();
       // Restore the force-reattach state for when it's no longer display
@@ -694,10 +692,11 @@ void HTMLSlotElement::NotifySlottedNodesOfFlatTreeChangeNaive(
       ++j;
       continue;
     }
-    if (old_index_map.Contains(new_node)) {
-      wtf_size_t old_index = old_index_map.at(new_node);
+    if (auto it = old_index_map.find(new_node);
+        it != old_index_map.end()) {
+      wtf_size_t old_index = it->value;
       if (old_index > i) {
-        i = old_index_map.at(new_node) + 1;
+        i = old_index + 1;
         ++j;
         continue;
       }
@@ -723,8 +722,9 @@ void HTMLSlotElement::NotifySlottedNodesOfFlatTreeChangeNaive(
       --j;
       continue;
     }
-    if (old_index_map.Contains(new_node)) {
-      wtf_size_t old_index = old_index_map.at(new_node);
+    if (auto it = old_index_map.find(new_node);
+        it != old_index_map.end()) {
+      wtf_size_t old_index = it->value;
       if (old_index < i - 1) {
         i = old_index;
         --j;

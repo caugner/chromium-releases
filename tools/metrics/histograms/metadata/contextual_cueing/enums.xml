@@ -308,6 +308,15 @@ chromium-metrics-reviews@google.com.
 
 <!-- LINT.ThenChange(//chrome/browser/contextual_cueing/contextual_cueing_enums.h:CueFormFactor) -->
 
+<!-- LINT.IfChange(CueTargetType) -->
+
+<enum name="CueTargetType">
+  <int value="0" label="Glic"/>
+  <int value="1" label="Test Source"/>
+</enum>
+
+<!-- LINT.ThenChange(//chrome/browser/contextual_cueing/cue_target.h:CueTargetType) -->
+
 <!-- LINT.IfChange(GlicAutoOpenResult) -->
 
 <enum name="GlicAutoOpenResult">

@@ -14,13 +14,15 @@ typedef NS_ENUM(NSUInteger, AppBarButtonType) {
   AppBarButtonTypeTabGrid,
 };
 
-// The states for the assistant button.
+// LINT.IfChange(AppBarAssistantButtonState)
 enum class AppBarAssistantButtonState {
   kLens,
   kAsk,
   kAIM,
   kAccount,
+  kMaxValue = kAccount,
 };
+// LINT.ThenChange(//tools/metrics/histograms/enums.xml:IOSAppBarAssistantButtonState)
 
 // Consumer of the app bar.
 @protocol AppBarConsumer <NSObject>
@@ -56,6 +58,9 @@ enum class AppBarAssistantButtonState {
 
 // Sets whether the incognito mode is active.
 - (void)setIncognito:(BOOL)incognito;
+
+// Sets whether the current page is the NTP and if it is the Start Surface.
+- (void)setNTPVisible:(BOOL)ntpVisible isStartSurface:(BOOL)isStartSurface;
 
 @end
 

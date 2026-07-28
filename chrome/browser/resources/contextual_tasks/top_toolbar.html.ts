@@ -11,7 +11,7 @@ import type {TopToolbarElement} from './top_toolbar.js';
 // clang-format off
 export function getHtml(this: TopToolbarElement) {
   return html`<!--_html_template_start_-->
-<div id="top-row">
+<div id="top-row" data-element-id="kContextualTasksWebUIToolbarElementId">
 <if expr="_google_chrome">
     <img src="chrome://resources/cr_components/searchbox/icons/google_g_gradient.svg"
         class="top-toolbar-logo">
@@ -32,14 +32,17 @@ export function getHtml(this: TopToolbarElement) {
         iron-icon="contextual_tasks:edit_square"
         class="no-overlap" title="$i18n{newThreadTooltip}"
         aria-label="$i18n{newThreadTooltip}"
-        ?hidden="${!this.isAimEligible}">
+        ?hidden="${!this.isAimEligible ||
+            (this.contextualTasksEnableSpatialModelToolbarLayout_ &&
+             this.contextualTasksEnableSpatialModelToolbarLayoutNewThreadInOverflow_)}">
     </cr-icon-button>
     <cr-icon-button id="threadHistoryButton"
         @click="${this.onThreadHistoryClick_}"
         iron-icon="contextual_tasks:notes_spark"
         class="no-overlap" title="$i18n{threadHistoryTooltip}"
         aria-label="$i18n{threadHistoryTooltip}"
-        ?hidden="${!this.isAiPage}">
+        ?hidden="${!this.isAiPage || !this.isUserSignedIn ||
+            this.contextualTasksEnableSpatialModelToolbarLayout_}">
     </cr-icon-button>
 
     ${!this.contextManagementInComposeboxEnabled_ ? html`
@@ -60,7 +63,8 @@ export function getHtml(this: TopToolbarElement) {
       </cr-icon-button>
     ` : ''}
     <cr-icon-button id="overflowMenuButton" iron-icon="cr:more-vert"
-      class="no-overlap" title="$i18n{moreOptionsTooltip}"
+      data-element-id="kContextualTasksWebUIOverflowMenuElementId"
+      class="no-overlap ${this.overflowMenuOpen_ ? 'active' : ''}" title="$i18n{moreOptionsTooltip}"
       aria-label="$i18n{moreOptionsTooltip}"
       @click="${this.onOverflowMenuButtonClick_}"
       ?hidden="${this.hideOverflowMenuButton_}">
@@ -80,11 +84,16 @@ export function getHtml(this: TopToolbarElement) {
   </cr-lazy-render-lit>
   <cr-lazy-render-lit id="overflowMenu" .template="${() => html`
     <contextual-tasks-overflow-menu
-      .enableOpenInNewTabButton="${this.enableOpenInNewTabButton}"
-      .isPinned="${this.isPinned}"
-      .isPinButtonEnabled="${this.isPinButtonEnabled}"
-      .isAiPage="${this.isAiPage}"
-      @pin-click="${this.onPinClick_}">
+        .enableOpenInNewTabButton="${this.enableOpenInNewTabButton}"
+        .isPinned="${this.isPinned}"
+        .isPinButtonEnabled="${this.isPinButtonEnabled}"
+        .isAiPage="${this.isAiPage}"
+        .isAimEligible="${this.isAimEligible}"
+        .contextualTasksEnableSpatialModelToolbarLayout="${this.contextualTasksEnableSpatialModelToolbarLayout_}"
+        .contextualTasksEnableSpatialModelToolbarLayoutNewThreadInOverflow="${this.contextualTasksEnableSpatialModelToolbarLayoutNewThreadInOverflow_}"
+        @pin-click="${this.onPinClick_}"
+        @new-thread-click="${this.onNewThreadClick_}"
+        @open-changed="${this.onOverflowMenuOpenChanged_}">
     </contextual-tasks-overflow-menu>`}">
   </cr-lazy-render-lit>
   ${this.showReopenTabs_ ? html`

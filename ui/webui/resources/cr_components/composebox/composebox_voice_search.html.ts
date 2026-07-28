@@ -19,20 +19,19 @@ export function getHtml(this: ComposeboxVoiceSearchElement) {
                 @click="${this.onTryAgainClick_}"
               >${this.i18n('tryAgain')}
             </a>`
-        : ''}
-        <a id="details" part="voice-details-link" target="_blank"
+        : html`<a id="details" part="voice-details-link" target="_blank"
             href="${this.detailsUrl_}"
             @click="${this.onLinkClick_}"
           >${this.i18n('voiceDetails')}
-        </a>
+        </a>`}
       </div>
-      ${this.isPermissionPromptOpen_ ? html`
+      ${this.isPermissionPromptOpen ? html`
           <textarea id="input"
               class="${this.shouldShowErrorScrim_() ? 'hidden' : ''}"
               placeholder="${this.i18n('voiceWaiting')}" disabled
           ></textarea>`
       : ''}
-      ${this.liveTranscriptEnabled && !this.isPermissionPromptOpen_ ?
+      ${this.liveTranscriptEnabled && !this.isPermissionPromptOpen ?
           html`<textarea id="input"
               .value="${this.transcript_}"
               placeholder="${this.listeningPlaceholder_}"

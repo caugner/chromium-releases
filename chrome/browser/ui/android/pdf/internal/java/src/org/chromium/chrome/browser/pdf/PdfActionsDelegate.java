@@ -9,6 +9,7 @@ import android.net.Uri;
 import androidx.pdf.view.PdfView;
 
 import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 
 /** Interface to handle actions from the PDF viewer. */
 @NullMarked
@@ -45,4 +46,14 @@ public interface PdfActionsDelegate {
 
     /** Called when the PDF document fails to load. */
     void onDocumentLoadFailed();
+
+    /** Called when the edit mode changes. */
+    void onEditModeChanged(boolean editMode);
+
+    /** Returns whether the page navigation and edit button are visible in the top toolbar. */
+    boolean isPageNavAndEditVisible();
+
+    /** Returns the URI of the PDF document. */
+    @Nullable Uri getUri();
 }
+

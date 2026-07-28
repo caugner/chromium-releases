@@ -125,6 +125,7 @@ enum class Channel;
 
 class ChromeDirectSocketsDelegate;
 class ChromeHidDelegate;
+class ChromeSensorDelegate;
 class ChromeSerialDelegate;
 class ChromeBluetoothDelegate;
 class ChromeUsbDelegate;
@@ -201,8 +202,9 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       bool is_outermost_main_frame,
       const GURL& candidate_url,
       const GURL& destination_url) override;
-  bool ShouldUseProcessPerSite(content::BrowserContext* browser_context,
-                               const GURL& site_url) override;
+  bool ShouldUseProcessPerSite(
+      content::BrowserContext* browser_context,
+      const content::SecurityPrincipal& security_principal) override;
   bool ShouldReuseAnyExistingProcessForNewMainFrameSiteInstance(
       content::BrowserContext* browser_context,
       const GURL& site_instance_original_url) override;
@@ -245,6 +247,9 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   void LogWebUIUsage(
       std::variant<content::WebUI*, GURL> webui_variant) override;
   bool IsWebUIAllowedToMakeNetworkRequests(const url::Origin& origin) override;
+  bool ShouldAllowMojoJsBindingsForSite(
+      content::BrowserContext* browser_context,
+      const GURL& site_url) override;
   bool IsHandledURL(const GURL& url) override;
   bool HasCustomSchemeHandler(content::BrowserContext* browser_context,
                               const std::string& scheme) override;
@@ -261,8 +266,9 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::RenderFrameHost* render_frame_host) override;
   bool ShouldStayInParentProcessForNTP(const GURL& url,
                                        const GURL& parent_site_url) override;
-  bool IsSuitableHost(content::RenderProcessHost* process_host,
-                      const GURL& site_url) override;
+  bool IsSuitableHost(
+      content::RenderProcessHost* process_host,
+      const content::SecurityPrincipal& security_principal) override;
   bool MayReuseHost(content::RenderProcessHost* process_host) override;
   size_t GetProcessCountToIgnoreForLimit() override;
   bool SupportsBaselinePermissionsPolicyForIsolatedApp() override;
@@ -737,6 +743,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::FrameTreeNodeId frame_tree_node_id,
       const network::ResourceRequest& resource_request) override;
   bool WillInterceptWebSocket(content::RenderFrameHost* frame) override;
+  content::ContentBrowserClient::WebSocketOptions GetWebSocketOptions(
+      content::RenderFrameHost* frame) override;
   void CreateWebSocket(
       content::RenderFrameHost* frame,
       WebSocketFactory factory,
@@ -744,7 +752,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       const net::SiteForCookies& site_for_cookies,
       const std::optional<std::string>& user_agent,
       mojo::PendingRemote<network::mojom::WebSocketHandshakeClient>
-          handshake_client) override;
+          handshake_client,
+      content::ContentBrowserClient::WebSocketOptions options) override;
   void WillCreateWebTransport(
       int process_id,
       int frame_routing_id,
@@ -797,6 +806,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       override;
   content::HidDelegate* GetHidDelegate() override;
   content::DirectSocketsDelegate* GetDirectSocketsDelegate() override;
+  content::SensorDelegate* GetSensorDelegate() override;
   std::unique_ptr<content::AuthenticatorRequestClientDelegate>
   GetWebAuthenticationRequestDelegate(
       content::RenderFrameHost* render_frame_host) override;
@@ -969,6 +979,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       const GURL& url) override;
   bool ShouldServiceWorkerInheritPolicyContainerFromCreator(
       const GURL& url) override;
+  bool ShouldServiceWorkerRequireForegroundPriorityDuringStartup(
+      const GURL& script_url) override;
   void GrantAdditionalRequestPrivilegesToWorkerProcess(
       int child_id,
       const GURL& script_url) override;
@@ -1082,6 +1094,9 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       const std::optional<blink::LocalFrameToken>& source_frame_token,
       const url::Origin& source_origin,
       const std::optional<url::Origin>& target_origin) override;
+  bool IsSecureContextRoot(content::RenderFrameHost* parent_frame,
+                           content::FrameTreeNodeId frame_tree_node_id,
+                           const GURL& url) override;
   bool IsCrossOriginSubframeAllowedToShowFilePicker(
       content::RenderFrameHost* render_frame_host,
       const url::Origin& requesting_origin) override;
@@ -1400,6 +1415,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
 #if !BUILDFLAG(IS_ANDROID)
   std::unique_ptr<ChromeHidDelegate> hid_delegate_;
   std::unique_ptr<ChromeDirectSocketsDelegate> direct_sockets_delegate_;
+  std::unique_ptr<ChromeSensorDelegate> sensor_delegate_;
 #endif
   std::unique_ptr<ChromeBluetoothDelegate> bluetooth_delegate_;
   std::unique_ptr<ChromeUsbDelegate> usb_delegate_;

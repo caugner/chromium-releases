@@ -18,7 +18,6 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
 #include "net/http/http_util.h"
-#include "net/shared_dictionary/shared_dictionary_constants.h"
 #include "services/network/public/cpp/cors/cors.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
@@ -87,26 +86,6 @@ bool IsRequestHeaderSafe(std::string_view key, std::string_view value) {
       return false;
   }
 
-  // The Accept-Encoding header can be set by the media pipeline (e.g.
-  // "identity;q=1, *;q=0"), but must not be used to negotiate shared
-  // dictionary compression (dcb, dcz) which is managed by the network stack.
-  if (base::EqualsCaseInsensitiveASCII(
-          key, net::HttpRequestHeaders::kAcceptEncoding)) {
-    net::HttpUtil::ValuesIterator encodings(value, ',');
-    while (encodings.GetNext()) {
-      if (base::StartsWith(
-              encodings.value(),
-              net::shared_dictionary::kSharedBrotliContentEncodingName,
-              base::CompareCase::INSENSITIVE_ASCII) ||
-          base::StartsWith(
-              encodings.value(),
-              net::shared_dictionary::kSharedZstdContentEncodingName,
-              base::CompareCase::INSENSITIVE_ASCII)) {
-        return false;
-      }
-    }
-  }
-
   for (const auto& header : kUnsafeHeaderValues) {
     if (base::EqualsCaseInsensitiveASCII(header.name, key) &&
         base::EqualsCaseInsensitiveASCII(header.value, value)) {
@@ -143,7 +122,8 @@ bool AreRequestHeadersSafe(const net::HttpRequestHeaders& request_headers) {
   return true;
 }
 
-bool ContainsForbiddenSecurityHeader(net::HttpRequestHeaders& headers) {
+bool ContainsForbiddenSecurityHeader(net::HttpRequestHeaders& headers,
+                                     std::string* out_forbidden_header_name) {
   static const bool enabled =
       base::FeatureList::IsEnabled(features::kRestrictForbiddenSecurityHeaders);
   if (!enabled) {
@@ -224,6 +204,9 @@ bool ContainsForbiddenSecurityHeader(net::HttpRequestHeaders& headers) {
     if (base::StartsWith(it.name(), "Sec-",
                          base::CompareCase::INSENSITIVE_ASCII)) {
       if (!sanitize_and_check_security_header(it.name(), it.value())) {
+        if (out_forbidden_header_name) {
+          *out_forbidden_header_name = std::string(it.name());
+        }
         return true;
       }
     }

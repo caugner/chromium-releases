@@ -142,6 +142,8 @@ component("network_service") {
     "prefetch_url_loader_client.h",
     "proxy_auto_config_library.cc",
     "proxy_auto_config_library.h",
+    "proxy_checking_host_resolver_request.cc",
+    "proxy_checking_host_resolver_request.h",
     "proxy_config_service_mojo.cc",
     "proxy_config_service_mojo.h",
     "proxy_lookup_request.cc",
@@ -331,6 +333,13 @@ component("network_service") {
     ]
   }
 
+  if (is_mac) {
+    sources += [
+      "mac_system_proxy_resolver_mojo.cc",
+      "mac_system_proxy_resolver_mojo.h",
+    ]
+  }
+
   if (is_linux) {
     sources += [
       "network_change_notifier_passive_factory.cc",
@@ -363,6 +372,7 @@ component("network_service") {
     "//components/vrp_flags:buildflags",
     "//components/web_package",
     "//components/webrtc:fake_ssl_socket",
+    "//components/webrtc:features",
     "//crypto",
     "//mojo/public/cpp/base",
     "//mojo/public/cpp/base:protobuf_support",
@@ -573,7 +583,7 @@ source_set("tests") {
     data = [
       "//net/tools/testserver/",
       "//services/test/data/",
-      "//third_party/pywebsocket3/src/mod_pywebsocket/",
+      "//third_party/pywebsocket3/src/pywebsocket3/",
     ]
   }
 
@@ -588,6 +598,10 @@ source_set("tests") {
       "brokered_udp_client_socket_unittest.cc",
       "windows_system_proxy_resolver_mojo_unittest.cc",
     ]
+  }
+
+  if (is_mac) {
+    sources += [ "mac_system_proxy_resolver_mojo_unittest.cc" ]
   }
 
   if (enable_device_bound_sessions) {
@@ -611,6 +625,7 @@ source_set("tests") {
     "//components/vrp_flags:buildflags",
     "//components/web_package",
     "//components/webrtc:fake_ssl_socket",
+    "//components/webrtc:features",
     "//crypto",
     "//crypto:test_support",
     "//mojo/public/cpp/bindings",

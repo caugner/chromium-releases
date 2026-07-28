@@ -1387,9 +1387,9 @@ TEST_F(RenderWidgetHostViewAuraTest, SetCompositionText) {
   MockWidgetInputHandler::DispatchedIMEMessage* ime_message =
       events[0]->ToIME();
   EXPECT_TRUE(ime_message);
-  EXPECT_TRUE(ime_message->Matches(composition_text.text, ime_text_spans,
-                                   gfx::Range::InvalidRange(), 4, 4,
-                                   blink::mojom::ImeState::kNone));
+  EXPECT_TRUE(ime_message->Matches(
+      composition_text.text, ime_text_spans, gfx::Range::InvalidRange(), 4, 4,
+      blink::mojom::ImeState::kNone, blink::DOMNodeIdType()));
 
   view_->ImeCancelComposition();
   EXPECT_FALSE(view_->has_composition_text_);
@@ -6409,7 +6409,8 @@ TEST_F(InputMethodResultAuraTest, CommitTextBeforeCursor) {
         events[0]->ToIME();
     EXPECT_TRUE(ime_message);
     EXPECT_TRUE(ime_message->Matches(u"hello", {}, gfx::Range::InvalidRange(),
-                                     -5, -5, blink::mojom::ImeState::kNone));
+                                     -5, -5, blink::mojom::ImeState::kNone,
+                                     blink::DOMNodeIdType()));
   }
 }
 
@@ -6800,6 +6801,36 @@ TEST_F(RenderWidgetHostViewAuraTest, FocusReasonMultipleEventsOnSameNode) {
 
   EXPECT_EQ(ui::TextInputClient::FOCUS_REASON_TOUCH,
             parent_view_->GetFocusReason());
+}
+
+// Pen input on Aura can be delivered as MouseEvents with pointer type kPen.
+// kMouseEventPenPointerType feature ensures that the RenderWidgetHostViewAura's
+// LastPointerType is correctly set to kPen for these scenarios as opposed to
+// unconditionally reporting kMouse.
+// This is particularly important for virtual keyboard on Windows which
+// references the last pointer type in its Show/Hide logic.
+// http://crbug.com/525093257
+TEST_F(RenderWidgetHostViewAuraTest, PenMouseEventsSetPointerType) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(features::kMouseEventPenPointerType);
+
+  for (ui::EventPointerType pointer_type :
+       {ui::EventPointerType::kPen, ui::EventPointerType::kMouse}) {
+    for (ui::EventType type :
+         {ui::EventType::kMouseMoved, ui::EventType::kMousePressed,
+          ui::EventType::kMouseDragged, ui::EventType::kMouseReleased,
+          ui::EventType::kMouseEntered, ui::EventType::kMouseExited}) {
+      SCOPED_TRACE(testing::Message()
+                   << "pointer type " << static_cast<int>(pointer_type)
+                   << ", event type " << static_cast<int>(type));
+      ui::MouseEvent mouse_event(
+          type, gfx::Point(10, 10), gfx::Point(10, 10), ui::EventTimeForNow(),
+          ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON,
+          ui::PointerDetails(pointer_type, 0));
+      parent_view_->OnMouseEvent(&mouse_event);
+      EXPECT_EQ(parent_view_->GetLastPointerType(), pointer_type);
+    }
+  }
 }
 
 class RenderWidgetHostViewAuraInputMethodTest

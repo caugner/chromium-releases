@@ -7,6 +7,7 @@
 #include <memory>
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "base/test/mock_callback.h"
 #include "base/test/scoped_feature_list.h"
 #include "components/contextual_search/contextual_search_session_handle.h"
@@ -43,7 +44,8 @@ class InputStateModelTest : public testing::Test {
         static_cast<int>(
             contextual_search::SearchContentSharingSettingsValue::kEnabled));
     pref_service_.registry()->RegisterIntegerPref(
-        contextual_search::kDriveConsentState, 0);
+        contextual_search::kDriveConsentState,
+        static_cast<int>(DriveConsentState::kRestricted));
 
     input_state_model_ = std::make_unique<InputStateModel>(
         session_handle_, config_, active_url_, /*is_off_the_record=*/false,
@@ -63,7 +65,8 @@ class InputStateModelTest : public testing::Test {
   omnibox::SearchboxConfig config_;
   GURL active_url_;
   InputState state_;
-  const std::vector<const contextual_search::FileInfo*> empty_file_info_list_;
+  const std::vector<raw_ptr<const contextual_search::FileInfo>>
+      empty_file_info_list_;
 };
 
 TEST_F(InputStateModelTest, DoesNotRemoveDriveInputWhenSignedInAndFlagEnabled) {
@@ -1128,6 +1131,140 @@ TEST_F(InputStateModelCompatibilityTest, ForcedDisabledToolsAndInputTypes) {
                   omnibox::InputType::INPUT_TYPE_BROWSER_TAB)));
 }
 
+TEST_F(InputStateModelCompatibilityTest,
+       SmartTabSharingActiveDisablesIncompatibleToolsAndModels) {
+  // Set up rules for Canvas and Image Gen to allow some inputs, so they are
+  // enabled initially.
+  for (auto& tool_config : *config_.mutable_tool_configs()) {
+    if (tool_config.tool() == omnibox::ToolMode::TOOL_MODE_CANVAS ||
+        tool_config.tool() == omnibox::ToolMode::TOOL_MODE_IMAGE_GEN) {
+      auto* rule = tool_config.mutable_rule();
+      rule->set_tool(tool_config.tool());
+      rule->add_allowed_input_types(omnibox::InputType::INPUT_TYPE_LENS_IMAGE);
+    }
+  }
+
+  // Set up rule for Gemini Pro to NOT allow Tab.
+  for (auto& model_config : *config_.mutable_model_configs()) {
+    if (model_config.model() == omnibox::ModelMode::MODEL_MODE_GEMINI_PRO) {
+      auto* rule = model_config.mutable_rule();
+      rule->clear_allowed_input_types();
+      rule->add_allowed_input_types(omnibox::InputType::INPUT_TYPE_LENS_IMAGE);
+      rule->add_allowed_input_types(omnibox::InputType::INPUT_TYPE_LENS_FILE);
+      break;
+    }
+  }
+
+  // Re-create the model with the modified config.
+  input_state_model_ = std::make_unique<InputStateModel>(
+      session_handle_, config_, active_url_, /*is_off_the_record=*/false,
+      /*browser_identity_matches_aim_identity=*/false);
+  input_state_model_->SetPrefService(&pref_service_);
+  input_state_model_->setActiveModel(
+      omnibox::ModelMode::MODEL_MODE_UNSPECIFIED);
+
+  // Now they should be enabled initially.
+  auto state = input_state_model_->get_state_for_testing();
+  EXPECT_THAT(
+      state.disabled_tools,
+      testing::Not(testing::Contains(omnibox::ToolMode::TOOL_MODE_CANVAS)));
+  EXPECT_THAT(
+      state.disabled_tools,
+      testing::Not(testing::Contains(omnibox::ToolMode::TOOL_MODE_IMAGE_GEN)));
+  EXPECT_THAT(state.disabled_models,
+              testing::Not(testing::Contains(
+                  omnibox::ModelMode::MODEL_MODE_GEMINI_PRO)));
+
+  // Enable Smart Tab Sharing.
+  input_state_model_->SetSmartTabSharingActive(true);
+  state = input_state_model_->get_state_for_testing();
+
+  // Canvas, Image Gen, and Gemini Pro should now be disabled because they are
+  // incompatible with browser tab input.
+  EXPECT_THAT(state.disabled_tools,
+              testing::Contains(omnibox::ToolMode::TOOL_MODE_CANVAS));
+  EXPECT_THAT(state.disabled_tools,
+              testing::Contains(omnibox::ToolMode::TOOL_MODE_IMAGE_GEN));
+  EXPECT_THAT(state.disabled_models,
+              testing::Contains(omnibox::ModelMode::MODEL_MODE_GEMINI_PRO));
+
+  // Disable Smart Tab Sharing.
+  input_state_model_->SetSmartTabSharingActive(false);
+  state = input_state_model_->get_state_for_testing();
+
+  // They should be enabled again.
+  EXPECT_THAT(
+      state.disabled_tools,
+      testing::Not(testing::Contains(omnibox::ToolMode::TOOL_MODE_CANVAS)));
+  EXPECT_THAT(
+      state.disabled_tools,
+      testing::Not(testing::Contains(omnibox::ToolMode::TOOL_MODE_IMAGE_GEN)));
+  EXPECT_THAT(state.disabled_models,
+              testing::Not(testing::Contains(
+                  omnibox::ModelMode::MODEL_MODE_GEMINI_PRO)));
+}
+
+TEST_F(InputStateModelCompatibilityTest,
+       IncompatibleToolOrModelDisablesBrowserTabInput) {
+  // Set up rule for Canvas to allow Image (not Tab).
+  for (auto& tool_config : *config_.mutable_tool_configs()) {
+    if (tool_config.tool() == omnibox::ToolMode::TOOL_MODE_CANVAS) {
+      auto* rule = tool_config.mutable_rule();
+      rule->set_tool(tool_config.tool());
+      rule->add_allowed_input_types(omnibox::InputType::INPUT_TYPE_LENS_IMAGE);
+      break;
+    }
+  }
+
+  // Set up rule for Gemini Pro to NOT allow Tab.
+  for (auto& model_config : *config_.mutable_model_configs()) {
+    if (model_config.model() == omnibox::ModelMode::MODEL_MODE_GEMINI_PRO) {
+      auto* rule = model_config.mutable_rule();
+      rule->clear_allowed_input_types();
+      rule->add_allowed_input_types(omnibox::InputType::INPUT_TYPE_LENS_IMAGE);
+      rule->add_allowed_input_types(omnibox::InputType::INPUT_TYPE_LENS_FILE);
+      break;
+    }
+  }
+
+  // Re-create the model with the modified config.
+  input_state_model_ = std::make_unique<InputStateModel>(
+      session_handle_, config_, active_url_, /*is_off_the_record=*/false,
+      /*browser_identity_matches_aim_identity=*/false);
+  input_state_model_->SetPrefService(&pref_service_);
+  input_state_model_->setActiveModel(
+      omnibox::ModelMode::MODEL_MODE_UNSPECIFIED);
+
+  // Initially, browser tab input should not be disabled.
+  auto state = input_state_model_->get_state_for_testing();
+  EXPECT_THAT(state.disabled_input_types,
+              testing::Not(testing::Contains(
+                  omnibox::InputType::INPUT_TYPE_BROWSER_TAB)));
+
+  // Select Canvas.
+  input_state_model_->setActiveTool(omnibox::ToolMode::TOOL_MODE_CANVAS);
+  state = input_state_model_->get_state_for_testing();
+
+  // Browser tab input should be disabled.
+  EXPECT_THAT(state.disabled_input_types,
+              testing::Contains(omnibox::InputType::INPUT_TYPE_BROWSER_TAB));
+
+  // Reset tool.
+  input_state_model_->setActiveTool(omnibox::ToolMode::TOOL_MODE_UNSPECIFIED);
+  state = input_state_model_->get_state_for_testing();
+  EXPECT_THAT(state.disabled_input_types,
+              testing::Not(testing::Contains(
+                  omnibox::InputType::INPUT_TYPE_BROWSER_TAB)));
+
+  // Select Gemini Pro.
+  input_state_model_->setActiveModel(omnibox::ModelMode::MODEL_MODE_GEMINI_PRO);
+  state = input_state_model_->get_state_for_testing();
+
+  // Browser tab input should be disabled.
+  EXPECT_THAT(state.disabled_input_types,
+              testing::Contains(omnibox::InputType::INPUT_TYPE_BROWSER_TAB));
+}
+
 TEST_F(InputStateModelTest, UpdateModelFromUrl) {
   omnibox::SearchboxConfig config;
 
@@ -1269,6 +1406,79 @@ TEST_F(InputStateModelTest, DriveConsentStateTogglesDriveInput) {
               testing::UnorderedElementsAre(omnibox::INPUT_TYPE_LENS_IMAGE,
                                             omnibox::INPUT_TYPE_LENS_FILE,
                                             omnibox::INPUT_TYPE_BROWSER_TAB));
+}
+
+TEST_F(InputStateModelTest, DriveConsentStateWithDisclaimerToggle) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitWithFeatures(
+      {omnibox::kComposeboxDriveContextMenuOption,
+       omnibox::kComposeboxDriveContextMenuOptionDisclaimer},
+      {});
+
+  omnibox::SearchboxConfig config;
+  config.add_input_type_configs()->set_input_type(
+      omnibox::InputType::INPUT_TYPE_LENS_IMAGE);
+  config.add_input_type_configs()->set_input_type(
+      omnibox::InputType::INPUT_TYPE_LENS_FILE);
+  config.add_input_type_configs()->set_input_type(
+      omnibox::InputType::INPUT_TYPE_DRIVE);
+
+  input_state_model_ = std::make_unique<InputStateModel>(
+      session_handle_, config, active_url_, /*is_off_the_record=*/false,
+      /*browser_identity_matches_aim_identity=*/true);
+  input_state_model_->SetPrefService(&pref_service_);
+
+  // When Disclaimer is enabled, kNotConsent should allow Drive input.
+  pref_service_.SetInteger(contextual_search::kDriveConsentState,
+                           static_cast<int>(DriveConsentState::kNotConsent));
+  EXPECT_THAT(input_state_model_->get_state_for_testing().allowed_input_types,
+              testing::UnorderedElementsAre(
+                  omnibox::INPUT_TYPE_LENS_IMAGE, omnibox::INPUT_TYPE_LENS_FILE,
+                  omnibox::INPUT_TYPE_BROWSER_TAB, omnibox::INPUT_TYPE_DRIVE));
+
+  // kConsent should also allow Drive input.
+  pref_service_.SetInteger(contextual_search::kDriveConsentState,
+                           static_cast<int>(DriveConsentState::kConsent));
+  EXPECT_THAT(input_state_model_->get_state_for_testing().allowed_input_types,
+              testing::UnorderedElementsAre(
+                  omnibox::INPUT_TYPE_LENS_IMAGE, omnibox::INPUT_TYPE_LENS_FILE,
+                  omnibox::INPUT_TYPE_BROWSER_TAB, omnibox::INPUT_TYPE_DRIVE));
+
+  // kNotReady should allow Drive input.
+  pref_service_.SetInteger(contextual_search::kDriveConsentState,
+                           static_cast<int>(DriveConsentState::kNotReady));
+  EXPECT_THAT(input_state_model_->get_state_for_testing().allowed_input_types,
+              testing::UnorderedElementsAre(
+                  omnibox::INPUT_TYPE_LENS_IMAGE, omnibox::INPUT_TYPE_LENS_FILE,
+                  omnibox::INPUT_TYPE_BROWSER_TAB, omnibox::INPUT_TYPE_DRIVE));
+
+  // kRestricted should NOT allow Drive input.
+  pref_service_.SetInteger(contextual_search::kDriveConsentState,
+                           static_cast<int>(DriveConsentState::kRestricted));
+  EXPECT_THAT(input_state_model_->get_state_for_testing().allowed_input_types,
+              testing::UnorderedElementsAre(omnibox::INPUT_TYPE_LENS_IMAGE,
+                                            omnibox::INPUT_TYPE_LENS_FILE,
+                                            omnibox::INPUT_TYPE_BROWSER_TAB));
+
+  // Disable Disclaimer flag, and verify kNotConsent no longer allows Drive.
+  base::test::ScopedFeatureList disclaimer_disabled_list;
+  disclaimer_disabled_list.InitWithFeatures(
+      {}, {omnibox::kComposeboxDriveContextMenuOptionDisclaimer});
+
+  pref_service_.SetInteger(contextual_search::kDriveConsentState,
+                           static_cast<int>(DriveConsentState::kNotConsent));
+  EXPECT_THAT(input_state_model_->get_state_for_testing().allowed_input_types,
+              testing::UnorderedElementsAre(omnibox::INPUT_TYPE_LENS_IMAGE,
+                                            omnibox::INPUT_TYPE_LENS_FILE,
+                                            omnibox::INPUT_TYPE_BROWSER_TAB));
+
+  // Verify kConsent still allows Drive.
+  pref_service_.SetInteger(contextual_search::kDriveConsentState,
+                           static_cast<int>(DriveConsentState::kConsent));
+  EXPECT_THAT(input_state_model_->get_state_for_testing().allowed_input_types,
+              testing::UnorderedElementsAre(
+                  omnibox::INPUT_TYPE_LENS_IMAGE, omnibox::INPUT_TYPE_LENS_FILE,
+                  omnibox::INPUT_TYPE_BROWSER_TAB, omnibox::INPUT_TYPE_DRIVE));
 }
 
 TEST_F(InputStateModelTest, SetPrefServiceInitializesConsentState) {

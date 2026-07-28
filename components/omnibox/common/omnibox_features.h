@@ -31,7 +31,13 @@ BASE_DECLARE_FEATURE(kDynamicMaxAutocomplete);
 // Local history zero-prefix (aka zero-suggest) and prefix suggestions.
 BASE_DECLARE_FEATURE(kFocusTriggersWebAndSRPZeroSuggest);
 BASE_DECLARE_FEATURE(kOmniboxCrossDeviceTabZeroSuggest);
-BASE_DECLARE_FEATURE_PARAM(int, kOmniboxCrossDeviceTabZeroSuggestMaxAge);
+BASE_DECLARE_FEATURE_PARAM(int, kOmniboxCrossDeviceTabZeroSuggestMaxAgeMinutes);
+BASE_DECLARE_FEATURE_PARAM(
+    int,
+    kOmniboxCrossDeviceTabZeroSuggestDelayedContinuationMaxAgeMinutes);
+BASE_DECLARE_FEATURE_PARAM(
+    int,
+    kOmniboxCrossDeviceTabZeroSuggestMaxDelayedContinuationUptimeMinutes);
 BASE_DECLARE_FEATURE(kOnClobberSuggestIOS);
 BASE_DECLARE_FEATURE(kHideContextualGroupHeaders);
 BASE_DECLARE_FEATURE(kHideSuggestionGroupHeaders);
@@ -73,17 +79,18 @@ BASE_DECLARE_FEATURE(kOmniboxWebUIPopupStabilizeStartupShow);
 BASE_DECLARE_FEATURE(kOmniboxAimDetachWebContentsOnHide);
 BASE_DECLARE_FEATURE(kOmniboxWebUIDetachWebContentsOnHide);
 BASE_DECLARE_FEATURE(kOmniboxWebUIPopupMarkAsHidden);
+BASE_DECLARE_FEATURE(kWebUISearchboxWithoutModelController);
 
 // Omnibox UI - these affect the UI or function of the location bar (not the
 // popup).
-BASE_DECLARE_FEATURE(kAiModeOmniboxEntryPoint);
+BASE_DECLARE_FEATURE(kAimEligibilityComponentExtension);
 BASE_DECLARE_FEATURE(kDynamicAimSubmit);
 extern const base::FeatureParam<bool> kShowRhsAimHint;
-
 BASE_DECLARE_FEATURE(kHideAimEntrypointOnUserInput);
 BASE_DECLARE_FEATURE(kHideAimEntrypointForUrlSuggestions);
 BASE_DECLARE_FEATURE(kOmniboxMultimodalInput);
 BASE_DECLARE_FEATURE(kAndroidDesktopAimGate);
+BASE_DECLARE_FEATURE(kAim3pEntrypoint);
 
 // Navigation experiments.
 BASE_DECLARE_FEATURE(kDefaultTypedNavigationsToHttps);
@@ -121,6 +128,7 @@ BASE_DECLARE_FEATURE(kReportApplicationLanguageInSearchRequest);
 BASE_DECLARE_FEATURE(kOmniboxAppendInvocationSource);
 
 BASE_DECLARE_FEATURE(kOmniboxAsyncViewInflation);
+BASE_DECLARE_FEATURE(kOmniboxFuseboxAsyncInflation);
 BASE_DECLARE_FEATURE(kUseFusedLocationProvider);
 
 BASE_DECLARE_FEATURE(kOmniboxMobileParityUpdate);
@@ -173,6 +181,10 @@ extern const base::FeatureParam<bool> kComposeboxDriveIdentityFallback;
 // Whether to enable Google Drive context menu option's disclaimer flow in the
 // composebox.
 BASE_DECLARE_FEATURE(kComposeboxDriveContextMenuOptionDisclaimer);
+extern const base::FeatureParam<int> kComposeboxDriveConsentFlowId;
+extern const base::FeatureParam<int> kComposeboxDriveConsentProductId;
+extern const base::FeatureParam<std::string>
+    kComposeboxDriveConsentEntrypointId;
 
 // Whether to force the Google Drive disclaimer to be accepted.
 BASE_DECLARE_FEATURE(kForceDriveDisclaimerAccepted);
@@ -193,10 +205,6 @@ inline constexpr base::FeatureParam<std::string> kAimUrlInterceptionParams{
 // Enable debug logs that can be read from an internals page.
 BASE_DECLARE_FEATURE(kOmniboxDebugLogs);
 
-// Feature flag to enable the "Astrophotography Mode" (Sparkles) icon for the
-// Thinking Pro model when multiple Pro models are available.
-BASE_DECLARE_FEATURE(kThinkingModelIconUpdate);
-
 BASE_DECLARE_FEATURE(kVoiceSearchCoherenceComposeboxes);
 extern const base::FeatureParam<bool>
     kVoiceSearchCoherenceComposeboxCobrowsingOnly;
@@ -212,8 +220,8 @@ BASE_DECLARE_FEATURE(kJumpStartOmnibox);
 BASE_DECLARE_FEATURE(kSuppressIntermediateACUpdatesOnLowEndDevices);
 // Delay focusTab to prioritize navigation (https://crbug.com/374852568).
 BASE_DECLARE_FEATURE(kPostDelayedTaskFocusTab);
-BASE_DECLARE_FEATURE(kOmniboxImprovementForLFF);
 BASE_DECLARE_FEATURE(kResetSuggestionsScroll);
+BASE_DECLARE_FEATURE(kOmniboxSessionlessVoiceSearch);
 #endif  // BUILDFLAG(IS_ANDROID)
 
 // If enabled, X-Geo headers are sent for all search navigations on all

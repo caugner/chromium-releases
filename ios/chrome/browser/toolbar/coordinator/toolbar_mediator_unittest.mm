@@ -27,6 +27,7 @@
 #import "ios/chrome/browser/intelligence/features/features.h"
 #import "ios/chrome/browser/menu/ui_bundled/browser_action_factory.h"
 #import "ios/chrome/browser/menu/ui_bundled/menu_histograms.h"
+#import "ios/chrome/browser/ntp/model/new_tab_page_tab_helper.h"
 #import "ios/chrome/browser/optimization_guide/model/optimization_guide_service_factory.h"
 #import "ios/chrome/browser/policy/model/policy_util.h"
 #import "ios/chrome/browser/shared/model/browser/test/test_browser.h"
@@ -35,8 +36,8 @@
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_opener.h"
 #import "ios/chrome/browser/shared/public/commands/activity_service_commands.h"
 #import "ios/chrome/browser/shared/public/commands/browser_coordinator_commands.h"
-#import "ios/chrome/browser/shared/public/commands/bwg_commands.h"
 #import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
+#import "ios/chrome/browser/shared/public/commands/gemini_commands.h"
 #import "ios/chrome/browser/shared/public/commands/page_side_swipe_commands.h"
 #import "ios/chrome/browser/shared/public/commands/popup_menu_commands.h"
 #import "ios/chrome/browser/shared/public/commands/scene_commands.h"
@@ -195,7 +196,7 @@ class ToolbarMediatorTest : public PlatformTest,
         identity_manager,
         builder.Build(base::SysNSStringToUTF8(identity.userEmail)));
 
-    AccountCapabilitiesTestMutator mutator(&account_info.capabilities);
+    AccountCapabilitiesTestMutator mutator(&account_info);
     mutator.set_can_use_model_execution_features(capability);
     mutator.set_can_use_gemini_in_chrome(capability);
 
@@ -311,10 +312,52 @@ TEST_P(ToolbarMediatorTest, TestWebStateSelectionUpdatesConsumer) {
   OCMExpect([consumer_ setCanGoBack:YES]);
   OCMExpect([consumer_ setCanGoForward:NO animated:NO]);
   OCMExpect([consumer_ setShareEnabled:YES]);
-  OCMExpect([consumer_ setIsLoading:NO]);
+  OCMExpect([consumer_ setNTPVisible:NO
+                      isStartSurface:NO
+                           isLoading:NO
+                     loadingProgress:0.0]);
 
   browser_->GetWebStateList()->InsertWebState(
       CreateWebState(), WebStateList::InsertionParams::AtIndex(0).Activate());
+
+  EXPECT_OCMOCK_VERIFY(consumer_);
+}
+
+// Tests that selecting a NTP web state updates the consumer with NTP visible
+// and isStartSurface status.
+TEST_P(ToolbarMediatorTest, TestWebStateSelectionNTPUpdatesConsumer) {
+  std::unique_ptr<web::FakeWebState> web_state = CreateWebState();
+  web_state->SetVisibleURL(GURL("chrome://newtab"));
+  NewTabPageTabHelper::CreateForWebState(web_state.get());
+  NewTabPageTabHelper::FromWebState(web_state.get())
+      ->SetShowStartSurface(false);
+
+  OCMExpect([consumer_ setNTPVisible:YES
+                      isStartSurface:NO
+                           isLoading:NO
+                     loadingProgress:0.0]);
+
+  browser_->GetWebStateList()->InsertWebState(
+      std::move(web_state),
+      WebStateList::InsertionParams::AtIndex(0).Activate());
+
+  EXPECT_OCMOCK_VERIFY(consumer_);
+
+  // Test Start Surface NTP
+  std::unique_ptr<web::FakeWebState> start_web_state = CreateWebState();
+  start_web_state->SetVisibleURL(GURL("chrome://newtab"));
+  NewTabPageTabHelper::CreateForWebState(start_web_state.get());
+  NewTabPageTabHelper::FromWebState(start_web_state.get())
+      ->SetShowStartSurface(true);
+
+  OCMExpect([consumer_ setNTPVisible:YES
+                      isStartSurface:YES
+                           isLoading:NO
+                     loadingProgress:0.0]);
+
+  browser_->GetWebStateList()->InsertWebState(
+      std::move(start_web_state),
+      WebStateList::InsertionParams::AtIndex(1).Activate());
 
   EXPECT_OCMOCK_VERIFY(consumer_);
 }
@@ -329,11 +372,17 @@ TEST_P(ToolbarMediatorTest, TestWebStateUpdates) {
       WebStateList::InsertionParams::AtIndex(0).Activate());
 
   // Test loading state.
-  OCMExpect([consumer_ setIsLoading:YES]);
+  OCMExpect([consumer_ setNTPVisible:NO
+                      isStartSurface:NO
+                           isLoading:YES
+                     loadingProgress:0.0]);
   fake_web_state->SetLoading(true);
   EXPECT_OCMOCK_VERIFY(consumer_);
 
-  OCMExpect([consumer_ setIsLoading:NO]);
+  OCMExpect([consumer_ setNTPVisible:NO
+                      isStartSurface:NO
+                           isLoading:NO
+                     loadingProgress:0.0]);
   fake_web_state->SetLoading(false);
   EXPECT_OCMOCK_VERIFY(consumer_);
 
@@ -585,7 +634,7 @@ TEST_P(ToolbarMediatorTest, TestTabGroupIndicatorVisibilityUpdated) {
 
 // Tests that assistantButtonTapped: calls geminiHandler to start entry flow.
 TEST_P(ToolbarMediatorTest, TestAssistantButtonTapped) {
-  id mock_gemini_handler = OCMProtocolMock(@protocol(BWGCommands));
+  id mock_gemini_handler = OCMProtocolMock(@protocol(GeminiCommands));
   mediator_.geminiHandler = mock_gemini_handler;
 
   OCMExpect([mock_gemini_handler

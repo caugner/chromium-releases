@@ -47,6 +47,7 @@
 #include "components/contextual_search/pref_names.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/omnibox/browser/aim_eligibility_service.h"
+#include "components/omnibox/browser/aim_eligibility_service_features.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
 #include "components/omnibox/common/omnibox_features.h"
 #include "components/prefs/pref_service.h"
@@ -124,8 +125,6 @@ class OmniboxWebUiInteractiveTestBase
           {omnibox::kShowLensSearchChip.name, "true"}};
       features.emplace_back(omnibox::internal::kWebUIOmniboxSimplification,
                             simplification_params);
-      features.emplace_back(omnibox::kAiModeOmniboxEntryPoint,
-                            base::FieldTrialParams());
       features.emplace_back(omnibox::kAimEnabled, base::FieldTrialParams());
       features.emplace_back(
           features::kPageActionsMigration,
@@ -533,17 +532,14 @@ IN_PROC_BROWSER_TEST_F(OmniboxAimWebUiInteractiveTest,
       // Wait for the context menu button to render in the popup.
       InAnyContext(
           WaitForElementToRender(kClassicPopupWebView, kClassicContextMenu)),
-      MayInvolveNativeContextMenu(
-          // Open the context menu and click "Deep Search".
-          InSameContext(
-              ClickElement(kClassicPopupWebView, kClassicContextMenu)),
-          InAnyContext(WaitForShow(
-              OmniboxContextMenuController::kDeepResearchIdForTesting)),
-          InSameContext(SelectMenuItem(
-              OmniboxContextMenuController::kDeepResearchIdForTesting)),
-          // Wait for classic popup to hide and AIM popup to show.
-          InAnyContext(WaitForHide(kClassicPopupWebView))),
-      WaitForAimPopupReady(),
+      // Open the context menu and click "Deep Search".
+      InSameContext(ClickElement(kClassicPopupWebView, kClassicContextMenu)),
+      InAnyContext(
+          WaitForShow(OmniboxContextMenuController::kDeepResearchIdForTesting)),
+      InSameContext(SelectMenuItem(
+          OmniboxContextMenuController::kDeepResearchIdForTesting)),
+      // Wait for classic popup to hide and AIM popup to show.
+      InAnyContext(WaitForHide(kClassicPopupWebView)), WaitForAimPopupReady(),
       // Wait for deep search chip to render in AIM popup.
       InAnyContext(WaitForElementToRender(kAimPopupWebView, kDeepSearchChip)));
 }
@@ -556,7 +552,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxAimWebUiInteractiveTest,
   DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kFirstTab);
 
   // Force a larger window size to give the popup room to grow.
-  browser()->window()->SetBounds(gfx::Rect(0, 0, 1280, 1024));
+  browser()->GetWindow()->SetBounds(gfx::Rect(0, 0, 1280, 1024));
 
   browser()->profile()->GetPrefs()->SetInteger(
       contextual_search::kSearchContentSharingSettings,
@@ -617,23 +613,21 @@ IN_PROC_BROWSER_TEST_F(OmniboxAimWebUiInteractiveTest,
           WaitForStateChange(kClassicPopupWebView, visible_in_viewport)),
 
       // 4. Click the context menu and select the first tab.
-      MayInvolveNativeContextMenu(
 #if BUILDFLAG(IS_WIN)
-          // On Windows with pixel tests enabled, physical clicks fail because
-          // the element is outside the omnibox frame bounds. We call the Mojo
-          // method directly via JS to bypass bounds checks.
-          InSameContext(ExecuteJsAt(
-              kClassicPopupWebView, {"omnibox-popup-app"},
-              "el => el.popupPageHandler_.showContextMenu({x: 0, y: 0})")),
+      // On Windows with pixel tests enabled, physical clicks fail because
+      // the element is outside the omnibox frame bounds. We call the Mojo
+      // method directly via JS to bypass bounds checks.
+      InSameContext(ExecuteJsAt(
+          kClassicPopupWebView, {"omnibox-popup-app"},
+          "el => el.popupPageHandler_.showContextMenu({x: 0, y: 0})")),
 #else
-          InSameContext(
-              ClickElement(kClassicPopupWebView, kClassicContextMenu)),
+      InSameContext(ClickElement(kClassicPopupWebView, kClassicContextMenu)),
 #endif
-          InAnyContext(WaitForShow(
-              OmniboxContextMenuController::kFirstTabMenuItemIdForTesting)),
-          InSameContext(SelectMenuItem(
-              OmniboxContextMenuController::kFirstTabMenuItemIdForTesting)),
-          InAnyContext(WaitForHide(kClassicPopupWebView))),
+      InAnyContext(WaitForShow(
+          OmniboxContextMenuController::kFirstTabMenuItemIdForTesting)),
+      InSameContext(SelectMenuItem(
+          OmniboxContextMenuController::kFirstTabMenuItemIdForTesting)),
+      InAnyContext(WaitForHide(kClassicPopupWebView)),
 
       // 5. Verify that it transitions to AIM popup.
       WaitForAimPopupReady(),
@@ -883,14 +877,12 @@ IN_PROC_BROWSER_TEST_P(OmniboxAimUploadInteractiveTest,
       InAnyContext(
           WaitForElementToRender(kClassicPopupWebView, kClassicContextMenu)),
       InAnyContext(ScrollIntoView(kClassicPopupWebView, kClassicContextMenu)),
-      MayInvolveNativeContextMenu(
-          // Open the context menu and click upload.
-          InSameContext(
-              ClickElement(kClassicPopupWebView, kClassicContextMenu)),
-          InAnyContext(WaitForShow(GetParam().upload_context_menu_item_id)),
-          InAnyContext(SelectMenuItem(GetParam().upload_context_menu_item_id)),
-          // Wait for classic popup to hide.
-          InAnyContext(WaitForHide(kClassicPopupWebView))),
+      // Open the context menu and click upload.
+      InSameContext(ClickElement(kClassicPopupWebView, kClassicContextMenu)),
+      InAnyContext(WaitForShow(GetParam().upload_context_menu_item_id)),
+      InAnyContext(SelectMenuItem(GetParam().upload_context_menu_item_id)),
+      // Wait for classic popup to hide.
+      InAnyContext(WaitForHide(kClassicPopupWebView)),
       // Wait for AIM popup to open.
       WaitForAimPopupReady(),
       // Wait for thumbnail to render in AIM popup.
@@ -932,8 +924,8 @@ class WebUIOmniboxSimplificationInteractiveTest
   base::test::ScopedFeatureList feature_list_;
 };
 
-// TODO(crbug.com/512352908): Flaky on Mac.
-#if BUILDFLAG(IS_MAC)
+// TODO(crbug.com/512348269): Flaky on Mac and Windows.
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
 #define MAYBE_HasBackgroundApplied DISABLED_HasBackgroundApplied
 #else
 #define MAYBE_HasBackgroundApplied HasBackgroundApplied
@@ -956,8 +948,8 @@ IN_PROC_BROWSER_TEST_F(WebUIOmniboxSimplificationInteractiveTest,
           true)));
 }
 
-// TODO(crbug.com/512348269): Flaky on Mac.
-#if BUILDFLAG(IS_MAC)
+// TODO(crbug.com/512348269): Flaky on Mac and Windows.
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
 #define MAYBE_OblongShapeApplied DISABLED_OblongShapeApplied
 #else
 #define MAYBE_OblongShapeApplied OblongShapeApplied
@@ -994,7 +986,7 @@ IN_PROC_BROWSER_TEST_F(WebUIOmniboxSimplificationInteractiveTest,
                        MAYBE_HasSuggestionLabel) {
   const DeepQuery kSuggestionLabel = {"omnibox-popup-app", "#context",
                                       "#description"};
-  browser()->window()->SetBounds(gfx::Rect(0, 0, 1280, 1024));
+  browser()->GetWindow()->SetBounds(gfx::Rect(0, 0, 1280, 1024));
   std::u16string expected_text =
       l10n_util::GetStringUTF16(IDS_GOOGLE_SEARCH_BOX_EMPTY_HINT_MULTIMODAL);
   RunTestSequence(

@@ -92,20 +92,6 @@ void RecordDestructionSource(SharedWorkerHostDestructionSource source) {
                                 source);
 }
 
-net::IsolationInfo ComputeIsolationInfoWithPartition(
-    const blink::StorageKey& storage_key,
-    net::NetworkIsolationPartition partition) {
-  net::IsolationInfo isolation_info = storage_key.ToPartialNetIsolationInfo();
-  if (partition != net::NetworkIsolationPartition::kGeneral &&
-      !isolation_info.IsEmpty()) {
-    return net::IsolationInfo::Create(
-        isolation_info.request_type(), *isolation_info.top_frame_origin(),
-        *isolation_info.frame_origin(), isolation_info.site_for_cookies(),
-        isolation_info.nonce(), partition);
-  }
-  return isolation_info;
-}
-
 }  // namespace
 
 namespace content {
@@ -223,10 +209,6 @@ SharedWorkerHost::~SharedWorkerHost() {
     }
   }
 
-  if (auto* lock_manager = GetStoragePartitionImpl()->GetLockManager()) {
-    lock_manager->RemoveLockObserver(token().value());
-  }
-
   if (site_instance_->HasProcess()) {
     // Send any final reports and allow the reporting configuration to be
     // removed.
@@ -238,6 +220,10 @@ SharedWorkerHost::~SharedWorkerHost() {
         ->SendReportsAndRemoveSource(reporting_source_);
 
     GetProcessHost()->RemoveObserver(this);
+
+    if (auto* lock_manager = GetStoragePartitionImpl()->GetLockManager()) {
+      lock_manager->RemoveLockObserver(token().value());
+    }
 
     GetStoragePartitionImpl()->ClearNetworkRestrictionsAfterDelay({
         network_restrictions_id_,
@@ -566,7 +552,7 @@ SharedWorkerHost::CreateNetworkFactoryParamsForSubresources() {
           GetStoragePartitionImpl()
               ->CreateURLLoaderNetworkObserverForServiceOrSharedWorker(
                   ToOriginatingProcessId(GetProcessHost()->GetID()),
-                  origin_lock, GetWorkerStorageKey()),
+                  origin_lock),
           /*devtools_observer=*/mojo::NullRemote(),
           mojo::Clone(worker_client_security_state_), network_restrictions_id_,
           /*debug_tag=*/
@@ -624,7 +610,7 @@ void SharedWorkerHost::CreateLockManager(
   GetStoragePartitionImpl()->BindLockManager(
       GetWorkerStorageKey(), token().value(), std::move(receiver));
   GetStoragePartitionImpl()->GetLockManager()->AddLockObserver(token().value(),
-                                                               this);
+                                                            this);
 }
 
 bool SharedWorkerHost::OnLockContention() {
@@ -704,7 +690,8 @@ void SharedWorkerHost::CreateWebTransportConnector(
   mojo::MakeSelfOwnedReceiver(
       std::make_unique<WebTransportConnectorImpl>(
           GetProcessHost()->GetDeprecatedID(), /*frame=*/nullptr, origin,
-          GetNetworkAnonymizationKey(), worker_client_security_state_->Clone()),
+          GetNetworkAnonymizationKey(), worker_client_security_state_->Clone(),
+          network_restrictions_id_),
       std::move(receiver));
 }
 
@@ -718,11 +705,7 @@ void SharedWorkerHost::CreateWebSocketConnector(
           GlobalRenderFrameHostId(GetProcessHost()->GetID(),
                                   IPC::mojom::kRoutingIdNone),
           storage_key.origin(), ComputeIsolationInfoForWebSocket(),
-          worker_client_security_state_->Clone(),
-          // TODO(crbug.com/492462310): Pass network_restrictions_id so
-          // Connection-Allowlist is enforced for shared worker WebSocket
-          // connections.
-          /*network_restrictions_id=*/std::nullopt),
+          worker_client_security_state_->Clone(), network_restrictions_id_),
       std::move(receiver));
 }
 
@@ -970,7 +953,8 @@ void SharedWorkerHost::RenderProcessHostDestroyed(RenderProcessHost* host) {
 }
 
 StoragePartitionImpl* SharedWorkerHost::GetStoragePartitionImpl() {
-  return service_->storage_partition();
+  return static_cast<StoragePartitionImpl*>(
+      GetProcessHost()->GetStoragePartition());
 }
 
 std::vector<GlobalRenderFrameHostId>
@@ -987,14 +971,6 @@ base::WeakPtr<SharedWorkerHost> SharedWorkerHost::AsWeakPtr() {
   return weak_factory_.GetWeakPtr();
 }
 
-net::NetworkIsolationPartition SharedWorkerHost::GetNetworkIsolationPartition()
-    const {
-  return instance_.same_site_cookies() ==
-                 blink::mojom::SharedWorkerSameSiteCookies::kNone
-             ? net::NetworkIsolationPartition::kSharedWorkerSameSiteCookiesNone
-             : net::NetworkIsolationPartition::kGeneral;
-}
-
 net::NetworkIsolationKey SharedWorkerHost::GetNetworkIsolationKey() const {
   // Note: Since shared workers are partitioned by the storage key, we'll use
   // the storage key to create a NIK that matches the current partitioning
@@ -1002,15 +978,15 @@ net::NetworkIsolationKey SharedWorkerHost::GetNetworkIsolationKey() const {
   // different top-level sites will be able to share the same shared worker, so
   // it doesn't make sense to incorporate the top-level site into the NIK in
   // that case either.
-  return ComputeIsolationInfoWithPartition(GetWorkerStorageKey(),
-                                           GetNetworkIsolationPartition())
+  return GetWorkerStorageKey()
+      .ToPartialNetIsolationInfo()
       .network_isolation_key();
 }
 
 net::NetworkAnonymizationKey SharedWorkerHost::GetNetworkAnonymizationKey()
     const {
-  return ComputeIsolationInfoWithPartition(GetWorkerStorageKey(),
-                                           GetNetworkIsolationPartition())
+  return GetWorkerStorageKey()
+      .ToPartialNetIsolationInfo()
       .network_anonymization_key();
 }
 

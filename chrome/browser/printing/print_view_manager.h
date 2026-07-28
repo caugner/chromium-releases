@@ -81,9 +81,12 @@ class PrintViewManager : public PrintViewManagerBase,
       SetupScriptedPrintPreviewCallback callback) override;
   void ShowScriptedPrintPreview() override;
   void RequestPrintPreview(mojom::RequestPrintPreviewParamsPtr params) override;
-  void CheckForCancel(int32_t preview_ui_id,
+  void CheckForCancel(const base::UnguessableToken& preview_ui_id,
                       int32_t request_id,
                       CheckForCancelCallback callback) override;
+  void SetAccessibilityTree(
+      int32_t cookie,
+      const ui::AXTreeUpdate& accessibility_tree) override;
 
   // content::WebContentsObserver implementation.
   void RenderFrameDeleted(content::RenderFrameHost* render_frame_host) override;

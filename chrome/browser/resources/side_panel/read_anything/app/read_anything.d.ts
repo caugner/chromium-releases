@@ -163,6 +163,9 @@ declare namespace chrome {
     // Distiled html content from DOM distiller distillation.
     let htmlContent: string;
 
+    // The active URL of the main panel document.
+    let documentUrl: string;
+
     let axTreeAnchors: Record<string, AxTreeAnchorMetadata[]>;
 
     // The active distillation method currently showing in page content.
@@ -227,6 +230,9 @@ declare namespace chrome {
 
     // Returns the url of the AXNode for the provided AXNodeID.
     function getUrl(nodeId: number): string;
+
+    // Returns the HTML id of the AXNode for the provided AXNodeID.
+    function getHtmlId(nodeId: number): string;
 
     // Returns the alt text of the AXNode for the provided AXNodeID.
     function getAltText(nodeId: number): string;
@@ -589,5 +595,9 @@ declare namespace chrome {
     // whereas the other returns a segment (word or phrase) within the sentence.
     function getCurrentTextSegments():
         Array<{nodeId: number, start: number, length: number}>;
+
+    // Called when the main frame undergoes a same document navigation (such as
+    // a fragment navigation).
+    let onMainFrameSameDocumentNavigation: (url: string) => void;
   }
 }

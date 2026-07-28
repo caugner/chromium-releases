@@ -332,8 +332,9 @@ class ExternalFileURLLoader : public network::mojom::URLLoader {
 ExternalFileURLLoaderFactory::ExternalFileURLLoaderFactory(
     void* profile_id,
     int render_process_host_id,
-    mojo::PendingReceiver<network::mojom::URLLoaderFactory> factory_receiver)
-    : network::SelfDeletingURLLoaderFactory(std::move(factory_receiver)),
+    mojo::PendingReceiver<network::mojom::URLLoaderFactory> factory_receiver,
+    base::SelfDeletingPassKey key)
+    : network::SelfDeletingURLLoaderFactory(std::move(factory_receiver), key),
       profile_id_(profile_id),
       render_process_host_id_(render_process_host_id) {}
 
@@ -369,7 +370,7 @@ ExternalFileURLLoaderFactory::Create(void* profile_id,
   // The ExternalFileURLLoaderFactory will delete itself when there are no more
   // receivers - see the network::SelfDeletingURLLoaderFactory::OnDisconnect
   // method.
-  new ExternalFileURLLoaderFactory(
+  base::MakeSelfDeleting<ExternalFileURLLoaderFactory>(
       profile_id, render_process_host_id,
       pending_remote.InitWithNewPipeAndPassReceiver());
 

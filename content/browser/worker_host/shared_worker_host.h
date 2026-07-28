@@ -34,7 +34,6 @@
 #include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/bindings/unique_receiver_set.h"
 #include "net/base/network_isolation_key.h"
-#include "net/base/network_isolation_partition.h"
 #include "services/device/public/cpp/compute_pressure/buildflags.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/network/public/cpp/cross_origin_embedder_policy.h"
@@ -240,8 +239,6 @@ class CONTENT_EXPORT SharedWorkerHost
   net::IsolationInfo ComputeIsolationInfoForWebSocket() const;
 
   base::WeakPtr<SharedWorkerHost> AsWeakPtr();
-
-  net::NetworkIsolationPartition GetNetworkIsolationPartition() const;
 
   net::NetworkIsolationKey GetNetworkIsolationKey() const;
 

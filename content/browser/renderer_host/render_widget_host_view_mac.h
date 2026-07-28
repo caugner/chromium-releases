@@ -171,7 +171,6 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void UpdateTooltipUnderCursor(const std::u16string& tooltip_text) override;
   void UpdateTooltip(const std::u16string& tooltip_text) override;
   gfx::Size GetRequestedRendererSize() override;
-  uint32_t GetCaptureSequenceNumber() const override;
   bool IsSurfaceAvailableForCopy() override;
   void CopyFromSurface(
       const gfx::Rect& src_rect,
@@ -179,7 +178,6 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
       base::TimeDelta timeout,
       base::OnceCallback<void(const content::CopyFromSurfaceResult&)> callback)
       override;
-  void EnsureSurfaceSynchronizedForWebTest() override;
   ui::FilteredGestureProvider* GetFilteredGestureProviderForTesting() override;
   void FocusedNodeChanged(bool is_editable_node,
                           const gfx::Rect& node_bounds_in_screen) override;
@@ -201,6 +199,12 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   viz::ScopedSurfaceIdAllocator DidUpdateVisualProperties(
       const cc::RenderFrameMetadata& metadata) override;
   void DidNavigate() override;
+
+  void CreateUnboundedSurface(
+      mojo::PendingAssociatedReceiver<blink::mojom::UnboundedSurfaceHost> host,
+      mojo::PendingAssociatedRemote<blink::mojom::UnboundedSurfaceClient>
+          client,
+      const gfx::Rect& bounds_in_dips) override;
 
   blink::mojom::PointerLockResult LockPointer(bool) override;
   blink::mojom::PointerLockResult ChangePointerLock(bool) override;
@@ -464,6 +468,8 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
 
   void SetShowingContextMenu(bool showing) override;
 
+  void SetSupportsAutoFill(bool supports) override;
+
   // Helper method to obtain ui::TextInputType for the active widget from the
   // TextInputManager.
   ui::TextInputType GetTextInputType();
@@ -597,6 +603,10 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   // but no NSWindow, like when in headless.
   bool IsHeadless() const;
 
+  // Returns true if this view is the active unbounded widget of the popup
+  // parent host view.
+  bool IsActiveUnboundedPopup() const;
+
   // If `requested_range` is within the selection region, stores the first rect
   // of the region in `rect` and the selection range in `actual_range`, and
   // returns true. Otherwise returns false.
@@ -708,10 +718,6 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   // is locked.
   bool pointer_lock_unadjusted_movement_ = false;
 
-  // Latest capture sequence number which is incremented when the caller
-  // requests surfaces be synchronized via
-  // EnsureSurfaceSynchronizedForWebTest().
-  uint32_t latest_capture_sequence_number_ = 0u;
 
   // Remote accessibility objects corresponding to the NSWindow that this is
   // displayed to the user in.

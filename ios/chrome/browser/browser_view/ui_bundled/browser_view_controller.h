@@ -18,6 +18,7 @@
 #import "ios/chrome/browser/main/ui/browser_layout_consumer.h"
 #import "ios/chrome/browser/omnibox/ui/omnibox_focus_delegate.h"
 #import "ios/chrome/browser/omnibox/ui/popup/omnibox_popup_presenter.h"
+#import "ios/chrome/browser/shared/coordinator/scene/state/lens_overlay_state_notifier.h"
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/shared/public/commands/browser_commands.h"
 #import "ios/chrome/browser/shared/ui/util/ui_view_controller_with_display_tracing.h"
@@ -27,16 +28,17 @@
 @class BookmarksCoordinator;
 @class BrowserContentViewController;
 @protocol BrowserCoordinatorCommands;
-@protocol BWGCommands;
 @protocol DefaultPromoNonModalPresentationDelegate;
 @protocol FindInPageCommands;
 class FullscreenBrowserAgent;
 class FullscreenController;
+@protocol GeminiCommands;
 @protocol HelpCommands;
 @protocol IncognitoReauthCommands;
 @class KeyCommandsProvider;
 @class LayoutGuideCenter;
 @class LayoutState;
+@class MainToolbarCoordinator;
 @class NewTabPageCoordinator;
 @protocol PopupMenuCommands;
 @class PopupMenuCoordinator;
@@ -48,7 +50,6 @@ class TabUsageRecorderBrowserAgent;
 @protocol TextZoomCommands;
 @class ToolbarAccessoryPresenter;
 @protocol ToolbarCommands;
-@class MainToolbarCoordinator;
 class UrlLoadingBrowserAgent;
 @protocol VoiceSearchController;
 
@@ -68,7 +69,7 @@ typedef struct {
   id<SceneCommands> sceneHandler;
   id<ToolbarCommands> toolbarHandler;
   id<FindInPageCommands> findInPageCommandsHandler;
-  id<BWGCommands> geminiHandler;
+  id<GeminiCommands> geminiHandler;
   LayoutGuideCenter* layoutGuideCenter;
   BOOL isOffTheRecord;
   raw_ptr<UrlLoadingBrowserAgent> urlLoadingBrowserAgent;
@@ -87,6 +88,7 @@ typedef struct {
                                           ContextualSheetPresenter,
                                           IncognitoReauthConsumer,
                                           LensOverlayPresentationEnvironment,
+                                          LensOverlayStateNotifierObserver,
                                           TabConsumer,
                                           OmniboxFocusDelegate,
                                           OmniboxPopupPresenterDelegate,
@@ -122,10 +124,13 @@ typedef struct {
     nonModalPromoPresentationDelegate;
 
 // Command handler for Gemini commands.
-@property(nonatomic, weak) id<BWGCommands> geminiHandler;
+@property(nonatomic, weak) id<GeminiCommands> geminiHandler;
 
 // The layout state.
 @property(nonatomic, weak) LayoutState* layoutState;
+
+// The lens overlay state notifier.
+@property(nonatomic, weak) LensOverlayStateNotifier* lensOverlayStateNotifier;
 
 // Callback that will be invoked when the browser view visibility changed.
 @property(nonatomic, assign) const BrowserViewVisibilityStateChangedCallback&

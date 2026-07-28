@@ -920,6 +920,20 @@ Microsoft::WRL::ComPtr<IMFSample> CreateSampleFromTexture(
 
   HRESULT hr;
   if (need_perform_copy) {
+    if (frame->format() == PIXEL_FORMAT_NV12 ||
+        frame->format() == PIXEL_FORMAT_I420 ||
+        frame->format() == PIXEL_FORMAT_YV12 ||
+        frame->format() == PIXEL_FORMAT_NV21) {
+      const gfx::Rect& visible_rect = frame->visible_rect();
+      if (visible_rect.x() % 2 != 0 || visible_rect.y() % 2 != 0 ||
+          visible_rect.width() % 2 != 0 || visible_rect.height() % 2 != 0) {
+        DLOG(ERROR) << "Source visible_rect is not properly aligned for 4:2:0 "
+                       "subsampled format.";
+        return nullptr;
+      }
+    } else {
+      NOTREACHED();
+    }
     D3D11_TEXTURE2D_DESC desc;
     input_texture->GetDesc(&desc);
     desc.Width = static_cast<UINT>(frame->visible_rect().width());
@@ -1105,11 +1119,11 @@ void GenerateResourceOnSyncTokenReleased(
     RETURN_ON_FAILURE_WITH_CALLBACK(E_FAIL, "Invalid shared image stub");
   }
 
-  if (!shared_image_stub->shared_context_state()) {
+  auto shared_context_state = shared_image_stub->shared_context_state();
+  if (!shared_context_state) {
     RETURN_ON_FAILURE_WITH_CALLBACK(E_FAIL, "Invalid shared context state");
   }
 
-  auto shared_context_state = shared_image_stub->shared_context_state();
   if (!shared_context_state->MakeCurrent(nullptr, /*needs_gl=*/true)) {
     RETURN_ON_FAILURE_WITH_CALLBACK(E_FAIL, "Failed to make context current");
   }
@@ -1185,6 +1199,21 @@ void GenerateResourceOnSyncTokenReleased(
                                            nullptr, &shared_handle);
   }
   if (FAILED(hr) || is_texture_array) {
+    if (frame->format() == PIXEL_FORMAT_NV12 ||
+        frame->format() == PIXEL_FORMAT_I420 ||
+        frame->format() == PIXEL_FORMAT_YV12 ||
+        frame->format() == PIXEL_FORMAT_NV21) {
+      const gfx::Rect& visible_rect = frame->visible_rect();
+      if (visible_rect.x() % 2 != 0 || visible_rect.y() % 2 != 0 ||
+          visible_rect.width() % 2 != 0 || visible_rect.height() % 2 != 0) {
+        RETURN_ON_FAILURE_WITH_CALLBACK(
+            E_INVALIDARG,
+            "Source visible_rect is not properly aligned for "
+            "4:2:0 subsampled format.");
+      }
+    } else {
+      NOTREACHED();
+    }
     TRACE_EVENT0("media", "CopyTextureOnCreateSharedHandleFailed");
     texture_desc.Usage = D3D11_USAGE_DEFAULT;
     texture_desc.BindFlags =

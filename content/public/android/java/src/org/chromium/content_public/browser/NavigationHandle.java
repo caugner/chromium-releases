@@ -57,7 +57,9 @@ public class NavigationHandle {
     private @Nullable WebContents mWebContents;
     private @Nullable Page mCommittedPage;
     private boolean mIsSameOrigin;
+    private int mIgnoredDuplicateNavigationCount;
 
+    private long mNavigationStartMs;
     private boolean mStarted;
 
     public static NavigationHandle createForTesting(
@@ -108,6 +110,7 @@ public class NavigationHandle {
                 /* isPageActivation= */ false,
                 /* isPdf= */ false,
                 /* mimeType= */ "",
+                /* navigationStartMs= */ 0,
                 /* webContents= */ null);
         return handle;
     }
@@ -148,6 +151,7 @@ public class NavigationHandle {
             boolean isPageActivation,
             boolean isPdf,
             String mimeType,
+            long navigationStartMs,
             @Nullable WebContents webContents) {
         mReferrerUrl = referrerUrl;
         mBaseUrlForDataUrl = baseUrlForDataUrl;
@@ -163,9 +167,16 @@ public class NavigationHandle {
         mIsPdf = isPdf;
         mIsPageActivation = isPageActivation;
         mMimeType = mimeType;
+        mNavigationStartMs = navigationStartMs;
         mWebContents = webContents;
 
         mStarted = true;
+    }
+
+    /** Returns the navigation start time in milliseconds. */
+    public long getNavigationStartMs() {
+        assert mStarted;
+        return mNavigationStartMs;
     }
 
     /**
@@ -199,7 +210,8 @@ public class NavigationHandle {
             boolean isPdf,
             String mimeType,
             Page currentPage,
-            boolean isSameOrigin) {
+            boolean isSameOrigin,
+            int ignoredDuplicateNavigationCount) {
         mUrl = url;
         mIsErrorPage = isErrorPage;
         mHasCommitted = hasCommitted;
@@ -217,6 +229,31 @@ public class NavigationHandle {
             mCommittedPage = currentPage;
         }
         mIsSameOrigin = isSameOrigin;
+        mIgnoredDuplicateNavigationCount = ignoredDuplicateNavigationCount;
+    }
+
+    public void callDidFinishForTesting(GURL url) {
+        callDidFinishForTesting(url, true);
+    }
+
+    public void callDidFinishForTesting(GURL url, boolean hasCommitted) {
+        didFinish(
+                url,
+                /* isErrorPage= */ false,
+                hasCommitted,
+                /* isPrimaryMainFrameFragmentNavigation= */ false,
+                /* isDownload= */ false,
+                /* isValidSearchFormUrl= */ false,
+                /* transition= */ PageTransition.LINK,
+                /* errorCode= */ NetError.OK,
+                /* errorDescription= */ "",
+                /* httpStatuscode= */ 200,
+                /* isExternalProtocol= */ false,
+                /* isPdf= */ false,
+                /* mimeType= */ "",
+                Page.createForTesting(),
+                /* isSameOrigin= */ true,
+                /* ignoredDuplicateNavigationCount= */ 0);
     }
 
     /** Release the C++ pointer. */
@@ -472,5 +509,10 @@ public class NavigationHandle {
      */
     public @Nullable Page getCommittedPage() {
         return mCommittedPage;
+    }
+
+    /** Returns the number of duplicate navigations ignored during this navigation. */
+    public int getIgnoredDuplicateNavigationCount() {
+        return mIgnoredDuplicateNavigationCount;
     }
 }

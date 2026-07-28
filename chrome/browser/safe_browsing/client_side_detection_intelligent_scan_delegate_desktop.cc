@@ -173,9 +173,13 @@ void ClientSideDetectionIntelligentScanDelegateDesktop::Inquiry::
   LogOnDeviceModelCallbackStateOnSuccessfulResponse(!!callback_);
 
   if (callback_) {
+    std::optional<float> scam_score = std::nullopt;
+    if (scam_detection_response->has_scam_score()) {
+      scam_score = scam_detection_response->scam_score();
+    }
     std::move(callback_).Run(IntelligentScanResult::Success(
         scam_detection_response->brand(), scam_detection_response->intent(),
-        model_version, kOnDeviceModelType));
+        model_version, kOnDeviceModelType, scam_score));
   }
 
   // Reset session immediately so that future inference is not affected by the
@@ -236,7 +240,8 @@ bool ClientSideDetectionIntelligentScanDelegateDesktop::ShouldShowScamWarning(
   if (!verdict.has_value() ||
       *verdict ==
           IntelligentScanVerdict::INTELLIGENT_SCAN_VERDICT_UNSPECIFIED ||
-      *verdict == IntelligentScanVerdict::INTELLIGENT_SCAN_VERDICT_SAFE) {
+      *verdict == IntelligentScanVerdict::INTELLIGENT_SCAN_VERDICT_SAFE ||
+      *verdict == IntelligentScanVerdict::SCAM_EXPERIMENT_CATCH_ALL_TELEMETRY) {
     return false;
   }
 

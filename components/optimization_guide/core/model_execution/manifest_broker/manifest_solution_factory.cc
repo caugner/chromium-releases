@@ -273,7 +273,8 @@ ManifestSolutionFactory::ManifestSolutionFactory(
     UsageTracker& usage_tracker,
     on_device_model::ServiceClient& service_client,
     OnDeviceModelAccessController& access_controller,
-    base::OnceClosure on_init_complete)
+    base::OnceClosure on_init_complete,
+    base::RepeatingClosure on_solutions_updated)
     : broker_impl_(broker_impl),
       service_client_(service_client),
       usage_tracker_(usage_tracker),
@@ -285,7 +286,8 @@ ManifestSolutionFactory::ManifestSolutionFactory(
       safety_models_(MakeSafetyModelsMap(manifest_.GetRecipes())),
       solutions_(MakeSolutionsMap(manifest_.GetRecipes())),
       on_asset_init_(
-          base::BarrierClosure(assets_.size(), std::move(on_init_complete))) {}
+          base::BarrierClosure(assets_.size(), std::move(on_init_complete))),
+      on_solutions_updated_(std::move(on_solutions_updated)) {}
 ManifestSolutionFactory::~ManifestSolutionFactory() = default;
 
 void ManifestSolutionFactory::UpdateAssetState(const std::string& asset_id,
@@ -338,19 +340,47 @@ void ManifestSolutionFactory::UpdateSolutions() {
               OnDeviceModelEligibilityReason::kFeatureExecutionNotEnabled));
     }
   }
+  if (on_solutions_updated_) {
+    on_solutions_updated_.Run();
+  }
 }
 
-std::vector<mojom::BrokerModelInfoPtr>
+std::vector<std::pair<mojom::BrokerModelInfoPtr, base::FilePath>>
 ManifestSolutionFactory::GetBrokerModels() const {
-  std::vector<mojom::BrokerModelInfoPtr> result;
+  std::vector<std::pair<mojom::BrokerModelInfoPtr, base::FilePath>> result;
   for (const auto& [model_id, state] : base_models_) {
     const auto& recipe = manifest_.GetRecipes().base_models().at(model_id);
     auto info = mojom::BrokerModelInfo::New();
     info->name = model_id;
+    auto it = assets_.find(recipe.weights_file().asset_id());
+    base::FilePath path_to_measure;
+    if (it != assets_.end() && it->second.has_value()) {
+      path_to_measure = it->second->path;
+    }
     if (auto path = ResolveFile(recipe.weights_file())) {
       info->weights_path = path->AsUTF8Unsafe();
     }
-    result.push_back(std::move(info));
+
+    switch (recipe.backend_type()) {
+      case proto::BaseModelRecipe::BACKEND_TYPE_CPU:
+        info->backend_type = "CPU";
+        break;
+      case proto::BaseModelRecipe::BACKEND_TYPE_GPU:
+      default:
+        switch (recipe.performance_hint()) {
+          case proto::BaseModelRecipe::PERFORMANCE_HINT_HIGHEST_QUALITY:
+            info->backend_type = "GPU (highest quality)";
+            break;
+          case proto::BaseModelRecipe::PERFORMANCE_HINT_FASTEST_INFERENCE:
+          default:
+            // Default to fastest inference per `ConvertPerformanceHint`.
+            info->backend_type = "GPU (fastest inference)";
+            break;
+        }
+        break;
+    }
+
+    result.emplace_back(std::move(info), std::move(path_to_measure));
   }
   return result;
 }
@@ -521,7 +551,7 @@ ManifestSolutionFactory::GetOrLoadTextSafetyModel(const std::string& model_id) {
     if (recipe.has_weights_file()) {
       params.ts_paths.emplace();
       // We should not get here unless the asset is available.
-      params.ts_paths->data = *ResolveFile(recipe.weights_file());
+      params.ts_paths->model = *ResolveFile(recipe.weights_file());
     }
     if (recipe.has_language_detection_model_file()) {
       params.language_paths.emplace();

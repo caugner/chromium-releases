@@ -240,7 +240,8 @@ IN_PROC_BROWSER_TEST_F(TranslateBubbleViewBrowserTest, AlertAccessibleEvent) {
 }
 
 class TranslateBubbleVisualTest
-    : public SupportsTestDialog<TranslateBubbleViewBrowserTest> {
+    : public SupportsTestDialog<
+          TranslateBubbleViewBrowserTest_SearchUIDisabled> {
  public:
   TranslateBubbleVisualTest(const TranslateBubbleVisualTest&) = delete;
   TranslateBubbleVisualTest& operator=(const TranslateBubbleVisualTest&) =
@@ -316,7 +317,8 @@ IN_PROC_BROWSER_TEST_F(TranslateBubbleViewBrowserTest_SearchUIDisabled,
                                                            u"Spanish");
 
   EXPECT_EQ(bubble->model()->GetTargetLanguageIndex(),
-            bubble->model()->GetTargetLanguageIndexForCode("es").value());
+            static_cast<int>(
+                bubble->model()->GetTargetLanguageIndexForCode("es").value()));
 }
 
 IN_PROC_BROWSER_TEST_F(TranslateBubbleViewBrowserTest_SearchUIEnabled,
@@ -337,7 +339,8 @@ IN_PROC_BROWSER_TEST_F(TranslateBubbleViewBrowserTest_SearchUIEnabled,
                                                            u"Spanish");
 
   EXPECT_EQ(bubble->model()->GetTargetLanguageIndex(),
-            bubble->model()->GetTargetLanguageIndexForCode("es").value());
+            static_cast<int>(
+                bubble->model()->GetTargetLanguageIndexForCode("es").value()));
 }
 
 IN_PROC_BROWSER_TEST_F(TranslateBubbleViewBrowserTest_SearchUIEnabled,

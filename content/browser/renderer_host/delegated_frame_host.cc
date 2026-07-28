@@ -100,9 +100,6 @@ void DelegatedFrameHost::WasShown(
 
   frame_evictor_->SetVisible(true);
   if (record_tab_switch_time_request && compositor_) {
-    // Only requests with saved frames should be sent to the DelegatedFrameHost.
-    CHECK(record_tab_switch_time_request
-              ->AllEventsAreTabSwitchesWithSavedFrame());
     compositor_->RequestSuccessfulPresentationTimeForNextFrame(
         tab_switch_time_recorder_.TabWasShown(
             std::move(*record_tab_switch_time_request)));
@@ -124,9 +121,6 @@ void DelegatedFrameHost::RequestSuccessfulPresentationTimeForNextFrame(
     blink::RecordContentToVisibleTimeRequest visible_time_request) {
   if (!compositor_)
     return;
-
-  // Only requests with saved frames should be sent to the DelegatedFrameHost.
-  CHECK(visible_time_request.AllEventsAreTabSwitchesWithSavedFrame());
 
   // Tab was shown while widget was already painting, eg. due to being
   // captured.
@@ -558,7 +552,8 @@ void DelegatedFrameHost::ContinueDelegatedFrameEviction(
   //
   // TODO(b/337467299): determine why we are evicting without finding valid
   // surfaces.
-  DCHECK(!local_surface_id_.is_valid() || !surface_ids.empty());
+  CHECK(!local_surface_id_.is_valid() || !surface_ids.empty(),
+        base::NotFatalUntil::M152);
   if (!surface_ids.empty()) {
     CHECK(host_frame_sink_manager_);
     host_frame_sink_manager_->EvictSurfaces(surface_ids);

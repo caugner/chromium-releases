@@ -30,6 +30,7 @@ import androidx.annotation.StringRes;
 import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.ApplicationStatus;
+import org.chromium.base.DeviceInfo;
 import org.chromium.base.ResettersForTesting;
 import org.chromium.base.TimeUtils;
 import org.chromium.build.annotations.NullMarked;
@@ -85,6 +86,8 @@ public class NtpCustomizationMediator implements TemplateUrlServiceObserver {
     private final @Nullable PropertyModel mContainerPropertyModel;
     private final WindowAndroid mWindowAndroid;
     private final Context mContext;
+    private final boolean mIsNtpCustomizationSyncEnabled;
+    private final Runnable mShowMainBottomSheetRunnable;
     private final @Nullable Profile mProfile;
     private @Nullable Integer mCurrentBottomSheet;
     private boolean mShouldRecreate;
@@ -101,16 +104,21 @@ public class NtpCustomizationMediator implements TemplateUrlServiceObserver {
             @Nullable PropertyModel containerPropertyModel,
             Supplier<@Nullable Profile> profileSupplier,
             WindowAndroid windowAndroid,
-            SnackbarManager snackbarManager) {
+            SnackbarManager snackbarManager,
+            Runnable showMainBottomSheetRunnable) {
         mBottomSheetController = bottomSheetController;
         mBottomSheetContent = bottomSheetContent;
         mViewFlipperPropertyModel = viewFlipperPropertyModel;
         mContainerPropertyModel = containerPropertyModel;
         mProfileSupplier = profileSupplier;
         mWindowAndroid = windowAndroid;
+        mShowMainBottomSheetRunnable = showMainBottomSheetRunnable;
         mViewFlipperMap = new HashMap<>();
         mTypeToListenersMap = new HashMap<>();
         mContext = context;
+
+        mIsNtpCustomizationSyncEnabled = NtpCustomizationUtils.isNTPCustomizationSyncEnabled();
+
         Profile profile = mProfileSupplier.get();
         assumeNonNull(profile);
         mProfile = profile.getOriginalProfile();
@@ -219,7 +227,7 @@ public class NtpCustomizationMediator implements TemplateUrlServiceObserver {
         if (parentSheet != null) {
             showBottomSheet(parentSheet);
         } else {
-            showBottomSheet(MAIN);
+            mShowMainBottomSheetRunnable.run();
 
             // Updates the visibility status (on or off) of the feeds section in the main bottom
             // sheet.
@@ -335,7 +343,7 @@ public class NtpCustomizationMediator implements TemplateUrlServiceObserver {
         List<Integer> content = new ArrayList<>();
         content.add(MVT);
 
-        if (!NtpCustomizationUtils.isNtpSimplificationEnabledOnDesktop()) {
+        if (!DeviceInfo.isDesktop()) {
             content.add(NTP_CARDS);
         }
         assumeNonNull(mProfile);
@@ -343,8 +351,10 @@ public class NtpCustomizationMediator implements TemplateUrlServiceObserver {
             content.add(FEED);
         }
 
-        if (NtpCustomizationUtils.isNtpThemeCustomizationEnabled(
-                mWindowAndroid, DeviceFormFactor.isNonMultiDisplayContextOnTablet(context))) {
+        if (!mIsNtpCustomizationSyncEnabled
+                && NtpCustomizationUtils.isNtpThemeCustomizationEnabled(
+                        mWindowAndroid,
+                        DeviceFormFactor.isNonMultiDisplayContextOnTablet(context))) {
             content.add(THEME);
         }
         return content;

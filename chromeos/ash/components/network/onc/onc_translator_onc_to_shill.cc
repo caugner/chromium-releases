@@ -83,11 +83,6 @@ void SetClientCertProperties(client_cert::ConfigType config_type,
                                   *shill_dictionary);
 }
 
-bool IsPolicyOncSource(::onc::ONCSource source) {
-  return source == ::onc::ONC_SOURCE_USER_POLICY ||
-         source == ::onc::ONC_SOURCE_DEVICE_POLICY;
-}
-
 // This class is responsible to translate the local fields of the given
 // |onc_object| according to |onc_signature| into |shill_dictionary|. This
 // translation should consider (if possible) only fields of this ONC object and
@@ -311,7 +306,7 @@ void LocalTranslator::TranslateL2TP() {
   // only honored for policy-provided configurations because the login password
   // is only made available to Shill when policy requests it.
   const std::string* password = onc_object_->FindString(::onc::l2tp::kPassword);
-  if (IsPolicyOncSource(onc_source_) && password &&
+  if (chromeos::onc::IsPolicyOncSource(onc_source_) && password &&
       *password == ::onc::substitutes::kPasswordPlaceholderVerbatim) {
     // TODO(b/220249018): shill::kL2tpIpsecUseLoginPasswordProperty is a string
     // property containing "false" or "true". Migrate it to a bool to match
@@ -396,7 +391,7 @@ void LocalTranslator::TranslateEAP() {
   // only made available to Shill when policy requests it.
   const std::string* password_field =
       onc_object_->FindString(::onc::eap::kPassword);
-  if (IsPolicyOncSource(onc_source_) && password_field &&
+  if (chromeos::onc::IsPolicyOncSource(onc_source_) && password_field &&
       *password_field == ::onc::substitutes::kPasswordPlaceholderVerbatim) {
     shill_dictionary_->Set(shill::kEapUseLoginPasswordProperty, true);
   }

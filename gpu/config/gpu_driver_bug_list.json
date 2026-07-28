@@ -3769,6 +3769,21 @@
       ]
     },
     {
+      "id": 479,
+      "description": "D3D12 AV1 encoding high and professional profiles query causes unexpected driver behavior on some older drivers.",
+      "os": {
+        "type": "win"
+      },
+      "vendor_id": "0x8086",
+      "driver_version": {
+        "op": "<",
+        "value": "32.0.101.6559"
+      },
+      "features": [
+        "limit_d3d12_av1_profile_to_main"
+      ]
+    },
+    {
       "id": 480,
       "cr_bugs": [520656244],
       "description": "Reattach FBO depth/stencil attachments when they are reallocated on Qualcomm GPUs",
@@ -3779,6 +3794,18 @@
       },
       "features": [
         "reattach_fbo_depth_stencil_on_reallocation"
+      ]
+    },
+    {
+      "id": 481,
+      "cr_bugs": [443107135],
+      "description": "Disable Media Foundation D3D video processing on Qualcomm GPUs.",
+      "os": {
+        "type": "win"
+      },
+      "vendor_id": "0x4d4f4351",
+      "features": [
+        "disable_media_foundation_d3d_video_processing"
       ]
     },
     {
@@ -3824,15 +3851,6 @@
       "gl_vendor": "Imagination.*",
       "features": [
         "reattach_texture_to_fbo_after_layer_increase"
-      ]
-    },
-    {
-      "id": 488,
-      "cr_bugs": [534468209],
-      "description": "Flush pending GPU jobs/queries before unbinding or deleting a user framebuffer object on ARM Mali Valhall/Avalon GPUs to avoid driver crash.",
-      "gl_vendor": "ARM.*",
-      "features": [
-        "flush_queries_before_deleting_or_unbinding_fbo"
       ]
     }
   ]

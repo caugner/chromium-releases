@@ -14,6 +14,7 @@ type ContextualTasksComposeboxElement = any;
 
 // <if expr="not is_android">
 // TODO(crbug.com/511383725): Support onboarding tooltip on Android.
+import './lens_search_tooltip.js';
 import './onboarding_tooltip.js';
 import './banner_promo.js';
 import '//resources/cr_components/composebox/contextual_entrypoint_and_menu.js';
@@ -23,6 +24,7 @@ import type {ContextualActionMenuElement} from '//resources/cr_components/compos
 import type {ContextualEntrypointAndMenuElement} from '//resources/cr_components/composebox/contextual_entrypoint_and_menu.js';
 import {HelpBubbleMixinLit} from 'chrome://resources/cr_components/help_bubble/help_bubble_mixin_lit.js';
 
+import type {ContextualTasksLensSearchTooltipElement} from './lens_search_tooltip.js';
 import type {ContextualTasksOnboardingTooltipElement} from './onboarding_tooltip.js';
 // </if>
 
@@ -110,6 +112,7 @@ export interface ContextualTasksAppElement {
     // <if expr="not is_android">
     // TODO(crbug.com/511383725): Support onboarding tooltip on Android.
     onboardingTooltip?: ContextualTasksOnboardingTooltipElement,
+    lensSearchTooltip?: ContextualTasksLensSearchTooltipElement,
     // </if>
   };
 }
@@ -222,6 +225,7 @@ export class ContextualTasksAppElement extends ContextualTasksAppElementBase {
         reflect: true,
       },
       isAiPage_: {type: Boolean, reflect: true},
+      isUserSignedIn_: {type: Boolean},
       isLensOverlayShowing_: {type: Boolean},
       isOverlayOpenForAimVisualSearch_: {type: Boolean},
       isGhostLoaderVisible_: {type: Boolean, reflect: true},
@@ -260,6 +264,11 @@ export class ContextualTasksAppElement extends ContextualTasksAppElementBase {
         type: Boolean,
         value: loadTimeData.getBoolean('showOnboardingTooltip'),
       },
+      showLensSearchTooltip_: {
+        type: Boolean,
+        value: loadTimeData.getBoolean('askGCoBrowseEnabled'),
+      },
+      lensSearchTooltipShowing_: {type: Boolean},
       energyEffectEnabled_: {
         type: Boolean,
         reflect: true,
@@ -282,6 +291,7 @@ export class ContextualTasksAppElement extends ContextualTasksAppElementBase {
         type: Boolean,
         reflect: true,
       },
+      onboardingTooltipShowing_: {type: Boolean},
     };
   }
 
@@ -289,8 +299,13 @@ export class ContextualTasksAppElement extends ContextualTasksAppElementBase {
       loadTimeData.getBoolean('energyEffectEnabled');
   protected accessor showOnboardingTooltip_: boolean =
       loadTimeData.getBoolean('showOnboardingTooltip');
+  protected accessor showLensSearchTooltip_: boolean =
+      loadTimeData.getBoolean('askGCoBrowseEnabled');
+  protected accessor lensSearchTooltipShowing_: boolean = false;
+
   protected accessor showSmartTabSharingTryItIph_: boolean = false;
   protected accessor showSmartTabSharingDefaultOnIph_: boolean = false;
+  protected accessor onboardingTooltipShowing_: boolean = false;
   protected accessor userName_: string =
       loadTimeData.getString('friendlyZeroStateGaiaName');
   protected accessor friendlyZeroStateTitleBeforeName_: string =
@@ -311,12 +326,15 @@ export class ContextualTasksAppElement extends ContextualTasksAppElementBase {
   // though top-level navigation could fail for numerous reasons.
   protected accessor isLoadError_: boolean = !window.navigator.onLine;
   protected accessor isAiPage_: boolean = loadTimeData.getBoolean('isAiPage');
+  protected accessor isUserSignedIn_: boolean =
+      loadTimeData.getBoolean('isSignedIn');
   protected accessor isAimEligible_: boolean =
       loadTimeData.getBoolean('isAimEligible');
   protected accessor isLensOverlayShowing_: boolean = false;
   protected accessor isOverlayOpenForAimVisualSearch_: boolean = false;
   // Indicates if in tab mode. Most start in a tab.
-  protected accessor isShownInTab_: boolean = true;
+  protected accessor isShownInTab_: boolean =
+      loadTimeData.getBoolean('isShownInTab');
   protected accessor darkMode_: boolean = loadTimeData.getBoolean('darkMode');
   protected accessor isErrorDialogVisible_: boolean = false;
   private pendingUrl_: string = '';
@@ -328,8 +346,8 @@ export class ContextualTasksAppElement extends ContextualTasksAppElementBase {
   // Whether no queries have been submitted in the current AIM thread. This
   // can be undefined on initial load to prevent the composebox from flashing
   // briefly before the zero state is rendered.
-  protected accessor isZeroState_: boolean|undefined =
-      loadTimeData.getBoolean('isGhostLoaderVisible') ? false : undefined;
+  protected accessor isZeroState_: boolean =
+      loadTimeData.getBoolean('isZeroState');
   protected accessor enableNativeZeroStateSuggestions_: boolean =
       loadTimeData.getBoolean('enableNativeZeroStateSuggestions');
   protected accessor inNlm_: boolean = false;
@@ -612,23 +630,29 @@ export class ContextualTasksAppElement extends ContextualTasksAppElementBase {
     // Fetch the initial common search params.
     this.updateCommonSearchParams();
 
-    // Listeners for ghost loader
-    this.$.threadFrame.addEventListener(
-        'loadstart', this.onThreadFrameLoadStart.bind(this));
-    this.$.threadFrame.addEventListener(
-        'loadredirect', this.onThreadFrameLoadRedirect.bind(this));
-    this.$.threadFrame.addEventListener(
-        'loadabort', this.onThreadFrameLoadAbort.bind(this));
-    this.$.threadFrame.addEventListener(
-        'loadcommit', this.onThreadFrameLoadCommit.bind(this));
-    this.$.threadFrame.addEventListener(
-        'contentload', this.onThreadFrameContentLoad.bind(this));
+    // Listeners for ghost loader. Registered via eventTracker_ so that
+    // removeThreadFrameListenersForTesting() can detach them.
+    this.eventTracker_.add(
+        this.$.threadFrame, 'loadstart',
+        this.onThreadFrameLoadStart.bind(this));
+    this.eventTracker_.add(
+        this.$.threadFrame, 'loadredirect',
+        this.onThreadFrameLoadRedirect.bind(this));
+    this.eventTracker_.add(
+        this.$.threadFrame, 'loadabort',
+        this.onThreadFrameLoadAbort.bind(this));
+    this.eventTracker_.add(
+        this.$.threadFrame, 'loadcommit',
+        this.onThreadFrameLoadCommit.bind(this));
+    this.eventTracker_.add(
+        this.$.threadFrame, 'contentload',
+        this.onThreadFrameContentLoad.bind(this));
     this.eventTracker_.add(window, 'message', (event: MessageEvent) => {
       if (event.data === 'domContentLoaded') {
         this.isDomContentLoaded_ = true;
         // Play the zero state animations, unhide the composebox/header,
         // and focus the composebox.
-        if (this.isZeroState_) {
+        if (this.isZeroState_ && this.isShownInTab_) {
           this.playZeroStateAnimations_();
           this.forceComposeboxFocus();
         }
@@ -708,9 +732,11 @@ export class ContextualTasksAppElement extends ContextualTasksAppElementBase {
 
     // Add this fallback: If the DOM already loaded while we were awaiting, play
     // it now!
-    if (this.isZeroState_ && this.isDomContentLoaded_) {
+    if (this.isZeroState_ && this.isDomContentLoaded_ && this.isShownInTab_) {
       this.playZeroStateAnimations_();
       this.forceComposeboxFocus();
+    } else if (this.isZeroState_ && !this.isShownInTab_) {
+      this.playZeroStateAnimations_();
     }
 
     // The thread URL is considered pending (not loaded immediately in the
@@ -742,6 +768,12 @@ export class ContextualTasksAppElement extends ContextualTasksAppElementBase {
 
     this.postMessageHandler_.setInputPlateBoundsUpdateCallback(
         this.onInputPlateBoundsUpdate_.bind(this));
+
+    this.postMessageHandler_.setInputStateUpdateCallback(
+        (toolMode?: number, modelMode?: number,
+         data?: Record<string, unknown>) => {
+          this.composebox_?.onInputStateUpdate(toolMode, modelMode, data);
+        });
 
     this.eventTracker_.add(
         composebox, 'context-menu-opened',
@@ -780,6 +812,15 @@ export class ContextualTasksAppElement extends ContextualTasksAppElementBase {
             this.requestUpdate();
           }
         });
+
+    // <if expr="is_android and not is_desktop_android">
+    this.isDomContentLoaded_ = true;
+    if (this.isInitialFrameLoad_ && this.isZeroState_) {
+      this.playZeroStateAnimations_();
+      // Omit calling this.forceComposeboxFocus() on mobile Android startup to
+      // avoid automatically popping up the software keyboard on page load.
+    }
+    // </if>
   }
 
   override updated(changedProperties: PropertyValues<this>) {
@@ -824,17 +865,49 @@ export class ContextualTasksAppElement extends ContextualTasksAppElementBase {
     // Tooltip not supported on Android. Therefore, make calls to this method
     // a no-op.
     // <if expr="not is_android">
-    const tooltip = this.$.onboardingTooltip;
+    const onboardingTooltip =
+        this.shadowRoot?.querySelector<ContextualTasksOnboardingTooltipElement>(
+            '#onboardingTooltip') || null;
+    const lensSearchTooltip =
+        this.shadowRoot?.querySelector<ContextualTasksLensSearchTooltipElement>(
+            '#lensSearchTooltip') || null;
+
     const composeboxContainer = this.composebox_;
     if (!composeboxContainer) {
       return;
     }
     const crComposebox = this.composebox_.getComposebox();
-    if (tooltip && crComposebox) {
-      tooltip.updateTooltipVisibility(composeboxContainer, crComposebox);
+    if (!crComposebox) {
+      return;
+    }
+
+    if (onboardingTooltip) {
+      const hasToken = crComposebox.getHasAutomaticActiveTabChipToken();
+      const isCoinsEnabled = loadTimeData.getBoolean('tabFaviconChipsToCoinsEnabled');
+      const target = isCoinsEnabled ?
+          crComposebox.getContextEntrypointElement() :
+          crComposebox.getAutomaticActiveTabChipElement();
+
+      onboardingTooltip.updateTooltipVisibility(hasToken, target, composeboxContainer);
+      this.onboardingTooltipShowing_ = onboardingTooltip.shouldShow;
+    }
+
+
+    if (lensSearchTooltip) {
+      lensSearchTooltip.updateTooltipVisibility(composeboxContainer, crComposebox);
+      this.lensSearchTooltipShowing_ = lensSearchTooltip.shouldShow;
     }
     // </if>
   }
+
+  protected onOnboardingTooltipDismissed_() {
+    this.onboardingTooltipShowing_ = false;
+  }
+
+  protected onLensSearchTooltipDismissed_() {
+    this.lensSearchTooltipShowing_ = false;
+  }
+
 
   private playZeroStateAnimations_() {
     this.clearZeroStateAnimations_();
@@ -935,6 +1008,16 @@ export class ContextualTasksAppElement extends ContextualTasksAppElementBase {
     }
     this.updateBasicModeAfterNavigation();
     this.maybeOnThreadFrameTopLevelNavigation(ev.url);
+
+    // <if expr="is_android and not is_desktop_android">
+    // On standard mobile Android phones, since guest-to-host script
+    // communication is not supported, must set isDomContentLoaded_ on
+    // loadcommit rather than waiting for a domContentLoaded message.
+    this.isDomContentLoaded_ = true;
+    if (this.isZeroState_) {
+      this.playZeroStateAnimations_();
+    }
+    // </if>
   }
 
   private onThreadFrameContentLoad() {
@@ -1018,8 +1101,17 @@ export class ContextualTasksAppElement extends ContextualTasksAppElementBase {
 
     if (isAiPage && isZeroState) {
       this.isZeroState_ = true;
-      if (!this.isInitialFrameLoad_ && this.isDomContentLoaded_) {
-        this.playZeroStateAnimations_();
+      if (!this.isInitialFrameLoad_) {
+        // Tab instances synchronize animations with the web document lifecycle
+        // (waiting for DOM load), while side panel instances trigger them
+        // immediately to match the native UI transition.
+        if (this.isShownInTab_) {
+          if (this.isDomContentLoaded_) {
+            this.playZeroStateAnimations_();
+          }
+        } else {
+          this.playZeroStateAnimations_();
+        }
       }
     }
 
@@ -1087,7 +1179,7 @@ export class ContextualTasksAppElement extends ContextualTasksAppElementBase {
       const currentHeight = composebox.offsetHeight;
       const currentUrl = this.$.threadFrame.src;
       if (currentUrl.includes(AIOH_URL_IDENTIFIER) &&
-          this.forcedComposeboxBounds_ === null) {
+          this.forcedComposeboxBounds_ === null && !this.isZeroState_) {
         this.playComposeboxAiohFadeInAnimation_();
       }
       if (currentHeight !== inputRect.height) {
@@ -1402,26 +1494,6 @@ export class ContextualTasksAppElement extends ContextualTasksAppElementBase {
           },
           ['blocking']);
 
-      // Allow downloading files. This is necessary since aim can generate
-      // images for download.
-      this.$.threadFrame.addEventListener(
-          'permissionrequest',
-          (e: chrome.webviewTag.PermissionRequestEvent|
-           PermissionRequestEvent) => {
-            if (e.permission === 'download') {
-              e.request.allow();
-            } else if (e.permission === 'geolocation') {
-              e.request.allow();
-            }
-          });
-
-      // Sets the user agent to the default user agent + the contextual tasks
-      // custom suffix.
-      const userAgent = this.$.threadFrame.getUserAgent();
-      const userAgentSuffix = loadTimeData.getString('userAgentSuffix');
-      this.$.threadFrame.setUserAgentOverride(
-          `${userAgent} ${userAgentSuffix}`);
-
       // Inject a script to notify the embedder when the DOM has loaded so the
       // app knows when to show the header and composebox.
       this.$.threadFrame.addContentScripts([{
@@ -1452,6 +1524,27 @@ export class ContextualTasksAppElement extends ContextualTasksAppElementBase {
         },
         run_at: 'document_start',
       }]);
+    }
+
+    // Allow downloading files. This is necessary since aim can generate
+    // images for download.
+    this.$.threadFrame.addEventListener('permissionrequest', (e: Event) => {
+      const permissionEvent = e as chrome.webviewTag.PermissionRequestEvent |
+          PermissionRequestEvent;
+      if (permissionEvent.permission === 'download') {
+        permissionEvent.request.allow();
+      } else if (permissionEvent.permission === 'geolocation') {
+        permissionEvent.request.allow();
+      }
+    });
+
+    const userAgentSuffix = loadTimeData.getString('userAgentSuffix');
+    if (userAgentSuffix) {
+      const userAgent = this.$.threadFrame.getUserAgent();
+      if (!userAgent.endsWith(userAgentSuffix)) {
+        this.$.threadFrame.setUserAgentOverride(
+            `${userAgent} ${userAgentSuffix}`);
+      }
     }
   }
 
@@ -1593,6 +1686,16 @@ export class ContextualTasksAppElement extends ContextualTasksAppElementBase {
     this.isNavigatingFromAiPage_ = isNavigatingForTesting;
   }
 
+  // Detaches the threadFrame load listeners so real <webview> events cannot
+  // run the handlers while a test drives them manually.
+  removeThreadFrameListenersForTesting() {
+    this.eventTracker_.remove(this.$.threadFrame, 'loadstart');
+    this.eventTracker_.remove(this.$.threadFrame, 'loadredirect');
+    this.eventTracker_.remove(this.$.threadFrame, 'loadabort');
+    this.eventTracker_.remove(this.$.threadFrame, 'loadcommit');
+    this.eventTracker_.remove(this.$.threadFrame, 'contentload');
+  }
+
   isNavigatingForTesting() {
     return this.isNavigatingFromAiPage_;
   }
@@ -1624,7 +1727,7 @@ export class ContextualTasksAppElement extends ContextualTasksAppElementBase {
     await this.onThreadFrameLoadAbort(event);
   }
 
-  setIsZeroStateForTesting(isZeroState: boolean|undefined) {
+  setIsZeroStateForTesting(isZeroState: boolean) {
     this.isZeroState_ = isZeroState;
   }
 

@@ -39,7 +39,7 @@ void TabUnderlineController::Initialize(UiDelegate* ui_delegate) {
     glic_service_ =
         GlicKeyedServiceFactory::GetGlicKeyedService(tab->GetProfile());
 
-    GlicSharingManager& sharing_manager =
+    GlicSharingManagerInternal& sharing_manager =
         glic_service_->active_instance_sharing_manager();
 
     // Subscribe to changes in the set of pinned tabs.
@@ -175,6 +175,10 @@ void TabUnderlineController::OnContextTabsChanged(
       should_underline
           ? UpdateUnderlineReason::kContextualTask_TabInContext
           : UpdateUnderlineReason::kContextualTask_TabNotInContext);
+}
+
+void TabUnderlineController::OnActiveTaskContextProviderDestroyed() {
+  contextual_task_observation_.Reset();
 }
 
 void TabUnderlineController::PanelStateChanged(
@@ -345,8 +349,7 @@ void TabUnderlineController::HideUnderline(bool triggered_by_glic) {
 
   // TODO(crbug.com/467739947): Consider reenabling hide animation for
   // contextual tasks.
-  if (!triggered_by_glic ||
-      base::FeatureList::IsEnabled(features::kGlicDisableUnderlineAnimations)) {
+  if (!triggered_by_glic) {
     ui_delegate_->StopShowing();
   } else {
     ui_delegate_->StartRampingDown();
@@ -362,10 +365,6 @@ void TabUnderlineController::RemoveSource(UnderlineSource source) {
 }
 
 void TabUnderlineController::AnimateUnderline() {
-  if (base::FeatureList::IsEnabled(features::kGlicDisableUnderlineAnimations)) {
-    return;
-  }
-
   if (!ui_delegate_->IsShowing()) {
     // There is be a chance that the underline view has already stopped showing.
     // In that case, gracefully handle the crash case in crbug.com/398319435 by
@@ -456,7 +455,7 @@ bool TabUnderlineController::ShouldUseSignalsForGlicUnderlines() {
 }
 
 bool TabUnderlineController::ShouldUseSignalsForContextualTasks() {
-  return base::FeatureList::IsEnabled(contextual_tasks::kContextualTasks);
+  return contextual_tasks::IsContextualTasksUIEnabled();
 }
 
 BrowserWindowInterface* TabUnderlineController::GetBrowserWindowInterface() {

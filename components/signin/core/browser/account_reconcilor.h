@@ -5,6 +5,7 @@
 #define COMPONENTS_SIGNIN_CORE_BROWSER_ACCOUNT_RECONCILOR_H_
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "base/compiler_specific.h"
@@ -27,7 +28,10 @@
 #include "components/signin/public/base/signin_client.h"
 #include "components/signin/public/base/signin_metrics.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
+#include "components/signin/public/identity_manager/tribool.h"
 #include "google_apis/gaia/google_service_auth_error.h"
+#include "net/device_bound_sessions/session_key.h"
+#include "services/network/public/mojom/device_bound_sessions.mojom.h"
 
 #if BUILDFLAG(IS_CHROMEOS)
 #include "components/account_manager_core/account_manager_facade.h"
@@ -142,6 +146,7 @@ class AccountReconcilor
  protected:
   void OnSetAccountsInCookieCompleted(
       const std::vector<CoreAccountId>& accounts_to_send,
+      std::optional<base::TimeTicks> cookie_upgrade_start_time,
       signin::SetAccountsInCookieResult result);
   void OnLogOutFromCookieCompleted(const GoogleServiceAuthError& error);
 
@@ -151,6 +156,36 @@ class AccountReconcilor
   friend class AccountReconcilorThrottlerTest;
   friend class BaseAccountReconcilorTestTable;
   friend class DiceBrowserTest;
+
+  FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest,
+                           DeviceBoundSessionsFetchBlocksReconciliation);
+  FRIEND_TEST_ALL_PREFIXES(
+      AccountReconcilorTest,
+      DeviceBoundSessionsFetchDoesNotBlockReconciliationWhenPreconditionsNotMet);
+  FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest,
+                           CookieUpgradeTriggersMultiloginEvenIfCookiesMatch);
+  FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest,
+                           NeedsCookieBindingUpgradeTriggersUpgrade);
+  FRIEND_TEST_ALL_PREFIXES(
+      AccountReconcilorTest,
+      NeedsCookieBindingUpgradeNoUpgradeIfStandardSessionExists);
+  FRIEND_TEST_ALL_PREFIXES(
+      AccountReconcilorTest,
+      NeedsCookieBindingUpgradeNoUpgradeIfPrototypeSessionExists);
+  FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest,
+                           CookieBindingUpgradeStatusMetricsFeatureDisabled);
+  FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest,
+                           CookieBindingUpgradeStatusMetricsNoWrappedKey);
+  FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest,
+                           CookieBindingUpgradeStatusMetricsNeedsUpgrade);
+  FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest,
+                           CookieBindingUpgradeStatusMetricsHasStandardSession);
+  FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest,
+                           CookieBindingUpgradeStatusMetricsUpgradeNotDeferred);
+  FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest,
+                           GetGaiaApiSourceNormalReconcileParameter);
+  FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest,
+                           GetGaiaApiSourceCookieUpgradeParameter);
 
 #if BUILDFLAG(ENABLE_MIRROR)
   FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest,
@@ -280,6 +315,10 @@ class AccountReconcilor
                            TableRowTestMultilogin);
   FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest, ReconcileAfterShutdown);
   FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest, UnlockAfterShutdown);
+  FRIEND_TEST_ALL_PREFIXES(AccountReconcilorMirrorTest,
+                           StartReconcileCookieJarFresh);
+  FRIEND_TEST_ALL_PREFIXES(AccountReconcilorMirrorTest,
+                           StartReconcileCookieJarStale);
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
   FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest,
                            OnAccountsInCookieUpdatedLogoutInProgress);
@@ -318,10 +357,26 @@ class AccountReconcilor
     kCookieSettingChange = 7,
     kForcedReconcile = 8,
     kPrimaryAccountChanged = 9,
+    kDeviceBoundSessionsFetched = 10,
 
-    kMaxValue = kPrimaryAccountChanged
+    kMaxValue = kDeviceBoundSessionsFetched
   };
   // LINT.ThenChange(//tools/metrics/histograms/metadata/signin/enums.xml:SigninReconcilerTrigger)
+
+  // These values are persisted to logs. Entries should not be renumbered and
+  // numeric values should never be reused.
+  // LINT.IfChange(CookieBindingUpgradeStatus)
+  enum class CookieBindingUpgradeStatus {
+    kFeatureNotSupported = 0,
+    kFeatureDisabled = 1,
+    kNoWrappedKey = 2,
+    kHasStandardSession = 3,
+    kHasPrototypeSession = 4,
+    kNotFirstRun = 5,
+    kNeedsUpgrade = 6,
+    kMaxValue = kNeedsUpgrade,
+  };
+  // LINT.ThenChange(//tools/metrics/histograms/metadata/signin/enums.xml:CookieBindingUpgradeStatus)
 
   void set_timer_for_testing(std::unique_ptr<base::OneShotTimer> timer);
 
@@ -350,7 +405,8 @@ class AccountReconcilor
   // consistency is enabled. Virtual so that they can be overridden in tests.
   virtual void PerformLogoutAllAccountsAction();
   virtual void PerformSetCookiesAction(
-      const signin::MultiloginParameters& parameters);
+      const signin::MultiloginParameters& parameters,
+      bool is_cookie_upgrade = false);
 
   // Used during periodic reconciliation.
   void StartReconcile(Trigger trigger);
@@ -372,7 +428,7 @@ class AccountReconcilor
   std::vector<CoreAccountId> LoadValidAccountsFromTokenService() const;
 
   // The reconcilor only starts when the token service is ready.
-  bool IsIdentityManagerReady();
+  bool IsIdentityManagerReady() const;
 
   // Overridden from content_settings::Observer.
   void OnContentSettingChanged(
@@ -425,7 +481,21 @@ class AccountReconcilor
   // no-op.
   bool CookieNeedsUpdate(
       const signin::MultiloginParameters& parameters,
-      const std::vector<gaia::ListedAccount>& existing_accounts);
+      const std::vector<gaia::ListedAccount>& existing_accounts,
+      CookieBindingUpgradeStatus upgrade_status);
+
+  // Returns the status of the cookie binding upgrade check.
+  CookieBindingUpgradeStatus NeedsCookieBindingUpgrade() const;
+
+  // If some of the cookie binding preconditions aren't met, returns a
+  // `CookieBindingUpgradeStatus` indicating why upgrade is not possible.
+  base::expected<void, CookieBindingUpgradeStatus>
+  CheckCookieBindingUpgradePreconditions() const;
+
+  // Defers reconciliation on startup if we need to check DBSC sessions to see
+  // if a cookie upgrade is required. Returns true if reconciliation was
+  // deferred.
+  bool MaybeDeferReconciliationForCookieUpgrade();
 
   // Sets the reconcilor state and calls Observer::OnStateChanged() if needed.
   void SetState(signin_metrics::AccountReconcilorState state);
@@ -435,12 +505,18 @@ class AccountReconcilor
 
   static void RecordReconcileOperation(Trigger trigger, Operation operation);
 
+  void FetchDeviceBoundSessions();
+  void OnDeviceBoundSessionsFetched(
+      std::optional<base::TimeTicks> fetch_start_time,
+      const std::vector<net::device_bound_sessions::SessionKey>& sessions);
+
   // Histogram names.
   static const char kOperationHistogramName[];
   static const char kTriggerLogoutHistogramName[];
   static const char kTriggerMultiloginHistogramName[];
   static const char kTriggerNoopHistogramName[];
   static const char kTriggerThrottledHistogramName[];
+  static const char kCookieJarIsFreshHistogramName[];
 
   std::unique_ptr<signin::AccountReconcilorDelegate> delegate_;
   AccountReconcilorThrottler throttler_;
@@ -519,6 +595,11 @@ class AccountReconcilor
   // suspend the reconcilor.
   signin_metrics::AccountReconcilorState state_ =
       signin_metrics::AccountReconcilorState::kInactive;
+
+  signin::Tribool has_standard_device_bound_session_ =
+      signin::Tribool::kUnknown;
+  bool reconcile_on_device_bound_sessions_fetched_ = false;
+  bool reconciliation_deferred_logged_ = false;
 
   // Set to true when Shutdown() is called.
   bool was_shut_down_ = false;

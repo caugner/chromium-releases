@@ -23,7 +23,9 @@ import org.chromium.ui.modelutil.PropertyObservable;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Manages the collection of action buttons in the bottom bar, handling their bindings and
@@ -65,24 +67,34 @@ public class BottomBarButtonManager implements Destroyable {
         public final PropertyModelChangeProcessor.ViewBinder<PropertyModel, View, PropertyKey>
                 binder;
         public final PropertyModel.WritableBooleanPropertyKey visibilityPropertyKey;
+        public final boolean initiallyVisible;
 
         /**
-         * Constructs an ActionConfig.
+         * Constructs an {@link ActionConfig}.
          *
          * @param actionId The ID of the action.
          * @param container The container view for the button.
          * @param binder The view binder for the button.
          * @param visibilityPropertyKey The property key for visibility in the bottom bar model.
+         * @param initiallyVisible Whether the action is initially requested to be visible in the
+         *     bottom bar upon registration.
+         *     <p>Standard standalone buttons (e.g., Home, New Tab, Tab Switcher, App Menu) should
+         *     pass {@code true} so they become visible as soon as their models are supplied.
+         *     <p>Mutually exclusive candidates (e.g., GLIC and AI Mode) MUST pass {@code false}.
+         *     This defers {@link PropertyModelChangeProcessor} creation until later once statically
+         *     resolved to avoid the view data not updating due to the MCP already being bound.
          */
         public ActionConfig(
                 @ActionId int actionId,
                 BottomBarButtonContainer container,
                 PropertyModelChangeProcessor.ViewBinder<PropertyModel, View, PropertyKey> binder,
-                PropertyModel.WritableBooleanPropertyKey visibilityPropertyKey) {
+                PropertyModel.WritableBooleanPropertyKey visibilityPropertyKey,
+                boolean initiallyVisible) {
             this.actionId = actionId;
             this.container = container;
             this.binder = binder;
             this.visibilityPropertyKey = visibilityPropertyKey;
+            this.initiallyVisible = initiallyVisible;
         }
     }
 
@@ -98,7 +110,7 @@ public class BottomBarButtonManager implements Destroyable {
 
         private @Nullable PropertyModel mModel;
         private @Nullable PropertyModelChangeProcessor<PropertyModel, View, PropertyKey> mMcp;
-        private boolean mRequestedVisibility = true;
+        private boolean mRequestedVisibility;
         private boolean mCachedVisibility;
 
         /**
@@ -110,6 +122,7 @@ public class BottomBarButtonManager implements Destroyable {
          * @param observer Observer for the model supplier.
          * @param position The {@link ButtonPosition} in respect to the center button.
          * @param visibilityPropertyKey The property key for visibility in the bottom bar model.
+         * @param initiallyVisible Whether the action is initially requested to be visible.
          */
         private ButtonBinding(
                 BottomBarButtonContainer container,
@@ -117,13 +130,15 @@ public class BottomBarButtonManager implements Destroyable {
                 NullableObservableSupplier<PropertyModel> supplier,
                 Callback<@Nullable PropertyModel> observer,
                 @ButtonPosition int position,
-                PropertyModel.WritableBooleanPropertyKey visibilityPropertyKey) {
+                PropertyModel.WritableBooleanPropertyKey visibilityPropertyKey,
+                boolean initiallyVisible) {
             mContainer = container;
             mBinder = binder;
             mSupplier = supplier;
             mObserver = observer;
             mPosition = position;
             mVisibilityPropertyKey = visibilityPropertyKey;
+            mRequestedVisibility = initiallyVisible;
         }
     }
 
@@ -170,7 +185,8 @@ public class BottomBarButtonManager implements Destroyable {
                     config.container,
                     config.binder,
                     position,
-                    config.visibilityPropertyKey);
+                    config.visibilityPropertyKey,
+                    config.initiallyVisible);
         }
         assert foundCenter : "Center action not found in configs";
     }
@@ -225,6 +241,7 @@ public class BottomBarButtonManager implements Destroyable {
      * @param binder The view binder for the button.
      * @param position The relative position of the button.
      * @param visibilityPropertyKey The property key for visibility in the bottom bar model.
+     * @param initiallyVisible Whether the action is initially requested to be visible.
      */
     private void registerAction(
             @ActionId int actionId,
@@ -232,14 +249,21 @@ public class BottomBarButtonManager implements Destroyable {
             BottomBarButtonContainer container,
             PropertyModelChangeProcessor.ViewBinder<PropertyModel, View, PropertyKey> binder,
             @ButtonPosition int position,
-            PropertyModel.WritableBooleanPropertyKey visibilityPropertyKey) {
+            PropertyModel.WritableBooleanPropertyKey visibilityPropertyKey,
+            boolean initiallyVisible) {
         assert mButtons.indexOfKey(actionId) < 0 : "Action already registered: " + actionId;
 
         Callback<@Nullable PropertyModel> observer = model -> onModelChanged(actionId, model);
 
         ButtonBinding state =
                 new ButtonBinding(
-                        container, binder, supplier, observer, position, visibilityPropertyKey);
+                        container,
+                        binder,
+                        supplier,
+                        observer,
+                        position,
+                        visibilityPropertyKey,
+                        initiallyVisible);
         mButtons.put(actionId, state);
 
         supplier.addSyncObserverAndCallIfNonNull(observer);
@@ -261,14 +285,50 @@ public class BottomBarButtonManager implements Destroyable {
 
         // Update model properties and calculate centering.
         int balance = 0;
+        Set<PropertyModel.WritableBooleanPropertyKey> visibleKeys = new HashSet<>();
+        @ActionId int activeExtraActionId = ActionId.GLIC;
         for (int i = 0; i < mButtons.size(); i++) {
+            @ActionId int actionId = mButtons.keyAt(i);
             ButtonBinding state = mButtons.valueAt(i);
             boolean visible = isVisible(state);
-            mBottomBarModel.set(state.mVisibilityPropertyKey, visible);
+            // Bind the PropertyModelChangeProcessor when the button becomes visible,
+            // and destroy it when it becomes invisible. This ensures that on a shared slot
+            // (like GLIC and AI_MODE sharing the extra container), only the active action's
+            // binder is active, preventing clobbering.
             if (visible) {
+                if (state.mMcp == null && state.mModel != null) {
+                    state.mMcp =
+                            PropertyModelChangeProcessor.create(
+                                    state.mModel, state.mContainer, state.mBinder);
+                }
+            } else {
+                if (state.mMcp != null) {
+                    state.mMcp.destroy();
+                    state.mMcp = null;
+                }
+            }
+
+            if (visible) {
+                visibleKeys.add(state.mVisibilityPropertyKey);
                 balance += state.mPosition;
+                if (state.mVisibilityPropertyKey == BottomBarProperties.IS_EXTRA_BUTTON_VISIBLE) {
+                    activeExtraActionId = actionId;
+                }
             }
         }
+
+        // EXTRA_BUTTON_ACTION_ID must be set BEFORE updating the visibility properties,
+        // so that the view binder can query the correct active action ID when the visibility
+        // property change event is dispatched.
+        mBottomBarModel.set(BottomBarProperties.EXTRA_BUTTON_ACTION_ID, activeExtraActionId);
+
+        // Apply visibility to the bottom bar model based on the collected visible keys.
+        for (int i = 0; i < mButtons.size(); i++) {
+            ButtonBinding state = mButtons.valueAt(i);
+            boolean keyVisible = visibleKeys.contains(state.mVisibilityPropertyKey);
+            mBottomBarModel.set(state.mVisibilityPropertyKey, keyVisible);
+        }
+
         mHasCenteredButton = balance == ButtonPosition.CENTER;
 
         // Update cached visibility and dispatch button-specific events.
@@ -305,8 +365,6 @@ public class BottomBarButtonManager implements Destroyable {
         state.mModel = model;
 
         if (model != null) {
-            state.mMcp =
-                    PropertyModelChangeProcessor.create(model, state.mContainer, state.mBinder);
             model.addObserver(mModelObserver);
         }
         recomputeState();

@@ -168,7 +168,7 @@ public class WebauthnBrowserBridge {
      */
     public void cleanupRequest(@Nullable RenderFrameHost frameHost) {
         log(TAG, "cleanupRequest");
-        // This should never be called without a bridge already having been created.
+
         assert mNativeWebauthnBrowserBridge != 0;
 
         WebauthnBrowserBridgeJni.get().cleanupRequest(mNativeWebauthnBrowserBridge, frameHost);
@@ -182,11 +182,15 @@ public class WebauthnBrowserBridge {
      */
     public void cleanupCredManRequest(@Nullable RenderFrameHost frameHost) {
         log(TAG, "cleanupCredManRequest");
-        // This should never be called without a bridge already having been created.
+
         assert mNativeWebauthnBrowserBridge != 0;
 
         WebauthnBrowserBridgeJni.get()
                 .cleanupCredManRequest(mNativeWebauthnBrowserBridge, frameHost);
+    }
+
+    public boolean isInitialized() {
+        return mNativeWebauthnBrowserBridge != 0;
     }
 
     public void destroy() {

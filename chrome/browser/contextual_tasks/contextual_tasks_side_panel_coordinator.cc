@@ -35,25 +35,28 @@
 #include "chrome/browser/contextual_tasks/entry_point_eligibility_manager.h"
 #include "chrome/browser/devtools/devtools_ui_bindings.h"
 #include "chrome/browser/devtools/devtools_window.h"
+#include "chrome/browser/feature_engagement/tracker_factory.h"
 #include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_list/tab_list_interface.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
-#include "chrome/browser/ui/views/interaction/browser_elements_views.h"
+#include "chrome/browser/ui/user_education/browser_user_education_interface.h"
 #include "chrome/browser/ui/webui/new_tab_page/composebox/variations/composebox_fieldtrial.h"
 #include "chrome/browser/ui/webui/webui_embedding_context.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/webui_url_constants.h"
-#include "chrome/grit/generated_resources.h"
 #include "components/contextual_search/contextual_search_metrics_recorder.h"
 #include "components/contextual_search/contextual_search_service.h"
 #include "components/contextual_search/contextual_search_session_handle.h"
 #include "components/contextual_tasks/public/contextual_task.h"
 #include "components/contextual_tasks/public/contextual_tasks_service.h"
 #include "components/contextual_tasks/public/features.h"
+#include "components/contextual_tasks/public/prefs.h"
+#include "components/feature_engagement/public/feature_constants.h"
+#include "components/feature_engagement/public/tracker.h"
 #include "components/lens/lens_overlay_dismissal_source.h"
 #include "components/permissions/permission_request_manager.h"
 #include "components/prefs/pref_service.h"
@@ -61,6 +64,7 @@
 #include "components/strings/grit/components_strings.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "components/web_modal/web_contents_modal_dialog_manager_delegate.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/page.h"
@@ -85,7 +89,6 @@
 namespace {
 
 #if !BUILDFLAG(IS_ANDROID)
-// LINT.IfChange(GetContextualTasksArmShortName)
 std::string GetContextualTasksArmShortName() {
   using contextual_tasks::ExpandButtonOption;
   ExpandButtonOption expand_button = contextual_tasks::GetExpandButtonOption();
@@ -124,7 +127,6 @@ std::string GetContextualTasksArmShortName() {
 
   return "Default";
 }
-// LINT.ThenChange(//chrome/browser/about_flags.cc)
 #endif  // !BUILDFLAG(IS_ANDROID)
 
 std::unique_ptr<content::WebContents> CreateWebContents(
@@ -250,15 +252,17 @@ ContextualTasksPanelController* ContextualTasksPanelController::From(
 
 void ContextualTasksSidePanelCoordinator::Show(
     bool transition_from_tab,
-    omnibox::ChromeAimEntryPoint entry_point) {
-  EntrySource entry_source;
+    omnibox::ChromeAimEntryPoint entry_point,
+    bool use_no_animation) {
+  ContextualTasksPanelController::EntrySource entry_source;
   if (entry_point == omnibox::ChromeAimEntryPoint::
                          DESKTOP_CHROME_LENS_CONTEXTUAL_SEARCHBOX_ENTRY_POINT) {
-    entry_source = EntrySource::kLensOverlay;
+    entry_source = ContextualTasksPanelController::EntrySource::kLensOverlay;
   } else if (transition_from_tab) {
-    entry_source = EntrySource::kAiModeLinkClick;
+    entry_source =
+        ContextualTasksPanelController::EntrySource::kAiModeLinkClick;
   } else {
-    entry_source = EntrySource::kOther;
+    entry_source = ContextualTasksPanelController::EntrySource::kOther;
   }
 
   // Increment the impression count and attempt to show the HaTS survey.
@@ -295,6 +299,7 @@ void ContextualTasksSidePanelCoordinator::Show(
   tabs::TabInterface* active_tab_interface =
       TabListInterface::From(browser_window_)->GetActiveTab();
   CHECK(active_tab_interface);
+  CloseLensSessionIfActive(active_tab_interface, entry_point);
   if (!GetCurrentTask()) {
     // If no task is found, create a new task and associate it with the active
     // tab.
@@ -314,10 +319,16 @@ void ContextualTasksSidePanelCoordinator::Show(
   }
   UpdateWebContentsForActiveTab();
 
-  contextual_tasks_panel_host_->Show(
-      transition_from_tab
-          ? ContextualTasksPanelHost::AnimationStyle::kTransitionFromTab
-          : ContextualTasksPanelHost::AnimationStyle::kStandard);
+  ContextualTasksPanelHost::AnimationStyle animation_style =
+      ContextualTasksPanelHost::AnimationStyle::kStandard;
+  if (use_no_animation) {
+    animation_style = ContextualTasksPanelHost::AnimationStyle::kNoAnimation;
+  } else if (transition_from_tab) {
+    animation_style =
+        ContextualTasksPanelHost::AnimationStyle::kTransitionFromTab;
+  }
+
+  contextual_tasks_panel_host_->Show(animation_style);
 
   UpdateOpenState(/*is_open=*/true);
   UpdateContextualTaskUI();
@@ -333,6 +344,24 @@ void ContextualTasksSidePanelCoordinator::Show(
         /*anchored_message_text=*/std::string(),
         glic::GlicNudgeActivity::kNudgeIgnoredOpenedContextualTasksSidePanel,
         base::DoNothing());
+  }
+
+  // Feature engagement session notice and IPH trigger checks.
+  feature_engagement::Tracker* tracker =
+      feature_engagement::TrackerFactory::GetForBrowserContext(
+          browser_window_->GetProfile());
+  if (tracker) {
+    tracker->NotifyEvent("contextual_tasks_session_started");
+
+    // Increment post-onboarding session count if it has been explicitly
+    // initialized (>= 0).
+    int post_onboarding_sessions =
+        pref_service_->GetInteger(kContextualTasksSessionCountPostOnboarding);
+    if (post_onboarding_sessions >= 0) {
+      post_onboarding_sessions++;
+      pref_service_->SetInteger(kContextualTasksSessionCountPostOnboarding,
+                                post_onboarding_sessions);
+    }
   }
 #endif  // !BUILDFLAG(IS_ANDROID)
 }
@@ -354,10 +383,60 @@ void ContextualTasksSidePanelCoordinator::Close() {
   NotifyActiveTaskContextProvider();
 
   RecordSessionEndMetrics();
+
+  // Disassociate all tabs associated with the current task on close so that
+  // re-opening the panel always starts a fresh zero-state thread regardless of
+  // which associated tab is active.
+  DisassociateAllTabsFromCurrentTask();
+  CleanUpUnusedWebContents();
+
+  if (kShowEntryPoint.Get() == EntryPointOption::kNoEntryPoint) {
+    if (content::WebContents* active_web_contents = GetActiveWebContents()) {
+      MaybeDetachWebContents(active_web_contents);
+      for (auto it = task_id_to_web_contents_cache_.begin();
+           it != task_id_to_web_contents_cache_.end(); ++it) {
+        if (it->second->web_contents.get() == active_web_contents) {
+          task_id_to_web_contents_cache_.erase(it);
+          break;
+        }
+      }
+    }
+  }
+}
+
+void ContextualTasksSidePanelCoordinator::OpenInZeroState() {
+  DisassociateAllTabsFromCurrentTask();
+
+  if (content::WebContents* active_contents = GetActiveWebContents()) {
+    MaybeDetachWebContents(active_contents);
+  }
+
+  CleanUpUnusedWebContents();
+  bool is_pinned =
+      contextual_tasks::IsContextualTasksPinButtonInToolbarEnabled() &&
+      contextual_tasks::GetEffectivePinState(browser_window_->GetProfile());
+
+  Show(/*transition_from_tab=*/false,
+       is_pinned ? omnibox::ChromeAimEntryPoint::
+                       DESKTOP_CHROME_COBROWSE_PINNED_TOOLBAR_BUTTON
+                 : omnibox::ChromeAimEntryPoint::
+                       DESKTOP_CHROME_COBROWSE_TOOLBAR_BUTTON);
 }
 
 bool ContextualTasksSidePanelCoordinator::IsPanelOpenForContextualTask() const {
   return contextual_tasks_panel_host_->IsPanelOpenForContextualTask();
+}
+
+ContextualTasksPanelController::EntrySource
+ContextualTasksSidePanelCoordinator::GetActiveEntrySource() const {
+  if (content::WebContents* active_web_contents = GetActiveWebContents()) {
+    for (const auto& it : task_id_to_web_contents_cache_) {
+      if (it.second->web_contents.get() == active_web_contents) {
+        return it.second->entry_source;
+      }
+    }
+  }
+  return ContextualTasksPanelController::EntrySource::kOther;
 }
 
 void ContextualTasksSidePanelCoordinator::TransferWebContentsFromTab(
@@ -793,6 +872,23 @@ void ContextualTasksSidePanelCoordinator::OnActiveTabChanged(
          web_contents_changed ? "ChangedThreads" : "StayedOnThread"}));
   }
 
+  if (!is_panel_currently_open && tab && tab->GetContents()) {
+    // If this tab was opened from a contextual tasks page (e.g. clicking a link
+    // on a full tab AIM page), we should not log OpenFullTab.
+    tabs::TabInterface* opener = tab_list.GetOpenerForTab(tab->GetHandle());
+    bool opened_from_contextual_tasks =
+        opener && opener->GetContents() &&
+        ContextualTasksUiService::IsContextualTasksUrl(
+            opener->GetContents()->GetLastCommittedURL());
+
+    if (!opened_from_contextual_tasks &&
+        ContextualTasksUiService::IsContextualTasksUrl(
+            tab->GetContents()->GetLastCommittedURL())) {
+      base::RecordAction(base::UserMetricsAction(
+          "ContextualTasks.TabChange.UserAction.OpenFullTab"));
+    }
+  }
+
   ObserveWebContentsOnActiveTab();
 
   NotifyActiveTaskContextProvider();
@@ -906,6 +1002,11 @@ void ContextualTasksSidePanelCoordinator::UpdateContextualTaskUI() {
   if (auto* web_ui_interface = GetWebUiInterface(web_contents)) {
     web_ui_interface->OnActiveTabContextStatusChanged();
   }
+
+  std::optional<ContextualTask> task = GetCurrentTask();
+  if (task) {
+    contextual_tasks_service_->SetLastActiveTask(task->GetTaskId());
+  }
 }
 
 void ContextualTasksSidePanelCoordinator::MaybeDetachWebContents(
@@ -917,12 +1018,45 @@ void ContextualTasksSidePanelCoordinator::MaybeDetachWebContents(
 
 void ContextualTasksSidePanelCoordinator::DisassociateTabFromTask(
     content::WebContents* web_contents) {
+  if (!contextual_tasks_service_) {
+    return;
+  }
   SessionID tab_id = sessions::SessionTabHelper::IdForTab(web_contents);
   std::optional<ContextualTask> task =
       contextual_tasks_service_->GetContextualTaskForTab(tab_id);
   if (task) {
     contextual_tasks_service_->DisassociateTabFromTask(task->GetTaskId(),
                                                        tab_id);
+  }
+}
+
+void ContextualTasksSidePanelCoordinator::DisassociateAllTabsFromCurrentTask() {
+  if (!contextual_tasks_service_) {
+    return;
+  }
+  std::optional<ContextualTask> current_task = GetCurrentTask();
+  if (current_task) {
+    if (contextual_tasks::kShowEntryPoint.Get() ==
+            contextual_tasks::EntryPointOption::kToolbarEphemeralBranded &&
+        current_task->GetThread().has_value()) {
+      return;
+    }
+
+    std::vector<SessionID> associated_tab_ids =
+        contextual_tasks_service_->GetTabsAssociatedWithTask(
+            current_task->GetTaskId());
+    for (SessionID tab_id : associated_tab_ids) {
+      contextual_tasks_service_->DisassociateTabFromTask(
+          current_task->GetTaskId(), tab_id);
+    }
+  } else {
+    TabListInterface* tab_list = TabListInterface::From(browser_window_);
+    if (tab_list) {
+      tabs::TabInterface* active_tab_interface = tab_list->GetActiveTab();
+      if (active_tab_interface && active_tab_interface->GetContents()) {
+        DisassociateTabFromTask(active_tab_interface->GetContents());
+      }
+    }
   }
 }
 
@@ -974,6 +1108,25 @@ void ContextualTasksSidePanelCoordinator::CloseLensSessionsForTask(
 #endif  // !BUILDFLAG(IS_ANDROID)
     }
   }
+}
+
+void ContextualTasksSidePanelCoordinator::CloseLensSessionIfActive(
+    tabs::TabInterface* tab_interface,
+    omnibox::ChromeAimEntryPoint entry_point) {
+#if !BUILDFLAG(IS_ANDROID)
+  if (entry_point != omnibox::ChromeAimEntryPoint::
+                         DESKTOP_CHROME_COBROWSE_PINNED_TOOLBAR_BUTTON &&
+      entry_point != omnibox::ChromeAimEntryPoint::
+                         DESKTOP_CHROME_COBROWSE_TOOLBAR_BUTTON) {
+    return;
+  }
+
+  auto* search_controller = LensSearchController::From(tab_interface);
+  if (search_controller && search_controller->IsActive()) {
+    search_controller->CloseLensSync(
+        lens::LensOverlayDismissalSource::kUnexpectedSidePanelOpen);
+  }
+#endif
 }
 
 std::pair<std::optional<base::Uuid>,

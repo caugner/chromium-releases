@@ -102,7 +102,7 @@ class FakeAutocompleteProviderClient : public MockAutocompleteProviderClient {
 
   void Classify(
       const std::u16string& text,
-      bool prefer_keyword,
+      bool in_keyword_mode,
       bool allow_exact_keyword_match,
       metrics::OmniboxEventProto::PageClassification page_classification,
       AutocompleteMatch* match,
@@ -2350,7 +2350,7 @@ TEST_F(ZeroSuggestProviderTest,
   GURL composebox_suggest_url =
       GetSuggestURL(metrics::OmniboxEventProto::NTP_COMPOSEBOX_PREFETCH,
                     metrics::OmniboxFocusType::INTERACTION_FOCUS, "",
-                    TemplateURLRef::RequestSource::NTP_COMPOSEBOX);
+                    TemplateURLRef::RequestSource::COMPOSEBOX);
 
   EXPECT_TRUE(test_loader_factory()->IsPending(ntp_suggest_url.spec()));
   EXPECT_TRUE(test_loader_factory()->IsPending(composebox_suggest_url.spec()));
@@ -2412,7 +2412,7 @@ TEST_F(ZeroSuggestProviderTest, TestComposeboxPrefetchWithSuggestInventory) {
   GURL composebox_suggest_url =
       GetSuggestURL(metrics::OmniboxEventProto::NTP_COMPOSEBOX_PREFETCH,
                     metrics::OmniboxFocusType::INTERACTION_FOCUS, "",
-                    TemplateURLRef::RequestSource::NTP_COMPOSEBOX,
+                    TemplateURLRef::RequestSource::COMPOSEBOX,
                     omnibox::SuggestInventory::SUGGEST_INVENTORY_TRAVEL);
 
   EXPECT_TRUE(test_loader_factory()->IsPending(ntp_suggest_url.spec()));

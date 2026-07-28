@@ -43,7 +43,6 @@ constexpr auto kCommonAllowlist = base::MakeFixedFlatSet<std::string_view>({
     "aepgaekjheajlcifmpjcnpbjcencoefn",
     "afoipjmffplafpbfjopglheidddioiai",
     "afpnehpifljbjjplppeplamalioanmio",
-    "ahpbemfdnadmigmdjhebofmeaonbpfmc",
     "anjihnbmjbbpofafpmklejenkgnjfcdi",
     "aoijoapjiidlaapoinclpjkmpaeckiff",
     "aphendncpdekdkepekckjkiloclamieb",
@@ -56,7 +55,6 @@ constexpr auto kCommonAllowlist = base::MakeFixedFlatSet<std::string_view>({
     "bpmgmelggoioalpijejanjhbjkfeehbg",
     "cahbpjmendhigemdnlifkfmdhnipbdil",
     "cajomgbhgfomgakdejohnkomlblhhlmo",
-    "cdebpoondplobcgjepkgplleeeeojmpa",
     "cdgdgmknjolkacdiheibdjmidfkooodf",
     "cedlmaejgblmkmnddjikaagkhbfonihp",
     "cgpnjolncgemfdgbfokgdbmhpondgjmm",
@@ -66,7 +64,6 @@ constexpr auto kCommonAllowlist = base::MakeFixedFlatSet<std::string_view>({
     "demlnppodlnndiacjgbijdjnnnoninak",
     "denipklgekfpcdmbahmbpnmokgajnhma",
     "deokbmklnlnlikckmachjjhgnidefhhg",
-    "dgmhhjhnkhlmooconggnbjhlmpkpliij",
     "djkbhkgnbiknnlinckcclejmjkddokhl",
     "djobiocnmcaeodjcdhbhjgjndhiadgod",
     "eaghkdkaebflfmmhidgnldnncfpknpne",
@@ -77,7 +74,6 @@ constexpr auto kCommonAllowlist = base::MakeFixedFlatSet<std::string_view>({
     "ejbidlmioeopgmjieecjihnlgacicoie",
     "ejoilaclhpbfooagcjdkkmklhjipgmll",
     "ekiflcmfallbndjhecchfcipbaajdfhl",
-    "ekigfkofdacepchbgkogfedfapdekjgp",
     "emejfeljcemojhhcmobdeflgjabpafip",
     "emlbfhdjchamibhjgcokeipljabljheo",
     "enfpdhommpcbfiojillmflopkkjbcjmf",
@@ -86,7 +82,6 @@ constexpr auto kCommonAllowlist = base::MakeFixedFlatSet<std::string_view>({
     "fecgcoakonfhepcppcbddeefeoekhbah",
     "fenegagmedfckampfgjbeoflcpcpdppc",
     "ffhbnjlppmbnhahkbkcjgapgfinabjgb",
-    "fhohelmkloeoheiminpldlhkdfcmjbfm",
     "fjdejbdegplidjpkgcblpdibepibfifg",
     "fmfiolcdkhopmhgjbmlgpfcpfbeneope",
     "fnbgnnegegboidihpleofgakpegcidim",
@@ -99,7 +94,6 @@ constexpr auto kCommonAllowlist = base::MakeFixedFlatSet<std::string_view>({
     "gjenjmcioeobmpllaeopaoibabhgcohi",
     "glcdffonolecglhbodpaeijkhgdfkbon",
     "gnddkmpjjjcimefninepfmmddpgaaado",
-    "gngadipbljmmcgcjjflidckpbgebnhod",
     "gnogkjfeajjnafijfmffnkgenhnkdnfp",
     "gpgnoonhefbmngkiafpedbligiiekfcp",
     "haeblkpifdemlfnkogkipmghfcbonief",
@@ -136,12 +130,10 @@ constexpr auto kCommonAllowlist = base::MakeFixedFlatSet<std::string_view>({
     "jjoncgfekjbknjfejfonaochdpdedbka",
     "jlgegmdnodfhciolbdjciihnlaljdbjo",
     "jnnkgopblccifpnkfpfkmdafjebjlhcc",
-    "jnojnnofimbdpeihiddafgagckdlnlpe",
     "jpmngkkdajjfkdknhbifjbglkckbklee",
     "kahkblckpdgogkogmfhfnldpjhdpfiia",
     "kdbdkbbfhghbggpjmpapmobihghkdmkh",
     "kdndmepchimlohdcdkokdddpbnniijoa",
-    "kenkpdjcfppbccchillfdjkjnejjgand",
     "kflikliicodcopdhibchdfaninnhbalf",
     "kfllildicglifipmhpnlmpfbkdponghk",
     "khpfeaanjngmcnplbdlpegiifgpfgdco",
@@ -160,10 +152,8 @@ constexpr auto kCommonAllowlist = base::MakeFixedFlatSet<std::string_view>({
     "lnnghenlbgaeloipgjlafjhlccipbpnm",
     "maegcedffmoidlccpjahiglkaacbncnn",
     "mclaaifjbcglkbdhdkaamamplpjoabih",
-    "mdmkkicfmmkgmpkmkdikhlbggogpicma",
     "medpmkohocjidlghgmnnkpfigfpddaok",
     "mhbelemjphdecdagmmengimkkiefmcej",
-    "mhfhafklkbgalhbdihiccegaldefdigp",
     "mhjpnpdhahbahbjedoihlganncneknfo",
     "millmignkmpaolllendlllaibmeehohd",
     "mkjgggeeejocddadcegdhcchhmemokcn",
@@ -185,7 +175,6 @@ constexpr auto kCommonAllowlist = base::MakeFixedFlatSet<std::string_view>({
     "ofmlpkdeaopippomdfamngkpnbagkdem",
     "ogmfbebknnapidhhefcdgmoafjeblnjo",
     "okaiidkcbkpimeiebofglgpobdafmmeb",
-    "ondpjadajoodngapikdebdcnjcjkeecc",
     "opalidednimmhdfbcpdmoihhpkahgkak",
     "pdgbdkbnajhamggjjlhlapedeolflpgm",
     "pdpgalakpabfiiadeiimoolhemoleaeg",
@@ -202,104 +191,7 @@ constexpr auto kUserInstalledAllowlist = base::flat_set<std::string_view>();
 constexpr auto kKioskSessionAllowlist =
     base::MakeFixedFlatSet<std::string_view>({
         // go/keep-sorted start
-        "adbijfidmjidmkkpiglnfkflcoblkfmn",
-        "adpfhflbokfdhnfakijgjkpkjegncbpl",
-        "agkggapglfgffelalcfgbjmhkaljnbmn",
-        "alaoimaeafbgfglpffgcidfgbjnekifp",
-        "alhlkpgheiefedomljbenmkpconkffhk",
-        "amdpebpoiccejfcnocgebkidfmkcdfei",
-        "aoebmljacknghkklaholjkflllbghhnj",
-        "bgldcjbajnkfkephalfogfgklkgjnjeo",
-        "bhcnmihmgdljpnnoobnbdmdjhmfgcpio",
-        "bloholppicibpgbagaebcaagiikicjbn",
-        "cafpcfibibiomlehdnmabchhekeifbgb",
-        "cdomppfkcljjopjijjdchhjfioljaeph",
-        "cgihdamofndnjjlglmcaabdafhmoconf",
-        "ckmkndfplnldgohnnkhmeokbmedpdbjl",
-        "clbgknjcblogheibmcbbdlpkollmgofh",
-        "cmhiajbopgbagidplpiaclnpglmhbhka",
-        "cpbpbhkfonocjjamhjeabdihibkoajlc",
-        "dakemaookmhkdfgcgebakflmhgdhille",
-        "dakmgckkclepfbfeldlgenikiobflcne",
-        "ddhhodggehedggajomidnmgchfnbeold",
-        "dfjigmapgofdlgieniibjdcddlaafick",
-        "dinalfjmfmjkdnkgbbjncgchmghijpgl",
-        "ealpglkmnpenllgjjgdojoemohidefdm",
-        "edhlcbaemfhpoblalbdgeegmaddjdcae",
-        "edpaojhfdnnebhmmhdlpnpomoaopfjod",
-        "efdahhfldoeikfglgolhibmdidbnpneo",
-        "emlbcjpcbepfnhpkiidenlnfdjbghmpg",
-        "fammfnbkkollpklfkachppebochgakjg",
-        "fcichhfeoaikaoldkncmggipmpcbgffg",
-        "fdlpibjfnlhnmeckjjhfiejfdghkmkdm",
-        "gbecpjnejcnafnkgfciepngjcndodann",
-        "gbgncgdjjnelalecmmkimnlgfpmbihog",
-        "gcefeoeohcoeoofmehgjfipjiepodlhg",
-        "gdehbmmmjkddbonbmknngoigkleicpec",
-        "genfdmkliekafjhadcpnhefgicceohhd",
-        "gmdgbdlpbnhiogedlhmdiceocbgcbpgi",
-        "gobhocmdcdpfebockbogdfhnebgmemnf",
-        "hadonmdpeimgfpmmmeldbmjiknnbfdhk",
-        "hbcogfhdhehbfnedbbboiiddpkkjjnio",
-        "hbfbekdejbpmnpilhdnfokjehnianfeb",
-        "hblfbmjdaalalhifaajnnodlkiloengc",
-        "hchdcamjekgapahefjapegmaapggeafe",
-        "hebfpdlglfmneladiogocbflmbjneeoh",
-        "hgkaljnpgngpcgnaonmbdgaolefknaaj",
-        "hhbmmipodfklmbmiaegcbmbfmmfbngnf",
-        "hjbkdjhfdcinjcljfbealemkioalnfao",
-        "ibboejlnnenbhpjfpgoglholgpdjjeff",
-        "icfpencnfmadodjpbbdipkkkljmamine",
-        "iflkfmkmpafjfdkkokpkjpjmiogkdjjl",
-        "igknghlgndjihblholjbbhjbcfilkilb",
-        "ilehifjdadbblbcnciiggmcbmobkikcb",
-        "jamdkebjilnlfjndffcnekbipcfkhmem",
-        "jcgamccimilnfjpbkbadommjcaplmfod",
-        "jefdfinffojbalcgpkigjjijghmllgil",
-        "jiecdjmgkgmgmbonhifblhfaaecnomcj",
-        "jifdnnnegbhoagepoobbmajnpkmcbjig",
-        "jjlmjgfhdijljijikefhmgmhbchnkmnm",
-        "jmiabaaccndlngedakcjbpbgokhgcpfd",
-        "jnlegeoomaehdodfmpmlflpjapebjjjl",
-        "jnlhnplbndpohngdfjhmdinlpofclhdp",
-        "kacodfanpfkedlelnagnbgfbaabjfddn",
-        "kbkcdgjhbdlplagmlcpafgamnapneoba",
-        "kcdfcljkllboedjeoaicmmabopnnaoaa",
-        "kdffphekpginklcnoefcelkjclbjnbmi",
-        "kedeaijhpgoggdafoabafeldkoolemig",
-        "kgoklcfigmpofpbkdglgbhfgpjdjgppl",
-        "kjbdapadhmcgplddmcggjkhacdnpjmod",
-        "kpjcmnnhdgonbhjnfhebgapnkicknmpp",
-        "lfemdemifjedlccfbhpocnicmjlcgmce",
-        "lgpjgoglfmjggeggfelogaboagbcaklg",
-        "lmdoekjmofbfghllkonahbfdcckmgjlf",
-        "lnokaenamkoojjbhehhpggplknlbejmi",
-        "mbkamiddebohpehiafofidepfffpffln",
-        "mfejnceblfpkdodajfohmjimcbipnhhh",
-        "mfgkakkfpnhfmnipnbehiglkjijancnk",
-        "mhboapffkffmmcggindghkakhdhmjcje",
-        "mhdohnfjdghnpjmhnlodibcnjlaeinap",
-        "mkgbgfehlfaioaejpaedngdohcpdpbpd",
-        "nanoidlkencgghkphophigbmnohnbbcb",
-        "nclhjadnjgfjocbnfmlcfnagnieialof",
-        "nddaogoljagaikdogplnajkdggkfmgei",
         "ngpbnegpinocjhpnppjeppllflpgafkk",
-        "nhlaojpmboioihghmmdbhgcbjgmcicdk",
-        "nickmpjdfebcopckkfjmflblnmijbiom",
-        "nloplhgjobaomjdppnbcdjfgbefifbdo",
-        "obgbgecgadcagmhnanalmklenjajimld",
-        "oblnbnkmblikfegpcngkcbppphcenhjj",
-        "ocljbfllcpgnlnnaommbmaphaagjmkmj",
-        "odjaaghiehpobimgdjjfofmablbaleem",
-        "ofaokfiblaffkgcapcilcehdhlidehcd",
-        "olaaocfpicpjiocmoklnbfpdlbglbadp",
-        "omkghcboodpimaoimdkmigofhjcpmpeb",
-        "omlplbdgdcpaaknjnkodikcklbkhefoh",
-        "oopdabjckchhklpldcdjllmedcdnbdio",
-        "pjdhfcpflabeafmgdpgdfdejbhkdcgja",
-        "pjicdfmcmiihceiefbmioikgkcicochj",
-        "plebdlehcdhfkmidnmfpolcifjngmdck",
-        "pmcgpdpmlgkeociebbpdbppimbeheoli"
         // go/keep-sorted end
     });
 
@@ -343,7 +235,7 @@ struct DeprecationState {
 // `enum ChromeAppDeprecationLaunchOutcome` in
 // `tools/metrics/histograms/metadata/apps/enums.xml`.
 // Entries should not be renumbered and numeric values should never be reused.
-// LINT.IfChange(ChromeAppDeprecationLaunchOutcome)
+// LINT.IfChange(DeprecationCheckOutcome)
 enum class DeprecationCheckOutcome {
   kUserInstalledAllowedByFlag = 0,
   kUserInstalledAllowedByAllowlist = 1,
@@ -359,7 +251,8 @@ enum class DeprecationCheckOutcome {
   kAllowedNotChromeApp = 11,
   kAllowedDefault = 12,
   kBlockedDefault = 13,
-  kMaxValue = kBlockedDefault
+  kKioskModeBlockedButAllowedByAdminPolicy = 14,
+  kMaxValue = kKioskModeBlockedButAllowedByAdminPolicy
 };
 // LINT.ThenChange(//tools/metrics/histograms/metadata/apps/enums.xml:ChromeAppDeprecationLaunchOutcome)
 
@@ -498,18 +391,20 @@ DeprecationStatus HandleKioskSessionApp(const extensions::Extension& app,
     return DeprecationStatus::kLaunchAllowed;
   }
 
-  if (profile->GetPrefs()->GetBoolean(
-          ash::prefs::kKioskChromeAppsForceAllowed)) {
-    ReportMetric(DeprecationCheckOutcome::kKioskModeAllowedByAdminPolicy);
-    return DeprecationStatus::kLaunchAllowed;
-  }
+  bool allowed_by_admin_policy =
+      profile->GetPrefs()->GetBoolean(ash::prefs::kKioskChromeAppsForceAllowed);
 
   if (base::FeatureList::IsEnabled(kAllowChromeAppsInKioskSessions)) {
-    ReportMetric(DeprecationCheckOutcome::kKioskModeAllowedByFlag);
+    ReportMetric(allowed_by_admin_policy
+                     ? DeprecationCheckOutcome::kKioskModeAllowedByAdminPolicy
+                     : DeprecationCheckOutcome::kKioskModeAllowedByFlag);
     return DeprecationStatus::kLaunchAllowed;
   }
 
-  ReportMetric(DeprecationCheckOutcome::kKioskModeBlocked);
+  ReportMetric(
+      allowed_by_admin_policy
+          ? DeprecationCheckOutcome::kKioskModeBlockedButAllowedByAdminPolicy
+          : DeprecationCheckOutcome::kKioskModeBlocked);
   return DeprecationStatus::kLaunchBlocked;
 }
 

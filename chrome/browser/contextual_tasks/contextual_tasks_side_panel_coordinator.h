@@ -60,12 +60,6 @@ class ContextualTasksSidePanelCoordinator
       public TabListInterfaceObserver,
       content::WebContentsObserver {
  public:
-  enum class EntrySource {
-    kOther,
-    kLensOverlay,
-    kAiModeLinkClick,
-  };
-
   // A data structure to hold the cache and state of the panel per thread.
   struct WebContentsCacheItem {
     WebContentsCacheItem(std::unique_ptr<content::WebContents> wc, bool open);
@@ -83,7 +77,8 @@ class ContextualTasksSidePanelCoordinator
     base::TimeTicks last_active_time_ticks;
 
     // The entry source that triggered this task's panel.
-    EntrySource entry_source = EntrySource::kOther;
+    ContextualTasksPanelController::EntrySource entry_source =
+        ContextualTasksPanelController::EntrySource::kOther;
   };
 
   DECLARE_USER_DATA(ContextualTasksSidePanelCoordinator);
@@ -111,9 +106,13 @@ class ContextualTasksSidePanelCoordinator
   void RemoveObserver(
       ContextualTasksPanelController::Observer* observer) override;
   void Show(bool transition_from_tab,
-            omnibox::ChromeAimEntryPoint entry_point) override;
+            omnibox::ChromeAimEntryPoint entry_point,
+            bool use_no_animation = false) override;
   void Close() override;
+  void OpenInZeroState() override;
   bool IsPanelOpenForContextualTask() const override;
+  ContextualTasksPanelController::EntrySource GetActiveEntrySource()
+      const override;
   std::optional<tabs::TabHandle> GetAutoSuggestedTabHandle() override;
   void OnTaskChanged(content::WebContents* web_contents,
                      base::Uuid task_id) override;
@@ -217,6 +216,12 @@ class ContextualTasksSidePanelCoordinator
   // Disassociate the tab from the task if it's associated with it.
   void DisassociateTabFromTask(content::WebContents* web_contents);
 
+  // Disassociate all tabs associated with the current task, or the active tab
+  // if no current task exists. Under kToolbarEphemeralBranded mode, active
+  // tasks with conversation threads are preserved on panel close to allow
+  // ephemeral button resume.
+  void DisassociateAllTabsFromCurrentTask();
+
   // Update open state of the panel.
   void UpdateOpenState(bool is_open);
 
@@ -225,6 +230,11 @@ class ContextualTasksSidePanelCoordinator
 
   // Closes any active Lens sessions for tabs associated with the given task.
   void CloseLensSessionsForTask(const ContextualTask& task);
+
+  // Closes any active Lens session on the given tab if it matches an
+  // eligibility criteria.
+  void CloseLensSessionIfActive(tabs::TabInterface* tab_interface,
+                                omnibox::ChromeAimEntryPoint entry_point);
 
   // Notifies the ActiveTaskContextProvider about the current session state.
   // This checks both the panel and the active tab for a valid session handle.
@@ -282,7 +292,8 @@ class ContextualTasksSidePanelCoordinator
 
   // Used to save the entry source that triggered a task's panel when the panel
   // is being closed so that it can be logged.
-  std::optional<EntrySource> closing_entry_source_;
+  std::optional<ContextualTasksPanelController::EntrySource>
+      closing_entry_source_;
 
   base::ObserverList<ContextualTasksPanelController::Observer> observers_;
 

@@ -29,6 +29,9 @@ bool IsProcessOverheadExperimentActive() {
 
 namespace features {
 
+// Enables the migration of browser commands to Action API.
+BASE_FEATURE(kUseActionsForBrowserCommands, base::FEATURE_DISABLED_BY_DEFAULT);
+
 // Enables the use of WGC for the Eye Dropper screen capture.
 BASE_FEATURE(kAllowEyeDropperWGCScreenCapture,
 #if BUILDFLAG(IS_WIN)
@@ -43,8 +46,6 @@ BASE_FEATURE(kCompositorLoadingThrobber, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kCreateNewTabGroupAppMenuTopLevel,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
-BASE_FEATURE(kEnableExtensionsMenuTeardownFix,
-             base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kCtrlTabMru, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kImportExportFlags, base::FEATURE_DISABLED_BY_DEFAULT);
@@ -66,6 +67,7 @@ BASE_FEATURE_PARAM(bool,
 BASE_FEATURE(kMenuSimplification, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kTabGroupColorRefresh, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kWebuiRefresh2026, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kAppMenuGlowUp, base::FEATURE_DISABLED_BY_DEFAULT);
 
 bool IsTabStripDeclutterEnabled() {
   return base::FeatureList::IsEnabled(kDesktopGlowUp) ||
@@ -107,11 +109,15 @@ BASE_FEATURE(kDseIntegrity, base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kFewerUpdateConfirmations, base::FEATURE_ENABLED_BY_DEFAULT);
 #endif
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
 
 BASE_FEATURE(kExtensionsCollapseMainMenu, base::FEATURE_DISABLED_BY_DEFAULT);
 
-#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
+// When enabled, newly installed extensions are pinned to the toolbar by
+// default.
+BASE_FEATURE(kExtensionsPinnedByDefault, base::FEATURE_DISABLED_BY_DEFAULT);
+
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS_CORE)
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
 // Shows an infobar on PDFs offering to become the default PDF viewer if Chrome
@@ -151,6 +157,10 @@ BASE_FEATURE_PARAM(int,
                    0);
 #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
 
+// Enables the AI subscription level decorative ring around the user's avatar.
+BASE_FEATURE(kEnableAiSubscriptionAvatarRing,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 // Preloads a WebContents with a Top Chrome WebUI on BrowserView initialization,
 // so that it can be shown instantly at a later time when necessary.
 BASE_FEATURE(kPreloadTopChromeWebUI, base::FEATURE_ENABLED_BY_DEFAULT);
@@ -168,6 +178,8 @@ BASE_FEATURE(kPressAndHoldEscToExitBrowserFullscreen,
 // Enables the UI for Process Isolation in chrome://settings/system.
 BASE_FEATURE(kProcessIsolationSettings, base::FEATURE_DISABLED_BY_DEFAULT);
 #endif  // BUILDFLAG(IS_WIN)
+
+BASE_FEATURE(kRealboxVirtualFocusNavigation, base::FEATURE_DISABLED_BY_DEFAULT);
 
 #if BUILDFLAG(IS_MAC)
 // Add tab group colours when viewing tab groups using the top mac OS menu bar.
@@ -213,6 +225,9 @@ BASE_FEATURE(kTabDuplicateMetrics, base::FEATURE_ENABLED_BY_DEFAULT);
 // https://crbug.com/40141996
 BASE_FEATURE(kTabGroupsCollapseFreezing, base::FEATURE_ENABLED_BY_DEFAULT);
 
+// Enables collapsing a tab group programmatically during a drag.
+BASE_FEATURE(kCollapseTabGroupDuringDrag, base::FEATURE_ENABLED_BY_DEFAULT);
+
 #if !BUILDFLAG(IS_ANDROID)
 BASE_FEATURE(kTabGroupMenuMoreEntryPoints, base::FEATURE_DISABLED_BY_DEFAULT);
 
@@ -242,6 +257,8 @@ BASE_FEATURE(kTabHoverCardImages,
 // activated.
 BASE_FEATURE(kTabStripSkipSelectionEventOnActivation,
              base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kTabStripNewTabButtonFlickerFix, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kTabModalUsesDesktopWidget, base::FEATURE_DISABLED_BY_DEFAULT);
 
@@ -275,7 +292,12 @@ BASE_FEATURE_PARAM(int,
                    350);
 
 BASE_FEATURE(kUseDefaultDeadlineWhenAnimatingBounds,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+#if BUILDFLAG(IS_MAC) && defined(ARCH_CPU_ARM64)
+             base::FEATURE_ENABLED_BY_DEFAULT
+#else
+             base::FEATURE_DISABLED_BY_DEFAULT
+#endif
+);
 
 // Enables enterprise profile badging for managed profiles on the toolbar avatar
 // and in the profile menu. On managed profiles, a building icon will be used as
@@ -293,6 +315,8 @@ BASE_FEATURE(kNTPFooterBadgingPolicies, base::FEATURE_ENABLED_BY_DEFAULT);
 // menus.
 BASE_FEATURE(kEnterpriseManagementDisclaimerUsesCustomLabel,
              base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kEnterpriseReleaseNotes, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kManagedProfileRequiredInterstitial,
              base::FEATURE_ENABLED_BY_DEFAULT);
@@ -325,7 +349,7 @@ BASE_FEATURE_PARAM(bool,
                    "intent_picker",
 // TODOD(crbug.com/480035938): Enable on ChromeOS.
 #if BUILDFLAG(IS_CHROMEOS)
-                   false
+                   true
 #else
                    true
 #endif
@@ -335,43 +359,37 @@ BASE_FEATURE_PARAM(bool,
                    kPageActionsMigrationZoom,
                    &kPageActionsMigration,
                    "zoom",
-                   false);
+                   true);
 
 BASE_FEATURE_PARAM(bool,
                    kPageActionsMigrationCookieControls,
                    &kPageActionsMigration,
                    "cookie_controls",
-                   false);
+                   true);
 
 BASE_FEATURE_PARAM(bool,
                    kPageActionsMigrationAutofillMandatoryReauth,
                    &kPageActionsMigration,
                    "mandatory_reauth",
-                   false);
-
-BASE_FEATURE_PARAM(bool,
-                   kPageActionsMigrationSharingHub,
-                   &kPageActionsMigration,
-                   "sharing_hub",
-                   false);
+                   true);
 
 BASE_FEATURE_PARAM(bool,
                    kPageActionsMigrationAiMode,
                    &kPageActionsMigration,
                    "ai_mode",
-                   false);
+                   true);
 
 BASE_FEATURE_PARAM(bool,
                    kPageActionsMigrationVirtualCard,
                    &kPageActionsMigration,
                    "virtual_card",
-                   false);
+                   true);
 
 BASE_FEATURE_PARAM(bool,
                    kPageActionsMigrationFilledCardInformation,
                    &kPageActionsMigration,
                    "filled_card_information",
-                   false);
+                   true);
 
 BASE_FEATURE_PARAM(bool,
                    kPageActionsMigrationReadingMode,
@@ -383,21 +401,19 @@ BASE_FEATURE_PARAM(bool,
                    kPageActionsMigrationSavePayments,
                    &kPageActionsMigration,
                    "save_payments",
-                   false);
+                   true);
 BASE_FEATURE_PARAM(bool,
                    kPageActionsMigrationLensOverlayHomework,
                    &kPageActionsMigration,
                    "lens_overlay_homework",
-                   false);
+                   true);
 BASE_FEATURE_PARAM(bool,
                    kPageActionsMigrationBookmarkStar,
                    &kPageActionsMigration,
                    "bookmark_star",
-                   false);
+                   true);
 
 BASE_FEATURE(kPageActionsPrioritySelector, base::FEATURE_DISABLED_BY_DEFAULT);
-
-BASE_FEATURE(kSavePasswordsContextualUi, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kByDateHistoryInSidePanel, base::FEATURE_DISABLED_BY_DEFAULT);
 
@@ -579,6 +595,11 @@ BASE_FEATURE(kToolbarProfileChipResizing, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kToolbarGlicButtonResizing, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kOSCryptAsyncAvailabilityInfoBar,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+#if BUILDFLAG(IS_MAC)
+             base::FEATURE_ENABLED_BY_DEFAULT
+#else
+             base::FEATURE_DISABLED_BY_DEFAULT
+#endif
+);
 
 }  // namespace features

@@ -7,7 +7,6 @@
 
 #include <memory>
 
-#include "base/functional/function_ref.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -44,8 +43,8 @@ class AccountSelectionViewBase;
 //  * tabs::TabInterface, which represents the tab in which the UI is shown.
 // If either goes away, then this class should be destroyed. This class is owned
 // as a unique_ptr by IdentityDialogController which ensures that the lifetime
-// is scoped to that of RequestService. However, the lifetime must be
-// manually scoped to the tabs::TabInterface. This is done by:
+// is scoped to that of content::webid::Request. However, the lifetime
+// must be manually scoped to the tabs::TabInterface. This is done by:
 //  * Registering callbacks on tabs::TabInterface for relevant changes.
 //  * If the tab goes away, Close() is called.
 //  * All methods to show UI early exit if the tab no longer exists.
@@ -407,10 +406,11 @@ class FedCmAccountSelectionView : public AccountSelectionView,
   // the background, becomes foregrounded.
   void BackgroundTaskTabForegrounded(tabs::TabInterface* tab);
 
-  // Calls a delegate method while guarding against `this` being deleted.
   // Returns false if `this` got deleted. In that case, the caller must early
   // return.
-  [[nodiscard]] bool NotifyDelegate(base::FunctionRef<void()> notify_callback);
+  bool NotifyDelegateOfAccountSelection(
+      const Account& account,
+      const content::IdentityProviderData& idp_data);
 
   // Shows the verifying sheet.
   void ShowVerifyingSheet(const IdentityRequestAccountPtr& account);

@@ -30,7 +30,6 @@ import android.content.res.Configuration;
 import android.graphics.Rect;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.PopupWindow;
 
 import androidx.test.ext.junit.rules.ActivityScenarioRule;
 import androidx.test.filters.SmallTest;
@@ -42,7 +41,6 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
-import org.mockito.Spy;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.robolectric.Robolectric;
@@ -83,6 +81,7 @@ import org.chromium.ui.display.DisplayAndroid;
 import org.chromium.ui.listmenu.BasicListMenu;
 import org.chromium.ui.listmenu.ListMenuItemProperties;
 import org.chromium.ui.modelutil.MVCListAdapter.ModelList;
+import org.chromium.ui.widget.ChromePopupWindow;
 import org.chromium.ui.widget.UiWidgetFactory;
 import org.chromium.ui.widget.ViewRectProvider;
 import org.chromium.url.GURL;
@@ -120,7 +119,7 @@ public final class ToolbarLongPressMenuHandlerUnitTest {
     @Mock private WindowAndroid mWindowAndroid;
     @Mock private ActivityLifecycleDispatcher mActivityLifecycleDispatcher;
     @Mock private DisplayAndroid mDisplayAndroid;
-    @Spy PopupWindow mSpyPopupWindow;
+    private ChromePopupWindow mSpyPopupWindow;
     @Mock LocalStatePrefs.Natives mLocalStatePrefsNatives;
     @Mock PrefService mLocalPrefService;
 
@@ -583,6 +582,23 @@ public final class ToolbarLongPressMenuHandlerUnitTest {
     @EnableFeatures(ChromeFeatureList.SEND_TAB_TO_SELF_EXTRA_ENTRY_POINTS)
     public void testBuildMenuItemsWithSendTabToSelf_invalidUrl() {
         mUrl = GURL.emptyGURL();
+        ModelList list = mToolbarLongPressMenuHandler.buildMenuItems(true);
+
+        assertEquals(2, list.size());
+        assertEquals(
+                R.string.toolbar_move_to_the_bottom,
+                list.get(0).model.get(ListMenuItemProperties.TITLE_ID));
+        assertEquals(
+                R.string.toolbar_copy_link, list.get(1).model.get(ListMenuItemProperties.TITLE_ID));
+    }
+
+    // Verify that the "Send tab to self" menu item is not shown for non-HTTP/HTTPS URLs.
+    @Test
+    @SmallTest
+    @Restriction({DeviceFormFactor.PHONE})
+    @EnableFeatures(ChromeFeatureList.SEND_TAB_TO_SELF_EXTRA_ENTRY_POINTS)
+    public void testBuildMenuItemsWithSendTabToSelf_nonHttpUrl() {
+        mUrl = JUnitTestGURLs.CHROME_ABOUT;
         ModelList list = mToolbarLongPressMenuHandler.buildMenuItems(true);
 
         assertEquals(2, list.size());

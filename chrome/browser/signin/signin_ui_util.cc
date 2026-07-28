@@ -21,6 +21,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/feature_engagement/tracker_factory.h"
+#include "chrome/browser/metrics/profile_metrics_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -29,8 +30,8 @@
 #include "chrome/browser/signin/signin_ui_delegate.h"
 #include "chrome/browser/signin/signin_util.h"
 #include "chrome/browser/sync/sync_service_factory.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/navigator/browser_navigator.h"
 #include "chrome/browser/ui/navigator/browser_navigator_params.h"
@@ -146,6 +147,14 @@ SigninUiDelegate* GetSigninUiDelegate() {
 
 }  // namespace
 
+#if BUILDFLAG(ENABLE_DICE_SUPPORT)
+void ShowCrossDeviceSigninQrBubble(BrowserWindowInterface* browser,
+                                   base::OnceClosure closing_callback) {
+  GetSigninUiDelegate()->ShowCrossDeviceSigninQrBubble(
+      browser, std::move(closing_callback));
+}
+#endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
+
 std::u16string GetAuthenticatedUsername(Profile* profile) {
   DCHECK(profile);
   std::string user_display_name;
@@ -215,44 +224,6 @@ void ShowReauthForAccount(Profile* profile,
 #endif
 }
 
-void ShowExtensionSigninPrompt(Profile* profile,
-                               bool enable_sync,
-                               const std::string& email_hint) {
-#if BUILDFLAG(IS_CHROMEOS)
-  NOTREACHED();
-#elif BUILDFLAG(ENABLE_DICE_SUPPORT)
-  // There is no sign-in flow for guest or system profile.
-  if (profile->IsGuestSession() || profile->IsSystemProfile()) {
-    return;
-  }
-  // Locked profile should be unlocked with UserManager only.
-  ProfileAttributesEntry* entry =
-      g_browser_process->profile_manager()
-          ->GetProfileAttributesStorage()
-          .GetProfileAttributesWithPath(profile->GetPath());
-  if (entry && entry->IsSigninRequired()) {
-    return;
-  }
-
-  // This may be called in incognito. Redirect to the original profile.
-  profile = profile->GetOriginalProfile();
-
-  if (email_hint.empty()) {
-    // Add a new account.
-    GetSigninUiDelegate()->ShowSigninUI(
-        profile, enable_sync, signin_metrics::AccessPoint::kExtensions,
-        signin_metrics::PromoAction::PROMO_ACTION_NO_SIGNIN_PROMO);
-    return;
-  }
-
-  // Re-authenticate an existing account.
-  GetSigninUiDelegate()->ShowReauthUI(
-      profile, email_hint, enable_sync,
-      signin_metrics::AccessPoint::kExtensions,
-      signin_metrics::PromoAction::PROMO_ACTION_NO_SIGNIN_PROMO);
-#endif  // BUILDFLAG(IS_CHROMEOS)
-}
-
 void SignInFromSingleAccountPromo(Profile* profile,
                                   const CoreAccountInfo& account,
                                   signin_metrics::AccessPoint access_point) {
@@ -303,6 +274,8 @@ void SignInFromSingleAccountPromo(Profile* profile,
   }
 
   // If the account's refresh token are fine, sign in directly.
+  signin_metrics::LogSignInStarted(
+      access_point, *ProfileMetricsServiceFactory::GetForProfile(profile));
   IdentityManagerFactory::GetForProfile(profile)
       ->GetPrimaryAccountMutator()
       ->SetPrimaryAccount(account.account_id, signin::ConsentLevel::kSignin,
@@ -367,12 +340,12 @@ void EnableSyncFromMultiAccountPromo(Profile* profile,
     return;
   }
 
-  signin_metrics::LogSigninAccessPointStarted(access_point,
-                                              existing_account_promo_action);
   signin_metrics::RecordSigninUserActionForAccessPoint(access_point);
 
   if (syncer::IsReplaceSyncPromosWithSignInPromosEnabled()) {
     if (!identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSignin)) {
+      signin_metrics::LogSignInStarted(
+          access_point, *ProfileMetricsServiceFactory::GetForProfile(profile));
       identity_manager->GetPrimaryAccountMutator()->SetPrimaryAccount(
           account.account_id, signin::ConsentLevel::kSignin, access_point);
     }
@@ -413,6 +386,8 @@ void EnableSyncFromMultiAccountPromo(Profile* profile,
   // account in the profile.
   if (is_sync_promo &&
       !identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSignin)) {
+    signin_metrics::LogSignInStarted(
+        access_point, *ProfileMetricsServiceFactory::GetForProfile(profile));
     identity_manager->GetPrimaryAccountMutator()->SetPrimaryAccount(
         account.account_id, signin::ConsentLevel::kSignin, access_point);
   }

@@ -38,6 +38,9 @@
 // Tab Grid handler.
 @property(nonatomic, weak) id<TabGridCommands> tabGridHandler;
 
+// Dynamically updates the corner radius of the app bar.
+- (void)updateCornerRadius:(CGFloat)cornerRadius;
+
 // Updates the App Bar's subviews for a given rotation angle.
 - (void)updateForAngle:(CGFloat)angle;
 
@@ -51,6 +54,10 @@
 
 // Hides the blue-ish background.
 - (void)hideIPHBackground;
+
+// Returns the current portrait height of the App Bar, taking into account
+// whether the Gemini floaty is currently invoked.
+- (CGFloat)currentAppBarHeightPortrait;
 
 @end
 

@@ -6,6 +6,7 @@ package org.chromium.chrome.browser.media.ui;
 
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.mockito.Mockito.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -21,6 +22,7 @@ import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.base.test.util.HistogramWatcher;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.components.browser_ui.media.AudioBecomingNoisyReceiver;
 import org.chromium.components.browser_ui.media.MediaFeatureList;
@@ -32,6 +34,9 @@ import org.chromium.content_public.browser.test.mock.MockWebContents;
 /** Tests for {@link MediaSessionTabHelper} lazy-initialization and cleanup. */
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
+// TODO(crbug.com/522397811): Add tests with ALLOW_MULTIPLE_MEDIA_NOTIFICATIONS enabled once
+// the feature is implemented.
+@DisableFeatures(ChromeFeatureList.ALLOW_MULTIPLE_MEDIA_NOTIFICATIONS)
 public class MediaSessionTabHelperTest {
     private Tab mTab;
     private MockWebContents mWebContents;
@@ -116,8 +121,8 @@ public class MediaSessionTabHelperTest {
         org.chromium.components.browser_ui.media.AudioBecomingNoisyReceiver.getInstance()
                 .onReceive(context, intent);
 
-        // Verify that the media session is suspended (no arguments on M150)
-        verify(session).suspend();
+        // Verify that the media session is suspended (SuspendType.UI = 1)
+        verify(session).suspend(org.chromium.media_session.mojom.MediaSession.SuspendType.UI);
         histogramWatcher.assertExpected();
     }
 
@@ -143,7 +148,7 @@ public class MediaSessionTabHelperTest {
                 .onReceive(context, intent);
 
         // Verify that suspend is never called
-        verify(session, never()).suspend();
+        verify(session, never()).suspend(anyInt());
         histogramWatcher.assertExpected();
     }
 
@@ -203,7 +208,7 @@ public class MediaSessionTabHelperTest {
         AudioBecomingNoisyReceiver.getInstance().onReceive(context, intent);
 
         // Verify suspend is never called (since it's already paused)
-        verify(session, never()).suspend();
+        verify(session, never()).suspend(anyInt());
         histogramWatcher.assertExpected();
     }
 

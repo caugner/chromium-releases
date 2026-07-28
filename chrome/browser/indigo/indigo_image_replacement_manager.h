@@ -30,6 +30,7 @@ namespace indigo {
 
 class IndigoPageActionController;
 enum class ResetType;
+enum class IndigoTransformationResult;
 
 // An identifier used to group a set of related (primary and non-primary)
 // image replacements. This ID is currently shared with the Indigo component
@@ -78,8 +79,7 @@ class IndigoImageReplacementManager
   // blink::mojom::ImageReplacementHost implementation:
   void ReplacementFrameAttached(
       const blink::LocalFrameToken& replacement_frame_token,
-      blink::mojom::ImageDataPtr original_image,
-      const std::optional<base::Token>& tracked_element_id) override;
+      blink::mojom::ReplacementDataPtr replacement_data) override;
 
  private:
   friend class content::PageUserData<IndigoImageReplacementManager>;
@@ -94,7 +94,7 @@ class IndigoImageReplacementManager
   void CancelActiveRequest();
   void OnReceiverDisconnected();
   void Reset(ResetType reset_type);
-  void ShowErrorToast();
+  void ShowErrorToast(IndigoTransformationResult result);
 
   mojo::ReceiverSet<blink::mojom::ImageReplacementHost, IndigoImageReplacement>
       receivers_;

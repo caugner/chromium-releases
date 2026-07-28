@@ -86,10 +86,6 @@ CGFloat CompactButtonHorizontalPadding() {
   return self;
 }
 
-- (void)dealloc {
-  [_layoutState removeObserver:self];
-}
-
 #pragma mark - UIView
 
 - (void)didMoveToSuperview {
@@ -189,16 +185,6 @@ CGFloat CompactButtonHorizontalPadding() {
     _undoActive = useUndo;
     [self updateLayout];
   }
-}
-
-- (void)hide {
-  _smallNewTabButton.alpha = 0.0;
-  _largeNewTabButton.alpha = 0.0;
-}
-
-- (void)show {
-  _smallNewTabButton.alpha = 1.0;
-  _largeNewTabButton.alpha = 1.0;
 }
 
 - (void)setScrollViewScrolledToEdge:(BOOL)scrolledToEdge {

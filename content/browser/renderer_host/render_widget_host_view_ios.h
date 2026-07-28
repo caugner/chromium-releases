@@ -81,8 +81,6 @@ class CONTENT_EXPORT RenderWidgetHostViewIOS
   blink::mojom::PointerLockResult LockPointer(bool) override;
   blink::mojom::PointerLockResult ChangePointerLock(bool) override;
   void UnlockPointer() override;
-  void EnsureSurfaceSynchronizedForWebTest() override;
-  uint32_t GetCaptureSequenceNumber() const override;
   void TakeFallbackContentFrom(RenderWidgetHostView* view) override;
   std::unique_ptr<SyntheticGestureTarget> CreateSyntheticGestureTarget()
       override;
@@ -287,10 +285,6 @@ class CONTENT_EXPORT RenderWidgetHostViewIOS
   // is locked.
   bool pointer_lock_unadjusted_movement_ = false;
 
-  // Latest capture sequence number which is incremented when the caller
-  // requests surfaces be synchronized via
-  // EnsureSurfaceSynchronizedForWebTest().
-  uint32_t latest_capture_sequence_number_ = 0u;
 
   std::optional<gfx::PointF> last_root_scroll_offset_;
   bool is_scrolling_ = false;

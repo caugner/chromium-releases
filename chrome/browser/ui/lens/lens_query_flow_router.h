@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_UI_LENS_LENS_QUERY_FLOW_ROUTER_H_
 #define CHROME_BROWSER_UI_LENS_LENS_QUERY_FLOW_ROUTER_H_
 
+#include <optional>
+
 #include "base/memory/raw_ptr.h"
 #include "base/scoped_observation.h"
 #include "chrome/browser/profiles/profile.h"
@@ -13,6 +15,7 @@
 #include "chrome/browser/ui/lens/lens_overlay_query_controller.h"
 #include "chrome/browser/ui/lens/lens_search_controller.h"
 #include "components/contextual_search/contextual_search_session_handle.h"
+#include "components/lens/lens_overlay_invocation_source.h"
 
 namespace lens {
 
@@ -26,8 +29,18 @@ class LensQueryFlowRouter
     : public contextual_search::ContextualSearchContextController::
           ContextUploadStatusObserver {
  public:
+  // The context upload mode determines whether only the viewport screenshot or
+  // full page content (e.g. text/DOM) is included in the context upload.
+  enum class ContextUploadMode {
+    kViewportOnly,
+    kFullPage,
+  };
+
   explicit LensQueryFlowRouter(LensSearchController* lens_search_controller);
   ~LensQueryFlowRouter() override;
+
+  // Returns the current context upload mode.
+  ContextUploadMode context_upload_mode() const { return context_upload_mode_; }
 
   // Whether the query router is in an off state.
   bool IsOff() const;
@@ -159,6 +172,12 @@ class LensQueryFlowRouter
   // Returns whether the current active tab is context eligible.
   virtual bool IsActiveTabContextEligible() const;
 
+  // Returns whether full page context should be populated based on sign-in
+  // status, cobrowse eligibility, and permissions.
+  bool ShouldPopulateFullPageContext() const;
+
+  virtual Profile* profile() const;
+
  private:
   friend class LensQueryFlowRouterTestApi;
 
@@ -207,9 +226,9 @@ class LensQueryFlowRouter
     return tab_interface()->GetBrowserWindowInterface();
   }
 
-  Profile* profile() const {
-    return Profile::FromBrowserContext(web_contents()->GetBrowserContext());
-  }
+  // Records Lens query eligibility state when Unified Side Panel is enabled.
+  void RecordQueryEligibility(
+      std::optional<lens::LensOverlayInvocationSource> invocation_source);
 
   // Sends the provided request info to the contextual tasks panel to create a
   // search URL which is then loaded into the contextual tasks panel.
@@ -228,6 +247,7 @@ class LensQueryFlowRouter
   // Uploads the viewport and page context using the contextual search session
   // handle for the query router.
   void UploadContextualInputData(
+      ContextUploadMode upload_mode,
       std::unique_ptr<lens::ContextualInputData> contextual_input_data);
 
   // Called when the tab context has been added to the session handle, allowing
@@ -240,15 +260,13 @@ class LensQueryFlowRouter
   // Creates the contextual input data from data collected from overlay
   // initialization to be used for the contextual search session.
   std::unique_ptr<lens::ContextualInputData> CreateContextualInputData(
+      ContextUploadMode upload_mode,
       const SkBitmap& screenshot,
       GURL page_url,
       std::optional<std::string> page_title,
-      std::vector<lens::mojom::CenterRotatedBoxPtr> significant_region_boxes,
       base::span<const PageContent> underlying_page_contents,
       lens::MimeType primary_content_type,
-      std::optional<uint32_t> pdf_current_page,
-      float ui_scale_factor,
-      base::TimeTicks invocation_time);
+      std::optional<uint32_t> pdf_current_page);
 
   // Creates the search url request info from an interaction.
   std::unique_ptr<CreateSearchUrlRequestInfo>
@@ -265,6 +283,27 @@ class LensQueryFlowRouter
   void OnContextualizedComplete(
       base::WeakPtr<contextual_search::ContextualSearchSessionHandle>
           session_handle);
+
+  // Holds parameters captured when the query flow is started, allowing context
+  // to be stashed and upgraded lazily if needed.
+  struct InitialContextParams {
+    SkBitmap screenshot;
+    GURL page_url;
+    std::optional<std::string> page_title;
+    std::vector<lens::mojom::CenterRotatedBoxPtr> significant_region_boxes;
+    std::vector<lens::PageContent> underlying_page_contents;
+    lens::MimeType primary_content_type = lens::MimeType::kImage;
+    std::optional<uint32_t> pdf_current_page;
+    float ui_scale_factor = 1.0f;
+    base::TimeTicks invocation_time;
+  };
+
+  // Stash initial context parameters captured on overlay open for lazy
+  // upgrades.
+  std::optional<InitialContextParams> initial_context_params_;
+
+  // The current mode used for context upload (viewport-only vs full-page).
+  ContextUploadMode context_upload_mode_ = ContextUploadMode::kViewportOnly;
 
   // Stores a pending search request to be sent to contextual tasks after the
   // tab context is ready.
@@ -303,6 +342,10 @@ class LensQueryFlowRouter
   std::unique_ptr<contextual_tasks::DesktopQueryContextualizerDelegate>
       contextualizer_delegate_;
   std::unique_ptr<contextual_tasks::QueryContextualizer> query_contextualizer_;
+
+  // Track if we have already logged the query eligibility for the current
+  // session.
+  bool eligibility_logged_in_session_ = false;
 
   base::WeakPtrFactory<LensQueryFlowRouter> weak_factory_{this};
 };

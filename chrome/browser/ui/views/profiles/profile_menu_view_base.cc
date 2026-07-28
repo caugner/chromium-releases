@@ -27,10 +27,12 @@
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/color/chrome_color_id.h"
 #include "chrome/browser/ui/profiles/profile_colors_util.h"
+#include "chrome/browser/ui/profiles/profile_view_utils.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/chrome_typography.h"
 #include "chrome/browser/ui/views/controls/hover_button.h"
+#include "chrome/grit/browser_resources.h"
 #include "components/signin/public/base/signin_switches.h"
 #include "components/supervised_user/core/browser/family_link_user_capabilities.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -141,25 +143,6 @@ const gfx::ImageSkia ImageForMenu(const gfx::VectorIcon& icon,
   return gfx::CanvasImageSource::CreatePadded(sized_icon, gfx::Insets(padding));
 }
 
-// Resizes and crops `image_model` to a circular shape.
-// Note: if the image is backed by a vector icon, it is actually not cropped.
-// Cropping it would require theme colors which are not necessarily available,
-// and it is best to avoid cropping icons anyway -- icons naturally fitting in
-// the circle should be used instead.
-ui::ImageModel GetCircularSizedImage(const ui::ImageModel& image_model,
-                                     int size) {
-  // Resize.
-  ui::ImageModel resized =
-      profiles::GetSizedAvatarImageModel(image_model, size);
-  // It is assumed that vector icons are already fitting in a circle. Only crop
-  // images.
-  if (!resized.IsImage()) {
-    return resized;
-  }
-  return ui::ImageModel::FromImage(GetSizedAvatarIcon(
-      resized.GetImage(), size, size, profiles::AvatarShape::SHAPE_CIRCLE));
-}
-
 class FeatureButtonIconView : public views::ImageView {
   METADATA_HEADER(FeatureButtonIconView, views::ImageView)
 
@@ -223,7 +206,12 @@ class AvatarImageView : public views::ImageView {
     DCHECK(!avatar_image_.IsEmpty());
     ui::ColorProvider* color_provider = GetColorProvider();
     CHECK(color_provider);
+    const bool is_ai_ring_enabled =
+        IsAiSubscriptionRingEnabled(&(root_view_->profile()));
+
     gfx::ImageSkia sized_avatar_image;
+    bool should_crop = true;
+
     if (has_dotted_ring_) {
       const int size_with_border = image_size_ + 2 * border_size_;
       sized_avatar_image = profiles::GetAvatarWithDottedRing(
@@ -232,11 +220,18 @@ class AvatarImageView : public views::ImageView {
       // Dotted ring avatar does not support a border, as the border is already
       // included with the dotted ring.
       CHECK_EQ(border_size_, 0);
+    } else if (is_ai_ring_enabled) {
+      // Keep the avatar's size identical with the no-ring case, the ring
+      // expands outwards.
+      sized_avatar_image =
+          AddAiRingToAvatar(avatar_image_, *color_provider, image_size_);
+      should_crop = false;
     } else {
       if (border_size_ > 0) {
         // Total image size is `image_size_ + 2 * border_size_`.
         ui::ImageModel sized_avatar_image_without_border =
-            GetCircularSizedImage(avatar_image_, image_size_);
+            ProfileMenuViewBase::GetCircularSizedImage(avatar_image_,
+                                                       image_size_);
         sized_avatar_image = gfx::CanvasImageSource::CreatePadded(
             sized_avatar_image_without_border.Rasterize(color_provider),
             gfx::Insets(border_size_));
@@ -248,12 +243,16 @@ class AvatarImageView : public views::ImageView {
       sized_avatar_image = profiles::AddBackgroundToImage(sized_avatar_image,
                                                           GetBackgroundColor());
     }
-    gfx::Image circular_sized_avatar_image = profiles::GetSizedAvatarIcon(
-        gfx::Image(sized_avatar_image), sized_avatar_image.size().width(),
-        sized_avatar_image.size().height(),
-        profiles::AvatarShape::SHAPE_CIRCLE);
-    SetImage(ui::ImageModel::FromImageSkia(
-        *circular_sized_avatar_image.ToImageSkia()));
+
+    if (should_crop) {
+      gfx::Image circular_sized_avatar_image = profiles::GetSizedAvatarIcon(
+          gfx::Image(sized_avatar_image), sized_avatar_image.size().width(),
+          sized_avatar_image.size().height(),
+          profiles::AvatarShape::SHAPE_CIRCLE);
+      sized_avatar_image = *circular_sized_avatar_image.ToImageSkia();
+    }
+
+    SetImage(ui::ImageModel::FromImageSkia(sized_avatar_image));
   }
 
  private:
@@ -279,15 +278,21 @@ class MenuButtonRowView : public HoverButton {
  public:
   MenuButtonRowView(PressedCallback callback,
                     std::unique_ptr<views::View> icon_view,
-                    const std::u16string& title_text)
-      : HoverButton(std::move(callback),
-                    std::move(icon_view),
-                    title_text,
-                    /*subtitle=*/std::u16string(),
-                    /*secondary_view=*/nullptr,
-                    /*add_vertical_label_spacing=*/false) {
-    SetIconHorizontalMargins(kMenuItemLeftInternalPadding, /*right=*/0);
-
+                    const std::u16string& title_text,
+                    int icon_offset,
+                    std::unique_ptr<views::View> badge_view = nullptr)
+      : HoverButton(std::move(callback), [&]() {
+          HoverButton::Params params;
+          params.icon_view = std::move(icon_view);
+          params.title = title_text;
+          params.secondary_view = std::move(badge_view);
+          params.add_vertical_label_spacing = false;
+          params.icon_vertical_offset = -icon_offset;
+          params.icon_label_spacing -= icon_offset;
+          return params;
+        }()) {
+    SetIconHorizontalMargins(kMenuItemLeftInternalPadding - icon_offset,
+                             /*right=*/0);
     // Instead of creating the highlight with an InkDrop, which paints a layer
     // over this, we paint the highlight directly to the background.
     views::InkDrop::Get(this)->SetMode(views::InkDropHost::InkDropMode::OFF);
@@ -334,7 +339,49 @@ class MenuButtonRowView : public HoverButton {
 BEGIN_METADATA(MenuButtonRowView)
 END_METADATA
 
+class ProfileMenuNewBadge : public views::View {
+  METADATA_HEADER(ProfileMenuNewBadge, views::View)
+
+ public:
+  ProfileMenuNewBadge() {
+    SetLayoutManager(std::make_unique<views::FillLayout>());
+    auto* label = AddChildView(std::make_unique<views::Label>(
+        l10n_util::GetStringUTF16(IDS_NEW_BADGE), views::style::CONTEXT_LABEL,
+        views::style::STYLE_SECONDARY));
+
+    // Use a smaller, lighter font for the badge to match standard app menu
+    // styling.
+    label->SetFontList(label->font_list().Derive(-1, gfx::Font::NORMAL,
+                                                 gfx::Font::Weight::MEDIUM));
+    label->SetEnabledColor(ui::kColorBadgeForeground);
+    label->SetBorder(views::CreateEmptyBorder(gfx::Insets::VH(1, 4)));
+
+    SetBackground(views::CreateRoundedRectBackground(
+        ui::kColorBadgeBackground,
+        views::LayoutProvider::Get()->GetCornerRadiusMetric(
+            views::ShapeContextTokens::kBadgeRadius)));
+  }
+};
+
+BEGIN_METADATA(ProfileMenuNewBadge)
+END_METADATA
+
 }  // namespace
+
+ui::ImageModel ProfileMenuViewBase::GetCircularSizedImage(
+    const ui::ImageModel& image_model,
+    int size) {
+  // Resize.
+  ui::ImageModel resized =
+      profiles::GetSizedAvatarImageModel(image_model, size);
+  // It is assumed that vector icons are already fitting in a circle. Only crop
+  // images.
+  if (!resized.IsImage()) {
+    return resized;
+  }
+  return ui::ImageModel::FromImage(GetSizedAvatarIcon(
+      resized.GetImage(), size, size, profiles::AvatarShape::SHAPE_CIRCLE));
+}
 
 ProfileMenuViewBase::IdentitySectionParams::IdentitySectionParams() = default;
 ProfileMenuViewBase::IdentitySectionParams::~IdentitySectionParams() = default;
@@ -614,17 +661,23 @@ void ProfileMenuViewBase::SetProfileIdentityWithCallToAction(
 void ProfileMenuViewBase::AddFeatureButton(const std::u16string& text,
                                            base::RepeatingClosure action,
                                            const gfx::VectorIcon& icon,
-                                           float icon_to_image_ratio) {
+                                           float icon_to_image_ratio,
+                                           bool is_new) {
   // Initialize layout if this is the first time a button is added.
   if (!features_container_->GetLayoutManager()) {
     features_container_->SetLayoutManager(std::make_unique<views::BoxLayout>(
         views::BoxLayout::Orientation::kVertical));
   }
 
+  std::unique_ptr<views::View> secondary_view;
+  if (is_new) {
+    secondary_view = std::make_unique<ProfileMenuNewBadge>();
+  }
+
   features_container_->AddChildView(CreateMenuRowButton(
       std::move(action),
-      std::make_unique<FeatureButtonIconView>(icon, icon_to_image_ratio),
-      text));
+      std::make_unique<FeatureButtonIconView>(icon, icon_to_image_ratio), text,
+      /*icon_offset=*/0, std::move(secondary_view)));
 }
 
 void ProfileMenuViewBase::SetProfileManagementHeading(
@@ -676,12 +729,13 @@ void ProfileMenuViewBase::AddAvailableProfile(const ui::ImageModel& image_model,
   }
 
   DCHECK(!image_model.IsEmpty());
-  ui::ImageModel sized_image =
-      GetCircularSizedImage(image_model, kOtherProfileImageSize);
+  const int icon_offset =
+      (image_model.Size().width() - kOtherProfileImageSize) / 2;
+
   views::Button* button =
       selectable_profiles_container_->AddChildView(CreateMenuRowButton(
-          std::move(action), std::make_unique<views::ImageView>(sized_image),
-          name));
+          std::move(action), std::make_unique<views::ImageView>(image_model),
+          name, icon_offset));
 
   if (!is_guest && !first_profile_button_) {
     first_profile_button_ = button;
@@ -708,8 +762,8 @@ void ProfileMenuViewBase::AddProfileManagementFeatureButton(
 
   auto icon_view =
       std::make_unique<FeatureButtonIconView>(icon, /*icon_to_image_ratio=*/1);
-  profile_mgmt_features_container_->AddChildView(
-      CreateMenuRowButton(std::move(action), std::move(icon_view), text));
+  profile_mgmt_features_container_->AddChildView(CreateMenuRowButton(
+      std::move(action), std::move(icon_view), text, /*icon_offset=*/0));
 }
 
 void ProfileMenuViewBase::AddBottomMargin() {
@@ -854,12 +908,14 @@ void ProfileMenuViewBase::CreateAXWidgetObserver(views::Widget* widget) {
 std::unique_ptr<HoverButton> ProfileMenuViewBase::CreateMenuRowButton(
     base::RepeatingClosure action,
     std::unique_ptr<views::View> icon_view,
-    const std::u16string& text) {
+    const std::u16string& text,
+    int icon_offset,
+    std::unique_ptr<views::View> badge_view) {
   CHECK(icon_view);
   return std::make_unique<MenuButtonRowView>(
       base::BindRepeating(&ProfileMenuViewBase::ButtonPressed,
                           base::Unretained(this), std::move(action)),
-      std::move(icon_view), text);
+      std::move(icon_view), text, icon_offset, std::move(badge_view));
 }
 
 BEGIN_METADATA(ProfileMenuViewBase)

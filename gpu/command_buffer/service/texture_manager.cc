@@ -1762,9 +1762,6 @@ bool Texture::CanRenderTo(const FeatureInfo* feature_info, GLint level) const {
   if (face_infos_.size() == 6 && !cube_complete())
     return false;
   DCHECK(level >= 0 && level < static_cast<GLint>(MaxValidMipLevel()));
-  if (level < base_level_) {
-    return false;
-  }
   if (level > base_level_ && !texture_complete()) {
     return false;
   }
@@ -1823,7 +1820,8 @@ TextureRef::TextureRef(TextureManager* manager,
 scoped_refptr<TextureRef> TextureRef::Create(TextureManager* manager,
                                              GLuint client_id,
                                              GLuint service_id) {
-  return new TextureRef(manager, client_id, new Texture(service_id));
+  return base::MakeRefCounted<TextureRef>(manager, client_id,
+                                          new Texture(service_id));
 }
 
 TextureRef::~TextureRef() {
@@ -2134,7 +2132,7 @@ TextureRef* TextureManager::Consume(
     GLuint client_id,
     Texture* texture) {
   DCHECK(client_id);
-  scoped_refptr<TextureRef> ref(new TextureRef(this, client_id, texture));
+  auto ref = base::MakeRefCounted<TextureRef>(this, client_id, texture);
   bool result = textures_.insert(std::make_pair(client_id, ref)).second;
   DCHECK(result);
   return ref.get();

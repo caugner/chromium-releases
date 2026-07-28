@@ -9,6 +9,7 @@ import static org.chromium.build.NullUtil.assumeNonNull;
 import android.content.res.ColorStateList;
 import android.content.res.Resources;
 import android.graphics.Rect;
+import android.transition.Transition;
 import android.view.View;
 import android.view.ViewGroup;
 
@@ -54,6 +55,7 @@ public class OptionalButtonCoordinator {
     private @Nullable Callback<Integer> mTransitionFinishedCallback;
     private @Nullable IphCommandBuilder mIphCommandBuilder;
     private boolean mAlwaysShowActionChip;
+    private boolean mActionChipTriggeredByTracker;
     private @BrandedColorScheme int mBrandedColorScheme = BrandedColorScheme.APP_DEFAULT;
 
     @IntDef({
@@ -144,6 +146,15 @@ public class OptionalButtonCoordinator {
      */
     public void setCollapsedStateWidth(int width) {
         mMediator.setCollapsedStateWidth(width);
+    }
+
+    /**
+     * Sets the transition delegate that will be used to run transitions.
+     *
+     * @param delegate The transition delegate.
+     */
+    public void setTransitionDelegate(@Nullable Callback<Transition> delegate) {
+        mView.setTransitionDelegate(delegate);
     }
 
     /** Sets a runnable that's invoked before the optional button is hidden. */
@@ -246,21 +257,25 @@ public class OptionalButtonCoordinator {
                     FeatureList.isInitialized()
                             && AdaptiveToolbarFeatures.shouldShowActionChip(
                                     buttonData.getButtonSpec().getButtonVariant());
-            // And if feature engagement allows it.
-            Tracker featureEngagementTracker = mFeatureEngagementTrackerSupplier.get();
-
             // TODO(crbug.com/485624827): Add a property to ButtonSpec to always show action chip.
             boolean isGlic =
                     buttonData.getButtonSpec().getButtonVariant()
                             == AdaptiveToolbarButtonVariant.GLIC;
-            boolean shouldShowActionChip =
-                    mAlwaysShowActionChip
-                            || isGlic
-                            || (isActionChipVariant
-                                    && featureEngagementTracker != null
-                                    && featureEngagementTracker.isInitialized()
-                                    && featureEngagementTracker.shouldTriggerHelpUi(
-                                            FeatureConstants.CONTEXTUAL_PAGE_ACTIONS_ACTION_CHIP));
+            boolean triggeredByTracker = false;
+            boolean shouldShowActionChip = false;
+
+            if (mAlwaysShowActionChip || isGlic) {
+                shouldShowActionChip = true;
+            } else if (isActionChipVariant) {
+                Tracker tracker = mFeatureEngagementTrackerSupplier.get();
+                triggeredByTracker =
+                        tracker != null
+                                && tracker.isInitialized()
+                                && tracker.shouldTriggerHelpUi(
+                                        FeatureConstants.CONTEXTUAL_PAGE_ACTIONS_ACTION_CHIP);
+                shouldShowActionChip = triggeredByTracker;
+            }
+            mActionChipTriggeredByTracker = triggeredByTracker;
 
             if (!shouldShowActionChip) {
                 ((ButtonDataImpl) buttonData).updateActionChipResourceId(Resources.ID_NULL);
@@ -342,16 +357,19 @@ public class OptionalButtonCoordinator {
         }
 
         if (transitionType == TransitionType.EXPANDING_ACTION_CHIP) {
-            Tracker featureEngagementTracker = mFeatureEngagementTrackerSupplier.get();
-            if (featureEngagementTracker != null) {
-                // Record an event in feature engagement to limit the amount of times we show the
-                // action chip.
-                featureEngagementTracker.addOnInitializedCallback(
-                        isReady -> {
-                            if (!isReady) return;
-                            featureEngagementTracker.dismissed(
-                                    FeatureConstants.CONTEXTUAL_PAGE_ACTIONS_ACTION_CHIP);
-                        });
+            if (mActionChipTriggeredByTracker) {
+                Tracker featureEngagementTracker = mFeatureEngagementTrackerSupplier.get();
+                if (featureEngagementTracker != null) {
+                    // Record an event in feature engagement to limit the
+                    // amount of times we show the action chip.
+                    featureEngagementTracker.addOnInitializedCallback(
+                            isReady -> {
+                                if (!isReady) return;
+                                featureEngagementTracker.dismissed(
+                                        FeatureConstants.CONTEXTUAL_PAGE_ACTIONS_ACTION_CHIP);
+                            });
+                }
+                mActionChipTriggeredByTracker = false;
             }
         }
 

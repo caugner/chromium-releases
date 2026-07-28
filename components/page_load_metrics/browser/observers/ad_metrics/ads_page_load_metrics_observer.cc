@@ -239,10 +239,12 @@ FrameTreeData* AdsPageLoadMetricsObserver::FrameInstance::Get() {
 }
 
 FrameTreeData* AdsPageLoadMetricsObserver::FrameInstance::GetOwnedFrame() {
-  if (owned_frame_data_) {
-    return owned_frame_data_.get();
-  }
-  return nullptr;
+  return owned_frame_data_.get();
+}
+
+const FrameTreeData* AdsPageLoadMetricsObserver::FrameInstance::GetOwnedFrame()
+    const {
+  return owned_frame_data_.get();
 }
 
 AdsPageLoadMetricsObserver::HeavyAdThresholdNoiseProvider::
@@ -808,6 +810,34 @@ int64_t AdsPageLoadMetricsObserver::GetTotalAdNetworkBytes() const {
                                : 0;
 }
 
+base::flat_map<base::UnguessableToken,
+               AdsPageLoadMetricsObserver::AdFrameLiveStats>
+AdsPageLoadMetricsObserver::GetAdFrameLiveStats() const {
+  base::flat_map<base::UnguessableToken, AdFrameLiveStats> stats;
+  for (const auto& [id, frame_instance] : ad_frames_data_) {
+    // Only collect stats for owned frames (i.e. root ad frames).
+    // Subframes of the root ad frame are rolled up into the owned frame's
+    // totals.
+    const FrameTreeData* frame_data = frame_instance.GetOwnedFrame();
+    if (frame_data && !frame_data->devtools_frame_token().is_empty()) {
+      AdFrameLiveStats ad_frame_data;
+      base::UnguessableToken frame_id = frame_data->devtools_frame_token();
+      ad_frame_data.initial_origin = frame_data->initial_origin();
+      ad_frame_data.network_bytes =
+          frame_data->resource_data().network_bytes().InBytes();
+      ad_frame_data.cpu_time = frame_data->GetTotalCpuUsage();
+
+      auto result =
+          stats.emplace(std::move(frame_id), std::move(ad_frame_data));
+
+      // Each FrameTreeData corresponds to a unique root ad frame, so its
+      // devtools frame token should also be unique among the owned frames.
+      DCHECK(result.second);
+    }
+  }
+  return stats;
+}
+
 void AdsPageLoadMetricsObserver::OnSubresourceFilterGoingAway() {
   subresource_observation_.Reset();
 }
@@ -1304,14 +1334,9 @@ void AdsPageLoadMetricsObserver::RecordPerFrameHistogramsForHeavyAds(
 
 void AdsPageLoadMetricsObserver::ProcessOngoingNavigationResource(
     content::NavigationHandle* navigation_handle) {
-  // Extract the entry up front so the resource is owned locally for the rest
-  // of this call. Processing it can synchronously re-enter this method: the
-  // heavy ad intervention destroys the frame's in-flight NavigationRequest,
-  // which dispatches DidFinishNavigation. The re-entrant call must not observe
-  // or remove this entry again.
-  auto request_node = ongoing_navigation_resources_.extract(
+  const auto& frame_id_and_request = ongoing_navigation_resources_.find(
       navigation_handle->GetFrameTreeNodeId());
-  if (request_node.empty()) {
+  if (frame_id_and_request == ongoing_navigation_resources_.end()) {
     return;
   }
 
@@ -1323,7 +1348,8 @@ void AdsPageLoadMetricsObserver::ProcessOngoingNavigationResource(
           : content::RenderFrameHost::FromID(
                 navigation_handle->GetPreviousRenderFrameHostId());
 
-  ProcessResourceForFrame(rfh, request_node.mapped());
+  ProcessResourceForFrame(rfh, frame_id_and_request->second);
+  ongoing_navigation_resources_.erase(frame_id_and_request);
 }
 
 FrameTreeData* AdsPageLoadMetricsObserver::FindFrameData(

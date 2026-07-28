@@ -148,6 +148,10 @@ class MockPage : public read_anything::mojom::UntrustedPage {
               OnReadabilityDistillationStateChanged,
               (read_anything::mojom::ReadAnythingDistillationState state),
               (override));
+  MOCK_METHOD(void,
+              OnMainFrameSameDocumentNavigation,
+              (const GURL& url),
+              (override));
 
   mojo::Receiver<read_anything::mojom::UntrustedPage> receiver_{this};
 };
@@ -987,6 +991,26 @@ IN_PROC_BROWSER_TEST_P(
       }));
 
   handler_ = CreateHandler();
+}
+
+IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
+                       Activate_RestoresSettingsFromPrefs) {
+  handler_ = CreateHandler();
+  page_.receiver_.FlushForTesting();
+
+  // Change a preference.
+  PrefService* prefs = browser()->profile()->GetPrefs();
+  prefs->SetInteger(prefs::kAccessibilityReadAnythingColorInfo,
+                    static_cast<int>(read_anything::mojom::Colors::kDark));
+
+  // Re-activating the handler should restore settings.
+  EXPECT_CALL(page_, OnSettingsRestoredFromPrefs(
+                         _, _, _, _, _, _, read_anything::mojom::Colors::kDark,
+                         _, _, _, _, _, _))
+      .Times(1);
+
+  Activate(true);
+  page_.receiver_.FlushForTesting();
 }
 
 IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,

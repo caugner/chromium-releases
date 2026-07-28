@@ -120,10 +120,10 @@ enum class ResponseSegmentation {
   kTextSelectionWidgetAttachedAudio = 102,
   kTextSelectionWidgetDetachedText = 103,
   kTextSelectionWidgetDetachedAudio = 104,
-  kZeroStateAutoSummarizeAttachedText = 105,
-  kZeroStateAutoSummarizeAttachedAudio = 106,
-  kZeroStateAutoSummarizeDetachedText = 107,
-  kZeroStateAutoSummarizeDetachedAudio = 108,
+  kObsoleteZeroStateAutoSummarizeAttachedText = 105,
+  kObsoleteZeroStateAutoSummarizeAttachedAudio = 106,
+  kObsoleteZeroStateAutoSummarizeDetachedText = 107,
+  kObsoleteZeroStateAutoSummarizeDetachedAudio = 108,
   kUniversalCartAttachedText = 109,
   kUniversalCartAttachedAudio = 110,
   kUniversalCartDetachedText = 111,
@@ -156,7 +156,31 @@ enum class ResponseSegmentation {
   kPromotionPageAttachedAudio = 138,
   kPromotionPageDetachedText = 139,
   kPromotionPageDetachedAudio = 140,
-  kMaxValue = kPromotionPageDetachedAudio,
+  kDaisyChainOnNewTabAttachedText = 141,
+  kDaisyChainOnNewTabAttachedAudio = 142,
+  kDaisyChainOnNewTabDetachedText = 143,
+  kDaisyChainOnNewTabDetachedAudio = 144,
+  kDaisyChainOnFollowLinkAttachedText = 145,
+  kDaisyChainOnFollowLinkAttachedAudio = 146,
+  kDaisyChainOnFollowLinkDetachedText = 147,
+  kDaisyChainOnFollowLinkDetachedAudio = 148,
+  kConversationSwitchAttachedText = 149,
+  kConversationSwitchAttachedAudio = 150,
+  kConversationSwitchDetachedText = 151,
+  kConversationSwitchDetachedAudio = 152,
+  kDetachAttachButtonAttachedText = 153,
+  kDetachAttachButtonAttachedAudio = 154,
+  kDetachAttachButtonDetachedText = 155,
+  kDetachAttachButtonDetachedAudio = 156,
+  kTabRestoreAttachedText = 157,
+  kTabRestoreAttachedAudio = 158,
+  kTabRestoreDetachedText = 159,
+  kTabRestoreDetachedAudio = 160,
+  kReshowInactiveAttachedText = 161,
+  kReshowInactiveAttachedAudio = 162,
+  kReshowInactiveDetachedText = 163,
+  kReshowInactiveDetachedAudio = 164,
+  kMaxValue = kReshowInactiveDetachedAudio,
 };
 // LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:GlicResponseSegmentation)
 
@@ -182,6 +206,33 @@ enum class DaisyChainSource {
   kMaxValue = kBookmark,
 };
 // LINT.ThenChange(//tools/metrics/histograms/metadata/glic/histograms.xml:Source)
+
+// LINT.IfChange(GlicDragAndDropValidationResult)
+enum class GlicDragAndDropValidationResult {
+  kSuccess = 0,
+  kBlockedByFeatureFlag = 1,
+  kInvalidDragId = 2,
+  kCrossProfileDragBlocked = 3,
+  kSourceWebContentsDestroyed = 4,
+  kSourceTabClosed = 5,
+  kTargetWebContentsDestroyed = 6,
+  kSourceFrameNavigatedBeforeContextFetched = 7,
+  kContextFetchFailed = 8,
+  kMaxValue = kContextFetchFailed,
+};
+// LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:GlicDragAndDropValidationResult)
+
+// LINT.IfChange(GlicDragAndDropContentType)
+enum class GlicDragAndDropContentType {
+  kUnknown = 0,
+  kImage = 1,
+  kText = 2,
+  kHtml = 3,
+  kUrl = 4,
+  kFile = 5,
+  kMaxValue = kFile,
+};
+// LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:GlicDragAndDropContentType)
 
 std::string GetDaisyChainSourceString(DaisyChainSource source);
 

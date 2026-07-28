@@ -47,7 +47,7 @@ class TimeDelta;
 
 namespace glic {
 
-class GlicSharingManager;
+class GlicSharingManagerInternal;
 struct ShowOptions;
 
 using SafeEmbedderKey = std::variant<tabs::TabHandle, FloatingEmbedderKey>;
@@ -169,7 +169,7 @@ class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
       Profile* profile = nullptr);
   GlicInstanceMetrics(
       const metrics::ProfileMetricsService* profile_metrics_service,
-      GlicSharingManager* sharing_manager,
+      GlicSharingManagerInternal* sharing_manager,
       enterprise_reporting::SaasUsageReportingController*
           saas_usage_reporting_controller,
       Profile* profile = nullptr);
@@ -379,6 +379,7 @@ class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
   void RecordResponseLatencyByAttachedTabCount(base::TimeDelta latency);
 
   void RecordSkillsInvokeFunnelStep(SkillsInvokeFunnel invoke_funnel);
+  void RecordAndResetAutoOpenPdfMetric();
 
   base::flat_map<GlicInstanceEvent, int> event_counts_;
   EmbedderType current_ui_mode_ = EmbedderType::kUnknown;
@@ -413,6 +414,9 @@ class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
   base::TimeTicks creation_time_;
   base::TimeTicks floaty_open_time_;
   std::map<tabs::TabHandle, base::TimeTicks> side_panel_open_times_;
+  std::vector<tabs::TabHandle> tabs_with_side_panel_;
+  ukm::SourceId auto_open_pdf_source_id_ = ukm::kInvalidSourceId;
+  base::TimeTicks auto_open_pdf_start_time_;
 
   std::unique_ptr<GlicStateTracker> activity_tracker_;
   std::unique_ptr<GlicStateTracker> visibility_tracker_;
@@ -433,7 +437,7 @@ class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
   base::CallbackListSubscription pinned_tabs_changed_subscription_;
   base::CallbackListSubscription tab_pinning_status_subscription_;
   const raw_ref<const metrics::ProfileMetricsService> profile_metrics_service_;
-  raw_ptr<GlicSharingManager> sharing_manager_ = nullptr;
+  raw_ptr<GlicSharingManagerInternal> sharing_manager_ = nullptr;
   raw_ptr<enterprise_reporting::SaasUsageReportingController>
       saas_usage_reporting_controller_ = nullptr;
   raw_ptr<Profile> profile_ = nullptr;

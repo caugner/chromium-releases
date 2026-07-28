@@ -45,6 +45,10 @@
 class LocationBarView;
 class IconLabelBubbleView;
 
+namespace ai_mode_button_config {
+struct AiModeButtonConfig;
+}
+
 namespace content {
 class WebContents;
 }  // namespace content
@@ -61,7 +65,8 @@ class OSExchangeData;
 struct OmniboxState : public base::SupportsUserData::Data {
   OmniboxState(const OmniboxEditModel::State& model_state,
                const gfx::Range& selection,
-               const gfx::Range& saved_selection_for_focus_change);
+               const gfx::Range& saved_selection_for_focus_change,
+               const bool show_full_url = false);
 
   ~OmniboxState() override;
 
@@ -73,6 +78,7 @@ struct OmniboxState : public base::SupportsUserData::Data {
   // and tabbing back into the omnibox.
   const gfx::Range selection;
   const gfx::Range saved_selection_for_focus_change;
+  const bool show_full_url;
 };
 
 // Views-implementation of OmniboxView.
@@ -221,6 +227,8 @@ class OmniboxViewViews
   FRIEND_TEST_ALL_PREFIXES(OmniboxViewViewsTest, AccessibleTextSelectBoundTest);
   FRIEND_TEST_ALL_PREFIXES(OmniboxViewViewsAIMButtonPreferenceTest,
                            ButtonVisibilityTogglesWithPref_OmniboxFocused);
+  FRIEND_TEST_ALL_PREFIXES(OmniboxViewViewsAIMButtonDynamicTest,
+                           QueryShowsArrowIcon);
   FRIEND_TEST_ALL_PREFIXES(OmniboxViewViewsPlaceholderTest,
                            ContextualTasksPlaceholderForContextualTasksPage);
   FRIEND_TEST_ALL_PREFIXES(OmniboxViewViewsPlaceholderTest,
@@ -350,7 +358,6 @@ class OmniboxViewViews
   void AppendDropFormats(
       int* formats,
       std::set<ui::ClipboardFormatType>* format_types) override;
-  ui::mojom::DragOperation OnDrop(const ui::DropTargetEvent& event) override;
   views::View::DropCallback CreateDropCallback(
       const ui::DropTargetEvent& event) override;
   void UpdateContextMenu(ui::SimpleMenuModel* menu_contents) override;
@@ -405,6 +412,9 @@ class OmniboxViewViews
   // Returns true if the Contextual Tasks placeholder text should be installed
   // instead of the DSE placeholder text.
   bool ShouldInstallContextualTasksPlaceholderText() const;
+
+  // Helper to get the current `AiModeButtonConfig` if available.
+  const ai_mode_button_config::AiModeButtonConfig* GetAiModeConfig() const;
 
   // Records an impression of the AIM hint text.
   void RecordAimHintImpression();

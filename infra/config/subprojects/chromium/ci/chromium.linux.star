@@ -40,6 +40,7 @@ ci.defaults.set(
     shadow_service_account = ci_constants.DEFAULT_SHADOW_SERVICE_ACCOUNT,
     siso_project = siso.project.DEFAULT_TRUSTED,
     siso_remote_jobs = siso.remote_jobs.HIGH_JOBS_FOR_CI,
+    siso_remote_linking = True,
 )
 
 consoles.console_view(
@@ -91,7 +92,6 @@ ci.builder(
             "chromium_linux_cast_receiver",
         ],
     ),
-    ssd = None,
     tree_closing = True,
     console_view_entry = consoles.console_view_entry(
         category = "cast",
@@ -136,7 +136,6 @@ ci.builder(
             "chromium_linux_cast_receiver",
         ],
     ),
-    ssd = None,
     tree_closing = True,
     console_view_entry = consoles.console_view_entry(
         category = "cast",
@@ -180,7 +179,6 @@ ci.builder(
             "chromium_linux_cast_receiver_gtests",
         ],
     ),
-    ssd = None,
     tree_closing = True,
     console_view_entry = consoles.console_view_entry(
         category = "cast",
@@ -224,7 +222,6 @@ ci.builder(
             "chromium_linux_cast_receiver_gtests",
         ],
     ),
-    ssd = None,
     tree_closing = True,
     console_view_entry = consoles.console_view_entry(
         category = "cast",
@@ -258,6 +255,9 @@ ci.builder(
     contact_team_email = "chrome-build-team@google.com",
     execution_timeout = 6 * time.hour,
     notifies = ["Deterministic Linux"],
+    # crbug.com/528174631: Deterministic builder needs to download all remote
+    # outputs to compare them.
+    siso_output_local_strategy = "full",
     siso_remote_jobs = siso.remote_jobs.DEFAULT,
 )
 
@@ -279,6 +279,9 @@ ci.builder(
     ),
     contact_team_email = "chrome-build-team@google.com",
     execution_timeout = 7 * time.hour,
+    # crbug.com/528174631: Deterministic builder needs to download all remote
+    # outputs to compare them.
+    siso_output_local_strategy = "full",
     siso_remote_jobs = siso.remote_jobs.DEFAULT,
 )
 
@@ -310,7 +313,6 @@ ci.builder(
             "linux-jammy",
         ],
     ),
-    ssd = None,
     gardener_rotations = args.ignore_default(None),
     tree_closing = False,
     console_view_entry = consoles.console_view_entry(
@@ -367,14 +369,12 @@ ci.builder(
             "isolate_profile_data",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "release",
         short_name = "bld",
     ),
     cq_mirrors_console_view = "mirrors",
     contact_team_email = "chrome-linux-engprod@google.com",
-    siso_remote_linking = True,
 )
 
 ci.builder(
@@ -411,7 +411,6 @@ ci.builder(
             "all",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "debug|builder",
         short_name = "64",
@@ -499,6 +498,9 @@ ci.thin_tester(
         per_test_modifications = {
             "browser_tests": targets.mixin(
                 swarming = targets.swarming(
+                    # TODO(crbug.com/493903786): Drop back down to 1h timeout
+                    # after resources are deployed.
+                    hard_timeout_sec = 7200,
                     shards = 40,
                 ),
             ),
@@ -518,12 +520,12 @@ ci.thin_tester(
         browser_config = targets.browser_config.DEBUG,
         os_type = targets.os_type.LINUX,
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "arm64",
         short_name = "dbg",
     ),
     contact_team_email = "chrome-linux-engprod@google.com",
+    execution_timeout = 6 * time.hour,
 )
 
 ci.builder(
@@ -560,7 +562,6 @@ ci.builder(
     targets = targets.bundle(
         additional_compile_targets = "chrome",
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "release",
         short_name = "bld-wl",
@@ -598,7 +599,6 @@ ci.thin_tester(
         mixins = [
             "isolate_profile_data",
             "linux-jammy",
-            "retry_only_failed_tests",
         ],
         per_test_modifications = {
             "browser_tests": targets.mixin(
@@ -624,7 +624,6 @@ ci.thin_tester(
             ),
         },
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux",
         short_name = "no-webui",
@@ -664,7 +663,6 @@ ci.thin_tester(
         mixins = [
             "isolate_profile_data",
             "linux-jammy",
-            "retry_only_failed_tests",
         ],
         per_test_modifications = {
             "blink_web_tests": targets.mixin(
@@ -707,7 +705,6 @@ ci.thin_tester(
             ),
         },
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "release",
         short_name = "tst",
@@ -763,10 +760,8 @@ ci.thin_tester(
                 # crbug.com/1459645
                 # crbug.com/1508286
                 # crbug.com/404871436
-                # crbug.com/524128527
-                # crbug.com/534835229
                 swarming = targets.swarming(
-                    shards = 90,
+                    shards = 70,
                 ),
             ),
             "content_browsertests": targets.mixin(
@@ -810,9 +805,14 @@ ci.thin_tester(
             "not_site_per_process_blink_web_tests": targets.remove(
                 reason = "removal was present before migration to starlark",
             ),
+            "not_site_per_process_headless_shell_wpt_tests": targets.mixin(
+                swarming = targets.swarming(
+                    shards = 24,
+                ),
+            ),
             "sync_integration_tests": targets.mixin(
                 swarming = targets.swarming(
-                    shards = 8,
+                    shards = 16,
                 ),
             ),
             "telemetry_perf_unittests": targets.mixin(
@@ -837,7 +837,6 @@ ci.thin_tester(
             ),
         },
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "debug|tester",
         short_name = "64",
@@ -896,19 +895,11 @@ ci.thin_tester(
                 args = [
                     "--test-launcher-filter-file=../../testing/buildbot/filters/ozone-linux.browser_tests_weston.filter",
                 ],
-                # Only retry the individual failed tests instead of rerunning
-                # entire shards.
-                # crbug.com/1473501
-                retry_only_failed_tests = True,
                 swarming = targets.swarming(
                     shards = 20,
                 ),
             ),
             "content_browsertests": targets.mixin(
-                # Only retry the individual failed tests instead of rerunning
-                # entire shards.
-                # crbug.com/1473501
-                retry_only_failed_tests = True,
             ),
             "content_unittests": targets.mixin(
                 args = [
@@ -939,9 +930,6 @@ ci.thin_tester(
                 args = [
                     "--test-launcher-filter-file=../../testing/buildbot/filters/ozone-linux.unit_tests_wayland.filter",
                 ],
-                # Only retry the individual failed tests instead of rerunning entire
-                # shards.
-                retry_only_failed_tests = True,
                 swarming = targets.swarming(
                     shards = 4,
                 ),
@@ -953,7 +941,6 @@ ci.thin_tester(
             ),
         },
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "release",
         short_name = "tst-wl",
@@ -1015,10 +1002,6 @@ ci.thin_tester(
                     "--mutter-display=1280x800",
                     "--test-launcher-filter-file=../../testing/buildbot/filters/ozone-linux.browser_tests_mutter.filter",
                 ],
-                # Only retry the individual failed tests instead of rerunning
-                # entire shards.
-                # crbug.com/1473501
-                retry_only_failed_tests = True,
                 swarming = targets.swarming(
                     expiration_sec = 18000,
                     hard_timeout_sec = 14400,
@@ -1026,10 +1009,6 @@ ci.thin_tester(
                 ),
             ),
             "content_browsertests": targets.mixin(
-                # Only retry the individual failed tests instead of rerunning
-                # entire shards.
-                # crbug.com/1473501
-                retry_only_failed_tests = True,
                 swarming = targets.swarming(
                     expiration_sec = 18000,
                     hard_timeout_sec = 14400,
@@ -1049,7 +1028,6 @@ ci.thin_tester(
             ),
         },
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "release",
         short_name = "tst-mt",
@@ -1093,7 +1071,6 @@ ci.builder(
             "linux-jammy",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "release",
         short_name = "nsl",
@@ -1191,7 +1168,6 @@ ci.builder(
             ),
         },
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "OriginIsolation",
         short_name = "oi",
@@ -1243,7 +1219,6 @@ ci.builder(
             ),
         },
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "bfcache",
         short_name = "bfc",
@@ -1284,7 +1259,6 @@ ci.builder(
             "all",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "release",
         short_name = "trc",
@@ -1326,7 +1300,6 @@ ci.builder(
             "empty_main",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "release",
         short_name = "gcc",
@@ -1359,7 +1332,6 @@ ci.builder(
             "all",
         ],
     ),
-    ssd = None,
     gardener_rotations = args.ignore_default(None),
     tree_closing = False,
     console_view_entry = consoles.console_view_entry(
@@ -1372,7 +1344,6 @@ ci.builder(
     execution_timeout = 6 * time.hour,
     notifies = args.ignore_default([]),
     siso_keep_going = 0,
-    siso_remote_linking = True,
 )
 
 ci.builder(
@@ -1415,7 +1386,6 @@ ci.builder(
             "v4l2_unittest",
         ],
     ),
-    ssd = None,
     tree_closing = False,
     console_view_entry = consoles.console_view_entry(
         category = "linux",

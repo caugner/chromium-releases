@@ -4,6 +4,8 @@
 
 #include "content/browser/webid/delegation/email_verification_request.h"
 
+#include <optional>
+
 #include "base/barrier_closure.h"
 #include "base/base64url.h"
 #include "base/json/json_reader.h"
@@ -289,11 +291,8 @@ void EmailVerificationRequest::OnWebIdentityWellKnownFetched(
     return;
   }
 
-  // EVP doesn't use client_ids, so it can safely use an empty string one.
-  // TODO(crbug.com/380367784): Allow callers of SendAccountsRequest to not pass
-  // an unnecessary client_id.
   idp_network_manager_->SendAccountsRequest(
-      url::Origin::Create(well_known.accounts), well_known.accounts, "",
+      url::Origin::Create(well_known.accounts), well_known.accounts,
       base::BindOnce(&EmailVerificationRequest::OnAccountsResponseReceived,
                      weak_ptr_factory_.GetWeakPtr(), email, barrier, accounts));
 }
@@ -460,13 +459,10 @@ void EmailVerificationRequest::Verify(
       base::BindOnce(
           [](scoped_refptr<JwksResultOrError> jwks,
              base::RepeatingClosure closure, FetchStatus status,
-             data_decoder::DataDecoder::ValueOrError result) {
+             std::optional<base::DictValue> result) {
             if (status.parse_status != ParseStatus::kSuccess) {
               jwks->data = base::unexpected(
                   EmailVerificationRequestResult::kJwksHttpNotFound);
-            } else if (!result.has_value() || !result->is_dict()) {
-              jwks->data = base::unexpected(
-                  EmailVerificationRequestResult::kJwksInvalidResponse);
             } else {
               jwks->data = std::move(*result);
             }
@@ -508,9 +504,6 @@ void EmailVerificationRequest::OnTokenAndKeysFetchComplete(
 
   // Step 5.1: The browser parses and verifies if the SD-JWT
   // is valid.
-  // TODO: check if all of the necessary fields of the SD-JWT
-  // are present and valid.
-
   if (!parsed_token) {
     CompleteVerifyRequest(std::move(callback), std::nullopt,
                           EmailVerificationRequestResult::kTokenMalformedSdJwt);
@@ -575,32 +568,21 @@ void EmailVerificationRequest::OnTokenAndKeysFetchComplete(
 
   std::string result = sd_jwt_kb.Serialize();
 
-  EvtVerifier::Verify(
-      result, issuer, std::move(jwks->data.value().GetDict()),
-      render_frame_host_->GetLastCommittedOrigin(), email, nonce,
-      *holder_pub_key,
-      base::BindOnce(
-          [](base::WeakPtr<EmailVerificationRequest> request, std::string token,
-             const url::Origin& issuer,
-             EmailVerifier::OnEmailVerifiedCallback callback,
-             EvtVerifier::Result result) {
-            if (!request) {
-              std::move(callback).Run(std::nullopt);
-              return;
-            }
-            if (result == EvtVerifier::Result::kVerified) {
-              // Step 5.3: the browser notifies the page that
-              // the SD-JWT+KB is ready.
-              request->CompleteVerifyRequest(
-                  std::move(callback), token,
-                  blink::mojom::EmailVerificationRequestResult::kSuccess);
-            } else {
-              request->CompleteVerifyRequest(
-                  std::move(callback), std::nullopt,
-                  VerificationResultToEvpRequestStatus(result));
-            }
-          },
-          weak_ptr_factory_.GetWeakPtr(), result, issuer, std::move(callback)));
+  EvtVerifier::Result verification_result =
+      EvtVerifier::Verify(result, issuer, jwks->data.value(),
+                          render_frame_host_->GetLastCommittedOrigin(), email,
+                          nonce, *holder_pub_key);
+
+  if (verification_result == EvtVerifier::Result::kVerified) {
+    // Step 5.3: the browser notifies the page that
+    // the SD-JWT+KB is ready.
+    CompleteVerifyRequest(std::move(callback), result,
+                          EmailVerificationRequestResult::kSuccess);
+  } else {
+    CompleteVerifyRequest(
+        std::move(callback), std::nullopt,
+        VerificationResultToEvpRequestStatus(verification_result));
+  }
 }
 
 void EmailVerificationRequest::CompleteIsVerifiableRequest(
@@ -683,6 +665,7 @@ void EmailVerificationRequest::MaybeAddDevToolsIssue(
     case EmailVerificationRequestResult::kJwksInvalidResponse:
     case EmailVerificationRequestResult::
         kTokenVerificationSdJwtUnsupportedHeaderAlg:
+    case EmailVerificationRequestResult::kTokenVerificationSdJwtInvalidTyp:
     case EmailVerificationRequestResult::kTokenVerificationSdJwtMissingIss:
     case EmailVerificationRequestResult::kTokenVerificationSdJwtMissingIat:
     case EmailVerificationRequestResult::kTokenVerificationSdJwtMissingCnf:

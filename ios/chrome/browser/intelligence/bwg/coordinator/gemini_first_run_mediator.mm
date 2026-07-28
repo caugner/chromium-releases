@@ -104,8 +104,9 @@ const CGFloat kPromoMaxImpressionCount = 3;
 
 - (void)disconnect {
   if (_FRECompletion) {
-    _FRECompletion(NO);
+    void (^completion)(BOOL) = _FRECompletion;
     _FRECompletion = nil;
+    completion(NO);
   }
 }
 
@@ -117,8 +118,8 @@ const CGFloat kPromoMaxImpressionCount = 3;
   return ShouldForceBWGPromo() || !promoImpressionsExhausted;
 }
 
-- (GeminiConsentConfiguration*)consentConfigurationForFREType:
-    (GeminiFREType)FREType {
+- (GeminiConsentConfiguration*)consentConfigurationForFirstRunType:
+    (GeminiFirstRunType)firstRunType {
   variations::VariationsService* variationsService =
       GetApplicationContext()->GetVariationsService();
   std::string country =
@@ -132,7 +133,7 @@ const CGFloat kPromoMaxImpressionCount = 3;
   return [GeminiConsentConfiguration
       configurationForManaged:isManagedAccount
                        strict:[self useStrictLegalConsent]
-                         type:FREType
+                         type:firstRunType
                       country:nsCountry];
 }
 
@@ -179,7 +180,7 @@ const CGFloat kPromoMaxImpressionCount = 3;
   return !_geminiService->HasModelExecutionCapability();
 }
 
-#pragma mark - GeminiConsentMutator
+#pragma mark - GeminiFirstRunMutator
 
 - (BOOL)shouldShowImageRemixRow {
   return IsGeminiImageRemixToolShowFRERowEnabled() &&
@@ -201,14 +202,14 @@ const CGFloat kPromoMaxImpressionCount = 3;
 
 // Did consent to Live Gemini.
 - (void)didConsentToLiveGemini {
-  gemini::UpdateUserConsentPrefs(YES, _prefService);
+  gemini::UpdateUserConsentToLivePrefs(YES, _prefService);
   __weak __typeof(self) weakSelf = self;
   [_delegate dismissGeminiConsentUIWithCompletion:^{
     [weakSelf handleFRECompletion:YES];
   }];
 }
 
-// Did dismiss the Consent UI.
+// Did refuse Gemini consent.
 - (void)didRefuseGeminiConsent {
   // Retain self to survive synchronous teardown from the delegate.
   __strong __typeof(self) strongSelf = self;
@@ -225,11 +226,13 @@ const CGFloat kPromoMaxImpressionCount = 3;
   [strongSelf handleFRECompletion:NO];
 }
 
-- (void)didRefuseLiveMicPermission {
+// Did refuse Live onboarding.
+- (void)didRefuseLiveOnboarding {
   // Retain self to survive synchronous teardown from the delegate.
   __strong __typeof(self) strongSelf = self;
-  [_delegate dismissGeminiFlow];
-  [strongSelf handleFRECompletion:NO];
+  [_delegate dismissGeminiConsentUIWithCompletion:^{
+    [strongSelf handleFRECompletion:NO];
+  }];
 }
 
 // Promo was shown.
@@ -240,17 +243,13 @@ const CGFloat kPromoMaxImpressionCount = 3;
   }
 
   [self logPromoShown];
-
-  GeminiTabHelper* geminiTabHelper = [self activeWebStateGeminiTabHelper];
-  if (geminiTabHelper) {
-    geminiTabHelper->SetIsFirstRun(true);
-  }
 }
 
 - (void)handleFRECompletion:(BOOL)success {
   if (_FRECompletion) {
-    _FRECompletion(success);
+    void (^completion)(BOOL) = _FRECompletion;
     _FRECompletion = nil;
+    completion(success);
   }
 }
 

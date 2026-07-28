@@ -130,9 +130,9 @@ BASE_FEATURE(kPreinstalledWebAppAlwaysMigrateForTesting,
 // Controls the enablement of structured metrics on Windows, Linux, and Mac.
 BASE_FEATURE(kChromeStructuredMetrics, base::FEATURE_ENABLED_BY_DEFAULT);
 
-// When enabled, allows parsing of `tab_group_color_palette` theme key, else
-// ignores it.
-BASE_FEATURE(kCustomizeTabGroupColorPalette, base::FEATURE_DISABLED_BY_DEFAULT);
+#if !BUILDFLAG(IS_ANDROID)
+BASE_FEATURE(kContextContainers, base::FEATURE_DISABLED_BY_DEFAULT);
+#endif
 
 // Moves the Extensions "puzzle piece" icon from the title bar into the app menu
 // for web app windows.
@@ -156,6 +156,15 @@ BASE_FEATURE(kDesktopPWAsPreventClose,
 // Adds a user settings that allows PWAs to be opened with a tab strip.
 BASE_FEATURE(kDesktopPWAsTabStripSettings, base::FEATURE_DISABLED_BY_DEFAULT);
 
+// Removes the Window Controls Overlay toggle button from the PWA toolbar
+// and auto-enables WCO when the app developer specifies it in the manifest.
+// When disabled, the toggle button is shown and WCO must be enabled by the
+// user. This feature only affects apps that have "window-controls-overlay" in
+// their PWA manifest's display_override field, apps without manifest support
+// are unaffected.
+BASE_FEATURE(kDesktopPWAsWindowControlsOverlayWithNoToggle,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 // Enables the standalone Document Picture-in-Picture window path, replacing
 // the Browser-backed implementation with a dedicated host.
 BASE_FEATURE(kDocumentPipStandaloneWindow, base::FEATURE_DISABLED_BY_DEFAULT);
@@ -171,8 +180,6 @@ BASE_FEATURE(kEnableFullscreenToAnyScreenAndroid,
              base::FEATURE_DISABLED_BY_DEFAULT);
 #endif
 
-// Enables the new reset banner on the settings page.
-BASE_FEATURE(kShowResetProfileBannerV2, base::FEATURE_ENABLED_BY_DEFAULT);
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
 // Controls whether Chrome Apps are supported. See https://crbug.com/40186761.
@@ -204,6 +211,8 @@ BASE_FEATURE(kGlicIgnoreDogfoodClient, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kGlicExperimentalTriggering, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kGlicExperimentalTriggeringOptInTabFocus,
              base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kGlicExperimentalTriggeringScreenshot,
+             base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kGlicExperimentalTriggeringSuppressDoneNotification,
              base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kGlicExperimentalTriggeringOptInBypass,
@@ -240,6 +249,7 @@ const base::FeatureParam<base::TimeDelta> kGlicActorClickDelay{
 
 // Controls whether the Actor UI components are enabled.
 BASE_FEATURE(kGlicActorUi, base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kGlicConfirmTabClose, base::FEATURE_ENABLED_BY_DEFAULT);
 // Controls whether we ignore users preference of reduced motion enabled and
 // still show the tab indicator spinner. No-op if kGlicActorUiTabIndicator is
 // disabled.
@@ -430,9 +440,17 @@ BASE_FEATURE_ENUM_PARAM(GlicActorEnterprisePrefDefault,
 const base::FeatureParam<bool> kGlicActorPolicyControlExemption{
     &kGlicActor, "glic_actor_policy_control_exemption", false};
 
+BASE_FEATURE(kGlicActorWorkspaceExemptFromTierCheckRegressionFixKillswitch,
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
 BASE_FEATURE(kGlicActorPermissionsBypass, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kGlicActorToctouValidation, base::FEATURE_DISABLED_BY_DEFAULT);
+
+// Enables the explicit actor path that directly activates an observed DOM node
+// when its interaction point is covered by an eligible modeless panel.
+BASE_FEATURE(kGlicActorOccludedDirectActivation,
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kGlicActorInternalPopups, base::FEATURE_ENABLED_BY_DEFAULT);
 
@@ -497,8 +515,8 @@ const base::FeatureParam<int> kGlicMinRequiredRamMb{
 const base::FeatureParam<bool> kGlicAdaptiveToolbarAutoPin{
     &kGlic, "adaptive-toolbar-auto-pin", true};
 
-// Controls whether the Glic feature is always detached.
-BASE_FEATURE(kGlicDetached, base::FEATURE_ENABLED_BY_DEFAULT);
+const base::FeatureParam<bool> kGlicBottomSheetPromo{
+    &kGlic, "glic-bottom-sheet-promo", true};
 
 // Controls whether the Glic feature uses multiple instances or not.
 BASE_FEATURE(kGlicMultiInstance, base::FEATURE_ENABLED_BY_DEFAULT);
@@ -538,6 +556,11 @@ BASE_FEATURE(kGlicZOrderChanges, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kGlicDevelopmentSyncGoogleCookies,
              "GlicDevelopmentCookies",
              base::FEATURE_DISABLED_BY_DEFAULT);
+
+// When this feature is enabled, device bound sessions in the Glic storage
+// partition are cleared in addition to cookies. This prevents DBSC deferrals.
+BASE_FEATURE(kGlicClearDeviceBoundSessionsOnFirstSync,
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 const base::FeatureParam<bool> kGlicStatusIconOpenMenuWithSecondaryClick{
     &kGlic, "open-status-icon-menu-with-secondary-click", true};
@@ -621,13 +644,6 @@ BASE_FEATURE_PARAM(base::TimeDelta,
                    &kGlicUserStatusCheck,
                    "glic-user-status-throttle-interval",
                    base::Seconds(5));
-
-BASE_FEATURE(kGlicFreURLConfig, base::FEATURE_ENABLED_BY_DEFAULT);
-BASE_FEATURE_PARAM(std::string,
-                   kGlicFreURL,
-                   &kGlicFreURLConfig,
-                   "glic-fre-url",
-                   "https://gemini.google.com/glic/intro?");
 
 BASE_FEATURE(kGlicLearnMoreURLConfig, base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE_PARAM(std::string,
@@ -798,6 +814,11 @@ const base::FeatureParam<int> kGlicWarmingDelayMs{
 const base::FeatureParam<int> kGlicWarmingJitterMs{
     &kGlicWarming, "glic-warming-jitter-ms", 10 * 1000};
 
+// Blocks prewarming if the device has less than this amount of physical memory.
+// If 0, memory is not checked.
+const base::FeatureParam<size_t> kGlicWarmingMinRequiredRamMb{
+    &kGlicWarming, "glic-warming-min-required-ram-mb", 0};
+
 BASE_FEATURE(kGlicTieredRollout, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kGlicRollout, base::FEATURE_ENABLED_BY_DEFAULT);
@@ -815,8 +836,6 @@ BASE_FEATURE(kGlicDefaultTabContextSetting, base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kGlicDefaultContextPinOnBind, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kGlicUnloadOnClose, base::FEATURE_DISABLED_BY_DEFAULT);
-
-BASE_FEATURE(kGlicApiActivationGating, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kGlicBindPinnedUnboundTab, base::FEATURE_ENABLED_BY_DEFAULT);
 
@@ -909,8 +928,6 @@ BASE_FEATURE(kGlicDaisyChainNewTabs, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kGlicLiveModeOnlyGlow, base::FEATURE_ENABLED_BY_DEFAULT);
 
-BASE_FEATURE(kGlicMITabContextMenu, base::FEATURE_ENABLED_BY_DEFAULT);
-
 BASE_FEATURE(kGlicGeminiContinueURLRedirect, base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kGlicWebContinuity, base::FEATURE_DISABLED_BY_DEFAULT);
 const base::FeatureParam<std::string> kGlicWebContinuityUrl{
@@ -926,12 +943,12 @@ const base::FeatureParam<int> kGlicWebContinuityMaxTurnIdLength{
 
 BASE_FEATURE(kGlicUseToolbarHeightSidePanel, base::FEATURE_DISABLED_BY_DEFAULT);
 
-BASE_FEATURE(kGlicButtonPressedState, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kGlicButtonPressedState, base::FEATURE_ENABLED_BY_DEFAULT);
 
 const base::FeatureParam<bool> kGlicButtonContainerBackground{
     &kGlicButtonPressedState, "glic-button-container-background", false};
 const base::FeatureParam<bool> kGlicButtonPressedForceSolidIcon{
-    &kGlicButtonPressedState, "glic-button-pressed-force-solid-icon", false};
+    &kGlicButtonPressedState, "glic-button-pressed-force-solid-icon", true};
 
 BASE_FEATURE(kGlicShareImage, base::FEATURE_DISABLED_BY_DEFAULT);
 
@@ -999,19 +1016,21 @@ BASE_FEATURE_PARAM(base::TimeDelta,
 BASE_FEATURE(kGlicActorAutofillOneTimePassword,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
+// Whether to click a field before filling it in Glic actor autofill.
+// This feature is also gated by |kGlicActorAutofill|.
+BASE_FEATURE(kGlicActorAutofillPreClick, base::FEATURE_DISABLED_BY_DEFAULT);
+
 // Whether to enable the section label in Glic actor autofill.
 // This feature is also gated by |kGlicActorAutofill|.
 BASE_FEATURE(kGlicActorAutofillSectionLabel, base::FEATURE_DISABLED_BY_DEFAULT);
 
-BASE_FEATURE(kGlicDisableUnderlineAnimations,
-             base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kGlicGuestUrlPresets, base::FEATURE_DISABLED_BY_DEFAULT);
 const base::FeatureParam<int> kGlicGuestUrlPresetType{
     &kGlicGuestUrlPresets, "glic-guest-url-preset-type", 0};
 
 BASE_FEATURE(kGlicContextualCueBubble, base::FEATURE_DISABLED_BY_DEFAULT);
 
-BASE_FEATURE(kGlicClientZoomControl, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kGlicClientZoomControl, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kActorFormFillingServiceEnableAddress,
              base::FEATURE_ENABLED_BY_DEFAULT);
@@ -1021,6 +1040,10 @@ BASE_FEATURE(kActorFormFillingServiceEnableCreditCard,
 
 // Enables the `google-chrome://` URI scheme.
 BASE_FEATURE(kGoogleChromeScheme, base::FEATURE_DISABLED_BY_DEFAULT);
+
+// Controls whether the Google Search AI Mode Workspace link (Connected Apps) is
+// shown in AI Settings. Acts as a killswitch.
+BASE_FEATURE(kGoogleSearchAiModeWorkspace, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Force Privacy Guide to be available even if it would be unavailable
 // otherwise. This is meant for development and test purposes only.
@@ -1218,11 +1241,28 @@ const base::FeatureParam<base::TimeDelta>
 // Enables HTTPS-First Mode by default in Incognito Mode.
 BASE_FEATURE(kHttpsFirstModeIncognito, base::FEATURE_ENABLED_BY_DEFAULT);
 
+// Enables the Incoming Call Notifications scenario. When created by an
+// installed origin, an incoming call notification should have increased
+// priority, colored buttons, a ringtone, and a default "close" button.
+// Otherwise, if the origin is not installed, it should behave like the default
+// notifications, but with the added "Close" button. See
+// https://github.com/MicrosoftEdge/MSEdgeExplainers/blob/main/Notifications/notifications_actions_customization.md
+BASE_FEATURE(kIncomingCallNotifications,
+#if BUILDFLAG(IS_WIN)
+             base::FEATURE_ENABLED_BY_DEFAULT);
+#else
+             base::FEATURE_DISABLED_BY_DEFAULT);
+#endif  // BUILDFLAG(IS_WIN)
+
 // Experimental image replacement feature. b/482792874
 BASE_FEATURE(kIndigo, base::FEATURE_DISABLED_BY_DEFAULT);
 
 const base::FeatureParam<bool> kIndigoRequireGlicEnabling{
     &kIndigo, "indigo_require_glic_enabling", false};
+const base::FeatureParam<bool> kIndigoAllowForEnterprise{
+    &kIndigo, "allow_indigo_for_enterprise", false};
+const base::FeatureParam<bool> kIndigoSkipEnterpriseCheck{
+    &kIndigo, "indigo_skip_enterprise_check", false};
 
 const base::FeatureParam<base::TimeDelta> kIndigoAnchoredMessageResetDuration{
     &kIndigo, "indigo_anchored_message_reset_duration", base::Hours(24)};
@@ -1239,6 +1279,13 @@ const base::FeatureParam<std::string> kIndigoSavedUrl{
 const base::FeatureParam<std::string> kIndigoScopes{
     &kIndigo, "indigo_scopes",
     "https://www.googleapis.com/auth/userinfo.email"};
+
+BASE_FEATURE(kIndigoMetadataKeywordHeuristic,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+const base::FeatureParam<base::TimeDelta>
+    kIndigoMetadataKeywordHeuristicSameDocumentNavigationDelay{
+        &kIndigoMetadataKeywordHeuristic,
+        "same_document_navigation_metadata_delay", base::Seconds(4)};
 
 // Experimental image replacement feature opens glic.
 BASE_FEATURE(kIndigoOpenGlic, base::FEATURE_DISABLED_BY_DEFAULT);
@@ -1305,12 +1352,13 @@ BASE_FEATURE(kIndigoComponent, base::FEATURE_DISABLED_BY_DEFAULT);
 const base::FeatureParam<std::string> kIndigoComponentAttribute{
     &kIndigoComponent, "indigo_component_attribute", ""};
 
-BASE_FEATURE(kSystemNotifications, base::FEATURE_ENABLED_BY_DEFAULT);
+// If enabled, the initial WebUI skips spell check initialization on startup for
+// NTP.
+BASE_FEATURE(kInitialWebUIWithoutSpellCheckForNtp,
+             "InitialWebUIWithoutSpellCheckForNtp",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
-#if BUILDFLAG(IS_MAC)
-// Enables the usage of Apple's new Notification API.
-BASE_FEATURE(kNewMacNotificationAPI, base::FEATURE_DISABLED_BY_DEFAULT);
-#endif  // BUILDFLAG(IS_MAC)
+BASE_FEATURE(kSystemNotifications, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // When kNoReferrers is enabled, most HTTP requests will provide empty
 // referrers instead of their ordinary behavior.
@@ -1341,7 +1389,7 @@ BASE_FEATURE(kPluginVm, base::FEATURE_DISABLED_BY_DEFAULT);
 #endif
 
 // Allows Chrome to do preconnect when prerender fails.
-BASE_FEATURE(kPrerenderFallbackToPreconnect, base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kPrerenderFallbackToPreconnect, base::FEATURE_DISABLED_BY_DEFAULT);
 
 #if BUILDFLAG(IS_CHROMEOS)
 // If enabled, use managed per-printer print job options set via
@@ -1504,6 +1552,17 @@ const base::FeatureParam<base::TimeDelta> kSCTLogMaxIngestionRandomDelay{
     "sct_log_max_ingestion_random_delay",
     base::Hours(1),
 };
+
+// When enabled, an extension service worker's render process is given
+// foreground priority while the worker is STARTING. Extension service workers
+// are often started headlessly (e.g. to register webRequest listeners) with no
+// controllee or other foreground signal, so their process would otherwise be
+// left at background priority (which maps to EcoQoS on Windows). Under heavy
+// system load that lets the worker starve, miss the start timeout, get torn
+// down, and retry indefinitely (crbug.com/484218883). The boost is dropped once
+// the worker reaches RUNNING or stops.
+BASE_FEATURE(kServiceWorkerForegroundOnExtensionStartup,
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Alternative to switches::kSitePerProcess, for turning on full site isolation.
 // Launch bug: https://crbug.com/810843.  This is a //chrome-layer feature to
@@ -1836,6 +1895,15 @@ const base::FeatureParam<bool> kWebUIReloadButtonDeferBrowserViewShow{
 // initialization.
 const base::FeatureParam<bool> kWebUIReloadButtonPrewarmWebUI{
     &kWebUIReloadButton, "WebUIReloadButtonPrewarmWebUI", false};
+// When this is enabled, the pre-warmed WebUI will also navigate immediately. It
+// only takes effect when `WebUIReloadButtonPrewarmWebUI` is enabled.
+const base::FeatureParam<bool> kWebUIReloadButtonPrewarmWebUIPreNavigate{
+    &kWebUIReloadButton, "WebUIReloadButtonPrewarmWebUIPreNavigate", false};
+// When this is enabled, the WebUI toolbar will be pre-warmed at profile ready
+// time instead of browser initialization time. It only takes effect when
+// `WebUIReloadButtonPrewarmWebUI` is enabled.
+const base::FeatureParam<bool> kWebUIReloadButtonProfilePrewarming{
+    &kWebUIReloadButton, "WebUIReloadButtonProfilePrewarming", false};
 // When this is enabled, the reload button will be marked as visible until its
 // first non-empty paint.
 const base::FeatureParam<bool> kWebUIReloadButtonKeepVisibleUntilPaint{
@@ -1917,10 +1985,10 @@ BASE_FEATURE(kClassManagementEnabledMetricsProvider,
 // feature.
 BASE_FEATURE(kSmartRestartMetrics, base::FEATURE_ENABLED_BY_DEFAULT);
 
-BASE_FEATURE(kSmartRestart, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kSmartRestart, base::FEATURE_ENABLED_BY_DEFAULT);
 
 const base::FeatureParam<base::TimeDelta> kSmartRestartDelay{
-    &kSmartRestart, "restart_delay", base::Minutes(5)};
+    &kSmartRestart, "restart_delay", base::Minutes(1)};
 
 BASE_FEATURE(kSmartRestartLockScreen, base::FEATURE_DISABLED_BY_DEFAULT);
 

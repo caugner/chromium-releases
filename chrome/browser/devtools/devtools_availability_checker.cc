@@ -20,6 +20,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "url/gurl.h"
+#include "url/url_constants.h"
 
 #if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
 #include "extensions/browser/extension_registry.h"
@@ -43,9 +44,9 @@
 
 namespace {
 
-policy::DeveloperToolsPolicyHandler::Availability GetDevToolsAvailability(
+policy::DeveloperToolsAvailability GetDevToolsAvailability(
     Profile* profile) {
-  using Availability = policy::DeveloperToolsPolicyHandler::Availability;
+  using Availability = policy::DeveloperToolsAvailability;
   Availability availability =
       policy::DeveloperToolsPolicyHandler::GetEffectiveAvailability(profile);
 #if BUILDFLAG(IS_CHROMEOS)
@@ -100,17 +101,24 @@ bool IsInspectionAllowed(Profile* profile, content::WebContents* web_contents) {
   policy::DeveloperToolsPolicyChecker* checker =
       policy::DeveloperToolsPolicyCheckerFactory::GetForBrowserContext(profile);
   if (checker) {
-    bool is_blocked = false;
-    web_contents->ForEachRenderFrameHost([&](content::RenderFrameHost* frame) {
-      auto frame_availability =
-          checker->GetDevToolsAvailabilityForUrl(frame->GetLastCommittedURL());
-      if (frame_availability == policy::DeveloperToolsPolicyChecker::
-                                    DevToolsAvailability::kDisallowed) {
-        is_blocked = true;
+    if (content::RenderFrameHost* main_frame =
+            web_contents->GetPrimaryMainFrame()) {
+      bool is_blocked = false;
+      main_frame->ForEachRenderFrameHost([&](content::RenderFrameHost* frame) {
+        if (frame->GetLastCommittedURL().is_empty() ||
+            frame->GetLastCommittedURL().SchemeIs(url::kAboutScheme)) {
+          return;
+        }
+        auto frame_availability = checker->GetDevToolsAvailabilityForUrl(
+            frame->GetLastCommittedURL());
+        if (frame_availability == policy::DeveloperToolsPolicyChecker::
+                                      DevToolsAvailability::kDisallowed) {
+          is_blocked = true;
+        }
+      });
+      if (is_blocked) {
+        return false;
       }
-    });
-    if (is_blocked) {
-      return false;
     }
   }
 
@@ -170,7 +178,7 @@ bool IsInspectionAllowed(Profile* profile, content::WebContents* web_contents) {
   }
 
   // Fall back to the general enum policy for the tab context.
-  using Availability = policy::DeveloperToolsPolicyHandler::Availability;
+  using Availability = policy::DeveloperToolsAvailability;
   Availability availability = GetDevToolsAvailability(profile);
   switch (availability) {
     case Availability::kDisallowed:
@@ -222,7 +230,7 @@ bool IsInspectionAllowed(Profile* profile,
   }
 #endif
 
-  using Availability = policy::DeveloperToolsPolicyHandler::Availability;
+  using Availability = policy::DeveloperToolsAvailability;
   Availability availability =
       extension ? policy::DeveloperToolsPolicyHandler::GetEffectiveAvailability(
                       profile)
@@ -278,7 +286,7 @@ bool IsInspectionAllowed(Profile* profile, const web_app::WebApp* web_app) {
         break;
     }
   }
-  using Availability = policy::DeveloperToolsPolicyHandler::Availability;
+  using Availability = policy::DeveloperToolsAvailability;
   Availability availability =
       policy::DeveloperToolsPolicyHandler::GetEffectiveAvailability(profile);
   switch (availability) {
@@ -300,6 +308,9 @@ bool IsInspectionAllowed(Profile* profile, const web_app::WebApp* web_app) {
 #endif
 
 bool IsInspectionAllowed(Profile* profile, const GURL& url) {
+  if (url.is_empty() || url.SchemeIs(url::kAboutScheme)) {
+    return true;
+  }
 #if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
   if (url.SchemeIs(extensions::kExtensionScheme)) {
     if (const extensions::Extension* extension =
@@ -329,7 +340,7 @@ bool IsInspectionAllowed(Profile* profile, const GURL& url) {
   }
   // If the URL-based policy doesn't have a rule for this URL, we fall back to
   // the general enum-based policy.
-  using Availability = policy::DeveloperToolsPolicyHandler::Availability;
+  using Availability = policy::DeveloperToolsAvailability;
   Availability availability = GetDevToolsAvailability(profile);
   switch (availability) {
     case Availability::kDisallowed:

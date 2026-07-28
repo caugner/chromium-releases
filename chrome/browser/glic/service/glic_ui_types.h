@@ -13,6 +13,7 @@
 #include "chrome/browser/glic/host/glic.mojom-shared.h"
 #include "chrome/browser/glic/public/context/glic_sharing_manager.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/side_panel/side_panel_enums.h"
 #include "components/tabs/public/tab_interface.h"
 #include "third_party/abseil-cpp/absl/functional/overload.h"
 #include "ui/gfx/geometry/rect.h"
@@ -44,6 +45,7 @@ struct SidePanelShowOptions {
   bool pin_on_bind = true;
   GlicPinTrigger pin_trigger = GlicPinTrigger::kUnknown;
   bool prefer_peek = false;
+  SidePanelOpenTrigger open_trigger = SidePanelOpenTrigger::kGlicOpened;
 };
 
 struct FloatingShowOptions {
@@ -83,7 +85,7 @@ struct ShowOptions {
   bool reinitialize_if_already_active = false;
   std::optional<std::string> prompt_suggestion;
   mojom::InvocationSource invocation_source =
-      mojom::InvocationSource::kTopChromeButton;
+      mojom::InvocationSource::kUnsupported;
   mojom::FreOverride fre_override = mojom::FreOverride::kUnspecified;
 
   // Container for options that are different between side panel and floaty.

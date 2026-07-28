@@ -11,15 +11,16 @@
 #include "build/branding_buildflags.h"
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/actor/resources/grit/actor_browser_resources.h"
+#include "chrome/browser/dictation/features.h"
 #include "chrome/browser/glic/browser_ui/glic_vector_icon_manager.h"
 #include "chrome/browser/indigo/indigo_page_action_controller.h"
 #include "chrome/browser/indigo/resources/grit/indigo_strings.h"
-#include "chrome/browser/multistep_filter/ui/filter_ui_controller.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/send_tab_to_self/send_tab_to_self_client_service.h"
 #include "chrome/browser/send_tab_to_self/send_tab_to_self_client_service_factory.h"
 #include "chrome/browser/skills/skills_ui_window_controller.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/chrome_pages.h"
@@ -43,7 +44,6 @@
 #include "components/autofill/core/common/autofill_features.h"
 #include "components/commerce/core/commerce_feature_list.h"
 #include "components/data_sharing/public/features.h"
-#include "components/multistep_filter/core/features.h"
 #include "components/omnibox/browser/vector_icons.h"
 #include "components/plus_addresses/core/browser/grit/plus_addresses_strings.h"
 #include "components/plus_addresses/core/common/features.h"
@@ -53,6 +53,7 @@
 #include "components/tabs/public/tab_interface.h"
 #include "components/translate/core/browser/translate_manager.h"
 #include "components/vector_icons/vector_icons.h"
+#include "ui/base/base_window.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/menus/simple_menu_model.h"
 #include "ui/strings/grit/ui_strings.h"
@@ -339,7 +340,7 @@ void ToastService::RegisterToasts(
                                       ? vector_icons::kMarkEmailReadIcon
                                       : vector_icons::kMarkEmailReadOldIcon,
                                   IDS_EMAIL_VERIFIED)
-          .AddGlobalScoped()
+          .SetPersistOnNavigation()
           .AddMenu()
           .Build());
 
@@ -484,63 +485,6 @@ void ToastService::RegisterToasts(
             .Build());
   }
 
-  if (base::FeatureList::IsEnabled(multistep_filter::kMultistepFilter)) {
-    toast_registry_->RegisterToast(
-        ToastId::kMultistepFilterSuggestion,
-        ToastSpecification::Builder(
-#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
-            vector_icons::kPlayCircleSparkIcon,
-#else
-            features::IsRoundedIconsEnabled()
-                ? vector_icons::kPlayArrowIcon
-                : vector_icons::kPlayArrowChromeRefreshOldIcon,
-#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
-            IDS_MULTISTEP_FILTER_SUGGESTION_TITLE)
-            .AddActionButton(
-                IDS_MULTISTEP_FILTER_SUGGESTION_APPLY_BUTTON,
-                base::BindRepeating(
-                    [](BrowserWindowInterface* window) {
-                      if (tabs::TabInterface* tab =
-                              window->GetActiveTabInterface()) {
-                        if (multistep_filter::FilterUiController* controller =
-                                multistep_filter::FilterUiController::From(
-                                    tab)) {
-                          controller->ApplySuggestion();
-                        }
-                      }
-                    },
-                    base::Unretained(browser_window_interface)))
-            .AddCloseButton()
-            .Build());
-    toast_registry_->RegisterToast(
-        ToastId::kMultistepFilterSuggestionRecent,
-        ToastSpecification::Builder(
-#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
-            vector_icons::kPlayCircleSparkIcon,
-#else
-            features::IsRoundedIconsEnabled()
-                ? vector_icons::kPlayArrowIcon
-                : vector_icons::kPlayArrowChromeRefreshOldIcon,
-#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
-            IDS_MULTISTEP_FILTER_SUGGESTION_RECENT_TITLE)
-            .AddActionButton(
-                IDS_MULTISTEP_FILTER_SUGGESTION_RECENT_APPLY_BUTTON,
-                base::BindRepeating(
-                    [](BrowserWindowInterface* window) {
-                      if (tabs::TabInterface* tab =
-                              window->GetActiveTabInterface()) {
-                        if (multistep_filter::FilterUiController* controller =
-                                multistep_filter::FilterUiController::From(
-                                    tab)) {
-                          controller->ApplySuggestion();
-                        }
-                      }
-                    },
-                    base::Unretained(browser_window_interface)))
-            .AddCloseButton()
-            .Build());
-  }
-
   toast_registry_->RegisterToast(
       ToastId::kSendTabToSelfTabOpened,
       // TODO(crbug.com/488072250): Update the strings.
@@ -657,6 +601,71 @@ void ToastService::RegisterToasts(
                     },
                     base::Unretained(browser_window_interface)))
             .AddCloseButton()
+            .Build());
+  }
+
+  toast_registry_->RegisterToast(
+      ToastId::kTabStripSwitchDelayedHorizontal,
+      ToastSpecification::Builder(
+          kFullscreenIcon,
+          IDS_TAB_STRIP_SWITCH_DELAYED_TO_HORIZONTAL_TOAST_BODY)
+          .AddActionButton(IDS_TAB_STRIP_SWITCH_DELAYED_EXIT_FULLSCREEN_ACTION,
+                           base::BindRepeating(
+                               [](BrowserWindowInterface* window) {
+                                 if (window->GetWindow()->IsFullscreen()) {
+                                   chrome::ToggleFullscreenMode(
+                                       window, /*user_initiated=*/true);
+                                 }
+                               },
+                               base::Unretained(browser_window_interface)))
+          .AddCloseButton()
+          .AddGlobalScoped()
+          .Build());
+
+  toast_registry_->RegisterToast(
+      ToastId::kTabStripSwitchDelayedVertical,
+      ToastSpecification::Builder(
+          kFullscreenIcon, IDS_TAB_STRIP_SWITCH_DELAYED_TO_VERTICAL_TOAST_BODY)
+          .AddActionButton(IDS_TAB_STRIP_SWITCH_DELAYED_EXIT_FULLSCREEN_ACTION,
+                           base::BindRepeating(
+                               [](BrowserWindowInterface* window) {
+                                 if (window->GetWindow()->IsFullscreen()) {
+                                   chrome::ToggleFullscreenMode(
+                                       window, /*user_initiated=*/true);
+                                 }
+                               },
+                               base::Unretained(browser_window_interface)))
+          .AddCloseButton()
+          .AddGlobalScoped()
+          .Build());
+
+  if (base::FeatureList::IsEnabled(
+          autofill::features::kAutofillAmbientAutofill)) {
+    toast_registry_->RegisterToast(
+        ToastId::kAutofillAiPreFetchErrorMessage,
+        ToastSpecification::Builder(features::IsRoundedIconsEnabled()
+                                        ? kTextAnalysisIcon
+                                        : kTextAnalysisOldIcon,
+                                    IDS_AUTOFILL_AI_PRE_FETCH_ERROR_MESSAGE)
+            .AddGlobalScoped()
+            .Build());
+  }
+  if (base::FeatureList::IsEnabled(dictation::kDictation)) {
+    toast_registry_->RegisterToast(
+        ToastId::kDictationError,
+        ToastSpecification::Builder(features::IsRoundedIconsEnabled()
+                                        ? vector_icons::kErrorIcon
+                                        : vector_icons::kErrorOldIcon,
+                                    IDS_DICTATION_ERROR_TOAST)
+            .Build());
+    toast_registry_->RegisterToast(
+        ToastId::kDictationStopped,
+        ToastSpecification::Builder(
+            features::IsRoundedIconsEnabled()
+                ? vector_icons::kMicIcon
+                : vector_icons::kMicChromeRefreshOldIcon,
+            IDS_DICTATION_STOPPED_TOAST)
+            .SetPersistOnNavigation()
             .Build());
   }
 }  // RegisterToasts() end.

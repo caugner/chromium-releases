@@ -18,6 +18,7 @@
 #include "third_party/metrics_proto/omnibox_event.pb.h"
 #include "third_party/metrics_proto/omnibox_focus_type.pb.h"
 #include "third_party/metrics_proto/omnibox_input_type.pb.h"
+#include "third_party/omnibox_proto/chrome_searchbox_stats.pb.h"
 #include "third_party/omnibox_proto/suggest_inventory.pb.h"
 #include "third_party/omnibox_proto/tool_mode.pb.h"
 #include "third_party/perfetto/include/perfetto/tracing/traced_value_forward.h"
@@ -259,7 +260,8 @@ class AutocompleteInput {
       case metrics::OmniboxEventProto::SRP_OMNIBOX_COMPOSEBOX:
       case metrics::OmniboxEventProto::OTHER_OMNIBOX_COMPOSEBOX:
       case metrics::OmniboxEventProto::CO_BROWSING_COMPOSEBOX:
-        return SearchTermsData::RequestSource::NTP_COMPOSEBOX;
+      case metrics::OmniboxEventProto::COMPOSEBOX_EVERYWHERE:
+        return SearchTermsData::RequestSource::COMPOSEBOX;
       default:
         return SearchTermsData::RequestSource::SEARCHBOX;
     }
@@ -294,16 +296,6 @@ class AutocompleteInput {
     prevent_inline_autocomplete_ = prevent_inline_autocomplete;
   }
 
-  // Returns whether, given an input string consisting solely of a substituting
-  // keyword, we should score it like a non-substituting keyword.
-  bool prefer_keyword() const { return prefer_keyword_; }
-  // |prefer_keyword| should be true when the keyword UI is onscreen; this
-  // will bias the autocomplete result set toward the keyword provider when
-  // the input string is a bare keyword.
-  void set_prefer_keyword(bool prefer_keyword) {
-    prefer_keyword_ = prefer_keyword;
-  }
-
   // Returns whether this input is allowed to be treated as an exact
   // keyword match.  If not, the default result is guaranteed not to be a
   // keyword search, even if the input is "<keyword> <search string>".
@@ -316,7 +308,7 @@ class AutocompleteInput {
     allow_exact_keyword_match_ = allow_exact_keyword_match;
   }
 
-  // Provides public read-only access to whether the user entered keyword mode.
+  // Whether the user entered keyword mode.
   bool in_keyword_mode() const { return in_keyword_mode_; }
 
   // Set by the edit model or driver of autocompletion to inform autocomplete
@@ -404,6 +396,15 @@ class AutocompleteInput {
     previous_query_ = previous_query;
   }
 
+  std::optional<omnibox::metrics::ChromeSearchboxStats::InputMethod>
+  input_method() const {
+    return input_method_;
+  }
+  void set_input_method(
+      omnibox::metrics::ChromeSearchboxStats::InputMethod input_method) {
+    input_method_ = input_method;
+  }
+
   // Resets all internal variables to the null-constructed state.
   void Clear();
 
@@ -455,7 +456,6 @@ class AutocompleteInput {
   GURL canonicalized_url_;
   std::string desired_tld_;
   bool prevent_inline_autocomplete_;
-  bool prefer_keyword_;
   bool allow_exact_keyword_match_;
   bool in_keyword_mode_;
   bool omit_asynchronous_matches_;
@@ -494,6 +494,12 @@ class AutocompleteInput {
   // This is only relevant for contextual tasks where a previous query might
   // be submitted and follow-up queries can be asked in the same thread.
   std::string previous_query_;
+  // The method the input was entered (e.g. voice). Passed to suggest requests
+  // for searchboxes that want a smart compose responses. Used to determine
+  // when to trigger smart compose. Optional since it's currently only needed
+  // for composebox inputs.
+  std::optional<omnibox::metrics::ChromeSearchboxStats::InputMethod>
+      input_method_;
 };
 
 #endif  // COMPONENTS_OMNIBOX_BROWSER_AUTOCOMPLETE_INPUT_H_

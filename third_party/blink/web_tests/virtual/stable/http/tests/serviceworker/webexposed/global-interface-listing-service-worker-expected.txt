@@ -74,6 +74,7 @@ interface Blob
     method slice
     method stream
     method text
+    method textStream
 interface BroadcastChannel : EventTarget
     attribute @@toStringTag
     getter name
@@ -604,6 +605,29 @@ interface FontFace
     setter variant
     setter variationSettings
     setter weight
+interface FontFaceSet : EventTarget
+    attribute @@toStringTag
+    getter onloading
+    getter onloadingdone
+    getter onloadingerror
+    getter ready
+    getter size
+    getter status
+    method @@iterator
+    method add
+    method check
+    method clear
+    method constructor
+    method delete
+    method entries
+    method forEach
+    method has
+    method keys
+    method load
+    method values
+    setter onloading
+    setter onloadingdone
+    setter onloadingerror
 interface FormData
     attribute @@toStringTag
     method @@iterator
@@ -1425,6 +1449,7 @@ interface PerformanceEntry
     getter duration
     getter entryType
     getter name
+    getter navigationId
     getter startTime
     method constructor
     method toJSON
@@ -1643,6 +1668,7 @@ interface Request
     method formData
     method json
     method text
+    method textStream
 interface Response
     static method error
     static method redirect
@@ -1664,6 +1690,7 @@ interface Response
     method formData
     method json
     method text
+    method textStream
 interface RestrictionTarget
     attribute @@toStringTag
     method constructor
@@ -3313,16 +3340,20 @@ interface WebTransportDatagramDuplexStream
     attribute @@toStringTag
     getter incomingHighWaterMark
     getter incomingMaxAge
+    getter incomingMaxBufferedDatagrams
     getter maxDatagramSize
     getter outgoingHighWaterMark
     getter outgoingMaxAge
+    getter outgoingMaxBufferedDatagrams
     getter readable
     getter writable
     method constructor
     setter incomingHighWaterMark
     setter incomingMaxAge
+    setter incomingMaxBufferedDatagrams
     setter outgoingHighWaterMark
     setter outgoingMaxAge
+    setter outgoingMaxBufferedDatagrams
 interface WebTransportError : DOMException
     attribute @@toStringTag
     getter source

@@ -12,13 +12,17 @@
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/browser/devtools/devtools_toggle_action.h"
+#include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/desktop_browser_window_capabilities.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
+#include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/cr_components/searchbox/searchbox_handler.h"
 #include "chrome/browser/ui/webui/omnibox_popup/omnibox_popup_web_contents_helper.h"
@@ -60,7 +64,11 @@ class WebUIBrowserTest : public InProcessBrowserTest {
     scoped_feature_list_.InitWithFeatures(
         /*enabled_features=*/{features::kWebium,
                               features::kAttachUnownedInnerWebContents},
-        /*disabled_features=*/{});
+        /*disabled_features=*/
+        // TODO(crbug.com/452061489): Fix tests that fail when the WebUI Omnibox
+        // is enabled and then remove these two Features.
+        {omnibox::internal::kWebUIOmniboxPopup,
+         omnibox::internal::kWebUIOmniboxAimPopup});
     InProcessBrowserTest::SetUp();
   }
 
@@ -123,7 +131,7 @@ class WebUIBrowserSurfaceEmbedPixelTest : public InProcessBrowserTest {
 
 // Ensures that WebUIBrowser does not crash on startup and can shutdown.
 IN_PROC_BROWSER_TEST_F(WebUIBrowserTest, StartupAndShutdown) {
-  auto* window = browser()->window();
+  auto* window = WebUIBrowserWindow::FromBrowser(browser());
   ASSERT_TRUE(window);
 
   content::WebContents* web_contents =
@@ -147,7 +155,7 @@ IN_PROC_BROWSER_TEST_F(WebUIBrowserTest, AllowKeyboardLockForInnerContents) {
 
 // Navigation at chrome/ layer, which hits some focus management paths.
 IN_PROC_BROWSER_TEST_F(WebUIBrowserTest, NavigatePage) {
-  auto* window = browser()->window();
+  auto* window = WebUIBrowserWindow::FromBrowser(browser());
   ASSERT_TRUE(window);
 
   content::WebContents* web_contents =
@@ -169,7 +177,7 @@ IN_PROC_BROWSER_TEST_F(WebUIBrowserTest, NavigatePage) {
 
 // Verify DevTools targets enumeration for browser UI and tabs.
 IN_PROC_BROWSER_TEST_F(WebUIBrowserTest, EnumerateDevToolsTargets) {
-  auto* window = browser()->window();
+  auto* window = WebUIBrowserWindow::FromBrowser(browser());
   ASSERT_TRUE(window);
 
   content::WebContents* web_contents =
@@ -213,7 +221,7 @@ IN_PROC_BROWSER_TEST_F(WebUIBrowserTest, EnumerateDevToolsTargets) {
 
 // Test entering and exiting fullscreen mode.
 IN_PROC_BROWSER_TEST_F(WebUIBrowserTest, FullscreenEnterAndExit) {
-  auto* window = browser()->window();
+  auto* window = WebUIBrowserWindow::FromBrowser(browser());
   ASSERT_TRUE(window);
 
   content::WebContents* web_contents =
@@ -235,7 +243,7 @@ IN_PROC_BROWSER_TEST_F(WebUIBrowserTest, FullscreenEnterAndExit) {
 
 // Test entering and exiting tab fullscreen mode, including tab switching.
 IN_PROC_BROWSER_TEST_F(WebUIBrowserTest, TabFullscreenEnterAndExit) {
-  auto* window = browser()->window();
+  auto* window = WebUIBrowserWindow::FromBrowser(browser());
   ASSERT_TRUE(window);
 
   content::WebContents* web_contents =
@@ -394,7 +402,7 @@ IN_PROC_BROWSER_TEST_F(WebUIBrowserSurfaceEmbedPixelTest,
 #endif
 IN_PROC_BROWSER_TEST_F(WebUIBrowserTest,
                        MAYBE_CloseTabDoesNotMakeRemainingTabBlank) {
-  auto* window = browser()->window();
+  auto* window = WebUIBrowserWindow::FromBrowser(browser());
   ASSERT_TRUE(window);
 
   content::WebContents* ui_web_contents =
@@ -509,7 +517,7 @@ IN_PROC_BROWSER_TEST_F(WebUIBrowserTest, SetContentsSizeEarlyResizesWindow) {
   window->SetContentsSize(target_size);
 
   // 3) Show the window and navigate to our layout testing page
-  new_browser->window()->Show();
+  new_browser->GetWindow()->Show();
   content::WebContents* tab_contents =
       new_browser->tab_strip_model()->GetActiveWebContents();
   ASSERT_TRUE(tab_contents);
@@ -523,4 +531,26 @@ IN_PROC_BROWSER_TEST_F(WebUIBrowserTest, SetContentsSizeEarlyResizesWindow) {
   })) << "Window contents size did not update to the expected size."
       << "Window contents size: " << window->GetContentsSize().ToString()
       << ", expected: " << target_size.ToString();
+}
+
+IN_PROC_BROWSER_TEST_F(WebUIBrowserTest, DevToolsWindowDoesNotCrash) {
+  chrome::ToggleDevToolsWindow(browser(), DevToolsToggleAction::Show(),
+                               DevToolsOpenedByAction::kUnknown);
+}
+
+IN_PROC_BROWSER_TEST_F(WebUIBrowserTest,
+                       ActiveTabHasNonZeroSizeOnWindowCreation) {
+  // Create a new browser window with a tab.
+  Browser* new_browser = Browser::Create(Browser::CreateParams(
+      Browser::Type::TYPE_NORMAL, browser()->profile(), true));
+  chrome::AddTabAt(new_browser, GURL(), -1, true);
+  new_browser->GetWindow()->Show();
+
+  content::WebContents* active_contents =
+      new_browser->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(active_contents);
+
+  // The active tab's size must be non-zero immediately after the browser window
+  // is created.
+  EXPECT_FALSE(active_contents->GetSize().IsZero());
 }
