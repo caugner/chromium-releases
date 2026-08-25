@@ -9,8 +9,8 @@
 
 #include "base/check_op.h"
 #include "base/functional/bind.h"
-#include "base/functional/function_ref.h"
-#include "base/logging.h"
+#include "base/metrics/user_metrics.h"
+#include "base/metrics/user_metrics_action.h"
 #include "base/time/time.h"
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/glic/browser_ui/glic_vector_icon_manager.h"
@@ -20,7 +20,6 @@
 #include "components/vector_icons/vector_icons.h"
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/color/color_id.h"
@@ -92,7 +91,7 @@ constexpr int kMenuItemHorizontalMargin = 6;
 // Timing specifications.
 
 // Radius constants.
-constexpr int kToolbarCornerRadius = 12;
+constexpr int kToolbarCornerRadius = 10;
 constexpr int kExpandButtonHoverRadius = 8;
 constexpr int kCloseButtonHoverRadius = kCloseButtonSize / 2;
 constexpr int kMenuItemHoverCornerRadius = 4;
@@ -157,11 +156,9 @@ class IndigoOverlayLayoutManager : public views::LayoutManagerBase {
     gfx::Insets insets = child->GetInsets();
 
     if (tracked_rect && !tracked_rect->IsEmpty() && corner_offset) {
-      gfx::Point top_right = tracked_rect->top_right();
-      gfx::Point toolbar_top_right = top_right + *corner_offset;
-      return gfx::Point(
-          toolbar_top_right.x() - preferred_size.width() + insets.right(),
-          toolbar_top_right.y() - insets.top());
+      gfx::Point origin = tracked_rect->top_right() + *corner_offset;
+      origin.Offset(insets.right() - preferred_size.width(), -insets.top());
+      return origin;
     }
     return gfx::Point(kToolbarInitialOffset, kToolbarInitialOffset);
   }
@@ -178,16 +175,74 @@ ui::ImageModel GetChevronImageModel(bool is_expanded) {
       ui::kColorSysOnSurface, kIconSize);
 }
 
-std::unique_ptr<views::ImageView> CreateCompactSparkIcon() {
-  auto spark_icon = std::make_unique<views::ImageView>();
-  spark_icon->SetCanProcessEventsWithinSubtree(false);
-  spark_icon->SetProperty(views::kElementIdentifierKey,
-                          IndigoToolbar::kSparkIconElementId);
-  spark_icon->SetImage(ui::ImageModel::FromVectorIcon(
-      glic::GlicVectorIconManager::GetVectorIcon(IDR_GLIC_BUTTON_VECTOR_ICON),
-      ui::kColorSysOnSurface, kIconSize));
-  return spark_icon;
-}
+class IndigoSparkButton : public views::ImageButton {
+  METADATA_HEADER(IndigoSparkButton, views::ImageButton)
+
+ public:
+  explicit IndigoSparkButton(
+      PressedCallback callback,
+      base::RepeatingCallback<void(bool)> interaction_changed_callback)
+      : views::ImageButton(std::move(callback)),
+        interaction_changed_callback_(std::move(interaction_changed_callback)) {
+    SetProperty(views::kElementIdentifierKey,
+                IndigoToolbar::kSparkIconElementId);
+    SetImageModel(views::Button::STATE_NORMAL,
+                  ui::ImageModel::FromVectorIcon(
+                      glic::GlicVectorIconManager::GetVectorIcon(
+                          IDR_GLIC_BUTTON_VECTOR_ICON),
+                      ui::kColorSysOnSurface, kIconSize));
+    SetTooltipText(l10n_util::GetStringUTF16(IDS_INDIGO_TOOLBAR_EXPAND));
+    SetFocusBehavior(FocusBehavior::ACCESSIBLE_ONLY);
+    SetImageHorizontalAlignment(ImageButton::ALIGN_CENTER);
+    SetImageVerticalAlignment(ImageButton::ALIGN_MIDDLE);
+    views::InkDrop::Get(this)->SetBaseColor(ui::kColorSysOnSurfaceSubtle);
+    views::InstallRoundRectHighlightPathGenerator(this, gfx::Insets(),
+                                                  kCloseButtonHoverRadius);
+  }
+
+  IndigoSparkButton(const IndigoSparkButton&) = delete;
+  IndigoSparkButton& operator=(const IndigoSparkButton&) = delete;
+  ~IndigoSparkButton() override = default;
+
+  void StateChanged(ButtonState old_state) override {
+    views::ImageButton::StateChanged(old_state);
+    MaybeNotifyInteractionState();
+  }
+
+  void OnFocus() override {
+    views::ImageButton::OnFocus();
+    MaybeNotifyInteractionState();
+  }
+
+  void OnBlur() override {
+    views::ImageButton::OnBlur();
+    MaybeNotifyInteractionState();
+  }
+
+  void ClearInteractionState() {
+    if (is_interacting_) {
+      is_interacting_ = false;
+      interaction_changed_callback_.Run(false);
+    }
+  }
+
+ private:
+  void MaybeNotifyInteractionState() {
+    const bool is_interacting =
+        IsDrawn() && (HasFocus() || GetState() == STATE_HOVERED ||
+                      GetState() == STATE_PRESSED);
+    if (is_interacting != is_interacting_) {
+      is_interacting_ = is_interacting;
+      interaction_changed_callback_.Run(is_interacting);
+    }
+  }
+
+  bool is_interacting_ = false;
+  base::RepeatingCallback<void(bool)> interaction_changed_callback_;
+};
+
+BEGIN_METADATA(IndigoSparkButton)
+END_METADATA
 
 // A custom view that tracks mouse and focus events to notify when the toolbar's
 // interaction state starts or ends.
@@ -248,12 +303,19 @@ class IndigoToolbarView : public views::View,
     }
   }
 
+  void ClearInteractionState() {
+    if (is_interacting_) {
+      is_interacting_ = false;
+      interaction_changed_callback_.Run(false);
+    }
+  }
+
  private:
   void MaybeNotifyInteractionState() {
     auto* focus_manager = GetFocusManager();
     const bool is_focused =
         focus_manager && Contains(focus_manager->GetFocusedView());
-    const bool is_interacting = is_focused || is_mouse_over_;
+    const bool is_interacting = IsDrawn() && (is_focused || is_mouse_over_);
     if (is_interacting != is_interacting_) {
       is_interacting_ = is_interacting;
       interaction_changed_callback_.Run(is_interacting);
@@ -272,11 +334,8 @@ class IndigoExpandButton : public HoverButton {
   METADATA_HEADER(IndigoExpandButton, HoverButton)
 
  public:
-  explicit IndigoExpandButton(
-      PressedCallback callback,
-      base::RepeatingCallback<void(bool)> interaction_changed_callback)
-      : HoverButton(std::move(callback), CreateExpandButtonParams()),
-        interaction_changed_callback_(std::move(interaction_changed_callback)) {
+  explicit IndigoExpandButton(PressedCallback callback)
+      : HoverButton(std::move(callback), CreateExpandButtonParams()) {
     SetProperty(views::kElementIdentifierKey,
                 IndigoToolbar::kExpandButtonElementId);
     SetProperty(
@@ -295,10 +354,6 @@ class IndigoExpandButton : public HoverButton {
                                                  /*highlight_on_hover=*/true,
                                                  /*highlight_on_focus=*/true);
     SetFocusBehavior(FocusBehavior::ACCESSIBLE_ONLY);
-
-    CHECK(icon_view());
-    icon_view()->parent()->SetProperty(views::kMarginsKey, gfx::Insets());
-    icon_view()->parent()->SetVisible(false);
 
     chevron_ = views::AsViewClass<views::ImageView>(secondary_view());
     CHECK(chevron_);
@@ -320,64 +375,9 @@ class IndigoExpandButton : public HoverButton {
     UpdateState();
   }
 
-  void SetCompact(bool compact) {
-    if (compact == is_compact_) {
-      return;
-    }
-    is_compact_ = compact;
-    icon_view()->parent()->SetVisible(compact);
-    title()->parent()->SetVisible(!compact);
-    chevron_->SetVisible(!compact);
-
-    SetBorder(views::CreateEmptyBorder(gfx::Insets::TLBR(
-        kExpandButtonVerticalPadding,
-        compact ? kCloseButtonLeftMargin : kExpandButtonLeftPadding,
-        kExpandButtonVerticalPadding, kExpandButtonRightPadding)));
-
-    SetProperty(
-        views::kMarginsKey,
-        gfx::Insets::TLBR(
-            kTopRowButtonVerticalMargin,
-            compact ? kCloseButtonLeftMargin : kExpandButtonLeftMargin,
-            kTopRowButtonVerticalMargin,
-            compact ? kCloseButtonRightMargin : kExpandButtonRightMargin));
-
-    SetProperty(
-        views::kFlexBehaviorKey,
-        compact
-            ? views::FlexSpecification(views::MinimumFlexSizeRule::kPreferred,
-                                       views::MaximumFlexSizeRule::kPreferred)
-            : views::FlexSpecification(views::MinimumFlexSizeRule::kPreferred,
-                                       views::MaximumFlexSizeRule::kUnbounded));
-  }
-
-  void StateChanged(ButtonState old_state) override {
-    HoverButton::StateChanged(old_state);
-    MaybeNotifyInteractionState();
-  }
-
-  void OnFocus() override {
-    HoverButton::OnFocus();
-    MaybeNotifyInteractionState();
-  }
-
-  void OnBlur() override {
-    HoverButton::OnBlur();
-    MaybeNotifyInteractionState();
-  }
-
  private:
-  void MaybeNotifyInteractionState() {
-    const bool is_interacting = HasFocus() || GetState() == STATE_HOVERED ||
-                                GetState() == STATE_PRESSED;
-    if (is_interacting != is_interacting_) {
-      is_interacting_ = is_interacting;
-      interaction_changed_callback_.Run(is_interacting);
-    }
-  }
   static HoverButton::Params CreateExpandButtonParams() {
     HoverButton::Params params;
-    params.icon_view = CreateCompactSparkIcon();
     params.icon_label_spacing = 0;
     params.title = l10n_util::GetStringUTF16(IDS_INDIGO_TOOLBAR_CAPTION);
     params.secondary_view = CreateChevronView();
@@ -408,9 +408,6 @@ class IndigoExpandButton : public HoverButton {
   }
 
   bool is_expanded_ = false;
-  bool is_compact_ = false;
-  bool is_interacting_ = false;
-  base::RepeatingCallback<void(bool)> interaction_changed_callback_;
   raw_ptr<views::ImageView> chevron_ = nullptr;
 };
 
@@ -482,14 +479,30 @@ std::unique_ptr<views::View> IndigoToolbar::CreateToolbarView() {
                   .SetCrossAxisAlignment(views::LayoutAlignment::kStretch)
                   .SetCollapseMargins(true)
                   .AddChildren(
-                      views::Builder<HoverButton>(
-                          std::make_unique<IndigoExpandButton>(
+                      views::Builder<views::ImageButton>(
+                          std::make_unique<IndigoSparkButton>(
                               base::BindRepeating(
                                   &IndigoToolbar::OnExpandButtonClicked,
                                   base::Unretained(this)),
                               base::BindRepeating(
                                   &IndigoToolbar::
-                                      OnExpandButtonInteractionChanged,
+                                      OnSparkButtonInteractionChanged,
+                                  base::Unretained(this))))
+                          .SetProperty(
+                              views::kMarginsKey,
+                              gfx::Insets::TLBR(kTopRowButtonVerticalMargin,
+                                                kCloseButtonLeftMargin,
+                                                kTopRowButtonVerticalMargin,
+                                                kCloseButtonRightMargin))
+                          .SetProperty(views::kCrossAxisAlignmentKey,
+                                       views::LayoutAlignment::kCenter)
+                          .SetPreferredSize(
+                              gfx::Size(kCloseButtonSize, kCloseButtonSize))
+                          .SetVisible(false),
+                      views::Builder<HoverButton>(
+                          std::make_unique<IndigoExpandButton>(
+                              base::BindRepeating(
+                                  &IndigoToolbar::OnExpandButtonClicked,
                                   base::Unretained(this))))
                           .SetProperty(
                               views::kMarginsKey,
@@ -524,6 +537,8 @@ std::unique_ptr<views::View> IndigoToolbar::CreateToolbarView() {
                                                  : vector_icons::kCloseOldIcon,
                                              ui::kColorSysOnSurface, kIconSize))
                           .SetTooltipText(l10n_util::GetStringUTF16(IDS_CLOSE))
+                          .SetAccessibleName(l10n_util::GetStringUTF16(
+                              IDS_INDIGO_TOOLBAR_CLOSE_ACCESSIBLE_NAME))
                           .SetFocusBehavior(
                               views::View::FocusBehavior::ACCESSIBLE_ONLY)
                           .CustomConfigure(
@@ -662,15 +677,6 @@ void IndigoToolbar::Show(views::View* parent_view) {
     // expanded mode. We must explicitly invoke SetPresentationState to reset
     // its layout and button states back to collapsed.
     SetPresentationState(PresentationState::kCollapsed);
-    // ResetLayout immediately flushes the changes without waiting for
-    // animation. This is needed to jump to the collapsed state immediately
-    // since the view might be animating from a previous incarnation.
-    views::View* animating_container =
-        view->GetViewByElementId(kAnimatingContainerElementId);
-    CHECK(animating_container);
-    static_cast<views::AnimatingLayoutManager*>(
-        animating_container->GetLayoutManager())
-        ->ResetLayout();
   }
 
   // Default properties: initially unanchored with default corner offset.
@@ -695,6 +701,16 @@ void IndigoToolbar::Show(views::View* parent_view) {
   } else {
     view->InvalidateLayout();
   }
+
+  // ResetLayout immediately flushes the changes without waiting for
+  // animation. This is needed to jump to the collapsed state immediately
+  // both for newly created and recycled views after being added to parent.
+  views::View* animating_container =
+      view->GetViewByElementId(kAnimatingContainerElementId);
+  CHECK(animating_container);
+  static_cast<views::AnimatingLayoutManager*>(
+      animating_container->GetLayoutManager())
+      ->ResetLayout();
 }
 
 void IndigoToolbar::Hide() {
@@ -738,13 +754,15 @@ void IndigoToolbar::OnToolbarInteractionChanged(bool interacting) {
   }
 }
 
-void IndigoToolbar::OnExpandButtonInteractionChanged(bool interacting) {
+void IndigoToolbar::OnSparkButtonInteractionChanged(bool interacting) {
   if (interacting && presentation_state_ == PresentationState::kCompact) {
+    is_interacting_ = true;
     SetPresentationState(PresentationState::kCollapsed);
   }
 }
 
 void IndigoToolbar::OnCloseButtonClicked() {
+  base::RecordAction(base::UserMetricsAction("Indigo.Toolbar.Close"));
   Hide();
   if (delegate_) {
     delegate_->OnClose(this);
@@ -752,6 +770,7 @@ void IndigoToolbar::OnCloseButtonClicked() {
 }
 
 void IndigoToolbar::OnExpandButtonClicked() {
+  base::RecordAction(base::UserMetricsAction("Indigo.Toolbar.Expand"));
   views::View* view = view_tracker_.view();
   if (!view) {
     return;
@@ -765,14 +784,17 @@ void IndigoToolbar::OnExpandButtonClicked() {
 }
 
 void IndigoToolbar::OnRegenerateButtonClicked() {
+  SetPresentationState(PresentationState::kCollapsed, kInitialAutoCompactDelay);
   delegate_->OnRegenerate(this);
 }
 
 void IndigoToolbar::OnReplacePhotoClicked() {
+  SetPresentationState(PresentationState::kCollapsed, kInitialAutoCompactDelay);
   delegate_->OnReplaceOriginalPhoto(this);
 }
 
 void IndigoToolbar::OnDeletePhotoClicked() {
+  SetPresentationState(PresentationState::kCollapsed, kInitialAutoCompactDelay);
   delegate_->OnDeleteOriginalPhoto(this);
 }
 
@@ -789,6 +811,11 @@ void IndigoToolbar::UpdateTrackedPosition(const gfx::Rect& rect) {
 
   if (!should_be_visible) {
     auto_compact_timer_.Stop();
+    views::AsViewClass<IndigoToolbarView>(view)->ClearInteractionState();
+    if (auto* spark_button = views::AsViewClass<IndigoSparkButton>(
+            view->GetViewByElementId(kSparkIconElementId))) {
+      spark_button->ClearInteractionState();
+    }
   } else if (!was_visible) {
     SetPresentationState(presentation_state_ == PresentationState::kExpanded
                              ? PresentationState::kExpanded
@@ -833,8 +860,11 @@ void IndigoToolbar::SetPresentationState(PresentationState state,
   auto* expand_button = views::AsViewClass<IndigoExpandButton>(
       view->GetViewByElementId(kExpandButtonElementId));
   CHECK(expand_button);
-  expand_button->SetCompact(is_compact);
   expand_button->SetExpanded(is_expanded);
+
+  auto* spark_button = views::AsViewClass<IndigoSparkButton>(
+      view->GetViewByElementId(kSparkIconElementId));
+  CHECK(spark_button);
 
   views::View* expanded_container =
       view->GetViewByElementId(kExpandedContainerElementId);
@@ -860,6 +890,24 @@ void IndigoToolbar::SetPresentationState(PresentationState state,
       animating_layout->FadeIn(expanded_container);
     } else {
       animating_layout->FadeOut(expanded_container);
+    }
+  } else if (!is_expanded) {
+    expanded_container->SetVisible(false);
+  }
+
+  const bool was_compact = (previous_state == PresentationState::kCompact);
+  if (is_compact != was_compact) {
+    views::View* button_to_show =
+        is_compact ? static_cast<views::View*>(spark_button)
+                   : static_cast<views::View*>(expand_button);
+    views::View* button_to_hide = is_compact
+                                      ? static_cast<views::View*>(expand_button)
+                                      : static_cast<views::View*>(spark_button);
+    const bool transfer_focus = button_to_hide->HasFocus();
+    button_to_hide->SetVisible(false);
+    button_to_show->SetVisible(true);
+    if (transfer_focus) {
+      button_to_show->RequestFocus();
     }
   }
 }

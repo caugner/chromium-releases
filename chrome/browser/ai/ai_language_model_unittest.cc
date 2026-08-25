@@ -279,7 +279,6 @@ class AILanguageModelTest : public AITestUtils::AITestBase {
          {blink::features::kAIPromptAPIMultimodalInput, {}},
          {features::kAILanguageModelOverrideConfiguration,
           {{"ai_language_model_output_buffer", "100"}}},
-         {features::kAILanguageModelAppendOutputTokensToContext, {}},
          {optimization_guide::features::kOptimizationGuideOnDeviceModel, {}},
          {optimization_guide::features::kAIModelUnloadableProgress,
           {{"ai_model_unloadable_progress_bytes", "0"}}}},
@@ -444,18 +443,6 @@ TEST_F(AILanguageModelTest, MultiplePrompts) {
               ElementsAreArray({"UfooEM", "UbarEM"}));
   EXPECT_THAT(Prompt(*session, MakeInput("baz")),
               ElementsAreArray({"UfooEM", "UbarEM", "UbazEM"}));
-}
-
-// TODO(crbug.com/530923828): remove this test with the feature entry.
-TEST_F(AILanguageModelTest, MultiplePrompts_AppendOutputTokensDisabled) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndDisableFeature(
-      features::kAILanguageModelAppendOutputTokensToContext);
-
-  auto session = CreateSession();
-  EXPECT_THAT(Prompt(*session, MakeInput("foo")), ElementsAreArray({"UfooEM"}));
-  EXPECT_THAT(Prompt(*session, MakeInput("bar")),
-              ElementsAreArray({"UfooEM", "UfooEME", "UbarEM"}));
 }
 
 TEST_F(AILanguageModelTest, PromptMultipleContents) {
@@ -2560,13 +2547,14 @@ TEST_F(AILanguageModelManifestTest, CanCreateAndCreateWithManifestGemma4) {
       kAIApiFoundationalModel, {{"model_version", "v4"}});
 
   fake_manifest_broker_->client().RequestAssetsFor("prompt_api_gemma4");
-
-  // Verify CanCreateLanguageModel check passes successfully.
-  base::test::TestFuture<blink::mojom::ModelAvailabilityCheckResult> future;
-  ai_manager_->CanCreateLanguageModel(
-      blink::mojom::AILanguageModelCreateOptions::New(), future.GetCallback());
-  EXPECT_EQ(future.Get(),
-            blink::mojom::ModelAvailabilityCheckResult::kAvailable);
+  ASSERT_TRUE(base::test::RunUntil([&] {
+    base::test::TestFuture<blink::mojom::ModelAvailabilityCheckResult> future;
+    ai_manager_->CanCreateLanguageModel(
+        blink::mojom::AILanguageModelCreateOptions::New(),
+        future.GetCallback());
+    return future.Get() ==
+           blink::mojom::ModelAvailabilityCheckResult::kAvailable;
+  }));
 
   // Verify CreateLanguageModel can retrieve the model successfully.
   TestCreateLanguageModelClient language_model_client;

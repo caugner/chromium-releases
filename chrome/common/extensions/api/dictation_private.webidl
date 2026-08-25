@@ -25,12 +25,21 @@ dictionary DictationContext {
   DOMString editableContent;
 };
 
+dictionary StartStreamFlags {
+  // Starts the stream in "eval" mode, useful for recording inputs.
+  required boolean evalMode;
+  // If true, uses the Web Speech API backend instead of the cloud backend.
+  required boolean webSpeechApiBackend;
+};
+
 dictionary StartStreamDetails {
   // The unique identifier of the stream.
   required long streamId;
   // The context of the dictation session. May be omitted if context is passed
   // asynchronously in the ContextUpdate event instead.
   DictationContext context;
+  // Flags used to experimentally modify the behavior of the extension.
+  required StartStreamFlags flags;
 };
 
 callback OnStartStreamListener = undefined (StartStreamDetails details);
@@ -83,6 +92,21 @@ dictionary SetStreamStateDetails {
   required StreamState state;
 };
 
+dictionary LogMessageDetails {
+  // Timestamp of the log message (milliseconds since epoch).
+  required double timestamp;
+  // The log message text.
+  required DOMString message;
+};
+
+callback OnBrowserLogListener = undefined (sequence<LogMessageDetails> details);
+
+interface OnBrowserLogEvent : ExtensionEvent {
+  static undefined addListener(OnBrowserLogListener listener);
+  static undefined removeListener(OnBrowserLogListener listener);
+  static boolean hasListener(OnBrowserLogListener listener);
+};
+
 // The dictationPrivate API is a private API used by the dictation extension.
 interface DictationPrivate {
   // Sends the transcription to the browser.
@@ -91,6 +115,10 @@ interface DictationPrivate {
 
   // Notifies the browser of stream state changes.
   static Promise<undefined> setStreamState(SetStreamStateDetails details);
+
+  // Updates the audio level of the stream. Valid values are between 0.0 and
+  // 1.0.
+  static Promise<undefined> updateAudioLevel(double audioLevel);
 
   // Fired to instruct the extension to start capturing microphone audio and
   // connecting to transcription service.
@@ -102,6 +130,9 @@ interface DictationPrivate {
   // Fired to provide updated context for an active stream. Only sent if
   // context wasn't provided as part of the StartStream event.
   static attribute OnContextUpdateEvent onContextUpdate;
+
+  // Fired when browser log messages are emitted.
+  static attribute OnBrowserLogEvent onBrowserLog;
 };
 
 partial interface Browser {

@@ -301,6 +301,8 @@ PageLoadTracker::PageLoadTracker(
       is_origin_visit_(
           CalculateIsOriginVisit(*is_first_navigation_in_web_contents,
                                  navigation_handle->GetPageTransition())),
+      navigation_scenario_(
+          embedder_interface->GetNavigationScenario(navigation_handle)),
       page_type_(CalculatePageType(navigation_handle)),
       parent_tracker_(std::move(parent_tracker)) {
   DCHECK(!navigation_handle->HasCommitted());
@@ -1357,6 +1359,10 @@ bool PageLoadTracker::IsFirstNavigationInWebContents() const {
   return *is_first_navigation_in_web_contents_;
 }
 
+NavigationScenario PageLoadTracker::GetNavigationScenario() const {
+  return navigation_scenario_;
+}
+
 bool PageLoadTracker::IsOriginVisit() const {
   return is_origin_visit_;
 }
@@ -1433,15 +1439,6 @@ void PageLoadTracker::OnSharedStorageWorkletHostCreated() {
 void PageLoadTracker::OnSharedStorageSelectURLCalled() {
   for (const auto& observer : observers_) {
     observer->OnSharedStorageSelectURLCalled();
-  }
-}
-
-void PageLoadTracker::OnAdAuctionComplete(bool is_server_auction,
-                                          bool is_on_device_auction,
-                                          content::AuctionResult result) {
-  for (const auto& observer : observers_) {
-    observer->OnAdAuctionComplete(is_server_auction, is_on_device_auction,
-                                  result);
   }
 }
 

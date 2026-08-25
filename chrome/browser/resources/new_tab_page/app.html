@@ -63,14 +63,13 @@ import {SubmitButtonIconType} from '//resources/cr_components/composebox/compose
         context-menu-glif-animation-state="${this.contextMenuGlifAnimationState_}"
         .energyEffectAnimationEnabled="${this.energyEffectAnimationEnabled_}"
         .contextManagementInComposeboxEnabled="${this.contextManagementInComposeboxEnabled_}"
-        ?multi-line-enabled="${this.multiLineEnabled_}">
+        ?multi-line-enabled="${this.multiLineEnabled_}"
+        ?inert="${!this.realboxShown_}">
     </ntp-searchbox>
     <div id="dialogAnchor"></div>
     ${this.showComposebox_ ? html`
-      <dialog id="composeboxDialog">
-        ${this.useNtpComposeboxFork_ ? html`
-          <ntp-composebox id="composebox"
-              entrypoint-name="Realbox"
+      <div id="composeboxDialog">
+        <ntp-composebox id="composebox"
               searchbox-layout-mode="Compact"
               searchbox-next-enabled
               ?disable-caret-color-animation="${!this.caretAnimationsEnabled_}"
@@ -88,33 +87,11 @@ import {SubmitButtonIconType} from '//resources/cr_components/composebox/compose
               .energyEffectAnimationEnabled="${this.energyEffectAnimationEnabled_}"
               ?is-dark="${this.isThemeDark_()}">
           </ntp-composebox>
-        ` : html`
-          <cr-composebox id="composebox"
-              entrypoint-name="Realbox"
-              ?ntp-realbox-next-enabled="${this.ntpRealboxNextEnabled_}"
-              ?searchbox-next-enabled="${this.ntpRealboxNextEnabled_}"
-              .submitButtonIconType="${this.ntpRealboxNextEnabled_ ? SubmitButtonIconType.FORWARD : SubmitButtonIconType.UPWARD}"
-              ?disable-caret-color-animation="${!this.caretAnimationsEnabled_}"
-              .observeResize="${false}"
-              .state="${this.composeboxState_}"
-              @close-composebox="${this.onCloseComposebox_}"
-              .closeOnEscape="${false}"
-              .clearAllInputsWhenSubmittingQuery="${true}"
-              .showVoiceSearch="${true}"
-              .energyEffectEnabled="${this.energyEffectEnabled_}"
-              .energyEffectAnimationEnabled="${this.energyEffectAnimationEnabled_}"
-              .usePecApi="${this.usePecApi_}"
-              .smartTabSharingVisible="${this.smartTabSharingVisible_}"
-              .contextManagementInComposeboxEnabled="${this.contextManagementInComposeboxEnabled_}"
-              @voice-search-action="${this.onComposeVoiceSearchAction_}"
-              searchbox-layout-mode="${this.ntpRealboxNextEnabled_ ? 'Compact' : ''}">
-          </cr-composebox>
-        `}
         ${this.enableThreadsRail_ ? html`
           <cr-threads-rail id="threadsRail">
           </cr-threads-rail>
         ` : ''}
-      </dialog>
+      </div>
     ` : ''}
     ${this.showLensUploadDialog_ ? html`
       <ntp-lens-upload-dialog id="lensUploadDialog"
@@ -123,7 +100,7 @@ import {SubmitButtonIconType} from '//resources/cr_components/composebox/compose
     ` : ''}
   </div>
   ${this.lazyRender_ && this.ntpNextFeaturesEnabled_
-  && this.isActionChipsVisible_ ? html`
+  && this.isActionChipsVisible_ && this.composeboxEnabled ? html`
     <ntp-action-chips
         ?show-background="${this.showActionChipsBackground_()}"
         @action-chip-click="${this.onActionChipClick_}"
@@ -198,7 +175,7 @@ import {SubmitButtonIconType} from '//resources/cr_components/composebox/compose
           ${this.backgroundImageAttribution2_}
         </div>
       </a>
-      ${!this.isAndroid_ ? html`
+      ${this.showCustomizeButton_ ? html`
         <ntp-customize-buttons id="customizeButtons"
             ?modules-shown-to-user="${this.modulesShownToUser}"
             ?show-background-image="${this.showBackgroundImage_}"

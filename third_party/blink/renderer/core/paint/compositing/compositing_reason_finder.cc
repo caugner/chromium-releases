@@ -7,6 +7,7 @@
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css/properties/css_bitset.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/dom/flat_tree_traversal.h"
 #include "third_party/blink/renderer/core/dom/node.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
@@ -377,22 +378,19 @@ CompositingReasons CompositingReasonFinder::DirectReasonsForPaintProperties(
   CompositingReasons reasons = CompositingReason::kNone;
 
   auto* element = DynamicTo<Element>(object.GetNode());
-  if (element && RuntimeEnabledFeatures::CanvasDrawElementEnabled(
-                     object.GetDocument().GetExecutionContext())) {
-    if (element->IsInCanvasSubtree() &&
-        !object.StyleRef().IsRenderedInTopLayer(*element)) [[unlikely]] {
-      auto* canvas_parent =
-          DynamicTo<HTMLCanvasElement>(element->parentElement());
-      if (IsA<LayoutBox>(object) && canvas_parent &&
-          canvas_parent->layoutSubtree() && canvas_parent->GetLayoutObject() &&
-          canvas_parent->GetLayoutObject()->IsCanvas() &&
-          !canvas_parent->IsInCanvasSubtree()) {
-        reasons |= CompositingReason::kCanvasChild;
-      } else {
-        // Disable compositing for elements in canvas subtrees other than the
-        // direct children of the outermost canvas element.
-        return CompositingReason::kNone;
-      }
+  if (element && element->IsInCanvasSubtree() &&
+      !object.StyleRef().IsRenderedInTopLayer(*element)) [[unlikely]] {
+    const Element* parent =
+        FlatTreeTraversal::ParentElementSkippingSlots(*element);
+    auto* canvas_parent = DynamicTo<HTMLCanvasElement>(parent);
+    if (IsA<LayoutBox>(object) && canvas_parent &&
+        canvas_parent->layoutSubtree() && canvas_parent->GetLayoutObject() &&
+        canvas_parent->GetLayoutObject()->IsCanvas()) {
+      reasons |= CompositingReason::kCanvasChild;
+    } else {
+      // Disable compositing for elements in canvas subtrees other than the
+      // direct children of canvas elements.
+      return CompositingReason::kNone;
     }
   }
 
@@ -488,12 +486,8 @@ bool CompositingReasonFinder::ShouldForcePreferCompositingToLCDText(
     CompositingReasons reasons) {
   DCHECK_EQ(reasons, DirectReasonsForPaintProperties(object));
 
-  if (RuntimeEnabledFeatures::CanvasDrawElementEnabled(
-          object.GetDocument().GetExecutionContext())) {
-    const auto* element = DynamicTo<Element>(object.GetNode());
-    if (element && element->IsInCanvasSubtree()) {
-      return false;
-    }
+  if (object.IsInCanvasSubtree()) {
+    return false;
   }
 
   if (reasons != CompositingReason::kNone) {

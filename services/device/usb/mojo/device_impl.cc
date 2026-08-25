@@ -107,11 +107,11 @@ bool IsAndroidSecurityKeyRequest(
   // would be considered equivalent by Android but would not be caught by an
   // exact match here. Android is case-sensitive thus a byte-wise match is
   // suitable.
-  const char* magic = mojom::UsbControlTransferParams::kSecurityKeyAOAModel;
+  auto magic = base::byte_span_from_cstring(
+      mojom::UsbControlTransferParams::kSecurityKeyAOAModel);
   return params->type == mojom::UsbControlTransferType::VENDOR &&
          params->request == 52 && params->index == 1 &&
-         data.size() >= strlen(magic) &&
-         UNSAFE_TODO(memcmp(data.data(), magic, strlen(magic))) == 0;
+         data.size() >= magic.size() && data.first(magic.size()) == magic;
 }
 
 // Returns the sum of `packet_lengths`, or nullopt if the sum would overflow.
@@ -161,10 +161,11 @@ void DeviceImpl::Create(scoped_refptr<device::UsbDevice> device,
                         mojo::PendingReceiver<mojom::UsbDevice> receiver,
                         mojo::PendingRemote<mojom::UsbDeviceClient> client,
                         base::span<const uint8_t> blocked_interface_classes,
-                        bool allow_security_key_requests) {
-  auto* device_impl =
-      new DeviceImpl(std::move(device), std::move(client),
-                     blocked_interface_classes, allow_security_key_requests);
+                        bool allow_security_key_requests,
+                        bool allow_unrestricted_control_transfers) {
+  auto* device_impl = new DeviceImpl(
+      std::move(device), std::move(client), blocked_interface_classes,
+      allow_security_key_requests, allow_unrestricted_control_transfers);
   device_impl->receiver_ = mojo::MakeSelfOwnedReceiver(
       base::WrapUnique(device_impl), std::move(receiver));
 }
@@ -182,11 +183,14 @@ DeviceImpl::~DeviceImpl() {
 DeviceImpl::DeviceImpl(scoped_refptr<device::UsbDevice> device,
                        mojo::PendingRemote<mojom::UsbDeviceClient> client,
                        base::span<const uint8_t> blocked_interface_classes,
-                       bool allow_security_key_requests)
+                       bool allow_security_key_requests,
+                       bool allow_unrestricted_control_transfers)
     : device_(std::move(device)),
       blocked_interface_classes_(blocked_interface_classes.begin(),
                                  blocked_interface_classes.end()),
       allow_security_key_requests_(allow_security_key_requests),
+      allow_unrestricted_control_transfers_(
+          allow_unrestricted_control_transfers),
       client_(std::move(client)) {
   DCHECK(device_);
   observation_.Observe(device_.get());
@@ -268,7 +272,8 @@ bool DeviceImpl::HasControlTransferPermission(
   // 1. STANDARD Requests
   // ==========================================
   if (type == UsbControlTransferType::STANDARD) {
-    if (base::FeatureList::IsEnabled(
+    if (!allow_unrestricted_control_transfers_ &&
+        base::FeatureList::IsEnabled(
             features::kWebUsbEnforceStandardRequestAllowlist)) {
       // Reject all Standard requests except fundamental inspection and
       // discovery inbound commands (GET_STATUS, GET_DESCRIPTOR,
@@ -318,39 +323,34 @@ bool DeviceImpl::HasControlTransferPermission(
   // 2. CLASS Requests
   // ==========================================
   if (type == UsbControlTransferType::CLASS) {
-    const mojom::UsbInterfaceInfo* interface = nullptr;
-    if (recipient == UsbControlTransferRecipient::ENDPOINT) {
-      interface = device_handle_->FindInterfaceByEndpoint(index & 0xff);
-    } else {
-      // For CLASS requests, we assume index identifies the interface for all
-      // other recipients (INTERFACE, DEVICE, OTHER).
-      interface = FindInterface(config, index & 0xff);
-    }
+    if (recipient == UsbControlTransferRecipient::INTERFACE ||
+        recipient == UsbControlTransferRecipient::ENDPOINT) {
+      const mojom::UsbInterfaceInfo* interface = nullptr;
+      if (recipient == UsbControlTransferRecipient::ENDPOINT) {
+        interface = device_handle_->FindInterfaceByEndpoint(index & 0xff);
+      } else {
+        interface = FindInterface(config, index & 0xff);
+      }
 
-    // Block if the targeted interface is protected.
-    if (interface) {
+      if (!interface) {
+        return BlockAndLog(
+            WebUsbControlTransferPermissionOutcome::kError_InterfaceNotFound);
+      }
+
       auto blocked_class = FindBlockedClass(interface);
       if (blocked_class) {
         LogBlockedControlTransfer(*blocked_class, direction, type);
         return BlockAndLog(WebUsbControlTransferPermissionOutcome::kBlocked);
       }
+
+      return AllowAndLog(WebUsbControlTransferPermissionOutcome::kAllowed);
     }
 
-    // For requests explicitly targeting an INTERFACE or ENDPOINT, the interface
-    // must actually exist in the current configuration.
-    if (recipient == UsbControlTransferRecipient::INTERFACE ||
-        recipient == UsbControlTransferRecipient::ENDPOINT) {
-      return interface ? AllowAndLog(
-                             WebUsbControlTransferPermissionOutcome::kAllowed)
-                       : BlockAndLog(WebUsbControlTransferPermissionOutcome::
-                                         kError_InterfaceNotFound);
-    }
-
-    // For DEVICE and OTHER recipients, if we could not identify the target
-    // interface, we must block it if the device has any protected interfaces.
-    // This prevents bypassing the blocklist by specifying an invalid interface
-    // number (e.g. 0xFF) on a device that ignores the wIndex field.
-    if (!interface && HasProtectedInterface(config)) {
+    // For DEVICE and OTHER recipients, we block the request if the device
+    // has any protected interfaces. This prevents bypassing the blocklist by
+    // specifying a non-protected interface number (or an invalid one) on a
+    // device that ignores the wIndex field.
+    if (HasProtectedInterface(config)) {
       return BlockAndLog(WebUsbControlTransferPermissionOutcome::kBlocked);
     }
 

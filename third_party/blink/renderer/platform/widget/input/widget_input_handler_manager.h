@@ -138,7 +138,8 @@ class PLATFORM_EXPORT WidgetInputHandlerManager final
 
   void ProcessTouchAction(cc::TouchAction touch_action);
 
-  mojom::blink::WidgetInputHandlerHost* GetWidgetInputHandlerHost();
+  mojo::SharedRemote<mojom::blink::WidgetInputHandlerHost>
+  GetWidgetInputHandlerHost();
   mojo::SharedRemote<mojom::blink::WidgetInputHandlerHost>
   GetVizWidgetInputHandlerHost();
 
@@ -223,6 +224,7 @@ class PLATFORM_EXPORT WidgetInputHandlerManager final
   int HandwritingRadiusOnInputThread() const {
     return input_handler_proxy_->HandwritingRadiusOnInputThread();
   }
+  void PostSetPointerLockedToInputThread(bool is_locked);
 
  private:
   friend class ThreadSafeRefCounted<WidgetInputHandlerManager>;
@@ -334,7 +336,9 @@ class PLATFORM_EXPORT WidgetInputHandlerManager final
 
   // The WidgetInputHandlerHost is bound on the compositor task runner
   // but class can be called on the compositor and main thread.
-  mojo::SharedRemote<mojom::blink::WidgetInputHandlerHost> host_;
+  base::Lock host_lock_;
+  mojo::SharedRemote<mojom::blink::WidgetInputHandlerHost> host_
+      GUARDED_BY(host_lock_);
   base::Lock viz_host_lock_;
   mojo::SharedRemote<mojom::blink::WidgetInputHandlerHost> viz_host_
       GUARDED_BY(viz_host_lock_);

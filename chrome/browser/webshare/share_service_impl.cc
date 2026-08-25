@@ -19,6 +19,7 @@
 #include "chrome/browser/bad_message.h"
 #include "chrome/browser/browser_process.h"
 #include "components/safe_browsing/buildflags.h"
+#include "content/public/browser/weak_document_ptr.h"
 #include "content/public/browser/web_contents.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "services/network/public/mojom/permissions_policy/permissions_policy_feature.mojom.h"
@@ -33,8 +34,10 @@
 
 #if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
+#include "chrome/browser/safe_browsing/v5_get_hash_protocol_manager_factory.h"
 #include "components/safe_browsing/content/common/file_type_policies.h"
 #include "components/safe_browsing/core/browser/db/database_manager.h"
+#include "components/safe_browsing/core/browser/db/v5_get_hash_protocol_manager.h"
 #endif
 
 // IsDangerousFilename() and IsDangerousMimeType() should be kept in sync with
@@ -243,8 +246,14 @@ void ShareServiceImpl::Share(const std::string& title,
 #if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
   DCHECK(!safe_browsing_request_);
   if (should_check_url && g_browser_process->safe_browsing_service()) {
+    auto* v5_manager =
+        web_contents->GetBrowserContext()
+            ? safe_browsing::V5GetHashProtocolManagerFactory::
+                  GetForBrowserContext(web_contents->GetBrowserContext())
+            : nullptr;
     safe_browsing_request_.emplace(
         g_browser_process->safe_browsing_service()->database_manager(),
+        v5_manager ? v5_manager->GetWeakPtr() : nullptr,
         web_contents->GetLastCommittedURL(),
         base::BindOnce(&ShareServiceImpl::RunShareOperation,
                        weak_factory_.GetWeakPtr(), title, text, share_url,
@@ -269,7 +278,7 @@ void ShareServiceImpl::RunShareOperation(
   safe_browsing_request_.reset();
 #endif
 
-  content::WebContents* const web_contents =
+  content::WebContents* web_contents =
       content::WebContents::FromRenderFrameHost(&render_frame_host());
   if (!web_contents) {
     VLOG(1) << "Cannot share after navigating away";
@@ -305,9 +314,21 @@ void ShareServiceImpl::RunShareOperation(
          blink::mojom::ShareError result) { std::move(callback).Run(result); },
       std::move(sharing_service_operation), std::move(callback)));
 #elif BUILDFLAG(IS_WIN)
+  base::WeakPtr<ShareServiceImpl> weak_this = weak_factory_.GetWeakPtr();
+  content::WeakDocumentPtr weak_document =
+      render_frame_host().GetWeakDocumentPtr();
   auto blocker = web_contents->ForSecurityDropFullscreen(
       /*display_id=*/display::kInvalidDisplayId);
-  if (!blocker) {
+  if (!weak_this) {
+    return;
+  }
+  content::RenderFrameHost* rfh = weak_document.AsRenderFrameHostIfValid();
+  if (!blocker || !rfh || !rfh->IsActive()) {
+    std::move(callback).Run(blink::mojom::ShareError::PERMISSION_DENIED);
+    return;
+  }
+  web_contents = content::WebContents::FromRenderFrameHost(rfh);
+  if (!web_contents) {
     std::move(callback).Run(blink::mojom::ShareError::PERMISSION_DENIED);
     return;
   }

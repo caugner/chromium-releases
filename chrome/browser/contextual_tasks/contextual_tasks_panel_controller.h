@@ -46,10 +46,12 @@ class ContextualTasksPanelController {
   // Visibility commands.
   // Show the panel. If |transition_from_tab| is true, trigger the panel content
   // to animate from the active tab content's bounds.
-  virtual void Show(bool transition_from_tab = false,
-                    omnibox::ChromeAimEntryPoint entry_point =
-                        omnibox::ChromeAimEntryPoint::UNKNOWN_AIM_ENTRY_POINT,
-                    bool use_no_animation = false) = 0;
+  virtual void Show(
+      bool transition_from_tab = false,
+      omnibox::ChromeAimEntryPoint entry_point =
+          omnibox::ChromeAimEntryPoint::UNKNOWN_AIM_ENTRY_POINT,
+      bool use_no_animation = false,
+      std::optional<base::TimeTicks> open_time_ticks = std::nullopt) = 0;
   // Close the panel.
   virtual void Close() = 0;
 
@@ -61,14 +63,14 @@ class ContextualTasksPanelController {
   // feature might also show panel.
   virtual bool IsPanelOpenForContextualTask() const = 0;
 
-  // LINT.IfChange(ContextualTasksSidePanelEntrySource)
+  // The entry source for the contextual tasks panel.
   enum class EntrySource {
     kOther = 0,
     kLensOverlay = 1,
     kAiModeLinkClick = 2,
-    kMaxValue = kAiModeLinkClick,
+    kAioToCobr = 3,
+    kMaxValue = kAioToCobr,
   };
-  // LINT.ThenChange(//tools/metrics/histograms/metadata/contextual_tasks/enums.xml:ContextualTasksSidePanelEntrySource)
 
   // Returns the entry source of the currently active panel.
   virtual EntrySource GetActiveEntrySource() const = 0;
@@ -93,6 +95,8 @@ class ContextualTasksPanelController {
   // WebContents & session management.
   // Returns the currently active WebContents, or NULL if there is none.
   virtual content::WebContents* GetActiveWebContents() const = 0;
+  // Returns the WebContents hosting the top WebUI toolbar, or nullptr if none.
+  virtual content::WebContents* GetToolbarWebContents() const = 0;
   // Returns a list of all cached panel WebContents.
   virtual std::vector<content::WebContents*> GetPanelWebContentsList()
       const = 0;
@@ -128,6 +132,9 @@ class ContextualTasksPanelController {
 
   // Whether the side panel can expand to full tab.
   virtual bool CanExpandToFullTab() const = 0;
+
+  // Shows the native PageInfo bubble.
+  virtual void ShowPageInfoBubble() = 0;
 
   // Static.
   static ContextualTasksPanelController* From(BrowserWindowInterface* browser);

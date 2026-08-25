@@ -177,11 +177,8 @@ class CORE_EXPORT HTMLMediaElement
 
   cc::Layer* CcLayer() const;
 
-  enum DelayedActionType {
-    kLoadMediaResource = 1 << 0,
-    kLoadTextTrackResource = 1 << 1
-  };
-  void ScheduleTextTrackResourceLoad();
+  enum DelayedActionType { kLoadMediaResource = 1 << 0 };
+  void ScheduleAutomaticTextTrackSelection();
 
   // error state
   MediaError* error() const;
@@ -204,6 +201,9 @@ class CORE_EXPORT HTMLMediaElement
       std::variant<MediaStreamDescriptor*, MediaSourceHandle*>;
   void SetSrcObjectVariant(SrcObjectVariant src_object_variant);
   SrcObjectVariant GetSrcObjectVariant() const;
+  bool HasSrcObject() const {
+    return src_object_stream_descriptor_ || src_object_media_source_handle_;
+  }
 
   enum NetworkState {
     kNetworkEmpty,
@@ -408,6 +408,9 @@ class CORE_EXPORT HTMLMediaElement
   void DidAudioOutputSinkChanged(const String& hashed_device_id);
 
   void SetCcLayerForTesting(cc::Layer* layer) { SetCcLayer(layer); }
+  void SetIsEncryptedForTesting(bool is_encrypted) {
+    is_encrypted_media_ = is_encrypted;
+  }
   void AddTrackForTesting(const media::MediaTrack& t) { AddTrack(t); }
   void SetTrackStateForTesting(const media::MediaTrack& t,
                                media::MediaTrack::State s) {
@@ -675,6 +678,7 @@ class CORE_EXPORT HTMLMediaElement
   void RecordAutoPictureInPictureInfo(
       const media::PictureInPictureEventsInfo::AutoPipInfo&
           auto_picture_in_picture_info) override;
+  void RequestSaveVideoFrame() override;
 
   void LoadTimerFired(TimerBase*);
   void ProgressEventTimerFired();
@@ -763,6 +767,7 @@ class CORE_EXPORT HTMLMediaElement
   void RequireOfficialPlaybackPositionUpdate() const;
 
   void UpdateControlsVisibility();
+  virtual void UpdateVideoFrameAvailability() {}
 
   TextTrackContainer& EnsureTextTrackContainer();
 
@@ -982,6 +987,9 @@ class CORE_EXPORT HTMLMediaElement
   HeapVector<Member<ScriptPromiseResolverBase>> play_promise_resolvers_;
   TaskHandle play_promise_resolve_task_handle_;
   TaskHandle play_promise_reject_task_handle_;
+  // Coalesces automatic text track selection into a single task; see
+  // ScheduleAutomaticTextTrackSelection().
+  TaskHandle text_track_selection_task_handle_;
   HeapVector<Member<ScriptPromiseResolverBase>> play_promise_resolve_list_;
   HeapVector<Member<ScriptPromiseResolverBase>> play_promise_reject_list_;
   PlayPromiseError play_promise_error_code_ = PlayPromiseError::kNotSupported;

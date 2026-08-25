@@ -26,6 +26,8 @@ export interface InputPlateBoundsUpdateMessage {
   type: 'input-plate-bounds-update';
   'bounds-rect': Rect;
   occluders: Rect[];
+  viewportWidth?: number;
+  viewportHeight?: number;
 }
 
 /**
@@ -43,7 +45,8 @@ export class PostMessageHandler {
   private pendingMessages_: Array<Uint8Array|object> = [];
   private handshakeMessage_: Uint8Array|null = null;
   private onInputPlateBoundsUpdate_:
-      ((rect?: Rect, occluders?: Rect[]) => void)|null = null;
+      ((rect?: Rect, occluders?: Rect[], viewportWidth?: number,
+        viewportHeight?: number) => void)|null = null;
   private onInputStateUpdate_:
       ((toolMode?: number, modelMode?: number,
         data?: Record<string, unknown>) => void)|null = null;
@@ -85,6 +88,9 @@ export class PostMessageHandler {
   sendMessage(message: Uint8Array) {
     if (!this.handshakeComplete_) {
       this.pendingMessages_.push(message);
+      if (this.handshakeIntervalId_ === null) {
+        this.restartHandshake_();
+      }
       return;
     }
 
@@ -106,6 +112,9 @@ export class PostMessageHandler {
   sendObjectMessage(message: object) {
     if (!this.handshakeComplete_) {
       this.pendingMessages_.push(message);
+      if (this.handshakeIntervalId_ === null) {
+        this.restartHandshake_();
+      }
       return;
     }
 
@@ -229,7 +238,8 @@ export class PostMessageHandler {
     if (event.data && event.data.type === 'input-plate-bounds-update') {
       if (this.onInputPlateBoundsUpdate_) {
         this.onInputPlateBoundsUpdate_(
-            event.data['bounds-rect'], event.data['occluders']);
+            event.data['bounds-rect'], event.data['occluders'],
+            event.data.viewportWidth, event.data.viewportHeight);
       }
       return;
     }
@@ -272,7 +282,9 @@ export class PostMessageHandler {
   }
 
   setInputPlateBoundsUpdateCallback(
-      callback: (rect?: Rect, occluders?: Rect[]) => void) {
+      callback:
+          (rect?: Rect, occluders?: Rect[], viewportWidth?: number,
+           viewportHeight?: number) => void) {
     this.onInputPlateBoundsUpdate_ = callback;
   }
 

@@ -7,16 +7,15 @@
 #include <string>
 
 #include "base/check_op.h"
-#include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_panel_controller.h"
+#include "chrome/browser/contextual_tasks/contextual_tasks_utils.h"
 #include "chrome/browser/contextual_tasks/entry_point_eligibility_manager.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/actions/chrome_action_id.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_actions.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
@@ -45,7 +44,6 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/models/image_model.h"
-#include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_owner.h"
@@ -315,22 +313,45 @@ void ContextualTasksButton::OnButtonPress() {
   CHECK(controller);
   // TODO(crbug.com/480218994): Clean up the ToggleContextualTasksSidePanel
   // browser action, since the logic is now handled in this method.
+  bool is_pinned = contextual_tasks::GetEffectivePinState(
+      browser_window_interface_->GetProfile());
+
   if (controller->IsPanelOpenForContextualTask()) {
     base::RecordAction(base::UserMetricsAction(
         "ContextualTasks.ToolbarButton.UserAction.CloseSidePanel"));
     base::UmaHistogramBoolean(
         "ContextualTasks.ToolbarButton.UserAction.CloseSidePanel", true);
+
+    const char* sub_action =
+        is_pinned
+            ? "ContextualTasks.PermanentToolbarButton.UserAction.CloseSidePanel"
+            : "ContextualTasks.EphemeralToolbarButton.UserAction."
+              "CloseSidePanel";
+    base::RecordAction(base::UserMetricsAction(sub_action));
+    base::UmaHistogramBoolean(sub_action, true);
+
     controller->Close();
   } else {
     base::RecordAction(base::UserMetricsAction(
         "ContextualTasks.ToolbarButton.UserAction.OpenSidePanel"));
     base::UmaHistogramBoolean(
         "ContextualTasks.ToolbarButton.UserAction.OpenSidePanel", true);
+
+    const char* sub_action =
+        is_pinned
+            ? "ContextualTasks.PermanentToolbarButton.UserAction.OpenSidePanel"
+            : "ContextualTasks.EphemeralToolbarButton.UserAction.OpenSidePanel";
+    base::RecordAction(base::UserMetricsAction(sub_action));
+    base::UmaHistogramBoolean(sub_action, true);
+
     if (contextual_tasks::kShowEntryPoint.Get() ==
         contextual_tasks::EntryPointOption::kToolbarEphemeralBranded) {
-      controller->Show(
-          /*transition_from_tab=*/false,
-          omnibox::ChromeAimEntryPoint::DESKTOP_CHROME_COBROWSE_TOOLBAR_BUTTON);
+      omnibox::ChromeAimEntryPoint entry_point =
+          is_pinned ? omnibox::ChromeAimEntryPoint::
+                          DESKTOP_CHROME_COBROWSE_PINNED_TOOLBAR_BUTTON
+                    : omnibox::ChromeAimEntryPoint::
+                          DESKTOP_CHROME_COBROWSE_TOOLBAR_BUTTON;
+      controller->Show(/*transition_from_tab=*/false, entry_point);
     } else {
       controller->OpenInZeroState();
     }
@@ -453,6 +474,10 @@ void ContextualTasksButton::MaybeUpdateVisibility() {
     }
     SetVisible(true);
     AnimateShow();
+    base::RecordAction(base::UserMetricsAction(
+        "ContextualTasks.EphemeralToolbarButton.Shown"));
+    base::UmaHistogramBoolean("ContextualTasks.EphemeralToolbarButton.Shown",
+                              true);
   } else {
     SetVisible(will_be_visible);
     if (was_visible && !will_be_visible) {

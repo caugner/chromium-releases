@@ -265,6 +265,7 @@ Dữ liệu của bạn được mã hoá bằng cụm mật khẩu. Nhập cụ
 <translation id="7038674195294813388">Mở phần cài đặt Ứng dụng mặc định trong iOS, sau đó nhấn vào "Ứng dụng trình duyệt" rồi chọn Chrome.</translation>
 <translation id="7056826488869329999">Mở và chạy quy trình Kiểm tra an toàn trên Chrome.</translation>
 <translation id="7061455974939528301">Nhấn và giữ biểu tượng Chrome rồi nhấp vào "Chỉnh sửa màn hình chính"</translation>
+<translation id="7095110968493193530">Vào Trình quản lý mật khẩu của Google cho <ph name="EMAIL" /></translation>
 <translation id="7124339256045485976">Giữ cho Chrome luôn cập nhật</translation>
 <translation id="7145599899567697473">Lưu và tự động điền mật khẩu trong Chrome</translation>
 <translation id="7161390184744336561">Google Chrome đã lỗi thời</translation>
@@ -350,7 +351,7 @@ Dữ liệu của bạn đã được mã hoá bằng cụm mật khẩu vào <p
 <translation id="8540666473246803645">Google Chrome</translation>
 <translation id="8544583291890527417">Cảnh báo về mọi vấn đề liên quan đến quyền riêng tư hoặc bảo mật mà Chrome phát hiện ra.</translation>
 <translation id="855027533751209304">Mẹo khi dùng Chrome: Tìm thông tin về những gì bạn thấy</translation>
-<translation id="8558480467877843976">Giờ bạn có thể dùng Chrome mỗi khi duyệt web hoặc nhấn vào liên kết trong thư/tin nhắn, tài liệu, v.v.</translation>
+<translation id="8558480467877843976">Giờ bạn có thể dùng Chrome mỗi khi duyệt web hoặc nhấn vào đường liên kết trong thư/tin nhắn, tài liệu, v.v.</translation>
 <translation id="8603022514504485810">Trình quản lý mật khẩu của Google không thể kiểm tra tất cả mật khẩu. Hãy thử lại vào ngày mai hoặc <ph name="BEGIN_LINK" />kiểm tra các mật khẩu trong Tài khoản Google của bạn.<ph name="END_LINK" /></translation>
 <translation id="8610372330814566250">Sử dụng mật khẩu, nhật ký, dấu trang và thẻ tín dụng từ Safari trong Chrome</translation>
 <translation id="8630122478628016441">Bật chế độ "Khoá các thẻ Ẩn danh khi bạn đóng Chrome".</translation>
@@ -371,7 +372,7 @@ Dữ liệu của bạn đã được mã hoá bằng cụm mật khẩu vào <p
 <translation id="9004772704776174843">Bạn đã bị đăng xuất khỏi Chrome</translation>
 <translation id="9068336935206019333">Mở trong chế độ ẩn danh của Chrome</translation>
 <translation id="9082304295862405388">Gemini có thể sử dụng vị trí chính xác của bạn, tuỳ thuộc vào quyền bạn đã cấp cho Chrome</translation>
-<translation id="909127538042363610">Sử dụng chế độ bảo mật mạnh nhất của Chrome</translation>
+<translation id="909127538042363610">Lớp bảo mật mạnh nhất của Chrome</translation>
 <translation id="9113725809421872108">Xác minh danh tính để lưu mật khẩu này và lấy dữ liệu Chrome trên mọi thiết bị của bạn</translation>
 <translation id="9122931302567044771">Tức là lần nào Chrome cũng yêu cầu trang web dành cho máy tính.</translation>
 <translation id="9176561303811134420">Quản lý phương thức thanh toán trong Chrome</translation>

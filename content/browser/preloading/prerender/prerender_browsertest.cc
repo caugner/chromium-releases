@@ -105,6 +105,7 @@
 #include "content/public/test/preloading_test_util.h"
 #include "content/public/test/prerender_test_util.h"
 #include "content/public/test/scoped_accessibility_mode_override.h"
+#include "content/public/test/test_devtools_protocol_client.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_navigation_throttle.h"
 #include "content/public/test/test_utils.h"
@@ -2076,7 +2077,7 @@ IN_PROC_BROWSER_TEST_P(NoVarySearchPrerenderBrowserTest,
 
   // Start prerendering `prerendering_url2`.
   test::PrerenderHostCreationWaiter host_creation_waiter2;
-  AddPrerenderAsync(prerendering_url2, R"(params=(\\\"a\\\"))");
+  AddPrerenderAsync(prerendering_url2, R"(params=(\\\"a\\\" \\\"extra\\\"))");
   PrerenderHostId host_id2 = host_creation_waiter2.Wait();
   auto* host2 =
       web_contents_impl()->GetPrerenderHostRegistry()->FindNonReservedHostById(
@@ -2166,6 +2167,48 @@ IN_PROC_BROWSER_TEST_P(NoVarySearchPrerenderBrowserTest, HintIsPopulated) {
           host_id);
   ASSERT_TRUE(host);
   ASSERT_TRUE(host->no_vary_search_hint().has_value());
+}
+
+// Tests that a second prerender speculation rule whose URL only differs from
+// an existing prerendering URL by query parameters covered by a matching
+// No-Vary-Search hint is rejected as a duplicate, rather than creating a
+// second prerender host.
+IN_PROC_BROWSER_TEST_P(NoVarySearchPrerenderBrowserTest,
+                       EquivalentUrlsUnderNoVarySearchHintAreDeduped) {
+  const GURL kInitialUrl = GetUrl("/empty.html");
+  const GURL kPrerenderingUrl1 = GetUrl("/no_vary_search_a.html?prerender&a=1");
+  const GURL kPrerenderingUrl2 = GetUrl("/no_vary_search_a.html?prerender&a=2");
+
+  // Navigate to an initial page.
+  ASSERT_TRUE(NavigateToURL(shell(), kInitialUrl));
+  ASSERT_EQ(web_contents()->GetLastCommittedURL(), kInitialUrl);
+
+  PrerenderHostRegistry* registry =
+      web_contents_impl()->GetPrerenderHostRegistry();
+
+  // Trigger both prerenders from a single speculation rule set. They differ
+  // only by the "a" query param, which the matching No-Vary-Search hint
+  // declares as not affecting the response, so the browser should create a
+  // single prerender host for the first URL and reject the second as a
+  // duplicate (per HTML 7.6.1.3's "redundant with" definition).
+  prerender_helper()->AddPrerendersAsync(
+      {kPrerenderingUrl1, kPrerenderingUrl2},
+      /*eagerness=*/std::nullopt,
+      /*no_vary_search_hint=*/R"(params=(\\\"a\\\"))",
+      /*target_hint=*/std::string());
+  WaitForPrerenderLoadCompletion(kPrerenderingUrl1);
+
+  PrerenderHost* host1 = registry->FindHostByUrlForTesting(kPrerenderingUrl1);
+  ASSERT_TRUE(host1);
+  ASSERT_TRUE(host1->no_vary_search_hint().has_value());
+  // The surviving host was created for the first URL.
+  EXPECT_EQ(host1->GetInitialUrl(), kPrerenderingUrl1);
+
+  // The second URL should resolve to the same (surviving) host rather than to
+  // a newly-created second host. If dedupe failed, a distinct host with
+  // initial URL kPrerenderingUrl2 would exist and be returned here.
+  PrerenderHost* host2 = registry->FindHostByUrlForTesting(kPrerenderingUrl2);
+  EXPECT_EQ(host2, host1);
 }
 
 // Tests that the speculationrules trigger works in the presence of
@@ -3339,6 +3382,44 @@ class PrerenderTargetHintBrowserTest : public PrerenderBrowserTest {
         {id, target_hint, url.spec(), action}, nullptr);
   }
 };
+
+IN_PROC_BROWSER_TEST_F(PrerenderTargetHintBrowserTest,
+                       DevToolsCanAttachToNewTabPrerenderPrimaryMainFrame) {
+  // Scenario:
+  // 1. Open a regular page and start a Chromium new-tab prerender.
+  // 2. Verify the hidden prerender WebContents keeps an initial empty primary
+  //    main frame as a browser-side placeholder.
+  // 3. Attach DevTools to this frame target, as an external CDP client would.
+  // 4. Verify attach initializes the renderer-side frame and commands work.
+  const GURL initial_url = GetUrl("/simple_links.html");
+  const GURL prerendering_url = GetUrl("/title2.html");
+
+  ASSERT_TRUE(NavigateToURL(shell(), initial_url));
+
+  PrerenderHostId host_id = prerender_helper()->AddPrerender(
+      prerendering_url, /*eagerness=*/std::nullopt, "_blank");
+  WebContents* prerender_web_contents =
+      test::PrerenderTestHelper::GetPrerenderWebContents(host_id);
+  ASSERT_TRUE(prerender_web_contents);
+  ASSERT_NE(prerender_web_contents, web_contents_impl());
+  ExpectWebContentsIsForNewTabPrerendering(*prerender_web_contents);
+
+  auto* prerender_web_contents_impl =
+      static_cast<WebContentsImpl*>(prerender_web_contents);
+  RenderFrameHostImpl* primary_main_frame =
+      prerender_web_contents_impl->GetPrimaryMainFrame();
+  ASSERT_TRUE(primary_main_frame);
+  ASSERT_TRUE(primary_main_frame->is_initial_empty_document());
+  ASSERT_FALSE(primary_main_frame->IsRenderFrameLive());
+
+  TestDevToolsProtocolClient devtools_client;
+  devtools_client.AttachToFrameTreeHost(primary_main_frame);
+
+  ASSERT_TRUE(primary_main_frame->IsRenderFrameLive());
+  ASSERT_TRUE(devtools_client.SendCommandSync("Page.enable"));
+  ASSERT_TRUE(devtools_client.SendCommandSync("Runtime.enable"));
+  devtools_client.DetachProtocolClient();
+}
 
 // Tests that clicking a link annotated with "target=_blank" can activate a
 // prerender whose target_hint is "_blank".
@@ -11712,6 +11793,73 @@ IN_PROC_BROWSER_TEST_F(PrerenderBackForwardCacheBrowserTest,
       EvalJs(current_frame_host(), "getSessionStorageKeys()").ExtractString());
 }
 
+// Regression test for crbug.com/568719351:
+// Verifies that if a BackForwardCache restore navigation triggers prerender
+// activation checks in NavigationRequest::BeginNavigation(), and cancelling a
+// matching prerender synchronously starts a queued pending prerender whose
+// navigation evicts the BFCached page being restored (synchronously destroying
+// the primary main frame's NavigationRequest), BeginNavigation() does not
+// access `this` after it is destroyed.
+IN_PROC_BROWSER_TEST_F(PrerenderBackForwardCacheBrowserTest,
+                       EvictBackForwardCacheDuringPrerenderActivationCheck) {
+  net::test_server::ControllableHttpResponse response1(
+      embedded_test_server(), "/empty.html?prerender=1");
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  const GURL initial_url = embedded_test_server()->GetURL("/empty.html");
+  const GURL next_url = embedded_test_server()->GetURL("/empty.html?next");
+  const GURL prerender1_url =
+      embedded_test_server()->GetURL("/empty.html?prerender=1");
+  const GURL prerender2_url =
+      embedded_test_server()->GetURL("/empty.html?prerender2");
+
+  // 1. Navigate to `initial_url` and then `next_url` so `initial_rfh` is
+  // stored in the BackForwardCache.
+  ASSERT_TRUE(NavigateToURL(shell(), initial_url));
+  RenderFrameHostImplWrapper initial_rfh(current_frame_host());
+  ASSERT_TRUE(NavigateToURL(shell(), next_url));
+  ASSERT_TRUE(initial_rfh->IsInBackForwardCache());
+
+  // 2. Trigger `prerender1_url` with a No-Vary-Search hint matching
+  // `initial_url`, and hold its initial navigation in-flight so it remains the
+  // running prerender (`running_prerender_host_id_`). Queue `prerender2_url`
+  // behind it in `pending_prerenders_`.
+  test::PrerenderHostRegistryObserver registry_observer(*web_contents_impl());
+  AddPrerenderAsync(prerender1_url, R"(params=(\\\"prerender\\\"))");
+  response1.WaitForRequest();
+  AddPrerenderAsync(prerender2_url);
+  registry_observer.WaitForTrigger(prerender2_url);
+
+  // 3. When `prerender2_url` starts its initial navigation (triggered
+  // synchronously when `prerender1_url` is cancelled during
+  // `FindPotentialHostToActivate()`), evict `initial_rfh` from BFCache (e.g.
+  // simulating ServiceWorker activation evicting BFCached controllees). This
+  // synchronously calls `RestartBackForwardCachedNavigationAsync()` and
+  // destroys the in-flight BFCache restore `NavigationRequest`.
+  bool evicted_during_prerender2_start = false;
+  base::RunLoop primary_page_changed_loop;
+  testing::NiceMock<MockWebContentsObserver> observer(web_contents());
+  ON_CALL(observer, DidStartNavigation(testing::_))
+      .WillByDefault([&](NavigationHandle* navigation_handle) {
+        if (navigation_handle->GetURL() == prerender2_url &&
+            initial_rfh->IsInBackForwardCache()) {
+          evicted_during_prerender2_start = true;
+          initial_rfh->EvictFromBackForwardCacheWithReason(
+              BackForwardCacheMetrics::NotRestoredReason::
+                  kServiceWorkerVersionActivation);
+        }
+      });
+  ON_CALL(observer, PrimaryPageChanged(testing::_))
+      .WillByDefault([&](Page&) { primary_page_changed_loop.Quit(); });
+
+  // 4. Navigate back to `initial_url`. The BFCache restore navigation is
+  // restarted as a normal navigation and should complete without crashing.
+  shell()->GoBackOrForward(-1);
+  EXPECT_TRUE(evicted_during_prerender2_start);
+  primary_page_changed_loop.Run();
+  EXPECT_EQ(web_contents()->GetLastCommittedURL(), initial_url);
+}
+
 #if !BUILDFLAG(IS_ANDROID)
 // The out-of-process StorageService is not implemented on Android. Also as
 // commented below, test_api->CrashNow() won't work on x86 and x86_64 Android.
@@ -13038,8 +13186,9 @@ IN_PROC_BROWSER_TEST_F(MultiplePrerendersBrowserTest,
 }
 
 // Tests that critical-level memory pressure cancels prerendering on trigger.
+// crbug.com/538697108
 IN_PROC_BROWSER_TEST_F(MultiplePrerendersBrowserTest,
-                       MemoryPressureOnTrigger_Critical) {
+                       DISABLED_MemoryPressureOnTrigger_Critical) {
   GURL initial_url = GetUrl("/empty.html");
   ASSERT_TRUE(NavigateToURL(shell(), initial_url));
 
@@ -13165,6 +13314,29 @@ IN_PROC_BROWSER_TEST_F(MultiplePrerendersBrowserTest,
   std::unique_ptr<PrerenderHandle> prerender_handle =
       AddEmbedderTriggeredPrerenderAsync(embedder_triggered_prerendering_url);
   EXPECT_TRUE(prerender_handle);
+}
+
+// Regression test for bug 40893667:
+// Tests that destroying a WebContents with multiple active prerenders sharing a
+// process does not crash during teardown when one RFH destruction triggers
+// RenderProcessGone notification for another RFH while PrerenderHostRegistry is
+// being destroyed.
+IN_PROC_BROWSER_TEST_F(MultiplePrerendersBrowserTest,
+                       TeardownWithMultiplePrerendersSharingProcess) {
+  const GURL initial_url = GetUrl("/empty.html");
+  ASSERT_TRUE(NavigateToURL(shell(), initial_url));
+
+  // Trigger multiple prerenders so they exist concurrently in the registry.
+  GURL prerender_url1 = GetUrl("/empty.html?prerender1");
+  GURL prerender_url2 = GetUrl("/empty.html?prerender2");
+  AddPrerender(prerender_url1);
+  AddPrerender(prerender_url2);
+  EXPECT_TRUE(HasHostForUrl(prerender_url1));
+  EXPECT_TRUE(HasHostForUrl(prerender_url2));
+
+  // Destroying the shell (and thus WebContents) should complete cleanly without
+  // crashing due to accessing a null PrerenderHostRegistry during RFH teardown.
+  shell()->Close();
 }
 
 // Tests that PrerenderHostRegistry can start prerendering when the DevTools is

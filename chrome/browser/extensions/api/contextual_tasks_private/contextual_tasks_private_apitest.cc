@@ -24,6 +24,7 @@
 #include "net/test/embedded_test_server/http_response.h"
 #include "services/network/public/cpp/network_switches.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "third_party/omnibox_proto/chrome_aim_entry_point.pb.h"
 
 using ::testing::NiceMock;
 using ::testing::Return;
@@ -184,7 +185,7 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksPrivateApiEligibleTest,
 
   EXPECT_CALL(
       *mock_ui_service,
-      StartTaskUiInSidePanel(
+      StartTaskUiInSidePanelImpl(
           testing::_, testing::_,
           testing::Property(
               &GURL::spec,
@@ -193,10 +194,22 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksPrivateApiEligibleTest,
                   testing::HasSubstr("mstk=abc"), testing::HasSubstr("aioh=1"),
                   testing::HasSubstr("csuir=1"), testing::HasSubstr("ved=123"),
                   testing::HasSubstr("cs=1"), testing::HasSubstr("sxsrf=xyz"),
-                  testing::HasSubstr("ei=456"),
+                  testing::HasSubstr("ei=456"), testing::HasSubstr("aep=173"),
                   testing::HasSubstr("q=some_query"))),
-          testing::_, /*associate_web_contents=*/false, testing::_, true,
-          /*use_no_animation=*/false))
+          testing::_,
+          testing::AllOf(
+              testing::Field(
+                  &contextual_tasks::StartTaskUiOptions::associate_web_contents,
+                  false),
+              testing::Field(&contextual_tasks::StartTaskUiOptions::entry_point,
+                             omnibox::ChromeAimEntryPoint::
+                                 DESKTOP_CHROME_COBROWSE_AIO_LINK),
+              testing::Field(&contextual_tasks::StartTaskUiOptions::
+                                 use_mstk_for_task_association,
+                             true),
+              testing::Field(
+                  &contextual_tasks::StartTaskUiOptions::use_no_animation,
+                  false))))
       .Times(testing::AtLeast(1));
 
   EXPECT_TRUE(RunExtensionTest(
@@ -223,7 +236,7 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksPrivateApiEligibleDisabledTest,
 
   EXPECT_CALL(
       *mock_ui_service,
-      StartTaskUiInSidePanel(
+      StartTaskUiInSidePanelImpl(
           testing::_, testing::_,
           testing::Property(
               &GURL::spec,
@@ -232,10 +245,22 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksPrivateApiEligibleDisabledTest,
                   testing::HasSubstr("mstk=abc"), testing::HasSubstr("aioh=1"),
                   testing::HasSubstr("csuir=1"), testing::HasSubstr("ved=123"),
                   testing::HasSubstr("cs=1"), testing::HasSubstr("sxsrf=xyz"),
-                  testing::HasSubstr("ei=456"),
+                  testing::HasSubstr("ei=456"), testing::HasSubstr("aep=173"),
                   testing::Not(testing::HasSubstr("q=")))),
-          testing::_, /*associate_web_contents=*/false, testing::_, true,
-          /*use_no_animation=*/false))
+          testing::_,
+          testing::AllOf(
+              testing::Field(
+                  &contextual_tasks::StartTaskUiOptions::associate_web_contents,
+                  false),
+              testing::Field(&contextual_tasks::StartTaskUiOptions::entry_point,
+                             omnibox::ChromeAimEntryPoint::
+                                 DESKTOP_CHROME_COBROWSE_AIO_LINK),
+              testing::Field(&contextual_tasks::StartTaskUiOptions::
+                                 use_mstk_for_task_association,
+                             true),
+              testing::Field(
+                  &contextual_tasks::StartTaskUiOptions::use_no_animation,
+                  false))))
       .Times(testing::AtLeast(1));
 
   EXPECT_TRUE(RunExtensionTest(
@@ -249,10 +274,9 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksPrivateApiEligibleTest,
                        LaunchPanelInNewTabMissingMstk) {
   auto* mock_ui_service = GetMockUiService();
 
-  EXPECT_CALL(
-      *mock_ui_service,
-      StartTaskUiInSidePanel(testing::_, testing::_, testing::_, testing::_,
-                             testing::_, testing::_, testing::_, testing::_))
+  EXPECT_CALL(*mock_ui_service,
+              StartTaskUiInSidePanelImpl(testing::_, testing::_, testing::_,
+                                         testing::_, testing::_))
       .Times(0);
 
   EXPECT_TRUE(RunExtensionTest(
@@ -266,10 +290,9 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksPrivateApiEligibleTest,
                        LaunchPanelInNewTabInvalidTargetUrl) {
   auto* mock_ui_service = GetMockUiService();
 
-  EXPECT_CALL(
-      *mock_ui_service,
-      StartTaskUiInSidePanel(testing::_, testing::_, testing::_, testing::_,
-                             testing::_, testing::_, testing::_, testing::_))
+  EXPECT_CALL(*mock_ui_service,
+              StartTaskUiInSidePanelImpl(testing::_, testing::_, testing::_,
+                                         testing::_, testing::_))
       .Times(0);
 
   EXPECT_TRUE(
@@ -288,10 +311,9 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksPrivateApiEligibleTest,
 
   auto* mock_ui_service = GetMockUiService();
 
-  EXPECT_CALL(
-      *mock_ui_service,
-      StartTaskUiInSidePanel(testing::_, testing::_, testing::_, testing::_,
-                             testing::_, testing::_, testing::_, testing::_))
+  EXPECT_CALL(*mock_ui_service,
+              StartTaskUiInSidePanelImpl(testing::_, testing::_, testing::_,
+                                         testing::_, testing::_))
       .Times(0);
 
   EXPECT_TRUE(RunExtensionTest(

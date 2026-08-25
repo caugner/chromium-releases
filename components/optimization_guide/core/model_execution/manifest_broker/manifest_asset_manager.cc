@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-#include "base/byte_count.h"
+#include "base/byte_size.h"
 #include "base/containers/flat_map.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -276,7 +276,7 @@ ManifestAssetManager::DiskSpaceStatus::DiskSpaceStatus() = default;
 ManifestAssetManager::DiskSpaceStatus::~DiskSpaceStatus() = default;
 
 void ManifestAssetManager::DiskSpaceStatus::Update(
-    std::optional<base::ByteCount> free_space) {
+    std::optional<base::ByteSize> free_space) {
   free_space_ = free_space;
   last_evaluated_ = base::Time::Now();
 }
@@ -380,6 +380,10 @@ void ManifestAssetManager::UpdateSolutionFactory(
   // TODO(holte): Potentially defer stopping the old factory from providing new
   // solutions until we actually download assets for the new factory.
   factory_ = std::move(factory);
+  if (std::optional<base::ByteSize> free_space =
+          disk_space_status_.GetFreeSpace()) {
+    factory_->UpdateFreeDiskSpace(free_space);
+  }
 
   // Mark the manifest asset as ready. This is deferred until now let the
   // AssetManager decide when the factory can start providing solutions.
@@ -481,12 +485,13 @@ void ManifestAssetManager::UpdateActiveAssets() {
 }
 
 void ManifestAssetManager::OnDiskSpaceEvaluated(
-    std::optional<base::ByteCount> free_space) {
+    std::optional<base::ByteSize> free_space) {
   TRACE_EVENT("optimization_guide",
               "ManifestAssetManager::OnDiskSpaceEvaluated",
               perfetto::Flow::FromPointer(this));
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   disk_space_status_.Update(free_space);
+  factory_->UpdateFreeDiskSpace(free_space);
   UpdateRegistrations();
 }
 
@@ -503,7 +508,7 @@ bool ManifestAssetManager::ShouldInstall(
     return true;
   }
   if (!disk_space_status_.CanSupportOnDemandInstall()) {
-    std::optional<base::ByteCount> free_space =
+    std::optional<base::ByteSize> free_space =
         disk_space_status_.GetFreeSpace();
     if (free_space) {
       base::UmaHistogramCounts100(

@@ -9,12 +9,19 @@ import {previousReadHighlightClass} from '../read_aloud/movement.js';
 import {getReadAloudModel} from '../read_aloud/read_aloud_model_browser_proxy.js';
 import {ReadAloudNode} from '../read_aloud/read_aloud_types.js';
 import {SpeechController} from '../read_aloud/speech_controller.js';
-import {getReadingModeTextNodes, isDistilledByReadability, LOG_EMPTY_DELAY_MS} from '../shared/common.js';
+import {isDistilledByReadability, LOG_EMPTY_DELAY_MS} from '../shared/common.js';
 import {LinkStatus, ReadAnythingLogger} from '../shared/read_anything_logger.js';
+import {getReadingModeTextNodes} from '../shared/tree_traversal.js';
 
 import {NodeStore} from './node_store.js';
 import {removeExtraneousElementsFrom} from './readability_content_processing.js';
 import {ReadabilityImageClassifier} from './readability_image_classifier.js';
+
+const READABILITY_SET_HTML_OPTIONS: SetHtmlOptions = {
+  sanitizer: {
+    removeElements: ['style', 'meta', 'template'],
+  },
+};
 
 const DATA_PREFIX = 'data-';
 const LINK_DATA_ATTR = 'link';
@@ -141,13 +148,6 @@ export class ContentController {
   private currentState_: ContentState = CONTENT_STATES[ContentType.NO_CONTENT];
   private previousRootId_?: number;
 
-  // The Trusted Types policy is registered globally on the window object.
-  // The browser only allows a policy name to be registered once per page load.
-  // Making this static ensures that multiple instances of ContentController
-  // (which occur frequently during WebUI test runs) share the same policy
-  // reference and do not trigger a "Policy already exists" TypeError.
-  private static trustedUpdatePolicy: TrustedTypePolicy|undefined;
-
   // Holds the text nodes extracted from the current rendered distillation.
   // This array ensures that we can link a DOM node back to its AXTree
   // mapping for text selection via its index in this array.
@@ -261,8 +261,7 @@ export class ContentController {
       }
 
       const contentContainer = document.createElement('div');
-      contentContainer.innerHTML = this.getTrustedHtml(contentHtml);
-
+      contentContainer.setHTML(contentHtml, READABILITY_SET_HTML_OPTIONS);
 
       // Strip single newlines from text nodes to prevent unexpected sentence
       // breaks, as Readability preserves raw HTML newlines which are visually
@@ -1092,25 +1091,6 @@ export class ContentController {
         }
       });
     });
-  }
-
-  private getTrustedHtml(html: string): TrustedHTML {
-    if (!ContentController.trustedUpdatePolicy || !isDistilledByReadability()) {
-      return window.trustedTypes!.emptyHTML;
-    }
-    return ContentController.trustedUpdatePolicy.createHTML(html);
-  }
-
-  configureTrustedTypes(): void {
-    if (!window.trustedTypes || ContentController.trustedUpdatePolicy) {
-      return;
-    }
-    ContentController.trustedUpdatePolicy =
-        window.trustedTypes.createPolicy('reader-mode-policy', {
-          createHTML: (s: string) => s,
-          createScript: () => '',
-          createScriptURL: () => '',
-        });
   }
 
   static getInstance(): ContentController {

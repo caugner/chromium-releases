@@ -233,18 +233,54 @@ TEST_F(ActorFeaturesTest,
   locale_storage->Set(original_locale);
 }
 
-TEST_F(ActorFeaturesTest, IsGeminiLuminousEnabled_Default) {
+TEST_F(ActorFeaturesTest, IsGeminiLuminousEnabled_DefaultWithoutPAM) {
   EXPECT_FALSE(IsGeminiLuminousEnabled());
 }
 
-TEST_F(ActorFeaturesTest, IsGeminiLuminousEnabled_Enabled) {
+TEST_F(ActorFeaturesTest, IsGeminiLuminousEnabled_WithPageActionMenu) {
   base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitWithFeatures({kGeminiLuminous, kPageActionMenu}, {});
+  scoped_feature_list.InitAndEnableFeature(kPageActionMenu);
   EXPECT_TRUE(IsGeminiLuminousEnabled());
 }
 
-TEST_F(ActorFeaturesTest, IsGeminiLuminousEnabled_Disabled) {
+TEST_F(ActorFeaturesTest, IsGeminiLuminousEnabled_FeatureFlagDisabled) {
   base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitWithFeatures({}, {kGeminiLuminous});
+  scoped_feature_list.InitWithFeatures({kPageActionMenu}, {kGeminiLuminous});
   EXPECT_FALSE(IsGeminiLuminousEnabled());
+}
+
+TEST_F(ActorFeaturesTest, IsGeminiExperimentalGuidedOnboardingEnabled) {
+  // Disabled by default.
+  EXPECT_FALSE(IsGeminiExperimentalGuidedOnboardingEnabled());
+  EXPECT_FALSE(ShouldForceGeminiExperimentalGuidedOnboarding());
+
+  // Disabled without PageActionMenu dependency.
+  {
+    base::test::ScopedFeatureList scoped_feature_list;
+    scoped_feature_list.InitAndEnableFeature(
+        kGeminiExperimentalGuidedOnboarding);
+    EXPECT_FALSE(IsGeminiExperimentalGuidedOnboardingEnabled());
+    EXPECT_FALSE(ShouldForceGeminiExperimentalGuidedOnboarding());
+  }
+
+  // Enabled when PageActionMenu and feature are enabled.
+  {
+    base::test::ScopedFeatureList scoped_feature_list;
+    scoped_feature_list.InitWithFeatures(
+        {kPageActionMenu, kGeminiExperimentalGuidedOnboarding}, {});
+    EXPECT_TRUE(IsGeminiExperimentalGuidedOnboardingEnabled());
+    EXPECT_FALSE(ShouldForceGeminiExperimentalGuidedOnboarding());
+  }
+
+  // Forced when force param is enabled with PageActionMenu.
+  {
+    base::test::ScopedFeatureList scoped_feature_list;
+    base::FieldTrialParams params;
+    params[kGeminiExperimentalGuidedOnboardingForceParam] = "true";
+    scoped_feature_list.InitWithFeaturesAndParameters(
+        {{kPageActionMenu, {}}, {kGeminiExperimentalGuidedOnboarding, params}},
+        {});
+    EXPECT_TRUE(IsGeminiExperimentalGuidedOnboardingEnabled());
+    EXPECT_TRUE(ShouldForceGeminiExperimentalGuidedOnboarding());
+  }
 }

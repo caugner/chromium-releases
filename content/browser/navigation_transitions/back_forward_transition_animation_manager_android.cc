@@ -141,12 +141,7 @@ void BackForwardTransitionAnimationManagerAndroid::OnGestureCancelled() {
 }
 
 void BackForwardTransitionAnimationManagerAndroid::OnGestureInvoked() {
-  if (destination_entry_id_ == NavigationTransitionData::kInvalidId) {
-    // TODO(crbug.com/530682179): The caller should ensure this is not called
-    // unless there is an active transition. Make it a CHECK once we have
-    // figured the root cause for this call.
-    return;
-  }
+  CHECK_NE(destination_entry_id_, NavigationTransitionData::kInvalidId);
   if (animator_) {
     animator_->OnGestureInvoked();
     MaybeDestroyAnimator();

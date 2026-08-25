@@ -28,7 +28,13 @@ BASE_FEATURE(kTabSearchCjkWordBoundary, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kVerticalTabs, base::FEATURE_DISABLED_BY_DEFAULT);
 
-BASE_FEATURE(kVerticalTabsLaunch, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kVerticalTabsLaunch,
+#if BUILDFLAG(IS_CHROMEOS)
+             base::FEATURE_DISABLED_BY_DEFAULT
+#else
+             base::FEATURE_ENABLED_BY_DEFAULT
+#endif
+);
 BASE_FEATURE_PARAM(bool,
                    kVerticalTabsToggleInTabContextMenu,
                    &kVerticalTabsLaunch,
@@ -37,7 +43,7 @@ BASE_FEATURE_PARAM(bool,
 
 BASE_FEATURE(kVerticalTabsPreviewBadge, base::FEATURE_DISABLED_BY_DEFAULT);
 
-BASE_FEATURE(kVerticalTabsNewBadge, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kVerticalTabsNewBadge, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kVerticalTabsExpandOnHover, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE_PARAM(bool,
@@ -101,6 +107,11 @@ BASE_FEATURE(kBackToOpener, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kMigrateEverythingMenuPinnedToTabstrip,
              base::FEATURE_DISABLED_BY_DEFAULT);
+
+bool IsSplitViewHorizontalIndirectAccessEnabled() {
+  return base::FeatureList::IsEnabled(kSplitViewHorizontal) &&
+         !kSplitViewHorizontalDirectAccess.Get();
+}
 
 bool IsVerticalTabsFeatureEnabled() {
   return base::FeatureList::IsEnabled(kVerticalTabs) ||

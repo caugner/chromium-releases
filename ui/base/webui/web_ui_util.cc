@@ -194,6 +194,8 @@ void SetLoadTimeDataDefaults(const std::string& app_locale,
   localized_strings->Set(
       "roundedIconsAttribute",
       features::IsRoundedIconsEnabled() ? "rounded-icons" : "");
+  localized_strings->Set("webuiRoundedIconsEnabled",
+                         features::IsWebUIRoundedIconsEnabled());
 }
 
 void SetLoadTimeDataDefaults(const std::string& app_locale,
@@ -205,6 +207,8 @@ void SetLoadTimeDataDefaults(const std::string& app_locale,
   (*replacements)["textdirection"] = GetTextDirection();
   (*replacements)["roundedIconsAttribute"] =
       features::IsRoundedIconsEnabled() ? "rounded-icons" : "";
+  (*replacements)["webuiRoundedIconsEnabled"] =
+      features::IsWebUIRoundedIconsEnabled() ? "true" : "false";
 }
 
 std::string GetWebUiCssTextDefaults() {

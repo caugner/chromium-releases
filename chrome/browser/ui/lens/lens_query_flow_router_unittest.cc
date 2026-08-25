@@ -135,8 +135,7 @@ MATCHER_P(ImageEncodingOptionsMatches,
     return false;
   }
   const auto& actual = arg.value();
-  return actual.enable_webp_encoding == expected.enable_webp_encoding &&
-         actual.max_size == expected.max_size &&
+  return actual.max_size == expected.max_size &&
          actual.max_height == expected.max_height &&
          actual.max_width == expected.max_width &&
          actual.compression_quality == expected.compression_quality;
@@ -372,13 +371,13 @@ class MockContextualTasksUiService
   ~MockContextualTasksUiService() override = default;
 
   MOCK_METHOD(void,
-              StartTaskUiInSidePanel,
+              StartTaskUiInSidePanelImpl,
               (BrowserWindowInterface * browser_window_interface,
                tabs::TabInterface* tab_interface,
                const GURL& url,
                std::unique_ptr<contextual_search::ContextualSearchSessionHandle>
                    session_handle,
-               omnibox::ChromeAimEntryPoint entry_point),
+               contextual_tasks::StartTaskUiOptions options),
               (override));
 
   MOCK_METHOD(void,
@@ -1045,7 +1044,6 @@ TEST_F(LensQueryFlowRouterContextualTaskEnabledTest,
 
 TEST_F(LensQueryFlowRouterContextualTaskEnabledTest,
        StartQueryFlow_RoutesToContextualTasks) {
-  SignInUser();
   lens::GrantLensOverlayNeededPermissions(profile_.get());
 
   // Arrange: Set up and create the router.
@@ -1080,7 +1078,6 @@ TEST_F(LensQueryFlowRouterContextualTaskEnabledTest,
   auto image_upload_config =
       ntp_composebox::FeatureConfig::Get().config.composebox().image_upload();
   lens::ImageEncodingOptions expected_image_options{
-      .enable_webp_encoding = image_upload_config.enable_webp_encoding(),
       .max_size = image_upload_config.downscale_max_image_size(),
       .max_height = image_upload_config.downscale_max_image_height(),
       .max_width = image_upload_config.downscale_max_image_width(),
@@ -1103,10 +1100,12 @@ TEST_F(LensQueryFlowRouterContextualTaskEnabledTest,
                         ui_scale_factor, invocation_time);
 }
 
-#if !BUILDFLAG(IS_CHROMEOS)
-TEST_F(LensQueryFlowRouterContextualTaskEnabledTest,
-       StartQueryFlow_RoutesToContextualTasks_OnlyViewport_WhenSignedOut) {
-  SignOutUser();
+TEST_F(
+    LensQueryFlowRouterContextualTaskEnabledTest,
+    StartQueryFlow_RoutesToContextualTasks_OnlyViewport_WhenContextualSearchboxDisabled) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndDisableFeature(
+      lens::features::kLensOverlayContextualSearchbox);
 
   // Arrange: Set up and create the router.
   EXPECT_CALL(*mock_lens_search_controller_,
@@ -1137,7 +1136,6 @@ TEST_F(LensQueryFlowRouterContextualTaskEnabledTest,
   auto image_upload_config =
       ntp_composebox::FeatureConfig::Get().config.composebox().image_upload();
   lens::ImageEncodingOptions expected_image_options{
-      .enable_webp_encoding = image_upload_config.enable_webp_encoding(),
       .max_size = image_upload_config.downscale_max_image_size(),
       .max_height = image_upload_config.downscale_max_image_height(),
       .max_width = image_upload_config.downscale_max_image_width(),
@@ -1158,19 +1156,7 @@ TEST_F(LensQueryFlowRouterContextualTaskEnabledTest,
 }
 
 TEST_F(LensQueryFlowRouterContextualTaskEnabledTest,
-       ShouldPopulateFullPageContext_SignedOut_ReturnsFalse) {
-  SignOutUser();
-  lens::GrantLensOverlayNeededPermissions(profile_.get());
-  TestLensQueryFlowRouter router(mock_lens_search_controller_.get(),
-                                 mock_context_controller_.get(),
-                                 profile_.get());
-  EXPECT_FALSE(router.ShouldPopulateFullPageContext());
-}
-#endif  // !BUILDFLAG(IS_CHROMEOS)
-
-TEST_F(LensQueryFlowRouterContextualTaskEnabledTest,
-       ShouldPopulateFullPageContext_SignedIn_PermissionsGranted_ReturnsTrue) {
-  SignInUser();
+       ShouldPopulateFullPageContext_PermissionsGranted_ReturnsTrue) {
   lens::GrantLensOverlayNeededPermissions(profile_.get());
   TestLensQueryFlowRouter router(mock_lens_search_controller_.get(),
                                  mock_context_controller_.get(),
@@ -1180,7 +1166,6 @@ TEST_F(LensQueryFlowRouterContextualTaskEnabledTest,
 
 TEST_F(LensQueryFlowRouterContextualTaskEnabledTest,
        ShouldPopulateFullPageContext_PermissionsNotGranted_ReturnsFalse) {
-  SignInUser();
   profile_->GetPrefs()->SetBoolean(lens::prefs::kLensSharingPageContentEnabled,
                                    false);
   TestLensQueryFlowRouter router(mock_lens_search_controller_.get(),
@@ -1527,7 +1512,7 @@ TEST_F(LensQueryFlowRouterContextualTaskEnabledTest,
           });
 
   EXPECT_CALL(*service,
-              StartTaskUiInSidePanel(
+              StartTaskUiInSidePanelImpl(
                   mock_browser_window_interface_.get(), &mock_tab_interface_,
                   GURL("https://www.google.com/search?q=test"),
                   testing::IsNull(), testing::_))
@@ -1698,7 +1683,7 @@ TEST_F(LensQueryFlowRouterContextualTaskEnabledTest,
           });
 
   EXPECT_CALL(*service,
-              StartTaskUiInSidePanel(
+              StartTaskUiInSidePanelImpl(
                   mock_browser_window_interface_.get(), &mock_tab_interface_,
                   GURL("https://www.google.com/search?q=test"),
                   testing::IsNull(), testing::_))
@@ -1797,7 +1782,7 @@ TEST_F(LensQueryFlowRouterContextualTaskEnabledTest,
           });
 
   EXPECT_CALL(*service,
-              StartTaskUiInSidePanel(
+              StartTaskUiInSidePanelImpl(
                   mock_browser_window_interface_.get(), &mock_tab_interface_,
                   GURL("https://www.google.com/search?q=test"),
                   testing::IsNull(), testing::_))
@@ -1971,7 +1956,7 @@ TEST_F(LensQueryFlowRouterContextualTaskEnabledTest,
   // Expect StartTaskUiInSidePanel to be called with the real URL and the
   // session handle.
   EXPECT_CALL(*service,
-              StartTaskUiInSidePanel(
+              StartTaskUiInSidePanelImpl(
                   mock_browser_window_interface_.get(), &mock_tab_interface_,
                   GURL("https://www.google.com/search?q=test"),
                   testing::Pointer(router.mock_session_handle()), testing::_))
@@ -1980,7 +1965,7 @@ TEST_F(LensQueryFlowRouterContextualTaskEnabledTest,
               BrowserWindowInterface*, tabs::TabInterface*, const GURL&,
               std::unique_ptr<contextual_search::ContextualSearchSessionHandle>
                   handle,
-              omnibox::ChromeAimEntryPoint entry_point) {
+              contextual_tasks::StartTaskUiOptions options) {
             router.SetTransferredSessionHandle(std::move(handle));
           });
 
@@ -2062,7 +2047,7 @@ TEST_F(
   // Expect StartTaskUiInSidePanel to be called with the real URL and the
   // session handle.
   EXPECT_CALL(*service,
-              StartTaskUiInSidePanel(
+              StartTaskUiInSidePanelImpl(
                   mock_browser_window_interface_.get(), &mock_tab_interface_,
                   GURL("https://www.google.com/search?q=test"),
                   testing::Pointer(router.mock_session_handle()), testing::_))
@@ -2071,7 +2056,7 @@ TEST_F(
               BrowserWindowInterface*, tabs::TabInterface*, const GURL&,
               std::unique_ptr<contextual_search::ContextualSearchSessionHandle>
                   handle,
-              omnibox::ChromeAimEntryPoint entry_point) {
+              contextual_tasks::StartTaskUiOptions options) {
             router.SetTransferredSessionHandle(std::move(handle));
           });
 
@@ -2169,7 +2154,7 @@ TEST_F(LensQueryFlowRouterContextualTaskEnabledTest,
           });
 
   EXPECT_CALL(*service,
-              StartTaskUiInSidePanel(
+              StartTaskUiInSidePanelImpl(
                   mock_browser_window_interface_.get(), &mock_tab_interface_,
                   GURL("https://www.google.com/search?q=test"),
                   testing::IsNull(), testing::_))
@@ -2514,7 +2499,7 @@ TEST_F(LensQueryFlowRouterContextualTaskEnabledTest,
           profile_.get()));
 
   EXPECT_CALL(*service,
-              StartTaskUiInSidePanel(
+              StartTaskUiInSidePanelImpl(
                   mock_browser_window_interface_.get(), &mock_tab_interface_,
                   GURL("https://www.google.com/search?q=test"),
                   testing::Pointer(router.mock_session_handle()), testing::_))
@@ -2523,7 +2508,7 @@ TEST_F(LensQueryFlowRouterContextualTaskEnabledTest,
               BrowserWindowInterface*, tabs::TabInterface*, const GURL&,
               std::unique_ptr<contextual_search::ContextualSearchSessionHandle>
                   handle,
-              omnibox::ChromeAimEntryPoint entry_point) {
+              contextual_tasks::StartTaskUiOptions options) {
             router.SetTransferredSessionHandle(std::move(handle));
           });
 
@@ -2594,7 +2579,7 @@ TEST_F(
           profile_.get()));
 
   EXPECT_CALL(*service,
-              StartTaskUiInSidePanel(
+              StartTaskUiInSidePanelImpl(
                   mock_browser_window_interface_.get(), &mock_tab_interface_,
                   GURL("https://www.google.com/search?q=test"),
                   testing::Pointer(router.mock_session_handle()), testing::_))
@@ -2603,7 +2588,7 @@ TEST_F(
               BrowserWindowInterface*, tabs::TabInterface*, const GURL&,
               std::unique_ptr<contextual_search::ContextualSearchSessionHandle>
                   handle,
-              omnibox::ChromeAimEntryPoint entry_point) {
+              contextual_tasks::StartTaskUiOptions options) {
             router.SetTransferredSessionHandle(std::move(handle));
           });
 
@@ -2787,7 +2772,7 @@ TEST_F(LensQueryFlowRouterUnifiedEligibilityTest,
       .WillOnce(base::test::RunOnceCallback<1>(
           GURL("https://www.google.com/search?q=test")));
   EXPECT_CALL(*service,
-              StartTaskUiInSidePanel(
+              StartTaskUiInSidePanelImpl(
                   _, _, GURL("https://www.google.com/search?q=test"), _, _))
       .Times(1);
 
@@ -2848,7 +2833,7 @@ TEST_F(LensQueryFlowRouterUnifiedEligibilityTest,
       .WillOnce(base::test::RunOnceCallback<1>(
           GURL("https://www.google.com/search?q=test")));
   EXPECT_CALL(*service,
-              StartTaskUiInSidePanel(
+              StartTaskUiInSidePanelImpl(
                   _, _, GURL("https://www.google.com/search?q=test"), _, _))
       .Times(1);
 
@@ -2910,7 +2895,7 @@ TEST_F(LensQueryFlowRouterUnifiedEligibilityTest,
       .WillOnce(base::test::RunOnceCallback<1>(
           GURL("https://www.google.com/search?q=test")));
   EXPECT_CALL(*service,
-              StartTaskUiInSidePanel(
+              StartTaskUiInSidePanelImpl(
                   _, _, GURL("https://www.google.com/search?q=test"), _, _))
       .Times(1);
 

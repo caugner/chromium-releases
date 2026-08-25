@@ -11,6 +11,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "build/build_config.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_panel_controller.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_panel_host.h"
 #include "chrome/browser/tab_list/tab_list_interface_observer.h"
@@ -19,6 +20,10 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "third_party/omnibox_proto/chrome_aim_entry_point.pb.h"
 #include "ui/base/unowned_user_data/scoped_unowned_user_data.h"
+
+#if !BUILDFLAG(IS_ANDROID)
+#include "chrome/browser/ui/views/bubble/webui_bubble_reopen_suppressor.h"
+#endif
 
 class BrowserWindowInterface;
 class PrefService;
@@ -79,6 +84,9 @@ class ContextualTasksSidePanelCoordinator
     // The entry source that triggered this task's panel.
     ContextualTasksPanelController::EntrySource entry_source =
         ContextualTasksPanelController::EntrySource::kOther;
+
+    // The time when this task's panel was opened.
+    base::TimeTicks open_time_ticks;
   };
 
   DECLARE_USER_DATA(ContextualTasksSidePanelCoordinator);
@@ -105,9 +113,11 @@ class ContextualTasksSidePanelCoordinator
   void AddObserver(ContextualTasksPanelController::Observer* observer) override;
   void RemoveObserver(
       ContextualTasksPanelController::Observer* observer) override;
-  void Show(bool transition_from_tab,
-            omnibox::ChromeAimEntryPoint entry_point,
-            bool use_no_animation = false) override;
+  void Show(
+      bool transition_from_tab,
+      omnibox::ChromeAimEntryPoint entry_point,
+      bool use_no_animation = false,
+      std::optional<base::TimeTicks> open_time_ticks = std::nullopt) override;
   void Close() override;
   void OpenInZeroState() override;
   bool IsPanelOpenForContextualTask() const override;
@@ -120,6 +130,7 @@ class ContextualTasksSidePanelCoordinator
   void SetPendingTaskForTab(tabs::TabInterface* tab,
                             const base::Uuid& task_id) override;
   content::WebContents* GetActiveWebContents() const override;
+  content::WebContents* GetToolbarWebContents() const override;
   std::vector<content::WebContents*> GetPanelWebContentsList() const override;
   std::unique_ptr<content::WebContents> DetachWebContentsForTask(
       const base::Uuid& task_id) override;
@@ -136,6 +147,7 @@ class ContextualTasksSidePanelCoordinator
   void MoveTaskUiToNewTab() override;
   void NotifyExpandToFullTabStateChanged() override;
   bool CanExpandToFullTab() const override;
+  void ShowPageInfoBubble() override;
 
   // ContextualTasksPanelHost::Observer:
   void OnSurfaceStateChanged(
@@ -257,6 +269,15 @@ class ContextualTasksSidePanelCoordinator
   // Browser window of the current panel.
   const raw_ptr<BrowserWindowInterface> browser_window_ = nullptr;
 
+  // WebContents cache for each task.
+  // Must be declared before contextual_tasks_panel_host_ so that in automated
+  // C++ reverse destruction order, the panel host is destroyed before cached
+  // WebContents objects are deleted.
+  // It's okay to assume there is only 1 WebContents per task per window.
+  // Different windows do not share the WebContents with the same task.
+  std::map<base::Uuid, std::unique_ptr<WebContentsCacheItem>>
+      task_id_to_web_contents_cache_;
+
   // Interface to interact with/get state about the panel UI. Own the unique_ptr
   // so that its lifetime is tied to `this`.
   const std::unique_ptr<ContextualTasksPanelHost> contextual_tasks_panel_host_;
@@ -271,12 +292,6 @@ class ContextualTasksSidePanelCoordinator
   const raw_ptr<PrefService> pref_service_;
 
   const raw_ptr<ActiveTaskContextProvider> active_task_context_provider_;
-
-  // WebContents cache for each task.
-  // It's okay to assume there is only 1 WebContents per task per window.
-  // Different windows do not share the WebContents with the same task.
-  std::map<base::Uuid, std::unique_ptr<WebContentsCacheItem>>
-      task_id_to_web_contents_cache_;
 
   base::CallbackListSubscription eligibility_change_subscription_;
 
@@ -296,6 +311,11 @@ class ContextualTasksSidePanelCoordinator
       closing_entry_source_;
 
   base::ObserverList<ContextualTasksPanelController::Observer> observers_;
+
+#if !BUILDFLAG(IS_ANDROID)
+  // TODO(crbug.com/536100150): Support this on Android Desktop
+  WebUIBubbleReopenSuppressor page_info_bubble_suppressor_;
+#endif
 
   base::WeakPtrFactory<ContextualTasksSidePanelCoordinator> weak_ptr_factory_{
       this};

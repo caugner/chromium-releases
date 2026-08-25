@@ -12,7 +12,7 @@
 <translation id="1166460004393506534">‏حذف کردن داده‌های مرور در Chrome</translation>
 <translation id="1179527450541388808">‏از جایگاه صفحه اصلی iPad سریع‌تر به Chrome دسترسی داشته باشید.</translation>
 <translation id="1180362651362502943">‏به استفاده از داده‌های Chrome ذخیره‌شده در «حساب Google» خود ادامه دهید.</translation>
-<translation id="1200396280085622191">‏با ضربه زدن روی پیوندهای موجود در پیام‌ها و برنامه‌های دیگر، از Chrome استفاده کنید.</translation>
+<translation id="1200396280085622191">‏از Chrome با تک‌ضربی روی پیوندها در پیام‌ها و برنامه‌های دیگر استفاده کنید.</translation>
 <translation id="1229222343402087523">‏جستجوی ${searchPhrase} در Chrome</translation>
 <translation id="1237769345474105984">‏از Chrome</translation>
 <translation id="124228879633599436">‏‫Chrome شما قدیمی است. برای حفظ ایمنی، آن را به‌روز کنید.</translation>
@@ -63,7 +63,7 @@
 <translation id="2199719347983604670">‏داده‌های مربوط به همگام‌سازی Chrome</translation>
 <translation id="2212318912894837281">‏برای ذخیره کردن این گذرواژه و دریافت داده‌های Chrome در همه دستگاه‌هایتان، گذرعبارت را وارد کنید</translation>
 <translation id="2213327331203157297">‏برای غیرفعال کردن حالت «قفل همه» در Chrome، آن را در iPhone خود خاموش کنید.</translation>
-<translation id="2242467532204595597">‏با ضربه زدن روی پیوندهای موجود در پیام‌ها، اسناد و دیگر برنامه‌ها، از Chrome استفاده کنید.</translation>
+<translation id="2242467532204595597">‏از Chrome با تک‌ضربی روی پیوندها در پیام‌ها، اسناد و دیگر برنامه استفاده کنید.</translation>
 <translation id="2256384876478573507">‏هر لحظه خواستید در iPhone شروع به مرور کنید، Chrome را سریع‌تر باز کنید.</translation>
 <translation id="2270691132923135296">‏برای شروع، با مفاهیم پایه و مفید Chrome آشنا شوید</translation>
 <translation id="2311240109311056604">‏بازی «دایناسور Chrome» را باز می‌کند.</translation>
@@ -195,7 +195,7 @@
 <translation id="5554520618550346933">‏وقتی از گذرواژه‌ای استفاده کنید، Chrome به شما هشدار می‌دهد آیا این گذرواژه در فضای آنلاین منتشر شده است یا نه. هنگام انجام این کار، نام‌های کاربری و گذرواژه‌های شما رمزگذاری می‌شود تا اشخاص دیگر، ازجمله Google نتوانند آن‌ها را بخوانند.</translation>
 <translation id="5601180634394228718">‏برای تنظیمات بیشتری که از داده‌ها برای بهبود تجربه شما در Chrome استفاده می‌کنند، به <ph name="BEGIN_LINK" />سرویس‌های Google<ph name="END_LINK" /> بروید.</translation>
 <translation id="5639704535586432836">‏Settings (تنظیمات) &gt; Privacy (حریم خصوصی) &gt; Camera (دوربین) &gt; Google Chrome را باز کنید و دوربین را روشن کنید.</translation>
-<translation id="5642200033778930880">‏Google Chrome نمی‌تواند از دوربین درحالت «نمای تقسیم‌شده» استفاده کند</translation>
+<translation id="5642200033778930880">‏‫Google Chrome نمی‌تواند از دوربین در حالت نمای دونیمه استفاده کند</translation>
 <translation id="5661521615548540542">‏«مدیر گذرواژه Google» نتوانست همه گذرواژه‌ها را بررسی کند. بعداً دوباره امتحان کنید.</translation>
 <translation id="5681291952421236520">‏روشن/خاموش کردن Chrome</translation>
 <translation id="5690398455483874150">{count,plural, =1{‏درحال نمایش ۱ پنجره Chrome}one{‏درحال نمایش {count} پنجره Chrome}other{‏درحال نمایش {count} پنجره Chrome}}</translation>
@@ -265,6 +265,7 @@
 <translation id="7038674195294813388">‏تنظیمات Default Apps (برنامه‌های پیش‌فرض) را در iOS باز کنید، سپس روی «Browser App» (برنامه مرورگر) تک‌ضرب بزنید و Chrome را انتخاب کنید.</translation>
 <translation id="7056826488869329999">‏«کنترل ایمنی» را در Chrome باز و اجرا می‌کند.</translation>
 <translation id="7061455974939528301">‏نماد Chrome را فشار دهید و نگه دارید و روی «ویرایش کردن صفحه اصلی» کلیک کنید</translation>
+<translation id="7095110968493193530">‏در «مدیر گذرواژه Google» برای <ph name="EMAIL" /></translation>
 <translation id="7124339256045485976">‏به‌روز نگه داشتن Chrome</translation>
 <translation id="7145599899567697473">‏گذرواژه‌ها در Chrome ذخیره و به‌طور خودکار تکمیل می‌شود</translation>
 <translation id="7161390184744336561">‏نسخه Google Chrome قدیمی است</translation>
@@ -314,7 +315,7 @@
 <translation id="7855730255114109580">‏Google Chrome به‌روز است</translation>
 <translation id="787226752901403048">‏به سیستم Chrome وارد شوید و گروه‌های زبانه را هم‌سانی کنید، به آن‌ها بپیوندید، و با هم روی ایده‌ها کار کنید</translation>
 <translation id="7897703007638178753">‏دیدن برگه‌های اخیر Chrome</translation>
-<translation id="7948283758957877064">‏ویژگی‌های جدید Chrome</translation>
+<translation id="7948283758957877064">‏تازه‌های Chrome</translation>
 <translation id="8000174216052461231">‏نکته Chrome: بالاترین حفاظ امنیتی Chrome را دریافت کنید</translation>
 <translation id="8006014511203279255">‏برای باز کردن پیوندهای موجود در پیام‌ها یا برنامه‌های دیگر، از Chrome استفاده کنید.</translation>
 <translation id="8014670471808569312">‏‫Chrome پیشنهاد خواهد داد که گذرواژه‌تان را ذخیره کند.</translation>
@@ -350,7 +351,7 @@
 <translation id="8540666473246803645">Google Chrome</translation>
 <translation id="8544583291890527417">‏برای هر مشکل حریم خصوصی یا امنیتی که Chrome تشخیص می‌دهد به شما هشدار می‌دهد.</translation>
 <translation id="855027533751209304">‏نکته Chrome: جستجوی آنچه می‌بینید</translation>
-<translation id="8558480467877843976">‏اکنون هرزمان بخواهید می‌توانید با مرور کردن یا ضربه زدن روی پیوندهای موجود در پیام‌ها، اسناد، و دیگر برنامه‌ها، از Chrome استفاده کنید.</translation>
+<translation id="8558480467877843976">‏اکنون هر زمان که مرور می‌کنید یا روی پیوندهای موجود در پیام‌ها، اسناد، و دیگر برنامه‌ها تک‌ضرب می‌زنید می‌توانید از Chrome استفاده کنید.</translation>
 <translation id="8603022514504485810">‏«مدیر گذرواژه Google» نتوانست همه گذرواژه‌ها را بررسی کند. فردا دوباره امتحان کنید یا <ph name="BEGIN_LINK" />گذرواژه‌ها را در «حساب Google» خود بررسی کنید.<ph name="END_LINK" /></translation>
 <translation id="8610372330814566250">‏از گذرواژه‌ها، سابقه، نشانک‌ها، و کارت‌های اعتباری Safari خود در Chrome استفاده کنید</translation>
 <translation id="8630122478628016441">‏«قفل کردن برگه‌های ناشناس هنگام بستن Chrome» را روشن کنید.</translation>

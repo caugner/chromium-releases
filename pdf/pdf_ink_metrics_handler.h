@@ -134,6 +134,18 @@ enum class TextAnnotationColor {
 // These values are persisted to logs. Entries should not be renumbered and
 // numeric values should never be reused.
 //
+// LINT.IfChange(PDFLoadedWithInkTextAnnotations)
+enum class PDFLoadedWithInkTextAnnotations {
+  kUnknown = 0,
+  kTrue = 1,
+  kFalse = 2,
+  kMaxValue = kFalse,
+};
+// LINT.ThenChange(//tools/metrics/histograms/metadata/pdf/enums.xml:PDFLoadedWithInkTextAnnotations)
+
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+//
 // LINT.IfChange(PDFLoadedWithV2InkAnnotations)
 enum class PDFLoadedWithV2InkAnnotations {
   kUnknown = 0,
@@ -154,8 +166,21 @@ void ReportTextHighlight(const ink::Brush& brush,
 
 void ReportKeyboardTextHighlight(const ink::Brush& brush);
 
+void RecordPdfLoadedWithInkTextAnnotations(
+    PDFLoadedWithInkTextAnnotations loaded_with_annotations);
+
 void RecordPdfLoadedWithV2InkAnnotations(
     PDFLoadedWithV2InkAnnotations loaded_with_annotations);
+
+// Reports the number of text annotations added when saving.
+// Note that only one of `RecordTextAnnotationAddedCountOnSave()` or
+// `RecordTextAnnotationRemovedCountOnSave()` should be called for any given
+// save operation.
+void RecordTextAnnotationAddedCountOnSave(size_t count);
+
+// Reports the number of text annotations removed when saving. See comments
+// above for `RecordTextAnnotationAddedCountOnSave()`.
+void RecordTextAnnotationRemovedCountOnSave(size_t count);
 
 void ReportTextAnnotationMetrics(const InkTextBoxAttributes& attributes);
 

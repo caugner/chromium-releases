@@ -387,7 +387,7 @@ void DeletionDialogController::CreateDialogFromBrowser(
   // destroyed during ShowBrowserModal.
   auto weak_ptr = weak_ptr_factory_.GetWeakPtr();
   views::Widget* widget =
-      chrome::ShowBrowserModal(browser->GetBrowserForMigrationOnly(), std::move(dialog_model));
+      chrome::ShowBrowserModal(browser, std::move(dialog_model));
   if (weak_ptr) {
     weak_ptr->widget_ = widget;
   }

@@ -142,6 +142,7 @@ ci.builder(
         ],
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "viz",
     ),
@@ -196,6 +197,7 @@ ci.builder(
         ],
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "site_isolation",
     ),
@@ -228,6 +230,7 @@ ci.builder(
         ],
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "network|traffic|annotations",
         short_name = "lnx",
@@ -271,6 +274,7 @@ ci.builder(
     ),
     builderless = True,
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "release",
         short_name = "rel",
@@ -334,6 +338,7 @@ ci.builder(
         },
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux|blink",
         short_name = "BIr",
@@ -378,6 +383,7 @@ ci.builder(
         ],
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux",
         short_name = "se",
@@ -417,6 +423,7 @@ ci.builder(
         ],
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux|blink",
         short_name = "VF",
@@ -455,6 +462,7 @@ ci.builder(
         ],
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux",
     ),
@@ -487,6 +495,7 @@ ci.thin_tester(
             "mac_default_arm64",
         ],
     ),
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "mac",
     ),
@@ -531,6 +540,7 @@ ci.builder(
     ),
     builderless = True,
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "mulitscreen",
     ),
@@ -699,6 +709,7 @@ ci.builder(
     ),
     builderless = True,
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "android",
     ),
@@ -737,6 +748,7 @@ ci.builder(
         ],
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux",
     ),
@@ -945,6 +957,7 @@ ci.builder(
         },
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux",
     ),
@@ -1000,6 +1013,7 @@ ci.builder(
         },
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux|blink",
         short_name = "trace",
@@ -1065,59 +1079,6 @@ fyi_ios_builder(
 )
 
 ci.builder(
-    name = "mac-osxbeta-rel",
-    builder_spec = builder_config.builder_spec(
-        gclient_config = builder_config.gclient_config(
-            config = "chromium",
-            apply_configs = [
-                # This is necessary due to this builder running the
-                # telemetry_perf_unittests suite.
-                "chromium_with_telemetry_dependencies",
-            ],
-        ),
-        chromium_config = builder_config.chromium_config(
-            config = "chromium",
-            apply_configs = [
-                "mb",
-            ],
-            build_config = builder_config.build_config.DEBUG,
-            target_bits = 64,
-            target_platform = builder_config.target_platform.MAC,
-        ),
-    ),
-    gn_args = gn_args.config(
-        configs = [
-            "gpu_tests",
-            "debug",
-            "no_symbols",
-            "dcheck_always_on",
-            "static",
-            "remoteexec",
-            "mac",
-            "x64",
-        ],
-    ),
-    targets = targets.bundle(
-        targets = [
-            "mac26_x86_tests",
-        ],
-        mixins = [
-            "limited_capacity_bot",
-            "mac_beta_x64",
-        ],
-    ),
-    builderless = False,
-    cores = None,
-    os = os.MAC_BETA,
-    cpu = cpu.ARM64,
-    console_view_entry = consoles.console_view_entry(
-        category = "mac",
-        short_name = "beta",
-    ),
-    main_console_view = None,
-)
-
-ci.builder(
     name = "linux-headless-shell-rel",
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(config = "chromium"),
@@ -1147,6 +1108,7 @@ ci.builder(
         ],
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux",
         short_name = "hdls",
@@ -1401,6 +1363,7 @@ ci.builder(
         os_type = targets.os_type.LINUX,
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux|arm64",
         short_name = "rel",
@@ -1485,6 +1448,7 @@ ci.builder(
         os_type = targets.os_type.LINUX,
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux|arm64",
         short_name = "wl",
@@ -1525,6 +1489,7 @@ ci.builder(
         use_swarming = False,
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "perfetto",
         short_name = "lnx",
@@ -1839,7 +1804,7 @@ fyi_ios_builder(
             "expand-as-isolated-script",
             "has_native_resultdb_integration",
             "ios_beta_test_pool",
-            "mac_15_beta_arm64",
+            "mac_26_arm64",
             "mac_toolchain",
             "out_dir_arg",
             "xcode_27_beta",
@@ -1898,7 +1863,7 @@ fyi_ios_builder(
             "expand-as-isolated-script",
             "has_native_resultdb_integration",
             "ios_beta_test_pool",
-            "mac_15_beta_arm64",
+            "mac_26_arm64",
             "mac_toolchain",
             "out_dir_arg",
             "xcode_27_beta",
@@ -1953,7 +1918,7 @@ fyi_ios_builder(
             "expand-as-isolated-script",
             "has_native_resultdb_integration",
             "ios_beta_test_pool",
-            "mac_15_beta_arm64",
+            "mac_26_arm64",
             "mac_toolchain",
             "out_dir_arg",
             "xcode_27_beta",
@@ -2014,7 +1979,7 @@ fyi_ios_builder(
             "expand-as-isolated-script",
             "has_native_resultdb_integration",
             "ios_beta_test_pool",
-            "mac_15_beta_arm64",
+            "mac_26_arm64",
             "mac_toolchain",
             "out_dir_arg",
             "xcode_27_beta",
@@ -2069,7 +2034,7 @@ fyi_mac_builder(
             "all",
         ],
         mixins = [
-            "mac_26_arm64",
+            "mac_27_arm64",
         ],
         per_test_modifications = {
             "browser_tests": targets.mixin(
@@ -2632,6 +2597,7 @@ ci.builder(
         },
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = [
         consoles.console_view_entry(
             category = "treesinviz",
@@ -2785,6 +2751,7 @@ ci.builder(
         },
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = [
         consoles.console_view_entry(
             category = "treesinviz",
@@ -2822,16 +2789,11 @@ ci.builder(
         ],
     ),
     targets = targets.bundle(
-        targets = [
+        additional_compile_targets = [
             "browser_tests",
+            "chrome",
             "interactive_ui_tests",
             "unit_tests",
-        ],
-        additional_compile_targets = [
-            "chrome",
-        ],
-        mixins = [
-            "linux-jammy",
         ],
     ),
     os = os.LINUX_DEFAULT,
@@ -2870,16 +2832,11 @@ ci.builder(
         ],
     ),
     targets = targets.bundle(
-        targets = [
+        additional_compile_targets = [
             "browser_tests",
+            "chrome",
             "interactive_ui_tests",
             "unit_tests",
-        ],
-        additional_compile_targets = [
-            "chrome",
-        ],
-        mixins = [
-            "linux-jammy",
         ],
     ),
     os = os.LINUX_DEFAULT,
@@ -2888,4 +2845,23 @@ ci.builder(
         short_name = "tsgo",
     ),
     contact_team_email = "chrome-webui@google.com",
+)
+
+ci.builder(
+    name = "linux-webdriver-bidi-rel",
+    description_html = "Builder for WebDriver BiDi implementation",
+    schedule = "triggered",
+    triggered_by = [],
+    builder_spec = builder_config.copy_from("ci/Linux Builder"),
+    gn_args = "ci/Linux Builder",
+    targets = targets.bundle(
+        targets = ["webdriver_bidi_unittests"],
+        mixins = [
+            "linux-jammy",
+        ],
+    ),
+    console_view_entry = consoles.console_view_entry(
+        category = "webdriver",
+    ),
+    contact_team_email = "chrome-devtools@google.com",
 )

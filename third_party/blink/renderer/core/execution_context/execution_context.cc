@@ -324,10 +324,6 @@ bool ExecutionContext::IsContextPaused() const {
   return lifecycle_state_ == mojom::blink::FrameLifecycleState::kPaused;
 }
 
-bool ExecutionContext::IsContextFrozen() const {
-  return lifecycle_state_ == mojom::blink::FrameLifecycleState::kFrozen;
-}
-
 LoaderFreezeMode ExecutionContext::GetLoaderFreezeMode() const {
   if (is_in_back_forward_cache_) {
     DCHECK_EQ(lifecycle_state_, mojom::blink::FrameLifecycleState::kFrozen);
@@ -618,6 +614,11 @@ bool ExecutionContext::IsFeatureEnabled(
     mojom::blink::DocumentPolicyFeature feature,
     PolicyValue threshold_value) const {
   return security_context_.IsFeatureEnabled(feature, threshold_value).enabled;
+}
+
+PolicyValue ExecutionContext::GetDocumentPolicyValue(
+    mojom::blink::DocumentPolicyFeature feature) const {
+  return security_context_.GetDocumentPolicyValue(feature);
 }
 
 bool ExecutionContext::IsFeatureEnabled(

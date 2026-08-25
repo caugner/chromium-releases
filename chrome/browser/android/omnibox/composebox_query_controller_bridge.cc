@@ -51,14 +51,13 @@
 #include "content/public/browser/web_contents.h"
 #include "mojo/public/cpp/base/big_buffer.h"
 #include "net/base/url_util.h"
+#include "third_party/jni_zero/default_conversions.h"
 #include "third_party/omnibox_proto/chrome_aim_entry_point.pb.h"
 #include "third_party/omnibox_proto/tool_config.pb.h"
 #include "ui/base/unowned_user_data/user_data_factory.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "url/android/gurl_android.h"
 #include "url/gurl.h"
-
-#include "third_party/jni_zero/default_conversions.h"
 
 namespace jni_zero {
 template <>
@@ -274,7 +273,7 @@ ComposeboxQueryControllerBridge::AddFile(
 
   std::optional<lens::ImageEncodingOptions> image_options;
   if (file_type.find("image") != std::string::npos) {
-    image_options = lens::ImageEncodingOptions{.enable_webp_encoding = false,
+    image_options = lens::ImageEncodingOptions{
                                                .max_size = 1500000,
                                                .max_height = 1600,
                                                .max_width = 1600,
@@ -354,13 +353,11 @@ ComposeboxQueryControllerBridge::AddTabContextFromCache(JNIEnv* env,
 }
 
 std::unique_ptr<ComposeboxQueryController::CreateSearchUrlRequestInfo>
-ComposeboxQueryControllerBridge::CreateSearchUrlRequestInfoFromUrl(
-    GURL url,
-    const std::string& query_text) {
+ComposeboxQueryControllerBridge::CreateSearchUrlRequestInfoFromUrl(GURL url) {
   std::unique_ptr<ComposeboxQueryController::CreateSearchUrlRequestInfo>
       search_url_request_info = std::make_unique<
           ComposeboxQueryController::CreateSearchUrlRequestInfo>();
-  search_url_request_info->query_text = query_text;
+  net::GetValueForKeyInQuery(url, "q", &search_url_request_info->query_text);
   search_url_request_info->additional_params =
       lens::GetParametersMapWithoutQuery(url);
   search_url_request_info->query_start_time = base::Time::Now();
@@ -398,20 +395,17 @@ void ComposeboxQueryControllerBridge::ContextualizeAndCreateSearchUrl(
 void ComposeboxQueryControllerBridge::GetAimUrl(
     JNIEnv* env,
     GURL url,
-    const std::string& query_text,
     const base::android::JavaRef<jobject>& j_callback) {
   ContextualizeAndCreateSearchUrl(
-      CreateSearchUrlRequestInfoFromUrl(std::move(url), query_text),
-      j_callback);
+      CreateSearchUrlRequestInfoFromUrl(std::move(url)), j_callback);
 }
 
 void ComposeboxQueryControllerBridge::GetImageGenerationUrl(
     JNIEnv* env,
     GURL url,
-    const std::string& query_text,
     const base::android::JavaRef<jobject>& j_callback) {
   auto search_url_request_info =
-      CreateSearchUrlRequestInfoFromUrl(std::move(url), query_text);
+      CreateSearchUrlRequestInfoFromUrl(std::move(url));
   search_url_request_info->additional_params["imgn"] = "1";
   ContextualizeAndCreateSearchUrl(std::move(search_url_request_info),
                                   j_callback);
@@ -420,10 +414,9 @@ void ComposeboxQueryControllerBridge::GetImageGenerationUrl(
 void ComposeboxQueryControllerBridge::GetAimUrlFromInputState(
     JNIEnv* env,
     GURL url,
-    const std::string& query_text,
     const base::android::JavaRef<jobject>& j_callback) {
   auto search_url_request_info =
-      CreateSearchUrlRequestInfoFromUrl(std::move(url), query_text);
+      CreateSearchUrlRequestInfoFromUrl(std::move(url));
 
   if (input_state_model_) {
     for (const auto& [key, value] :
@@ -589,7 +582,7 @@ void ComposeboxQueryControllerBridge::StartTabContextUploadFlow(
       base::TimeTicks::Now() - start_time);
 
   std::optional<lens::ImageEncodingOptions> image_options =
-      lens::ImageEncodingOptions{.enable_webp_encoding = false,
+      lens::ImageEncodingOptions{
                                  .max_size = 1500000,
                                  .max_height = 1600,
                                  .max_width = 1600,

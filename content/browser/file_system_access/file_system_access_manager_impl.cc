@@ -190,7 +190,10 @@ void ShowFilePickerOnUIThread(
   WebContents* web_contents = WebContents::FromRenderFrameHost(rfh);
   RenderFrameHost* outermost_rfh = rfh ? rfh->GetOutermostMainFrame() : nullptr;
 
-  if (!web_contents || !outermost_rfh || !outermost_rfh->IsActive()) {
+  if (!web_contents ||
+      (base::FeatureList::IsEnabled(features::kFileSystemAccessCheckHidden) &&
+       web_contents->GetVisibility() == Visibility::HIDDEN) ||
+      !outermost_rfh || !outermost_rfh->IsActive()) {
     std::move(callback).Run(file_system_access_error::FromStatus(
                                 FileSystemAccessStatus::kOperationAborted),
                             {});
@@ -1223,16 +1226,18 @@ void FileSystemAccessManagerImpl::DeserializeHandle(
       // Apply bucket information.
       auto bucket_callback = base::BindOnce(
           [](storage::FileSystemURL url,
+             const blink::StorageKey& expected_storage_key,
              base::OnceCallback<void(const storage::FileSystemURL&)> callback,
              storage::QuotaErrorOr<storage::BucketInfo> result) {
-            if (!result.has_value()) {
+            if (!result.has_value() ||
+                result->storage_key != expected_storage_key) {
               // Drop `token`, and directly return.
               return;
             }
             url.SetBucket(result->ToBucketLocator());
             std::move(callback).Run(url);
           },
-          url,
+          url, storage_key,
           base::BindOnce(&FileSystemAccessManagerImpl::
                              DidGetSandboxedBucketForDeserializeHandle,
                          weak_factory_.GetWeakPtr(), data, std::move(token),
@@ -2261,7 +2266,6 @@ FileSystemAccessManagerImpl::GetEffectiveWritePermissionMode() {
 
 bool FileSystemAccessManagerImpl::IsSafePathComponent(
     storage::FileSystemType type,
-    const url::Origin& origin,
     const std::string& name) {
   // This method is similar to net::IsSafePortablePathComponent, with a few
   // notable differences where the net version does not consider names safe
@@ -2355,7 +2359,7 @@ bool FileSystemAccessManagerImpl::IsSafePathComponent(
   // components/safe_browsing/content/resources/download_file_types.asciipb,
   // are considered unsafe, with an exception of ".local" extensions.
   if (extension_lower != FILE_PATH_LITERAL("local") && permission_context_ &&
-      permission_context_->IsFileTypeDangerous(component, origin)) {
+      permission_context_->IsFileTypeDangerous(component)) {
     return false;
   }
 
@@ -2364,7 +2368,7 @@ bool FileSystemAccessManagerImpl::IsSafePathComponent(
     return false;
   }
 
-  if (net::IsReservedNameOnWindows(component.value())) {
+  if (base::IsReservedNameOnWindows(component.value())) {
     return false;
   }
 

@@ -29,6 +29,9 @@ namespace features {
 BASE_FEATURE(kAbortNavigationsFromTabClosures,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
+// Allows loading Top Chrome Webium.
+BASE_FEATURE(kDebugTopChromeWebUI, base::FEATURE_DISABLED_BY_DEFAULT);
+
 // Capture Android key event objects to send them to the web contents when the
 // IME sends composition texts.
 BASE_FEATURE(kAndroidCaptureKeyEvents, base::FEATURE_ENABLED_BY_DEFAULT);
@@ -256,6 +259,11 @@ BASE_FEATURE(kClearCrossSiteCrossBrowsingContextGroupWindowName,
 
 BASE_FEATURE(kCompositeBGColorAnimation, base::FEATURE_DISABLED_BY_DEFAULT);
 
+// Defer Session Storage scavenging to avoid LevelDB initialization blocking
+// the critical path of startup.
+BASE_FEATURE(kDeferSessionStorageScavengingOnStartup,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 // Enables deferring the creation of the speculative RFH when the navigation
 // starts. The creation of a speculative RFH consumes about 2ms and is blocking
 // the network request. With this feature the creation will be deferred until
@@ -449,7 +457,7 @@ BASE_FEATURE(kFedCmLightweightMode, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kFedCmMetricsEndpoint, base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Enables FedCM to support login request initiated by the embedder.
-BASE_FEATURE(kFedCmEmbedderInitiatedLogin, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kFedCmEmbedderInitiatedLogin, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Enables Nonce usage in Params
 BASE_FEATURE(kFedCmNonceInParams, base::FEATURE_DISABLED_BY_DEFAULT);
@@ -526,12 +534,12 @@ BASE_FEATURE(kIdbSqliteOnDiskRollout, base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Controls whether we ignore duplicate navigations or not, in favor of
 // preserving the already ongoing navigation.
-BASE_FEATURE(kIgnoreDuplicateNavs, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kIgnoreDuplicateNavs, base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE_PARAM(base::TimeDelta,
                    kDuplicateNavThreshold,
                    &kIgnoreDuplicateNavs,
                    "duplicate_nav_threshold",
-                   base::Milliseconds(2000));
+                   base::Milliseconds(3000));
 BASE_FEATURE_PARAM(bool,
                    kSkipIgnoreBrowserInitiatedNavs,
                    &kIgnoreDuplicateNavs,
@@ -659,9 +667,13 @@ BASE_FEATURE(kIsolateFencedFrames, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kIsolateOrigins, base::FEATURE_DISABLED_BY_DEFAULT);
 const char kIsolateOriginsFieldTrialParamName[] = "OriginsList";
 
+// Enables process isolation for subframe error pages. See
+// https://crbug.com/40134629.
+BASE_FEATURE(kIsolateSubframeErrorPages, base::FEATURE_DISABLED_BY_DEFAULT);
+
 #if BUILDFLAG(IS_ANDROID)
 // Enables the ability to specification a renderer that does not use Java.
-BASE_FEATURE(kJavalessRendererExperimentOn, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kJavalessRendererExperimentOn, base::FEATURE_ENABLED_BY_DEFAULT);
 #endif
 
 // Kill-switch for the tracking of keep-alive requests blocked by client.
@@ -800,7 +812,7 @@ BASE_FEATURE(kPrerender2FallbackPrefetchSpecRules,
 
 // If enabled, the feature allows the prerender host to be reused for the
 // future same-site page prerender if marked as reusable.
-BASE_FEATURE(kPrerender2ReuseHost, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kPrerender2ReuseHost, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // If enabled, the feature parameter allows all the prerender hosts for
 // DSE search results to be reused.
@@ -808,7 +820,7 @@ BASE_FEATURE_PARAM(bool,
                    kPrerender2ReuseSearchResultHost,
                    &features::kPrerender2ReuseHost,
                    "reuse_search_host",
-                   false);
+                   true);
 
 // If enabled, activation beacon is sent when a prerendered page is activated.
 // The activation beacon is a beacon that echoes back a server specified token
@@ -835,6 +847,11 @@ BASE_FEATURE(kProcessSelectionDeferringConditions,
 // OriginAgentClusterDefaultEnable is enabled, since origin-keyed processes
 // require origin-agent-clusters.
 BASE_FEATURE(kOriginKeyedProcessesByDefault, base::FEATURE_DISABLED_BY_DEFAULT);
+
+// When enabled, ads will not be eligible for origin-keyed processes by default.
+// Ads can still opt into origin-keyed processes by using the
+// Origin-Agent-Cluster: ?1 header.
+BASE_FEATURE(kExcludeAdsFromOriginIsolation, base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Fires the `pushsubscriptionchange` event defined here:
 // https://w3c.github.io/push-api/#the-pushsubscriptionchange-event

@@ -93,6 +93,8 @@ class InputStateModel {
   void SetPermanentlyDisabledInputTypes(
       const std::vector<InputType>& input_types);
 
+  // Enables or disables an input type based on parameters.
+  void TogglePermanentlyDisabledInputType(InputType input_type, bool disabled);
 
   // Gets additional query params for the current state.
   std::map<std::string, std::string> GetAdditionalQueryParams();
@@ -188,6 +190,16 @@ class InputStateModel {
   DriveConsentState drive_consent_state_ = DriveConsentState::kNotReady;
 
   bool is_smart_tab_sharing_active_ = false;
+
+  // Each URL change causes `UpdateStateFromUrl()` to run.
+  // Only changing threads requires reading tool param from URL to initialize
+  // tool state. Once the user modifies the tool, the initial tool state is
+  // invalid, and therefore, this flag is set to `true` so Chrome knows to no
+  // longer read and set the initial tool from the URL. Cannot just read tool
+  // from URL when thread URL is changed (to change threads), since tool URL
+  // param is added a few URL changes AFTER the thread URL is changed (to change
+  // threads).
+  bool user_modified_tool_in_thread_ = false;
 
   base::WeakPtrFactory<InputStateModel> weak_ptr_factory_{this};
 };

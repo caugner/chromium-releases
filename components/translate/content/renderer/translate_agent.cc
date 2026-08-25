@@ -12,6 +12,7 @@
 #include "base/check_op.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/json/string_escape.h"
 #include "base/location.h"
@@ -28,6 +29,7 @@
 #include "components/language_detection/core/constants.h"
 #include "components/language_detection/core/language_detection_provider.h"
 #include "components/translate/content/renderer/isolated_world_util.h"
+#include "components/translate/core/common/translate_features.h"
 #include "components/translate/core/common/translate_metrics.h"
 #include "components/translate/core/common/translate_util.h"
 #include "components/translate/core/language_detection/language_detection_model.h"
@@ -154,6 +156,15 @@ void TranslateAgent::PageCaptured(
   WebLocalFrame* main_frame = render_frame()->GetWebFrame();
   if (!main_frame)
     return;
+
+  blink::WebDocumentLoader* doc_loader = main_frame->GetDocumentLoader();
+  if (base::FeatureList::IsEnabled(translate::kEnableTranslatePdf) &&
+      doc_loader &&
+      doc_loader->GetWebResponse().MimeType() == "application/pdf") {
+    // If the page is a PDF and PDF translation is enabled, we should only
+    // register it when PdfPageCaptured is called.
+    return;
+  }
 
   WebDocument document = main_frame->GetDocument();
   GURL url = GURL(document.Url());

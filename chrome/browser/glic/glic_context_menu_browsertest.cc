@@ -87,7 +87,7 @@ IN_PROC_BROWSER_TEST_F(GlicContextMenuBrowserTest, GlicItemAbsentForImage) {
 IN_PROC_BROWSER_TEST_F(GlicContextMenuBrowserTest,
                        GlicPrecedesLensAndReadingModeInPageMenu) {
   TemplateURLService* model =
-      TemplateURLServiceFactory::GetForProfile(browser()->profile());
+      TemplateURLServiceFactory::GetForProfile(browser()->GetProfile());
   ASSERT_NE(model, nullptr);
   search_test_utils::WaitForTemplateURLServiceToLoad(model);
 
@@ -221,9 +221,10 @@ IN_PROC_BROWSER_TEST_F(GlicContextMenuArm3BrowserTest, GlicInvokeArm3) {
 
 IN_PROC_BROWSER_TEST_F(GlicContextMenuBrowserTest, GlicItemAbsentInAppWindow) {
   // Create an app browser window.
-  Browser* app_browser = Browser::Create(Browser::CreateParams::CreateForApp(
-      "test_app", /*trusted_source=*/false, gfx::Rect(), browser()->profile(),
-      /*user_gesture=*/true));
+  Browser* app_browser = Browser::Create(
+      Browser::CreateParams::CreateForApp("test_app", /*trusted_source=*/false,
+                                          gfx::Rect(), browser()->GetProfile(),
+                                          /*user_gesture=*/true));
 
   // Add a tab and navigate to a test page.
   content::WebContents* blank_tab = chrome::AddSelectedTabWithURL(
@@ -268,7 +269,7 @@ IN_PROC_BROWSER_TEST_F(GlicContextMenuBrowserTest,
 IN_PROC_BROWSER_TEST_F(GlicContextMenuBrowserTest,
                        GlicItemPrecedesSearchProvider) {
   TemplateURLService* model =
-      TemplateURLServiceFactory::GetForProfile(browser()->profile());
+      TemplateURLServiceFactory::GetForProfile(browser()->GetProfile());
   ASSERT_NE(model, nullptr);
   search_test_utils::WaitForTemplateURLServiceToLoad(model);
 
@@ -309,7 +310,7 @@ IN_PROC_BROWSER_TEST_F(GlicContextMenuBrowserTest,
 IN_PROC_BROWSER_TEST_F(GlicContextMenuBrowserTest,
                        GlicItemPrecedesSearchProviderInEditableField) {
   TemplateURLService* model =
-      TemplateURLServiceFactory::GetForProfile(browser()->profile());
+      TemplateURLServiceFactory::GetForProfile(browser()->GetProfile());
   ASSERT_NE(model, nullptr);
   search_test_utils::WaitForTemplateURLServiceToLoad(model);
 
@@ -369,7 +370,7 @@ class GlicContextMenuSimplificationBrowserTest
 IN_PROC_BROWSER_TEST_F(GlicContextMenuSimplificationBrowserTest,
                        GlicItemPrecedesSearchProvider) {
   TemplateURLService* model =
-      TemplateURLServiceFactory::GetForProfile(browser()->profile());
+      TemplateURLServiceFactory::GetForProfile(browser()->GetProfile());
   ASSERT_NE(model, nullptr);
   search_test_utils::WaitForTemplateURLServiceToLoad(model);
 
@@ -447,7 +448,7 @@ class GlicContextMenuStandardBrowserTest
 IN_PROC_BROWSER_TEST_F(GlicContextMenuStandardBrowserTest,
                        GlicItemPrecedesSearchProvider) {
   TemplateURLService* model =
-      TemplateURLServiceFactory::GetForProfile(browser()->profile());
+      TemplateURLServiceFactory::GetForProfile(browser()->GetProfile());
   ASSERT_NE(model, nullptr);
   search_test_utils::WaitForTemplateURLServiceToLoad(model);
 
@@ -488,7 +489,7 @@ IN_PROC_BROWSER_TEST_F(GlicContextMenuStandardBrowserTest,
 IN_PROC_BROWSER_TEST_F(GlicContextMenuStandardBrowserTest,
                        GlicItemPrecedesSearchProviderInEditableField) {
   TemplateURLService* model =
-      TemplateURLServiceFactory::GetForProfile(browser()->profile());
+      TemplateURLServiceFactory::GetForProfile(browser()->GetProfile());
   ASSERT_NE(model, nullptr);
   search_test_utils::WaitForTemplateURLServiceToLoad(model);
 

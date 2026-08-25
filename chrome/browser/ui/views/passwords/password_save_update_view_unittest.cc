@@ -8,7 +8,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/memory/ptr_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/test/scoped_feature_list.h"
 #include "chrome/browser/password_manager/factories/profile_password_store_factory.h"
@@ -31,7 +30,6 @@
 #include "ui/views/controls/button/md_text_button.h"
 #include "ui/views/controls/combobox/combobox.h"
 #include "ui/views/controls/editable_combobox/editable_password_combobox.h"
-#include "ui/views/controls/styled_label.h"
 #include "ui/views/interaction/interaction_test_util_views.h"
 #include "ui/views/view_tracker.h"
 #include "ui/views/view_utils.h"
@@ -598,6 +596,26 @@ TEST_F(PasswordDropdownExperimentTest,
   ASSERT_TRUE(cancel_button);
   EXPECT_EQ(views::AsViewClass<views::MdTextButton>(cancel_button)->GetText(),
             NeverButtonCaption());
+}
+
+TEST_F(PasswordDropdownExperimentTest, TrustedVaultErrorUiState) {
+  base::test::ScopedFeatureList scoped_feature_list{
+      password_manager::features::kPasswordSaveInContextErrorResolution};
+  signin::MakePrimaryAccountAvailable(
+      IdentityManagerFactory::GetForProfile(profile()), "test@email.com",
+      signin::ConsentLevel::kSignin);
+  ON_CALL(*model_delegate_mock(), IsSavingBlockedByTrustedVaultError)
+      .WillByDefault(Return(true));
+
+  CreateViewAndShow();
+
+  EXPECT_EQ(view()->GetSubtitle(),
+            l10n_util::GetStringUTF16(
+                IDS_PASSWORD_BUBBLES_SUBTITLE_TRUSTED_VAULT_ERROR));
+  views::MdTextButton* ok_button = view()->GetOkButtonForTesting();
+  ASSERT_TRUE(ok_button);
+  EXPECT_EQ(ok_button->GetText(), l10n_util::GetStringUTF16(IDS_CONTINUE));
+  ASSERT_TRUE(view()->GetFootnoteViewForTesting());
 }
 
 TEST_P(PasswordSaveUpdateViewTest, TrustedVaultErrorUiState) {

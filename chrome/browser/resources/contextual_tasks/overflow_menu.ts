@@ -20,12 +20,10 @@ import type {BrowserProxy} from './contextual_tasks_browser_proxy.js';
 import {BrowserProxyImpl} from './contextual_tasks_browser_proxy.js';
 import {getCss} from './overflow_menu.css.js';
 import {getHtml} from './overflow_menu.html.js';
-import {recordAction} from './utils.js';
+import {hideUnboundedMenu, recordAction, showUnboundedMenu} from './utils.js';
 
 export interface OverflowMenuElement {
-  $: {
-    menu: CrActionMenuElement,
-  };
+  $: {menu: CrActionMenuElement};
 }
 
 // <if expr="is_android">
@@ -60,6 +58,9 @@ export class OverflowMenuElement extends OverflowMenuElementBase {
       contextualTasksEnableSpatialModelToolbarLayoutNewThreadInOverflow:
           {type: Boolean},
       isAimEligible: {type: Boolean},
+      isCobrowseEligible: {type: Boolean},
+      isHandshakeComplete: {type: Boolean},
+      webuiRoundedIconsEnabled_: {type: Boolean},
     };
   }
 
@@ -80,6 +81,11 @@ export class OverflowMenuElement extends OverflowMenuElementBase {
       boolean = loadTimeData.getBoolean(
           'contextualTasksEnableSpatialModelToolbarLayoutNewThreadInOverflow');
   accessor isAimEligible: boolean = false;
+  accessor isCobrowseEligible: boolean = false;
+  accessor isHandshakeComplete: boolean = false;
+
+  protected accessor webuiRoundedIconsEnabled_: boolean =
+      loadTimeData.getBoolean('webuiRoundedIconsEnabled');
   private browserProxy_: BrowserProxy = BrowserProxyImpl.getInstance();
   private listenerIds_: number[] = [];
 // <if expr="not is_android">
@@ -125,11 +131,17 @@ export class OverflowMenuElement extends OverflowMenuElementBase {
     // </if>
   }
 
+  private get isUnboundedMenuEnabled_(): boolean {
+    return loadTimeData.valueExists('contextualTasksUnboundedMenuEnabled') &&
+        loadTimeData.getBoolean('contextualTasksUnboundedMenuEnabled');
+  }
+
   showAt(target: HTMLElement) {
     this.$.menu.showAt(target, {
       noOffset: true,
       anchorAlignmentY: AnchorAlignment.AFTER_END,
     });
+    showUnboundedMenu(this.$.menu, this.isUnboundedMenuEnabled_, 'overflow');
   }
 
   close() {
@@ -137,7 +149,8 @@ export class OverflowMenuElement extends OverflowMenuElementBase {
   }
 
   protected shouldShowPinButton_(): boolean {
-    return this.isPinButtonEnabled && this.isAiPage;
+    return this.isPinButtonEnabled && this.isAiPage &&
+        this.isCobrowseEligible && this.isHandshakeComplete;
   }
 
   protected getPinButtonTooltip_(): string {
@@ -179,7 +192,7 @@ export class OverflowMenuElement extends OverflowMenuElementBase {
   protected onHelpClick_() {
     this.close();
     recordAction('ContextualTasks.WebUI.UserAction.OpenHelp');
-    this.browserProxy_.handler.openOnboardingHelpUi();
+    this.browserProxy_.handler.openOverflowMenuHelpUi();
   }
 
 
@@ -195,6 +208,9 @@ export class OverflowMenuElement extends OverflowMenuElementBase {
   }
 
   protected onOpenChanged_(e: CustomEvent<{value: boolean}>) {
+    const menu = e.currentTarget as CrActionMenuElement;
+    hideUnboundedMenu(
+        menu, this.isUnboundedMenuEnabled_, e.detail.value, 'overflow');
     this.fire('open-changed', {value: e.detail.value});
   }
 

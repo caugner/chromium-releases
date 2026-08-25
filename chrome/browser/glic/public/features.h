@@ -36,10 +36,12 @@ BASE_DECLARE_FEATURE(kGlicOnboardingMetricsMigration);
 
 BASE_DECLARE_FEATURE(kGlicSelectionPrompt);
 extern const base::FeatureParam<bool> kGlicSelectionPromptUpdatesOnly;
-extern const base::FeatureParam<bool> kGlicSelectionPromptUseWidget;
-extern const base::FeatureParam<bool> kGlicSelectionPromptEnablePinning;
 extern const base::FeatureParam<std::string> kGlicSelectionTopCueOnlyList;
-extern const base::FeatureParam<bool> kGlicSelectionEnableSiteSettings;
+extern const base::FeatureParam<bool> kGlicSelectionShowCopyButtons;
+extern const base::FeatureParam<bool> kGlicSelectionAutoSendPrompt;
+extern const base::FeatureParam<std::string> kGlicSelectionPromptCta;
+inline constexpr char kGlicSelectionPromptCtaTellMe[] = "tell_me_about_this";
+inline constexpr char kGlicSelectionPromptCtaExplain[] = "explain";
 
 BASE_DECLARE_FEATURE(kGlicCreateTabAdjacent);
 
@@ -91,6 +93,8 @@ BASE_DECLARE_FEATURE(kGlicSkipCookieSyncOnOpen);
 BASE_DECLARE_FEATURE(kGlicCookieSyncOnTokenChange);
 extern const base::FeatureParam<base::TimeDelta>
     kGlicCookieSyncOnTokenChangeDelay;
+extern const base::FeatureParam<bool>
+    kGlicCookieSyncOnTokenChangeOnlyWhenFreCompleted;
 BASE_DECLARE_FEATURE(kGlicCookieSyncOnError);
 extern const base::FeatureParam<base::TimeDelta>
     kGlicCookieSyncOnErrorMinInterval;
@@ -119,8 +123,19 @@ BASE_DECLARE_FEATURE(kGlicAnchorEntryPointForOnboardedUsers);
 BASE_DECLARE_FEATURE(kGlicProcessCounterAbuseVerdict);
 BASE_DECLARE_FEATURE(kGlicNoWebUiLoader);
 BASE_DECLARE_FEATURE(kGlicGeminiEnterpriseSettingsEnabled);
+BASE_DECLARE_FEATURE(kGlicGeminiEnterpriseConsentEnabled);
 
 BASE_DECLARE_FEATURE(kGlicHotkeyLocalScope);
+
+BASE_DECLARE_FEATURE(kGlicPasteEligibilityCheck);
+BASE_DECLARE_FEATURE(kGlicWebPasteEligibilityCheck);
+BASE_DECLARE_FEATURE(kGlicOptInDialogLinkA11yFix);
+
+BASE_DECLARE_FEATURE(kGlicTabGroups);
+BASE_DECLARE_FEATURE(kGlicSparkSettingsAccessibleLabels);
+
+BASE_DECLARE_FEATURE(kGlicOptInDialogA11yFix);
+BASE_DECLARE_FEATURE(kGlicStructuredYieldMetadata);
 }  // namespace features
 
 #endif  // CHROME_BROWSER_GLIC_PUBLIC_FEATURES_H_

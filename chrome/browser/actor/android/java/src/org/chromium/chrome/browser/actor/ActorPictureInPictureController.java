@@ -27,6 +27,7 @@ import androidx.lifecycle.Lifecycle;
 
 import org.chromium.base.Callback;
 import org.chromium.base.Log;
+import org.chromium.base.ThreadUtils;
 import org.chromium.base.task.PostTask;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
@@ -250,6 +251,7 @@ public class ActorPictureInPictureController
                     mExitPipRunnable = null;
                     if (mInActorPiP && !shouldEnterPip()) {
                         Log.i(TAG, "Exiting PiP after 1 min delay.");
+                        ActorMetrics.getInstance().setIsInPip(false);
                         mInActorPiP = false;
                         hideOverlay();
                         mActivity.moveTaskToBack(true);
@@ -352,7 +354,7 @@ public class ActorPictureInPictureController
 
     /** Expose to Activity to guarantee UI reset during framework exits. */
     public void onFrameworkExitedPictureInPicture() {
-        exitPictureInPicture();
+        ThreadUtils.runOnUiThreadBlocking(this::exitPictureInPicture);
     }
 
     private void enterPictureInPicture() {
@@ -362,6 +364,9 @@ public class ActorPictureInPictureController
             mHandler.removeCallbacks(mTabSelectRunnable);
             mTabSelectRunnable = null;
         }
+
+        ActorMetrics.getInstance().setIsInPip(true);
+
         mInActorPiP = true;
         mPipStartTime = SystemClock.elapsedRealtime();
         mReceivedNewIntent = false;
@@ -374,6 +379,8 @@ public class ActorPictureInPictureController
 
     private void exitPictureInPicture() {
         if (!mInActorPiP) return;
+
+        ActorMetrics.getInstance().setIsInPip(false);
 
         mInActorPiP = false;
         ActorMetrics.recordPipStatus(ActorMetrics.ActorPipStatus.EXITED);
@@ -453,6 +460,10 @@ public class ActorPictureInPictureController
 
     /** Called when the Activity is destroyed. */
     public void destroy() {
+        if (mInActorPiP) {
+            ActorMetrics.getInstance().setIsInPip(false);
+            mInActorPiP = false;
+        }
         cancelPendingExit();
         if (mTabSelectRunnable != null) {
             mHandler.removeCallbacks(mTabSelectRunnable);

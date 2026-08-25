@@ -26,6 +26,7 @@
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_utils.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_web_contents_user_data.h"
+#include "chrome/browser/contextual_tasks/entry_point_eligibility_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_list/tab_list_interface.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
@@ -68,7 +69,7 @@
 #if !BUILDFLAG(IS_ANDROID)
 #include "chrome/browser/ui/lens/lens_overlay_controller.h"
 #include "chrome/browser/ui/lens/lens_search_controller.h"
-#include "chrome/browser/ui/omnibox/omnibox_next_features.h"
+#include "components/omnibox/common/omnibox_features.h"
 #else
 #include "base/android/content_uri_utils.h"
 #endif
@@ -199,7 +200,6 @@ ContextualTasksComposeboxHandler::ContextualTasksComposeboxHandler(
     Profile* profile,
     content::WebContents* web_contents,
     mojo::PendingReceiver<composebox::mojom::PageHandler> pending_handler,
-    mojo::PendingRemote<composebox::mojom::Page> pending_page,
     mojo::PendingReceiver<searchbox::mojom::PageHandler>
         pending_searchbox_handler,
     mojo::PendingRemote<searchbox::mojom::Page> pending_searchbox_page,
@@ -208,7 +208,6 @@ ContextualTasksComposeboxHandler::ContextualTasksComposeboxHandler(
     TakeInputStateModelCallback take_input_model_callback)
     : ComposeboxHandler(
           std::move(pending_handler),
-          std::move(pending_page),
           std::move(pending_searchbox_handler),
           std::move(pending_searchbox_page),
           profile,
@@ -241,10 +240,17 @@ ContextualTasksComposeboxHandler::ContextualTasksComposeboxHandler(
   // Set the callback for getting suggest inputs from the session.
   // The session is owned by WebUI controller and accessed via callback.
   // It is safe to use Unretained because omnibox client is owned by `this`.
-  static_cast<ContextualTasksOmniboxClient*>(client())
-      ->SetSuggestInputsCallback(base::BindRepeating(
-          &ContextualTasksComposeboxHandler::GetSuggestInputs,
-          base::Unretained(this)));
+  auto* omnibox_client = static_cast<ContextualTasksOmniboxClient*>(client());
+  omnibox_client->SetSuggestInputsCallback(
+      base::BindRepeating(&ContextualTasksComposeboxHandler::GetSuggestInputs,
+                          base::Unretained(this)));
+  omnibox_client->SetHasPreviousSubmittedThreadContextCallback(
+      base::BindRepeating(&ContextualTasksComposeboxHandler::
+                              SessionHandleHasPreviousSubmittedThreadContext,
+                          base::Unretained(this)));
+  omnibox_client->SetHasAutoSuggestedTabCallback(base::BindRepeating(
+      &ContextualTasksComposeboxHandler::HasAutoSuggestedTab,
+      base::Unretained(this)));
 
   InitializeInputStateModel();
 }
@@ -341,6 +347,35 @@ void ContextualTasksComposeboxHandler::StartPlatformVoiceRecognition() {
   web_ui_interface_->StartPlatformVoiceRecognition();
 }
 
+void ContextualTasksComposeboxHandler::SetActiveToolMode(
+    omnibox::ToolMode tool,
+    bool is_set_by_server) {
+  omnibox::ToolMode previous_tool =
+      input_state_model_ ? input_state_model_->GetInputState().active_tool
+                         : omnibox::ToolMode::TOOL_MODE_UNSPECIFIED;
+
+  ContextualSearchboxHandler::SetActiveToolMode(tool, is_set_by_server);
+  if (!is_set_by_server) {
+    // Send an AIM query to notify AIM webpage (client side) of previous
+    // tool (`tool_mode`) and the newly changed tool (`new_tool_mode`).
+    // This path runs when a tool is added (or swapped), or removed.
+    // This causes side effects on AIM webpage; e.g., Canvas chip
+    // removed in Chrome -> Canvas popup is removed in AIM webpage.
+    auto request_info =
+        std::make_unique<contextual_search::ContextualSearchContextController::
+                             CreateClientToAimRequestInfo>();
+    request_info->exit_tool_info =
+        contextual_search::ContextualSearchContextController::
+            CreateClientToAimRequestInfo::ExitToolInfo{
+                .tool_mode = previous_tool,
+                .new_tool_mode = tool,
+            };
+    contextual_tasks::FinalizeAndSendAimQuery(std::move(request_info),
+                                              GetContextualSessionHandle(),
+                                              web_ui_interface_);
+  }
+}
+
 void ContextualTasksComposeboxHandler::SubmitQuery(
     const std::string& query_text,
     uint8_t mouse_button,
@@ -351,7 +386,7 @@ void ContextualTasksComposeboxHandler::SubmitQuery(
     bool is_voice_search) {
   CreateAndSendQueryMessage(query_text, is_voice_search);
   // TODO(crbug.com/469535685): This should reflect the response from the
-  // webview when PostMessageToWebview provides one.
+  // webview when PostAimMessage provides one.
 }
 
 void ContextualTasksComposeboxHandler::CreateAndSendQueryMessage(
@@ -442,23 +477,23 @@ void ContextualTasksComposeboxHandler::CreateAndSendQueryMessage(
   // Kick off the on-submit contextualization flow to upload delayed tabs and
   // recontextualize the active tab.
   recontextualization_pending_count_++;
-  // It is safe to use base::Unretained(this) here because `recontextualizer_`
-  // is owned by `this` and will be destroyed when `this` is destroyed,
-  // cancelling any pending callbacks.
   auto callback = base::BindOnce(
-      [](ContextualTasksComposeboxHandler* handler, std::string query,
-         std::optional<base::Uuid> task_id,
+      [](base::WeakPtr<ContextualTasksComposeboxHandler> handler,
+         std::string query, std::optional<base::Uuid> task_id,
          std::optional<base::UnguessableToken> token, bool voice,
          std::map<std::string, std::string> cgi_params,
          base::WeakPtr<contextual_search::ContextualSearchSessionHandle>
              handle) {
+        if (!handler) {
+          return;
+        }
         // The session handle is accessed via GetContextualSessionHandle(),
         // so we ignore it here.
         handler->ContinueCreateAndSendQueryMessage(query, task_id, token, voice,
                                                    std::move(cgi_params));
       },
-      base::Unretained(this), query, task_id, overlay_token, is_voice_search,
-      additional_cgi_params);
+      weak_factory_.GetWeakPtr(), query, task_id, overlay_token,
+      is_voice_search, additional_cgi_params);
 
   contextual_tasks::QueryContextualizer::ContextualizeParams params;
   params.task_id = task_id;
@@ -467,11 +502,11 @@ void ContextualTasksComposeboxHandler::CreateAndSendQueryMessage(
   params.auto_suggested_chip_tabs = tabs_to_force_contextualize;
   params.on_ineligible_callback = base::BindRepeating(
       &ContextualTasksComposeboxHandler::OnPageContextIneligible,
-      base::Unretained(this));
+      weak_factory_.GetWeakPtr());
   params.on_processed_callback =
       base::BindRepeating(&ContextualTasksComposeboxHandler::
                               OnTabProcessedForQueryContextualization,
-                          base::Unretained(this));
+                          weak_factory_.GetWeakPtr());
   params.complete_callback = std::move(callback);
   params.enable_smart_tab_selection = IsSmartTabSharingActive();
   recontextualizer_->Contextualize(std::move(params));
@@ -576,6 +611,10 @@ void ContextualTasksComposeboxHandler::InitializeInputStateModel() {
             tab_id = tabs::SessionMappedTabHandleFactory::GetInstance()
                          .GetHandleForSessionId(
                              file_info.tab_session_id.value().id());
+            // In case the tab is not mapped.
+            if (tab_id == tabs::TabHandle::NullValue) {
+              tab_id = file_info.tab_session_id.value().id();
+            }
           }
           tab_info->tab_id = tab_id;
           tab_info->title = file_info.tab_title.value_or("");
@@ -607,8 +646,7 @@ void ContextualTasksComposeboxHandler::InitializeInputStateModel() {
 
 bool ContextualTasksComposeboxHandler::IsContextualSearchTabSharingEligible()
     const {
-  return web_ui_interface_ &&
-         web_ui_interface_->IsContextualTasksEligibleOnInit();
+  return contextual_tasks::IsTabSharingEligible(profile_);
 }
 
 void ContextualTasksComposeboxHandler::SetAimThreadRestoredTabs(
@@ -619,6 +657,43 @@ void ContextualTasksComposeboxHandler::SetAimThreadRestoredTabs(
     }
     return;
   }
+
+  if (base::FeatureList::IsEnabled(omnibox::kContextManagementInComposebox)) {
+    // Collect IDs and URLs of tabs that are now committed in thread history.
+    std::set<int32_t> restored_tab_ids;
+    std::set<GURL> restored_urls;
+    for (const auto& tab : tabs) {
+      restored_tab_ids.insert(tab->tab_id);
+      restored_urls.insert(tab->url);
+    }
+
+    // Remove any delayed tabs that have transitioned to restored tabs.
+    std::erase_if(delayed_tabs_, [&](const auto& pair) {
+      if (restored_tab_ids.contains(pair.second)) {
+        pending_delayed_tab_ids_.erase(pair.second);
+        return true;
+      }
+      return false;
+    });
+
+    // If the currently auto-suggested tab is now a restored tab, clear the
+    // uncommitted auto-suggested chip in the WebUI composebox.
+    auto* auto_suggestion_manager =
+        web_ui_interface_->GetAutoSuggestionManager();
+    if (auto_suggestion_manager) {
+      const auto* current_suggestion =
+          auto_suggestion_manager->GetCurrentSuggestion();
+      if (current_suggestion &&
+          (restored_tab_ids.contains(current_suggestion->tab_id) ||
+           restored_urls.contains(current_suggestion->url))) {
+        if (SearchboxHandler::page_) {
+          SearchboxHandler::page_->UpdateAutoSuggestedTabContext(
+              nullptr, /*invocation_source=*/std::nullopt);
+        }
+      }
+    }
+  }
+
   if (SearchboxHandler::page_) {
     SearchboxHandler::page_->SetAimThreadRestoredTabs(std::move(tabs));
   }
@@ -857,7 +932,10 @@ void ContextualTasksComposeboxHandler::FileSelectionCanceled() {
 void ContextualTasksComposeboxHandler::AddTabContext(
     int32_t tab_id,
     bool delay_upload,
+    searchbox::mojom::TabAttachmentSource source,
     AddTabContextCallback callback) {
+  // `source` is ignored here as contextual tasks composebox does not need to
+  // preserve tab origin across sessions in the same way as WebuiOmniboxHandler.
   if (!IsContextualSearchTabSharingEligible()) {
     std::move(callback).Run(base::unexpected(
         contextual_search::ContextUploadErrorType::kBrowserProcessingError));
@@ -1117,6 +1195,12 @@ void ContextualTasksComposeboxHandler::DeleteContext(
   }
 }
 
+bool ContextualTasksComposeboxHandler::HasAutoSuggestedTab() {
+  auto* auto_suggestion_manager = web_ui_interface_->GetAutoSuggestionManager();
+  return auto_suggestion_manager &&
+         auto_suggestion_manager->GetCurrentSuggestion() != nullptr;
+}
+
 void ContextualTasksComposeboxHandler::MaybeTriggerLens() {
 #if !BUILDFLAG(IS_ANDROID)
   if (!omnibox::kAskGCoBrowseWithVisualSelection.Get()) {
@@ -1151,6 +1235,19 @@ void ContextualTasksComposeboxHandler::UpdateSuggestedTabContext(
     SearchboxHandler::page_->UpdateAutoSuggestedTabContext(nullptr,
                                                            invocation_source);
     return;
+  }
+
+  // If context management is enabled and the tab is already restored/committed
+  // in the contextual task, do not suggest it again as an uncommitted chip.
+  if (base::FeatureList::IsEnabled(omnibox::kContextManagementInComposebox) &&
+      suggested_tab) {
+    std::vector<int32_t> restored_ids = web_ui_interface_->GetRestoredTabIds();
+    if (std::find(restored_ids.begin(), restored_ids.end(),
+                  suggested_tab->tab_id) != restored_ids.end()) {
+      SearchboxHandler::page_->UpdateAutoSuggestedTabContext(nullptr,
+                                                             invocation_source);
+      return;
+    }
   }
 
   // Always use the passed info as the result of the manager's filtering.

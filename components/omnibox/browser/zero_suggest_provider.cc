@@ -4,8 +4,6 @@
 
 #include "components/omnibox/browser/zero_suggest_provider.h"
 
-#include <stddef.h>
-
 #include <optional>
 #include <string>
 #include <utility>
@@ -37,6 +35,9 @@
 #include "components/omnibox/browser/page_classification_functions.h"
 #include "components/omnibox/browser/remote_suggestions_service.h"
 #include "components/omnibox/browser/search_suggestion_parser.h"
+#if !BUILDFLAG(IS_ANDROID)
+#include "components/omnibox/browser/suggest_inventory_fallback_utils.h"
+#endif
 #include "components/omnibox/browser/suggestion_group_util.h"
 #include "components/omnibox/browser/zero_suggest_cache_service.h"
 #include "components/omnibox/common/omnibox_feature_configs.h"
@@ -46,14 +47,12 @@
 #include "components/search/ntp_features.h"
 #include "components/search_engines/search_engine_type.h"
 #include "components/search_engines/template_url_service.h"
-#include "components/strings/grit/components_strings.h"
 #include "components/url_formatter/url_formatter.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
 #include "third_party/metrics_proto/omnibox_event.pb.h"
 #include "third_party/metrics_proto/omnibox_focus_type.pb.h"
 #include "third_party/metrics_proto/omnibox_input_type.pb.h"
-#include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
 #include "url/url_canon.h"
 #include "url/url_util.h"
@@ -153,7 +152,7 @@ bool ShouldCacheResultTypeInContext(const ResultType result_type,
   switch (result_type) {
     case ResultType::kRemoteNoURL:
       // Only cache results for the NTP realbox if there is no contextual input.
-      if (omnibox::IsNTPRealbox(page_class)) {
+      if (page_class == OEP::NTP_REALBOX) {
         return !has_contextual_input;
       }
       // Composebox requests can't have contextual inputs and must not have any
@@ -407,8 +406,7 @@ void MaybeAddContextualSuggestParams(
       if (!input.context_tab_url().is_empty()) {
         search_terms_args.current_page_url = input.context_tab_url().spec();
       }
-    } else if (search_terms_args.page_classification ==
-                   metrics::OmniboxEventProto::NTP_COMPOSEBOX &&
+    } else if (search_terms_args.page_classification == OEP::NTP_COMPOSEBOX &&
                !client->IsPersonalizedUrlDataCollectionActive() &&
                !input.context_tab_title().empty()) {
       // Set `lens_overlay_suggest_inputs` when history sync is disabled, but
@@ -545,8 +543,7 @@ void ZeroSuggestProvider::StartPrefetch(const AutocompleteInput& input) {
 
   // Make a composebox prefetch request when the NTP zero suggest prefetch is
   // requested.
-  if (input.current_page_classification() ==
-          metrics::OmniboxEventProto::NTP_ZPS_PREFETCH &&
+  if (input.current_page_classification() == OEP::NTP_ZPS_PREFETCH &&
       base::FeatureList::IsEnabled(
           omnibox::kZeroSuggestPrefetchingForComposebox)) {
     if (base::FeatureList::IsEnabled(omnibox::kZeroSuggestPrefetchDebouncing)) {
@@ -633,8 +630,7 @@ void ZeroSuggestProvider::RunComposeboxPrefetch(
   }
 
   TemplateURLRef::SearchTermsArgs search_terms_args;
-  search_terms_args.page_classification =
-      metrics::OmniboxEventProto::NTP_COMPOSEBOX_PREFETCH;
+  search_terms_args.page_classification = OEP::NTP_COMPOSEBOX_PREFETCH;
   search_terms_args.request_source = TemplateURLRef::RequestSource::COMPOSEBOX;
   search_terms_args.focus_type = input.focus_type();
   search_terms_args.current_page_url = std::string();
@@ -643,9 +639,8 @@ void ZeroSuggestProvider::RunComposeboxPrefetch(
   search_terms_args.input_state = input.input_state();
   search_terms_args.suggest_inventory = input.suggest_inventory();
 
-  AutocompleteInput composebox_input(
-      input.text(), metrics::OmniboxEventProto::NTP_COMPOSEBOX_PREFETCH,
-      client()->GetSchemeClassifier());
+  AutocompleteInput composebox_input(input.text(), OEP::NTP_COMPOSEBOX_PREFETCH,
+                                     client()->GetSchemeClassifier());
   composebox_input.set_current_url(input.current_url());
   composebox_input.set_current_title(input.current_title());
   composebox_input.set_focus_type(input.focus_type());
@@ -754,8 +749,9 @@ void ZeroSuggestProvider::DeleteMatch(const AutocompleteMatch& match) {
 
 void ZeroSuggestProvider::AddProviderInfo(ProvidersInfo* provider_info) const {
   BaseSearchProvider::AddProviderInfo(provider_info);
-  if (!matches().empty())
+  if (!matches().empty()) {
     provider_info->back().set_times_returned_results_in_session(1);
+  }
 }
 
 ZeroSuggestProvider::ZeroSuggestProvider(AutocompleteProviderClient* client,
@@ -805,6 +801,7 @@ void ZeroSuggestProvider::OnURLLoadComplete(
   if (response_code != 200) {
     loader_.reset();
     done_ = true;
+    MaybePopulateFallbackMatches(input);
     return;
   }
 
@@ -820,6 +817,7 @@ void ZeroSuggestProvider::OnURLLoadComplete(
   if (!response_parsed) {
     loader_.reset();
     done_ = true;
+    MaybePopulateFallbackMatches(input);
     return;
   }
 
@@ -829,8 +827,7 @@ void ZeroSuggestProvider::OnURLLoadComplete(
   // The Contextual Search in Omnibox experience, which is only active on Web
   // page context, intentionally updates the cache with latest received results,
   // but does not publish the matches asynchronously.
-  if (input.current_page_classification() ==
-          metrics::OmniboxEventProto::OTHER &&
+  if (input.current_page_classification() == OEP::OTHER &&
       omnibox_feature_configs::ContextualSearch::Get()
           .IsEnabledWithPrefetch()) {
     return;
@@ -851,6 +848,11 @@ void ZeroSuggestProvider::OnURLLoadComplete(
   LogOmniboxZeroSuggestRequest(RemoteRequestEvent::kResponseConvertedToMatches,
                                result_type,
                                /*is_prefetch=*/false);
+
+  if (empty_results) {
+    MaybePopulateFallbackMatches(input);
+  }
+
   NotifyListeners(/*updated_matches=*/true);
 }
 
@@ -888,8 +890,7 @@ void ZeroSuggestProvider::OnPrefetchURLLoadComplete(
     // is essentially a no-op in this case.
     if (!client()->in_background_state() &&
         !(OmniboxFieldTrial::kZeroSuggestPrefetchingOnSRPCounterfactual.Get() &&
-          input.current_page_classification() ==
-              metrics::OmniboxEventProto::SRP_ZPS_PREFETCH &&
+          input.current_page_classification() == OEP::SRP_ZPS_PREFETCH &&
           result_type == ResultType::kRemoteSendURL)) {
       SearchSuggestionParser::Results unused_results;
       StoreRemoteResponse(SearchSuggestionParser::ExtractJsonData(
@@ -900,6 +901,19 @@ void ZeroSuggestProvider::OnPrefetchURLLoadComplete(
   }
 
   prefetch_loader->reset();
+}
+
+void ZeroSuggestProvider::MaybePopulateFallbackMatches(
+    const AutocompleteInput& input) {
+  matches_.clear();
+#if !BUILDFLAG(IS_ANDROID)
+  matches_ = omnibox::MaybeCreateFallbackMatchesForSuggestInventory(
+      this, client(), input,
+      /*num_suggestions=*/omnibox::kDefaultFallbackNumSuggestions);
+  if (!matches_.empty()) {
+    NotifyListeners(/*updated_matches=*/true);
+  }
+#endif
 }
 
 void ZeroSuggestProvider::ConvertSuggestResultsToAutocompleteMatches(

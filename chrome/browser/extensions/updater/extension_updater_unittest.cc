@@ -1616,9 +1616,7 @@ class ExtensionUpdaterTest : public testing::Test {
     TestingProfile profile;
     // TODO(crbug.com/396722906): Delete this when CrxInstaller no longer has
     // dependencies on ExtensionService.
-    static_cast<TestExtensionSystem*>(ExtensionSystem::Get(&profile))
-        ->CreateExtensionService(base::CommandLine::ForCurrentProcess(),
-                                 base::FilePath(), false);
+    static_cast<TestExtensionSystem*>(ExtensionSystem::Get(&profile))->Init();
     scoped_refptr<MockCrxInstaller> mock_installer =
         base::MakeRefCounted<MockCrxInstaller>(&profile);
 
@@ -1680,12 +1678,14 @@ class ExtensionUpdaterTest : public testing::Test {
 
     // Add crx file entry in the cache.
     base::RunLoop put_extension_run_loop;
+    base::FilePath cached_crx_path;
     test_extension_cache.AllowCaching("test_app");
     test_extension_cache.PutExtension(
         kTestExtensionId, "" /* expected hash*/, filename, version,
         base::BindLambdaForTesting(
-            [&put_extension_run_loop](const base::FilePath& file_path,
-                                      bool file_ownership_passed) {
+            [&put_extension_run_loop, &cached_crx_path](
+                const base::FilePath& file_path, bool file_ownership_passed) {
+              cached_crx_path = file_path;
               put_extension_run_loop.Quit();
             }));
     put_extension_run_loop.Run();
@@ -1743,7 +1743,7 @@ class ExtensionUpdaterTest : public testing::Test {
     LoadErrorReporter::Init(false);
 
     updater.SetExtensionCacheForTesting(&test_extension_cache);
-    CRXFileInfo crx_info(filename, GetTestVerifierFormat());
+    CRXFileInfo crx_info(cached_crx_path, GetTestVerifierFormat());
     crx_info.extension_id = kTestExtensionId;
     crx_info.expected_hash = hash;
 
