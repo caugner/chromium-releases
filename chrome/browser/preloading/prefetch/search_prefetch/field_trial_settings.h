@@ -24,6 +24,11 @@ BASE_DECLARE_FEATURE(kSearchPrefetchWithNoVarySearchDiskCache);
 
 BASE_DECLARE_FEATURE(kSearchPrefetchBeaconLogging);
 
+BASE_DECLARE_FEATURE(kSearchPrefetchPreloadServingMetrics);
+
+// Whether to record legacy search prefetch in PreloadServingMetrics.
+bool IsSearchPrefetchPreloadServingMetricsEnabled();
+
 // Whether the search prefetch service actually initiates prefetches.
 bool SearchPrefetchServicePrefetchingIsEnabled();
 
@@ -76,13 +81,6 @@ bool IsSearchMouseDownPrefetchEnabled();
 // A flavor of navigation prefetch that triggers when the user touches down on a
 // Search suggestion. This is for Android only.
 bool IsTouchDownPrefetchEnabled();
-
-// Allows the top selection to be prefetched by navigation prefetch strategies.
-bool AllowTopNavigationPrefetch();
-
-// Allows search history suggestions to be prefetched by navigation prefetch
-// strategies.
-bool PrefetchSearchHistorySuggestions();
 
 // Whether Omnibox prefetch and prerender should be restricted to the suggestion
 // being the default match.

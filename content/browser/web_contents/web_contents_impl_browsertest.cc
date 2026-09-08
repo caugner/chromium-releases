@@ -6,8 +6,8 @@
 
 #include <algorithm>
 #include <array>
+#include <initializer_list>
 #include <optional>
-#include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -41,6 +41,7 @@
 #include "components/input/render_widget_host_input_event_router.h"
 #include "components/ukm/test_ukm_recorder.h"
 #include "components/url_formatter/url_formatter.h"
+#include "content/browser/embedder_isolation_info.h"
 #include "content/browser/preloading/prerender/prerender_host_registry.h"
 #include "content/browser/renderer_host/cross_process_frame_connector.h"
 #include "content/browser/renderer_host/frame_tree.h"
@@ -53,9 +54,9 @@
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/browser/renderer_host/render_widget_host_view_child_frame.h"
 #include "content/browser/renderer_host/text_input_manager.h"
+#include "content/browser/site_info.h"
+#include "content/browser/site_instance_impl.h"
 #include "content/browser/surface_embed/surface_embed_connector_impl.h"
-#include "content/browser/web_contents/file_chooser_impl.h"
-#include "content/browser/web_contents/web_contents_impl.h"
 #include "content/browser/web_contents/web_contents_view.h"
 #include "content/common/content_navigation_policy.h"
 #include "content/common/frame.mojom-test-utils.h"
@@ -70,11 +71,11 @@
 #include "content/public/browser/media_player_id.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_handle.h"
-#include "content/public/browser/preloading.h"
-#include "content/public/browser/preloading_trigger_type.h"
 #include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
+#include "content/public/browser/site_instance.h"
 #include "content/public/browser/site_isolation_policy.h"
 #include "content/public/browser/unowned_inner_web_contents_client.h"
 #include "content/public/browser/web_contents.h"
@@ -85,7 +86,6 @@
 #include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/isolated_world_ids.h"
-#include "content/public/common/javascript_dialog_type.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/back_forward_cache_util.h"
 #include "content/public/test/browser_test.h"
@@ -123,13 +123,12 @@
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/mojom/web_client_hints_types.mojom.h"
 #include "testing/gmock/include/gmock/gmock.h"
-#include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/abseil-cpp/absl/cleanup/cleanup.h"
 #include "third_party/blink/public/common/client_hints/client_hints.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/page/page_zoom.h"
 #include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
 #include "third_party/blink/public/mojom/frame/fullscreen.mojom.h"
+#include "ui/accessibility/ax_mode.h"
 #include "ui/base/clipboard/clipboard_format_type.h"
 #include "ui/base/data_transfer_policy/data_transfer_endpoint.h"
 #include "ui/color/color_provider_manager.h"
@@ -2245,6 +2244,217 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
       web_contents->GetController().GetLastCommittedEntry();
   ASSERT_TRUE(entry);
   EXPECT_EQ(web_ui_url, entry->GetURL());
+}
+
+// A WebContents created with privileged params commits every navigation with
+// a privileged SiteInfo (keyed on the feature id), so it never shares a
+// renderer process with ordinary content of the same site.
+IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
+                       PrivilegedWebContentsGetsPrivilegedProcessIsolation) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  const GURL url = embedded_test_server()->GetURL("/title1.html");
+  BrowserContext* browser_context =
+      shell()->web_contents()->GetBrowserContext();
+
+  // A WebContents created with privileged params...
+  WebContents::CreateParams privileged_create_params(browser_context);
+  WebContents::PrivilegedParams marker;
+  marker.feature_id = 42;
+  privileged_create_params.privileged_params = marker;
+  std::unique_ptr<WebContents> privileged(
+      WebContents::Create(privileged_create_params));
+  ASSERT_TRUE(NavigateToURL(privileged.get(), url));
+
+  // ...commits its main frame with a privileged SiteInfo carrying the
+  // feature id.
+  const EmbedderIsolationInfo& privileged_isolation =
+      static_cast<SiteInstanceImpl*>(
+          privileged->GetPrimaryMainFrame()->GetSiteInstance())
+          ->GetSiteInfo()
+          .embedder_isolation_info();
+  EXPECT_TRUE(privileged_isolation.is_privileged());
+  EXPECT_EQ(privileged_isolation.privileged_feature_id(), 42);
+
+  // An ordinary WebContents at the same URL commits with no embedder
+  // isolation...
+  ASSERT_TRUE(NavigateToURL(shell(), url));
+  RenderFrameHost* ordinary_main_frame =
+      shell()->web_contents()->GetPrimaryMainFrame();
+  EXPECT_FALSE(
+      static_cast<SiteInstanceImpl*>(ordinary_main_frame->GetSiteInstance())
+          ->GetSiteInfo()
+          .embedder_isolation_info()
+          .is_privileged());
+
+  // ...and therefore never shares a renderer process with the privileged one.
+  EXPECT_NE(privileged->GetPrimaryMainFrame()->GetProcess(),
+            ordinary_main_frame->GetProcess());
+}
+
+// The privileged bit is reachable through the public
+// RenderProcessHost::IsPrivileged() helper; it is false for ordinary content.
+IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
+                       PrivilegedExposedViaPublicApis) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  const GURL url = embedded_test_server()->GetURL("/title1.html");
+  BrowserContext* browser_context =
+      shell()->web_contents()->GetBrowserContext();
+
+  WebContents::CreateParams privileged_create_params(browser_context);
+  WebContents::PrivilegedParams marker;
+  marker.feature_id = 42;
+  privileged_create_params.privileged_params = marker;
+  std::unique_ptr<WebContents> privileged(
+      WebContents::Create(privileged_create_params));
+  ASSERT_TRUE(NavigateToURL(privileged.get(), url));
+  EXPECT_TRUE(privileged->IsPrivileged());
+  EXPECT_TRUE(privileged->GetPrimaryMainFrame()->GetProcess()->IsPrivileged());
+
+  ASSERT_TRUE(NavigateToURL(shell(), url));
+  EXPECT_FALSE(shell()->web_contents()->IsPrivileged());
+  EXPECT_FALSE(shell()
+                   ->web_contents()
+                   ->GetPrimaryMainFrame()
+                   ->GetProcess()
+                   ->IsPrivileged());
+}
+
+// A WebContents created with PrivilegedParams marks every frame it hosts
+// as privileged, not just the main frame: a subframe (including a
+// cross-site one) also commits with a privileged SiteInfo.
+IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
+                       PrivilegedWebContentsPropagatesPrivilegeToSubframe) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  const GURL main_url = embedded_test_server()->GetURL("a.com", "/title1.html");
+  const GURL subframe_url =
+      embedded_test_server()->GetURL("b.com", "/title1.html");
+
+  WebContents::CreateParams privileged_create_params(
+      shell()->web_contents()->GetBrowserContext());
+  WebContents::PrivilegedParams marker;
+  marker.feature_id = 42;
+  privileged_create_params.privileged_params = marker;
+  std::unique_ptr<WebContents> privileged(
+      WebContents::Create(privileged_create_params));
+  ASSERT_TRUE(NavigateToURL(privileged.get(), main_url));
+
+  RenderFrameHost* main_frame = privileged->GetPrimaryMainFrame();
+  ASSERT_TRUE(ExecJs(main_frame, JsReplace(R"(
+      const f = document.createElement('iframe');
+      f.src = $1;
+      document.body.appendChild(f);
+  )",
+                                           subframe_url)));
+  ASSERT_TRUE(WaitForLoadStop(privileged.get()));
+  RenderFrameHost* subframe = ChildFrameAt(main_frame, 0);
+  ASSERT_TRUE(subframe);
+
+  auto is_privileged = [](RenderFrameHost* rfh) {
+    return static_cast<SiteInstanceImpl*>(rfh->GetSiteInstance())
+        ->GetSiteInfo()
+        .embedder_isolation_info()
+        .is_privileged();
+  };
+  EXPECT_TRUE(is_privileged(main_frame));
+  EXPECT_TRUE(is_privileged(subframe));
+}
+
+// A WebContents created with PrivilegedParams forces origin isolation on every
+// frame it hosts, so a same-site but cross-origin subframe lands in a different
+// process than the main frame. This keeps a compromise in such a subframe out
+// of the main frame's privileged process.
+IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
+                       PrivilegedWebContentsOriginIsolatesSameSiteSubframe) {
+  // Origin-Agent-Cluster opt-in (which is what forces the origin-keyed process)
+  // only applies to secure origins, so serve the pages over HTTPS with a cert
+  // that covers both same-site subdomains.
+  net::EmbeddedTestServer https_server(net::EmbeddedTestServer::TYPE_HTTPS);
+  https_server.SetCertHostnames({"a.com", "sub.a.com"});
+  https_server.ServeFilesFromSourceDirectory(GetTestDataFilePath());
+  ASSERT_TRUE(https_server.Start());
+  // `a.com` and `sub.a.com` share the site `a.com` but are cross-origin.
+  const GURL main_url = https_server.GetURL("a.com", "/title1.html");
+  const GURL subframe_url = https_server.GetURL("sub.a.com", "/title1.html");
+  BrowserContext* browser_context =
+      shell()->web_contents()->GetBrowserContext();
+
+  // Forcing origin isolation depends on OAC process isolation being available;
+  // where it is not (e.g. Android below the site-isolation memory threshold)
+  // privileged frames fall back to the site-keyed process.
+  const bool origin_isolation_available =
+      SiteIsolationPolicy::IsProcessIsolationForOriginAgentClusterEnabled();
+
+  WebContents::CreateParams privileged_create_params(browser_context);
+  WebContents::PrivilegedParams marker;
+  marker.feature_id = 42;
+  privileged_create_params.privileged_params = marker;
+  std::unique_ptr<WebContents> privileged(
+      WebContents::Create(privileged_create_params));
+  ASSERT_TRUE(NavigateToURL(privileged.get(), main_url));
+  RenderFrameHost* privileged_main = privileged->GetPrimaryMainFrame();
+  ASSERT_TRUE(ExecJs(privileged_main, JsReplace(R"(
+      const f = document.createElement('iframe');
+      f.src = $1;
+      document.body.appendChild(f);
+  )",
+                                                subframe_url)));
+  ASSERT_TRUE(WaitForLoadStop(privileged.get()));
+  RenderFrameHost* privileged_subframe = ChildFrameAt(privileged_main, 0);
+  ASSERT_TRUE(privileged_subframe);
+
+  auto is_privileged = [](RenderFrameHost* rfh) {
+    return static_cast<SiteInstanceImpl*>(rfh->GetSiteInstance())
+        ->GetSiteInfo()
+        .embedder_isolation_info()
+        .is_privileged();
+  };
+  EXPECT_TRUE(is_privileged(privileged_main));
+  EXPECT_TRUE(is_privileged(privileged_subframe));
+  if (origin_isolation_available) {
+    EXPECT_NE(privileged_main->GetProcess(), privileged_subframe->GetProcess());
+  } else {
+    EXPECT_EQ(privileged_main->GetProcess(), privileged_subframe->GetProcess());
+  }
+}
+
+// Two privileged WebContents of the same feature coalesce into a single shared
+// renderer process (process-per-site), while a privileged WebContents of a
+// different feature and an ordinary WebContents at the same URL each stay in
+// their own process.
+IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
+                       PrivilegedWebContentsCoalesceIntoSharedProcess) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  const GURL url = embedded_test_server()->GetURL("/title1.html");
+  BrowserContext* browser_context =
+      shell()->web_contents()->GetBrowserContext();
+
+  auto make_privileged = [&](int32_t feature_id) {
+    WebContents::CreateParams params(browser_context);
+    WebContents::PrivilegedParams privileged_params;
+    privileged_params.feature_id = feature_id;
+    params.privileged_params = privileged_params;
+    std::unique_ptr<WebContents> web_contents = WebContents::Create(params);
+    EXPECT_TRUE(NavigateToURL(web_contents.get(), url));
+    return web_contents;
+  };
+
+  std::unique_ptr<WebContents> privileged1 = make_privileged(42);
+  std::unique_ptr<WebContents> privileged2 = make_privileged(42);
+  std::unique_ptr<WebContents> other_feature = make_privileged(99);
+
+  // Same feature -> shared process.
+  EXPECT_EQ(privileged1->GetPrimaryMainFrame()->GetProcess(),
+            privileged2->GetPrimaryMainFrame()->GetProcess());
+
+  // A different feature id produces a distinct SiteInfo, so it does not join
+  // the shared process.
+  EXPECT_NE(privileged1->GetPrimaryMainFrame()->GetProcess(),
+            other_feature->GetPrimaryMainFrame()->GetProcess());
+
+  // An ordinary WebContents at the same URL stays in its own process.
+  ASSERT_TRUE(NavigateToURL(shell(), url));
+  EXPECT_NE(privileged1->GetPrimaryMainFrame()->GetProcess(),
+            shell()->web_contents()->GetPrimaryMainFrame()->GetProcess());
 }
 
 namespace {
@@ -5888,6 +6098,25 @@ class SurfaceEmbedConnectorWebContentsBrowserTest
         &surface_embed_connector_delegate_));
   }
 
+  void ExpectRegisteredViews(
+      input::RenderWidgetHostInputEventRouter* event_router,
+      TextInputManager* text_input_manager,
+      std::initializer_list<WebContentsImpl*> web_contents_list) {
+    ASSERT_TRUE(event_router);
+    ASSERT_TRUE(text_input_manager);
+    EXPECT_EQ(web_contents_list.size(),
+              event_router->RegisteredViewCountForTesting());
+    EXPECT_EQ(web_contents_list.size(),
+              text_input_manager->GetRegisteredViewsCountForTesting());
+    for (WebContentsImpl* web_contents : web_contents_list) {
+      auto* view = static_cast<RenderWidgetHostViewBase*>(
+          web_contents->GetRenderWidgetHostView());
+      ASSERT_TRUE(view);
+      EXPECT_TRUE(event_router->IsViewInMap(view));
+      EXPECT_TRUE(text_input_manager->IsRegistered(view));
+    }
+  }
+
  private:
   // Mock SurfaceEmbedConnector::Delegate that does nothing (no-op)
   class MockSurfaceEmbedConnectorDelegate
@@ -5904,7 +6133,8 @@ class SurfaceEmbedConnectorWebContentsBrowserTest
     void DetachedByHost() override {}
     bool IsAttachedForTesting() const override { return false; }
     void ChildProcessGone() override {}
-    void RequestFocus() override {}
+    void RequestFocusOnEmbedElement() override {}
+    void AdvanceFocusFromEmbedElement(bool reverse) override {}
   };
 
   content::test::PrerenderTestHelper prerender_helper_;
@@ -6092,6 +6322,89 @@ IN_PROC_BROWSER_TEST_F(SurfaceEmbedConnectorWebContentsBrowserTest,
     EXPECT_EQ(0U,
               inner_text_input_manager->GetRegisteredViewsCountForTesting());
   }
+}
+
+IN_PROC_BROWSER_TEST_F(SurfaceEmbedConnectorWebContentsBrowserTest,
+                       NestedRegistrationAndUnregistration) {
+  ASSERT_TRUE(NavigateToURL(shell(), GURL("about:blank")));
+  auto* root = static_cast<WebContentsImpl*>(shell()->web_contents());
+  WebContents::CreateParams create_params(root->GetBrowserContext());
+  auto parent = WebContents::Create(create_params);
+  auto child = WebContents::Create(create_params);
+  auto* parent_impl = static_cast<WebContentsImpl*>(parent.get());
+  auto* child_impl = static_cast<WebContentsImpl*>(child.get());
+  ASSERT_TRUE(NavigateToURL(parent.get(), GURL("about:blank")));
+  ASSERT_TRUE(NavigateToURL(child.get(), GURL("about:blank")));
+
+  auto* root_event_router = root->GetInputEventRouter();
+  auto* root_text_input_manager = root->GetTextInputManager();
+  auto* parent_event_router = parent_impl->GetInputEventRouter();
+  auto* parent_text_input_manager = parent_impl->GetTextInputManager();
+  auto* child_event_router = child_impl->GetInputEventRouter();
+  auto* child_text_input_manager = child_impl->GetTextInputManager();
+  ExpectRegisteredViews(root_event_router, root_text_input_manager, {root});
+  ExpectRegisteredViews(parent_event_router, parent_text_input_manager,
+                        {parent_impl});
+  ExpectRegisteredViews(child_event_router, child_text_input_manager,
+                        {child_impl});
+
+  child_impl->SetSurfaceEmbedConnector(
+      CreateConnector(child_impl, parent_impl));
+  ExpectRegisteredViews(root_event_router, root_text_input_manager, {root});
+  ExpectRegisteredViews(parent_event_router, parent_text_input_manager,
+                        {parent_impl, child_impl});
+  ExpectRegisteredViews(child_event_router, child_text_input_manager, {});
+
+  parent_impl->SetSurfaceEmbedConnector(CreateConnector(parent_impl, root));
+  ExpectRegisteredViews(root_event_router, root_text_input_manager,
+                        {root, parent_impl, child_impl});
+  ExpectRegisteredViews(parent_event_router, parent_text_input_manager, {});
+  ExpectRegisteredViews(child_event_router, child_text_input_manager, {});
+
+  parent_impl->ClearSurfaceEmbedConnector();
+  ExpectRegisteredViews(root_event_router, root_text_input_manager, {root});
+  ExpectRegisteredViews(parent_event_router, parent_text_input_manager,
+                        {parent_impl, child_impl});
+  ExpectRegisteredViews(child_event_router, child_text_input_manager, {});
+
+  child_impl->ClearSurfaceEmbedConnector();
+  ExpectRegisteredViews(root_event_router, root_text_input_manager, {root});
+  ExpectRegisteredViews(parent_event_router, parent_text_input_manager,
+                        {parent_impl});
+  ExpectRegisteredViews(child_event_router, child_text_input_manager,
+                        {child_impl});
+}
+
+IN_PROC_BROWSER_TEST_F(SurfaceEmbedConnectorWebContentsBrowserTest,
+                       DestructionWithNestedChildWebContents) {
+  ASSERT_TRUE(NavigateToURL(shell(), GURL("about:blank")));
+  auto* root = static_cast<WebContentsImpl*>(shell()->web_contents());
+  WebContents::CreateParams create_params(root->GetBrowserContext());
+  auto parent = WebContents::Create(create_params);
+  auto child = WebContents::Create(create_params);
+  auto* parent_impl = static_cast<WebContentsImpl*>(parent.get());
+  auto* child_impl = static_cast<WebContentsImpl*>(child.get());
+  ASSERT_TRUE(NavigateToURL(parent.get(), GURL("about:blank")));
+  ASSERT_TRUE(NavigateToURL(child.get(), GURL("about:blank")));
+
+  auto* root_event_router = root->GetInputEventRouter();
+  auto* root_text_input_manager = root->GetTextInputManager();
+  auto* child_event_router = child_impl->GetInputEventRouter();
+  auto* child_text_input_manager = child_impl->GetTextInputManager();
+
+  parent_impl->SetSurfaceEmbedConnector(CreateConnector(parent_impl, root));
+  child_impl->SetSurfaceEmbedConnector(
+      CreateConnector(child_impl, parent_impl));
+  ExpectRegisteredViews(root_event_router, root_text_input_manager,
+                        {root, parent_impl, child_impl});
+  ExpectRegisteredViews(child_event_router, child_text_input_manager, {});
+
+  parent.reset();
+
+  EXPECT_EQ(nullptr, child_impl->GetSurfaceEmbedConnector());
+  ExpectRegisteredViews(root_event_router, root_text_input_manager, {root});
+  ExpectRegisteredViews(child_event_router, child_text_input_manager,
+                        {child_impl});
 }
 
 IN_PROC_BROWSER_TEST_F(SurfaceEmbedConnectorWebContentsBrowserTest,
@@ -6997,6 +7310,52 @@ IN_PROC_BROWSER_TEST_F(SurfaceEmbedConnectorWebContentsBrowserTest,
 
   // End the test, there should be no CHECK when everything is unregistered
   // properly.
+}
+
+// A subframe of a surface-embedded WebContents is not the accessibility root:
+// the per-WebContents SurfaceEmbedConnector only applies to the outermost
+// frame. Accessibility is enabled programmatically so this is covered without
+// --force-renderer-accessibility. See crbug.com/534306599.
+IN_PROC_BROWSER_TEST_F(SurfaceEmbedConnectorWebContentsBrowserTest,
+                       EmbeddedOOPIFSubframeIsNotAccessibilityRoot) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  const GURL outer_url(
+      embedded_test_server()->GetURL("a.com", "/simple_page.html"));
+  const GURL inner_url(embedded_test_server()->GetURL(
+      "a.com", "/cross_site_iframe_factory.html?a(b)"));
+
+  // Setup outer WebContents.
+  ASSERT_TRUE(NavigateToURL(shell(), outer_url));
+  WebContentsImpl* outer_wc =
+      static_cast<WebContentsImpl*>(shell()->web_contents());
+
+  // Setup inner WebContents embedded via a SurfaceEmbedConnector.
+  WebContents::CreateParams inner_params(
+      shell()->web_contents()->GetBrowserContext());
+  std::unique_ptr<WebContents> inner_wc = WebContents::Create(inner_params);
+  WebContentsImpl* inner_wc_impl =
+      static_cast<WebContentsImpl*>(inner_wc.get());
+  inner_wc->SetDelegate(outer_wc->GetDelegate());
+
+  auto connector = CreateConnector(inner_wc_impl, outer_wc);
+  inner_wc_impl->SetSurfaceEmbedConnector(std::move(connector));
+
+  // Navigate to a page with an out-of-process iframe.
+  ASSERT_TRUE(NavigateToURL(inner_wc.get(), inner_url));
+  auto* rfh_a =
+      static_cast<RenderFrameHostImpl*>(inner_wc_impl->GetPrimaryMainFrame());
+  ASSERT_TRUE(rfh_a);
+  auto* rfh_b = static_cast<RenderFrameHostImpl*>(ChildFrameAt(rfh_a, 0));
+  ASSERT_TRUE(rfh_b);
+
+  // Enable accessibility so a BrowserAccessibilityManager is built per frame.
+  inner_wc_impl->SetAccessibilityMode(ui::kAXModeComplete);
+
+  // Both frames are embedded: the outermost frame is surface-embedded into the
+  // outer WebContents, and the out-of-process subframe has a frame-tree parent.
+  // Neither is the AX root.
+  EXPECT_FALSE(rfh_a->AccessibilityIsRootFrame());
+  EXPECT_FALSE(rfh_b->AccessibilityIsRootFrame());
 }
 
 IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
@@ -8967,256 +9326,6 @@ IN_PROC_BROWSER_TEST_F(WebContentsFencedFrameBrowserTest, DoNotUpdateAXTree) {
   EXPECT_NE(nullptr, fenced_frame_rfh);
 }
 
-namespace {
-
-class TestJavaScriptDialogManager final : public JavaScriptDialogManager,
-                                          public WebContentsDelegate {
- public:
-  TestJavaScriptDialogManager() = default;
-  ~TestJavaScriptDialogManager() final = default;
-
-  // WebContentsDelegate:
-  JavaScriptDialogManager* GetJavaScriptDialogManager(
-      WebContents* source) final {
-    return this;
-  }
-
-  PreloadingEligibility IsPrerender2Supported(
-      WebContents& web_contents,
-      PreloadingTriggerType trigger_type) final {
-    // Allow tests using this delegate to trigger preloading.
-    return PreloadingEligibility::kEligible;
-  }
-
-  bool IsBackForwardCacheSupported(WebContents& web_contents) final {
-    // Make sure pages using this delegate are destroyed, not cached, on unload.
-    return false;
-  }
-
-  // JavaScriptDialogManager:
-  void RunJavaScriptDialog(WebContents* web_contents,
-                           RenderFrameHost* render_frame_host,
-                           JavaScriptDialogType dialog_type,
-                           const std::u16string& message_text,
-                           const std::u16string& default_prompt_text,
-                           DialogClosedCallback callback,
-                           bool* did_suppress_message) final {
-    ASSERT_TRUE(did_suppress_message);
-    *did_suppress_message = false;
-    closed_callback_ = std::move(callback);
-  }
-
-  void RunBeforeUnloadDialog(WebContents* web_contents,
-                             RenderFrameHost* render_frame_host,
-                             bool is_reload,
-                             DialogClosedCallback callback) final {
-    closed_callback_ = std::move(callback);
-  }
-
-  bool HandleJavaScriptDialog(WebContents* web_contents,
-                              bool accept,
-                              const std::u16string* prompt_override) final {
-    if (closed_callback_) {
-      std::move(closed_callback_).Run(/*success=*/true, std::u16string());
-      return true;
-    }
-    return false;
-  }
-
-  void CancelDialogs(WebContents* web_contents, bool reset_state) final {
-    // Do nothing.
-  }
-
- private:
-  DialogClosedCallback closed_callback_;
-};
-
-}  // namespace
-
-class WebContentsPrerenderWithJSDialogBrowserTest
-    : public WebContentsPrerenderBrowserTest {
- public:
-  void SetUpOnMainThread() override {
-    WebContentsPrerenderBrowserTest::SetUpOnMainThread();
-    web_contents()->SetDelegate(&dialog_manager_);
-
-    // Navigate to a page with a child frame.
-    ASSERT_TRUE(embedded_test_server()->Start());
-    initial_url_ = embedded_test_server()->GetURL("/page_with_iframe.html");
-    ASSERT_TRUE(NavigateToURL(shell(), initial_url_));
-
-    // Prerender another page.
-    prerender_url_ = embedded_test_server()->GetURL("/title1.html");
-    prerender_helper().AddPrerender(prerender_url_);
-    activation_manager_.emplace(web_contents(), prerender_url_);
-  }
-
-  void TearDownOnMainThread() override {
-    activation_manager_.reset();
-    web_contents()->SetDelegate(shell());
-    WebContentsPrerenderBrowserTest::TearDownOnMainThread();
-  }
-
-  RenderFrameHost* GetFirstChildFrame() {
-    RenderFrameHost* main_rfh = web_contents()->GetPrimaryMainFrame();
-    RenderFrameHost* child_rfh = nullptr;
-    main_rfh->ForEachRenderFrameHost([&](RenderFrameHost* rfh) {
-      if (child_rfh) {
-        ADD_FAILURE() << "Should only be 1 child frame";
-        return;
-      }
-      if (rfh != main_rfh) {
-        child_rfh = rfh;
-      }
-    });
-    return child_rfh;
-  }
-
-  void NavigateToPrerenderedPage(bool expect_deferred) {
-    ExecuteScriptAsyncWithoutUserGesture(
-        web_contents(), JsReplace("location.href = $1", prerender_url_));
-    EXPECT_TRUE(activation_manager_->WaitForBeforeChecks());
-
-    // This handle is only valid until ResumeActivation().
-    NavigationHandle* navigation_handle =
-        activation_manager_->GetNavigationHandle();
-    ASSERT_TRUE(navigation_handle);
-    EXPECT_EQ(navigation_handle->IsCommitDeferringConditionDeferredForTesting(),
-              expect_deferred);
-
-    // ResumeActivation() must be called to continue after
-    // WaitForBeforeChecks(), but nothing should happen if activation is
-    // deferred.
-    activation_manager_->ResumeActivation();
-    EXPECT_EQ(activation_manager_->was_activated(), !expect_deferred);
-    EXPECT_EQ(web_contents()->GetLastCommittedURL(),
-              expect_deferred ? initial_url_ : prerender_url_);
-  }
-
-  GURL initial_url() const { return initial_url_; }
-  GURL prerender_url() const { return prerender_url_; }
-
-  TestJavaScriptDialogManager& dialog_manager() { return dialog_manager_; }
-  TestActivationManager& activation_manager() { return *activation_manager_; }
-
- private:
-  TestJavaScriptDialogManager dialog_manager_;
-  std::optional<TestActivationManager> activation_manager_;
-  GURL initial_url_;
-  GURL prerender_url_;
-};
-
-IN_PROC_BROWSER_TEST_F(WebContentsPrerenderWithJSDialogBrowserTest,
-                       ModalDialogDefersActivation) {
-  RenderFrameHostImplWrapper main_rfh(web_contents()->GetPrimaryMainFrame());
-  RenderFrameHostImplWrapper child_rfh(GetFirstChildFrame());
-  ASSERT_TRUE(main_rfh);
-  ASSERT_TRUE(child_rfh);
-
-  // Open a JS dialog. It should defer navigations and prerender activations.
-  main_rfh->RunModalAlertDialog(
-      u"alert", /*disable_third_party_subframe_suppresion=*/true,
-      base::DoNothing());
-  EXPECT_TRUE(web_contents_impl()->JavaScriptDialogDefersNavigations());
-  NavigateToPrerenderedPage(/*expect_deferred=*/true);
-
-  // Dismissing the dialog should asynchronously resume the activation.
-  dialog_manager().HandleJavaScriptDialog(web_contents(), /*accept=*/true,
-                                          /*prompt_override=*/nullptr);
-  EXPECT_FALSE(web_contents_impl()->JavaScriptDialogDefersNavigations());
-
-  // The prerender activation should not yet have replaced the main or child
-  // frames.
-  EXPECT_FALSE(activation_manager().was_activated());
-  EXPECT_EQ(web_contents()->GetLastCommittedURL(), initial_url());
-  EXPECT_TRUE(main_rfh);
-  EXPECT_TRUE(child_rfh);
-
-  // Wait until the activation finishes and destroys the child frame.
-  activation_manager().WaitForNavigationFinished();
-  EXPECT_TRUE(activation_manager().was_activated());
-  EXPECT_EQ(web_contents()->GetLastCommittedURL(), prerender_url());
-  EXPECT_FALSE(child_rfh);
-}
-
-IN_PROC_BROWSER_TEST_F(WebContentsPrerenderWithJSDialogBrowserTest,
-                       BeforeUnloadDialogDefersActivation) {
-  RenderFrameHostImplWrapper main_rfh(web_contents()->GetPrimaryMainFrame());
-  RenderFrameHostImplWrapper child_rfh(GetFirstChildFrame());
-  ASSERT_TRUE(main_rfh);
-  ASSERT_TRUE(child_rfh);
-
-  // Open a before unload confirm dialog. It should defer navigations and
-  // prerender activations.
-  web_contents_impl()->RunBeforeUnloadConfirm(
-      main_rfh.get(), /*is_reload=*/false, base::DoNothing());
-  EXPECT_TRUE(web_contents_impl()->JavaScriptDialogDefersNavigations());
-  NavigateToPrerenderedPage(/*expect_deferred=*/true);
-
-  // Dismissing the dialog should asynchronously resume the activation.
-  dialog_manager().HandleJavaScriptDialog(web_contents(), /*accept=*/true,
-                                          /*prompt_override=*/nullptr);
-  EXPECT_FALSE(web_contents_impl()->JavaScriptDialogDefersNavigations());
-
-  // The prerender activation should not yet have replaced the main or child
-  // frames.
-  EXPECT_FALSE(activation_manager().was_activated());
-  EXPECT_EQ(web_contents()->GetLastCommittedURL(), initial_url());
-  EXPECT_TRUE(main_rfh);
-  EXPECT_TRUE(child_rfh);
-
-  // Wait until the activation finishes and destroys the child frame.
-  activation_manager().WaitForNavigationFinished();
-  EXPECT_TRUE(activation_manager().was_activated());
-  EXPECT_EQ(web_contents()->GetLastCommittedURL(), prerender_url());
-  EXPECT_FALSE(child_rfh);
-}
-
-IN_PROC_BROWSER_TEST_F(WebContentsPrerenderWithJSDialogBrowserTest,
-                       MultipleDialogsDeferActivation) {
-  RenderFrameHostImplWrapper main_rfh(web_contents()->GetPrimaryMainFrame());
-  RenderFrameHostImplWrapper child_rfh(GetFirstChildFrame());
-  ASSERT_TRUE(main_rfh);
-  ASSERT_TRUE(child_rfh);
-
-  // Open a JS dialog. It should defer navigations.
-  main_rfh->RunModalAlertDialog(
-      u"main alert", /*disable_third_party_subframe_suppresion=*/true,
-      base::DoNothing());
-  EXPECT_TRUE(web_contents_impl()->JavaScriptDialogDefersNavigations());
-  NavigateToPrerenderedPage(/*expect_deferred=*/true);
-
-  // Open a JS dialog from the child frame. It will replace the existing dialog
-  // without running the close callback. Navigations and activations should NOT
-  // resume.
-  child_rfh->RunModalAlertDialog(
-      u"child alert", /*disable_third_party_subframe_suppresion=*/true,
-      base::DoNothing());
-  EXPECT_TRUE(web_contents_impl()->JavaScriptDialogDefersNavigations());
-  EXPECT_FALSE(activation_manager().was_activated());
-  EXPECT_EQ(web_contents()->GetLastCommittedURL(), initial_url());
-  EXPECT_TRUE(main_rfh);
-  EXPECT_TRUE(child_rfh);
-
-  // Dismissing the dialog should asynchronously resume the activation.
-  dialog_manager().HandleJavaScriptDialog(web_contents(), /*accept=*/true,
-                                          /*prompt_override=*/nullptr);
-  EXPECT_FALSE(web_contents_impl()->JavaScriptDialogDefersNavigations());
-
-  // The prerender activation should not yet have replaced the main or child
-  // frames.
-  EXPECT_FALSE(activation_manager().was_activated());
-  EXPECT_EQ(web_contents()->GetLastCommittedURL(), initial_url());
-  EXPECT_TRUE(main_rfh);
-  EXPECT_TRUE(child_rfh);
-
-  // Wait until the activation finishes and destroys the child frame.
-  activation_manager().WaitForNavigationFinished();
-  EXPECT_TRUE(activation_manager().was_activated());
-  EXPECT_EQ(web_contents()->GetLastCommittedURL(), prerender_url());
-  EXPECT_FALSE(child_rfh);
-}
-
 IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
                        ShowPickerBlockedWhenUnfocused) {
   ASSERT_TRUE(embedded_test_server()->Start());
@@ -9327,131 +9436,6 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
   if (opener_contents) {
     opener_contents->SetDelegate(shell());
   }
-}
-
-// Simulates a delegate that removes an iframe synchronously upon exiting
-// fullscreen.
-class DetachFrameOnFullscreenExitDelegate : public WebContentsDelegate {
- public:
-  DetachFrameOnFullscreenExitDelegate(WebContentsDelegate* original_delegate,
-                                      WebContents* target_contents)
-      : original_delegate_(original_delegate),
-        target_contents_(target_contents) {}
-
-  void ExitFullscreenModeForTab(WebContents* web_contents) override {
-    if (target_contents_) {
-      EXPECT_TRUE(ExecJs(target_contents_,
-                         "document.querySelector('iframe').remove();"));
-      target_contents_ = nullptr;
-    }
-    if (original_delegate_) {
-      original_delegate_->ExitFullscreenModeForTab(web_contents);
-    }
-  }
-
-  FullscreenState GetFullscreenState(
-      const WebContents* web_contents) const override {
-    if (original_delegate_) {
-      return original_delegate_->GetFullscreenState(web_contents);
-    }
-    return FullscreenState();
-  }
-
-  bool IsFullscreenForTabOrPending(const WebContents* web_contents) override {
-    if (original_delegate_) {
-      return original_delegate_->IsFullscreenForTabOrPending(web_contents);
-    }
-    return false;
-  }
-
- private:
-  raw_ptr<WebContentsDelegate> original_delegate_;
-  raw_ptr<WebContents, DisableDanglingPtrDetection> target_contents_;
-};
-
-// Tracks whether FileSelectionCanceled() was called.
-class CancellationTrackingFileSelectListener
-    : public FileChooserImpl::FileSelectListenerImpl {
- public:
-  CancellationTrackingFileSelectListener()
-      : FileSelectListenerImpl(/*owner=*/nullptr) {}
-
-  bool was_canceled() const { return was_canceled_; }
-
-  // FileChooserImpl::FileSelectListenerImpl:
-  void FileSelectionCanceled() override {
-    was_canceled_ = true;
-    FileSelectListenerImpl::FileSelectionCanceled();
-  }
-
- protected:
-  ~CancellationTrackingFileSelectListener() override = default;
-
- private:
-  bool was_canceled_ = false;
-};
-
-IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
-                       EnumerateDirectoryFrameDetachOnFullscreenExit) {
-  ASSERT_TRUE(embedded_test_server()->Start());
-  GURL url(embedded_test_server()->GetURL("/title1.html"));
-  EXPECT_TRUE(NavigateToURL(shell(), url));
-
-  WebContentsImpl* opener_contents =
-      static_cast<WebContentsImpl*>(shell()->web_contents());
-
-  ShellAddedObserver new_shell_observer;
-  EXPECT_TRUE(ExecJs(opener_contents, "window.open('about:blank', 'popup')"));
-  Shell* popup_shell = new_shell_observer.GetShell();
-  WebContentsImpl* popup_contents =
-      static_cast<WebContentsImpl*>(popup_shell->web_contents());
-
-  EXPECT_EQ(opener_contents,
-            popup_contents->GetFirstWebContentsInLiveOriginalOpenerChain());
-
-  FullscreenWebContentsObserver observer(
-      opener_contents, opener_contents->GetPrimaryMainFrame());
-  EXPECT_TRUE(ExecJs(opener_contents->GetPrimaryMainFrame(),
-                     "document.body.webkitRequestFullscreen();"));
-  observer.Wait();
-  EXPECT_TRUE(opener_contents->IsFullscreen());
-
-  EXPECT_TRUE(ExecJs(popup_contents, R"(
-    new Promise(resolve => {
-      let iframe = document.createElement('iframe');
-      iframe.src = 'about:blank';
-      iframe.onload = resolve;
-      document.body.appendChild(iframe);
-    });
-  )"));
-
-  RenderFrameHostImpl* child_rfh = static_cast<RenderFrameHostImpl*>(
-      ChildFrameAt(popup_contents->GetPrimaryMainFrame(), 0));
-  ASSERT_TRUE(child_rfh);
-
-  base::WeakPtr<RenderFrameHostImpl> weak_child_rfh = child_rfh->GetWeakPtr();
-
-  DetachFrameOnFullscreenExitDelegate intercepting_delegate(
-      opener_contents->GetDelegate(), popup_contents);
-  opener_contents->SetDelegate(&intercepting_delegate);
-  // `intercepting_delegate` lives on the stack, so it must be detached before
-  // this scope ends no matter how the test exits.
-  absl::Cleanup restore_delegate = [opener_contents, shell = shell()] {
-    opener_contents->SetDelegate(shell);
-  };
-
-  auto listener =
-      base::MakeRefCounted<CancellationTrackingFileSelectListener>();
-  // EnumerateDirectory() calls ForSecurityDropFullscreen() to prevent
-  // fullscreen spoofing. Because `opener_contents` is in the opener chain of
-  // `popup_contents` and is currently in fullscreen,
-  // ForSecurityDropFullscreen() asks `opener_contents` to exit fullscreen.
-  popup_contents->EnumerateDirectory(nullptr, child_rfh, listener,
-                                     base::FilePath());
-
-  EXPECT_EQ(weak_child_rfh, nullptr);
-  // Ensure the listener is answered to avoid leaking the Mojo callback.
-  EXPECT_TRUE(listener->was_canceled());
 }
 
 }  // namespace content

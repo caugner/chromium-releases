@@ -28,7 +28,10 @@ enum class ChromeInitiatorLocation : page_load_metrics::
       kOmniboxDirectUrlInput = 3,
       kOmniboxDefaultSearchEngine = 4,
       kLinkClick = 5,
-      kMaxValue = kLinkClick
+      kForward = 6,
+      kBackward = 7,
+      kReload = 8,
+      kMaxValue = kReload
     };
 // LINT.ThenChange(//tools/metrics/histograms/metadata/navigation/enums.xml:NavigationInitiatorType)
 
@@ -59,6 +62,9 @@ void AttachOmniboxDefaultSearchEngineNavigationHandleUserData(
     content::NavigationHandle& navigation_handle);
 
 void AttachBookmarkBarNavigationHandleUserData(
+    content::NavigationHandle& navigation_handle);
+
+void MarkNavigationServedBySearchPrefetch(
     content::NavigationHandle& navigation_handle);
 
 #endif  // CHROME_BROWSER_PAGE_LOAD_METRICS_CHROME_INITIATOR_LOCATION_H_

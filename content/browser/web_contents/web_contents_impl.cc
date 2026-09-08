@@ -113,6 +113,7 @@
 #include "content/browser/renderer_host/navigation_request.h"
 #include "content/browser/renderer_host/page_impl.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
+#include "content/browser/renderer_host/render_frame_host_manager.h"
 #include "content/browser/renderer_host/render_frame_proxy_host.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_delegate_view.h"
@@ -739,16 +740,9 @@ class JavaScriptDialogDismissNotifier {
       const JavaScriptDialogDismissNotifier&) = delete;
 
   ~JavaScriptDialogDismissNotifier() {
-    // Post a task to notify all clients, since callbacks could destroy an
-    // object on the stack.
-    GetUIThreadTaskRunner({})->PostTask(
-        FROM_HERE, base::BindOnce(
-                       [](std::vector<base::OnceClosure> callbacks) {
-                         for (auto& callback : callbacks) {
-                           std::move(callback).Run();
-                         }
-                       },
-                       std::move(callbacks_)));
+    for (auto& callback : callbacks_) {
+      std::move(callback).Run();
+    }
   }
 
   void NotifyOnDismiss(base::OnceClosure callback) {
@@ -1456,6 +1450,16 @@ WebContentsImpl::~WebContentsImpl() {
     SetPointerLockWidgetInParentChain(nullptr);
   }
 
+  // Auto-detach any WebContents embedded in this one via SurfaceEmbed.
+  // Swap to a local since Detach modifies surface_embed_children_.
+  std::vector<base::WeakPtr<WebContents>> children;
+  children.swap(surface_embed_children_);
+  for (auto& child_weak : children) {
+    if (WebContents* child = child_weak.get()) {
+      SurfaceEmbedConnector::Detach(child);
+    }
+  }
+
   if (surface_embed_connector_) {
     ClearSurfaceEmbedConnector();
   }
@@ -1762,6 +1766,18 @@ void WebContentsImpl::SetDelegate(WebContentsDelegate* delegate) {
   // Re-read values from the new delegate and apply them.
   if (view_) {
     view_->SetOverscrollControllerEnabled(CanOverscrollContent());
+  }
+}
+
+void WebContentsImpl::OptOutFrameEviction(
+    base::PassKey<FrameEvictionOptOutClient>) {
+  if (opt_out_frame_eviction_) {
+    return;
+  }
+  opt_out_frame_eviction_ = true;
+  if (RenderWidgetHostViewBase* view =
+          static_cast<RenderWidgetHostViewBase*>(GetRenderWidgetHostView())) {
+    view->OptOutFrameEviction();
   }
 }
 
@@ -2222,6 +2238,15 @@ void WebContentsImpl::SetAccessibilityMode(ui::AXMode mode) {
         }
         return FrameIterationAction::kSkipChildren;
       });
+
+  // Start recording if a request to record events has been received and this is
+  // the first time that at least kNativeAPIs has been requested.
+  if (pending_recording_ &&
+      accessibility_mode_.has_mode(ui::AXMode::kNativeAPIs)) {
+    PendingRecording pending = *std::exchange(pending_recording_, std::nullopt);
+    StartRecordingAccessibilityEvents(pending.api_type,
+                                      std::move(pending.callback));
+  }
 }
 
 void WebContentsImpl::DidCapturedSurfaceControl() {
@@ -3424,6 +3449,14 @@ void WebContentsImpl::AttachInnerWebContentsImpl(
     inner_web_contents_impl->SetAsFocusedWebContentsIfNecessary();
   }
 
+  // Synchronize visual properties so that the inner main frame's renderer
+  // process immediately receives initial throttling status upon being attached
+  // as an embedded main frame.
+  if (auto* rwh = inner_web_contents_impl->GetPrimaryMainFrame()
+                      ->GetRenderWidgetHost()) {
+    rwh->SynchronizeVisualProperties();
+  }
+
   observers_.NotifyObservers(&WebContentsObserver::InnerWebContentsAttached,
                              inner_web_contents_impl, render_frame_host);
 
@@ -3567,11 +3600,13 @@ void WebContentsImpl::SetSurfaceEmbedConnector(
 
   RecursivelyRegisterRenderWidgetHostViews();
 
-  surface_embed_connector_->UpdateViewForCurrentRenderFrameHost();
+  surface_embed_connector_->OnAttachedToParent();
 }
 
 void WebContentsImpl::ClearSurfaceEmbedConnector() {
   CHECK(surface_embed_connector_);
+
+  surface_embed_connector_->OnDetachedFromParent();
 
   surface_embed_connector_->ClearFocusOnInnerWebContents();
 
@@ -3603,7 +3638,32 @@ void WebContentsImpl::ClearSurfaceEmbedConnector() {
     view_ = nullptr;
   }
 
+  // The child main frame derives its embed-parent AX tree id from the
+  // connector. Clear that id from the child's AX tree data *before* freeing the
+  // connector. AccessibilityIsRootFrame() consults the connector, so if the
+  // connector were freed first the frame would report itself as the AX root
+  // while its tree data still carried the embedder's parent tree id.
+  // Serializing in that window trips
+  // BrowserAccessibilityManager::IsRootFrameManager()'s invariant that a root
+  // tree has no parent tree id. Note AXTree::Unserialize() notifies observers
+  // before it applies the new tree data, so the clear must happen while the
+  // connector still makes the frame a non-root. This runs even during
+  // destruction because the BrowserAccessibilityManagers are torn down after
+  // this point and cannot have a stale embedder parent tree id.
+  const bool had_embed_parent_ax_tree_id =
+      surface_embed_connector_->GetParentAXTreeID() != ui::AXTreeIDUnknown();
+  if (had_embed_parent_ax_tree_id) {
+    primary_frame_tree_.root()->current_frame_host()->ClearEmbedderAXTreeData();
+  }
+
   surface_embed_connector_.reset();
+
+  // The frame is now a true AX root. Refresh so the renderer and platform
+  // managers observe the final state. The tree data no longer carries the
+  // embedder's parent tree id, so this no longer sees an inconsistent state.
+  if (had_embed_parent_ax_tree_id && !IsBeingDestroyed()) {
+    primary_frame_tree_.root()->current_frame_host()->UpdateAXTreeData();
+  }
 
   // Recreate and register RenderWidgetHostView.
   if (!IsBeingDestroyed()) {
@@ -3716,6 +3776,14 @@ void WebContentsImpl::AttachGuestPage(
 
   outer_render_manager->set_attach_inner_delegate_complete();
   inner_main_frame->PropagateEmbeddingTokenToParentFrame();
+
+  // Synchronize visual properties so that the guest main frame's renderer
+  // process immediately receives initial throttling status upon being attached
+  // as an embedded main frame.
+  if (auto* rwh = inner_main_frame->GetRenderWidgetHost()) {
+    rwh->SynchronizeVisualProperties();
+  }
+
   // TODO(crbug.com/40202416): Determine if anything else is needed here.
 }
 
@@ -3741,6 +3809,13 @@ void WebContentsImpl::RecursivelyRegisterRenderWidgetHostViews() {
       static_cast<RenderWidgetHostViewChildFrame*>(view)->RegisterFrameSinkId();
     }
   }
+
+  // surface_embed_children_ is not expected to change during registration.
+  for (const auto& child_weak : surface_embed_children_) {
+    if (auto* child = static_cast<WebContentsImpl*>(child_weak.get())) {
+      child->RecursivelyRegisterRenderWidgetHostViews();
+    }
+  }
 }
 
 void WebContentsImpl::RecursivelyUnregisterRenderWidgetHostViews() {
@@ -3757,6 +3832,13 @@ void WebContentsImpl::RecursivelyUnregisterRenderWidgetHostViews() {
     if (view->IsRenderWidgetHostViewChildFrame()) {
       static_cast<RenderWidgetHostViewChildFrame*>(view)
           ->UnregisterFrameSinkId();
+    }
+  }
+
+  // surface_embed_children_ is not expected to change during unregistration.
+  for (const auto& child_weak : surface_embed_children_) {
+    if (auto* child = static_cast<WebContentsImpl*>(child_weak.get())) {
+      child->RecursivelyUnregisterRenderWidgetHostViews();
     }
   }
 }
@@ -4290,6 +4372,8 @@ void WebContentsImpl::Init(const WebContents::CreateParams& params,
 
   is_never_composited_ = params.is_never_composited;
 
+  privileged_params_ = params.privileged_params;
+
   creator_location_ = params.creator_location;
 #if BUILDFLAG(IS_ANDROID)
   java_creator_location_ = params.java_creator_location;
@@ -4303,13 +4387,16 @@ void WebContentsImpl::Init(const WebContents::CreateParams& params,
     }
   }
 
+  CHECK(!(params.initially_hidden && params.initially_hidden_but_painting));
+  initially_hidden_but_painting_ = params.initially_hidden_but_painting;
   // This is set before initializing the render manager since
   // RenderFrameHostManager::Init calls back into us via its delegate to ask if
   // it should be hidden.
-  visibility_ =
-      params.initially_hidden ? Visibility::HIDDEN : Visibility::VISIBLE;
-
-  GetController().SetActive(visibility_ == Visibility::VISIBLE);
+  visibility_ = params.initially_hidden || initially_hidden_but_painting_
+                    ? Visibility::HIDDEN
+                    : Visibility::VISIBLE;
+  GetController().SetActive(GetPageVisibilityState() !=
+                            PageVisibilityState::kHidden);
 
   enable_wake_locks_ = params.enable_wake_locks;
 
@@ -5072,7 +5159,8 @@ PageVisibilityState WebContentsImpl::CalculatePageVisibilityState(
   if (visibility == Visibility::VISIBLE || visible_capturer_count_ > 0 ||
       web_contents_visible_in_vr) {
     return PageVisibilityState::kVisible;
-  } else if (hidden_capturer_count_ > 0 || has_picture_in_picture_video_ ||
+  } else if ((!did_first_set_visible_ && initially_hidden_but_painting_) ||
+             hidden_capturer_count_ > 0 || has_picture_in_picture_video_ ||
              has_picture_in_picture_document_) {
     return PageVisibilityState::kHiddenButPainting;
   }
@@ -5907,6 +5995,10 @@ WebContents* WebContentsImpl::ShowCreatedWindow(
 
   WebContentsImpl* created = owned_created->contents.get();
 
+  // This uses the delegate for the WebContents where the window was created
+  // from, to control how to show the newly created window.
+  WebContentsDelegate* delegate = GetDelegate();
+
   // Individual members of |window_features.bounds| may be 0 to indicate that
   // the window.open() feature string did not specify a value. This code does
   // not distinguish between an unspecified value and 0.
@@ -5923,11 +6015,7 @@ WebContents* WebContentsImpl::ShowCreatedWindow(
     return nullptr;
   }
 
-  // This uses the delegate for the WebContents where the window was created
-  // from, to control how to show the newly created window.
-  // The delegate can be null in tests, or reset if dropping fullscreen executed
-  // event handlers.
-  WebContentsDelegate* delegate = GetDelegate();
+  // The delegate can be null in tests.
   if (!delegate) {
     return nullptr;
   }
@@ -6343,24 +6431,37 @@ void WebContentsImpl::RecordAccessibilityEvents(
     recording_mode_ =
         BrowserAccessibilityState::GetInstance()
             ->CreateScopedModeForWebContents(this, ui::kAXModeBasic);
-    auto* ax_mgr = GetOrCreateRootBrowserAccessibilityManager();
-    CHECK(ax_mgr);
-    base::ProcessId pid = base::Process::Current().Pid();
-    gfx::AcceleratedWidget widget =
-        ax_mgr->GetBrowserAccessibilityRoot()
-            ->GetTargetForNativeAccessibilityEvent();
-
-    DCHECK(std::ranges::contains(AXInspectFactory::SupportedApis(), api_type));
-    event_recorder_ = content::AXInspectFactory::CreateRecorder(
-        api_type, ax_mgr, pid, ui::AXTreeSelector(widget));
-    event_recorder_->ListenToEvents(*callback);
+    if (accessibility_mode_.has_mode(ui::AXMode::kNativeAPIs)) {
+      StartRecordingAccessibilityEvents(api_type, *std::move(callback));
+    } else {
+      // The WebContents must be hidden. Defer starting the recording until
+      // accessibility is enabled once it is shown.
+      pending_recording_ = PendingRecording{.api_type = api_type,
+                                            .callback = *std::move(callback)};
+    }
   } else {
+    pending_recording_.reset();
     if (event_recorder_) {
       event_recorder_->WaitForDoneRecording();
       event_recorder_.reset(nullptr);
     }
     recording_mode_.reset();
   }
+}
+
+void WebContentsImpl::StartRecordingAccessibilityEvents(
+    ui::AXApiType::Type api_type,
+    ui::AXEventCallback callback) {
+  auto* ax_mgr = GetOrCreateRootBrowserAccessibilityManager();
+  CHECK(ax_mgr);
+  base::ProcessId pid = base::Process::Current().Pid();
+  gfx::AcceleratedWidget widget = ax_mgr->GetBrowserAccessibilityRoot()
+                                      ->GetTargetForNativeAccessibilityEvent();
+
+  DCHECK(std::ranges::contains(AXInspectFactory::SupportedApis(), api_type));
+  event_recorder_ = content::AXInspectFactory::CreateRecorder(
+      api_type, ax_mgr, pid, ui::AXTreeSelector(widget));
+  event_recorder_->ListenToEvents(std::move(callback));
 }
 
 void WebContentsImpl::UnrecoverableAccessibilityError() {
@@ -6576,7 +6677,7 @@ const std::optional<gfx::Rect> WebContentsImpl::GetTextSelectionBounds(
   return std::nullopt;
 }
 
-const std::optional<gfx::Point> WebContentsImpl::GetFocusSelectionPoint(
+const std::optional<gfx::Rect> WebContentsImpl::GetFocusSelectionBounds(
     RenderFrameHost* render_frame_host) const {
   if (text_input_manager_ && render_frame_host) {
     auto* view =
@@ -6590,8 +6691,7 @@ const std::optional<gfx::Point> WebContentsImpl::GetFocusSelectionPoint(
         gfx::Rect bounds = gfx::BoundingRect(start, end);
         gfx::Point origin = bounds.origin();
         origin += root_view->GetViewBounds().OffsetFromOrigin();
-        origin += gfx::Vector2d(bounds.width(), bounds.height());
-        return origin;
+        return gfx::Rect(origin, bounds.size());
       }
     }
   }
@@ -7351,6 +7451,11 @@ bool WebContentsImpl::GotResponseToPointerLockRequest(
     if (pointer_lock_widget_->GotResponseToPointerLockRequest(result)) {
       return true;
     }
+
+    if (pointer_lock_widget_ && pointer_lock_widget_->GetView() &&
+        pointer_lock_widget_->GetView()->IsPointerLocked()) {
+      return true;
+    }
   }
 
   SetPointerLockWidgetInParentChain(nullptr);
@@ -8102,11 +8207,22 @@ void WebContentsImpl::NotifyChangedNavigationState(
 }
 
 bool WebContentsImpl::ShouldAllowRendererInitiatedCrossProcessNavigation(
+    RenderFrameHostImpl* render_frame_host,
     bool is_outermost_main_frame_navigation) {
   OPTIONAL_TRACE_EVENT1(
       "content",
       "WebContentsImpl::ShouldAllowRendererInitiatedCrossProcessNavigation",
       "is_outermost_main_frame_navigation", is_outermost_main_frame_navigation);
+  if (render_frame_host->frame_tree()->is_guest()) {
+    GuestPageHolderImpl* guest =
+        GuestPageHolderImpl::FromRenderFrameHost(*render_frame_host);
+    if (guest && guest->delegate()) {
+      return guest->delegate()
+          ->GuestShouldAllowRendererInitiatedCrossProcessNavigation(
+              is_outermost_main_frame_navigation);
+    }
+    return true;
+  }
   if (!delegate_) {
     return true;
   }
@@ -8506,20 +8622,6 @@ void WebContentsImpl::ViewSource(RenderFrameHostImpl* frame) {
     return;
   }
 
-  // Any new WebContents opened while this WebContents is in fullscreen can be
-  // used to confuse the user, so drop fullscreen. Dropping fullscreen can run
-  // event handlers synchronously, which may reset `delegate_` or detach
-  // `frame`. Dropping fullscreen before reading NavigationEntries also avoids
-  // holding pointers across the nested message loop.
-  base::WeakPtr<RenderFrameHostImpl> weak_frame = frame->GetWeakPtr();
-  if (!ForSecurityDropFullscreen(/*display_id=*/display::kInvalidDisplayId) ||
-      !delegate_) {
-    return;
-  }
-  if (!weak_frame) {
-    return;
-  }
-
   // Use the last committed entry, since the pending entry hasn't loaded yet and
   // won't be copied into the cloned tab.
   NavigationEntryImpl* last_committed_entry =
@@ -8534,6 +8636,11 @@ void WebContentsImpl::ViewSource(RenderFrameHostImpl* frame) {
     return;
   }
 
+  // Any new WebContents opened while this WebContents is in fullscreen can be
+  // used to confuse the user, so drop fullscreen.
+  if (!ForSecurityDropFullscreen(/*display_id=*/display::kInvalidDisplayId)) {
+    return;
+  }
 
   // We intentionally don't share the SiteInstance with the original frame so
   // that view source has a consistent process model and always ends up in a new
@@ -8762,15 +8869,12 @@ void WebContentsImpl::OnPageScaleFactorChanged(PageImpl& source) {
 
 void WebContentsImpl::EnumerateDirectory(
     base::WeakPtr<FileChooserImpl> file_chooser,
-    RenderFrameHostImpl* render_frame_host,
+    RenderFrameHost* render_frame_host,
     scoped_refptr<FileChooserImpl::FileSelectListenerImpl> listener,
     const base::FilePath& directory_path) {
   OPTIONAL_TRACE_EVENT2("content", "WebContentsImpl::EnumerateDirectory",
                         "render_frame_host", render_frame_host,
                         "directory_path", directory_path);
-  // The sole caller, FileChooserImpl::EnumerateChosenDirectory(), returns
-  // early if its frame is gone, and dereferences it on the way here.
-  CHECK(render_frame_host);
   absl::Cleanup cancel_chooser = [&listener] {
     listener->FileSelectionCanceled();
   };
@@ -8788,13 +8892,10 @@ void WebContentsImpl::EnumerateDirectory(
   }
 
   // Any explicit focusing of another window while this WebContents is in
-  // fullscreen can be used to confuse the user, so drop fullscreen. Dropping
-  // fullscreen can run event handlers synchronously, which may detach the
-  // frame that asked for the directory listing.
-  base::WeakPtr<RenderFrameHostImpl> weak_rfh = render_frame_host->GetWeakPtr();
+  // fullscreen can be used to confuse the user, so drop fullscreen.
   auto blocker =
       ForSecurityDropFullscreen(/*display_id=*/display::kInvalidDisplayId);
-  if (!blocker || !weak_rfh || !weak_rfh->IsActive()) {
+  if (!blocker) {
     return;
   }
   listener->SetFullscreenBlock(std::move(*blocker));
@@ -9909,6 +10010,7 @@ void WebContentsImpl::SurfaceEmbedChildWebContentsAttached(
     RenderFrameHost* embedder_render_frame_host) {
   OPTIONAL_TRACE_EVENT0(
       "content", "WebContentsImpl::SurfaceEmbedChildWebContentsAttached");
+  surface_embed_children_.push_back(inner_web_contents->GetWeakPtr());
   observers_.NotifyObservers(
       &WebContentsObserver::SurfaceEmbedChildWebContentsAttached,
       inner_web_contents, embedder_render_frame_host);
@@ -9918,6 +10020,9 @@ void WebContentsImpl::SurfaceEmbedChildWebContentsDetached(
     WebContents* inner_web_contents) {
   OPTIONAL_TRACE_EVENT0(
       "content", "WebContentsImpl::SurfaceEmbedChildWebContentsDetached");
+  std::erase_if(surface_embed_children_, [inner_web_contents](const auto& ptr) {
+    return ptr.get() == inner_web_contents;
+  });
   observers_.NotifyObservers(
       &WebContentsObserver::SurfaceEmbedChildWebContentsDetached,
       inner_web_contents);
@@ -10092,7 +10197,7 @@ void WebContentsImpl::SetWindowRect(const gfx::Rect& new_bounds) {
   // Only drop fullscreen on the specific destination display, which is known.
   // This supports sites using cross-screen window management capabilities to
   // retain fullscreen and place a window on another screen.
-  if (!ForSecurityDropFullscreen(display_id) || !delegate_) {
+  if (!ForSecurityDropFullscreen(display_id)) {
     return;
   }
 
@@ -10110,7 +10215,7 @@ void WebContentsImpl::MoveWindowTo(const gfx::Point& origin) {
   }
   gfx::Rect bounds(origin, view->GetBoundsInScreen().size());
   int64_t display_id = AdjustWindowRect(&bounds, GetPrimaryMainFrame());
-  if (!ForSecurityDropFullscreen(display_id) || !delegate_) {
+  if (!ForSecurityDropFullscreen(display_id)) {
     return;
   }
   delegate_->SetContentsBounds(this, bounds);
@@ -10127,7 +10232,7 @@ void WebContentsImpl::ResizeWindowTo(const gfx::Size& size) {
   }
   gfx::Rect bounds(view->GetBoundsInScreen().origin(), size);
   int64_t display_id = AdjustWindowRect(&bounds, GetPrimaryMainFrame());
-  if (!ForSecurityDropFullscreen(display_id) || !delegate_) {
+  if (!ForSecurityDropFullscreen(display_id)) {
     return;
   }
   delegate_->SetContentsBounds(this, bounds);
@@ -10410,6 +10515,15 @@ void WebContentsImpl::CreateThrottlesForNavigation(
                         "WebContentsImpl::CreateThrottlesForNavigation",
                         "navigation", registry.GetNavigationHandle());
   GetContentClient()->browser()->CreateThrottlesForNavigation(registry);
+}
+
+void WebContentsImpl::CreateThrottlesForCommitWithoutUrlLoader(
+    NavigationThrottleRegistry& registry) {
+  OPTIONAL_TRACE_EVENT1(
+      "content", "WebContentsImpl::CreateThrottlesForCommitWithoutUrlLoader",
+      "navigation", registry.GetNavigationHandle());
+  GetContentClient()->browser()->CreateThrottlesForCommitWithoutUrlLoader(
+      registry);
 }
 
 std::vector<std::unique_ptr<CommitDeferringCondition>>
@@ -10810,12 +10924,16 @@ void WebContentsImpl::SetFocusedFrame(FrameTreeNode* node,
       CHECK(GetOuterWebContents());
       SetFocusedFrameTree(&node->frame_tree());
     }
-  } else if (!GetOuterWebContents() || GetFocusedWebContents() == this) {
+  } else if ((!GetOuterWebContents() && !surface_embed_connector_) ||
+             GetFocusedWebContents() == this) {
     // This is an outermost WebContents or we are currently focused so allow
     // the requested node's frame tree to be focused. The
     // (GetFocusedWebContents() == this) is needed when there are multiple
     // frame trees within an inner WebContents (ie. a GuestView with fenced
     // frames).
+    //
+    // A SurfaceEmbed child is not an outermost WebContents and cannot take
+    // focus through a renderer request alone.
     SetFocusedFrameTree(&node->frame_tree());
   }
 
@@ -10844,6 +10962,22 @@ FrameTree* WebContentsImpl::GetDocumentPictureInPictureOpenerFrameTree() {
   }
 
   return nullptr;
+}
+
+std::optional<int64_t> WebContentsImpl::GetPrivilegedContentsFeatureId() {
+  if (privileged_params_) {
+    return privileged_params_->feature_id;
+  }
+  return std::nullopt;
+}
+
+bool WebContentsImpl::IsPrivileged() {
+  return privileged_params_.has_value();
+}
+
+bool WebContentsImpl::DoesWebContentsDisallowServiceWorkerControl() {
+  return privileged_params_ &&
+         privileged_params_->disallow_service_worker_control;
 }
 
 WebContents* WebContentsImpl::GetDocumentPictureInPictureOpener() {
@@ -11007,16 +11141,10 @@ bool WebContentsImpl::ShouldIgnoreInputEvents() {
   return web_contents->ShouldIgnoreInputEvents();
 }
 
-
 void WebContentsImpl::FocusOwningWebContents(
     RenderWidgetHostImpl* render_widget_host) {
   OPTIONAL_TRACE_EVENT1("content", "WebContentsImpl::FocusOwningWebContents",
                         "render_widget_host", render_widget_host);
-
-  if (surface_embed_connector_) {
-    // Requests focus for the embedding element in the parent page.
-    surface_embed_connector_->GetDelegate()->RequestFocus();
-  }
 
   RenderWidgetHostImpl* main_frame_widget_host =
       GetPrimaryMainFrame()->GetRenderWidgetHost();
@@ -11155,6 +11283,11 @@ void WebContentsImpl::CancelModalDialogsForRenderManager() {
   CancelDialogManagerDialogs(/*reset_state=*/true);
 }
 
+void WebContentsImpl::NotifyPrimaryPageWillBeDeactivated(PageImpl& page) {
+  observers_.NotifyObservers(&WebContentsObserver::PrimaryPageWillBeDeactivated,
+                             page);
+}
+
 void WebContentsImpl::NotifySwappedFromRenderManager(
     RenderFrameHostImpl* old_frame,
     RenderFrameHostImpl* new_frame) {
@@ -11261,6 +11394,13 @@ void WebContentsImpl::CreateRenderWidgetHostViewForRenderManager(
     view_->SetOverscrollControllerEnabled(CanOverscrollContent());
     rwh_view->SetSize(GetSizeForMainFrame());
   }
+
+  if (opt_out_frame_eviction_) {
+    if (RenderWidgetHostViewBase* view = static_cast<RenderWidgetHostViewBase*>(
+            render_view_host->GetWidget()->GetView())) {
+      view->OptOutFrameEviction();
+    }
+  }
 }
 
 void WebContentsImpl::ReattachOuterDelegateIfNeeded() {
@@ -11294,6 +11434,11 @@ bool WebContentsImpl::CreateRenderViewForRenderManager(
                                   opened_by_another_window_,
                                   navigation_metrics_token)) {
     return false;
+  }
+  // `CreateRenderView` initializes visibility from `IsHidden`, which cannot
+  // represent `kHiddenButPainting`. Set the full visibility state explicitly.
+  if (!did_first_set_visible_ && initially_hidden_but_painting_) {
+    rvh_impl->SetFrameTreeVisibility(PageVisibilityState::kHiddenButPainting);
   }
 
   // If `render_view_host` is for an inner WebContents, ensure that its
@@ -12624,8 +12769,6 @@ void WebContentsImpl::NotifyPageBecamePrimary(PageImpl& page) {
 
   observers_.NotifyObservers(&WebContentsObserver::PrimaryPageChanged, page);
 }
-
-
 
 FrameTreeNodeId WebContentsImpl::GetOuterDelegateFrameTreeNodeId() {
   return node_.outer_contents_frame_tree_node_id();

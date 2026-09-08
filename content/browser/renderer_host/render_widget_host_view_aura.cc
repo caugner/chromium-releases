@@ -603,14 +603,20 @@ RenderFrameHostImpl* RenderWidgetHostViewAura::GetFocusedFrame() const {
 }
 
 void RenderWidgetHostViewAura::HandleBoundsInRootChanged() {
+  const gfx::Rect bounds_in_root = window_->GetBoundsInRootWindow();
+  // `bounds_in_root` can be empty when the window has empty bounds, or when it
+  // has been removed from the window tree (or is in a transient state during
+  // reparenting across root windows before its layer is attached).
+  if (bounds_in_root.IsEmpty()) {
+    return;
+  }
 #if BUILDFLAG(IS_WIN)
   if (legacy_render_widget_host_HWND_) {
     // `SetBounds()` calls ::SetWindowPos which can spin a nested message loop
     // on Windows, potentially destroying `this`.
     base::WeakPtr<RenderWidgetHostViewAura> weak_this(
         weak_ptr_factory_.GetWeakPtr());
-    legacy_render_widget_host_HWND_->SetBounds(
-        window_->GetBoundsInRootWindow());
+    legacy_render_widget_host_HWND_->SetBounds(bounds_in_root);
     if (!weak_this) {
       return;
     }
@@ -860,8 +866,10 @@ gfx::Rect RenderWidgetHostViewAura::GetViewBoundsWithoutTransform() {
 void RenderWidgetHostViewAura::UpdateBackgroundColor() {
   CHECK(GetBackgroundColor());
 
-  SkColor color = *GetBackgroundColor();
-  window_->layer()->AsSolidColor()->SetColor(SkColor4f::FromColor(color));
+  SkColor4f background_color =
+      SkColor4f::FromColor(GetBackgroundColor().value());
+  window_->layer()->SetFillsBoundsOpaquely(background_color.isOpaque());
+  window_->layer()->AsSurface()->SetBackgroundColor(background_color);
 }
 
 #if BUILDFLAG(IS_WIN)
@@ -2515,6 +2523,11 @@ bool RenderWidgetHostViewAura::HasFallbackSurface() const {
   return delegated_frame_host_->HasFallbackSurface();
 }
 
+void RenderWidgetHostViewAura::OptOutFrameEviction() {
+  CHECK(delegated_frame_host_) << "Cannot be invoked during destruction.";
+  delegated_frame_host_->OptOutFrameEviction();
+}
+
 bool RenderWidgetHostViewAura::TransformPointToCoordSpaceForView(
     const gfx::PointF& point,
     input::RenderWidgetHostViewInput* target_view,
@@ -2902,6 +2915,7 @@ RenderWidgetHostViewAura::~RenderWidgetHostViewAura() {
   delegated_frame_host_.reset();
   window_observer_.reset();
   if (window_) {
+    aura::client::SetFocusChangeObserver(window_, nullptr);
     if (window_->GetHost())
       window_->GetHost()->RemoveObserver(this);
     UnlockPointer();
@@ -2948,9 +2962,11 @@ void RenderWidgetHostViewAura::CreateAuraWindow(aura::client::WindowType type) {
   display_observer_.emplace(this);
 
   window_->SetType(type);
-  window_->Init(ui::LAYER_SOLID_COLOR);
-  window_->layer()->AsSolidColor()->SetColor(SkColor4f::FromColor(
-      GetBackgroundColor() ? *GetBackgroundColor() : SK_ColorWHITE));
+  window_->Init(ui::LAYER_SURFACE);
+  SkColor4f background_color = SkColor4f::FromColor(
+      GetBackgroundColor() ? *GetBackgroundColor() : SK_ColorWHITE);
+  window_->layer()->SetFillsBoundsOpaquely(background_color.isOpaque());
+  window_->layer()->AsSurface()->SetBackgroundColor(background_color);
   UpdateFrameSinkIdRegistration();
 }
 
@@ -3465,26 +3481,15 @@ void RenderWidgetHostViewAura::OnUpdateTextInputStateCalled(
     bool did_update_state) {
   CHECK_EQ(text_input_manager_, text_input_manager);
 
-  if (!GetInputMethod()) {
+  if (!GetInputMethod())
     return;
-  }
 
   auto weak_this = weak_ptr_factory_.GetWeakPtr();
-  base::WeakPtr<RenderWidgetHostViewBase> weak_updated_view =
-      updated_view ? updated_view->GetWeakPtr() : nullptr;
-
-  auto check_alive = [&]() -> bool {
-    if (!weak_this || !weak_updated_view || !text_input_manager_ ||
-        !text_input_manager_->IsRegistered(updated_view)) {
-      // `this` or `updated_view` may have been deleted inside the IME callout.
-      return false;
-    }
-    return true;
-  };
 
   if (did_update_state) {
     GetInputMethod()->OnTextInputTypeChanged(this);
-    if (!check_alive()) {
+    if (!weak_this) {
+      // `this` may have been deleted inside the IME callout.
       return;
     }
   }
@@ -3501,12 +3506,6 @@ void RenderWidgetHostViewAura::OnUpdateTextInputStateCalled(
                ui::mojom::VirtualKeyboardVisibilityRequest::HIDE) {
       GetInputMethod()->SetVirtualKeyboardVisibilityIfEnabled(false);
     }
-    if (!check_alive()) {
-      return;
-    }
-    // The IME callout may have re-entrantly updated or unregistered the
-    // active view's state, freeing the object `state` points to.
-    state = text_input_manager_->GetTextInputState();
   }
 #endif
 
@@ -3517,12 +3516,6 @@ void RenderWidgetHostViewAura::OnUpdateTextInputStateCalled(
     if (state->show_ime_if_needed &&
         GetInputMethod()->GetTextInputClient() == this) {
       GetInputMethod()->SetVirtualKeyboardVisibilityIfEnabled(true);
-      if (!check_alive()) {
-        return;
-      }
-      // The IME callout may have re-entrantly updated or unregistered the
-      // active view's state, freeing the object `state` points to.
-      state = text_input_manager_->GetTextInputState();
     }
 // TODO(crbug.com/40110609): Remove this once TSF fix for input pane policy
 // is serviced
@@ -3534,12 +3527,6 @@ void RenderWidgetHostViewAura::OnUpdateTextInputStateCalled(
                                                            GetInputMethod());
       }
       virtual_keyboard_controller_win_->UpdateTextInputState(state);
-      if (!check_alive()) {
-        return;
-      }
-      // The IME callout may have re-entrantly updated or unregistered the
-      // active view's state, freeing the object `state` points to.
-      state = text_input_manager_->GetTextInputState();
     }
 #endif
   }
@@ -3547,12 +3534,10 @@ void RenderWidgetHostViewAura::OnUpdateTextInputStateCalled(
   // Ensure that selection bounds changes are sent to the IME.
   if (state && state->type != ui::TEXT_INPUT_TYPE_NONE) {
     text_input_manager->NotifySelectionBoundsChanged(updated_view);
-    if (!check_alive()) {
+    if (!weak_this) {
+      // `this` may have been deleted inside the IME callout.
       return;
     }
-    // The IME callout may have re-entrantly updated or unregistered the
-    // active view's state, freeing the object `state` points to.
-    state = text_input_manager_->GetTextInputState();
   }
 
   if (auto* render_widget_host = updated_view->host()) {

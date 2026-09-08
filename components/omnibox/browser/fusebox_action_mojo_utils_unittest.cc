@@ -69,6 +69,7 @@ TEST(FuseboxActionMojoUtilsTest, MapsInputSourceValuesToMojo) {
       {omnibox::INPUT_SOURCE_DRIVE, mojom::InputSource::kInputSourceDrive},
       {omnibox::INPUT_SOURCE_TAB_PICKER,
        mojom::InputSource::kInputSourceTabPicker},
+      {omnibox::INPUT_SOURCE_VOICE, mojom::InputSource::kInputSourceVoice},
   };
   for (const auto& test_case : kCases) {
     omnibox::SuggestTemplateInfo::FuseboxAction proto;
@@ -77,6 +78,51 @@ TEST(FuseboxActionMojoUtilsTest, MapsInputSourceValuesToMojo) {
     mojom::FuseboxActionPtr mojo_action = SyncFuseboxActionProtoToMojo(proto);
     ASSERT_TRUE(mojo_action);
     EXPECT_EQ(mojo_action->preselected_input_source, test_case.mojo_value);
+  }
+}
+
+TEST(FuseboxActionMojoUtilsTest, MapsSuggestInventoryValuesToMojo) {
+  struct {
+    omnibox::SuggestInventory proto_value;
+    omnibox::SuggestInventory mojo_value;
+  } kCases[] = {
+      {omnibox::SUGGEST_INVENTORY_DEFAULT, omnibox::SUGGEST_INVENTORY_DEFAULT},
+      {omnibox::SUGGEST_INVENTORY_TRAVEL, omnibox::SUGGEST_INVENTORY_TRAVEL},
+      {omnibox::SUGGEST_INVENTORY_AIM_IO_HP_TAKEOVER,
+       omnibox::SUGGEST_INVENTORY_AIM_IO_HP_TAKEOVER},
+      {omnibox::SUGGEST_INVENTORY_IMG_GEN_IO_HP_TAKEOVER,
+       omnibox::SUGGEST_INVENTORY_IMG_GEN_IO_HP_TAKEOVER},
+      {omnibox::SUGGEST_INVENTORY_AIM_CONVERSATION_STARTERS,
+       omnibox::SUGGEST_INVENTORY_AIM_CONVERSATION_STARTERS},
+      {omnibox::SUGGEST_INVENTORY_AI_HP_CREATE_CHIP,
+       omnibox::SUGGEST_INVENTORY_AI_HP_CREATE_CHIP},
+      {omnibox::SUGGEST_INVENTORY_AI_HP_GET_IT_DONE_CHIP,
+       omnibox::SUGGEST_INVENTORY_AI_HP_GET_IT_DONE_CHIP},
+      {omnibox::SUGGEST_INVENTORY_AI_HP_SIMPLIFY_CHIP,
+       omnibox::SUGGEST_INVENTORY_AI_HP_SIMPLIFY_CHIP},
+      {omnibox::SUGGEST_INVENTORY_AI_HP_IFL,
+       omnibox::SUGGEST_INVENTORY_AI_HP_IFL},
+      {omnibox::SUGGEST_INVENTORY_AI_HP_RESERVATIONS,
+       omnibox::SUGGEST_INVENTORY_AI_HP_RESERVATIONS},
+      {omnibox::SUGGEST_INVENTORY_BRAINSTORM,
+       omnibox::SUGGEST_INVENTORY_BRAINSTORM},
+      {omnibox::SUGGEST_INVENTORY_HELP_ME_LEARN,
+       omnibox::SUGGEST_INVENTORY_HELP_ME_LEARN},
+      {omnibox::SUGGEST_INVENTORY_WRITE_OR_EDIT,
+       omnibox::SUGGEST_INVENTORY_WRITE_OR_EDIT},
+      {omnibox::SUGGEST_INVENTORY_ADD_FILE,
+       omnibox::SUGGEST_INVENTORY_ADD_FILE},
+      {omnibox::SUGGEST_INVENTORY_ADD_TAB, omnibox::SUGGEST_INVENTORY_ADD_TAB},
+      {omnibox::SUGGEST_INVENTORY_AIM_IMAGES,
+       omnibox::SUGGEST_INVENTORY_AIM_IMAGES},
+  };
+  for (const auto& test_case : kCases) {
+    omnibox::SuggestTemplateInfo::FuseboxAction proto;
+    proto.set_preferred_inventory(test_case.proto_value);
+
+    mojom::FuseboxActionPtr mojo_action = SyncFuseboxActionProtoToMojo(proto);
+    ASSERT_TRUE(mojo_action);
+    EXPECT_EQ(mojo_action->preferred_inventory, test_case.mojo_value);
   }
 }
 

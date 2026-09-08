@@ -841,8 +841,8 @@ void ThreatDetails::MaybeAttachThreatDetailsAndLaunchSurvey() {
   }
   client_report_utils::FillInterstitialInteractionsHelper(
       report.get(), interstitial_interactions_.get());
-  ui_manager_->AttachThreatDetailsAndLaunchSurvey(browser_context_,
-                                                  std::move(report));
+  ui_manager_->AttachThreatDetailsAndLaunchSurvey(
+      browser_context_, std::move(report), is_tab_closed_);
 }
 
 void ThreatDetails::AllDone() {

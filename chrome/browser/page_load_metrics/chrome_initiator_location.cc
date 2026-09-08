@@ -20,6 +20,12 @@ std::string StringifyChromeInitiatorLocation(
       return "OmniboxDefaultSearchEngine";
     case ChromeInitiatorLocation::kLinkClick:
       return "LinkClick";
+    case ChromeInitiatorLocation::kForward:
+      return "Forward";
+    case ChromeInitiatorLocation::kBackward:
+      return "Backward";
+    case ChromeInitiatorLocation::kReload:
+      return "Reload";
     case ChromeInitiatorLocation::kOther:
       return "Other";
   }
@@ -59,4 +65,13 @@ void AttachBookmarkBarNavigationHandleUserData(
       navigation_handle,
       GetInitiatorLocation(ChromeInitiatorLocation::kBookmarkBar),
       StringifyChromeInitiatorLocation(ChromeInitiatorLocation::kBookmarkBar));
+}
+
+void MarkNavigationServedBySearchPrefetch(
+    content::NavigationHandle& navigation_handle) {
+  if (auto* user_data =
+          page_load_metrics::NavigationHandleUserData::GetForNavigationHandle(
+              navigation_handle)) {
+    user_data->set_is_served_by_legacy_search_prefetch(true);
+  }
 }

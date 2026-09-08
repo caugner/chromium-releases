@@ -132,12 +132,8 @@ void MouseWheelEventQueue::ProcessMouseWheelAck(
     return;
 
   event_sent_for_gesture_ack_->latency.AddNewLatencyFrom(ack_event.latency);
-  auto weak_this = weak_ptr_factory_.GetWeakPtr();
   client_->OnMouseWheelEventAck(*event_sent_for_gesture_ack_, ack_source,
                                 ack_result);
-  if (!weak_this) {
-    return;
-  }
 
   // If event wasn't consumed then generate a gesture scroll for it.
   if (CanGenerateGestureScroll(ack_result)) {
@@ -315,7 +311,7 @@ void MouseWheelEventQueue::TryForwardNextEventToRenderer() {
   client_->SendMouseWheelEventImmediately(
       *event_sent_for_gesture_ack_,
       base::BindOnce(&MouseWheelEventQueue::ProcessMouseWheelAck,
-                     weak_ptr_factory_.GetWeakPtr()),
+                     base::Unretained(this)),
       event_sent_for_gesture_ack_->dispatch_callback);
 }
 

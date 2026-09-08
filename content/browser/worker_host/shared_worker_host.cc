@@ -224,10 +224,6 @@ SharedWorkerHost::~SharedWorkerHost() {
     }
   }
 
-  if (auto* lock_manager = GetStoragePartitionImpl()->GetLockManager()) {
-    lock_manager->RemoveLockObserver(token().value());
-  }
-
   if (site_instance_->HasProcess()) {
     // Send any final reports and allow the reporting configuration to be
     // removed.
@@ -239,6 +235,10 @@ SharedWorkerHost::~SharedWorkerHost() {
         ->SendReportsAndRemoveSource(reporting_source_);
 
     GetProcessHost()->RemoveObserver(this);
+
+    if (auto* lock_manager = GetStoragePartitionImpl()->GetLockManager()) {
+      lock_manager->RemoveLockObserver(token().value());
+    }
 
     GetStoragePartitionImpl()->ClearNetworkRestrictionsAfterDelay({
         network_restrictions_id_,
@@ -325,10 +325,6 @@ void SharedWorkerHost::Start(
     if (!creator_policy_container_host_->policies().is_web_secure_context) {
       policies.is_web_secure_context = false;
     }
-    // Allow LNA access on non secure contexts if the creator did as well.
-    policies.allow_non_secure_local_network_access =
-        creator_policy_container_host_->policies()
-            .allow_non_secure_local_network_access;
 
     policies.ip_address_space = CalculateIPAddressSpace(
         result.final_response_url,
@@ -625,7 +621,7 @@ void SharedWorkerHost::CreateLockManager(
   GetStoragePartitionImpl()->BindLockManager(
       GetWorkerStorageKey(), token().value(), std::move(receiver));
   GetStoragePartitionImpl()->GetLockManager()->AddLockObserver(token().value(),
-                                                               this);
+                                                            this);
 }
 
 bool SharedWorkerHost::OnLockContention() {
@@ -970,7 +966,8 @@ void SharedWorkerHost::RenderProcessHostDestroyed(RenderProcessHost* host) {
 }
 
 StoragePartitionImpl* SharedWorkerHost::GetStoragePartitionImpl() {
-  return service_->storage_partition();
+  return static_cast<StoragePartitionImpl*>(
+      GetProcessHost()->GetStoragePartition());
 }
 
 std::vector<GlobalRenderFrameHostId>
@@ -1151,9 +1148,7 @@ bool SharedWorkerHost::EvictBFCachedClientsIfLastActive(
       // client.
       return false;
     }
-    if (other_rfh->IsInBackForwardCache()) {
-      bf_cached_clients.push_back(other_rfh);
-    }
+    bf_cached_clients.push_back(other_rfh);
   }
   for (RenderFrameHostImpl* rfh_to_evict : bf_cached_clients) {
     rfh_to_evict->EvictFromBackForwardCacheWithReason(

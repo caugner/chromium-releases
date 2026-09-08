@@ -68,6 +68,34 @@ bool PredictionOccursInOtherWebContents(
              blink::mojom::SpeculationTargetHint::kBlank;
 }
 
+PreloadingPredictor PredictorForRendererHeuristic(
+    blink::mojom::SpeculationHeuristic heuristic) {
+  switch (heuristic) {
+    case blink::mojom::SpeculationHeuristic::kPointerDown:
+      return preloading_predictor::kUrlPointerDownOnAnchor;
+    case blink::mojom::SpeculationHeuristic::kPointerHover:
+      return preloading_predictor::kUrlPointerHoverOnAnchor;
+    case blink::mojom::SpeculationHeuristic::kViewportModerate:
+      return preloading_predictor::kModerateViewportHeuristic;
+    case blink::mojom::SpeculationHeuristic::kViewportEager:
+      return preloading_predictor::kEagerViewportHeuristic;
+  }
+  NOTREACHED();
+}
+
+PreloadingDecider::EagernessSet HoverEagernessToExclude(
+    blink::mojom::SpeculationEagerness target_eagerness) {
+  PreloadingDecider::EagernessSet eagerness_to_exclude;
+  if (base::FeatureList::IsEnabled(
+          blink::features::kPreloadingEagerHoverHeuristics)) {
+    // In practice, this excludes "moderate" eagerness for candidates triggered
+    // by "eager" hover events.
+    eagerness_to_exclude = PreloadingDecider::EagernessSet::All();
+    eagerness_to_exclude.Remove(target_eagerness);
+  }
+  return eagerness_to_exclude;
+}
+
 }  // namespace
 
 class PreloadingDecider::BehaviorConfig {
@@ -242,7 +270,7 @@ void PreloadingDecider::AddPreloadingPrediction(
       triggered_primary_page_source_id);
 }
 
-void PreloadingDecider::OnPointerDown(const GURL& url) {
+void PreloadingDecider::OnPointerDown(const GURL& url, bool renderer_enacted) {
   if (observer_for_testing_) {
     observer_for_testing_->OnPointerDown(url);
   }
@@ -251,6 +279,12 @@ void PreloadingDecider::OnPointerDown(const GURL& url) {
     // The renderer owns candidate enactment (and its preconnect fallback, in
     // EnactRendererSelectedCandidate); enacting here too would double-enact
     // this pointerdown.
+    if (renderer_enacted) {
+      return;
+    }
+    HandleRendererOwnedHeuristic(url,
+                                 preloading_predictor::kUrlPointerDownOnAnchor,
+                                 /*fallback_to_preconnect=*/true);
     return;
   }
   MaybeEnactCandidate(url, preloading_predictor::kUrlPointerDownOnAnchor,
@@ -292,7 +326,8 @@ void PreloadingDecider::OnPreloadingHeuristicsModelDone(const GURL& url,
 void PreloadingDecider::OnPointerHover(
     const GURL& url,
     blink::mojom::AnchorElementPointerDataPtr mouse_data,
-    blink::mojom::SpeculationEagerness target_eagerness) {
+    blink::mojom::SpeculationEagerness target_eagerness,
+    bool renderer_enacted) {
   // In non-test code, target eagerness must be either "moderate" or "eager".
   if (target_eagerness != blink::mojom::SpeculationEagerness::kModerate &&
       target_eagerness != blink::mojom::SpeculationEagerness::kEager) {
@@ -319,29 +354,48 @@ void PreloadingDecider::OnPointerHover(
   // Preconnecting on hover events should not be done if the link is not safe
   // to prefetch or prerender.
   constexpr bool fallback_to_preconnect = false;
-  // Filter `kModerate` for the "eager" mouse hover to prevent false preloading.
-  EagernessSet eagerness_to_exclude;
+  EagernessSet eagerness_to_exclude = HoverEagernessToExclude(target_eagerness);
+
   if (base::FeatureList::IsEnabled(
-          blink::features::kPreloadingEagerHoverHeuristics)) {
-    eagerness_to_exclude = EagernessSet::All();
-    eagerness_to_exclude.Remove(target_eagerness);
+          blink::features::kSpeculationRulesRendererSideHeuristics)) {
+    // The renderer owns candidate enactment. The browser still receives hover
+    // notifications for metrics and for the generic warmups performed by
+    // AnchorElementInteractionHostImpl.
+    if (renderer_enacted) {
+      return;
+    }
+    HandleRendererOwnedHeuristic(url,
+                                 preloading_predictor::kUrlPointerHoverOnAnchor,
+                                 fallback_to_preconnect);
+    return;
   }
+
   MaybeEnactCandidate(url, preloading_predictor::kUrlPointerHoverOnAnchor,
                       PreloadingConfidence{100}, fallback_to_preconnect,
                       eagerness_to_exclude);
 }
 
-void PreloadingDecider::OnModerateViewportHeuristicTriggered(const GURL& url) {
+void PreloadingDecider::OnModerateViewportHeuristicTriggered(
+    const GURL& url,
+    bool renderer_enacted) {
   CHECK(base::FeatureList::IsEnabled(
       blink::features::kPreloadingModerateViewportHeuristics));
-  static const base::FeatureParam<bool> kShouldEnactCandidates{
-      &blink::features::kPreloadingModerateViewportHeuristics,
-      "enact_candidates", BUILDFLAG(IS_ANDROID)};
-  const bool should_enact_candidates = kShouldEnactCandidates.Get();
-  if (!should_enact_candidates) {
+  if (!blink::features::kPreloadingModerateViewportHeuristicsEnactCandidates
+           .Get()) {
     AddPreloadingPrediction(url,
                             preloading_predictor::kModerateViewportHeuristic,
                             PreloadingConfidence(100));
+    return;
+  }
+
+  if (base::FeatureList::IsEnabled(
+          blink::features::kSpeculationRulesRendererSideHeuristics)) {
+    if (renderer_enacted) {
+      return;
+    }
+    HandleRendererOwnedHeuristic(
+        url, preloading_predictor::kModerateViewportHeuristic,
+        /*fallback_to_preconnect=*/false);
     return;
   }
 
@@ -351,9 +405,21 @@ void PreloadingDecider::OnModerateViewportHeuristicTriggered(const GURL& url) {
                       /*eagerness_to_exclude=*/{});
 }
 
-void PreloadingDecider::OnEagerViewportHeuristicTriggered(const GURL& url) {
+void PreloadingDecider::OnEagerViewportHeuristicTriggered(
+    const GURL& url,
+    bool renderer_enacted) {
   CHECK(base::FeatureList::IsEnabled(
       blink::features::kPreloadingEagerViewportHeuristics));
+  if (base::FeatureList::IsEnabled(
+          blink::features::kSpeculationRulesRendererSideHeuristics)) {
+    if (renderer_enacted) {
+      return;
+    }
+    HandleRendererOwnedHeuristic(url,
+                                 preloading_predictor::kEagerViewportHeuristic,
+                                 /*fallback_to_preconnect=*/false);
+    return;
+  }
   MaybeEnactCandidate(url, preloading_predictor::kEagerViewportHeuristic,
                       PreloadingConfidence{100},
                       /*fallback_to_preconnect=*/false,
@@ -614,18 +680,23 @@ void PreloadingDecider::OnLCPPredicted() {
 }
 
 void PreloadingDecider::EnactRendererSelectedCandidate(
-    blink::mojom::SpeculationCandidatePtr candidate) {
+    blink::mojom::SpeculationCandidatePtr candidate,
+    blink::mojom::SpeculationHeuristic heuristic) {
   // SpeculationHostImpl::EnactCandidate rejects the message when the feature is
   // disabled, so reaching here never happens.
   CHECK(base::FeatureList::IsEnabled(
       blink::features::kSpeculationRulesRendererSideHeuristics));
 
-  // TODO(crbug.com/532860179): Plumb the actual enacting predictor from the
-  // renderer. For now only pointerdown is routed here, so attribute enactment
-  // to it.
   const PreloadingPredictor enacting_predictor =
-      preloading_predictor::kUrlPointerDownOnAnchor;
+      PredictorForRendererHeuristic(heuristic);
   const PreloadingConfidence confidence{100};
+  EagernessSet eagerness_to_exclude;
+  if (heuristic == blink::mojom::SpeculationHeuristic::kPointerHover) {
+    CHECK(candidate->eagerness ==
+              blink::mojom::SpeculationEagerness::kModerate ||
+          candidate->eagerness == blink::mojom::SpeculationEagerness::kEager);
+    eagerness_to_exclude = HoverEagernessToExclude(candidate->eagerness);
+  }
 
   // Capture before `candidate` is moved below.
   const GURL url = candidate->url;
@@ -641,31 +712,60 @@ void PreloadingDecider::EnactRendererSelectedCandidate(
   // Merge tags from every suitable on-standby candidate for this key, matching
   // the browser-driven path (MaybePrefetch), so the enacted preload carries
   // all applicable Sec-Speculation-Tags rather than just this candidate's.
-  candidate->tags = GetMergedSpeculationTagsFromSuitableCandidates(
-      key, enacting_predictor, confidence, /*eagerness_to_exclude=*/{});
+  std::vector<std::optional<std::string>> merged_tags =
+      GetMergedSpeculationTagsFromSuitableCandidates(
+          key, enacting_predictor, confidence, eagerness_to_exclude);
+
+  // An empty merge means the browser considered none of the on-standby
+  // candidates under `key` suitable, even though the key itself is on standby.
+  // The renderer picks candidates using its own mirror of the browser's
+  // eagerness sets, so the two normally agree, but IsSuitableCandidate() also
+  // applies browser-only state the renderer cannot see (today: the ML model
+  // superseding the hover heuristic), and the mirrors can drift. Neither is a
+  // reason to crash, so treat "nothing suitable" as a first-class outcome and
+  // decline, as the browser-driven path does when
+  // GetMatchedPreloadingCandidate() returns nullopt. Enacting anyway would
+  // leave `candidate->tags` empty, which violates the non-empty invariant
+  // documented on blink.mojom.SpeculationCandidate and trips a CHECK() in the
+  // SpeculationRulesTags constructor.
+  const bool suitable_candidate_found = !merged_tags.empty();
 
   bool enacted = false;
-  switch (candidate->action) {
-    case blink::mojom::SpeculationAction::kPrefetch:
-      AddPreloadingPrediction(url, enacting_predictor, confidence);
-      // The renderer may enact both a prefetch and a prerender for one
-      // pointerdown; an in-progress prerender wins, so skip the prefetch.
-      if (ShouldWaitForPrerenderResult(url)) {
-        return;
-      }
-      enacted =
-          prefetcher_.MaybePrefetch(std::move(candidate), enacting_predictor);
-      break;
-    case blink::mojom::SpeculationAction::kPrerender:
-    case blink::mojom::SpeculationAction::kPrerenderUntilScript:
-      enacted = prerenderer_->MaybePrerender(candidate, enacting_predictor,
-                                             confidence);
-      // Avoid a duplicate prediction when one is already recorded against
-      // another WebContents.
-      if (!enacted || !PredictionOccursInOtherWebContents(*candidate)) {
+  if (!suitable_candidate_found) {
+    // Still record the prediction. A PreloadingPrediction says a predictor
+    // expected this navigation, which is scored against where the user actually
+    // went; that is a separate axis from whether a preload was attempted, and
+    // the heuristic really did fire here. It also has to be recorded here:
+    // OnPointerDown()/OnPointerHover() return early once the renderer reports
+    // that it enacted, so HandleRendererOwnedHeuristic() -- which records the
+    // prediction on the "renderer did not enact" path -- never runs. Dropping
+    // it would lose the prediction entirely and undercount this predictor
+    // relative to both the browser-driven and not-enacted paths.
+    AddPreloadingPrediction(url, enacting_predictor, confidence);
+  } else {
+    candidate->tags = std::move(merged_tags);
+    switch (candidate->action) {
+      case blink::mojom::SpeculationAction::kPrefetch:
         AddPreloadingPrediction(url, enacting_predictor, confidence);
-      }
-      break;
+        // The renderer may enact both a prefetch and a prerender for one
+        // pointerdown; an in-progress prerender wins, so skip the prefetch.
+        if (ShouldWaitForPrerenderResult(url)) {
+          return;
+        }
+        enacted =
+            prefetcher_.MaybePrefetch(std::move(candidate), enacting_predictor);
+        break;
+      case blink::mojom::SpeculationAction::kPrerender:
+      case blink::mojom::SpeculationAction::kPrerenderUntilScript:
+        enacted = prerenderer_->MaybePrerender(candidate, enacting_predictor,
+                                               confidence);
+        // Avoid a duplicate prediction when one is already recorded against
+        // another WebContents.
+        if (!enacted || !PredictionOccursInOtherWebContents(*candidate)) {
+          AddPreloadingPrediction(url, enacting_predictor, confidence);
+        }
+        break;
+    }
   }
 
   // If nothing more aggressive started (e.g. blocked by eligibility or resource
@@ -677,8 +777,14 @@ void PreloadingDecider::EnactRendererSelectedCandidate(
     preconnector_.MaybePreconnect(url);
   }
 
-  // Mark as processed so other heuristics don't re-enact it.
-  MarkCandidateAsProcessed(key);
+  // Mark as processed so other heuristics don't re-enact it. If the browser
+  // found nothing suitable, leave the candidate on standby instead, so a later
+  // heuristic can still enact it: a heuristic the browser declined must not
+  // consume the candidate on its way out. Both MaybePrerenderForAction() and
+  // MaybePrefetch() skip the mark the same way.
+  if (suitable_candidate_found) {
+    MarkCandidateAsProcessed(key);
+  }
 }
 
 std::vector<std::optional<std::string>>
@@ -932,6 +1038,24 @@ std::unique_ptr<Prerenderer> PreloadingDecider::SetPrerendererForTesting(
   prerenderer->SetPrerenderCancellationCallback(base::BindRepeating(
       &OnPrerenderCanceled, render_frame_host().GetWeakDocumentPtr()));
   return std::exchange(prerenderer_, std::move(prerenderer));
+}
+
+void PreloadingDecider::HandleRendererOwnedHeuristic(
+    const GURL& url,
+    const PreloadingPredictor& enacting_predictor,
+    bool fallback_to_preconnect) {
+  CHECK(base::FeatureList::IsEnabled(
+      blink::features::kSpeculationRulesRendererSideHeuristics));
+  // Only reached when the renderer reported that it did not enact a candidate
+  // for this interaction. These signals don't depend on speculation rules, so
+  // the browser still owns them; this mirrors the tail of MaybeEnactCandidate
+  // for the case where nothing was enacted.
+  AddPreloadingPrediction(url, enacting_predictor, PreloadingConfidence{100});
+  if (!fallback_to_preconnect || ShouldWaitForPrerenderResult(url) ||
+      ShouldWaitForPrefetchResult(url)) {
+    return;
+  }
+  preconnector_.MaybePreconnect(url);
 }
 
 bool PreloadingDecider::IsOnStandByForTesting(

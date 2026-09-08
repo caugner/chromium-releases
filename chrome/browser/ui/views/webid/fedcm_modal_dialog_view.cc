@@ -63,12 +63,10 @@ content::WebContents* FedCmModalDialogView::ShowPopupWindow(
   // the latter only tracks tab fullscreen (e.g., a video playing in
   // fullscreen), not browser fullscreen (e.g., pressing F11). `GetDisplayMode`
   // returns `kFullscreen` in both cases.
-  content::WebContentsDelegate* delegate = source_window_->GetDelegate();
-  if (!delegate) {
-    return nullptr;
-  }
-  bool is_fullscreen = delegate->GetDisplayMode(source_window_) ==
-                       blink::mojom::DisplayMode::kFullscreen;
+  bool is_fullscreen =
+      source_window_->GetDelegate() &&
+      source_window_->GetDelegate()->GetDisplayMode(source_window_) ==
+          blink::mojom::DisplayMode::kFullscreen;
   WindowOpenDisposition disposition =
       is_fullscreen ? WindowOpenDisposition::NEW_FOREGROUND_TAB
                     : WindowOpenDisposition::NEW_POPUP;
@@ -76,16 +74,9 @@ content::WebContents* FedCmModalDialogView::ShowPopupWindow(
   content::OpenURLParams params(url, content::Referrer(), disposition,
                                 ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
                                 /*is_renderer_initiated=*/false);
-  base::WeakPtr<FedCmModalDialogView> weak_this =
-      weak_ptr_factory_.GetWeakPtr();
-  content::WebContents* popup_window = delegate->OpenURLFromTab(
+  popup_window_ = source_window_->GetDelegate()->OpenURLFromTab(
       source_window_, params, /*navigation_handle_callback=*/{});
 
-  if (!weak_this) {
-    return nullptr;
-  }
-
-  popup_window_ = popup_window;
   if (!popup_window_) {
     return nullptr;
   }
@@ -94,9 +85,6 @@ content::WebContents* FedCmModalDialogView::ShowPopupWindow(
   // because we requested a `NEW_FOREGROUND_TAB` disposition.
   if (!is_fullscreen) {
     ResizeAndFocusPopupWindow();
-    if (!weak_this) {
-      return nullptr;
-    }
   }
   Observe(popup_window_);
 

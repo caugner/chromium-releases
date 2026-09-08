@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_UI_SEARCH_PROMOTION_SEARCH_PROMOTION_MANAGER_H_
 
 #include <memory>
+#include <string>
 #include <string_view>
 
 #include "base/functional/callback.h"
@@ -15,7 +16,6 @@
 #include "chrome/browser/shell_integration.h"
 #include "components/feature_engagement/public/feature_constants.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "url/gurl.h"
 
 class BrowserUserEducationInterface;
 class Profile;
@@ -33,6 +33,16 @@ struct ClassificationResult;
 // resolution for tab and UI-level features.
 class SearchPromotionManager : public KeyedService {
  public:
+  // String labels returned by the SegmentationPlatform's `ChromeUserEngagement`
+  // model. See:
+  // components/segmentation_platform/embedder/default_model/chrome_user_engagement.cc
+  // for example of usage.
+  // Engagement tiers based on user activity over the last 28 days.
+  static constexpr std::string_view kEngagementLabelOneDay = "OneDay";
+  static constexpr std::string_view kEngagementLabelLow = "Low";
+  static constexpr std::string_view kEngagementLabelMedium = "Medium";
+  static constexpr std::string_view kEngagementLabelPower = "Power";
+
   using CreateTaskRunnerCallback = base::RepeatingCallback<
       std::unique_ptr<platform_experience::DelegatedTaskRunner>()>;
 
@@ -51,25 +61,24 @@ class SearchPromotionManager : public KeyedService {
   // Called when the IPH promo is accepted.
   void OnPromoAccepted();
 
-  // Returns true if the promo is allowed by feature flags.
+  // Returns true if a promotional UI is allowed to be shown (i.e. for
+  // treatment arms kOpen or kInstall, not kControl or kDisabled).
   bool IsPromoAllowedForTesting() const;
 
-  // Returns true if the profile meets the required low engagement level.
-  bool IsEngagementLowEnoughForTesting() const;
+  std::string_view GetEngagementLabelForTesting() const;
 
  private:
-  // Checks whether the current user profile belongs to the low engagement tier
-  // (defined as being active fewer than 9 days out of the last 28 days).
-  // Uses cached results from SegmentationPlatformService.
-  // This returns false until the service has completed initialization.
-  bool IsEngagementLowEnough() const;
+  // Checks whether the user's engagement matches the requirements of the
+  // configured experiment cohort.
+  bool IsEngagementEligible() const;
 
   void QueryEngagementLevel();
   void OnEngagementResultRetrieved(
       const segmentation_platform::ClassificationResult& result);
 
-  void PerformArmA();
-  void PerformArmB();
+  void ExecuteAction();
+  void PerformOpen();
+  void PerformInstall();
 
   void RunRegisterTask(std::unique_ptr<RegisterSearchPromotionTask> task);
   void OnTaskCompleted(platform_experience::DelegatedTaskResult result);
@@ -78,12 +87,13 @@ class SearchPromotionManager : public KeyedService {
       shell_integration::DefaultWebClientState state);
   void OnPromoClosed();
   void OnDefaultBrowserNameRetrieved(bool accepted,
-                                     std::string_view arm,
                                      const std::u16string& name);
 
-  bool is_promo_allowed_ = false;
-  std::string_view arm_ = feature_engagement::kSearchPromotionArmDefault;
-  bool is_engagement_low_enough_ = false;
+  feature_engagement::SearchPromotionAction action_ =
+      feature_engagement::SearchPromotionAction::kDisabled;
+  feature_engagement::SearchPromotionCohort cohort_ =
+      feature_engagement::SearchPromotionCohort::kAll;
+  std::string engagement_label_;
   bool was_accepted_ = false;
 
   const raw_ref<Profile> profile_;

@@ -293,6 +293,7 @@ void WebAppCommandScheduler::InstallIsolatedWebApp(
     std::unique_ptr<ScopedKeepAlive> optional_keep_alive,
     std::unique_ptr<ScopedProfileKeepAlive> optional_profile_keep_alive,
     InstallIsolatedWebAppCallback callback,
+    std::optional<IwaUpdateInfo> optional_update_info,
     const base::Location& call_location) {
   CHECK(optional_profile_keep_alive == nullptr ||
         optional_profile_keep_alive->profile() == &*profile_);
@@ -300,7 +301,8 @@ void WebAppCommandScheduler::InstallIsolatedWebApp(
       std::make_unique<InstallIsolatedWebAppCommand>(
           url_info, install_source, expected_version, *profile_,
           std::move(optional_keep_alive),
-          std::move(optional_profile_keep_alive), std::move(callback)),
+          std::move(optional_profile_keep_alive), std::move(callback),
+          std::move(optional_update_info)),
       call_location);
 }
 
@@ -989,7 +991,16 @@ void WebAppCommandScheduler::LaunchAppWithKeepAlives(
     std::unique_ptr<ScopedProfileKeepAlive> profile_keep_alive,
     std::unique_ptr<ScopedKeepAlive> browser_keep_alive,
     const base::Location& location) {
-  DCHECK(provider_->is_registry_ready());
+  // TODO(crbug.com/crbug.com/506131577): `WebAppProvider::on_registry_ready()`
+  // may fire in the case database reads fail, `WebAppProvider` is not
+  // initialized and `WebAppProvider::is_registry_ready()` reports false. Either
+  // `on_registry_ready()` should be renamed to indicate it is independent of
+  // init success or better error handling is implemented.
+  if (!provider_->is_registry_ready()) {
+    std::move(callback).Run(nullptr, nullptr,
+                            apps::LaunchContainer::kLaunchContainerNone);
+    return;
+  }
 
   // Decorate the callback to ensure the keep alives are kept alive during the
   // execution of the launch.

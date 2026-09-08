@@ -269,6 +269,14 @@ int GetLiveCaptionsNumberOfLines();
 // Sets whether the suggestion chips should be shown on the floaty.
 void SetShouldShowSuggestionChips(bool should_show);
 
+// Sets whether query submission should be blocked while page context is
+// loading.
+void SetBlockQuerySubmissionWhileLoading(bool block_submission);
+
+// Sets whether to display the page loading snackbar on the opening invocation
+// while page context is loading.
+void SetShowPageLoadingSnackbarOnOpeningInvocation(bool show_snackbar);
+
 // Shows the account snackbar on the Gemini floaty.
 void ShowAccountSnackbar();
 

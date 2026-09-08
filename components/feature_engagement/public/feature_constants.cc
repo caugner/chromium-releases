@@ -131,9 +131,6 @@ BASE_FEATURE(kIPHMemorySaverModeFeature,
 BASE_FEATURE(kIPHMultistepFilterPromoFeature,
              "IPH_MultistepFilterPromo",
              base::FEATURE_DISABLED_BY_DEFAULT);
-BASE_FEATURE(kIPHLiveCaptionFeature,
-             "IPH_LiveCaption",
-             base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kIPHLensOverlayFeature,
              "IPH_LensOverlay",
              base::FEATURE_DISABLED_BY_DEFAULT);
@@ -193,6 +190,9 @@ BASE_FEATURE(kIPHPdfSearchifyFeature,
 BASE_FEATURE(kIPHPdfTextAnnotationsFeature,
              "IPH_PdfTextAnnotations",
              base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kIPHPdfTranslateBubbleFeature,
+             "IPH_PdfTranslateBubble",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kIPHPerformanceInterventionDialogFeature,
              "IPH_PerformanceInterventionDialogFeature",
              base::FEATURE_ENABLED_BY_DEFAULT);
@@ -700,6 +700,9 @@ BASE_FEATURE(kIPHTabTearingXR,
 BASE_FEATURE(kIPHBottomToolbarTipFeature,
              "IPH_BottomToolbarTip",
              base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kIPHSendTabToSelfOmnibox,
+             "IPH_SendTabToSelfOmnibox",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 #endif  // BUILDFLAG(IS_IOS) || BUILDFLAG(IS_ANDROID)
 
 #if BUILDFLAG(IS_IOS)
@@ -834,6 +837,12 @@ BASE_FEATURE(kIPHiOSPostDefaultAbandonmentPromoFeature,
              base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kIPHiOSPromoGenericDefaultBrowserFeature,
              "IPH_iOSPromoGenericDefaultBrowser",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kIPHiOSPromoSettingsCardDefaultBrowserFeature,
+             "IPH_iOSPromoSettingsCardDefaultBrowser",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kIPHiOSPromoSettingsCellDefaultBrowserFeature,
+             "IPH_iOSPromoSettingsCellDefaultBrowser",
              base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kIPHiOSOverflowMenuCustomizationFeature,
              "IPH_iOSOverflowMenuCustomization",
@@ -1099,8 +1108,30 @@ BASE_FEATURE(kIPHSearchPromotionFeature,
              "IPH_SearchPromotionFeature",
              base::FEATURE_DISABLED_BY_DEFAULT);
 
-constinit const base::FeatureParam<std::string> kSearchPromotionArm{
-    &kIPHSearchPromotionFeature, "arm", kSearchPromotionArmDefault};
+constexpr base::FeatureParam<SearchPromotionAction>::Option
+    kSearchPromotionActionOptions[] = {
+        {SearchPromotionAction::kOpen, kSearchPromotionActionOpen},
+        {SearchPromotionAction::kInstall, kSearchPromotionActionInstall},
+        {SearchPromotionAction::kControl, kSearchPromotionActionControl},
+};
+
+constinit const base::FeatureParam<SearchPromotionAction>
+    kSearchPromotionAction{&kIPHSearchPromotionFeature, "action",
+                           SearchPromotionAction::kDisabled,
+                           &kSearchPromotionActionOptions};
+
+constexpr base::FeatureParam<SearchPromotionCohort>::Option
+    kSearchPromotionCohortOptions[] = {
+        {SearchPromotionCohort::kAll, kSearchPromotionCohortAll},
+        {SearchPromotionCohort::kLow, kSearchPromotionCohortLow},
+        {SearchPromotionCohort::kMedium, kSearchPromotionCohortMedium},
+        {SearchPromotionCohort::kPower, kSearchPromotionCohortPower},
+};
+
+constinit const base::FeatureParam<SearchPromotionCohort>
+    kSearchPromotionCohort{&kIPHSearchPromotionFeature, "cohort",
+                           SearchPromotionCohort::kAll,
+                           &kSearchPromotionCohortOptions};
 constinit const base::FeatureParam<std::string> kSearchPromotionStoreUrl{
     &kIPHSearchPromotionFeature, "store_url",
     "https://microsoftedge.microsoft.com/addons/detail/google-search-for-edge/"
@@ -1111,6 +1142,8 @@ constinit const base::FeatureParam<std::string> kSearchPromotionExtensionId{
 constinit const base::FeatureParam<std::string> kSearchPromotionInstructionsUrl{
     &kIPHSearchPromotionFeature, "instructions_url",
     "https://www.google.com/chrome/landing/google-search-extension-edge/"};
+constinit const base::FeatureParam<std::string> kSearchPromotionMinPehVersion{
+    &kIPHSearchPromotionFeature, "min_peh_version", "153.0.8001.0"};
 #endif  // BUILDFLAG(IS_WIN)
 
 }  // namespace feature_engagement

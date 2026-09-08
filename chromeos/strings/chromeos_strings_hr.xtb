@@ -163,7 +163,7 @@
 <translation id="1611649489706141841">prosljeđivanje</translation>
 <translation id="1615335640928990664">Potrošnja podatkovnog prometa od <ph name="FRIENDLY_DATE" /></translation>
 <translation id="1618566998877964907">Upotrijebite temu</translation>
-<translation id="1621067168122174824">Pokreni test punjenja</translation>
+<translation id="1621067168122174824">Pokreni test napunjenosti</translation>
 <translation id="1622402072367425417">svjetleći oblačići</translation>
 <translation id="1626590945318984973">Prečac nije dostupan. Pritisnite novi prečac bez upotrebe funkcijske tipke i tipke <ph name="META_KEY" />.</translation>
 <translation id="163774412591892664">Administrator je onemogućio vaš uređaj i može pristupiti njegovoj lokaciji.</translation>
@@ -1831,7 +1831,6 @@ Da biste dobili te prijepise, preuzmite model prijepisa (do 100 MB).</translati
 <translation id="9082718469794970195">Upotrijebi ovaj videozapis</translation>
 <translation id="9088306295921699330">Trenutačna upotreba</translation>
 <translation id="9088994563996376283">Pojednostavni</translation>
-<translation id="9095775724867566971">Pluginvm</translation>
 <translation id="909856219855259344">Više informacija o datumu poništavanja</translation>
 <translation id="9100765901046053179">Napredne postavke</translation>
 <translation id="910415269708673980">Osvježite tiket za <ph name="PRINCIPAL_NAME" /></translation>

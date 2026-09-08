@@ -43,7 +43,6 @@ class CORE_EXPORT SVGDocumentResourceTracker final
       const String& cache_identifier);
 
   void Dispose();
-  bool IsDisposed() const { return is_disposed_; }
 
   void Trace(Visitor*) const;
 
@@ -60,7 +59,6 @@ class CORE_EXPORT SVGDocumentResourceTracker final
   HeapHashSet<Member<SVGDocumentResource>> tracked_resources_;
   scoped_refptr<base::SingleThreadTaskRunner> dispose_task_runner_;
   bool dispose_task_pending_ = false;
-  bool is_disposed_ = false;
   String cache_identifier_;
 };
 

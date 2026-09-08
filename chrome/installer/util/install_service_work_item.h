@@ -16,7 +16,6 @@
 #include <string>
 #include <vector>
 
-#include "base/containers/span.h"
 #include "base/strings/cstring_view.h"
 #include "chrome/installer/util/work_item.h"
 
@@ -64,8 +63,7 @@ class InstallServiceWorkItem : public WorkItem {
   //
   // If COM CLSID/AppId registration is required, |clsids| should contain the
   // CLSIDs and AppIds to register. If COM Interface/Typelib registration is
-  // required, |iids| should contain the Interfaces and Typelibs to register
-  // and |previous_iids| should contain all old IIDs to be deleted on update.
+  // required, |iids| should contain the Interfaces and Typelibs to register.
   InstallServiceWorkItem(const std::wstring& service_name,
                          const std::wstring& display_name,
                          const std::wstring& description,
@@ -74,8 +72,7 @@ class InstallServiceWorkItem : public WorkItem {
                          const base::CommandLine& com_service_cmd_line_args,
                          const std::wstring& registry_path,
                          const std::vector<GUID>& clsids,
-                         const std::vector<GUID>& iids,
-                         base::span<const GUID> previous_iids);
+                         const std::vector<GUID>& iids);
 
   InstallServiceWorkItem(const InstallServiceWorkItem&) = delete;
   InstallServiceWorkItem& operator=(const InstallServiceWorkItem&) = delete;

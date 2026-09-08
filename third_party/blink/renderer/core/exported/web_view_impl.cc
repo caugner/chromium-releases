@@ -612,6 +612,7 @@ WebViewImpl::WebViewImpl(
       *chrome_client_, opener ? opener->GetPage() : nullptr,
       agent_group_scheduler.GetAgentGroupScheduler(),
       browsing_context_group_token, color_provider_colors);
+  page_->SetRendererPreferences(renderer_preferences_);
   CoreInitializer::GetInstance().ProvideModulesToPage(
       *page_, session_storage_namespace_id_);
 
@@ -2941,7 +2942,7 @@ void ValidatePausedStateConsistency() {
       }
       const bool microtasks_are_paused =
           window->GetAgent()->event_loop()->AreMicrotasksPaused();
-      CHECK(!microtasks_are_paused, base::NotFatalUntil::M153) << window->Url();
+      CHECK(!microtasks_are_paused, base::NotFatalUntil::M156) << window->Url();
     }
   }
 }
@@ -2975,7 +2976,6 @@ void WebViewImpl::EnableAutoResizeMode(const gfx::Size& min_size,
 
 void WebViewImpl::DisableAutoResizeMode() {
   should_auto_resize_ = false;
-  size_before_suppressed_autosize_.reset();
   ConfigureAutoResizeMode();
 }
 
@@ -3768,6 +3768,10 @@ void WebViewImpl::UpdateRendererPreferences(
   std::string old_accept_languages = renderer_preferences_.accept_languages;
   renderer_preferences_ = preferences;
 
+  if (GetPage()) {
+    GetPage()->SetRendererPreferences(preferences);
+  }
+
   for (auto& watcher : renderer_preference_watchers_) {
     watcher->NotifyUpdate(renderer_preferences_);
   }
@@ -3994,41 +3998,15 @@ void WebViewImpl::ResizeAfterLayout() {
   if (should_auto_resize_) {
     LocalFrameView* view = MainFrameImpl()->GetFrame()->View();
     gfx::Size frame_size = view->Size();
-    const bool should_suppress_notifications =
-        view->IsBeingAutoSized() &&
-        RuntimeEnabledFeatures::AutoSizeUsesScrollWidthForOverflowEnabled();
-    if (should_suppress_notifications && !size_before_suppressed_autosize_) {
-      size_before_suppressed_autosize_ = size_;
-    }
-    const bool had_suppressed_autosize_measurements =
-        size_before_suppressed_autosize_.has_value();
-    const gfx::Size previously_reported_size =
-        size_before_suppressed_autosize_.value_or(size_);
-    bool visual_viewport_size_changed = false;
     if (frame_size != size_) {
       size_ = frame_size;
 
-      GetPage()->GetVisualViewport().SetSize(size_,
-                                             should_suppress_notifications);
-      visual_viewport_size_changed = true;
+      GetPage()->GetVisualViewport().SetSize(size_);
       GetPageScaleConstraintsSet().DidChangeInitialContainingBlockSize(size_);
-    }
 
-    if (!should_suppress_notifications) {
-      size_before_suppressed_autosize_.reset();
-    }
-    if (!should_suppress_notifications &&
-        frame_size != previously_reported_size) {
       web_view_client_->DidAutoResize(size_);
       web_widget_->DidAutoResize(size_);
       SendResizeEventForMainFrame();
-      if (!visual_viewport_size_changed) {
-        view->GetFrame().GetDocument()->EnqueueVisualViewportResizeEvent();
-      }
-      if (had_suppressed_autosize_measurements &&
-          !view->GetFrame().GetDocument()->Printing()) {
-        probe::DidResizeMainFrame(&view->GetFrame());
-      }
     }
   }
 

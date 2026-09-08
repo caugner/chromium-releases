@@ -244,7 +244,8 @@ TEST_F(ComposeboxHandlerTest, SubmitQueryWithToolMetric) {
   handler().SetActiveToolMode(omnibox::ToolMode::TOOL_MODE_DEEP_SEARCH,
                               /*is_set_by_server=*/false);
   handler().RecordToolSelectionAction(omnibox::ToolMode::TOOL_MODE_DEEP_SEARCH);
-  handler().SetActiveModelMode(omnibox::ModelMode::MODEL_MODE_GEMINI_REGULAR);
+  handler().SetActiveModelMode(omnibox::ModelMode::MODEL_MODE_GEMINI_REGULAR,
+                               /*is_set_by_server=*/false);
   handler().RecordModelSelectionAction(
       omnibox::ModelMode::MODEL_MODE_GEMINI_REGULAR);
   EXPECT_CALL(metrics_recorder(),
@@ -264,7 +265,8 @@ TEST_F(ComposeboxHandlerTest, SubmitQueryWithToolMetric) {
   handler().SetActiveToolMode(omnibox::ToolMode::TOOL_MODE_IMAGE_GEN,
                               /*is_set_by_server=*/false);
   handler().RecordToolSelectionAction(omnibox::ToolMode::TOOL_MODE_IMAGE_GEN);
-  handler().SetActiveModelMode(omnibox::ModelMode::MODEL_MODE_GEMINI_PRO);
+  handler().SetActiveModelMode(omnibox::ModelMode::MODEL_MODE_GEMINI_PRO,
+                               /*is_set_by_server=*/false);
   handler().RecordModelSelectionAction(
       omnibox::ModelMode::MODEL_MODE_GEMINI_PRO);
   EXPECT_CALL(metrics_recorder(),
@@ -300,6 +302,25 @@ TEST_F(ComposeboxHandlerTest, SetSmartTabSharingActive) {
   EXPECT_TRUE(handler().IsSmartTabSharingActive());
 
   handler().SetSmartTabSharingActive(false);
+  EXPECT_FALSE(handler().IsSmartTabSharingActive());
+}
+
+TEST_F(ComposeboxHandlerTest, ResetInputStateModelClearsSmartTabSharingActive) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitWithFeaturesAndParameters(
+      {{contextual_tasks::kContextualTasksContext,
+        {{"ContextualTasksContextSmartTabSharing", "true"}}},
+       {contextual_tasks::kContextualTasksForceEntryPointEligibility, {}}},
+      {});
+
+  EXPECT_FALSE(handler().IsSmartTabSharingActive());
+
+  handler().SetSmartTabSharingActive(true);
+  EXPECT_TRUE(handler().IsSmartTabSharingActive());
+
+  // Starting a new session resets the session handle and input state model.
+  contextual_session_handle()->set_smart_tab_sharing_active(std::nullopt);
+  handler().ResetInputStateModel();
   EXPECT_FALSE(handler().IsSmartTabSharingActive());
 }
 
@@ -366,6 +387,7 @@ TEST_F(ComposeboxHandlerTest, DeleteContext_MojoDoesNotNotifyPage) {
 }
 
 TEST_F(ComposeboxHandlerTest, NextboxAnimationLimiting) {
+  base::HistogramTester histogram_tester;
   PrefService* prefs = profile()->GetPrefs();
 
   // 1. Initially allowed, counts are 0.
@@ -382,12 +404,14 @@ TEST_F(ComposeboxHandlerTest, NextboxAnimationLimiting) {
 
   // 2. Record 1st impression.
   {
-    handler().RecordNextboxAnimationImpression();
+    handler().RecordNextboxAnimationImpression(/*shown=*/true);
 
     const base::DictValue& dict =
         prefs->GetDict(prefs::kContextMenuAnimationState);
     EXPECT_THAT(dict.FindInt("nextbox_daily_count"), testing::Optional(1));
     EXPECT_THAT(dict.FindInt("nextbox_lifetime_count"), testing::Optional(1));
+    histogram_tester.ExpectBucketCount(
+        "Omnibox.ContextMenu.AnimationShown.ContextualTasks", true, 1);
   }
 
   // 3. Play 4 more times (total 5 daily impressions recorded).
@@ -395,7 +419,7 @@ TEST_F(ComposeboxHandlerTest, NextboxAnimationLimiting) {
     base::test::TestFuture<bool> future;
     handler().CanShowNextboxAnimation(future.GetCallback());
     EXPECT_TRUE(future.Take());
-    handler().RecordNextboxAnimationImpression();
+    handler().RecordNextboxAnimationImpression(/*shown=*/true);
   }
 
   // Verify counts are now 5 daily and 5 lifetime.
@@ -404,20 +428,25 @@ TEST_F(ComposeboxHandlerTest, NextboxAnimationLimiting) {
         prefs->GetDict(prefs::kContextMenuAnimationState);
     EXPECT_THAT(dict.FindInt("nextbox_daily_count"), testing::Optional(5));
     EXPECT_THAT(dict.FindInt("nextbox_lifetime_count"), testing::Optional(5));
+    histogram_tester.ExpectBucketCount(
+        "Omnibox.ContextMenu.AnimationShown.ContextualTasks", true, 5);
   }
 
-  // 4. The 6th time, it should not be allowed and record should do nothing.
+  // 4. The 6th time, it should not be allowed and record should do nothing to
+  // prefs.
   {
     base::test::TestFuture<bool> future;
     handler().CanShowNextboxAnimation(future.GetCallback());
     EXPECT_FALSE(future.Take());
 
-    handler().RecordNextboxAnimationImpression();
+    handler().RecordNextboxAnimationImpression(/*shown=*/false);
 
     const base::DictValue& dict =
         prefs->GetDict(prefs::kContextMenuAnimationState);
     EXPECT_THAT(dict.FindInt("nextbox_daily_count"), testing::Optional(5));
     EXPECT_THAT(dict.FindInt("nextbox_lifetime_count"), testing::Optional(5));
+    histogram_tester.ExpectBucketCount(
+        "Omnibox.ContextMenu.AnimationShown.ContextualTasks", false, 1);
   }
 
   // 5. Simulate a new day (change the date string in prefs).
@@ -434,12 +463,14 @@ TEST_F(ComposeboxHandlerTest, NextboxAnimationLimiting) {
     handler().CanShowNextboxAnimation(future.GetCallback());
     EXPECT_TRUE(future.Take());
 
-    handler().RecordNextboxAnimationImpression();
+    handler().RecordNextboxAnimationImpression(/*shown=*/true);
 
     const base::DictValue& dict =
         prefs->GetDict(prefs::kContextMenuAnimationState);
     EXPECT_THAT(dict.FindInt("nextbox_daily_count"), testing::Optional(1));
     EXPECT_THAT(dict.FindInt("nextbox_lifetime_count"), testing::Optional(6));
+    histogram_tester.ExpectBucketCount(
+        "Omnibox.ContextMenu.AnimationShown.ContextualTasks", true, 6);
   }
 
   // 7. Bring lifetime count to 19 and verify it caps after 20.
@@ -457,12 +488,14 @@ TEST_F(ComposeboxHandlerTest, NextboxAnimationLimiting) {
     handler().CanShowNextboxAnimation(future.GetCallback());
     EXPECT_TRUE(future.Take());
 
-    handler().RecordNextboxAnimationImpression();
+    handler().RecordNextboxAnimationImpression(/*shown=*/true);
 
     const base::DictValue& dict =
         prefs->GetDict(prefs::kContextMenuAnimationState);
     EXPECT_THAT(dict.FindInt("nextbox_daily_count"), testing::Optional(1));
     EXPECT_THAT(dict.FindInt("nextbox_lifetime_count"), testing::Optional(20));
+    histogram_tester.ExpectBucketCount(
+        "Omnibox.ContextMenu.AnimationShown.ContextualTasks", true, 7);
   }
 
   // 21st lifetime impression should be blocked.
@@ -471,12 +504,14 @@ TEST_F(ComposeboxHandlerTest, NextboxAnimationLimiting) {
     handler().CanShowNextboxAnimation(future.GetCallback());
     EXPECT_FALSE(future.Take());
 
-    handler().RecordNextboxAnimationImpression();
+    handler().RecordNextboxAnimationImpression(/*shown=*/false);
 
     const base::DictValue& dict =
         prefs->GetDict(prefs::kContextMenuAnimationState);
     EXPECT_THAT(dict.FindInt("nextbox_daily_count"), testing::Optional(1));
     EXPECT_THAT(dict.FindInt("nextbox_lifetime_count"), testing::Optional(20));
+    histogram_tester.ExpectBucketCount(
+        "Omnibox.ContextMenu.AnimationShown.ContextualTasks", false, 2);
   }
 }
 

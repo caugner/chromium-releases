@@ -101,6 +101,8 @@ export function getHtml(this: ContextualTasksAppElement) {
           .isZeroState="${this.isZeroState_}"
           .isSidePanel="${!this.isShownInTab_}"
           .isLensOverlayShowing="${this.isLensOverlayShowing_}"
+          .isLensSearchTooltipShowing="${
+              this.lensSearchTooltipTarget_ !== null}"
           .isOverlayOpenForAimVisualSearch="${
               this.isOverlayOpenForAimVisualSearch_}"
           .enableNativeZeroStateSuggestions="${
@@ -126,7 +128,10 @@ export function getHtml(this: ContextualTasksAppElement) {
         .container="${this.composeboxElement_}"
         title-text="$i18n{askGFirstRunTitle}"
         body-text="$i18n{askGFirstRunBody}"
-        close-button-type="icon"
+        close-button-type="text"
+        button-text="$i18n{lensSearchTooltipAcceptButton}"
+        link-url="$i18n{askGHelpUrl}"
+        link-text="$i18n{learnMore}"
         horizontal-align="left"
         @tooltip-dismissed="${this.onAskGTooltipDismissed_}">
     </contextual-tasks-info-tooltip>

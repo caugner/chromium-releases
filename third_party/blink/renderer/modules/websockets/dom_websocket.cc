@@ -38,6 +38,7 @@
 #include "base/feature_list.h"
 #include "base/functional/callback.h"
 #include "base/location.h"
+#include "services/network/public/mojom/ip_address_space.mojom-blink.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/switches.h"
 #include "third_party/blink/public/mojom/frame/lifecycle.mojom-shared.h"
@@ -243,9 +244,11 @@ DOMWebSocket* DOMWebSocket::Create(
   return websocket;
 }
 
-void DOMWebSocket::Connect(const String& url,
-                           const Vector<String>& protocols,
-                           ExceptionState& exception_state) {
+void DOMWebSocket::Connect(
+    const String& url,
+    const Vector<String>& protocols,
+    ExceptionState& exception_state,
+    network::mojom::blink::IPAddressSpace target_address_space) {
   UseCounter::Count(GetExecutionContext(), WebFeature::kWebSocket);
 
   DVLOG(1) << "WebSocket " << this << " connect() url=" << url;
@@ -259,7 +262,7 @@ void DOMWebSocket::Connect(const String& url,
   }
 
   auto result = common_.Connect(GetExecutionContext(), url, protocols, channel_,
-                                exception_state);
+                                exception_state, target_address_space);
 
   switch (result) {
     case WebSocketCommon::ConnectResult::kSuccess:

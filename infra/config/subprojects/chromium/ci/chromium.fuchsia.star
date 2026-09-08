@@ -69,7 +69,6 @@ ci.builder(
             "x64",
         ],
     ),
-    ssd = None,
     # Runs two builds, which can cause the builder to run out of disk space
     # with standard free space.
     free_space = free_space.high,
@@ -133,7 +132,7 @@ ci.builder(
         mixins = [
             "arm64",
             "docker",
-            "linux-jammy",
+            "linux-ubuntu",
         ],
         per_test_modifications = {
             "context_lost_validating_tests": targets.remove(
@@ -156,7 +155,6 @@ ci.builder(
             ),
         },
     ),
-    ssd = None,
     console_view_entry = [
         consoles.console_view_entry(
             category = "cast-receiver",
@@ -214,6 +212,7 @@ ci.builder(
             "cast_test_lists",
         ],
         mixins = [
+            "fuchsia-orchestrate",
             "isolate_profile_data",
             "linux-jammy",
             targets.mixin(
@@ -254,7 +253,6 @@ ci.builder(
             ),
         },
     ),
-    ssd = None,
     free_space = free_space.high,
     console_view_entry = [
         consoles.console_view_entry(
@@ -318,6 +316,7 @@ ci.builder(
         ],
         mixins = [
             "fuchsia-large-device-spec",
+            "fuchsia-orchestrate",
             "isolate_profile_data",
             "linux-jammy",
             targets.mixin(
@@ -356,7 +355,6 @@ ci.builder(
             ],
         },
     ),
-    ssd = None,
     console_view_entry = [
         consoles.console_view_entry(
             category = "cast-receiver",

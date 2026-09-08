@@ -960,8 +960,35 @@ void FileSystemAccessManagerImpl::ResolveDataTransferTokenWithFileType(
     HandleType file_type) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
+  if (!permission_context_) {
+    DidVerifySensitiveDirectoryAccessForDataTransfer(
+        binding_context, path_info, url, file_type,
+        std::move(token_resolved_callback), SensitiveEntryResult::kAllowed);
+    return;
+  }
+
+  RenderFrameHost* rfh = RenderFrameHost::FromID(binding_context.frame_id);
+  if (!rfh) {
+    std::move(token_resolved_callback)
+        .Run(file_system_access_error::FromStatus(
+                 blink::mojom::FileSystemAccessStatus::kOperationAborted),
+             blink::mojom::FileSystemAccessEntryPtr());
+    return;
+  }
+
+  auto can_show_file_picker_result =
+      permission_context_->CanShowFilePicker(rfh);
+  if (!can_show_file_picker_result.has_value()) {
+    std::move(token_resolved_callback)
+        .Run(file_system_access_error::FromStatus(
+                 blink::mojom::FileSystemAccessStatus::kPermissionDenied,
+                 can_show_file_picker_result.error()),
+             blink::mojom::FileSystemAccessEntryPtr());
+    return;
+  }
+
   // Don't perform sensitive entry access checks on D&D files.
-  if (!permission_context_ || file_type == HandleType::kFile) {
+  if (file_type == HandleType::kFile) {
     DidVerifySensitiveDirectoryAccessForDataTransfer(
         binding_context, path_info, url, file_type,
         std::move(token_resolved_callback), SensitiveEntryResult::kAllowed);
@@ -1226,18 +1253,16 @@ void FileSystemAccessManagerImpl::DeserializeHandle(
       // Apply bucket information.
       auto bucket_callback = base::BindOnce(
           [](storage::FileSystemURL url,
-             const blink::StorageKey& expected_storage_key,
              base::OnceCallback<void(const storage::FileSystemURL&)> callback,
              storage::QuotaErrorOr<storage::BucketInfo> result) {
-            if (!result.has_value() ||
-                result->storage_key != expected_storage_key) {
+            if (!result.has_value()) {
               // Drop `token`, and directly return.
               return;
             }
             url.SetBucket(result->ToBucketLocator());
             std::move(callback).Run(url);
           },
-          url, storage_key,
+          url,
           base::BindOnce(&FileSystemAccessManagerImpl::
                              DidGetSandboxedBucketForDeserializeHandle,
                          weak_factory_.GetWeakPtr(), data, std::move(token),

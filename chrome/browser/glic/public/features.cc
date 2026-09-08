@@ -24,7 +24,13 @@ const base::FeatureParam<bool> kGlicChromeStatusIconLogOnly{
 const base::FeatureParam<std::string> kGlicChromeStatusIconOtherAppID{
     &kGlicChromeStatusIcon, "glic-chrome-status-icon-other-app-id", ""};
 
-BASE_FEATURE(kGlicOSIconVariant, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kGlicOSIconVariant,
+#if BUILDFLAG(IS_MAC)
+             base::FEATURE_ENABLED_BY_DEFAULT
+#else
+             base::FEATURE_DISABLED_BY_DEFAULT
+#endif
+);
 const base::FeatureParam<int> kGlicOSIconVariantParam{&kGlicOSIconVariant,
                                                       "variant", 0};
 
@@ -42,6 +48,12 @@ const base::FeatureParam<bool> kGlicSelectionAutoSendPrompt{
     &kGlicSelectionPrompt, "auto_send_prompt", true};
 const base::FeatureParam<std::string> kGlicSelectionPromptCta{
     &kGlicSelectionPrompt, "cta", kGlicSelectionPromptCtaExplain};
+const base::FeatureParam<bool> kGlicSelectionPromptInlineFulfillment{
+    &kGlicSelectionPrompt, "inline_fulfillment", false};
+const base::FeatureParam<std::string> kGlicSelectionPromptInlinePromptTemplate{
+    &kGlicSelectionPrompt, "inline_prompt_template", ""};
+const base::FeatureParam<bool> kGlicSelectionPromptSkills{
+    &kGlicSelectionPrompt, "skills", true};
 
 BASE_FEATURE(kGlicClearTurnIdOnPanelWillOpen,
              base::FEATURE_DISABLED_BY_DEFAULT);
@@ -168,6 +180,9 @@ const base::FeatureParam<int> kGlicReloadMaxLoadingTimeMs{
 BASE_FEATURE(kGlicContextualCueingV2AutoSubmit,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
+BASE_FEATURE(kGlicMessageFirstFreForContextualCue,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 BASE_FEATURE(kGlicWebDragAndDropFileUpload, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kGlicOptInImpressionMetrics, base::FEATURE_ENABLED_BY_DEFAULT);
@@ -197,11 +212,6 @@ BASE_FEATURE(kGlicShowForSignedOut,
 #endif
 );
 
-// Killswitch that controls whether to update the WebContents visibility state
-// when toggling the Glic panel.
-BASE_FEATURE(kGlicSetWebContentsVisibilityWhenToggling,
-             base::FEATURE_ENABLED_BY_DEFAULT);
-
 BASE_FEATURE(kGlicProcessCounterAbuseVerdict,
              base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kGlicNoWebUiLoader, base::FEATURE_DISABLED_BY_DEFAULT);
@@ -229,11 +239,32 @@ BASE_FEATURE(kGlicWebPasteEligibilityCheck,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kGlicTabGroups, base::FEATURE_DISABLED_BY_DEFAULT);
+const base::FeatureParam<bool> kGlicTabGroupsUseFullTabEmbedder{
+    &kGlicTabGroups, "use_full_tab_embedder", false};
 BASE_FEATURE(kGlicSparkSettingsAccessibleLabels,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
-BASE_FEATURE(kGlicOptInDialogLinkA11yFix, base::FEATURE_ENABLED_BY_DEFAULT);
-
 BASE_FEATURE(kGlicOptInDialogA11yFix, base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kGlicStructuredYieldMetadata, base::FEATURE_DISABLED_BY_DEFAULT);
+// Whether to allow Mojo in the glic guest frame.
+BASE_FEATURE(kGlicEnableMojoJs, base::FEATURE_DISABLED_BY_DEFAULT);
+
+// Runs the glic client in a PrivilegedWebContents instead of a webview.
+// This is a work in progress. See b/534807813.
+BASE_FEATURE(kGlicNoWebview, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kGlicShakeTrigger,
+             "GlicShakeTrigger",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kGlicMarketingAutoOpen, base::FEATURE_ENABLED_BY_DEFAULT);
+const base::FeatureParam<std::string> kGlicMarketingUrlAllowlist{
+    &kGlicMarketingAutoOpen, "allowlisted_urls",
+#if BUILDFLAG(IS_ANDROID)
+    "https://www.google.com/chrome/ai-innovations/gemini-in-chrome/"
+#else
+    ""
+#endif
+};
+const base::FeatureParam<int> kGlicMarketingAutoOpenMaxCount{
+    &kGlicMarketingAutoOpen, "max_impressions", 1};
 }  // namespace features

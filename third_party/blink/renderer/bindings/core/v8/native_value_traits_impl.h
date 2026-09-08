@@ -254,12 +254,13 @@ class CORE_EXPORT NativeValueTraitsStringAdapter {
   NativeValueTraitsStringAdapter(const NativeValueTraitsStringAdapter&) =
       delete;
   NativeValueTraitsStringAdapter(NativeValueTraitsStringAdapter&&) = default;
-  NativeValueTraitsStringAdapter(v8::Isolate* isolate,
-                                 v8::Local<v8::String> value)
+  explicit NativeValueTraitsStringAdapter(v8::Isolate* isolate,
+                                          v8::Local<v8::String> value)
       : v8_string_(value), isolate_(isolate) {}
-  NativeValueTraitsStringAdapter(v8::Isolate* isolate, const String& value)
+  explicit NativeValueTraitsStringAdapter(v8::Isolate* isolate,
+                                          const String& value)
       : isolate_(isolate), wtf_string_(value) {}
-  NativeValueTraitsStringAdapter(v8::Isolate* isolate, int32_t value)
+  explicit NativeValueTraitsStringAdapter(v8::Isolate* isolate, int32_t value)
       : isolate_(isolate), wtf_string_(ToBlinkString(value)) {}
 
   NativeValueTraitsStringAdapter& operator=(
@@ -297,14 +298,20 @@ class CORE_EXPORT NativeValueTraitsStringAdapter {
     return StringType(wtf_string_);
   }
 
-  StringView ToStringView() const&;
+  StringView ToStringView() const& {
+    if (!v8_string_.IsEmpty()) [[likely]] {
+      return ToBlinkStringView(isolate_, v8_string_, string_view_backing_store_,
+                               kExternalize);
+    }
+    return wtf_string_;
+  }
 
   // Careful here, ordering some of the members here (mainly the isolate) may
   // be important in the hot path. Having the isolate the second member showed
   // a performance gain on MacOS arm (see crbug.com/1482549).
   v8::Local<v8::String> v8_string_;
   v8::Isolate* isolate_ = nullptr;
-  mutable String wtf_string_;
+  String wtf_string_;
   mutable StringView::StackBackingStore string_view_backing_store_;
 };
 

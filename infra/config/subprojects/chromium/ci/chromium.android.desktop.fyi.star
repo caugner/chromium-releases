@@ -17,6 +17,7 @@ ci.defaults.set(
     executable = ci_constants.DEFAULT_EXECUTABLE,
     builder_group = "chromium.android.desktop.fyi",
     pool = ci_constants.DEFAULT_POOL,
+    builderless = False,
     os = os.LINUX_DEFAULT,
     contact_team_email = "clank-engprod@google.com",
     execution_timeout = ci_constants.DEFAULT_EXECUTION_TIMEOUT,
@@ -100,7 +101,6 @@ ci.builder(
         os_type = targets.os_type.ANDROID,
     ),
     cores = 8,
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "x64|emu|rel",
         short_name = "15",

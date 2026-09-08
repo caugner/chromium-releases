@@ -17,7 +17,6 @@
 #include "gpu/command_buffer/common/shared_image_info.h"
 #include "gpu/command_buffer/common/shared_image_usage.h"
 #include "gpu/command_buffer/service/context_state.h"
-#include "gpu/command_buffer/service/gl_utils.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 #include "gpu/command_buffer/service/shared_context_state.h"
 #include "gpu/command_buffer/service/shared_image/shared_image_factory.h"
@@ -505,7 +504,8 @@ void GLTextureImageBacking::InitializeGLTexture(
   // unfortunate, but is done in order to mirror other allocation checks done in
   // the command decoder.
   gl::GLApi* const api = gl::g_current_gl_context;
-  DrainGLErrors(api);
+  while (api->glGetErrorFn() != GL_NO_ERROR) {
+  }
 
   const std::string debug_label =
       "GLSharedImage_" + SharedImageBacking::debug_label();

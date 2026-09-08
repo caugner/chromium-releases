@@ -53,7 +53,6 @@ polymorphic.launcher(
     pool = ci_constants.DEFAULT_POOL,
     cores = 8,
     os = os.LINUX_DEFAULT,
-    ssd = None,
     runner = "reviver/runner",
     target_builders = [
         "ci/android-10-x86-rel",
@@ -75,7 +74,6 @@ polymorphic.launcher(
     schedule = "0 4 * * *",
     pool = ci_constants.DEFAULT_POOL,
     os = os.LINUX_DEFAULT,
-    ssd = None,
     runner = "reviver/coverage-runner",
     target_builders = [
         "ci/android-code-coverage",
@@ -89,7 +87,6 @@ polymorphic.launcher(
     schedule = "0 5,8,11 * * *",
     pool = ci_constants.DEFAULT_POOL,
     os = os.LINUX_DEFAULT,
-    ssd = None,
     runner = "reviver/runner",
     target_builders = [
         "ci/android-14-arm64-rel",
@@ -105,7 +102,6 @@ polymorphic.launcher(
     pool = ci_constants.DEFAULT_POOL,
     cores = 8,
     os = os.LINUX_DEFAULT,
-    ssd = None,
     contact_team_email = "clank-engprod@google.com",
     runner = "reviver/runner",
     target_builders = [
@@ -135,7 +131,6 @@ polymorphic.launcher(
     pool = ci_constants.DEFAULT_POOL,
     cores = 8,
     os = os.LINUX_DEFAULT,
-    ssd = None,
     contact_team_email = "clank-engprod@google.com",
     runner = "reviver/runner",
     target_builders = [
@@ -164,7 +159,6 @@ polymorphic.launcher(
     pool = ci_constants.DEFAULT_POOL,
     cores = 8,
     os = os.LINUX_DEFAULT,
-    ssd = None,
     contact_team_email = "clank-engprod@google.com",
     runner = "reviver/runner",
     target_builders = [
@@ -189,7 +183,6 @@ polymorphic.launcher(
     name = "linux-launcher",
     # To avoid peak hours, we run it at 5~11 UTC, 21~27 PST.
     schedule = "0 5-11/3 * * *",
-    ssd = None,
     runner = "reviver/runner",
     target_builders = [
         polymorphic.target_builder(
@@ -205,7 +198,6 @@ polymorphic.launcher(
     name = "win-launcher",
     # To avoid peak hours, we run it at 5~11 UTC, 21~27 PST.
     schedule = "0 5-11/3 * * *",
-    ssd = None,
     runner = "reviver/runner",
     target_builders = [
         polymorphic.target_builder(
@@ -227,14 +219,13 @@ polymorphic.launcher(
     name = "mac-launcher",
     # To avoid peak hours, we run it at 5~11 UTC, 21~27 PST.
     schedule = "0 5-11/3 * * *",
-    ssd = None,
     runner = "reviver/runner",
     target_builders = [
         polymorphic.target_builder(
             builder = "ci/Mac Builder",
             dimensions = dimensions.dimensions(
                 builderless = True,
-                os = os.MAC_DEFAULT,
+                os = os.MAC_15,
                 cpu = cpu.X86_64,
                 ssd = True,
                 free_space = free_space.standard,
@@ -254,7 +245,6 @@ polymorphic.launcher(
     schedule = "0 2,4,6,8,10,12,14 * * *",
     pool = ci_constants.DEFAULT_POOL,
     os = os.LINUX_DEFAULT,
-    ssd = None,
     runner = "reviver/runner",
     target_builders = [
         "ci/fuchsia-arm64-cast-receiver-rel",
@@ -270,7 +260,7 @@ builder(
     builderless = 1,
     os = os.LINUX_DEFAULT,
     cpu = cpu.X86_64,
-    ssd = None,
+    ssd = False,
     free_space = free_space.standard,
     auto_builder_dimension = False,
     execution_timeout = 6 * time.hour,

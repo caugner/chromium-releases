@@ -42,23 +42,17 @@ PairwisePrimitiveInterpolation*
 InvalidatableInterpolation::MaybeConvertPairwise(
     const CSSInterpolationEnvironment& environment,
     const UnderlyingValueOwner& underlying_value_owner) const {
-  const InterpolationValue null_underlying(nullptr);
   for (const InterpolationType* interpolation_type : *interpolation_types_) {
     if ((start_keyframe_->IsNeutral() || end_keyframe_->IsNeutral()) &&
         (!underlying_value_owner ||
          underlying_value_owner.GetType() != interpolation_type)) {
       continue;
     }
-    const InterpolationValue& underlying =
-        (underlying_value_owner &&
-         underlying_value_owner.GetType() == interpolation_type)
-            ? underlying_value_owner.Value()
-            : null_underlying;
     ConversionCheckers conversion_checkers;
     PairwiseInterpolationValue result =
         interpolation_type->MaybeConvertPairwise(
-            *start_keyframe_, *end_keyframe_, environment, underlying,
-            conversion_checkers);
+            *start_keyframe_, *end_keyframe_, environment,
+            underlying_value_owner.Value(), conversion_checkers);
     AddConversionCheckers(interpolation_type, conversion_checkers);
     if (result) {
       return MakeGarbageCollected<PairwisePrimitiveInterpolation>(
@@ -77,20 +71,15 @@ TypedInterpolationValue* InvalidatableInterpolation::ConvertSingleKeyframe(
   if (keyframe.IsNeutral() && !underlying_value_owner) {
     return nullptr;
   }
-  const InterpolationValue null_underlying(nullptr);
   for (const InterpolationType* interpolation_type : *interpolation_types_) {
     if (keyframe.IsNeutral() &&
         underlying_value_owner.GetType() != interpolation_type) {
       continue;
     }
-    const InterpolationValue& underlying =
-        (underlying_value_owner &&
-         underlying_value_owner.GetType() == interpolation_type)
-            ? underlying_value_owner.Value()
-            : null_underlying;
     ConversionCheckers conversion_checkers;
     InterpolationValue result = interpolation_type->MaybeConvertSingle(
-        keyframe, environment, underlying, conversion_checkers);
+        keyframe, environment, underlying_value_owner.Value(),
+        conversion_checkers);
     AddConversionCheckers(interpolation_type, conversion_checkers);
     if (result) {
       return MakeGarbageCollected<TypedInterpolationValue>(
@@ -167,14 +156,8 @@ bool InvalidatableInterpolation::IsConversionCacheValid(
       return false;
     }
   }
-  const InterpolationValue null_underlying(nullptr);
   for (const auto& checker : conversion_checkers_) {
-    const InterpolationValue& underlying =
-        (underlying_value_owner &&
-         underlying_value_owner.GetType() == checker->GetType())
-            ? underlying_value_owner.Value()
-            : null_underlying;
-    if (!checker->IsValid(environment, underlying)) {
+    if (!checker->IsValid(environment, underlying_value_owner.Value())) {
       return false;
     }
   }
@@ -242,9 +225,6 @@ void InvalidatableInterpolation::EnsureValidInterpolationTypes(
 
 void InvalidatableInterpolation::SetFlagIfInheritUsed(
     CSSInterpolationEnvironment& environment) const {
-  if (!property_.IsCSSProperty()) {
-    return;
-  }
   StyleResolverState& state = environment.GetState();
   if (!state.ParentStyle()) {
     return;

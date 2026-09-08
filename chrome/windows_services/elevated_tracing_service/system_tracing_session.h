@@ -54,7 +54,8 @@ class SystemTracingSession
       scoped_refptr<base::SequencedTaskRunner> task_runner);
 
   // ISystemTraceSession:
-  IFACEMETHODIMP AcceptInvitation(UINT32 endpoint_handle, DWORD* pid) override;
+  IFACEMETHODIMP AcceptInvitation(const wchar_t* channel_name,
+                                  DWORD* pid) override;
 
  private:
   ~SystemTracingSession() override;

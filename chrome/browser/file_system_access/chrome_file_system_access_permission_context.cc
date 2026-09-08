@@ -81,6 +81,7 @@
 #include "base/android/apk_info.h"
 #include "base/android/content_uri_utils.h"
 #include "base/strings/string_util.h"
+#include "chrome/browser/glic/host/guest_util.h"  // nogncheck
 #include "chrome/browser/ui/android/tab_model/tab_model.h"
 #include "chrome/browser/ui/android/tab_model/tab_model_list.h"
 #else
@@ -2162,6 +2163,7 @@ void ChromeFileSystemAccessPermissionContext::CheckPathsAgainstEnterprisePolicy(
 
   data.reason =
       enterprise_connectors::ContentAnalysisRequest::FILE_PICKER_DIALOG;
+  data.initiating_frame_id = frame_id;
 
 #if BUILDFLAG(IS_CHROMEOS)
   storage::FileSystemContext* file_system_context = nullptr;
@@ -2376,6 +2378,16 @@ ChromeFileSystemAccessPermissionContext::CanShowFilePicker(
   // contexts. Note that on desktop, <webview> is explicitly allowed to use FSA
   // in the block above to avoid breaking existing usage.
   if (rfh->GetSiteInstance()->GetSecurityPrincipal().IsGuest()) {
+#if BUILDFLAG(IS_ANDROID)
+    // Allow Glic guest contexts to use File System Access API file pickers.
+    content::WebContents* web_contents =
+        content::WebContents::FromRenderFrameHost(rfh);
+    if (glic::IsGlicGuest(web_contents) &&
+        glic::GetGuestOrigin().IsSameOriginWith(
+            rfh->GetLastCommittedOrigin())) {
+      return base::ok();
+    }
+#endif  // BUILDFLAG(IS_ANDROID)
     return base::unexpected(kDefaultNotAllowedMessage);
   }
 

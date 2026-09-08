@@ -30,7 +30,7 @@ pkg.depend(
         ref = "refs/heads/main",
         path = "starlark-libs/chromium-luci",
         # Take revision from https://chromium.googlesource.com/infra/chromium/.
-        revision = "d381c78e626229ce32debabaf2af7666b3e85a4a",
+        revision = "8d5c215367583f0f8723d7d4b850155e2109977e",
     ),
 )
 
@@ -45,7 +45,6 @@ pkg.resources([
     "autoshard_exceptions.json",
     "dev/chromium-header.textpb",
     "lib/linux-default.json",
-    "lib/windows-default.json",
     "luci-analysis-dev.cfg",
     "luci-analysis.cfg",
     "luci-bisection-dev.cfg",

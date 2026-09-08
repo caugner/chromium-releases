@@ -313,8 +313,32 @@ class VIEWS_EXPORT MenuController final : public gfx::AnimationDelegate,
     return value;
   }
 
+  // Returns true if the controller is currently executing code on the call
+  // stack (e.g. inside OpenMenuImpl).
+  bool IsStackActive() const { return stack_depth_ > 0; }
+
+  // Returns whether the menu is currently in the showing state.
+  bool showing_for_testing() const { return showing_; }
+
+  // Defers closing the given widget until the current call stack unwinds.
+  void DeferWidgetDestruction(base::WeakPtr<Widget> widget);
+
+  // Defers destroying the given MenuRunnerImpl until the current call stack
+  // unwinds.
+  void DeferMenuRunnerDestruction(
+      std::unique_ptr<internal::MenuRunnerImpl> runner);
+
+  // Destroys this MenuController, or marks destruction pending if the call
+  // stack is currently active.
+  void Destroy();
+
   base::WeakPtr<MenuController> AsWeakPtr() {
     return weak_ptr_factory_.GetWeakPtr();
+  }
+
+  // Deletes the given MenuController directly for tests.
+  static void DeleteForTesting(MenuController* controller) {
+    delete controller;
   }
 
  private:
@@ -325,6 +349,30 @@ class VIEWS_EXPORT MenuController final : public gfx::AnimationDelegate,
   friend class SubmenuView;
   friend class test::MenuControllerTestApi;
   friend class test::MenuControllerUITest;
+
+  // RAII helper that tracks active call stack frames on MenuController to
+  // prevent premature destruction during re-entrant calls. While active
+  // (stack_depth_ > 0), deletion of the MenuController itself is blocked (which
+  // sets `destroy_pending_ = true`). Additionally, closing of associated
+  // MenuHost Widgets and destruction of released MenuRunnerImpl instances are
+  // deferred. Upon unwinding the outermost guard (stack_depth_ == 0), the
+  // MenuController is deleted if destruction was requested, or
+  // `ProcessDeferredDestructions()` is called to clean up deferred widgets and
+  // runners.
+  class ScopedDeletionGuard {
+   public:
+    explicit ScopedDeletionGuard(base::WeakPtr<MenuController> controller);
+    ScopedDeletionGuard(const ScopedDeletionGuard&) = delete;
+    ScopedDeletionGuard& operator=(const ScopedDeletionGuard&) = delete;
+    ~ScopedDeletionGuard();
+
+   private:
+    base::WeakPtr<MenuController> controller_;
+  };
+
+  // Closes deferred widgets and releases deferred menu runners once the stack
+  // has unwound.
+  void ProcessDeferredDestructions();
 
   struct MenuPart;
 
@@ -623,7 +671,7 @@ class VIEWS_EXPORT MenuController final : public gfx::AnimationDelegate,
   // Sets exit type. Calling this can terminate the active nested message-loop.
   void SetExitType(ExitType type);
 
-  // Performs the teardown of menus. This will notify the |delegate_|. If
+  // Performs the teardown of menus. This will notify the delegate. If
   // |exit_type_| is ExitType::kAll all nested runs will be exited.
   void ExitMenu();
 
@@ -723,10 +771,16 @@ class VIEWS_EXPORT MenuController final : public gfx::AnimationDelegate,
   std::list<NestedState> menu_stack_;
 
   // When Run is invoked during an active Run, it may be called from a separate
-  // MenuControllerDelegate. If not empty it means we are nested, and the
-  // stacked delegates should be notified instead of |delegate_|.
+  // MenuControllerDelegate. The stacked delegates are stored here, with the top
+  // (back) of the stack being the active delegate.
   std::list<raw_ptr<internal::MenuControllerDelegate, CtnExperimental>>
       delegate_stack_;
+
+  // Returns the current delegate (the top element of `delegate_stack_`), or
+  // nullptr if the stack is empty.
+  internal::MenuControllerDelegate* delegate() const {
+    return delegate_stack_.empty() ? nullptr : delegate_stack_.back().get();
+  }
 
   // As the mouse moves around submenus are not opened immediately. Instead
   // they open after this timer fires.
@@ -782,8 +836,6 @@ class VIEWS_EXPORT MenuController final : public gfx::AnimationDelegate,
 
   // Current hot tracked child button if any.
   raw_ptr<Button> hot_button_ = nullptr;
-
-  raw_ptr<internal::MenuControllerDelegate> delegate_;
 
   // The timestamp of the event which closed the menu - or 0 otherwise.
   base::TimeTicks closing_event_time_;
@@ -852,6 +904,18 @@ class VIEWS_EXPORT MenuController final : public gfx::AnimationDelegate,
   // its successful presentation
   std::optional<std::string> show_menu_host_duration_histogram_;
 
+  // True if destruction was requested while the call stack was active.
+  bool destroy_pending_ = false;
+
+  // Depth of active re-entrant stack frames managed by ScopedDeletionGuard.
+  int stack_depth_ = 0;
+
+  // Widgets whose Close() is deferred until the call stack unwinds.
+  std::vector<base::WeakPtr<Widget>> deferred_destroy_widgets_;
+
+  // Menu runners whose destruction is deferred until the call stack unwinds.
+  std::vector<std::unique_ptr<internal::MenuRunnerImpl>>
+      deferred_destroy_runners_;
   base::WeakPtrFactory<MenuController> weak_ptr_factory_{this};
 };
 

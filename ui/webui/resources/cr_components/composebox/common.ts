@@ -5,8 +5,9 @@
 import {ComposeboxContextAddedMethod} from '//resources/cr_components/search/constants.js';
 import {assertNotReachedCase} from '//resources/js/assert.js';
 import {loadTimeData} from '//resources/js/load_time_data.js';
+import type {FuseboxAction, SuggestInventory} from '//resources/mojo/components/omnibox/browser/fusebox_action.mojom-webui.js';
 import {TabAttachmentSource} from '//resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
-import type {DriveUploadError, SearchContextAttachment, SuggestInventory} from '//resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
+import type {DriveUploadError, SearchContextAttachment} from '//resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
 import type {UnguessableToken} from '//resources/mojo/mojo/public/mojom/base/unguessable_token.mojom-webui.js';
 import type {Url} from '//resources/mojo/url/mojom/url.mojom-webui.js';
 
@@ -251,26 +252,26 @@ export function mapMojoSourceToOrigin(source: TabAttachmentSource): TabUploadOri
   return MOJO_TO_ORIGIN[source];
 }
 
-export function isSuggestedOrigin(origin?: TabUploadOrigin): boolean {
+export function isAutoAddedOrigin(origin?: TabUploadOrigin): boolean {
   return origin === TabUploadOrigin.AUTO_ADDED ||
       origin === TabUploadOrigin.CURRENT_TAB_CHIP;
 }
 
-export function hasOnlySuggestedTabs(
+export function hasOnlyAutoAddedTabs(
     files: Map<UnguessableToken, ComposeboxFile>): boolean {
   if (files.size === 0) {
     return false;
   }
   for (const file of files.values()) {
     if (file.inputType !== InputType.kBrowserTab ||
-        !isSuggestedOrigin(file.origin)) {
+        !isAutoAddedOrigin(file.origin)) {
       return false;
     }
   }
   return true;
 }
 
-export function hasOnlySuggestedTabAttachments(
+export function hasOnlyAutoAddedTabAttachments(
     attachments: SearchContextAttachment[]): boolean {
   if (attachments.length === 0) {
     return false;
@@ -280,7 +281,7 @@ export function hasOnlySuggestedTabAttachments(
       return false;
     }
     const origin = mapMojoSourceToOrigin(attachment.tabAttachment.source);
-    if (!isSuggestedOrigin(origin)) {
+    if (!isAutoAddedOrigin(origin)) {
       return false;
     }
   }
@@ -296,6 +297,14 @@ export interface TabUpload {
 }
 
 export type ContextualUpload = TabUpload|FileUpload|DriveUpload;
+
+// Represents an embedder-agnostic request to execute a FuseboxAction in a
+// Composebox instance
+export interface ComposeboxFuseboxActionRequest {
+  suggestion: string;
+  files: ContextualUpload[];
+  fuseboxAction?: FuseboxAction;
+}
 
 export enum GlifAnimationState {
   INELIGIBLE = 'ineligible',
@@ -315,15 +324,24 @@ export enum ContextualSearchInputStateDeletionType {
 
 export function recordEnumerationValue(
     metricName: string, value: number, enumSize: number) {
-  chrome.histograms.recordEnumerationValue(metricName, value, enumSize);
+  const metricsService = chrome.histograms || chrome.metricsPrivate;
+  if (metricsService) {
+    metricsService.recordEnumerationValue(metricName, value, enumSize);
+  }
 }
 
 export function recordUserAction(metricName: string) {
-  chrome.histograms.recordUserAction(metricName);
+  const metricsService = chrome.histograms || chrome.metricsPrivate;
+  if (metricsService) {
+    metricsService.recordUserAction(metricName);
+  }
 }
 
 export function recordBoolean(metricName: string, value: boolean) {
-  chrome.histograms.recordBoolean(metricName, value);
+  const metricsService = chrome.histograms || chrome.metricsPrivate;
+  if (metricsService) {
+    metricsService.recordBoolean(metricName, value);
+  }
 }
 
 // TODO(crbug.com/468329884): Consider making this a new contextual entry
@@ -553,4 +571,19 @@ export function mapUploadErrorToProcessFilesError(errorType: ContextUploadErrorT
     default:
       return ProcessFilesError.NONE;
   }
+}
+
+/**
+ * Returns whether a given tab ID represents a valid browser tab.
+ */
+export function isValidTabId(tabId: number|undefined|null): boolean {
+  return typeof tabId === 'number' && tabId > 0;
+}
+
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+export enum SmartTabSharingSurface {
+  OMNIBOX_COMPOSEBOX = 0,
+  CONTEXTUAL_SEARCHBOX = 1,
+  MAX_VALUE = CONTEXTUAL_SEARCHBOX,
 }

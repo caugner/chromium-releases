@@ -549,10 +549,8 @@ bool SevenZipReaderImpl::IsFolderEncrypted(size_t folder_index) const {
   span.Size = db_.db.FoCodersOffsets[folder_index + 1] -
               db_.db.FoCodersOffsets[folder_index];
 
-  CSzFolder folder{};
-  if (SzGetNextFolderItem(&folder, &span) != SZ_OK) {
-    return false;
-  }
+  CSzFolder folder;
+  SzGetNextFolderItem(&folder, &span);
 
   for (size_t i = 0; i < folder.NumCoders && i < SZ_NUM_CODERS_IN_FOLDER_MAX;
        ++i) {

@@ -167,6 +167,8 @@ linux_memory_builder(
             "browser_tests": targets.mixin(
                 args = [
                     "--test-launcher-filter-file=../../testing/buildbot/filters/linux.asan.browser_tests.filter",
+                    # TODO(crbug.com/542347163): Re-enable when the runtime regression is fixed.
+                    "--disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup",
                 ],
                 ci_only = True,
                 # These are very slow on the ASAN trybot for some reason.
@@ -213,8 +215,20 @@ linux_memory_builder(
                 "linux_nvidia_gtx_1660_stable",
             ],
             "interactive_ui_tests": targets.mixin(
+                args = [
+                    # TODO(crbug.com/542347163): Re-enable when the runtime regression is fixed.
+                    "--disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup",
+                ],
                 # These are slow on the ASan trybot for some reason, crbug.com/1257927
                 swarming = targets.swarming(
+                    # Move to faster machine types to reduce capacity impact.
+                    # TODO(crbug.com/541675870): Can remove this if/when
+                    # everything's been migrated.
+                    optional_dimensions = {
+                        30: {
+                            "cpu": "x86-64-e4",
+                        },
+                    },
                     shards = 12,
                 ),
             ),
@@ -226,6 +240,10 @@ linux_memory_builder(
                 ),
             ),
             "sync_integration_tests": targets.mixin(
+                args = [
+                    # TODO(crbug.com/542347163): Re-enable when the runtime regression is fixed.
+                    "--disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup",
+                ],
                 swarming = targets.swarming(
                     shards = 8,
                 ),
@@ -239,7 +257,6 @@ linux_memory_builder(
             ),
         },
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux|asan lsan",
         short_name = "tst",
@@ -277,7 +294,6 @@ linux_memory_builder(
             "x64",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux|TSan v2",
         short_name = "bld",
@@ -324,6 +340,10 @@ linux_memory_builder(
         ],
         per_test_modifications = {
             "browser_tests": targets.mixin(
+                args = [
+                    # TODO(crbug.com/542347163): Re-enable when the runtime regression is fixed.
+                    "--disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup",
+                ],
                 swarming = targets.swarming(
                     shards = 45,
                 ),
@@ -347,6 +367,10 @@ linux_memory_builder(
                 ),
             ),
             "sync_integration_tests": targets.mixin(
+                args = [
+                    # TODO(crbug.com/542347163): Re-enable when the runtime regression is fixed.
+                    "--disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup",
+                ],
                 swarming = targets.swarming(
                     shards = 6,
                 ),
@@ -499,7 +523,6 @@ linux_memory_builder(
             ),
         },
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "cros|asan",
         short_name = "tst",
@@ -514,6 +537,7 @@ linux_memory_builder(
             config = "chromium",
             apply_configs = [
                 "chromeos",
+                "checkout_instrumented_libraries",
             ],
         ),
         chromium_config = builder_config.chromium_config(
@@ -585,6 +609,8 @@ linux_memory_builder(
             "browser_tests": targets.mixin(
                 args = [
                     "--test-launcher-filter-file=../../testing/buildbot/filters/chromeos.msan.browser_tests.oobe_negative.filter",
+                    # TODO(crbug.com/542347163): Re-enable when the runtime regression is fixed.
+                    "--disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup",
                 ],
                 # These are very slow on the Chrome OS MSAN trybot, most likely because browser_tests on cros has ~40% more tests. Also, these tests
                 # run on ash, which means every test starts and shuts down ash, which most likely explains why it takes longer than on other platforms.
@@ -604,6 +630,10 @@ linux_memory_builder(
                 reason = "Can't run on MSAN because gl_unittests_ozone uses the hardware driver, which isn't instrumented.",
             ),
             "interactive_ui_tests": targets.mixin(
+                args = [
+                    # TODO(crbug.com/542347163): Re-enable when the runtime regression is fixed.
+                    "--disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup",
+                ],
                 # These are very slow on the Chrome OS MSAN trybot for some reason.
                 # crbug.com/865455
                 swarming = targets.swarming(
@@ -634,7 +664,6 @@ linux_memory_builder(
             ),
         },
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "cros|msan",
         short_name = "tst",
@@ -649,6 +678,7 @@ linux_memory_builder(
         gclient_config = builder_config.gclient_config(
             config = "chromium",
             apply_configs = [
+                "checkout_instrumented_libraries",
             ],
         ),
         chromium_config = builder_config.chromium_config(
@@ -715,6 +745,10 @@ linux_memory_builder(
         ],
         per_test_modifications = {
             "browser_tests": targets.mixin(
+                args = [
+                    # TODO(crbug.com/542347163): Re-enable when the runtime regression is fixed.
+                    "--disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup",
+                ],
                 swarming = targets.swarming(
                     shards = 70,
                 ),
@@ -740,13 +774,16 @@ linux_memory_builder(
                 reason = "https://crbug.com/831676",
             ),
             "sync_integration_tests": targets.mixin(
+                args = [
+                    # TODO(crbug.com/542347163): Re-enable when the runtime regression is fixed.
+                    "--disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup",
+                ],
                 swarming = targets.swarming(
                     shards = 6,
                 ),
             ),
         },
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux|msan",
         short_name = "tst",
@@ -786,7 +823,8 @@ ci.builder(
     ),
     builderless = False,
     cores = None,  # Swapping between 8 and 24
-    os = os.MAC_DEFAULT,
+    # TODO(crbug.com/543006750): Revert to MAC_DEFAULT after arm migration.
+    os = os.MAC_15,
     console_view_entry = consoles.console_view_entry(
         category = "mac",
         short_name = "bld",
@@ -869,6 +907,10 @@ linux_memory_builder(
                 ),
             ],
             "interactive_ui_tests": targets.mixin(
+                args = [
+                    # TODO(crbug.com/542347163): Re-enable when the runtime regression is fixed.
+                    "--disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup",
+                ],
                 # https://crbug.com/1498240
                 ci_only = True,
                 # These are slow on the TSan bots for some reason, crbug.com/1257927
@@ -883,6 +925,10 @@ linux_memory_builder(
                 ),
             ),
             "sync_integration_tests": targets.mixin(
+                args = [
+                    # TODO(crbug.com/542347163): Re-enable when the runtime regression is fixed.
+                    "--disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup",
+                ],
                 # https://crbug.com/1498240
                 ci_only = True,
                 swarming = targets.swarming(
@@ -896,7 +942,6 @@ linux_memory_builder(
             ),
         },
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux|TSan v2",
         short_name = "tst",
@@ -978,6 +1023,10 @@ linux_memory_builder(
                 ),
             ),
             "browser_tests": targets.mixin(
+                args = [
+                    # TODO(crbug.com/542347163): Re-enable when the runtime regression is fixed.
+                    "--disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup",
+                ],
                 swarming = targets.swarming(
                     shards = 20,
                 ),
@@ -988,6 +1037,10 @@ linux_memory_builder(
                 ),
             ),
             "interactive_ui_tests": targets.mixin(
+                args = [
+                    # TODO(crbug.com/542347163): Re-enable when the runtime regression is fixed.
+                    "--disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup",
+                ],
                 swarming = targets.swarming(
                     shards = 6,
                 ),
@@ -999,7 +1052,6 @@ linux_memory_builder(
             ),
         },
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux|ubsan",
         short_name = "tst",
@@ -1072,7 +1124,8 @@ ci.builder(
     ),
     builderless = False,
     cores = 12,
-    os = os.MAC_DEFAULT,
+    # TODO(crbug.com/543006750): Revert to MAC_DEFAULT after arm migration.
+    os = os.MAC_15,
     console_view_entry = consoles.console_view_entry(
         category = "mac",
         short_name = "tst",
@@ -1155,7 +1208,6 @@ ci.builder(
             ),
         },
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux|blink",
         short_name = "asn",
@@ -1239,7 +1291,6 @@ ci.builder(
             ),
         },
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux|blink",
         short_name = "lk",
@@ -1258,6 +1309,7 @@ ci.builder(
         gclient_config = builder_config.gclient_config(
             config = "chromium",
             apply_configs = [
+                "checkout_instrumented_libraries",
             ],
         ),
         chromium_config = builder_config.chromium_config(
@@ -1324,7 +1376,6 @@ ci.builder(
             ),
         },
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux|blink",
         short_name = "msn",
@@ -1488,7 +1539,10 @@ ci.builder(
             target_platform = builder_config.target_platform.IOS,
         ),
         clusterfuzz_archive = builder_config.clusterfuzz_archive(
+            # TODO(https://crbug.com/527836546): Flip `use_archive_path` to True
+            # then remove `archive_name_prefix` and `archive_subdir`.
             archive_name_prefix = "ios-asan",
+            archive_path = "mac-release-ios-asan/ios-asan-mac-release",
             archive_subdir = "ios-asan",
             gs_acl = "public-read",
             gs_bucket = "chromium-browser-asan",
@@ -1514,7 +1568,7 @@ ci.builder(
         mixins = [
             "expand-as-isolated-script",
             "has_native_resultdb_integration",
-            "mac_beta_arm64",
+            "mac_default_arm64",
             "mac_toolchain",
             "out_dir_arg",
             "xcode_26_main",

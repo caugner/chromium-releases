@@ -3161,10 +3161,10 @@ TEST_F(RenderWidgetHostViewAuraTest, BackgroundColorMatchesCompositorFrame) {
   metadata.root_background_color = SkColors::kRed;
   view_->SetRenderFrameMetadata(metadata);
   view_->OnRenderFrameMetadataChangedAfterActivation(base::TimeTicks::Now());
-  auto* parent_layer = view_->GetNativeView()->layer()->AsSolidColor();
+  auto* parent_layer = view_->GetNativeView()->layer()->AsSurface();
 
   EXPECT_EQ(gfx::Rect(0, 0, 100, 100), parent_layer->bounds());
-  EXPECT_EQ(SkColors::kRed, parent_layer->background_color());
+  EXPECT_EQ(SkColors::kRed, parent_layer->GetBackgroundColor());
 }
 
 // Tests background setting priority.
@@ -3258,12 +3258,16 @@ TEST_F(RenderWidgetHostViewAuraTest, DeviceScaleFactorChanges) {
   view_->SetSize(gfx::Size(300, 300));
   ASSERT_TRUE(view_->HasPrimarySurface());
   EXPECT_EQ(gfx::Size(300, 300), view_->window_->layer()->size());
-  viz::SurfaceId initial_surface_id = *view_->window_->layer()->GetSurfaceId();
-  EXPECT_EQ(nullptr, view_->window_->layer()->GetOldestAcceptableFallback());
+  viz::SurfaceId initial_surface_id =
+      *view_->window_->layer()->AsSurface()->GetSurfaceId();
+  EXPECT_EQ(
+      nullptr,
+      view_->window_->layer()->AsSurface()->GetOldestAcceptableFallback());
 
   // Resizing should update the primary SurfaceId.
   aura_test_helper_->GetTestScreen()->SetDeviceScaleFactor(2.0f);
-  viz::SurfaceId new_surface_id = *view_->window_->layer()->GetSurfaceId();
+  viz::SurfaceId new_surface_id =
+      *view_->window_->layer()->AsSurface()->GetSurfaceId();
   EXPECT_NE(new_surface_id, initial_surface_id);
   EXPECT_EQ(gfx::Size(300, 300), view_->window_->layer()->bounds().size());
 }
@@ -3375,11 +3379,16 @@ TEST_F(RenderWidgetHostViewAuraTest, DiscardDelegatedFrames) {
   UNSAFE_TODO(views[1])->SetSize(size2);
   // Show it, it should block until we give it a frame.
   UNSAFE_TODO(views[1])->ShowWithVisibility(PageVisibilityState::kVisible);
-  ASSERT_TRUE(
-      UNSAFE_TODO(views[1])->window_->layer()->GetOldestAcceptableFallback());
+  ASSERT_TRUE(UNSAFE_TODO(views[1])
+                  ->window_->layer()
+                  ->AsSurface()
+                  ->GetOldestAcceptableFallback());
   EXPECT_EQ(
-      *UNSAFE_TODO(views[1])->window_->layer()->GetOldestAcceptableFallback(),
-      *UNSAFE_TODO(views[1])->window_->layer()->GetSurfaceId());
+      *UNSAFE_TODO(views[1])
+           ->window_->layer()
+           ->AsSurface()
+           ->GetOldestAcceptableFallback(),
+      *UNSAFE_TODO(views[1])->window_->layer()->AsSurface()->GetSurfaceId());
 
   for (size_t i = 0; i < renderer_count; ++i)
     UNSAFE_TODO(views[i])->Destroy();
@@ -5781,10 +5790,6 @@ TEST_F(RenderWidgetHostViewAuraTest, GestureTapFromStylusHasPointerType) {
 }
 
 TEST_F(RenderWidgetHostViewAuraTest, TouchpadResendsFilteredGSB) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(
-      blink::features::kDropInputEventsWhilePaintHolding);
-
   view_->event_handler()->set_mouse_wheel_wheel_phase_handler_timeout(
       TestTimeouts::action_max_timeout());
 
@@ -5908,9 +5913,11 @@ TEST_F(RenderWidgetHostViewAuraTest, DropFallbackIfResizedWhileHidden) {
   view_->Hide();
   view_->SetSize(gfx::Size(54, 32));
   view_->ShowWithVisibility(PageVisibilityState::kVisible);
-  ASSERT_TRUE(view_->window_->layer()->GetOldestAcceptableFallback());
-  EXPECT_EQ(*view_->window_->layer()->GetOldestAcceptableFallback(),
-            *view_->window_->layer()->GetSurfaceId());
+  ASSERT_TRUE(
+      view_->window_->layer()->AsSurface()->GetOldestAcceptableFallback());
+  EXPECT_EQ(
+      *view_->window_->layer()->AsSurface()->GetOldestAcceptableFallback(),
+      *view_->window_->layer()->AsSurface()->GetSurfaceId());
 }
 
 // If a tab is hidden and shown without being resized in the meantime, the
@@ -5922,13 +5929,15 @@ TEST_F(RenderWidgetHostViewAuraTest, DontDropFallbackIfNotResizedWhileHidden) {
   // Force fallback being set.
   view_->DidNavigate();
   view_->ResetFallbackToFirstNavigationSurface();
-  ASSERT_TRUE(view_->window_->layer()->GetOldestAcceptableFallback());
+  ASSERT_TRUE(
+      view_->window_->layer()->AsSurface()->GetOldestAcceptableFallback());
   viz::SurfaceId fallback =
-      *view_->window_->layer()->GetOldestAcceptableFallback();
+      *view_->window_->layer()->AsSurface()->GetOldestAcceptableFallback();
   view_->Hide();
   view_->ShowWithVisibility(PageVisibilityState::kVisible);
-  ASSERT_TRUE(view_->window_->layer()->GetOldestAcceptableFallback());
-  EXPECT_EQ(fallback, *view_->window_->layer()->GetSurfaceId());
+  ASSERT_TRUE(
+      view_->window_->layer()->AsSurface()->GetOldestAcceptableFallback());
+  EXPECT_EQ(fallback, *view_->window_->layer()->AsSurface()->GetSurfaceId());
 }
 
 // Check that TakeFallbackContentFrom() copies the fallback SurfaceId and
@@ -5947,8 +5956,9 @@ TEST_F(RenderWidgetHostViewAuraTest, TakeFallbackContent) {
   // Call TakeFallbackContentFrom(). The second view should obtain a fallback
   // from the first view.
   view2->TakeFallbackContentFrom(view_);
-  EXPECT_EQ(view_->window_->layer()->GetSurfaceId()->ToSmallestId(),
-            *view2->window_->layer()->GetOldestAcceptableFallback());
+  EXPECT_EQ(
+      view_->window_->layer()->AsSurface()->GetSurfaceId()->ToSmallestId(),
+      *view2->window_->layer()->AsSurface()->GetOldestAcceptableFallback());
 
   DestroyView(view2);
 }
@@ -5975,12 +5985,19 @@ TEST_F(RenderWidgetHostViewAuraTest, TakeFallbackContentForPrerender) {
   ASSERT_FALSE(prerender_view->delegated_frame_host_client_
                    ->DelegatedFrameHostIsVisible());
   prerender_view->SetSize(gfx::Size(50, 50));
-  ASSERT_FALSE(prerender_view->window_->layer()->GetOldestAcceptableFallback());
+  ASSERT_FALSE(prerender_view->window_->layer()
+                   ->AsSurface()
+                   ->GetOldestAcceptableFallback());
 
   prerender_view->TakeFallbackContentFrom(old_view);
-  ASSERT_TRUE(prerender_view->window_->layer()->GetOldestAcceptableFallback());
-  EXPECT_EQ(old_view->window_->layer()->GetSurfaceId()->ToSmallestId(),
-            *(prerender_view->window_->layer()->GetOldestAcceptableFallback()));
+  ASSERT_TRUE(prerender_view->window_->layer()
+                  ->AsSurface()
+                  ->GetOldestAcceptableFallback());
+  EXPECT_EQ(
+      old_view->window_->layer()->AsSurface()->GetSurfaceId()->ToSmallestId(),
+      *(prerender_view->window_->layer()
+            ->AsSurface()
+            ->GetOldestAcceptableFallback()));
 
   DestroyView(prerender_view);
   DestroyView(old_view);
@@ -7027,20 +7044,6 @@ class DestroyingMockInputMethod : public ui::MockInputMethod {
     }
   }
 
-  void SetVirtualKeyboardVisibilityIfEnabled(bool should_show) override {
-    ui::MockInputMethod::SetVirtualKeyboardVisibilityIfEnabled(should_show);
-    if (on_set_virtual_keyboard_visibility_if_enabled_) {
-      std::move(on_set_virtual_keyboard_visibility_if_enabled_).Run();
-    }
-  }
-
-  void CancelComposition(const ui::TextInputClient* client) override {
-    ui::MockInputMethod::CancelComposition(client);
-    if (on_cancel_composition_) {
-      std::move(on_cancel_composition_).Run();
-    }
-  }
-
   void set_on_caret_bounds_changed(base::OnceClosure closure) {
     on_caret_bounds_changed_ = std::move(closure);
   }
@@ -7049,20 +7052,9 @@ class DestroyingMockInputMethod : public ui::MockInputMethod {
     on_text_input_type_changed_ = std::move(closure);
   }
 
-  void set_on_set_virtual_keyboard_visibility_if_enabled(
-      base::OnceClosure closure) {
-    on_set_virtual_keyboard_visibility_if_enabled_ = std::move(closure);
-  }
-
-  void set_on_cancel_composition(base::OnceClosure closure) {
-    on_cancel_composition_ = std::move(closure);
-  }
-
  private:
   base::OnceClosure on_caret_bounds_changed_;
   base::OnceClosure on_text_input_type_changed_;
-  base::OnceClosure on_set_virtual_keyboard_visibility_if_enabled_;
-  base::OnceClosure on_cancel_composition_;
 };
 
 class RenderWidgetHostViewAuraReentrantDestructionIME
@@ -7148,91 +7140,6 @@ TEST_F(RenderWidgetHostViewAuraReentrantDestructionIME,
   // Dispatching this state notifies `view_` (a TextInputManager observer) via
   // OnUpdateTextInputStateCalled(), which calls into the input method above.
   GetTextInputManager(view_)->UpdateTextInputState(view_, state);
-}
-
-// RWHVA::OnUpdateTextInputStateCalled() calls
-// GetInputMethod()->SetVirtualKeyboardVisibilityIfEnabled(true) when the state
-// indicates that the virtual keyboard should be shown. If an observer or
-// virtual keyboard controller pumps messages and the view is destroyed
-// re-entrantly (e.g. on ChromeOS where KeyboardUIController runs the keyboard
-// show/hide cascade), on unwind the function must not dereference freed view
-// pointers or stale text input state.
-TEST_F(RenderWidgetHostViewAuraReentrantDestructionIME,
-       DestroyDuringSetVirtualKeyboardVisibilityIfEnabled) {
-  InitViewForFrame(nullptr);
-  ParentHostView(view_, parent_view_);
-  // `view_` shares the root window (and thus the InputMethod) with
-  // `parent_view_`.
-  ASSERT_EQ(static_cast<ui::InputMethod*>(input_method_.get()),
-            GetInputMethod());
-
-  // The virtual-keyboard branch requires the view to be the InputMethod's
-  // focused text input client.
-  input_method_->SetFocusedTextInputClient(view_.get());
-
-  // Arrange for the view to be synchronously destroyed inside
-  // SetVirtualKeyboardVisibilityIfEnabled.
-  input_method_->set_on_set_virtual_keyboard_visibility_if_enabled(
-      base::BindLambdaForTesting([&]() {
-        widget_host_ = nullptr;
-        view_.ExtractAsDangling()->Destroy();
-      }));
-
-  ui::mojom::TextInputState state;
-  state.type = ui::TEXT_INPUT_TYPE_TEXT;
-  state.mode = ui::TEXT_INPUT_MODE_TEXT;
-  state.show_ime_if_needed = true;
-  GetTextInputManager(view_.get())->UpdateTextInputState(view_.get(), state);
-}
-
-// When a mouse press occurs during active composition,
-// RenderWidgetHostViewEventHandler::OnMouseEvent calls
-// FinishImeCompositionSession(), which triggers
-// GetInputMethod()->CancelComposition(this). If the IME callout re-entrantly
-// destroys the view (e.g. by pumping a message loop on Windows TSF),
-// OnMouseEvent must not touch freed memory or cleared pointers.
-TEST_F(RenderWidgetHostViewAuraReentrantDestructionIME,
-       DestroyDuringFinishImeCompositionSessionOnMousePressed) {
-  InitViewForFrame(nullptr);
-  ParentHostView(view_, parent_view_);
-  ASSERT_EQ(static_cast<ui::InputMethod*>(input_method_.get()),
-            GetInputMethod());
-
-  input_method_->set_on_cancel_composition(base::BindLambdaForTesting([&]() {
-    widget_host_ = nullptr;
-    view_.ExtractAsDangling()->Destroy();
-  }));
-
-  FakeRenderWidgetHostViewAura* target_view = view_.get();
-  ui::MouseEvent mouse_press(ui::EventType::kMousePressed, gfx::Point(10, 10),
-                             gfx::Point(10, 10), ui::EventTimeForNow(),
-                             ui::EF_LEFT_MOUSE_BUTTON,
-                             ui::EF_LEFT_MOUSE_BUTTON);
-  target_view->OnMouseEvent(&mouse_press);
-}
-
-// When a gesture tap occurs during active composition,
-// RenderWidgetHostViewEventHandler::OnGestureEvent calls
-// FinishImeCompositionSession(), which triggers
-// GetInputMethod()->CancelComposition(this). If the IME callout re-entrantly
-// destroys the view, OnGestureEvent must not touch freed memory or cleared
-// pointers.
-TEST_F(RenderWidgetHostViewAuraReentrantDestructionIME,
-       DestroyDuringFinishImeCompositionSessionOnGestureTap) {
-  InitViewForFrame(nullptr);
-  ParentHostView(view_, parent_view_);
-  ASSERT_EQ(static_cast<ui::InputMethod*>(input_method_.get()),
-            GetInputMethod());
-
-  input_method_->set_on_cancel_composition(base::BindLambdaForTesting([&]() {
-    widget_host_ = nullptr;
-    view_.ExtractAsDangling()->Destroy();
-  }));
-
-  FakeRenderWidgetHostViewAura* target_view = view_.get();
-  ui::GestureEventDetails tap_details(ui::EventType::kGestureTap);
-  ui::GestureEvent gesture_tap(10, 10, 0, ui::EventTimeForNow(), tap_details);
-  target_view->OnGestureEvent(&gesture_tap);
 }
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS)

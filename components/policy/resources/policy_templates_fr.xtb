@@ -172,6 +172,16 @@ Le libellé est personnalisable avec la règle <ph name="ENTERPRISE_CUSTOM_LABEL
 <translation id="1100840127293327071">Ne pas cocher l'option permettant de conserver les données de navigation existantes par défaut</translation>
 <translation id="1105572260329131950">Utiliser les icônes par défaut pour les connexions sécurisées</translation>
 <translation id="1105711894873068933">Une fois <ph name="LACROS_NAME" /> désactivé, toutes les données utilisateur sont supprimées à la connexion suivante.</translation>
+<translation id="1106279506320506502">Indique si le mode isolé est activé.
+
+Le mode isolé est un mode de navigation éphémère réservé aux entreprises.
+Il est compatible avec les extensions installées d'office et les règles d'entreprise liées à la protection contre la perte de données.
+
+Si cette règle est définie sur 1 – Activée, le mode isolé est activé et le mode navigation privée est désactivé.
+
+Si cette règle est définie sur 0 — Désactivée, ou si elle n'est pas configurée, le mode isolé est désactivé.
+
+Cette règle nécessite une licence <ph name="CHROME_ENTERPRISE_PREMIUM_NAME" /> pour être appliquée.</translation>
 <translation id="1106342730891876476">Paramètres de partage</translation>
 <translation id="1107538157073168076">Désactiver l'extension des insights</translation>
 <translation id="1110426799149444997">Désactiver la recherche par zone <ph name="GOOGLE_LENS_PRODUCT_NAME" />.</translation>
@@ -1030,7 +1040,6 @@ Si la règle est définie sur 1 (Ne pas autoriser), la fonctionnalité n'est pas
 Si cette règle est définie sur "False" ou qu'elle n'est pas configurée, aucun événement n'est enregistré.</translation>
 <translation id="1692990221685273468">Détermine si l'outil de vérification des certificats intégré applique des contraintes encodées dans les ancres de confiance chargées depuis le magasin de confiance de la plate-forme.</translation>
 <translation id="169467210981344373">Désactiver le cache d'authentification HTTP à portée globale</translation>
-<translation id="169509902091359310">Ne pas autoriser la saisie vocale.</translation>
 <translation id="1696501581280568361">Suggère la séparation des profils</translation>
 <translation id="1698810555265314018">Contrôle la résolution des images imprimées lorsque <ph name="PRODUCT_NAME" /> imprime les PDF après rastérisation.
 
@@ -1618,6 +1627,17 @@ Cette règle est habituellement désactivée pour protéger les utilisateurs con
 <translation id="2057317273526988987">Autoriser l'accès à une liste d'URL</translation>
 <translation id="205807990145127714">Données de télémétrie pour signaler un événement d'intensité du signal.</translation>
 <translation id="2060153898336610735">Automatique, basé sur la langue actuelle</translation>
+<translation id="2060316966423154087">Indique si les utilisateurs peuvent autoriser <ph name="PRODUCT_NAME" /> à utiliser l'IA générative pour mieux comprendre les formulaires et les aider à remplir plus de champs.
+
+0 = A le même effet que 1. Avant la version M153, ce paramètre autorisait Google à utiliser des données pertinentes pour améliorer ses modèles d'IA. Selon la fonctionnalité, les données pertinentes peuvent inclure des prompts, des entrées, des sorties, des sources et des commentaires écrits. 0 est la valeur par défaut, sauf pour les exceptions ci-dessous.
+
+1 = Autorise l'utilisation de la fonctionnalité, mais n'autorise pas Google à améliorer ses modèles à l'aide de données pertinentes (y compris les prompts, les entrées, les sorties, les sources et les commentaires écrits). 1 est la valeur par défaut pour les utilisateurs de la version Enterprise gérés par <ph name="GOOGLE_ADMIN_CONSOLE_PRODUCT_NAME" /> et pour les comptes Education gérés par <ph name="GOOGLE_WORKSPACE_PRODUCT_NAME" />.
+
+2 = N'autorise pas la fonctionnalité.
+
+Si la règle n'est pas configurée, son comportement est déterminé par la règle <ph name="GEN_AI_DEFAULT_SETTINGS_POLICY_NAME" />.
+
+Pour en savoir plus sur la gestion des données pour les fonctionnalités d'IA générative, veuillez consulter https://support.google.com/chrome/a?p=generative_ai_settings.</translation>
 <translation id="2061123930713023976">Autoriser les captures de paquets de débogage du réseau</translation>
 <translation id="2061810934846663491">Configurer les noms de domaines requis pour les hôtes d'accès à distance</translation>
 <translation id="2062632109797189011">Réactiver l'API obsolète window.webkitStorageInfo</translation>
@@ -1735,7 +1755,7 @@ Cette règle a été supprimée dans Chrome 145. Nous vous recommandons d'utili
 <translation id="2149957154942061013">Usage interne uniquement</translation>
 <translation id="2151831603578119302">Activer les raccourcis des fonctionnalités d'accessibilité</translation>
 <translation id="2156132677421487971">Configurer les règles pour <ph name="PRODUCT_NAME" />, une fonctionnalité permettant aux utilisateurs de caster le contenu des onglets, des sites ou de leur bureau depuis leur navigateur sur des écrans ou systèmes audio distants.</translation>
-<translation id="2156359411909638496">Paramètres Chrome Finds</translation>
+<translation id="2156359411909638496">Paramètres pour les Découvertes Chrome</translation>
 <translation id="2156755242840687300">Serveurs d'impression externes activés</translation>
 <translation id="2157842368188031417">Cette règle ne concerne que les sessions Invité gérées. Elle doit être activée pour que le mode station de travail partagée d'Imprivata autorise les changements d'utilisateurs en cours de session.
       Si cette règle est définie sur "True", certaines règles sont ignorées d'office pour des fonctionnalités, qui conservent les données utilisateur sensibles et qui ne sont pas gérées par le mécanisme de nettoyage utilisé pour les changements d'utilisateurs en cours de session avec le mode station de travail partagée d'Imprivata.
@@ -2022,18 +2042,6 @@ Si cette règle n'est pas configurée, les utilisateurs peuvent modifier la list
 
       Si cette règle est définie sur "False" ou qu'elle n'est pas configurée, ce bouton n'est pas affiché.</translation>
 <translation id="2294382669900758280">La lecture vidéo dans les applications Android n'est pas prise en compte même si cette règle est définie sur "<ph name="TRUE" />".</translation>
-<translation id="2296529215567227994">Indique si le mode navigation privée doit être remplacé par le mode isolé.
-
-Le mode isolé est un mode de navigation éphémère réservé aux entreprises qui remplace le mode navigation privée.
-Contrairement au mode navigation privée, le mode isolé est compatible avec les extensions installées d'office et les règles d'entreprise liées à la protection contre la perte de données.
-
-Notez que les règles liées à la navigation privée ne s'appliquent pas au mode isolé.
-
-Si la valeur est définie sur 1 — Activée, le mode isolé est activé et remplace le mode navigation privée.
-
-Si cette règle est définie sur 0 — Désactivée, ou si elle n'est pas configurée, le mode isolé est désactivé et le comportement standard de la navigation privée est utilisé.
-
-Cette règle nécessite une licence <ph name="CHROME_ENTERPRISE_PREMIUM_NAME" /> pour être appliquée.</translation>
 <translation id="2299220924812062390">Indiquer une liste de plug-ins activés</translation>
 <translation id="2299815818824242485">Ne pas autoriser la recherche de protection supérieure via proxy</translation>
 <translation id="2303795211377219696">Activer la saisie automatique pour les cartes de crédit</translation>
@@ -2048,6 +2056,7 @@ Cette règle nécessite une licence <ph name="CHROME_ENTERPRISE_PREMIUM_NAME" />
 <translation id="230713790688681130">Activer la disposition de clavier Hindi InScript</translation>
 <translation id="2307496301287881990">Transmettre des états liés aux affichages et aux graphiques</translation>
 <translation id="2308084581803907194">Complexité élevée</translation>
+<translation id="2308557460534055666">Règle de configuration du connecteur Chrome Enterprise <ph name="ON_DATA_COPIED_ENTERPRISE_CONNECTOR" /></translation>
 <translation id="2308899582897965249">Désactiver l'impression silencieuse</translation>
 <translation id="2309284543927494965">Bloquer les mises à jour</translation>
 <translation id="2309341709647905294">Ne pas signaler les informations sur les périphériques branchés à l'appareil</translation>
@@ -2779,17 +2788,6 @@ Si cette règle est désactivée ou qu'elle n'est pas configurée, les utilisate
       Si vous désactivez ce paramètre, les pages Web ne peuvent pas utiliser JavaScript et l'utilisateur n'est pas en mesure de le modifier.
 
       Si vous activez ce paramètre ou si vous ne le définissez pas, les pages Web peuvent utiliser JavaScript, mais l'utilisateur n'est pas en mesure de le modifier.</translation>
-<translation id="2746385336260438202">La saisie vocale est une fonctionnalité basée sur l'IA qui permet aux utilisateurs de saisir et de modifier du texte à l'aide de leur voix. Elle s'appuie sur des modèles d'IA générative afin de fournir une transcription et une mise en forme de haute qualité.
-
-0 = Permettre d'utiliser la fonctionnalité tout en autorisant Google à utiliser des données pertinentes pour améliorer ses modèles d'IA. Selon la fonctionnalité, les données pertinentes peuvent inclure des prompts, des entrées, des sorties, des sources et des retours écrits. Elles pourront également être examinées par des réviseurs humains afin d'améliorer les modèles d'IA. 0 est la valeur par défaut, sauf pour les exceptions ci-dessous.
-
-1 = Permettre d'utiliser la fonctionnalité, mais ne pas autoriser Google à améliorer ses modèles à l'aide du contenu des utilisateurs (y compris les prompts, les entrées, les sorties, les sources et les retours écrits). 1 est la valeur par défaut pour les utilisateurs de la version Enterprise gérés par <ph name="GOOGLE_ADMIN_CONSOLE_PRODUCT_NAME" /> et pour les comptes Education gérés par <ph name="GOOGLE_WORKSPACE_PRODUCT_NAME" />.
-
-2 = Ne pas autoriser la fonctionnalité.
-
-Si la règle n'est pas configurée, son comportement est déterminé par la règle <ph name="GEN_AI_DEFAULT_SETTINGS_POLICY_NAME" />.
-
-Pour en savoir plus sur la gestion des données pour les fonctionnalités d'IA générative, veuillez consulter https://support.google.com/chrome/a?p=generative_ai_settings.</translation>
 <translation id="274769314493317695">Si <ph name="PRINTERS_WHITELIST" /> est sélectionné pour la règle <ph name="BULK_PRINTERS_ACCESS_MODE_POLICY_NAME" />, la définition de <ph name="NATIVE_PRINTERS_BULK_WHITELIST_POLICY_NAME" /> indique les imprimantes accessibles aux utilisateurs. Seules les imprimantes dont les ID correspondent aux valeurs définies dans cette règle sont proposées aux utilisateurs. Ces ID doivent correspondre à ceux indiqués dans les champs <ph name="ID_FIELD" /> ou <ph name="GUID_FIELD" /> du fichier spécifié dans la règle <ph name="NATIVE_PRINTERS_BULK_CONFIGURATION_POLICY_NAME" />.
 
       Cette règle étant obsolète, veuillez utiliser la règle <ph name="PRINTERS_BULK_ALLOWLIST_POLICY_NAME" /> à la place.</translation>
@@ -3022,6 +3020,23 @@ Les niveaux de complexité sont basés sur les métriques de qualité des mots d
 
 Consultez l'article du centre d'aide pour obtenir des explications détaillées sur ce qu'implique chaque niveau pour les codes et les mots de passe.</translation>
 <translation id="2926813071464307947">Désactiver le bac à sable du conteneur d'appli de moteur de rendu</translation>
+<translation id="2928782459146756987">Liste des paramètres des services des connecteurs <ph name="PRODUCT_NAME" /> Enterprise à appliquer au connecteur Enterprise <ph name="ON_DATA_COPIED_ENTERPRISE_CONNECTOR" />, qui se déclenche lorsque des données sont copiées dans le presse-papiers depuis <ph name="PRODUCT_NAME" />.
+
+Les champs "<ph name="ENTERPRISE_CONNECTOR_URL_LIST_FIELD" />", "<ph name="ENTERPRISE_CONNECTOR_TAGS_FIELD" />", "<ph name="ENTERPRISE_CONNECTOR_ENABLE_FIELD" />" et "<ph name="ENTERPRISE_CONNECTOR_DISABLE_FIELD" />" permettent de déterminer si le connecteur doit envoyer des données en vue d'une analyse lorsque celles-ci sont copiées à partir d'une page spécifique, ainsi que les tags à inclure dans la demande d'analyse de ces données. Un tag correspondant à un format "enable" sera inclus dans la demande d'analyse si l'URL de la page suit un format associé à ce tag, à condition qu'aucun format "disable" associé à ce même tag ne corresponde à l'URL de la page. L'analyse a lieu si au moins un tag doit être inclus dans la demande.
+
+Le champ "<ph name="ENTERPRISE_CONNECTOR_SERVICE_PROVIDER_FIELD" />" indique à quel fournisseur de services d'analyse correspondent les paramètres.
+
+Si la valeur du champ "<ph name="ENTERPRISE_CONNECTOR_BLOCK_UNTIL_VERDICT_FIELD" />" est 1, <ph name="PRODUCT_NAME" /> attend de recevoir une réponse du service d'analyse avant d'autoriser le presse-papiers de l'OS à accéder aux données. Pour toute autre valeur entière, <ph name="PRODUCT_NAME" /> autorise le presse-papiers de l'OS à accéder immédiatement aux données.
+
+Si la valeur du champ "<ph name="ENTERPRISE_CONNECTOR_DEFAULT_ACTION_FIELD" />" est "block", <ph name="PRODUCT_NAME" /> n'autorise pas le presse-papiers de l'OS à accéder aux données si une erreur survient pendant la communication avec le service d'analyse. Pour toute autre valeur, <ph name="PRODUCT_NAME" /> autorise le presse-papiers de l'OS à accéder aux données.
+
+Le champ "<ph name="ENTERPRISE_CONNECTOR_MINIMUM_DATA_SIZE" />" indique la taille minimale (en octets) que les données copiées depuis <ph name="PRODUCT_NAME" /> doivent atteindre ou dépasser pour être analysées. Si ce champ n'est pas renseigné, la valeur par défaut est de 100 octets.
+
+Le champ "<ph name="ENTERPRISE_CONNECTOR_REQUIRE_JUSTIFICATION_TAGS_FIELD" />" permet d'indiquer les tags pour lesquels le connecteur doit demander à l'utilisateur d'expliquer pourquoi une analyse entraînant l'affichage d'un avertissement est ignorée. Si ce champ n'est pas renseigné, nous partons du principe qu'aucune justification n'est requise.
+
+Le champ "<ph name="ENTERPRISE_CONNECTOR_VERIFICATION_FIELD" />" permet aux administrateurs de configurer des exigences de validation spécifiques à la plate-forme.
+
+Cette règle nécessite un réglage supplémentaire pour être appliquée. Pour en savoir plus, consultez la page https://support.google.com/chrome/a?p=chrome_enterprise_connector_policies_setting.</translation>
 <translation id="2930792103747180259">Désactivée : la récupération en arrière-plan à partir des service workers est autorisée sans restriction.</translation>
 <translation id="2931888116345994552">Active la mise à jour de tous les composants de <ph name="PRODUCT_NAME" /> si la règle n'est pas configurée ou qu'elle est activée.
 
@@ -3442,22 +3457,6 @@ Si vous devez utiliser cette règle pour désactiver la suppression de window.na
 <translation id="3181114468897395940">Les paramètres Page précédente/Page suivante utilisent le raccourci qui contient la touche de modification Alt</translation>
 <translation id="3182503302060513467">La page "Nouvel onglet" affichera l'annonce d'espace intermédiaire si elle est disponible</translation>
 <translation id="3184161739683646075">Contrôle le mode DNS-over-HTTPS</translation>
-<translation id="3184247679989063353">Liste de formats d'URL. Les requêtes réseau initiées à partir de sites desservis par des origines qui figurent sur la liste ne sont pas soumises aux contrôles de <ph name="LOCAL_NETWORK_ACCESS" />.
-
-Pour les origines autres que celles représentées par les formats spécifiés ici, la configuration personnelle de l'utilisateur s'applique.
-
-Pour en savoir plus sur les formats d'URL valides, veuillez consulter https://chromeenterprise.google/policies/url-patterns/.
-
-Pour connaître les restrictions concernant <ph name="LOCAL_NETWORK_ACCESS" />, consultez https://wicg.github.io/local-network-access/.
-
-Plusieurs règles listent des origines qui ont un impact sur les requêtes adressées à des points de terminaison du réseau local et à l'appareil local. Ces règles s'appliquent selon l'ordre de priorité suivant si une origine figure sur la liste de formats d'URL de plusieurs d'entre elles :
-
-  - LocalNetworkBlockedForUrls
-  - LocalNetworkAllowedForUrls
-  - LoopbackNetworkAccessBlockedForUrls
-  - LoopbackNetworkAccessAllowedForUrls
-  - LocalNetworkAccessBlockedForUrls
-  - LocalNetworkAccessAllowedForUrls</translation>
 <translation id="3184638144755436350">Chrome bloquera les navigations vers des protocoles externes dans
       un iFrame en bac à sable. Consultez https://chromestatus.com/features/5680742077038592.
 
@@ -4164,6 +4163,14 @@ Si le résultat de la vérification n'est pas concluant pour une connexion, l'er
 <translation id="366494444808132420">Autoriser les intégrations de Gemini.</translation>
 <translation id="3665437376055221832">N'inviter l'utilisateur que si la règle de sélection automatique n'établit de correspondance avec aucun certificat.</translation>
 <translation id="3671773704245936868">Désactiver la mise en surbrillance des éléments sélectionnés au clavier</translation>
+<translation id="367258298235646178">Permet aux administrateurs de personnaliser l'apparence des filigranes appliqués par les règles de Protection contre la perte de données. Cela inclut la définition de l'opacité du remplissage/du contour, de la taille de la police et du code temporel du fuseau horaire.
+Si cette règle ou certaines valeurs ne sont pas définies, Chrome utilisera son comportement par défaut pour les filigranes.
+Les valeurs par défaut sur ordinateur sont les suivantes : opacité du remplissage à 4, opacité du contour à 6 et taille de police à 24. Sur iOS, les valeurs par défaut sont les suivantes : opacité du remplissage à 10, opacité du contour à 15 et taille de police à 16. Sur toutes les plates-formes, le code temporel du fuseau horaire est défini par défaut sur "user_device" (fuseau horaire local de l'appareil de l'utilisateur).
+
+L'opacité du remplissage est un pourcentage compris entre 0 (totalement transparent) et 100 (totalement opaque).
+L'opacité du contour est un pourcentage compris entre 0 (totalement transparent) et 100 (totalement opaque).
+La taille de police est indiquée en points.
+Le champ "Code temporel du fuseau horaire" spécifie l'identifiant de fuseau horaire IANA (par exemple, "America/Toronto") utilisé pour formater les codes temporels du filigrane (pris en charge à partir de Chrome 152), qui utilise les noms de la base de données des fuseaux horaires IANA (https://www.iana.org/time-zones).</translation>
 <translation id="3674010627788940405">Ne prend pas en charge les en-têtes de requêtes CORS sans caractères génériques.</translation>
 <translation id="3675248815331229366">Définir cette règle vous permet de définir une liste de formats d'URL indiquant les sites non autorisés à accéder à la géolocalisation de l'utilisateur et qui ne peuvent pas demander l'autorisation de le faire à l'utilisateur.
 
@@ -4266,7 +4273,7 @@ Cette règle est obsolète depuis la version 144 de <ph name="PRODUCT_NAME" />,
 <translation id="3749511622128647337">Désactiver la sortie audio</translation>
 <translation id="3750220015372671395">Bloquer la génération de clé sur ces sites</translation>
 <translation id="3753267109888284695">Liste d'autorisation HTTP</translation>
-<translation id="3753514818525019935">Ne pas autoriser Chrome Finds.</translation>
+<translation id="3753514818525019935">Ne pas autoriser les Découvertes Chrome.</translation>
 <translation id="3753959315989102457">Désactiver la mise à jour de la position de l'appareil</translation>
 <translation id="3755237588083934849">Permet de spécifier la fréquence d'envoi (en millisecondes) des informations sur l'état de l'appareil. La fréquence minimale autorisée est de 60 secondes.
 
@@ -4607,6 +4614,11 @@ Sur les plates-formes de bureau, le téléchargement du modèle peut également 
 
       Si cette règle est désactivée ou qu'elle n'est pas configurée, <ph name="PLUGIN_VM_NAME" /> n'est pas activé pour l'appareil.</translation>
 <translation id="3973371701361892765">Ne jamais masquer automatiquement l'étagère</translation>
+<translation id="3974715256242096353">Si cette règle est définie sur "False", les utilisateurs ne peuvent pas personnaliser l'arrière-plan sur la page "Nouvel onglet". Tout arrière-plan personnalisé actuel sera définitivement supprimé, même si la règle est définie sur "True" par la suite.
+
+Si celle-ci est définie sur "True" ou si elle n'est pas configurée, les utilisateurs peuvent personnaliser l'arrière-plan sur la page "Nouvel onglet".
+
+Remarque : Sur Android, la règle n'est appliquée au navigateur qu'après un redémarrage.</translation>
 <translation id="3977304360459208438">Utiliser le paramètre par défaut pour les suites de chiffrement 3DES dans TLS</translation>
 <translation id="3977906634350977040">Si cette règle est activée, l'hôte d'accès à distance peut utiliser des authentifications par code ou association lorsqu'il accepte des connexions client.
 
@@ -4697,7 +4709,7 @@ Pendant les intervalles de restriction, les sessions en cours sont fermées et l
 <translation id="402759845255257575">Interdire à tous les sites d'exécuter JavaScript</translation>
 <translation id="4027608872760987929">Activer le moteur de recherche par défaut</translation>
 <translation id="4030152268425532846">Désactiver l'annulation de la connexion automatique</translation>
-<translation id="4042229154265896020">Autoriser la saisie vocale.</translation>
+<translation id="4032740546145417900">Ne pas autoriser la saisie de texte par commande vocale.</translation>
 <translation id="4043796890723386527">Empêcher les utilisateurs de créer et d'utiliser des profils secondaires, et d'utiliser le mode Invité dans le navigateur <ph name="LACROS_NAME" /></translation>
 <translation id="4047633048700722778">Permet de contrôler l'application du filtre d'URL SafeSites, qui utilise l'API Google Safe Search pour déterminer si une URL est associée ou non à du contenu pornographique.
 
@@ -5169,6 +5181,22 @@ Remarque : cette règle rend obsolète la règle <ph name="ARC_GLS_POLICY_NAME"
 <translation id="4363057787588706121">Autoriser la fusion de règles répertoriées qui proviennent de sources différentes</translation>
 <translation id="4363101430102811068">Autorise la détection de fuite pour les identifiants saisis</translation>
 <translation id="436581050240847513">Générer un rapport sur les interfaces réseau de l'appareil</translation>
+<translation id="4366420138981318392">Liste de formats d'URL. Les requêtes réseau initiées à partir de sites desservis par des origines qui figurent sur la liste ne sont pas soumises aux vérifications de l‘<ph name="LOCAL_NETWORK_ACCESS" />.
+
+Pour les origines autres que celles représentées par les formats spécifiés ici, la configuration personnelle de l'utilisateur s'applique.
+
+Pour en savoir plus sur les formats d'URL valides, veuillez consulter https://chromeenterprise.google/policies/url-patterns/.
+
+Pour connaître les restrictions concernant l’<ph name="LOCAL_NETWORK_ACCESS" />, consultez https://wicg.github.io/local-network-access/.
+
+Plusieurs règles listent des origines qui ont un impact sur les requêtes adressées à des points de terminaison du réseau local et à l'appareil local. Ces règles s'appliquent selon l'ordre de priorité suivant si une origine figure sur la liste de formats d'URL de plusieurs d'entre elles :
+
+  - LocalNetworkBlockedForUrls
+  - LocalNetworkAllowedForUrls
+  - LoopbackNetworkBlockedForUrls
+  - LoopbackNetworkAllowedForUrls
+  - LocalNetworkAccessBlockedForUrls
+  - LocalNetworkAccessAllowedForUrls</translation>
 <translation id="4369307906396795087">Les scripts pour les nœuds de calcul (nœuds de calcul Web, service workers, etc.) utilisent la vérification laxiste du type MIME. Les scripts de nœuds de calcul avec d'anciens types MIME, tels que <ph name="MIMETYPE_TEXT_ASCII" />, fonctionneront.</translation>
 <translation id="4370937370030117032">Désactivez l'envoi du nom d'utilisateur et du nom de fichier aux imprimantes en natif</translation>
 <translation id="4372704773119750918">Ne pas autoriser l'utilisateur d'entreprise à participer aux sessions à plusieurs profils, que ce soit en tant qu'utilisateur principal ou secondaire</translation>
@@ -5849,6 +5877,7 @@ Sinon, seuls les services sélectionnés sont activés.</translation>
 Si cette règle est désactivée, l'utilisateur ne voit pas cette promo.</translation>
 <translation id="4768446404233019970">Activer les suites de chiffrement 3DES dans TLS</translation>
 <translation id="4770334626033858263">Configuration utilisée pour générer et valider le code d'accès parental.</translation>
+<translation id="477383002672213319">Autoriser la saisie automatique améliorée sans perfectionner les modèles d'IA (améliore les modèles d'IA avant M153).</translation>
 <translation id="4773997835955617342">Modifie la configuration suggérée de <ph name="KRB5_CONFIG" /> pour les nouvelles demandes créées manuellement.
 
       Si cette règle est activée, la valeur de la règle "KerberosCustomPrefilledConfig" est appliquée en tant que configuration suggérée et figure dans la section "Paramètres avancés" de la boîte de dialogue d'authentification Kerberos.
@@ -5930,6 +5959,22 @@ Si cette règle est définie sur "False", c'est le comportement par défaut qui 
 <translation id="4826977043372474305">Les identifiants Wi-Fi kiosque sont stockés au niveau du kiosque</translation>
 <translation id="4827727182370777723">Paramètres de l'autorisation des polices locales par défaut</translation>
 <translation id="482803100714220060">Affiche les URL complètes</translation>
+<translation id="4830717535196994979">Liste de formats d'URL. Les requêtes réseau initiées à partir de sites Web desservis par des origines qui figurent sur la liste ne sont pas autorisées à émettre de requêtes d‘<ph name="LOCAL_NETWORK_ACCESS" />.
+
+Pour les origines autres que celles représentées par les formats spécifiés ici, la configuration personnelle de l'utilisateur s'applique.
+
+Pour en savoir plus sur les formats d'URL valides, veuillez consulter https://chromeenterprise.google/policies/url-patterns/.
+
+Pour connaître les restrictions concernant l’<ph name="LOCAL_NETWORK_ACCESS" />, consultez https://wicg.github.io/local-network-access/.
+
+Plusieurs règles listent des origines qui ont un impact sur les requêtes adressées à des points de terminaison du réseau local et à l'appareil local. Ces règles s'appliquent selon l'ordre de priorité suivant si une origine figure sur la liste de formats d'URL de plusieurs d'entre elles :
+
+  - LocalNetworkBlockedForUrls
+  - LocalNetworkAllowedForUrls
+  - LoopbackNetworkBlockedForUrls
+  - LoopbackNetworkAllowedForUrls
+  - LocalNetworkAccessBlockedForUrls
+  - LocalNetworkAccessAllowedForUrls</translation>
 <translation id="4832373379539003927">Détermine si la visionneuse de PDF de <ph name="PRODUCT_NAME" /> prend en charge les formulaires XFA dans les documents PDF.
 
 Si cette règle est définie sur "True", la prise en charge des formulaires XFA est activée.
@@ -6359,9 +6404,6 @@ Si la règle n'est pas configurée, son comportement est déterminé par la règ
 Pour en savoir plus sur la gestion des données pour les fonctionnalités d'IA générative, veuillez consulter https://support.google.com/chrome/a?p=generative_ai_settings.</translation>
 <translation id="5070539335358964387">Autoriser Rechercher et remplir avec Gemini, et améliorer les modèles d'IA.</translation>
 <translation id="5071303485174858500">Désactiver la session Invité gérée restreinte.</translation>
-<translation id="5073609397321802133">Si cette règle est définie sur "False", les utilisateurs ne peuvent pas personnaliser l'arrière-plan sur la page "Nouvel onglet". Tout arrière-plan personnalisé actuel sera définitivement supprimé, même si la règle est définie sur "True" par la suite.
-
-      Si celle-ci est définie sur "True" ou si elle n'est pas configurée, les utilisateurs peuvent personnaliser l'arrière-plan sur la page "Nouvel onglet".</translation>
 <translation id="5073788301065423829">Cette règle active ou désactive "Aide-moi à écrire" pour ChromeOS.
 
 Si cette règle est activée, "Aide-moi à écrire" l'est aussi.
@@ -6679,6 +6721,17 @@ Remarque : Cette fonctionnalité n'est pas encore disponible au grand public. S
 <translation id="5247584184349816217">Activer l'économiseur d'écran pour l'écran de verrouillage.</translation>
 <translation id="5247973380763021389">Empêcher les règles cloud utilisateur d'ignorer les règles cloud machine.</translation>
 <translation id="5249006530384016395">Détermine si la syntaxe <ph name="CUSTOM_STATE_DEPRECATED_SYNTAX" /> obsolète de l'état personnalisé CSS est activée</translation>
+<translation id="5249271416806588789">La saisie de texte par commande vocale est une fonctionnalité basée sur l'IA qui permet aux utilisateurs de saisir et de modifier du texte à l'aide de leur voix. Elle s'appuie sur des modèles d'IA générative afin de fournir une transcription et une mise en forme de haute qualité.
+
+0 = Permettre d'utiliser la fonctionnalité tout en autorisant Google à utiliser des données pertinentes pour améliorer ses modèles d'IA. Selon la fonctionnalité, les données pertinentes peuvent inclure des prompts, des entrées, des sorties, des sources et des retours écrits. Elles pourront également être examinées par des réviseurs humains afin d'améliorer les modèles d'IA. 0 est la valeur par défaut, sauf pour les exceptions ci-dessous.
+
+1 = Permettre d'utiliser la fonctionnalité, mais ne pas autoriser Google à améliorer ses modèles à l'aide du contenu des utilisateurs (y compris les prompts, les entrées, les sorties, les sources et les retours écrits). 1 est la valeur par défaut pour les utilisateurs de la version Enterprise gérés par <ph name="GOOGLE_ADMIN_CONSOLE_PRODUCT_NAME" /> et pour les comptes Education gérés par <ph name="GOOGLE_WORKSPACE_PRODUCT_NAME" />.
+
+2 = Ne pas autoriser la fonctionnalité.
+
+Si la règle n'est pas configurée, son comportement est déterminé par la règle <ph name="GEN_AI_DEFAULT_SETTINGS_POLICY_NAME" />.
+
+Pour en savoir plus sur la gestion des données pour les fonctionnalités d'IA générative, veuillez consulter https://support.google.com/chrome/a?p=generative_ai_settings.</translation>
 <translation id="5249453807420671499">Les utilisateurs peuvent ajouter des comptes Kerberos</translation>
 <translation id="5249555581286638799">Active le mode Haute efficacité</translation>
 <translation id="5252210248395576403">Cette règle autorise Réponses rapides à accéder au contenu sélectionné et à envoyer au serveur les infos pour obtenir les résultats de la traduction.
@@ -6881,17 +6934,6 @@ Si la règle est définie sur "False", les enseignants ne peuvent pas accéder �
 <translation id="537786648513450280">Contrôler l'accès de l'appareil aux applications Android provenant de sources non approuvées</translation>
 <translation id="5378885577701865339">Désactiver la fonctionnalité de presse-papiers partagé</translation>
 <translation id="5385337904220716757">Autoriser uniquement l'accès à la géolocalisation du système pour les services système</translation>
-<translation id="538768040137709073">Permet d'activer la fonctionnalité de presse-papiers partagé, qui donne la possibilité aux utilisateurs d'envoyer du texte entre un ordinateur de bureau Chrome et un appareil Android lorsque la synchronisation est activée et que l'utilisateur est connecté.
-
-          Si cette règle est définie sur "True", la possibilité d'envoyer du texte entre deux appareils est activée pour les utilisateurs de Chrome.
-
-          Si cette règle est définie sur "False", la possibilité d'envoyer du texte entre deux appareils est désactivée pour les utilisateurs de Chrome.
-
-          Si vous configurez cette règle, les utilisateurs ne peuvent pas la modifier ni l'ignorer.
-
-          Si cette règle n'est pas configurée, la fonctionnalité de presse-papiers partagé est activée par défaut.
-
-          C'est aux administrateurs de configurer les règles sur toutes les plates-formes qui les intéressent. Il est recommandé de définir cette règle sur une même valeur pour toutes les plates-formes.</translation>
 <translation id="5389708774452952523">Autoriser l'exécution du processus audio avec une priorité supérieure à la normale sous Windows</translation>
 <translation id="5390083518957894426">Permettre la réauthentification en ligne sur l'écran de verrouillage des utilisateurs via SAML</translation>
 <translation id="5391388690191341203">Compte local de l'appareil avec connexion automatique</translation>
@@ -7102,6 +7144,13 @@ Si <ph name="NTPCARDSVISIBLE" /> est désactivé, la carte SharePoint et OneDriv
 <translation id="5537400155400537818">Désactivé : le zoom CSS fonctionne de la même manière qu'avant la spécification standard.</translation>
 <translation id="5537587542872235553">Autoriser les applis Web isolées installées d'office et les applis kiosque à utiliser l'API Device Attributes</translation>
 <translation id="553806128266843748">Flag booléen spécifiant si la limitation est activée.</translation>
+<translation id="5540415024237352600">Cette règle sera abandonnée dans M153 et ne sera plus prise en charge (n'aura aucun effet) dans une prochaine version. Les signatures ponctuelles pour les applis natives créées lors de l'installation d'une progressive web app (PWA) sont désormais activées de manière permanente sous <ph name="MAC_OS_NAME" />. Cela garantit que chaque appli installée a une identité unique pour les composants système <ph name="MAC_OS_NAME" />.
+
+Si cette règle est activée ou qu'elle n'est pas configurée, les signatures ponctuelles sont autorisées pour l'appli native créée lors de l'installation d'une progressive web app (PWA). Cela garantit que chaque appli installée a une identité unique pour les composants système <ph name="MAC_OS_NAME" />.
+
+Si cette règle est désactivée, toutes les applis natives créées lors de l'installation de PWA auront la même identité. Cela peut interférer avec la fonctionnalité <ph name="MAC_OS_NAME" />.
+
+Désactivez cette règle uniquement si vous utilisez une solution de sécurité des points de terminaison qui bloque les applis avec une signature ponctuelle.</translation>
 <translation id="5540885720415375851">Autoriser la détection des appareils en local</translation>
 <translation id="5542235730745104308">Si cette règle est définie sur "True", <ph name="PRODUCT_NAME" /> utilise les variantes de pages d'erreur intégrées (telles que "Page introuvable"). Si cette règle est définie sur "False", <ph name="PRODUCT_NAME" /> n'utilise jamais les variantes de pages d'erreur.
 
@@ -7298,7 +7347,6 @@ Lorsqu'elle est définie pour <ph name="PRODUCT_OS_NAME" /> Kiosk, cette règle
           Si vous désactivez cette règle, le gestionnaire de mots de passe n'autorise pas l'affichage des mots de passe enregistrés en texte clair dans la fenêtre du gestionnaire de mots de passe.
 
           Si vous activez ou si vous ne configurez pas cette règle, les utilisateurs pourront voir leurs mots de passe en texte clair dans le gestionnaire de mots de passe.</translation>
-<translation id="561873855783619782">Autoriser la saisie vocale sans collecte de données.</translation>
 <translation id="5620392548325769024">Activer l'affichage de la page de bienvenue au premier lancement du navigateur suivant la mise à jour de l'OS</translation>
 <translation id="5621503441067774084">Activer la mise en surbrillance du curseur sur l'écran de connexion</translation>
 <translation id="5622590774455244290">Les applis Android peuvent volontairement choisir de respecter cette liste, mais vous ne pouvez pas les forcer à la suivre.</translation>
@@ -7496,7 +7544,7 @@ Si elle est désactivée ou n'est pas configurée, les Glanceables ne sont pas a
 <translation id="5776508475264864949">Interdire à l'appli Gemini d'effectuer des actions sur les pages Web.</translation>
 <translation id="5779185945203505880">Demander chaque fois qu'un site veut accéder aux capteurs</translation>
 <translation id="5783009211970309878">Imprimer les en-têtes et les pieds de page</translation>
-<translation id="5786913136266632175">Autoriser Chrome Finds et améliorer les modèles d'IA.</translation>
+<translation id="5786913136266632175">Autoriser les Découvertes Chrome et améliorer les modèles d'IA.</translation>
 <translation id="5789288985554424301">Permet de définir si les sites Web sont autorisés à utiliser l'API Idle Detection.
 
 Si cette règle est définie sur "1 - <ph name="ALLOW_IDLE_DETECTION_VALUE_NAME" />", les sites Web peuvent utiliser l'API sans demander l'autorisation de l'utilisateur.
@@ -7843,6 +7891,7 @@ Si cette règle n'est pas configurée, la règle <ph name="DEFAULT_AUTOMATIC_DOW
       Si elle est désactivée, les utilisateurs ne peuvent pas envoyer de commentaires à Google.</translation>
 <translation id="5976636832661103220">Les paramètres F11 utilisent le raccourci qui contient la touche de modification Maj</translation>
 <translation id="5979376378555121803">Application hébergée</translation>
+<translation id="5983016603010860828">Paramètres de la saisie de texte par commande vocale</translation>
 <translation id="5983274643567559194">La définition d'un raccourci pour l'action "Supprimer" est désactivée.</translation>
 <translation id="5984099692320899605">Ne pas utiliser l'authentification NTLM</translation>
 <translation id="5984237109586500246">Accepter les contenus Web diffusés via Signed HTTP Exchange</translation>
@@ -8039,14 +8088,6 @@ Si cette règle est activée ou n'est pas configurée, l'utilisateur peut person
 
 Si cette règle est désactivée, l'appli Raccourcis clavier est en lecture seule, et l'utilisateur ne peut alors pas personnaliser les raccourcis système.</translation>
 <translation id="6150320133676152520">Désactiver l'envoi automatique du code PIN sur l'écran de connexion et de verrouillage</translation>
-<translation id="6152224988699207920">Permet aux administrateurs de personnaliser l'apparence des filigranes appliqués par les règles de Protection contre la perte de données. Cela inclut la définition de l'opacité du remplissage/du contour, de la taille de la police et du code temporel du fuseau horaire.
-Si cette règle ou certaines valeurs ne sont pas définies, Chrome utilisera son comportement par défaut pour les filigranes.
-Les valeurs par défaut sont les suivantes : opacité du remplissage à 4, opacité du contour à 6, taille de police à 24 et code temporel du fuseau horaire défini sur "user_device" (fuseau horaire local de l'appareil de l'utilisateur).
-
-L'opacité du remplissage est un pourcentage compris entre 0 (totalement transparent) et 100 (totalement opaque).
-L'opacité du contour est un pourcentage compris entre 0 (totalement transparent) et 100 (totalement opaque).
-La taille de police est indiquée en points.
-Le champ "Code temporel du fuseau horaire" spécifie l'identifiant de fuseau horaire IANA (par exemple, "America/Toronto") utilisé pour formater les codes temporels du filigrane (pris en charge à partir de Chrome 152), qui utilise les noms de la base de données des fuseaux horaires IANA (https://www.iana.org/time-zones).</translation>
 <translation id="6155350825868160236">Autoriser l'utilisateur à choisir si des services Web Google peuvent être utilisés pour corriger les fautes d'orthographe</translation>
 <translation id="6155936611791017817">Définir l'état par défaut du grand curseur sur l'écran de connexion</translation>
 <translation id="6157537876488211233">Liste de règles de contournement de proxy séparées par des virgules</translation>
@@ -9101,7 +9142,7 @@ Si cette règle est définie sur "False" ou qu'elle n'est pas configurée, c'est
 
       Si cette règle n'est pas configurée, aucune donnée de télémétrie supplémentaire ne sera signalée en cas d'événements de modification de l'intensité du signal.</translation>
 <translation id="6751612743847158732">Restaurez toujours la dernière session.</translation>
-<translation id="6751882390104737961">Chrome Finds est une fonctionnalité basée sur l'IA qui aide les utilisateurs à rechercher et à comprendre le contenu de la page Web actuelle.
+<translation id="6751882390104737961">Les Découvertes Chrome sont une fonctionnalité basée sur l'IA qui aide les utilisateurs à rechercher et à comprendre le contenu de la page Web actuelle.
 
 0 = Permettre d'utiliser la fonctionnalité tout en autorisant Google à utiliser des données pertinentes pour améliorer ses modèles d'IA. Selon la fonctionnalité, les données pertinentes peuvent inclure des prompts, des entrées, des sorties, des sources et des retours écrits. Elles pourront également être examinées par des réviseurs humains afin d'améliorer les modèles d'IA. 0 est la valeur par défaut, sauf pour les exceptions ci-dessous.
 
@@ -9906,6 +9947,20 @@ Remarque : Si vous utilisez cette règle pour résoudre automatiquement le fuse
       Si cette règle est définie sur "False", les utilisateurs, les applications et les extensions ne peuvent pas utiliser ce mode.</translation>
 <translation id="7180529638251181928">Ne pas appliquer le mode restreint sur <ph name="YOUTUBE_PRODUCT_NAME" /></translation>
 <translation id="718126088895133062">Cette règle définit l'ID utilisateur attribuant des licences <ph name="PLUGIN_VM_NAME" /> pour cet appareil.</translation>
+<translation id="7182622189057326705">Cette règle est obsolète et n'a aucun effet, car la fonctionnalité de presse-papiers partagé a été supprimée de Chrome.
+
+Description d'origine :
+Permet d'activer la fonctionnalité de presse-papiers partagé, qui donne la possibilité aux utilisateurs d'envoyer du texte entre un ordinateur de bureau Chrome et un appareil Android lorsque la synchronisation est activée et que l'utilisateur est connecté.
+
+          Si cette règle est définie sur "True", la possibilité d'envoyer du texte entre deux appareils est activée pour les utilisateurs de Chrome.
+
+          Si cette règle est définie sur "False", la possibilité d'envoyer du texte entre deux appareils est désactivée pour les utilisateurs de Chrome.
+
+          Si vous la configurez, les utilisateurs ne peuvent pas la modifier ni l'ignorer.
+
+          Si cette règle n'est pas configurée, la fonctionnalité de presse-papiers partagé est activée par défaut.
+
+          C'est aux administrateurs de configurer les règles sur toutes les plates-formes qui les intéressent. Il est recommandé de définir cette règle sur une même valeur pour toutes les plates-formes.</translation>
 <translation id="7185078796915954712">TLS 1.3</translation>
 <translation id="7185630966939835143">Utiliser un service Web Google pour corriger les fautes d'orthographe</translation>
 <translation id="7187248416163189586">Désactiver les rapports sur le rétroéclairage de l'appareil</translation>
@@ -10073,6 +10128,7 @@ Si cette règle est désactivée ou n'est pas configurée, les paramètres de co
       Si vous activez cette règle, vous exposez les sites à certaines attaques ciblant plusieurs sites et autorisez le suivi des utilisateurs d'un site à l'autre même sans cookies, grâce à l'ajout d'entrées au cache d'authentification HTTP par le biais d'identifiants intégrés aux URL.
 
       Cette règle a pour but de donner l'opportunité aux entreprises tributaires de l'ancien comportement de mettre à jour leur processus de connexion. Elle sera prochainement supprimée.</translation>
+<translation id="7322231030019184787">Autoriser la saisie de texte par commande vocale sans collecte de données.</translation>
 <translation id="7322825363493984512">Mot de passe pour authentifier les services système auprès du proxy Web à distance.</translation>
 <translation id="7323773727263636287">Activer la fonctionnalité d'accessibilité de correction des couleurs.
 
@@ -10533,6 +10589,7 @@ On attend de cette règle qu'elle soit utilisée dans le cadre de la modificatio
       Lorsque cette règle est activée, le code d'accès parental peut être validé sur l'appareil d'un enfant.
       Lorsqu'elle est désactivée, il est impossible de valider ce code sur l'appareil d'un enfant.</translation>
 <translation id="7623431489198474050">Désactiver l'attestation à distance pour la protection du contenu</translation>
+<translation id="7624832415093566709">Autoriser la saisie de texte par commande vocale.</translation>
 <translation id="7625858205605842562">Cette règle permet de lister les formats d'URL pour lesquels les sites ne peuvent pas demander aux utilisateurs l'accès à un appareil USB.
 
       Si cette règle n'est pas configurée, la règle <ph name="DEFAULT_WEB_USB_GUARD_SETTING_POLICY_NAME" /> s'applique pour tous les sites, à condition qu'elle soit définie. Si ce n'est pas le cas, le paramètre défini par l'utilisateur s'applique.
@@ -11040,11 +11097,6 @@ Si la règle <ph name="ENABLE_MEDIA_ROUTER_POLICY_NAME" /> est désactivée, ell
 
       Si cette règle n'est pas configurée, aucune sélection automatique n'est effectuée pour aucun site.</translation>
 <translation id="7937766917976512374">Autoriser ou interdire la capture vidéo</translation>
-<translation id="7937825205289116563">Si cette règle est activée ou qu'elle n'est pas configurée, les signatures ponctuelles sont autorisées pour l'appli native créée lors de l'installation d'une progressive web app (PWA). Cela garantit que chaque appli installée a une identité unique pour les composants système <ph name="MAC_OS_NAME" />.
-
-Si cette règle est désactivée, toutes les applis natives créées lors de l'installation de PWA auront la même identité. Cela peut interférer avec la fonctionnalité <ph name="MAC_OS_NAME" />.
-
-Désactivez cette règle uniquement si vous utilisez une solution de sécurité des points de terminaison qui bloque les applis avec une signature ponctuelle.</translation>
 <translation id="7941528208359969119">Autoriser l'exécution de vérifications <ph name="OCSP_CRL_LABEL" /> en ligne</translation>
 <translation id="7941975817681987555">Ne pas prédire d'actions réseau lors d'une connexion au réseau</translation>
 <translation id="794447754389837404">Bloquer l'accès au réseau privé dans l'API Direct Sockets sur ces sites</translation>
@@ -11536,22 +11588,6 @@ Pour <ph name="PRODUCT_NAME" />, cette règle n'est appliquée que si l'ordinate
 
 Pour en savoir plus sur les anciennes technologies, consultez https://chromestatus.com/features.</translation>
 <translation id="8273183018575414926">Progressive Web Apps</translation>
-<translation id="8274053052968966211">Liste de formats d'URL. Les requêtes réseau initiées à partir de sites Web desservis par des origines qui figurent sur la liste ne sont pas autorisées à émettre de requêtes <ph name="LOCAL_NETWORK_ACCESS" />.
-
-Pour les origines autres que celles représentées par les formats spécifiés ici, la configuration personnelle de l'utilisateur s'applique.
-
-Pour en savoir plus sur les formats d'URL valides, veuillez consulter https://chromeenterprise.google/policies/url-patterns/.
-
-Pour connaître les restrictions concernant <ph name="LOCAL_NETWORK_ACCESS" />, consultez https://wicg.github.io/local-network-access/.
-
-Plusieurs règles listent des origines qui ont un impact sur les requêtes adressées à des points de terminaison du réseau local et à l'appareil local. Ces règles s'appliquent selon l'ordre de priorité suivant si une origine figure sur la liste de formats d'URL de plusieurs d'entre elles :
-
-  - LocalNetworkBlockedForUrls
-  - LocalNetworkAllowedForUrls
-  - LoopbackNetworkAccessBlockedForUrls
-  - LoopbackNetworkAccessAllowedForUrls
-  - LocalNetworkAccessBlockedForUrls
-  - LocalNetworkAccessAllowedForUrls</translation>
 <translation id="8274603902181597201">Nettoyer le répertoire d'accueil eCryptfs de l'utilisateur et employer un nouveau répertoire d'accueil chiffré avec ext4.</translation>
 <translation id="8274926413890711289">Activer les contrôles de rapports précis</translation>
 <translation id="8275103737670730746">Autoriser l'appel d'API de sélection de fichiers ou répertoires sans geste préalable de l'utilisateur</translation>
@@ -11640,7 +11676,6 @@ Si cette règle n'est pas configurée, la commande par le visage est désactivé
 <translation id="8330437518362176921">N'utiliser que l'URL de mise à jour fournie par la règle pour télécharger et mettre à jour les applis Chrome Kiosk</translation>
 <translation id="8331479227794770304">Activer les touches rémanentes</translation>
 <translation id="8332822245414537447">Désactiver la vérification de l'utilisation des clés RSA</translation>
-<translation id="8333141477131859004">Autoriser la saisie automatique améliorée et améliorer les modèles d'IA.</translation>
 <translation id="8334685561819743286">Désactiver la correction automatique lors de la saisie au clavier physique</translation>
 <translation id="8336986243404088829">Cette règle atténue les attaques de mémoire en traitement croisé par canal auxiliaire en isolant le processus de rendu sur le cœur de processeur et en empêchant d'autres processus de partager le même cœur. L'atténuation est compatible avec <ph name="MS_WIN_NAME" /> 11 24H2 et versions ultérieures. Si l'OS ne dispose pas de la prise en charge de la planification requise, cette règle n'aura aucun effet. Cette règle peut ralentir les performances dans certains scénarios exigeants analogues à la désactivation de l'hyperthreading. Pour en savoir plus, consultez https://learn.microsoft.com/fr-fr/windows/win32/api/winnt/ns-winnt-process_mitigation_side_channel_isolation_policy
       Si cette règle est activée, aucun autre processus ne sera planifié sur le même cœur de processeur lorsque le processus de rendu est en cours d'exécution.
@@ -12096,7 +12131,6 @@ Elle est toujours appliquée pour <ph name="PRODUCT_OS_NAME" />.</translation>
 <translation id="8634062512783775032">Utiliser <ph name="AES_KL_NAME" /> comme algorithme de chiffrement du stockage de l'utilisateur si celui-ci est compatible</translation>
 <translation id="8637566476051166626">Ports réseau explicitement autorisés</translation>
 <translation id="8643838501942693770">Autoriser les cookies tiers, mais permettre aux utilisateurs de modifier ce paramètre</translation>
-<translation id="8644225074581442734">Paramètres de la saisie vocale</translation>
 <translation id="864611373241249369">Une fois <ph name="LACROS_NAME" /> désactivé, nous tentons de migrer toutes les données.</translation>
 <translation id="8648844602494595665">Cette règle contrôle l'utilisation de l'icône en forme de cadenas dans l'omnibox.
        À partir de Chrome M93, il y aura une nouvelle icône dans l'omnibox pour les connexions sécurisées.
@@ -12219,7 +12253,7 @@ Si <ph name="LIVE_CAPTION_ENABLED_POLICY_NAME" /> est désactivée, la traductio
 <translation id="8713535263782304771">Désactiver la navigation sécurisée</translation>
 <translation id="8714556680280715750">URL permettant aux utilisateurs d'en savoir plus. Si cette règle n'est pas configurée, plus aucune URL "En savoir plus" ne figurera dans le programme d'installation. Si l'URL est spécifiée, elle doit utiliser le format HTTPS.</translation>
 <translation id="8715885991031124968">Autoriser les boîtes de dialogue JavaScript déclenchées depuis un sous-frame d'une origine différente.</translation>
-<translation id="8720288018555457355">Autoriser Chrome Finds sans améliorer les modèles d'IA.</translation>
+<translation id="8720288018555457355">Autoriser les Découvertes Chrome sans améliorer les modèles d'IA.</translation>
 <translation id="8720547069538712402">Autoriser l'utilisateur à activer ou désactiver le correcteur orthographique</translation>
 <translation id="8721685661759544418">Activer la lecture à voix haute des pages Web (distillation du texte et synthèse vocale)</translation>
 <translation id="8726080977639508431">Cette règle contrôle la façon dont <ph name="PRODUCT_NAME" /> interprète les règles des listes grises/de sites pour la fonctionnalité Legacy Browser Support. Cela concerne ces règles : <ph name="URL_LIST_POLICY_NAME" />, <ph name="URL_GREYLIST_POLICY_NAME" />, <ph name="USE_IE_SITELIST_POLICY_NAME" />, <ph name="EXTERNAL_SITELIST_POLICY_NAME" /> et <ph name="EXTERNAL_GREYLIST_POLICY_NAME" />.
@@ -12726,17 +12760,6 @@ Si cette règle n'est pas configurée, <ph name="PRODUCT_NAME" /> peut, par déf
 <translation id="9053841574218808519">Toujours exécuter les plug-ins non obsolètes</translation>
 <translation id="9055866143096316150">Rétrograder les demandes de wakelocks forçant l'activation de l'écran en demandes de wakelocks système</translation>
 <translation id="9057159618445405645">Utiliser le comportement par défaut du navigateur Chrome</translation>
-<translation id="9061455386353325110">Indique si les utilisateurs peuvent autoriser <ph name="PRODUCT_NAME" /> à utiliser l'IA générative pour mieux comprendre les formulaires et les aider à remplir plus de champs.
-
-0 = Permettre d'utiliser la fonctionnalité tout en autorisant Google à utiliser des données pertinentes pour améliorer ses modèles d'IA. Selon la fonctionnalité, les données pertinentes peuvent inclure des prompts, des entrées, des sorties, des documents source et des commentaires écrits. 0 est la valeur par défaut, sauf pour les exceptions ci-dessous.
-
-1 = Permettre d'utiliser la fonctionnalité, mais ne pas autoriser Google à améliorer ses modèles à l'aide du contenu des utilisateurs (y compris les prompts, les entrées, les sorties, les documents source et les commentaires écrits). 1 est la valeur par défaut pour les utilisateurs de la version Enterprise gérés par <ph name="GOOGLE_ADMIN_CONSOLE_PRODUCT_NAME" /> et pour les comptes Education gérés par <ph name="GOOGLE_WORKSPACE_PRODUCT_NAME" />.
-
-2 = Ne pas autoriser la fonctionnalité.
-
-Si la règle n'est pas configurée, son comportement est déterminé par la règle <ph name="GEN_AI_DEFAULT_SETTINGS_POLICY_NAME" />.
-
-Pour en savoir plus sur la gestion des données pour les fonctionnalités d'IA générative, veuillez consulter https://support.google.com/chrome/a?p=generative_ai_settings.</translation>
 <translation id="9061609750723054419">Contrôler la visibilité de l'avis de gestion sur la page "Nouvel onglet" des navigateurs gérés</translation>
 <translation id="9063485115966829754">La visionneuse de PDF utilise l'architecture GuestView.</translation>
 <translation id="9064546884927958824">Permet de dresser la liste des formats d'URL pour lesquels les sites peuvent afficher des images.

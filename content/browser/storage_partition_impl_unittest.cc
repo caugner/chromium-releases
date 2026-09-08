@@ -565,9 +565,8 @@ void ClearCookiesMatchingInfo(content::StoragePartition* partition,
 
 
 void ClearData(content::StoragePartition* partition, base::RunLoop* run_loop) {
-  base::Time time;
   partition->ClearData(StoragePartition::REMOVE_DATA_MASK_SHADER_CACHE,
-                       blink::StorageKey(), time, time,
+                       blink::StorageKey(), base::Time(), base::Time::Max(),
                        run_loop->QuitClosure());
 }
 
@@ -606,7 +605,6 @@ class StoragePartitionImplTest : public testing::Test {
   explicit StoragePartitionImplTest(
       bool is_local_storage_sqlite_enabled = false) {
     std::vector<base::test::FeatureRef> enabled_features{
-        network::features::kSharedStorageAPI,
         blink::features::kDeclarativePerformanceObserver};
     std::vector<base::test::FeatureRef> disabled_features;
     if (is_local_storage_sqlite_enabled) {

@@ -37,10 +37,9 @@ void FrameViewAutoSizeInfo::ConfigureAutoSizeMode(const gfx::Size& min_size,
   max_auto_size_ = max_size;
   did_run_autosize_ = false;
   handled_post_load_reset_ = false;
-  measurement_after_reset_pending_ = false;
 }
 
-bool FrameViewAutoSizeInfo::AutoSizeIfNeeded(bool should_reset_for_content) {
+bool FrameViewAutoSizeInfo::AutoSizeIfNeeded(bool should_reset_for_layout) {
   DCHECK(!in_auto_size_);
   base::AutoReset<bool> change_in_auto_size(&in_auto_size_, true);
 
@@ -65,22 +64,13 @@ bool FrameViewAutoSizeInfo::AutoSizeIfNeeded(bool should_reset_for_content) {
   }
 
   // Once loading finishes, remeasure for any suppressed shrink and on
-  // subsequent layout or overflow changes.
+  // subsequent layout changes.
   const bool load_finished = document->LoadEventFinished();
   const bool should_reset_after_load =
       uses_scroll_width && load_finished &&
-      (should_reset_for_content || !handled_post_load_reset_);
+      (should_reset_for_layout || !handled_post_load_reset_);
   if (should_reset_after_load) {
     handled_post_load_reset_ = true;
-  }
-
-  // After initial and post-load sizing, start a new measurement sequence only
-  // for layout or overflow invalidation. Re-reading a viewport-dependent scroll
-  // width can make autosize oscillate. Allow an existing sequence to continue.
-  if (uses_scroll_width && !num_passes_ && !is_first_autosize &&
-      !measurement_after_reset_pending_ && !should_reset_for_content &&
-      !should_reset_after_load) {
-    return false;
   }
 
   gfx::Size reset_size = size;
@@ -92,11 +82,9 @@ bool FrameViewAutoSizeInfo::AutoSizeIfNeeded(bool should_reset_for_content) {
     reset_size.set_height(min_auto_size_.height());
   }
   if (reset_size != size) {
-    measurement_after_reset_pending_ = uses_scroll_width;
     frame_view_->Resize(reset_size);
     return true;
   }
-  measurement_after_reset_pending_ = false;
 
   PaintLayerScrollableArea* layout_viewport = frame_view_->LayoutViewport();
 
@@ -117,8 +105,10 @@ bool FrameViewAutoSizeInfo::AutoSizeIfNeeded(bool should_reset_for_content) {
   // TODO(bokan): This code doesn't handle subpixel sizes correctly. Because
   // of that, it's forced to maintain all the special ScrollbarMode code
   // below. https://crbug.com/812311.
-  int width = uses_scroll_width ? document_layout_box->ScrollWidth().ToInt()
-                                : layout_view->ComputeMinimumWidth().ToInt();
+  int width =
+      RuntimeEnabledFeatures::AutoSizeUsesScrollWidthForOverflowEnabled()
+          ? document_layout_box->ScrollWidth().ToInt()
+          : layout_view->ComputeMinimumWidth().ToInt();
 
   int height = document_layout_box->ScrollHeight().ToInt();
   gfx::Size new_size(width, height);
@@ -196,7 +186,6 @@ bool FrameViewAutoSizeInfo::AutoSizeIfNeeded(bool should_reset_for_content) {
 }
 
 void FrameViewAutoSizeInfo::Clear() {
-  measurement_after_reset_pending_ = false;
   if (num_passes_) {
     num_passes_ = 0u;
     running_first_autosize_ = false;

@@ -49,8 +49,11 @@ OmniboxPopupFullPresenter::OmniboxPopupFullPresenter(
     OmniboxPopupPresenterDelegate& presenter_delegate,
     OmniboxController* controller)
     : OmniboxPopupPresenterBase(location_bar, presenter_delegate, controller) {
-  SetWebUIContent(std::make_unique<OmniboxFullPopupWebUIContent>(
-      this, this->location_bar(), controller));
+  // `location_bar` may be null in unit tests.
+  if (location_bar) {
+    SetWebUIContent(std::make_unique<OmniboxFullPopupWebUIContent>(
+        this, this->location_bar(), controller));
+  }
 }
 
 OmniboxPopupFullPresenter::~OmniboxPopupFullPresenter() = default;
@@ -121,6 +124,10 @@ void OmniboxPopupFullPresenter::Hide() {
   forward_events_timer_.Stop();
   popup_widget_observation_.Reset();
   OmniboxPopupPresenterBase::Hide();
+  // Reset the cached height to force a layout update when the popup is
+  // reshown. This prevents the popup from temporarily using a stale size
+  // from its previous state.
+  content_height_ = 1;
 }
 
 void OmniboxPopupFullPresenter::RequestFocus() {
@@ -147,16 +154,20 @@ std::string_view OmniboxPopupFullPresenter::GetPopupMetricPrefix() const {
 std::optional<base::TimeDelta>
 OmniboxPopupFullPresenter::ShouldDeferUntilVisualStateReady() const {
   if (!base::FeatureList::IsEnabled(
-          omnibox::kOmniboxAimDeferShowUntilVisualStateReady)) {
+          omnibox::kOmniboxFullWebUIDeferShowUntilVisualStateReady)) {
     return std::nullopt;
   }
   return base::Milliseconds(
-      omnibox::kOmniboxAimDeferShowUntilVisualStateReadyTimeoutMs.Get());
+      omnibox::kOmniboxFullWebUIDeferShowUntilVisualStateReadyTimeoutMs.Get());
 }
 
 bool OmniboxPopupFullPresenter::ShouldDetachWebContentsOnHide() const {
   return base::FeatureList::IsEnabled(
-      omnibox::kOmniboxAimDetachWebContentsOnHide);
+      omnibox::kOmniboxFullWebUIDetachWebContentsOnHide);
+}
+
+bool OmniboxPopupFullPresenter::ShouldHideForInitialLayout() const {
+  return false;
 }
 
 std::unique_ptr<RoundedOmniboxResultsFrame>
@@ -246,14 +257,12 @@ void OmniboxPopupFullPresenter::OnWidgetActivationChanged(views::Widget* widget,
           base::BindOnce(
               [](base::WeakPtr<OmniboxPopupFullPresenter> presenter) {
                 if (presenter) {
-                  if (auto* omnibox_view =
-                          presenter->location_bar()->GetOmniboxView()) {
-                    if (auto* omnibox_view_views =
-                            static_cast<OmniboxViewViews*>(omnibox_view)) {
-                      if (auto* focus_manager =
-                              omnibox_view_views->GetFocusManager()) {
-                        focus_manager->SetStoredFocusView(omnibox_view_views);
-                      }
+                  if (auto* widget =
+                          presenter->delegate().GetLocationBarWidget()) {
+                    if (auto* focus_manager = widget->GetFocusManager()) {
+                      focus_manager->SetStoredFocusView(
+                          presenter->delegate()
+                              .GetLocationBarFocusRestoreView());
                     }
                   }
                 }

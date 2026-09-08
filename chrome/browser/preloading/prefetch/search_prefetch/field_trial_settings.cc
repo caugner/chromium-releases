@@ -133,16 +133,6 @@ bool IsTouchDownPrefetchEnabled() {
                                                  "touch_down", true);
 }
 
-bool AllowTopNavigationPrefetch() {
-  return base::GetFieldTrialParamByFeatureAsBool(kSearchNavigationPrefetch,
-                                                 "allow_top_selection", true);
-}
-
-bool PrefetchSearchHistorySuggestions() {
-  return base::GetFieldTrialParamByFeatureAsBool(
-      kSearchNavigationPrefetch, "prefetch_search_history", true);
-}
-
 BASE_FEATURE(kSearchPrefetchOnlyAllowDefaultMatchPreloading,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
@@ -190,6 +180,13 @@ bool IsSearchPrefetchBeaconLoggingEnabled(
   }
   return value == kNavigationPrefetchParam.Get() ||
          value == kSuggestPrefetchParam.Get();
+}
+
+BASE_FEATURE(kSearchPrefetchPreloadServingMetrics,
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
+bool IsSearchPrefetchPreloadServingMetricsEnabled() {
+  return base::FeatureList::IsEnabled(kSearchPrefetchPreloadServingMetrics);
 }
 
 bool IsPrefetchIncognitoEnabled() {

@@ -198,10 +198,6 @@ class MouseWheelEventQueueTest : public testing::Test,
     ++acked_event_count_;
     last_acked_event_ = event.event;
     last_acked_event_state_ = ack_result;
-    if (destroy_queue_on_ack_) {
-      queue_.reset();
-      return;
-    }
   }
 
   bool IsWheelScrollInProgress() override {
@@ -406,10 +402,6 @@ class MouseWheelEventQueueTest : public testing::Test,
     EXPECT_EQ(1U, GetAndResetSentEventCount());
   }
 
-  void set_destroy_queue_on_ack(bool destroy) {
-    destroy_queue_on_ack_ = destroy;
-  }
-
   base::test::SingleThreadTaskEnvironment task_environment_;
   std::unique_ptr<MouseWheelEventQueue> queue_;
   std::vector<std::unique_ptr<WebInputEvent>> sent_events_;
@@ -417,7 +409,6 @@ class MouseWheelEventQueueTest : public testing::Test,
   size_t acked_event_count_;
   blink::mojom::InputEventResultState last_acked_event_state_;
   WebMouseWheelEvent last_acked_event_;
-  bool destroy_queue_on_ack_ = false;
 
  private:
   bool is_wheel_scroll_in_progress_ = false;
@@ -718,18 +709,4 @@ TEST_F(MouseWheelEventQueueTest, DoNotSwapXYForShiftScroll) {
   EXPECT_EQ(2U, GetAndResetSentEventCount());
 }
 #endif
-TEST_F(MouseWheelEventQueueTest, SynchronousDestructionDuringAck) {
-  SendMouseWheel(kWheelScrollX, kWheelScrollY, kWheelScrollGlobalX,
-                 kWheelScrollGlobalY, 1, 1, 0, false,
-                 WebMouseWheelEvent::kPhaseBegan,
-                 WebMouseWheelEvent::kPhaseNone);
-  EXPECT_EQ(0U, queued_event_count());
-  EXPECT_TRUE(event_in_flight());
-
-  set_destroy_queue_on_ack(true);
-  SendMouseWheelEventAck(blink::mojom::InputEventResultState::kNotConsumed);
-
-  EXPECT_EQ(nullptr, queue_);
-}
-
 }  // namespace input

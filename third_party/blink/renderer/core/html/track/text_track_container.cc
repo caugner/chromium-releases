@@ -190,9 +190,7 @@ void TextTrackContainer::UpdateDisplay(HTMLMediaElement& media_element,
   // 7. Let cues be an empty list of text track cues.
   // 8. For each track track in tracks, append to cues all the cues from
   // track's list of cues that have their text track cue active flag set.
-  // Note: Copy the list so that synchronous script (e.g. blur events on
-  // reparenting display boxes) cannot invalidate the iteration buffer.
-  const CueList active_cues = video.GetCueTimeline().CurrentlyActiveCues();
+  const CueList& active_cues = video.GetCueTimeline().CurrentlyActiveCues();
 
   // 9. If reset is false, then, for each text track cue cue in cues: if cue's
   // text track cue display state has a set of CSS boxes, then add those boxes
@@ -208,21 +206,14 @@ void TextTrackContainer::UpdateDisplay(HTMLMediaElement& media_element,
   // corresponding CSS boxes added to output, in text track cue order, run the
   // following substeps:
   double movie_time = video.currentTime();
-  for (const auto& cue : active_cues) {
-    // Cues may have been deactivated or removed if synchronous script ran
-    // during a previous iteration (e.g., via video.load() or
-    // track.removeCue()).
-    if (!cue->IsActive() || !cue->track() || !cue->track()->IsRendered()) {
+  for (const auto& active_cue : active_cues) {
+    TextTrackCue* cue = active_cue.Data();
+
+    DCHECK(cue->IsActive());
+    if (!cue->track() || !cue->track()->IsRendered() || !cue->IsActive())
       continue;
-    }
 
     cue->UpdateDisplay(*this);
-
-    // Recheck IsActive() in case UpdateDisplay() synchronously ran script
-    // that deactivated cues.
-    if (!cue->IsActive()) {
-      continue;
-    }
     cue->UpdatePastAndFutureNodes(movie_time);
   }
 

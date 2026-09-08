@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 
+#include "services/network/public/mojom/ip_address_space.mojom-blink.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/features.h"
@@ -26,6 +27,7 @@
 #include "third_party/blink/renderer/platform/heap/thread_state.h"
 #include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
+#include "third_party/blink/renderer/platform/wtf/text/format.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -942,9 +944,9 @@ TEST_P(DOMWebSocketInvalidClosingCodeTest, test) {
   EXPECT_TRUE(scope.GetExceptionState().HadException());
   EXPECT_EQ(DOMExceptionCode::kInvalidAccessError,
             scope.GetExceptionState().CodeAs<DOMExceptionCode>());
-  EXPECT_EQ(String::Format("The close code must be either 1000, or between "
-                           "3000 and 4999. %d is neither.",
-                           GetParam()),
+  EXPECT_EQ(Format("The close code must be either 1000, or between "
+                   "3000 and 4999. {} is neither.",
+                   GetParam()),
             scope.GetExceptionState().Message());
   EXPECT_EQ(DOMWebSocket::kConnecting, websocket_scope.Socket().readyState());
 }
@@ -979,6 +981,26 @@ TEST(DOMWebSocketTest, GCWhileEventsPending) {
   }
 
   ThreadState::Current()->CollectAllGarbageForTesting();
+}
+
+TEST(DOMWebSocketTest, ConnectForwardsTargetAddressSpace) {
+  test::TaskEnvironment task_environment;
+  V8TestingScope scope;
+  auto* socket =
+      DOMWebSocketWithMockChannel::Create(scope.GetExecutionContext());
+
+  EXPECT_CALL(*socket->Channel(),
+              Connect(KURL("ws://example.com/"), String(),
+                      network::mojom::blink::IPAddressSpace::kLoopback))
+      .WillOnce(Return(true));
+
+  socket->Connect("ws://example.com/", Vector<String>(), ASSERT_NO_EXCEPTION,
+                  network::mojom::blink::IPAddressSpace::kLoopback);
+
+  testing::Mock::VerifyAndClear(socket->Channel());
+  EXPECT_CALL(*socket->Channel(), Disconnect()).Times(AnyNumber());
+  socket->DidClose(WebSocketChannelClient::kClosingHandshakeIncomplete, 1006,
+                   "");
 }
 
 }  // namespace

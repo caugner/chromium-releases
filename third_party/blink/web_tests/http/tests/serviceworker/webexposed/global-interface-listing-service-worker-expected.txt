@@ -3561,10 +3561,12 @@ interface WebTransport
     getter closed
     getter congestionControl
     getter datagrams
+    getter draining
     getter incomingBidirectionalStreams
     getter incomingUnidirectionalStreams
     getter protocol
     getter ready
+    getter responseHeaders
     method close
     method constructor
     method createBidirectionalStream
@@ -3686,6 +3688,7 @@ interface WorkerNavigator
     getter appVersion
     getter connection
     getter deviceMemory
+    getter globalPrivacyControl
     getter gpu
     getter hardwareConcurrency
     getter language

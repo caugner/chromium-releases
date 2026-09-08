@@ -18,8 +18,7 @@ public interface PdfActionsDelegate {
      * Called when a link in the PDF is clicked.
      *
      * @param uri The uri of the link that was clicked.
-     * @return True if the navigation was initiated, false if the link had a disallowed scheme and
-     *     was dropped.
+     * @return True if the link was handled, false otherwise.
      */
     boolean onLinkClicked(Uri uri);
 

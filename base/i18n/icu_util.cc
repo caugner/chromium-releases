@@ -362,6 +362,13 @@ enum class ICUCreateInstance {
 // There are multiple exposed InitializeIcu* functions. This should be called
 // as at the end of (the last functions in the sequence of) these functions.
 bool DoCommonInitialization() {
+  UErrorCode status = U_ZERO_ERROR;
+  u_init(&status);
+  if (!U_SUCCESS(status)) {
+    LOG(FATAL) << "Failed to initialize ICU with data file: "
+               << u_errorName(status);
+  }
+
   // TODO(jungshik): Some callers do not care about tz at all. If necessary,
   // add a boolean argument to this function to init the default tz only
   // when requested.

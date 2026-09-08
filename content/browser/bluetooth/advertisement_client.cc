@@ -12,7 +12,6 @@
 #include "content/browser/bluetooth/bluetooth_blocklist.h"
 #include "content/browser/bluetooth/bluetooth_metrics.h"
 #include "content/browser/web_contents/web_contents_impl.h"
-#include "mojo/public/cpp/bindings/callback_helpers.h"
 
 namespace content {
 
@@ -50,12 +49,9 @@ WebBluetoothServiceImpl::WatchAdvertisementsClient::WatchAdvertisementsClient(
         client_remote,
     blink::WebBluetoothDeviceId device_id,
     RequestCallback callback)
-    : AdvertisementClient(
-          service,
-          std::move(client_remote),
-          mojo::WrapCallbackWithDefaultInvokeIfNotRun(
-              std::move(callback),
-              blink::mojom::WebBluetoothResult::WATCH_ADVERTISEMENTS_ABORTED)),
+    : AdvertisementClient(service,
+                          std::move(client_remote),
+                          std::move(callback)),
       device_id_(device_id) {
   DCHECK(device_id_.IsValid());
 }
@@ -95,12 +91,9 @@ WebBluetoothServiceImpl::ScanningClient::ScanningClient(
         client_remote,
     blink::mojom::WebBluetoothRequestLEScanOptionsPtr options,
     RequestCallback callback)
-    : AdvertisementClient(
-          service,
-          std::move(client_remote),
-          mojo::WrapCallbackWithDefaultInvokeIfNotRun(
-              std::move(callback),
-              blink::mojom::WebBluetoothResult::PROMPT_CANCELED)),
+    : AdvertisementClient(service,
+                          std::move(client_remote),
+                          std::move(callback)),
       options_(std::move(options)) {
   DCHECK(options_->filters.has_value() || options_->accept_all_advertisements);
 }

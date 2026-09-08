@@ -17,6 +17,7 @@ export function createAutocompleteMatch(
     isSearchType: false,
     isEnterpriseSearchAggregatorPeopleType: false,
     swapContentsAndDescription: false,
+    showContextualDescription: false,
     supportsDeletion: false,
     suggestionGroupId: -1,
     contents: '',
@@ -39,6 +40,7 @@ export function createAutocompleteMatch(
     answer: null,
     tailSuggestCommonPrefix: null,
     keywordModel: null,
+    fuseboxAction: null,
     ...config,
   };
 }
@@ -80,6 +82,7 @@ export class ComposeboxProxyImpl implements ComposeboxProxy {
     return this.searchboxCallbackRouter.updateSmartTabSharingActive.addListener(
         callback);
   }
+
   // </if>
 
   static getInstance(): ComposeboxProxyImpl {

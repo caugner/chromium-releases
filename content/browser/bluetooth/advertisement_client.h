@@ -28,9 +28,7 @@ class WebBluetoothServiceImpl::AdvertisementClient {
   bool is_connected() { return client_remote_.is_connected(); }
 
   void RunCallback(blink::mojom::WebBluetoothResult result) {
-    if (callback_) {
-      std::move(callback_).Run(result);
-    }
+    std::move(callback_).Run(result);
   }
 
  protected:

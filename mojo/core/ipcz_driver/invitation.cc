@@ -76,8 +76,6 @@ size_t GetAttachmentIndex(base::span<const uint8_t> name) {
 struct TransportOptions {
   bool is_peer_trusted = false;
   bool is_trusted_by_peer = false;
-  bool is_peer_elevated = false;
-  bool is_elevated = false;
   bool leak_channel_on_shutdown = false;
 };
 
@@ -103,8 +101,6 @@ IpczDriverHandle CreateTransportForMojoEndpoint(
   transport->set_leak_channel_on_shutdown(options.leak_channel_on_shutdown);
   transport->set_is_peer_trusted(options.is_peer_trusted);
   transport->set_is_trusted_by_peer(options.is_trusted_by_peer);
-  transport->set_is_peer_elevated(options.is_peer_elevated);
-  transport->set_is_elevated(options.is_elevated);
   return ObjectBase::ReleaseAsHandle(std::move(transport));
 }
 
@@ -306,11 +302,7 @@ MojoResult Invitation::Send(
       {.source = config.is_broker ? Transport::kBroker : Transport::kNonBroker,
        .destination = is_isolated ? Transport::kBroker : Transport::kNonBroker},
       *transport_endpoint,
-      {
-          .is_peer_trusted = is_peer_elevated,
-          .is_trusted_by_peer = true,
-          .is_peer_elevated = is_peer_elevated,
-      },
+      {.is_peer_trusted = is_peer_elevated, .is_trusted_by_peer = true},
       std::move(remote_process), error_handler, error_handler_context,
       remote_process_trust);
   if (transport == IPCZ_INVALID_DRIVER_HANDLE) {
@@ -422,12 +414,8 @@ MojoHandle Invitation::Accept(
        .destination = Transport::kBroker},
       *transport_endpoint,
       {
-          // An elevated process is more privileged than the inviting broker, so
-          // it does not implicitly trust that broker. The broker on the other
-          // hand trusts the elevated process.
-          .is_peer_trusted = !is_elevated,
+          .is_peer_trusted = true,
           .is_trusted_by_peer = is_elevated,
-          .is_elevated = is_elevated,
           .leak_channel_on_shutdown = leak_transport,
       });
   if (transport == IPCZ_INVALID_DRIVER_HANDLE) {

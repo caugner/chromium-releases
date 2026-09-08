@@ -338,12 +338,9 @@ void OfflineSigninLimiter::ForceOnlineLockScreenReauth() {
 
   LockScreenReauthManager* lock_screen_reauth_manager =
       LockScreenReauthManagerFactory::GetForProfile(profile_);
-  // LockScreenReauthManager is null for non primary users.
-  // See crbug.com/331200953.
-  if (lock_screen_reauth_manager) {
-    lock_screen_reauth_manager->MaybeForceReauthOnLockScreen(reauth_reason);
-    RecordReauthReason(local_state_.get(), user.GetAccountId(), reauth_reason);
-  }
+  DCHECK(lock_screen_reauth_manager);
+  lock_screen_reauth_manager->MaybeForceReauthOnLockScreen(reauth_reason);
+  RecordReauthReason(local_state_.get(), user.GetAccountId(), reauth_reason);
   offline_lock_screen_signin_limit_timer_->Stop();
 }
 

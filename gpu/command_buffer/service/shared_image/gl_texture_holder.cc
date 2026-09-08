@@ -9,7 +9,6 @@
 #include "base/bits.h"
 #include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
-#include "gpu/command_buffer/service/gl_utils.h"
 #include "gpu/command_buffer/service/shared_context_state.h"
 #include "gpu/command_buffer/service/shared_image/gl_repack_utils.h"
 #include "gpu/command_buffer/service/shared_image/shared_image_gl_utils.h"
@@ -157,7 +156,8 @@ void GLTextureHolder::Initialize(
   // below is attributable to the storage call. Silently squelching
   // these errors is unfortunate, but is done in order to mirror other
   // allocation checks done in the command decoder.
-  DrainGLErrors(api);
+  while (api->glGetErrorFn() != GL_NO_ERROR) {
+  }
 
   // Initialize the texture storage/image parameters and upload initial pixels
   // if available.
@@ -345,20 +345,13 @@ bool GLTextureHolder::UploadFromMemory(const SkPixmap& pixmap) {
   const void* pixels =
       !repacked_data.empty() ? repacked_data.data() : pixmap.addr();
   gl::GLApi* api = gl::g_current_gl_context;
-
-  // Drain any pre-existing GL errors so the post-allocation check below is
-  // attributable to the storage call. Mirrors other allocation checks done in
-  // the command decoder.
-  DrainGLErrors(api);
-
   {
     gl::ScopedProgressReporter scoped_progress_reporter(progress_reporter_);
     api->glTexSubImage2DFn(gl_target, /*level=*/0, 0, 0, size_.width(),
                            size_.height(), gl_format, gl_type, pixels);
   }
 
-  // Report any failures
-  return api->glGetErrorFn() == GL_NO_ERROR;
+  return true;
 }
 
 bool GLTextureHolder::ReadbackToMemory(const SkPixmap& pixmap) {
@@ -392,12 +385,6 @@ bool GLTextureHolder::ReadbackToMemory(const SkPixmap& pixmap) {
   }
 
   gl::GLApi* api = gl::g_current_gl_context;
-
-  // Drain any pre-existing GL errors so the post-allocation check below is
-  // attributable to the storage call. Mirrors other allocation checks done in
-  // the command decoder.
-  DrainGLErrors(api);
-
   // ScopedGLFramebuffer must be declared before ScopedFramebufferBinder
   // so that when this scope exits, ScopedFramebufferBinder is destroyed first
   // (restoring the previous framebuffer binding) before the temporary FBO is
@@ -494,8 +481,7 @@ bool GLTextureHolder::ReadbackToMemory(const SkPixmap& pixmap) {
     SwizzleRedAndBlue(pixmap);
   }
 
-  // Report any failures
-  return api->glGetErrorFn() == GL_NO_ERROR;
+  return true;
 }
 
 sk_sp<GrPromiseImageTexture> GLTextureHolder::GetPromiseImage(

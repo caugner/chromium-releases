@@ -58,7 +58,6 @@
 #include "content/browser/broadcast_channel/broadcast_channel_service.h"
 #include "content/browser/browsing_data/clear_site_data_handler.h"
 #include "content/browser/browsing_data/storage_partition_code_cache_data_remover.h"
-#include "content/browser/browsing_topics/browsing_topics_site_data_manager_impl.h"
 #include "content/browser/buckets/bucket_manager.h"
 #include "content/browser/cache_storage/cache_storage_control_wrapper.h"
 #include "content/browser/code_cache/generated_code_cache.h"
@@ -1559,12 +1558,6 @@ void StoragePartitionImpl::Initialize(
 
   bucket_manager_ = std::make_unique<BucketManager>(this);
 
-  // The Topics API is not available in Incognito mode.
-  if (!is_in_memory() &&
-      base::FeatureList::IsEnabled(network::features::kBrowsingTopics)) {
-    browsing_topics_site_data_manager_ =
-        std::make_unique<BrowsingTopicsSiteDataManagerImpl>(path);
-  }
   base::UmaHistogramTimes(
       "Storage.StoragePartition.InitializeDuration.BackgroundTasks",
       step_timer.Elapsed());
@@ -1651,6 +1644,10 @@ network::mojom::NetworkContext* StoragePartitionImpl::GetNetworkContext() {
     InitNetworkContext();
   }
   return network_context_owner_->network_context.get();
+}
+
+bool StoragePartitionImpl::IsNetworkContextInitialized() {
+  return network_context_owner_->network_context.is_bound();
 }
 
 cert_verifier::mojom::CertVerifierServiceUpdater*
@@ -1922,12 +1919,6 @@ StoragePartitionImpl::GetDeviceBoundSessionManager() {
 #else
   return nullptr;
 #endif  // BUILDFLAG(ENABLE_DEVICE_BOUND_SESSIONS)
-}
-
-BrowsingTopicsSiteDataManager*
-StoragePartitionImpl::GetBrowsingTopicsSiteDataManager() {
-  DCHECK(initialized_);
-  return browsing_topics_site_data_manager_.get();
 }
 
 ContentIndexContextImpl* StoragePartitionImpl::GetContentIndexContext() {
@@ -2586,14 +2577,6 @@ void StoragePartitionImpl::OnDataUseUpdate(
       sent_bytes);
 }
 
-void StoragePartitionImpl::OnSharedStorageHeaderReceived(
-    const url::Origin& request_origin,
-    std::vector<network::mojom::SharedStorageModifierMethodWithOptionsPtr>
-        methods_with_options,
-    const std::optional<std::string>& with_lock,
-    OnSharedStorageHeaderReceivedCallback callback) {
-  std::move(callback).Run();
-}
 
 void StoragePartitionImpl::Clone(
     mojo::PendingReceiver<network::mojom::URLLoaderNetworkServiceObserver>
@@ -3479,9 +3462,13 @@ void StoragePartitionImpl::OverrideDeviceBoundSessionManagerForTesting(
     std::unique_ptr<network::mojom::DeviceBoundSessionManager>
         device_bound_session_manager) {
   DCHECK(initialized_);
-  mojo::MakeSelfOwnedReceiver(
-      std::move(device_bound_session_manager),
-      device_bound_session_manager_.BindNewPipeAndPassReceiver());
+  device_bound_session_manager_.reset();
+
+  if (device_bound_session_manager) {
+    mojo::MakeSelfOwnedReceiver(
+        std::move(device_bound_session_manager),
+        device_bound_session_manager_.BindNewPipeAndPassReceiver());
+  }
 }
 
 void StoragePartitionImpl::GetQuotaSettings(

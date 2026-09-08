@@ -73,12 +73,6 @@ CSSCustomListInterpolationType::PreInterpolationCompositeIfNeeded(
     const InterpolationValue& underlying,
     EffectModel::CompositeOperation composite,
     ConversionCheckers& conversion_checkers) const {
-  conversion_checkers.push_back(MakeGarbageCollected<UnderlyingLengthChecker>(
-      UnderlyingLengthChecker::GetUnderlyingLength(underlying)));
-  if (!underlying) {
-    return value;
-  }
-
   // This adapts a ListInterpolationFunctions::CompositeItemCallback function
   // such that we can use the InterpolationType::Composite function of the
   // inner interpolation type to get the answer.
@@ -88,10 +82,12 @@ CSSCustomListInterpolationType::PreInterpolationCompositeIfNeeded(
   UnderlyingValueOwner owner;
   owner.Set(this, underlying);
 
+  ConversionCheckers null_checkers;
+
   const CSSInterpolationType* interpolation_type =
       inner_interpolation_type_.Get();
   auto composite_callback =
-      [interpolation_type, composite, &conversion_checkers](
+      [interpolation_type, composite, &null_checkers](
           UnderlyingValue& underlying_value, double underlying_fraction,
           const InterpolableValue& interpolable_value,
           const NonInterpolableValue* non_interpolable_value) {
@@ -103,7 +99,7 @@ CSSCustomListInterpolationType::PreInterpolationCompositeIfNeeded(
             underlying_value.GetNonInterpolableValue());
         InterpolationValue composite_result =
             interpolation_type->PreInterpolationCompositeIfNeeded(
-                std::move(value), underlying, composite, conversion_checkers);
+                std::move(value), underlying, composite, null_checkers);
         composite_result = composite_result.Clone();
         underlying_value.SetInterpolableValue(
             composite_result.interpolable_value);

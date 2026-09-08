@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <optional>
+
 #include "base/location.h"
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
@@ -103,6 +105,7 @@ class NavPrefetchBrowserTest : public ContentBrowserTest,
         PrefetchDocumentManager::GetOrCreateForCurrentDocument(
             shell()->web_contents()->GetPrimaryMainFrame());
     auto candidate = blink::mojom::SpeculationCandidate::New();
+    candidate->tags = {std::nullopt};
     candidate->url = url;
     candidate->action = blink::mojom::SpeculationAction::kPrefetch;
     candidate->eagerness = blink::mojom::SpeculationEagerness::kImmediate;
@@ -889,7 +892,7 @@ IN_PROC_BROWSER_TEST_P(PrefetchActivationBeaconBrowserTest,
         }
         if (params->url_request.url == beacon_url) {
           beacon_seen = true;
-          EXPECT_EQ(params->url_request.method, "HEAD");
+          EXPECT_EQ(params->url_request.method, "GET");
           URLLoaderInterceptor::WriteResponse("", "", params->client.get());
           beacon_run_loop.Quit();
           return true;
@@ -1458,8 +1461,8 @@ class PreloadActivationReportInterceptionBrowserClient
       bool* bypass_redirect_checks,
       bool* disable_secure_dns,
       network::mojom::URLLoaderFactoryOverridePtr* factory_override,
-      scoped_refptr<base::SequencedTaskRunner> navigation_response_task_runner)
-      override {
+      scoped_refptr<base::SequencedTaskRunner> navigation_response_task_runner,
+      bool is_for_network_service) override {
     if (type == URLLoaderFactoryType::kDocumentSubResource &&
         factory_override) {
       auto factory_override_ptr =
@@ -1485,7 +1488,7 @@ class PreloadActivationReportInterceptionBrowserClient
         isolation_info, std::move(navigation_id), ukm_source_id,
         factory_builder, header_client, bypass_redirect_checks,
         disable_secure_dns, factory_override,
-        std::move(navigation_response_task_runner));
+        std::move(navigation_response_task_runner), is_for_network_service);
   }
 
   void OnRequest(const GURL& url) { intercepted_urls_.push_back(url); }
@@ -1583,7 +1586,7 @@ IN_PROC_BROWSER_TEST_P(PrefetchActivationBeaconInterceptionBrowserTest,
 
   beacon_response_->WaitForRequest();
   EXPECT_EQ(beacon_response_->http_request()->method,
-            net::test_server::METHOD_HEAD);
+            net::test_server::METHOD_GET);
   beacon_response_->Send("HTTP/1.1 200 OK\r\n\r\n");
   beacon_response_->Done();
 

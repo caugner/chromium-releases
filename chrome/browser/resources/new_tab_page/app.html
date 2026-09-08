@@ -78,6 +78,7 @@ import {SubmitButtonIconType} from '//resources/cr_components/composebox/compose
               .showVoiceSearch="${true}"
               .smartTabSharingVisible="${this.smartTabSharingVisible_}"
               .contextManagementInComposeboxEnabled="${this.contextManagementInComposeboxEnabled_}"
+              @context-menu-opened="${this.onComposeboxContextMenuOpened_}"
               @close-composebox="${this.onCloseComposebox_}"
               @voice-search-action="${this.onComposeVoiceSearchAction_}"
               .submitButtonIconType="${SubmitButtonIconType.FORWARD}"
@@ -85,7 +86,7 @@ import {SubmitButtonIconType} from '//resources/cr_components/composebox/compose
               .closeOnEscape="${false}"
               .energyEffectEnabled="${this.energyEffectEnabled_}"
               .energyEffectAnimationEnabled="${this.energyEffectAnimationEnabled_}"
-              ?is-dark="${this.isThemeDark_()}">
+              >
           </ntp-composebox>
         ${this.enableThreadsRail_ ? html`
           <cr-threads-rail id="threadsRail">

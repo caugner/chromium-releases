@@ -16,12 +16,14 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/hash/hash.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/time/time.h"
@@ -61,7 +63,6 @@
 #include "content/public/test/scoped_web_ui_controller_factory_registration.h"
 #include "content/public/test/test_content_browser_client.h"
 #include "content/public/test/test_content_client.h"
-#include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
 #include "content/test/mock_widget_input_handler.h"
 #include "content/test/navigation_simulator_impl.h"
@@ -574,7 +575,8 @@ class RenderFrameHostManagerTest
     CHECK(frame_host);
 
     frame_host->SetPolicyContainerHost(
-        base::MakeRefCounted<PolicyContainerHost>());
+        base::MakeRefCounted<PolicyContainerHost>(),
+        base::UnguessableToken::Create());
     return frame_host;
   }
 
@@ -2126,6 +2128,126 @@ TEST_P(RenderFrameHostManagerTest, CancelPendingProperlyDeletesOrSwaps) {
                     ->browsing_context_state()
                     ->GetRenderFrameProxyHost(site_instance_group.get()));
   }
+}
+
+// FakeLocalFrame that records which IPCs it receives. Used to verify that
+// cross-BrowsingInstance IPCs sent to a proxy are not illegitimately forwarded
+// to the current RenderFrameHost and then sent to its LocalFrame.
+class IpcTrackingFakeLocalFrame : public content::FakeLocalFrame {
+ public:
+  explicit IpcTrackingFakeLocalFrame(TestRenderFrameHost* rfh) {
+    rfh->ResetLocalFrame();
+    Init(rfh->GetRemoteAssociatedInterfaces());
+  }
+
+  bool check_completed_called() const { return check_completed_called_; }
+  bool advance_focus_called() const { return advance_focus_called_; }
+
+  // FakeLocalFrame:
+  void CheckCompleted() override { check_completed_called_ = true; }
+  void AdvanceFocusInFrame(blink::mojom::FocusType focus_type,
+                           const std::optional<blink::RemoteFrameToken>&
+                               source_frame_token) override {
+    advance_focus_called_ = true;
+  }
+
+ private:
+  bool check_completed_called_ = false;
+  bool advance_focus_called_ = false;
+};
+
+// Helper to track whether IPCs like TakeFocus() were called on
+// WebContentsDelegate.
+class CallTrackingWebContentsDelegate : public WebContentsDelegate {
+ public:
+  bool take_focus_called() const { return take_focus_called_; }
+  bool update_target_url_called() const { return update_target_url_called_; }
+
+  bool TakeFocus(WebContents* source, bool reverse) override {
+    take_focus_called_ = true;
+    return true;
+  }
+
+  void UpdateTargetURL(WebContents* source, const GURL& url) override {
+    update_target_url_called_ = true;
+  }
+
+ private:
+  bool take_focus_called_ = false;
+  bool update_target_url_called_ = false;
+};
+
+// Main frame RenderFrameProxyHosts can briefly belong to a different
+// BrowsingInstance than the FrameTreeNode's current RenderFrameHost while a
+// cross-BrowsingInstance navigation is in progress (the proxy lives in the
+// speculative SiteInstanceGroup). Requests received from such a proxy should
+// not be forwarded to the current RenderFrameHost.
+TEST_P(RenderFrameHostManagerTest,
+       ProxyIgnoresRequestsFromUnrelatedBrowsingInstance) {
+  const GURL kUrl1(GetWebUIURL("foo"));
+  const GURL kUrl2("http://www.google.com/");
+
+  // Navigate to a WebUI page.
+  NavigationSimulator::NavigateAndCommitFromBrowser(contents(), kUrl1);
+  TestRenderFrameHost* initial_rfh = main_test_rfh();
+  scoped_refptr<SiteInstanceImpl> initial_instance =
+      initial_rfh->GetSiteInstance();
+
+  // Intercept LocalFrame messages on the initial RenderFrameHost so that we
+  // can observe whether CheckCompleted is forwarded to it.
+  IpcTrackingFakeLocalFrame local_frame(initial_rfh);
+  CallTrackingWebContentsDelegate delegate;
+  contents()->SetDelegate(&delegate);
+
+  // Start a browser-initiated navigation that swaps BrowsingInstances. This
+  // creates a speculative RenderFrameHost in a new BrowsingInstance and a
+  // RenderFrameProxyHost for the main frame in the speculative
+  // SiteInstanceGroup, while `initial_rfh` is still current.
+  auto navigation =
+      NavigationSimulator::CreateBrowserInitiated(kUrl2, contents());
+  navigation->ReadyToCommit();
+  ASSERT_TRUE(contents()->CrossProcessNavigationPending());
+  RenderFrameHostImpl* speculative_rfh =
+      contents()->GetSpeculativePrimaryMainFrame();
+  ASSERT_TRUE(speculative_rfh);
+  ASSERT_FALSE(initial_instance->IsRelatedSiteInstance(
+      speculative_rfh->GetSiteInstance()));
+
+  // Find the main frame proxy in the speculative SiteInstanceGroup and verify
+  // that it is in a different BrowsingInstance than the current frame host.
+  FrameTreeNode* root = contents()->GetPrimaryFrameTree().root();
+  RenderFrameProxyHost* proxy =
+      speculative_rfh->browsing_context_state()->GetRenderFrameProxyHost(
+          speculative_rfh->GetSiteInstance()->group());
+  ASSERT_TRUE(proxy);
+  ASSERT_EQ(root, proxy->frame_tree_node());
+  ASSERT_EQ(initial_rfh, root->current_frame_host());
+  ASSERT_FALSE(proxy->site_instance_group()->IsRelatedSiteInstanceGroup(
+      initial_rfh->GetSiteInstance()->group()));
+
+  // Simulate the speculative renderer sending RemoteFrameHost::CheckCompleted
+  // on the proxy. This should be dropped rather than forwarded to
+  // `initial_rfh`, since the proxy is in a different BrowsingInstance.
+  static_cast<blink::mojom::RemoteFrameHost*>(proxy)->CheckCompleted();
+  initial_rfh->FlushLocalFrameMessages();
+  EXPECT_FALSE(local_frame.check_completed_called());
+
+  // Verify TakeFocus is dropped.
+  static_cast<blink::mojom::RemoteMainFrameHost*>(proxy)->TakeFocus(false);
+  EXPECT_FALSE(delegate.take_focus_called());
+
+  // Verify UpdateTargetURL is dropped.
+  static_cast<blink::mojom::RemoteMainFrameHost*>(proxy)->UpdateTargetURL(
+      GURL("http://evil.com"), base::DoNothing());
+  EXPECT_FALSE(delegate.update_target_url_called());
+
+  // Verify AdvanceFocus is dropped.
+  static_cast<blink::mojom::RemoteFrameHost*>(proxy)->AdvanceFocus(
+      blink::mojom::FocusType::kForward, blink::LocalFrameToken());
+  initial_rfh->FlushLocalFrameMessages();
+  EXPECT_FALSE(local_frame.advance_focus_called());
+
+  contents()->SetDelegate(nullptr);
 }
 
 class RenderFrameHostManagerTestWithSiteIsolation
@@ -3958,7 +4080,6 @@ class RenderFrameHostManagerTestWithBackForwardCache
       public WebContentsDelegate {
  public:
   RenderFrameHostManagerTestWithBackForwardCache() {
-    IsolateAllSitesForTesting(base::CommandLine::ForCurrentProcess());
     scoped_feature_list_.InitWithFeaturesAndParameters(
         GetDefaultEnabledBackForwardCacheFeaturesForTesting(
             /*ignore_outstanding_network_request=*/false),
@@ -4456,77 +4577,6 @@ TEST_P(RenderFrameHostManagerAdTaggingSignalTest, RemoteGrandchildAdTagSignal) {
   EXPECT_TRUE(subframe_node->current_replication_state().is_ad_frame);
   EXPECT_TRUE(grandchild_node->current_replication_state().is_ad_frame);
   ExpectAdSubframeSignalForFrameProxy(proxy_to_main_frame, true);
-}
-
-// Tests that destroying a WebContents while a BackForwardCache restore is
-// waiting on a SetPageLifecycleState reply from a RenderViewHost owned by a
-// pending-delete RenderFrameHost does not commit the restore during
-// FrameTree::Shutdown(). Regression test for crbug.com/567160164.
-TEST_P(RenderFrameHostManagerTestWithBackForwardCache,
-       ShutdownDuringBFCacheRestoreWithPendingDeleteRFH) {
-  const GURL kUrl1("http://a.com/");
-  const GURL kUrl2("http://b.com/");
-  const GURL kUrl3("http://c.com/");
-
-  contents()->SetDelegate(this);
-
-  // 1. Navigate to kUrl1 and disable proactive BrowsingInstance swap so that
-  // `rfh1` stays in `pending_delete_hosts_` in the same BrowsingInstance when
-  // navigating to kUrl2.
-  contents()->NavigateAndCommit(kUrl1);
-  TestRenderFrameHost* rfh1 = contents()->GetPrimaryMainFrame();
-  RenderViewHostImpl* rvh1 = rfh1->render_view_host();
-  RenderViewHostDeletedObserver rvh1_deleted_observer(rvh1);
-  rfh1->DisableProactiveBrowsingInstanceSwapForTesting();
-
-  // 2. Navigate to kUrl2 (same BrowsingInstance) while dropping the unload ACK
-  // for `rfh1`. `rfh1` is now pending deletion on the root
-  // RenderFrameHostManager, and `rfh2` has a proxy to `rfh1`'s
-  // SiteInstanceGroup.
-  auto nav2 =
-      NavigationSimulatorImpl::CreateRendererInitiated(kUrl2, rfh1);
-  nav2->set_drop_unload_ack(true);
-  nav2->Commit();
-  TestRenderFrameHost* rfh2 = contents()->GetPrimaryMainFrame();
-  ASSERT_NE(rfh1, rfh2);
-  ASSERT_FALSE(rvh1_deleted_observer.deleted());
-  ASSERT_TRUE(rfh1->GetSiteInstance()->IsRelatedSiteInstance(
-      rfh2->GetSiteInstance()));
-  EXPECT_TRUE(rfh1->IsPendingDeletion());
-
-  // 3. Navigate to kUrl3 (cross-BrowsingInstance). `rfh2` enters
-  // BackForwardCache and its StoredPage tracks both `rfh2`'s RVH and `rvh1`.
-  contents()->NavigateAndCommit(kUrl3);
-  EXPECT_TRUE(rfh2->IsInBackForwardCache());
-
-  // 4. Rebind `rvh1`'s PageBroadcast to an unanswered receiver so that its
-  // `SetPageLifecycleState` reply remains pending until `rvh1` is destroyed.
-  mojo::AssociatedRemote<blink::mojom::PageBroadcast> broadcast_remote;
-  auto unanswered_receiver =
-      broadcast_remote.BindNewEndpointAndPassDedicatedReceiver();
-  rvh1->BindPageBroadcast(broadcast_remote.Unbind());
-
-  // 5. Start a BackForwardCache restore navigation to kUrl2. `rfh2`'s RVH
-  // replies to `SetPageLifecycleState`, while `rvh1`'s reply remains pending.
-  TestNavigationObserver back_nav_observer(
-      contents(), /*expected_number_of_navigations=*/1,
-      MessageLoopRunner::QuitMode::IMMEDIATE,
-      /*ignore_uncommitted_navigations=*/false);
-  auto back_navigation =
-      NavigationSimulatorImpl::CreateHistoryNavigation(-1, contents(), false);
-  back_navigation->Start();
-  base::RunLoop().RunUntilIdle();
-
-  FrameTreeNode* root = contents()->GetPrimaryFrameTree().root();
-  ASSERT_TRUE(root->navigation_request());
-  EXPECT_TRUE(root->navigation_request()->IsServedFromBackForwardCache());
-
-  // 6. Destroy the WebContents (calling FrameTree::Shutdown()). This must
-  // abort the in-flight NavigationRequest rather than synchronously committing
-  // the BFCache restore inside Shutdown().
-  DeleteContents();
-  EXPECT_EQ(kUrl2, back_nav_observer.last_navigation_url());
-  EXPECT_FALSE(back_nav_observer.last_navigation_succeeded());
 }
 
 INSTANTIATE_TEST_SUITE_P(All,

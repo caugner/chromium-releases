@@ -156,6 +156,7 @@ void GlicActorTaskIconManager::UpdateTaskListBubble(actor::TaskId task_id) {
     // we should remove it.
     // If the task was cancelled, it should also be removed from the bubble.
     actor_task_list_bubble_rows_.erase(task_id);
+    tasks_notified_of_start_.erase(task_id);
     return;
   }
 
@@ -163,12 +164,8 @@ void GlicActorTaskIconManager::UpdateTaskListBubble(actor::TaskId task_id) {
   bool is_active_universal_cart_task =
       IsActiveUniversalCartTask(state.value(), feature_mode);
   bool is_active_task = IsActiveExperimentalTask(state.value(), feature_mode) ||
-                        is_active_universal_cart_task;
-
-  if (is_active_task && actor_task_list_bubble_rows_.contains(task_id) &&
-      actor_task_list_bubble_rows_[task_id]) {
-    return;
-  }
+                        is_active_universal_cart_task ||
+                        IsActivePasswordChangeTask(state.value(), feature_mode);
 
   // Delay showing notifications/adding to active task list for Universal Cart
   // tasks until a tab has been associated with the task.
@@ -181,25 +178,24 @@ void GlicActorTaskIconManager::UpdateTaskListBubble(actor::TaskId task_id) {
   }
 
   const auto duration = manager->GetDuration(task_id);
-  bool is_new_task = !actor_task_list_bubble_rows_.contains(task_id);
   actor_task_list_bubble_rows_[task_id] =
       RequiresTaskProcessing(state.value(), feature_mode);
 
-  if (is_new_task && is_active_task) {
-    // Notify the bubble only if a task now requires processing. This callback
-    // will open the task list bubble and make it active, in order to bring it
-    // to the user's attention. This is also necessary for when a user
-    // switches windows in order to show the bubble in the active window.
-    task_list_bubble_change_callback_list_.Notify(
-        /*is_start_notification=*/true);
+  if (is_active_task) {
+    // Notify the bubble that an active task (such as experimental triggering,
+    // universal cart, or password change) has started execution. If enabled
+    // by feature flag, the bubble may be shown with a delay, and appears on
+    // the active window.
+    if (tasks_notified_of_start_.insert(task_id).second) {
+      task_list_bubble_change_callback_list_.Notify(
+          /*is_start_notification=*/true);
+    }
     return;
   }
 
   if (ShouldShowBubble(state.value(), duration, feature_mode)) {
-    // Notify the bubble only if a task now requires processing. This callback
-    // will open the task list bubble and make it active, in order to bring it
-    // to the user's attention. This is also necessary for when a user
-    // switches windows in order to show the bubble in the active window.
+    // Notify the bubble of task status updates, completion/failure events, or
+    // user attention requests (such as kPausedByActor or kWaitingOnUser).
     task_list_bubble_change_callback_list_.Notify(
         /*is_start_notification=*/false);
   }
@@ -243,7 +239,8 @@ bool GlicActorTaskIconManager::RequiresTaskProcessing(
   return GlicActorTaskIconManager::RequiresAttention(state) ||
          state == TaskState::kFinished || state == TaskState::kFailed ||
          IsActiveExperimentalTask(state, feature_mode) ||
-         IsActiveUniversalCartTask(state, feature_mode);
+         IsActiveUniversalCartTask(state, feature_mode) ||
+         IsActivePasswordChangeTask(state, feature_mode);
 }
 
 // static
@@ -269,6 +266,14 @@ bool GlicActorTaskIconManager::IsActiveUniversalCartTask(
     TaskState state,
     glic::mojom::FeatureMode feature_mode) {
   return feature_mode == glic::mojom::FeatureMode::kUniversalCart &&
+         (state == TaskState::kActing || state == TaskState::kReflecting);
+}
+
+// static
+bool GlicActorTaskIconManager::IsActivePasswordChangeTask(
+    TaskState state,
+    glic::mojom::FeatureMode feature_mode) {
+  return feature_mode == glic::mojom::FeatureMode::kPasswordChange &&
          (state == TaskState::kActing || state == TaskState::kReflecting);
 }
 

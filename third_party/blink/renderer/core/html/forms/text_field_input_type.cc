@@ -89,10 +89,6 @@ class DataListIndicatorElement final : public HTMLDivElement {
            GetDocument().IsActive();
   }
 
-  FocusableState SupportsFocus(UpdateBehavior) const override {
-    return FocusableState::kNotFocusable;
-  }
-
  public:
   explicit DataListIndicatorElement(Document& document)
       : HTMLDivElement(document) {}

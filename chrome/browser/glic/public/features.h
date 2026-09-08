@@ -42,6 +42,10 @@ extern const base::FeatureParam<bool> kGlicSelectionAutoSendPrompt;
 extern const base::FeatureParam<std::string> kGlicSelectionPromptCta;
 inline constexpr char kGlicSelectionPromptCtaTellMe[] = "tell_me_about_this";
 inline constexpr char kGlicSelectionPromptCtaExplain[] = "explain";
+extern const base::FeatureParam<bool> kGlicSelectionPromptInlineFulfillment;
+extern const base::FeatureParam<std::string>
+    kGlicSelectionPromptInlinePromptTemplate;
+extern const base::FeatureParam<bool> kGlicSelectionPromptSkills;
 
 BASE_DECLARE_FEATURE(kGlicCreateTabAdjacent);
 
@@ -108,6 +112,8 @@ extern const base::FeatureParam<int> kGlicReloadMaxLoadingTimeMs;
 
 BASE_DECLARE_FEATURE(kGlicContextualCueingV2AutoSubmit);
 
+BASE_DECLARE_FEATURE(kGlicMessageFirstFreForContextualCue);
+
 BASE_DECLARE_FEATURE(kGlicWebDragAndDropFileUpload);
 
 BASE_DECLARE_FEATURE(kGlicOptInImpressionMetrics);
@@ -115,27 +121,34 @@ BASE_DECLARE_FEATURE(kGlicOptInImpressionMetrics);
 BASE_DECLARE_FEATURE(kGlicContentsInitiallyHidden);
 BASE_DECLARE_FEATURE(kGlicShowForSignedOut);
 
-BASE_DECLARE_FEATURE(kGlicSetWebContentsVisibilityWhenToggling);
-
-BASE_DECLARE_FEATURE(kGlicSetWebContentsVisibilityWhenToggling);
-
 BASE_DECLARE_FEATURE(kGlicAnchorEntryPointForOnboardedUsers);
 BASE_DECLARE_FEATURE(kGlicProcessCounterAbuseVerdict);
 BASE_DECLARE_FEATURE(kGlicNoWebUiLoader);
 BASE_DECLARE_FEATURE(kGlicGeminiEnterpriseSettingsEnabled);
 BASE_DECLARE_FEATURE(kGlicGeminiEnterpriseConsentEnabled);
 
+BASE_DECLARE_FEATURE(kGlicMarketingAutoOpen);
+extern const base::FeatureParam<std::string> kGlicMarketingUrlAllowlist;
+extern const base::FeatureParam<int> kGlicMarketingAutoOpenMaxCount;
+
 BASE_DECLARE_FEATURE(kGlicHotkeyLocalScope);
 
 BASE_DECLARE_FEATURE(kGlicPasteEligibilityCheck);
 BASE_DECLARE_FEATURE(kGlicWebPasteEligibilityCheck);
-BASE_DECLARE_FEATURE(kGlicOptInDialogLinkA11yFix);
 
 BASE_DECLARE_FEATURE(kGlicTabGroups);
+extern const base::FeatureParam<bool> kGlicTabGroupsUseFullTabEmbedder;
 BASE_DECLARE_FEATURE(kGlicSparkSettingsAccessibleLabels);
 
 BASE_DECLARE_FEATURE(kGlicOptInDialogA11yFix);
 BASE_DECLARE_FEATURE(kGlicStructuredYieldMetadata);
+
+BASE_DECLARE_FEATURE(kGlicEnableMojoJs);
+
+BASE_DECLARE_FEATURE(kGlicNoWebview);
+
+BASE_DECLARE_FEATURE(kGlicShakeTrigger);
+
 }  // namespace features
 
 #endif  // CHROME_BROWSER_GLIC_PUBLIC_FEATURES_H_

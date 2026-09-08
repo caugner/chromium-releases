@@ -20,7 +20,6 @@ bool IsConnectionTrusted(
 }
 
 named_mojo_ipc_server::EndpointOptions CreateServerEndpointOptions(
-    [[maybe_unused]] UpdaterScope scope,
     const mojo::NamedPlatformChannel::ServerName& server_name) {
   named_mojo_ipc_server::EndpointOptions options;
   options.server_name = server_name;
