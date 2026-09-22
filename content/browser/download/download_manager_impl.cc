@@ -1423,6 +1423,14 @@ void DownloadManagerImpl::PostInitialization(
         base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
             FROM_HERE, std::move(load_history_downloads_cb_));
       }
+      {
+        std::vector<base::OnceClosure> callbacks =
+            std::move(active_downloads_callbacks_);
+        for (auto& cb : callbacks) {
+          base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+              FROM_HERE, std::move(cb));
+        }
+      }
       break;
     case DOWNLOAD_INITIALIZATION_DEPENDENCY_NONE:
     default:
@@ -1541,6 +1549,19 @@ void DownloadManagerImpl::GetUninitializedActiveDownloadsIfAny(
     download::SimpleDownloadManager::DownloadVector* downloads) {
   for (const auto& it : in_progress_downloads_)
     downloads->push_back(it.get());
+}
+
+void DownloadManagerImpl::WaitForActiveDownloadsInitialization(
+    base::OnceClosure callback) {
+  if (callback.is_null()) {
+    return;
+  }
+  if (in_progress_cache_initialized_) {
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, std::move(callback));
+    return;
+  }
+  active_downloads_callbacks_.push_back(std::move(callback));
 }
 
 void DownloadManagerImpl::OpenDownload(download::DownloadItemImpl* download) {
@@ -1668,8 +1689,9 @@ void DownloadManagerImpl::BeginResourceDownloadOnChecksComplete(
   } else if (rfh && params->url().SchemeIs(content::kChromeUIScheme)) {
     pending_url_loader_factory =
         std::make_unique<network::WrapperPendingSharedURLLoaderFactory>(
-            CreateWebUIURLLoaderFactory(rfh, params->url().GetScheme(),
-                                        base::flat_set<std::string>()));
+            CreateWebUIURLLoaderFactoryWithoutOriginLock(
+                WebUIURLLoaderFactoryPasskey::GetPassKey(), rfh,
+                params->url().GetScheme(), base::flat_set<std::string>()));
   } else if (rfh && params->url().SchemeIsFileSystem()) {
     StoragePartitionImpl* storage_partition = GetStoragePartitionForConfig(
         browser_context_, storage_partition_config);

@@ -229,6 +229,13 @@ class ContextualTasksUiTest : public ChromeRenderViewHostTestHarness {
         }));
 
     ON_CALL(*service_for_nav_, IsAiUrl(_)).WillByDefault(Return(true));
+    ON_CALL(*service_for_nav_, SetInitialEntryPointForTask(_, _))
+        .WillByDefault([this](const base::Uuid& task_id,
+                              omnibox::ChromeAimEntryPoint entry_point) {
+          service_for_nav_
+              ->ContextualTasksUiService::SetInitialEntryPointForTask(
+                  task_id, entry_point);
+        });
 
     embedded_web_contents_ = content::WebContentsTester::CreateTestWebContents(
         profile_, content::SiteInstance::Create(profile_));
@@ -851,6 +858,23 @@ TEST_F(ContextualTasksUiTest,
                 "voiceSearchCoherenceCobrowsingComposeboxEnabled"),
             true);
 }
+
+TEST_F(ContextualTasksUiTest, ShouldClearAllInputsOnSubmit) {
+  // Default / no invocation source should clear inputs.
+  EXPECT_TRUE(ContextualTasksUI::ShouldClearAllInputsOnSubmit(std::nullopt));
+
+#if !BUILDFLAG(IS_ANDROID)
+  // Omnibox page action entrypoint should retain inputs.
+  EXPECT_FALSE(ContextualTasksUI::ShouldClearAllInputsOnSubmit(
+      lens::LensOverlayInvocationSource::kOmniboxPageAction));
+
+  // Other entrypoints should clear inputs.
+  EXPECT_TRUE(ContextualTasksUI::ShouldClearAllInputsOnSubmit(
+      lens::LensOverlayInvocationSource::kAppMenu));
+  EXPECT_TRUE(ContextualTasksUI::ShouldClearAllInputsOnSubmit(
+      lens::LensOverlayInvocationSource::kToolbar));
+#endif
+}
 #endif  // BUILDFLAG(ENABLE_WEBUI_CONTEXTUAL_TASKS_COMPOSEBOX)
 
 TEST_F(ContextualTasksUiTest, DidFinishNavigation_ZeroState) {
@@ -1351,6 +1375,100 @@ TEST_F(ContextualTasksUiTest, CanExpandToFullTab_FeatureDisabled) {
   EXPECT_FALSE(controller.CanExpandToFullTab());
 }
 
+TEST_F(ContextualTasksUiTest, IsCoBrowseOmniboxAction_True) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeatureWithParameters(
+      omnibox::kWebUIOmniboxAskGAboutThisPage,
+      {{"Omnibox_AskGCoBrowseWithVisualSelection", "true"}});
+
+  content::TestWebUI web_ui;
+  web_ui.set_web_contents(embedded_web_contents_.get());
+  ContextualTasksUI controller(&web_ui);
+
+  base::Uuid task_id = base::Uuid::GenerateRandomV4();
+  service_for_nav_->SetInitialEntryPointForTask(
+      task_id,
+      omnibox::ChromeAimEntryPoint::DESKTOP_CHROME_COBROWSE_OMNIBOX_ACTION);
+  controller.SetTaskId(task_id);
+
+  EXPECT_TRUE(controller.IsCoBrowseOmniboxAction());
+}
+
+TEST_F(ContextualTasksUiTest, IsCoBrowseOmniboxAction_False_FeatureDisabled) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndDisableFeature(
+      omnibox::kWebUIOmniboxAskGAboutThisPage);
+
+  content::TestWebUI web_ui;
+  web_ui.set_web_contents(embedded_web_contents_.get());
+  ContextualTasksUI controller(&web_ui);
+
+  base::Uuid task_id = base::Uuid::GenerateRandomV4();
+  service_for_nav_->SetInitialEntryPointForTask(
+      task_id,
+      omnibox::ChromeAimEntryPoint::DESKTOP_CHROME_COBROWSE_OMNIBOX_ACTION);
+  controller.SetTaskId(task_id);
+
+  EXPECT_FALSE(controller.IsCoBrowseOmniboxAction());
+}
+
+TEST_F(ContextualTasksUiTest, IsCoBrowseOmniboxAction_False_OtherEntryPoint) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeatureWithParameters(
+      omnibox::kWebUIOmniboxAskGAboutThisPage,
+      {{"Omnibox_AskGCoBrowseWithVisualSelection", "true"}});
+
+  content::TestWebUI web_ui;
+  web_ui.set_web_contents(embedded_web_contents_.get());
+  ContextualTasksUI controller(&web_ui);
+
+  base::Uuid task_id = base::Uuid::GenerateRandomV4();
+  service_for_nav_->SetInitialEntryPointForTask(
+      task_id,
+      omnibox::ChromeAimEntryPoint::DESKTOP_CHROME_COBROWSE_TOOLBAR_BUTTON);
+  controller.SetTaskId(task_id);
+
+  EXPECT_FALSE(controller.IsCoBrowseOmniboxAction());
+}
+
+TEST_F(ContextualTasksUiTest, IsCoBrowseOmniboxAction_False_NoTaskId) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeatureWithParameters(
+      omnibox::kWebUIOmniboxAskGAboutThisPage,
+      {{"Omnibox_AskGCoBrowseWithVisualSelection", "true"}});
+
+  content::TestWebUI web_ui;
+  web_ui.set_web_contents(embedded_web_contents_.get());
+  ContextualTasksUI controller(&web_ui);
+
+  controller.SetTaskId(std::nullopt);
+
+  EXPECT_FALSE(controller.IsCoBrowseOmniboxAction());
+}
+
+TEST_F(ContextualTasksUiTest,
+       SetIsAiPage_CoBrowseOmniboxAction_SuppressesLensClose) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeatureWithParameters(
+      omnibox::kWebUIOmniboxAskGAboutThisPage,
+      {{"Omnibox_AskGCoBrowseWithVisualSelection", "true"}});
+
+  content::TestWebUI web_ui;
+  web_ui.set_web_contents(embedded_web_contents_.get());
+  ContextualTasksUI controller(&web_ui);
+
+  base::Uuid task_id = base::Uuid::GenerateRandomV4();
+  service_for_nav_->SetInitialEntryPointForTask(
+      task_id,
+      omnibox::ChromeAimEntryPoint::DESKTOP_CHROME_COBROWSE_OMNIBOX_ACTION);
+  controller.SetTaskId(task_id);
+
+  EXPECT_TRUE(controller.IsCoBrowseOmniboxAction());
+  // Calling SetIsAiPage should not trigger CloseLensAsync for CoBrowse Omnibox
+  // Action.
+  controller.SetIsAiPage(true);
+}
+
 TEST_F(ContextualTasksUiTest,
        DidFinishNavigation_PushTaskDetails_ZeroStateNavigation) {
   MockTaskInfoDelegate delegate;
@@ -1656,6 +1774,27 @@ TEST_F(ContextualTasksUiTest,
   observer->DidFinishNavigation(nav_handle2.get());
 
   observer.reset();
+}
+
+TEST_F(ContextualTasksUiTest, DidFinishNavigation_NonAiPage_ResetsTitle) {
+  MockTaskInfoDelegate delegate;
+  std::optional<base::Uuid> task_id = base::Uuid::ParseCaseInsensitive(kUuid);
+  std::optional<std::string> thread_id = "5678";
+  std::optional<std::string> title = "previous query title";
+
+  SetupMockDelegate(&delegate, task_id, thread_id, title);
+  auto observer = std::make_unique<ContextualTasksUI::FrameNavObserver>(
+      embedded_web_contents_.get(), service_for_nav_.get(),
+      contextual_tasks_service_.get(), &delegate);
+
+  GURL non_ai_url("https://google.com/search?q=puppy");
+  ON_CALL(*service_for_nav_, IsAiUrl(non_ai_url)).WillByDefault(Return(false));
+
+  std::unique_ptr<content::MockNavigationHandle> nav_handle =
+      CreateMockNavigationHandle(non_ai_url);
+  observer->DidFinishNavigation(nav_handle.get());
+
+  EXPECT_EQ(delegate.GetThreadTitle(), std::nullopt);
 }
 
 TEST_F(ContextualTasksUiTest, OnPageContextEligibilityChecked) {

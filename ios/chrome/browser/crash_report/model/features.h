@@ -9,4 +9,13 @@
 
 BASE_DECLARE_FEATURE(kMetrickitNonCrashReport);
 
+// Enables the MetrickitDeferRegistration feature.
+BASE_DECLARE_FEATURE(kMetrickitDeferRegistration);
+
+// Returns true if the MetrickitDeferRegistration feature is enabled.
+bool IsMetrickitDeferRegistrationEnabled();
+
+// Enables the iOS 27 Swift MetricKit state-aware report subscriber.
+BASE_DECLARE_FEATURE(kMetrickitSwiftReportSubscriber);
+
 #endif  // IOS_CHROME_BROWSER_CRASH_REPORT_MODEL_FEATURES_H_

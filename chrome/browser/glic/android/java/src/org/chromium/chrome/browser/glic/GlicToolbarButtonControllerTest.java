@@ -33,6 +33,7 @@ import org.robolectric.Robolectric;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.SupplierUtils;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.Features.EnableFeatures;
@@ -58,10 +59,7 @@ import java.util.Collections;
 
 /** Unit tests for {@link GlicToolbarButtonController}. */
 @RunWith(BaseRobolectricTestRunner.class)
-@EnableFeatures({
-    ChromeFeatureList.GLIC,
-    ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_V2
-})
+@EnableFeatures({ChromeFeatureList.GLIC})
 @DisableFeatures({
     ChromeFeatureList.ENABLE_ANDROID_SIDE_PANEL,
     ChromeFeatureList.ANDROID_BOTTOM_BAR
@@ -606,7 +604,7 @@ public class GlicToolbarButtonControllerTest {
                         () -> mTab,
                         mToggleGlicCallback,
                         () -> mTracker,
-                        () -> null,
+                        SupplierUtils.ofNull(),
                         mBrowserControlsVisibilityManager,
                         () -> mTabModelSelector,
                         recomputeCallback);

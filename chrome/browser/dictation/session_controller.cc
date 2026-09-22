@@ -15,6 +15,7 @@
 #include "base/strings/string_util.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/dictation/features.h"
 #include "chrome/browser/dictation/logging.h"
 #include "chrome/browser/dictation/metrics.h"
@@ -23,6 +24,7 @@
 #include "chrome/browser/dictation/session_ui.h"
 #include "chrome/browser/dictation/stream_provider.h"
 #include "chrome/browser/dictation/target.h"
+#include "chrome/browser/ui/accelerator_table.h"
 #include "content/public/browser/editable_level.h"
 #include "content/public/browser/focused_node_details.h"
 #include "content/public/browser/global_dom_node_id.h"
@@ -32,6 +34,8 @@
 #include "third_party/blink/public/common/input/web_input_event.h"
 #include "third_party/blink/public/common/input/web_keyboard_event.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom.h"
+#include "ui/base/accelerators/accelerator.h"
+#include "ui/events/blink/blink_event_util.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 
 namespace content {
@@ -131,6 +135,20 @@ void SessionController::DidGetUserInteraction(
     return;
   }
 
+  // Special case to ignore the accelerator used to focus inactive popups for
+  // accessibility so it's not treated as typing that ends the stream.
+  ui::Accelerator focus_accelerator;
+  if (GetAcceleratorForCommandId(IDC_FOCUS_INACTIVE_POPUP_FOR_ACCESSIBILITY,
+                                 &focus_accelerator)) {
+    if (key_event.windows_key_code == focus_accelerator.key_code() &&
+        ui::Accelerator::MaskOutKeyEventFlags(
+            ui::WebEventModifiersToEventFlags(key_event.GetModifiers())) ==
+            ui::Accelerator::MaskOutKeyEventFlags(
+                focus_accelerator.modifiers())) {
+      return;
+    }
+  }
+
   // If the user starts typing, end the stream.
   const bool event_has_text = !base::IsUnicodeControl(key_event.text[0]);
   if (attached_stream_provider_ && web_contents()->IsFocusedElementEditable() &&
@@ -200,6 +218,15 @@ void SessionController::OnFocusChangedInPage(
 void SessionController::PrimaryPageChanged(content::Page& page) {
   // Shut down the whole session immediately upon navigating away from the page
   // associated with the session (closes bubble and stops typing).
+  if (ui_) {
+    ui_->OnStopped();
+  }
+  EndSessionAsynchronously();
+}
+
+void SessionController::PrimaryMainFrameRenderProcessGone(
+    base::TerminationStatus status) {
+  // If the page crashes, immediately end the session.
   if (ui_) {
     ui_->OnStopped();
   }
@@ -280,7 +307,8 @@ void SessionController::HostTabDidClose() {
 
 void SessionController::DidUpdateStreamProviderState(
     StreamProvider& stream_provider,
-    StreamProvider::StreamState old_state) {
+    StreamProvider::StreamState old_state,
+    StreamErrorReason reason) {
   using StreamState = StreamProvider::StreamState;
 
   const bool is_attached = attached_stream_provider_.get() == &stream_provider;
@@ -290,6 +318,9 @@ void SessionController::DidUpdateStreamProviderState(
       stream_provider.GetState() == StreamState::kFailed) {
     std::unique_ptr<StreamProvider> provider_to_delete;
     if (is_attached) {
+      if (kSessionEndsOnStreamEnd.Get()) {
+        is_shutting_down_ = true;
+      }
       provider_to_delete = std::move(attached_stream_provider_);
     } else {
       auto it = std::ranges::find_if(finalizing_stream_providers_,
@@ -338,7 +369,7 @@ void SessionController::DidUpdateStreamProviderState(
         is_attached ? SessionUi::StreamType::kAttached
                     : SessionUi::StreamType::kFinalizing;
     if (ui_) {
-      ui_->OnError(stream_type);
+      ui_->OnError(stream_type, reason);
     }
   }
 }

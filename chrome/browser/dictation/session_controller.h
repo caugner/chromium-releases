@@ -59,13 +59,16 @@ class SessionController : public SessionUiDelegate,
   // StreamProviderDelegate:
   void DidUpdateStreamProviderState(
       StreamProvider& stream_provider,
-      StreamProvider::StreamState old_state) override;
+      StreamProvider::StreamState old_state,
+      StreamErrorReason reason = StreamErrorReason::kNone) override;
 
   // content::WebContentsObserver:
   void DidGetUserInteraction(const blink::WebInputEvent& event) override;
   void OnFocusChangedInPage(
       const content::FocusedNodeDetails& details) override;
   void PrimaryPageChanged(content::Page& page) override;
+  void PrimaryMainFrameRenderProcessGone(
+      base::TerminationStatus status) override;
 
   // Starts a new dictation stream by creating and attaching a new stream
   // provider. An existing stream must have been detached before calling this

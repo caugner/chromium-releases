@@ -3,8 +3,9 @@
 // found in the LICENSE file.
 
 import {assert} from '//resources/js/assert.js';
-import {KeywordType} from '//resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
-import type {AutocompleteMatch, InputKeywordModel} from '//resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
+import {loadTimeData} from '//resources/js/load_time_data.js';
+import {KeywordType, SelectionLineState} from '//resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
+import type {AutocompleteMatch, InputKeywordModel, OmniboxPopupSelection} from '//resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
 
 /**
  * Loosely based on `metrics::OmniboxEventProto::KeywordModeEntryMethod` in
@@ -41,6 +42,11 @@ export interface KeywordModeManagerDelegate {
  * the WebUI searchbox.
  */
 export class KeywordModeManager {
+  keywordSpaceTriggeringEnabled: boolean = loadTimeData.isInitialized() &&
+          loadTimeData.valueExists('keywordSpaceTriggeringEnabled') ?
+      loadTimeData.getBoolean('keywordSpaceTriggeringEnabled') :
+      true;
+
   private inputKeywordModel_: InputKeywordModel|null = null;
   private entryMethod_: KeywordModeEntryMethod = KeywordModeEntryMethod.NONE;
   private delegate_: KeywordModeManagerDelegate;
@@ -201,8 +207,9 @@ export class KeywordModeManager {
     // TODO(b/504669216): webUI doesn't track paste state yet.
 
     // Space triggering must be enabled.
-    // TODO(b/504669216): webUI isn't aware of
-    //   `kKeywordSpaceTriggeringEnabled` pref.
+    if (!this.keywordSpaceTriggeringEnabled) {
+      return false;
+    }
 
     this.enter(
         keyword, this.inputKeywordModel_.displayText,
@@ -245,29 +252,60 @@ export class KeywordModeManager {
   formatMatchFillIntoEdit(
       match: AutocompleteMatch, matchIndex: number,
       lastQueriedInput?: string|null): string {
+    if (this.isInKeywordMode) {
+      const keyword = this.inputKeywordModel_?.keyword;
+      if (keyword) {
+        if (match.fillIntoEdit.startsWith(keyword + ' ')) {
+          return match.fillIntoEdit.substring(keyword.length + 1);
+        }
+        if (match.fillIntoEdit === keyword ||
+            (match.keywordModel?.type !== KeywordType.kInKeyword &&
+             match.keywordModel?.keyword === keyword)) {
+          return '';
+        }
+      }
+      return match.fillIntoEdit;
+    }
     const isDefaultMatch = matchIndex === 0 && match.allowedToBeDefaultMatch;
     if (isDefaultMatch && lastQueriedInput) {
       return lastQueriedInput + match.inlineAutocompletion;
-    }
-    if (this.isInKeywordMode) {
-      const keyword = this.inputKeywordModel_?.keyword;
-      if (keyword && match.fillIntoEdit.startsWith(keyword + ' ')) {
-        return match.fillIntoEdit.substring(keyword.length + 1);
-      }
     }
     return match.fillIntoEdit;
   }
 
   /**
    * Updates or preserves the keyword model when the selected autocomplete match
-   * changes.
+   * or popup selection changes.
    */
-  onSelectedMatchChanged(selectedMatch: AutocompleteMatch|null): void {
-    // If the input is in keyword mode, preserve keyword mode.
-    if (this.isInKeywordMode) {
+  onSelectedMatchChanged(
+      selectedMatch: AutocompleteMatch|null,
+      selection?: OmniboxPopupSelection): void {
+    if (!selectedMatch) {
+      if (!this.isInKeywordMode) {
+        this.inputKeywordModel = null;
+      }
       return;
     }
-    if (!selectedMatch?.keywordModel) {
+    const isKeywordChipSelected =
+        selection?.state === SelectionLineState.kKeywordMode ||
+        selectedMatch.keywordModel?.type === KeywordType.kInstant;
+
+    if (isKeywordChipSelected && selectedMatch.keywordModel) {
+      if (!this.isInKeywordMode ||
+          this.activeKeyword !== selectedMatch.keywordModel.keyword) {
+        this.enter(
+            selectedMatch.keywordModel.keyword,
+            selectedMatch.keywordModel.chipHint, KeywordModeEntryMethod.TAB);
+      }
+      return;
+    }
+    if (selectedMatch.keywordModel?.type === KeywordType.kInKeyword) {
+      return;
+    }
+    if (this.isInKeywordMode) {
+      this.exit();
+    }
+    if (!selectedMatch.keywordModel) {
       this.inputKeywordModel = null;
       return;
     }

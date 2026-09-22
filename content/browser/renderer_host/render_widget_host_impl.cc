@@ -80,6 +80,7 @@
 #include "content/browser/renderer_host/render_widget_host_owner_delegate.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/browser/renderer_host/render_widget_host_view_child_frame.h"
+#include "content/browser/renderer_host/text_input_manager.h"
 #include "content/browser/renderer_host/unbounded_surface_window.h"
 #include "content/browser/renderer_host/visible_time_request_trigger.h"
 #include "content/browser/scheduler/browser_task_executor.h"
@@ -264,11 +265,13 @@ std::vector<DropData::Metadata> DropDataToMetaData(const DropData& drop_data) {
         DropData::Kind::STRING, ui::kMimeTypeHtml16));
   }
 
-  // On Aura, filenames are available before drop.
+  // On Aura, filenames are available before drop, but we sanitize the
+  // paths to their BaseName to prevent leaking absolute paths
+  // (https://crbug.com/514524620).
   for (const auto& file_info : drop_data.filenames) {
     if (!file_info.path.empty()) {
       metadata.push_back(DropData::Metadata::CreateForFilePath(
-          file_info.path, file_info.display_name));
+          file_info.path.BaseName(), file_info.display_name));
     }
   }
 
@@ -1156,6 +1159,7 @@ blink::VisualProperties RenderWidgetHostImpl::GetVisualProperties() {
         delegate_->GetVirtualKeyboardResizeHeight();
     visual_properties.window_show_state = delegate_->GetWindowShowState();
     visual_properties.resizable = delegate_->GetResizable();
+    visual_properties.always_on_top = delegate_->GetIsAlwaysOnTop();
   } else {
     visual_properties.compositor_viewport_pixel_rect =
         properties_from_parent_local_root_.compositor_viewport;
@@ -2498,6 +2502,32 @@ void RenderWidgetHostImpl::PasteIntoNode(
       text, target_dom_node_id.target_element_dom_id);
 }
 
+std::optional<std::u16string_view>
+RenderWidgetHostImpl::GetTextPrecedingSelection(
+    const GlobalDOMNodeId& target_dom_node_id) {
+  TextInputManager* text_input_manager = delegate_->GetTextInputManager();
+  if (!text_input_manager) {
+    return std::nullopt;
+  }
+  const ui::mojom::TextInputState* state =
+      text_input_manager->GetTextInputState();
+  if (!state || !state->value) {
+    return std::nullopt;
+  }
+  if (!target_dom_node_id.target_element_dom_id.is_null() &&
+      state->node_id != target_dom_node_id.target_element_dom_id.value()) {
+    return std::nullopt;
+  }
+  if (!state->selection.IsValid()) {
+    return std::nullopt;
+  }
+  size_t start = state->selection.GetMin();
+  if (start > state->value->length()) {
+    return std::nullopt;
+  }
+  return std::u16string_view(*state->value).substr(0, start);
+}
+
 void RenderWidgetHostImpl::RejectPointerLockOrUnlockIfNecessary(
     blink::mojom::PointerLockResult reason) {
   CHECK(!request_pointer_lock_callback_ || !IsPointerLocked());
@@ -3278,7 +3308,9 @@ bool RenderWidgetHostImpl::StoredVisualPropertiesNeedsUpdate(
          old_visual_properties->root_widget_viewport_segments !=
              new_visual_properties.root_widget_viewport_segments ||
          old_visual_properties->window_controls_overlay_rect !=
-             new_visual_properties.window_controls_overlay_rect;
+             new_visual_properties.window_controls_overlay_rect ||
+         old_visual_properties->always_on_top !=
+             new_visual_properties.always_on_top;
 }
 
 void RenderWidgetHostImpl::AutoscrollStart(const gfx::PointF& position) {

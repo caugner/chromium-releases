@@ -68,6 +68,7 @@
 #include "chrome/common/actor_webui.mojom.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/critical_actions/core/browser/features.h"
 #include "components/feature_engagement/public/feature_constants.h"
 #include "components/prefs/pref_service.h"
 #include "components/tabs/public/tab_interface.h"
@@ -119,8 +120,6 @@ BASE_FEATURE(kGlicAvoidReactivatingActiveEmbedder,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kGlicUnpinOnUnbindIfUnused, base::FEATURE_ENABLED_BY_DEFAULT);
-
-BASE_FEATURE(kSuppressFocusOnReady, base::FEATURE_ENABLED_BY_DEFAULT);
 
 constexpr size_t kMaxRecentConversationsForPanel = 3;
 
@@ -805,7 +804,8 @@ void GlicInstanceImpl::PrepareForOpen() {
   }
 }
 
-void GlicInstanceImpl::OnUserInputSubmitted(mojom::WebClientMode mode) {
+void GlicInstanceImpl::OnUserInputSubmitted(mojom::WebClientMode mode,
+                                            mojom::PromptType /*prompt_type*/) {
   for (auto& [key, entry] : embedders_) {
     entry.user_input_submitted_while_bound = true;
   }
@@ -1340,6 +1340,7 @@ void GlicInstanceImpl::ClearActiveEmbedderAndNotifyVisibilityChange() {
     host().PanelWasClosed();
 #if !BUILDFLAG(IS_ANDROID)
     MaybeShowShortcutSnoozePromo();
+    MaybeShowCriticalActionFeaturePromo();
 #endif  // !BUILDFLAG(IS_ANDROID)
   }
   return;
@@ -1370,6 +1371,24 @@ void GlicInstanceImpl::MaybeShowShortcutSnoozePromo() {
 
   BrowserUserEducationInterface::From(browser)->MaybeShowFeaturePromo(
       std::move(params));
+#endif
+}
+
+void GlicInstanceImpl::MaybeShowCriticalActionFeaturePromo() {
+#if !BUILDFLAG(IS_ANDROID)
+  if (!base::FeatureList::IsEnabled(
+          critical_actions::features::kCriticalActionHistory)) {
+    return;
+  }
+  BrowserWindowInterface* browser =
+      ProfileBrowserCollection::GetForProfile(profile_)->FindTabbedBrowser();
+  if (!browser) {
+    return;
+  }
+  if (auto* user_education = BrowserUserEducationInterface::From(browser)) {
+    user_education->MaybeShowFeaturePromo(
+        feature_engagement::kIPHCriticalActionAppMenuFeature);
+  }
 #endif
 }
 
@@ -1831,12 +1850,6 @@ void GlicInstanceImpl::WebUiStateChanged(mojom::WebUiState state) {
   TRACE_EVENT_INSTANT("glic", "GlicInstanceImpl::WebUiStateChanged",
                       perfetto::Flow::FromPointer(this), "state", state);
   instance_metrics_.OnWebUiStateChanged(state);
-  if (state == mojom::WebUiState::kReady &&
-      !base::FeatureList::IsEnabled(kSuppressFocusOnReady)) {
-    if (auto* embedder = GetActiveEmbedder()) {
-      embedder->Focus();
-    }
-  }
 }
 
 void GlicInstanceImpl::ContextAccessIndicatorChanged(bool enabled) {

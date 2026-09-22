@@ -63,6 +63,7 @@
 #include "content/public/test/scoped_web_ui_controller_factory_registration.h"
 #include "content/public/test/test_content_browser_client.h"
 #include "content/public/test/test_content_client.h"
+#include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
 #include "content/test/mock_widget_input_handler.h"
 #include "content/test/navigation_simulator_impl.h"
@@ -268,7 +269,6 @@ void DidNavigateFrame(RenderFrameHostManager* rfh_manager,
       false /* is_same_document_navigation */,
       false /* clear_proxies_on_commit */, blink::FramePolicy(),
       true /* allow_paint_holding */, view_transition_commit_info,
-      /*navigation_request_url=*/std::nullopt,
       false /* is_backward_navigation */);
 }
 
@@ -2276,8 +2276,9 @@ TEST_P(RenderFrameHostManagerTestWithSiteIsolation, DetachPendingChild) {
       TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, "frame_name", "uniqueName1",
       false, blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::DocumentToken(), blink::FramePolicy(),
-      blink::mojom::FrameOwnerProperties(), kOwnerType, ukm::kInvalidSourceId);
+      blink::DocumentToken(), base::UnguessableToken::Create(),
+      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(), kOwnerType,
+      ukm::kInvalidSourceId);
   contents()->GetPrimaryMainFrame()->OnCreateChildFrame(
       contents()->GetPrimaryMainFrame()->GetProcess()->GetNextRoutingID(),
       TestRenderFrameHost::CreateStubFrameRemote(),
@@ -2286,8 +2287,9 @@ TEST_P(RenderFrameHostManagerTestWithSiteIsolation, DetachPendingChild) {
       TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, "frame_name", "uniqueName2",
       false, blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::DocumentToken(), blink::FramePolicy(),
-      blink::mojom::FrameOwnerProperties(), kOwnerType, ukm::kInvalidSourceId);
+      blink::DocumentToken(), base::UnguessableToken::Create(),
+      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(), kOwnerType,
+      ukm::kInvalidSourceId);
   RenderFrameHostManager* root_manager =
       contents()->GetPrimaryFrameTree().root()->render_manager();
   RenderFrameHostManager* iframe1 =
@@ -2458,8 +2460,8 @@ TEST_P(RenderFrameHostManagerTestWithSiteIsolation,
       TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, "frame_name", "uniqueName1",
       false, blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::DocumentToken(), blink::FramePolicy(),
-      blink::mojom::FrameOwnerProperties(),
+      blink::DocumentToken(), base::UnguessableToken::Create(),
+      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(),
       blink::FrameOwnerElementType::kIframe, ukm::kInvalidSourceId);
   RenderFrameHostManager* iframe =
       contents()->GetPrimaryFrameTree().root()->child_at(0)->render_manager();
@@ -2619,8 +2621,8 @@ TEST_P(RenderFrameHostManagerTestWithSiteIsolation,
       TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, std::string(), "uniqueName1",
       false, blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::DocumentToken(), blink::FramePolicy(),
-      blink::mojom::FrameOwnerProperties(),
+      blink::DocumentToken(), base::UnguessableToken::Create(),
+      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(),
       blink::FrameOwnerElementType::kIframe, ukm::kInvalidSourceId);
   RenderFrameHostManager* subframe_rfhm =
       contents()->GetPrimaryFrameTree().root()->child_at(0)->render_manager();
@@ -2845,9 +2847,9 @@ TEST_P(RenderFrameHostManagerTest, TraverseComplexOpenerChain) {
       TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, std::string(), "uniqueName0",
       false, blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::DocumentToken(), blink::FramePolicy(),
-      blink::mojom::FrameOwnerProperties(), false, kOwnerType,
-      is_dummy_frame_for_inner_tree);
+      blink::DocumentToken(), base::UnguessableToken::Create(),
+      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(), false,
+      kOwnerType, is_dummy_frame_for_inner_tree);
   tree1->AddFrame(
       root1->current_frame_host(), process_id, 13,
       TestRenderFrameHost::CreateStubFrameRemote(),
@@ -2856,9 +2858,9 @@ TEST_P(RenderFrameHostManagerTest, TraverseComplexOpenerChain) {
       TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, std::string(), "uniqueName1",
       false, blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::DocumentToken(), blink::FramePolicy(),
-      blink::mojom::FrameOwnerProperties(), false, kOwnerType,
-      is_dummy_frame_for_inner_tree);
+      blink::DocumentToken(), base::UnguessableToken::Create(),
+      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(), false,
+      kOwnerType, is_dummy_frame_for_inner_tree);
 
   std::unique_ptr<TestWebContents> tab2(
       TestWebContents::Create(browser_context(), nullptr));
@@ -2874,9 +2876,9 @@ TEST_P(RenderFrameHostManagerTest, TraverseComplexOpenerChain) {
       TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, std::string(), "uniqueName2",
       false, blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::DocumentToken(), blink::FramePolicy(),
-      blink::mojom::FrameOwnerProperties(), false, kOwnerType,
-      is_dummy_frame_for_inner_tree);
+      blink::DocumentToken(), base::UnguessableToken::Create(),
+      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(), false,
+      kOwnerType, is_dummy_frame_for_inner_tree);
   tree2->AddFrame(
       root2->current_frame_host(), process_id, 23,
       TestRenderFrameHost::CreateStubFrameRemote(),
@@ -2885,9 +2887,9 @@ TEST_P(RenderFrameHostManagerTest, TraverseComplexOpenerChain) {
       TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, std::string(), "uniqueName3",
       false, blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::DocumentToken(), blink::FramePolicy(),
-      blink::mojom::FrameOwnerProperties(), false, kOwnerType,
-      is_dummy_frame_for_inner_tree);
+      blink::DocumentToken(), base::UnguessableToken::Create(),
+      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(), false,
+      kOwnerType, is_dummy_frame_for_inner_tree);
 
   std::unique_ptr<TestWebContents> tab3(
       TestWebContents::Create(browser_context(), nullptr));
@@ -2908,9 +2910,9 @@ TEST_P(RenderFrameHostManagerTest, TraverseComplexOpenerChain) {
       TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, std::string(), "uniqueName4",
       false, blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::DocumentToken(), blink::FramePolicy(),
-      blink::mojom::FrameOwnerProperties(), false, kOwnerType,
-      is_dummy_frame_for_inner_tree);
+      blink::DocumentToken(), base::UnguessableToken::Create(),
+      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(), false,
+      kOwnerType, is_dummy_frame_for_inner_tree);
 
   root1->child_at(1)->SetOpener(root1->child_at(1));
   root1->SetOpener(root2->child_at(1));
@@ -3008,8 +3010,9 @@ TEST_P(RenderFrameHostManagerTest, PageFocusPropagatesToSubframeProcesses) {
       TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, "frame1", "uniqueName1", false,
       blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::DocumentToken(), blink::FramePolicy(),
-      blink::mojom::FrameOwnerProperties(), kOwnerType, ukm::kInvalidSourceId);
+      blink::DocumentToken(), base::UnguessableToken::Create(),
+      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(), kOwnerType,
+      ukm::kInvalidSourceId);
   main_test_rfh()->OnCreateChildFrame(
       main_test_rfh()->GetProcess()->GetNextRoutingID(),
       TestRenderFrameHost::CreateStubFrameRemote(),
@@ -3018,8 +3021,9 @@ TEST_P(RenderFrameHostManagerTest, PageFocusPropagatesToSubframeProcesses) {
       TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, "frame2", "uniqueName2", false,
       blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::DocumentToken(), blink::FramePolicy(),
-      blink::mojom::FrameOwnerProperties(), kOwnerType, ukm::kInvalidSourceId);
+      blink::DocumentToken(), base::UnguessableToken::Create(),
+      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(), kOwnerType,
+      ukm::kInvalidSourceId);
   main_test_rfh()->OnCreateChildFrame(
       main_test_rfh()->GetProcess()->GetNextRoutingID(),
       TestRenderFrameHost::CreateStubFrameRemote(),
@@ -3028,8 +3032,9 @@ TEST_P(RenderFrameHostManagerTest, PageFocusPropagatesToSubframeProcesses) {
       TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, "frame3", "uniqueName3", false,
       blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::DocumentToken(), blink::FramePolicy(),
-      blink::mojom::FrameOwnerProperties(), kOwnerType, ukm::kInvalidSourceId);
+      blink::DocumentToken(), base::UnguessableToken::Create(),
+      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(), kOwnerType,
+      ukm::kInvalidSourceId);
 
   FrameTreeNode* root = contents()->GetPrimaryFrameTree().root();
   RenderFrameHostManager* child1 = root->child_at(0)->render_manager();
@@ -3137,8 +3142,9 @@ TEST_P(RenderFrameHostManagerTest,
       TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, "frame1", "uniqueName1", false,
       blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::DocumentToken(), blink::FramePolicy(),
-      blink::mojom::FrameOwnerProperties(), kOwnerType, ukm::kInvalidSourceId);
+      blink::DocumentToken(), base::UnguessableToken::Create(),
+      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(), kOwnerType,
+      ukm::kInvalidSourceId);
 
   FrameTreeNode* root = contents()->GetPrimaryFrameTree().root();
   RenderFrameHostManager* child = root->child_at(0)->render_manager();
@@ -3715,6 +3721,41 @@ TEST_P(RenderFrameHostManagerTest, NavigateCrossSiteBetweenWebUIs) {
   EXPECT_FALSE(GetPendingFrameHost(manager));
 }
 
+TEST_P(RenderFrameHostManagerTest,
+       InitialEmptyDocumentInheritsInsecureRequestState) {
+  const GURL kUrl("http://www.google.test");
+  const std::vector<uint32_t> kInsecureNavigationsSet = {123, 456};
+
+  contents()->NavigateAndCommit(kUrl);
+  main_test_rfh()->browsing_context_state()->SetInsecureRequestPolicy(
+      blink::mojom::InsecureRequestPolicy::kBlockAllMixedContent);
+  main_test_rfh()->browsing_context_state()->SetInsecureNavigationsSet(
+      kInsecureNavigationsSet);
+
+  main_test_rfh()->OnCreateChildFrame(
+      main_test_rfh()->GetProcess()->GetNextRoutingID(),
+      TestRenderFrameHost::CreateStubFrameRemote(),
+      TestRenderFrameHost::CreateStubBrowserInterfaceBrokerReceiver(),
+      TestRenderFrameHost::CreateStubPolicyContainerBindParams(),
+      TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
+      blink::mojom::TreeScopeType::kDocument, "frame", "uniqueName", false,
+      blink::LocalFrameToken(), base::UnguessableToken::Create(),
+      blink::DocumentToken(), base::UnguessableToken::Create(),
+      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(),
+      blink::FrameOwnerElementType::kIframe, ukm::kInvalidSourceId);
+
+  const blink::mojom::FrameReplicationState& child_replication_state =
+      contents()
+          ->GetPrimaryFrameTree()
+          .root()
+          ->child_at(0)
+          ->current_replication_state();
+  EXPECT_EQ(blink::mojom::InsecureRequestPolicy::kBlockAllMixedContent,
+            child_replication_state.insecure_request_policy);
+  EXPECT_EQ(kInsecureNavigationsSet,
+            child_replication_state.insecure_navigations_set);
+}
+
 // This class intercepts RenderFrameProxyHost creations, and overrides their
 // respective blink::mojom::RemoteFrame instances.
 class InsecureRequestPolicyProxyObserver
@@ -3779,8 +3820,8 @@ TEST_P(RenderFrameHostManagerTestWithSiteIsolation,
       TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, "frame1", "uniqueName1", false,
       blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::DocumentToken(), blink::FramePolicy(),
-      blink::mojom::FrameOwnerProperties(),
+      blink::DocumentToken(), base::UnguessableToken::Create(),
+      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(),
       blink::FrameOwnerElementType::kIframe, ukm::kInvalidSourceId);
 
   FrameTreeNode* root = contents()->GetPrimaryFrameTree().root();
@@ -4016,8 +4057,9 @@ TEST_P(RenderFrameHostManagerTestWithSiteIsolation,
       TestRenderFrameHost::CreateStubAssociatedInterfaceProviderReceiver(),
       blink::mojom::TreeScopeType::kDocument, "child_frame", "uniqueName1",
       false, blink::LocalFrameToken(), base::UnguessableToken::Create(),
-      blink::DocumentToken(), blink::FramePolicy(),
-      blink::mojom::FrameOwnerProperties(), kOwnerType, ukm::kInvalidSourceId);
+      blink::DocumentToken(), base::UnguessableToken::Create(),
+      blink::FramePolicy(), blink::mojom::FrameOwnerProperties(), kOwnerType,
+      ukm::kInvalidSourceId);
 
   FrameTreeNode* child_node =
       contents()->GetPrimaryFrameTree().root()->child_at(0);
@@ -4080,6 +4122,7 @@ class RenderFrameHostManagerTestWithBackForwardCache
       public WebContentsDelegate {
  public:
   RenderFrameHostManagerTestWithBackForwardCache() {
+    IsolateAllSitesForTesting(base::CommandLine::ForCurrentProcess());
     scoped_feature_list_.InitWithFeaturesAndParameters(
         GetDefaultEnabledBackForwardCacheFeaturesForTesting(
             /*ignore_outstanding_network_request=*/false),
@@ -4577,6 +4620,77 @@ TEST_P(RenderFrameHostManagerAdTaggingSignalTest, RemoteGrandchildAdTagSignal) {
   EXPECT_TRUE(subframe_node->current_replication_state().is_ad_frame);
   EXPECT_TRUE(grandchild_node->current_replication_state().is_ad_frame);
   ExpectAdSubframeSignalForFrameProxy(proxy_to_main_frame, true);
+}
+
+// Tests that destroying a WebContents while a BackForwardCache restore is
+// waiting on a SetPageLifecycleState reply from a RenderViewHost owned by a
+// pending-delete RenderFrameHost does not commit the restore during
+// FrameTree::Shutdown(). Regression test for crbug.com/567160164.
+TEST_P(RenderFrameHostManagerTestWithBackForwardCache,
+       ShutdownDuringBFCacheRestoreWithPendingDeleteRFH) {
+  const GURL kUrl1("http://a.com/");
+  const GURL kUrl2("http://b.com/");
+  const GURL kUrl3("http://c.com/");
+
+  contents()->SetDelegate(this);
+
+  // 1. Navigate to kUrl1 and disable proactive BrowsingInstance swap so that
+  // `rfh1` stays in `pending_delete_hosts_` in the same BrowsingInstance when
+  // navigating to kUrl2.
+  contents()->NavigateAndCommit(kUrl1);
+  TestRenderFrameHost* rfh1 = contents()->GetPrimaryMainFrame();
+  RenderViewHostImpl* rvh1 = rfh1->render_view_host();
+  RenderViewHostDeletedObserver rvh1_deleted_observer(rvh1);
+  rfh1->DisableProactiveBrowsingInstanceSwapForTesting();
+
+  // 2. Navigate to kUrl2 (same BrowsingInstance) while dropping the unload ACK
+  // for `rfh1`. `rfh1` is now pending deletion on the root
+  // RenderFrameHostManager, and `rfh2` has a proxy to `rfh1`'s
+  // SiteInstanceGroup.
+  auto nav2 =
+      NavigationSimulatorImpl::CreateRendererInitiated(kUrl2, rfh1);
+  nav2->set_drop_unload_ack(true);
+  nav2->Commit();
+  TestRenderFrameHost* rfh2 = contents()->GetPrimaryMainFrame();
+  ASSERT_NE(rfh1, rfh2);
+  ASSERT_FALSE(rvh1_deleted_observer.deleted());
+  ASSERT_TRUE(rfh1->GetSiteInstance()->IsRelatedSiteInstance(
+      rfh2->GetSiteInstance()));
+  EXPECT_TRUE(rfh1->IsPendingDeletion());
+
+  // 3. Navigate to kUrl3 (cross-BrowsingInstance). `rfh2` enters
+  // BackForwardCache and its StoredPage tracks both `rfh2`'s RVH and `rvh1`.
+  contents()->NavigateAndCommit(kUrl3);
+  EXPECT_TRUE(rfh2->IsInBackForwardCache());
+
+  // 4. Rebind `rvh1`'s PageBroadcast to an unanswered receiver so that its
+  // `SetPageLifecycleState` reply remains pending until `rvh1` is destroyed.
+  mojo::AssociatedRemote<blink::mojom::PageBroadcast> broadcast_remote;
+  auto unanswered_receiver =
+      broadcast_remote.BindNewEndpointAndPassDedicatedReceiver();
+  rvh1->BindPageBroadcast(broadcast_remote.Unbind());
+
+  // 5. Start a BackForwardCache restore navigation to kUrl2. `rfh2`'s RVH
+  // replies to `SetPageLifecycleState`, while `rvh1`'s reply remains pending.
+  TestNavigationObserver back_nav_observer(
+      contents(), /*expected_number_of_navigations=*/1,
+      MessageLoopRunner::QuitMode::IMMEDIATE,
+      /*ignore_uncommitted_navigations=*/false);
+  auto back_navigation =
+      NavigationSimulatorImpl::CreateHistoryNavigation(-1, contents(), false);
+  back_navigation->Start();
+  base::RunLoop().RunUntilIdle();
+
+  FrameTreeNode* root = contents()->GetPrimaryFrameTree().root();
+  ASSERT_TRUE(root->navigation_request());
+  EXPECT_TRUE(root->navigation_request()->IsServedFromBackForwardCache());
+
+  // 6. Destroy the WebContents (calling FrameTree::Shutdown()). This must
+  // abort the in-flight NavigationRequest rather than synchronously committing
+  // the BFCache restore inside Shutdown().
+  DeleteContents();
+  EXPECT_EQ(kUrl2, back_nav_observer.last_navigation_url());
+  EXPECT_FALSE(back_nav_observer.last_navigation_succeeded());
 }
 
 INSTANTIATE_TEST_SUITE_P(All,

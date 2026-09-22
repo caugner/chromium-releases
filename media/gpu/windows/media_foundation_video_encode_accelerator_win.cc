@@ -473,9 +473,9 @@ EncoderStatus MediaFoundationVideoEncodeAccelerator::Initialize(
   }
   bitrate_allocation_ = AllocateBitrateForDefaultEncoding(config);
 
-  bitstream_buffer_size_ =
-      EstimateBitstreamBufferSize(bitrate_allocation_.GetSumBitrate(),
-                                  frame_rate_, config.input_visible_size);
+  bitstream_buffer_size_ = EstimateBitstreamBufferSize(
+      bitrate_allocation_.GetSumBitrate(), frame_rate_, input_format_,
+      config.input_visible_size);
   gop_length_ = config.gop_length.value_or(kDefaultGOPLength);
   low_latency_mode_ = config.require_low_delay;
   drop_frame_thresh_percentage_ = config.drop_frame_thresh_percentage;
@@ -867,8 +867,6 @@ void MediaFoundationVideoEncodeAccelerator::QueueInput(
                          "4:2:0 subsampled format."});
       return;
     }
-  } else {
-    NOTREACHED();
   }
 
   PendingInput result;
@@ -1291,7 +1289,8 @@ void MediaFoundationVideoEncodeAccelerator::UpdateFrameSize(
   }
 
   bitstream_buffer_size_ = EstimateBitstreamBufferSize(
-      bitrate_allocation_.GetSumBitrate(), frame_rate_, input_visible_size_);
+      bitrate_allocation_.GetSumBitrate(), frame_rate_, input_format_,
+      input_visible_size_);
   bitstream_buffer_queue_.clear();
   // Reset the input frame counter since MFT was notified to end the streaming
   // and restart with new frame size.
@@ -2283,6 +2282,13 @@ HRESULT MediaFoundationVideoEncodeAccelerator::CopyInputSampleBufferFromGpu(
   DCHECK(dxgi_device_manager_);
   auto& input_sample = input.input_sample;
 
+  if (frame->format() != PIXEL_FORMAT_NV12) {
+    LOG(ERROR) << "Format mismatch: frame format "
+               << VideoPixelFormatToString(frame->format())
+               << " is not PIXEL_FORMAT_NV12";
+    return E_INVALIDARG;
+  }
+
   auto d3d_device = dxgi_device_manager_->GetDevice();
   if (!d3d_device) {
     LOG(ERROR) << "Failed to get device from MF DXGI device manager";
@@ -2316,6 +2322,13 @@ HRESULT MediaFoundationVideoEncodeAccelerator::CopyInputSampleBufferFromGpu(
   // Check if we need to scale the input texture
   D3D11_TEXTURE2D_DESC input_desc = {};
   input_texture->GetDesc(&input_desc);
+
+  if (input_desc.Format != DXGI_FORMAT_NV12) {
+    LOG(ERROR) << "Format mismatch: source format " << input_desc.Format
+               << " is not DXGI_FORMAT_NV12";
+    return E_INVALIDARG;
+  }
+
   gfx::Size texture_size(input_desc.Width, input_desc.Height);
   ComD3D11Texture2D sample_texture;
   if (texture_size != input_visible_size_ ||
@@ -2334,10 +2347,10 @@ HRESULT MediaFoundationVideoEncodeAccelerator::CopyInputSampleBufferFromGpu(
   MFT_INPUT_STREAM_INFO input_stream_info;
   hr = encoder_->GetInputStreamInfo(input_stream_id_, &input_stream_info);
   RETURN_ON_HR_FAILURE(hr, "Couldn't get input stream info", hr);
+  const size_t allocation_size =
+      VideoFrame::AllocationSize(PIXEL_FORMAT_NV12, input_visible_size_);
   hr = MFCreateAlignedMemoryBuffer(
-      input_stream_info.cbSize
-          ? input_stream_info.cbSize
-          : VideoFrame::AllocationSize(frame->format(), input_visible_size_),
+      std::max(static_cast<size_t>(input_stream_info.cbSize), allocation_size),
       input_stream_info.cbAlignment == 0 ? input_stream_info.cbAlignment
                                          : input_stream_info.cbAlignment - 1,
       &input_buffer);
@@ -2352,8 +2365,7 @@ HRESULT MediaFoundationVideoEncodeAccelerator::CopyInputSampleBufferFromGpu(
     LOG(ERROR) << "Failed to copy sample to memory.";
     return E_FAIL;
   }
-  size_t copied_bytes =
-      VideoFrame::AllocationSize(frame->format(), input_visible_size_);
+  const size_t copied_bytes = allocation_size;
   hr = input_buffer->SetCurrentLength(copied_bytes);
   RETURN_ON_HR_FAILURE(hr, "Failed to set current buffer length", hr);
 
@@ -2460,9 +2472,18 @@ HRESULT MediaFoundationVideoEncodeAccelerator::PopulateInputSampleBufferGpu(
     RETURN_ON_HR_FAILURE(hr, "Failed to perform D3D video processing", hr);
     sample_texture = scaled_d3d11_texture_;
   } else if (input.generate_sample_on_wait_sync_token) {
-    // Shared images that are not GpuMemoryBuffers have already
-    // been copied.
-    sample_texture = input_texture;
+    // Shared images that are not GpuMemoryBuffers have already been staged
+    // for the encoder. If the staged texture is guarded by a keyed mutex,
+    // copy it to a private texture so that the mutex only needs to be held
+    // for the duration of the copy rather than the encode.
+    ComDXGIKeyedMutex keyed_mutex;
+    if (SUCCEEDED(input_texture->QueryInterface(IID_PPV_ARGS(&keyed_mutex)))) {
+      hr = PerformD3DCopy(input_texture.Get(), gfx::Rect(input_visible_size_));
+      RETURN_ON_HR_FAILURE(hr, "Failed to perform D3D texture copy", hr);
+      sample_texture = copied_d3d11_texture_;
+    } else {
+      sample_texture = input_texture;
+    }
   } else {
     // Even though no scaling is needed we still need to copy the texture to
     // avoid concurrent usage causing glitches (https://crbug.com/1462315). This
@@ -3199,7 +3220,7 @@ void MediaFoundationVideoEncodeAccelerator::OnSharedImageResourceAvailable(
     // a copy of it. Hardware encoders are not guaranteed to be done with the
     // texture when ProcessInput is finished.
     bool need_perform_copy =
-        !has_been_copied &&
+        !has_been_copied.value_or(false) &&
         ((frame->format() == PIXEL_FORMAT_NV12 &&
           frame->visible_rect().size() == input_visible_size_) ||
          !frame->visible_rect().origin().IsOrigin());

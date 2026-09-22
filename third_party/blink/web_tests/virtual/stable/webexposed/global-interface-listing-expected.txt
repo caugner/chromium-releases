@@ -2007,7 +2007,6 @@ interface Document : Node
     method releaseEvents
     method replaceChildren
     method requestStorageAccess
-    method requestStorageAccessFor
     method startViewTransition
     method webkitCancelFullScreen
     method webkitExitFullscreen
@@ -2688,7 +2687,6 @@ interface Fence
 interface FencedFrameConfig
     attribute @@toStringTag
     method constructor
-    method setSharedStorageContext
 interface FetchLaterResult
     attribute @@toStringTag
     getter activated
@@ -2802,6 +2800,7 @@ interface FontFace
     getter variant
     getter variationSettings
     getter weight
+    getter width
     method constructor
     method load
     setter ascentOverride
@@ -2817,6 +2816,7 @@ interface FontFace
     setter variant
     setter variationSettings
     setter weight
+    setter width
 interface FontFaceSet : EventTarget
     attribute @@toStringTag
     getter onloading
@@ -8962,6 +8962,9 @@ interface SVGTextPathElement : SVGTextContentElement
     attribute TEXTPATH_METHODTYPE_ALIGN
     attribute TEXTPATH_METHODTYPE_STRETCH
     attribute TEXTPATH_METHODTYPE_UNKNOWN
+    attribute TEXTPATH_SIDETYPE_LEFT
+    attribute TEXTPATH_SIDETYPE_RIGHT
+    attribute TEXTPATH_SIDETYPE_UNKNOWN
     attribute TEXTPATH_SPACINGTYPE_AUTO
     attribute TEXTPATH_SPACINGTYPE_EXACT
     attribute TEXTPATH_SPACINGTYPE_UNKNOWN
@@ -12856,6 +12859,7 @@ namespace console
     method reportError
     method requestAnimationFrame
     method requestIdleCallback
+    method requestResize
     method resizeBy
     method resizeTo
     method scroll

@@ -855,7 +855,7 @@ class WebGPUDecoderImpl final : public WebGPUDecoder {
       // will populate it with semaphores and call GrDirectContext::flush.
       success = true;
       if (shared_context_state_->gr_context()) {
-        skgpu::ganesh::Flush(surface);
+        success = skgpu::ganesh::Flush(surface).fSuccess;
       } else {
         DCHECK(shared_context_state_->graphite_shared_context());
         DCHECK(shared_context_state_->gpu_main_graphite_recorder());
@@ -1122,7 +1122,11 @@ WebGPUDecoderImpl::WebGPUDecoderImpl(
 
   use_webgpu_adapter_ = gpu_preferences.use_webgpu_adapter;
   use_webgpu_power_preference_ = gpu_preferences.use_webgpu_power_preference;
-  webgpu_on_vk_gl_interop_ = gpu_preferences.enable_webgpu_on_vk_via_gl_interop;
+  // TODO(crbug.com/500918256): Move VulkanContextProvider creation earlier
+  // so `enable_webgpu_on_vk_via_gl_interop` is only true if it exists.
+  webgpu_on_vk_gl_interop_ =
+      gpu_preferences.enable_webgpu_on_vk_via_gl_interop &&
+      shared_context_state_->vk_context_provider();
   force_webgpu_compat_ = gpu_preferences.force_webgpu_compat;
   require_enabled_toggles_ = gpu_preferences.enabled_dawn_features_list;
   require_disabled_toggles_ = gpu_preferences.disabled_dawn_features_list;
@@ -2373,7 +2377,7 @@ error::Error WebGPUDecoderImpl::HandleAssociateMailboxForBufferImmediate(
   std::unique_ptr<SharedBufferRepresentationAndAccess>
       representation_and_access;
   auto it = known_device_metadata_.find(device);
-  DCHECK(it != known_device_metadata_.end());
+  CHECK(it != known_device_metadata_.end());
   representation_and_access = AssociateMailboxDawnBuffer(
       mailbox, device, it->second.backendType, usage);
 
@@ -2469,7 +2473,10 @@ bool WebGPUDecoderImpl::ClearSharedImageWithSkia(const Mailbox& mailbox) {
   // It's ok to pass in empty GrFlushInfo here since SignalSemaphores()
   // will populate it with semaphores and call GrDirectContext::flush.
   if (shared_context_state_->gr_context()) {
-    skgpu::ganesh::Flush(surface);
+    if (!skgpu::ganesh::Flush(surface).fSuccess) {
+      DLOG(ERROR) << "ClearSharedImage: skgpu::ganesh::Flush failed";
+      return false;
+    }
   } else {
     DCHECK(shared_context_state_->graphite_shared_context());
     DCHECK(shared_context_state_->gpu_main_graphite_recorder());

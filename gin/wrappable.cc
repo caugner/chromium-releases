@@ -59,7 +59,6 @@ v8::MaybeLocal<v8::Object> WrappableBase::GetWrapper(v8::Isolate* isolate) {
     return {};
   }
 
-
   AssociateWithWrapper(isolate, wrapper);
   return wrapper;
 }

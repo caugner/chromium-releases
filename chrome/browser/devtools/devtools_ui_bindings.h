@@ -133,7 +133,6 @@ class DevToolsUIBindings : public DevToolsEmbedderMessageDispatcher::Delegate,
   ~DevToolsUIBindings() override;
 
   std::string GetTypeForMetrics() override;
-  bool MayAccessAllCookies() override;
 
   content::WebContents* web_contents() { return web_contents_; }
   Profile* profile() { return profile_; }

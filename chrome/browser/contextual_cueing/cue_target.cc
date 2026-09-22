@@ -17,13 +17,44 @@ GlicCueActionData::GlicCueActionData(GlicCueActionData&&) = default;
 GlicCueActionData& GlicCueActionData::operator=(const GlicCueActionData&) =
     default;
 
+bool CueTarget::SupportsEditPrompt() const {
+  return false;
+}
+
+bool CueTarget::OverridesUcbScoring() const {
+  return false;
+}
+
 const char* GetName(CueTargetType type) {
   switch (type) {
     case CueTargetType::kGlic:
       return "Glic";
     case CueTargetType::kTestSource:
       return "TestSource";
+    case CueTargetType::kIndigo:
+      return "Indigo";
   }
+}
+
+const char* GetName(CueIntrusiveness intrusiveness) {
+  switch (intrusiveness) {
+    case CueIntrusiveness::kLoud:
+      return "Loud";
+    case CueIntrusiveness::kQuiet:
+      return "Quiet";
+  }
+}
+
+bool CueTarget::SupportsIntrusiveness(CueIntrusiveness intrusiveness) const {
+  if (RequiresModelExecution()) {
+    return intrusiveness == CueIntrusiveness::kLoud;
+  }
+  return SupportsIntrusivenessImpl(intrusiveness);
+}
+
+bool CueTarget::SupportsIntrusivenessImpl(
+    CueIntrusiveness intrusiveness) const {
+  return true;
 }
 
 }  // namespace contextual_cueing

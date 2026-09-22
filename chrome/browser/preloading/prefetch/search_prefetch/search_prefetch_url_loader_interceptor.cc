@@ -115,8 +115,8 @@ SearchPrefetchURLLoaderInterceptor::MaybeCreateLoaderForRequest(
   }
 
   if (is_prerender_main_frame_navigation) {
-    auto handler =
-        service->MaybeCreateResponseReader(tentative_resource_request);
+    auto handler = service->MaybeCreateResponseReaderForPrerender(
+        tentative_resource_request);
     if (handler) {
       if (IsSearchPrefetchPreloadServingMetricsEnabled()) {
         // This navigation id is used for recording navigation served by search

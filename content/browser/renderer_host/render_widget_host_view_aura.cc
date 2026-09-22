@@ -62,6 +62,7 @@
 #include "third_party/blink/public/mojom/widget/record_content_to_visible_time_request.mojom.h"
 #include "ui/accessibility/aura/aura_window_properties.h"
 #include "ui/accessibility/platform/ax_platform_node.h"
+#include "ui/accessibility/platform/ax_platform_node_delegate.h"
 #include "ui/accessibility/platform/browser_accessibility_manager.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/cursor_client.h"
@@ -88,7 +89,8 @@
 #include "ui/base/ui_base_features.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/base/ui_base_types.h"
-#include "ui/compositor/layer.h"
+#include "ui/compositor/layer_solid_color.h"
+#include "ui/compositor/layer_surface.h"
 #include "ui/display/screen.h"
 #include "ui/events/blink/blink_event_util.h"
 #include "ui/events/blink/did_overscroll_params.h"
@@ -869,7 +871,7 @@ void RenderWidgetHostViewAura::UpdateBackgroundColor() {
   SkColor4f background_color =
       SkColor4f::FromColor(GetBackgroundColor().value());
   window_->layer()->SetFillsBoundsOpaquely(background_color.isOpaque());
-  window_->layer()->AsSurface()->SetBackgroundColor(background_color);
+  window_->layer()->AsSurface()->SetFallbackBackgroundColor(background_color);
 }
 
 #if BUILDFLAG(IS_WIN)
@@ -1503,6 +1505,16 @@ RenderWidgetHostViewAura::AccessibilityGetNativeViewAccessible() {
   }
 
   return nullptr;
+}
+
+ui::AXTreeID RenderWidgetHostViewAura::AccessibilityGetParentAXTreeID() {
+  ui::AXPlatformNode* parent = ui::AXPlatformNode::FromNativeViewAccessible(
+      GetParentNativeViewAccessible());
+  if (!parent || parent->IsDestroyed() || !parent->GetDelegate()) {
+    return ui::AXTreeIDUnknown();
+  }
+
+  return parent->GetDelegate()->GetTreeData().tree_id;
 }
 
 void RenderWidgetHostViewAura::SetMainFrameAXTreeID(ui::AXTreeID id) {
@@ -2562,6 +2574,12 @@ bool RenderWidgetHostViewAura::HasSavedCompositorFrame() const {
   return delegated_frame_host_ && delegated_frame_host_->HasSavedFrame();
 }
 
+void RenderWidgetHostViewAura::SetEvictOnHide(bool evict_on_hide) {
+  if (delegated_frame_host_) {
+    delegated_frame_host_->SetEvictOnHide(evict_on_hide);
+  }
+}
+
 void RenderWidgetHostViewAura::FocusedNodeChanged(
     bool editable,
     const gfx::Rect& node_bounds_in_screen) {
@@ -2966,7 +2984,7 @@ void RenderWidgetHostViewAura::CreateAuraWindow(aura::client::WindowType type) {
   SkColor4f background_color = SkColor4f::FromColor(
       GetBackgroundColor() ? *GetBackgroundColor() : SK_ColorWHITE);
   window_->layer()->SetFillsBoundsOpaquely(background_color.isOpaque());
-  window_->layer()->AsSurface()->SetBackgroundColor(background_color);
+  window_->layer()->AsSurface()->SetFallbackBackgroundColor(background_color);
   UpdateFrameSinkIdRegistration();
 }
 
@@ -3481,15 +3499,26 @@ void RenderWidgetHostViewAura::OnUpdateTextInputStateCalled(
     bool did_update_state) {
   CHECK_EQ(text_input_manager_, text_input_manager);
 
-  if (!GetInputMethod())
+  if (!GetInputMethod()) {
     return;
+  }
 
   auto weak_this = weak_ptr_factory_.GetWeakPtr();
+  base::WeakPtr<RenderWidgetHostViewBase> weak_updated_view =
+      updated_view ? updated_view->GetWeakPtr() : nullptr;
+
+  auto check_alive = [&]() -> bool {
+    if (!weak_this || !weak_updated_view || !text_input_manager_ ||
+        !text_input_manager_->IsRegistered(updated_view)) {
+      // `this` or `updated_view` may have been deleted inside the IME callout.
+      return false;
+    }
+    return true;
+  };
 
   if (did_update_state) {
     GetInputMethod()->OnTextInputTypeChanged(this);
-    if (!weak_this) {
-      // `this` may have been deleted inside the IME callout.
+    if (!check_alive()) {
       return;
     }
   }
@@ -3506,6 +3535,12 @@ void RenderWidgetHostViewAura::OnUpdateTextInputStateCalled(
                ui::mojom::VirtualKeyboardVisibilityRequest::HIDE) {
       GetInputMethod()->SetVirtualKeyboardVisibilityIfEnabled(false);
     }
+    if (!check_alive()) {
+      return;
+    }
+    // The IME callout may have re-entrantly updated or unregistered the
+    // active view's state, freeing the object `state` points to.
+    state = text_input_manager_->GetTextInputState();
   }
 #endif
 
@@ -3516,6 +3551,12 @@ void RenderWidgetHostViewAura::OnUpdateTextInputStateCalled(
     if (state->show_ime_if_needed &&
         GetInputMethod()->GetTextInputClient() == this) {
       GetInputMethod()->SetVirtualKeyboardVisibilityIfEnabled(true);
+      if (!check_alive()) {
+        return;
+      }
+      // The IME callout may have re-entrantly updated or unregistered the
+      // active view's state, freeing the object `state` points to.
+      state = text_input_manager_->GetTextInputState();
     }
 // TODO(crbug.com/40110609): Remove this once TSF fix for input pane policy
 // is serviced
@@ -3527,6 +3568,12 @@ void RenderWidgetHostViewAura::OnUpdateTextInputStateCalled(
                                                            GetInputMethod());
       }
       virtual_keyboard_controller_win_->UpdateTextInputState(state);
+      if (!check_alive()) {
+        return;
+      }
+      // The IME callout may have re-entrantly updated or unregistered the
+      // active view's state, freeing the object `state` points to.
+      state = text_input_manager_->GetTextInputState();
     }
 #endif
   }
@@ -3534,10 +3581,12 @@ void RenderWidgetHostViewAura::OnUpdateTextInputStateCalled(
   // Ensure that selection bounds changes are sent to the IME.
   if (state && state->type != ui::TEXT_INPUT_TYPE_NONE) {
     text_input_manager->NotifySelectionBoundsChanged(updated_view);
-    if (!weak_this) {
-      // `this` may have been deleted inside the IME callout.
+    if (!check_alive()) {
       return;
     }
+    // The IME callout may have re-entrantly updated or unregistered the
+    // active view's state, freeing the object `state` points to.
+    state = text_input_manager_->GetTextInputState();
   }
 
   if (auto* render_widget_host = updated_view->host()) {

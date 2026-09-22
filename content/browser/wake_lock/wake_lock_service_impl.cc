@@ -4,8 +4,10 @@
 
 #include "content/browser/wake_lock/wake_lock_service_impl.h"
 
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "services/device/public/mojom/wake_lock_context.mojom.h"
+#include "services/network/public/mojom/permissions_policy/permissions_policy_feature.mojom.h"
 
 namespace content {
 
@@ -22,6 +24,20 @@ void WakeLockServiceImpl::GetWakeLock(
     device::mojom::WakeLockReason reason,
     const std::string& description,
     mojo::PendingReceiver<device::mojom::WakeLock> receiver) {
+  // Web content is only permitted to request screen wake locks.
+  if (type != device::mojom::WakeLockType::kPreventDisplaySleep) {
+    return;
+  }
+
+  // The `screen-wake-lock` permissions policy applies to the Web Wake Lock API
+  // and shouldn't affect internal video playback wake locks (e.g., in
+  // cross-origin iframes or Picture-in-Picture windows).
+  if (reason != device::mojom::WakeLockReason::kVideoPlayback &&
+      !render_frame_host().IsFeatureEnabled(
+          network::mojom::PermissionsPolicyFeature::kScreenWakeLock)) {
+    return;
+  }
+
   device::mojom::WakeLockContext* wake_lock_context =
       WebContents::FromRenderFrameHost(&render_frame_host())
           ->GetWakeLockContext();

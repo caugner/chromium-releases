@@ -181,7 +181,10 @@ void TextTrackContainer::UpdateDisplay(HTMLMediaElement& media_element,
   // 5. If the last time these rules were run, the user agent was not exposing
   // a user interface for video, but now it is, optionally let reset be true.
   // Otherwise, let reset be false.
-  bool reset = exposing_controls == kDidStartExposingControls;
+  //
+  // We also reset when controls stop being exposed (kDidStopExposingControls)
+  // so that cue positions are recalculated to use the reclaimed space.
+  bool reset = exposing_controls != kDidNotStartExposingControls;
 
   // 6. Let tracks be the subset of video's list of text tracks that have as
   // their rules for updating the text track rendering these rules for
@@ -190,7 +193,9 @@ void TextTrackContainer::UpdateDisplay(HTMLMediaElement& media_element,
   // 7. Let cues be an empty list of text track cues.
   // 8. For each track track in tracks, append to cues all the cues from
   // track's list of cues that have their text track cue active flag set.
-  const CueList& active_cues = video.GetCueTimeline().CurrentlyActiveCues();
+  // Note: Copy the list so that synchronous script (e.g. blur events on
+  // reparenting display boxes) cannot invalidate the iteration buffer.
+  const CueList active_cues = video.GetCueTimeline().CurrentlyActiveCues();
 
   // 9. If reset is false, then, for each text track cue cue in cues: if cue's
   // text track cue display state has a set of CSS boxes, then add those boxes
@@ -206,14 +211,21 @@ void TextTrackContainer::UpdateDisplay(HTMLMediaElement& media_element,
   // corresponding CSS boxes added to output, in text track cue order, run the
   // following substeps:
   double movie_time = video.currentTime();
-  for (const auto& active_cue : active_cues) {
-    TextTrackCue* cue = active_cue.Data();
-
-    DCHECK(cue->IsActive());
-    if (!cue->track() || !cue->track()->IsRendered() || !cue->IsActive())
+  for (const auto& cue : active_cues) {
+    // Cues may have been deactivated or removed if synchronous script ran
+    // during a previous iteration (e.g., via video.load() or
+    // track.removeCue()).
+    if (!cue->IsActive() || !cue->track() || !cue->track()->IsRendered()) {
       continue;
+    }
 
     cue->UpdateDisplay(*this);
+
+    // Recheck IsActive() in case UpdateDisplay() synchronously ran script
+    // that deactivated cues.
+    if (!cue->IsActive()) {
+      continue;
+    }
     cue->UpdatePastAndFutureNodes(movie_time);
   }
 

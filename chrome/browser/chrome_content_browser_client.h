@@ -82,6 +82,10 @@ namespace blocked_content {
 class PopupNavigationDelegate;
 }  // namespace blocked_content
 
+namespace extensions {
+class Extension;
+}  // namespace extensions
+
 namespace content {
 class BrowserContext;
 class BtmService;
@@ -429,11 +433,13 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   bool AreThirdPartyCookiesGenerallyAllowed(
       content::BrowserContext* browser_context,
       content::WebContents* web_contents) override;
+  static GURL GetPrewarmUrl();
   void PrewarmServiceWorkerRegistrationForDSE(
       content::BrowserContext* browser_context,
       content::ServiceWorkerContext& service_worker_context) override;
-  static std::optional<int>&
-  PrewarmServiceWorkerRegistrationForDSECalledCountForTesting();
+  blink::mojom::ScriptInjectionPolicy GetScriptInjectionPolicy(
+      content::BrowserContext* browser_context,
+      const GURL& url) override;
   bool CanSendSCTAuditingReport(
       content::BrowserContext* browser_context) override;
   void OnNewSCTAuditingReportSent(
@@ -739,6 +745,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       bool is_service_worker,
       int process_id,
       int routing_id,
+      bool prefer_bound_cookie_context,
       mojo::PendingReceiver<network::mojom::RestrictedCookieManager>* receiver)
       override;
   void OnNetworkServiceCreated(
@@ -1161,10 +1168,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
           callback) override;
 #endif  // !BUILDFLAG(IS_ANDROID)
 
-  bool ShouldDispatchPagehideDuringCommit(
-      content::BrowserContext* browser_context,
-      const GURL& destination_url) override;
-
 #if BUILDFLAG(IS_WIN)
   void OnTracingServiceStarted() override;
   void OnTracingServiceStopped() override;
@@ -1244,6 +1247,13 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   // Used by subclasses (e.g. implemented by downstream embedders) to add
   // their own extra part objects.
   void AddExtraPart(std::unique_ptr<ChromeContentBrowserClientParts> part);
+
+  static void AddChromeSchemeFactories(
+      int render_process_id,
+      content::RenderFrameHost* frame_host,
+      content::WebContents* web_contents,
+      const extensions::Extension* extension,
+      NonNetworkURLLoaderFactoryMap* factories);
 
   // Exposed for tests to perform dependency injection.
   virtual std::unique_ptr<HttpAuthCoordinator> CreateHttpAuthCoordinator();

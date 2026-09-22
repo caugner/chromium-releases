@@ -41,7 +41,6 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
-import org.robolectric.annotation.Config;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.chrome.browser.ntp.NewTabPageUtils;
@@ -51,7 +50,6 @@ import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
 
 /** Unit tests for {@link SearchBoxViewBinder}. */
 @RunWith(BaseRobolectricTestRunner.class)
-@Config(manifest = Config.NONE)
 public class SearchBoxViewBinderUnitTest {
     @Rule public MockitoRule mMockitoRule = MockitoJUnit.rule();
 
@@ -193,5 +191,16 @@ public class SearchBoxViewBinderUnitTest {
         mPropertyModel.set(SearchBoxProperties.AI_CHIP_CLICK_CALLBACK, mOnClickListener);
         mSearchBoxLayout.mAiChip.performClick();
         verify(mOnClickListener).onClick(mSearchBoxLayout.mAiChip);
+    }
+
+    @Test
+    public void testSetSearchBoxClickListener() {
+        mPropertyModel.set(SearchBoxProperties.SEARCH_BOX_CLICK_CALLBACK, mOnClickListener);
+        mSearchBoxLayout.mHintTextView.performClick();
+        verify(mOnClickListener).onClick(mSearchBoxLayout.mHintTextView);
+        assertTrue(mSearchBoxLayout.mHintTextView.isFocusable());
+
+        mPropertyModel.set(SearchBoxProperties.SEARCH_BOX_CLICK_CALLBACK, null);
+        assertTrue(mSearchBoxLayout.mHintTextView.isFocusable());
     }
 }

@@ -26,7 +26,7 @@
 #error "This file should only be included with Symphonia support enabled."
 #endif
 
-#include "media/filters/symphonia_glue.rs.h"
+#include "media/filters/symphonia_decoder_bridge.rs.h"
 
 namespace base {
 class SequencedTaskRunner;
@@ -155,6 +155,12 @@ class MEDIA_EXPORT SymphoniaAudioDecoder : public AudioDecoder {
   // The timestamp of the first frame. Symphonia is configured to count in
   // microseconds with the first frame starting at zero.
   std::optional<base::TimeDelta> first_frame_timestamp_;
+
+  // Number of decode errors logged so far, used with LIMITED_MEDIA_LOG.
+  int num_decode_errors_ = 0;
+
+  // Number of consecutive packet decode errors encountered.
+  int consecutive_error_count_ = 0;
 };
 
 MEDIA_EXPORT SymphoniaPacket

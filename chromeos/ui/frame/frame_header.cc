@@ -112,7 +112,7 @@ void FrameHeader::FrameAnimatorView::StartAnimation(base::TimeDelta duration) {
   old_layer->SetTransform(gfx::Transform());
   // Layer in maximized / fullscreen / snapped state is set to
   // opaque, which can prevent resterizing the new layer immediately.
-  if (old_layer->type() != ui::LAYER_SOLID_COLOR) {
+  if (!old_layer->AsSolidColor()) {
     old_layer->SetFillsBoundsOpaquely(false);
   }
 
@@ -209,10 +209,7 @@ FrameHeader::~FrameHeader() {
     center_button_ = nullptr;
   }
 
-  if (underneath_layer_owner_) {
-    underneath_layer_owner_->RemoveObserver(this);
-    underneath_layer_owner_ = nullptr;
-  }
+  underneath_layer_owner_ = nullptr;
 
   auto* target_window = target_widget_->GetNativeView();
   if (target_window && target_window->GetProperty(kFrameHeaderKey) == this)
@@ -380,21 +377,9 @@ void FrameHeader::UpdateFrameHeaderKey() {
   target_widget_->GetNativeView()->SetProperty(kFrameHeaderKey, this);
 }
 
-void FrameHeader::OnLayerRecreated(ui::Layer* old_layer) {
-  if (underneath_layer_owner_) {
-    frame_animator_->RemoveLayerFromRegionsKeepInLayerTree(old_layer);
-    frame_animator_->AddLayerToRegion(underneath_layer_owner_->layer(),
-                                      views::LayerRegion::kBelow);
-  }
-}
-
 void FrameHeader::AddLayerBeneath(ui::LayerOwner* layer_owner) {
   if (layer_owner) {
     underneath_layer_owner_ = layer_owner;
-    // A relationship between the layer_owner's layer and animation view is
-    // created, we need to observe the layer_owner in case of the layer gets
-    // recreated.
-    layer_owner->AddObserver(this);
     frame_animator_->AddLayerToRegion(layer_owner->layer(),
                                       views::LayerRegion::kBelow);
   }
@@ -404,7 +389,6 @@ void FrameHeader::RemoveLayerBeneath() {
   if (underneath_layer_owner_) {
     frame_animator_->RemoveLayerFromRegionsKeepInLayerTree(
         underneath_layer_owner_->layer());
-    underneath_layer_owner_->RemoveObserver(this);
     underneath_layer_owner_ = nullptr;
   }
 }
@@ -486,8 +470,13 @@ void FrameHeader::LayoutHeaderInternal() {
 
   caption_button_container()->UpdateButtonsImageAndTooltip();
 
-  caption_button_container()->SetButtonSize(
-      views::GetCaptionButtonLayoutSize(GetButtonLayoutSize()));
+  gfx::Size button_size =
+      views::GetCaptionButtonLayoutSize(GetButtonLayoutSize());
+  // Ensure buttons fill custom header height if larger than standard size.
+  if (painted_height_ > button_size.height()) {
+    button_size.set_height(painted_height_);
+  }
+  caption_button_container()->SetButtonSize(button_size);
 
   const gfx::Size caption_button_container_size =
       caption_button_container()->GetPreferredSize({});

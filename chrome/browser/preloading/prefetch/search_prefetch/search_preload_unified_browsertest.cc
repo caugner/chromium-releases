@@ -29,8 +29,8 @@
 #include "chrome/browser/preloading/prefetch/search_prefetch/search_preload_test_response_utils.h"
 #include "chrome/browser/preloading/prefetch/search_prefetch/streaming_search_prefetch_url_loader.h"
 #include "chrome/browser/preloading/prerender/prerender_manager.h"
-#include "chrome/browser/preloading/prerender/search_prewarm_progress_service.h"
-#include "chrome/browser/preloading/prerender/search_prewarm_progress_service_factory.h"
+#include "chrome/browser/preloading/prerender/search_preload_progress_service.h"
+#include "chrome/browser/preloading/prerender/search_preload_progress_service_factory.h"
 #include "chrome/browser/preloading/scoped_prewarm_feature_list.h"
 #include "chrome/browser/preloading/search_preload/search_preload_features.h"
 #include "chrome/browser/profiles/profile.h"
@@ -69,8 +69,8 @@
 #include "third_party/blink/public/common/features.h"
 
 #if !BUILDFLAG(IS_ANDROID)
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/omnibox/omnibox_controller.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
@@ -279,7 +279,8 @@ class SearchPreloadUnifiedBrowserTest : public PlatformBrowserTest,
 
   SearchPrefetchURLLoader::RequestHandler CreatePrerenderRequestHandler(
       const network::ResourceRequest& request) {
-    return search_prefetch_service_->MaybeCreateResponseReader(request);
+    return search_prefetch_service_->MaybeCreateResponseReaderForPrerender(
+        request);
   }
 
   network::ResourceRequest CreateServingRequest(const GURL& url) {
@@ -542,7 +543,7 @@ class SearchPreloadUnifiedBrowserTest : public PlatformBrowserTest,
 // Tests that the SearchSuggestionService can trigger prerendering after the
 // corresponding prefetch request succeeds.
 // TODO(crbug.com/40943413): enable the flaky test.
-#if BUILDFLAG(IS_LINUX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ANDROID)
 #define MAYBE_PrerenderHintReceivedBeforeSucceed \
   DISABLED_PrerenderHintReceivedBeforeSucceed
 #else
@@ -1420,6 +1421,38 @@ IN_PROC_BROWSER_TEST_P(HTTPCacheSearchPreloadUnifiedBrowserTest,
       "Omnibox.SearchPrefetch.CacheAliasElapsedTimeToFallback", 0);
   histogram_tester.ExpectUniqueSample("PreloadServingMetrics.Backward.All",
                                       1 /* kPrefetch */, 0);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.All.All.All",
+      3);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.All.All.NoInstantLoad",
+      1);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.All.All.Prefetch",
+      0);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.All.All.Prerender",
+      2);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.Backward.All.All",
+      1);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.Backward.All.NoInstantLoad",
+      1);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.Backward.All.Prefetch",
+      0);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.Backward.All.Prerender",
+      0);
 }
 
 // Tests the started prerender is destroyed after prefetch request expired.
@@ -2514,7 +2547,7 @@ IN_PROC_BROWSER_TEST_F(SearchPrefetchThrottleBrowserTest,
 
   // Start Prewarm.
   EXPECT_TRUE(prerender_manager()->MaybeStartPrewarmSearchResult());
-  auto* service = SearchPrewarmProgressServiceFactory::GetForProfile(
+  auto* service = SearchPreloadProgressServiceFactory::GetForProfile(
       Profile::FromBrowserContext(GetActiveWebContents()->GetBrowserContext()));
   EXPECT_TRUE(service && service->HasOnGoingSearchPrewarm());
 
@@ -2764,6 +2797,41 @@ IN_PROC_BROWSER_TEST_F(SearchPreloadUnifiedBrowserTest,
   histogram_tester.ExpectUniqueSample(
       "PreloadServingMetrics.OmniboxDefaultSearchEngine.All", 1 /* kPrefetch */,
       1);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.All.All.All",
+      1);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.All.All.NoInstantLoad",
+      0);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.All.All.Prefetch",
+      1);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.All.All.Prerender",
+      0);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.OmniboxDefaultSearchEngine.All.All",
+      1);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.OmniboxDefaultSearchEngine.All."
+      "NoInstantLoad",
+      0);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.OmniboxDefaultSearchEngine.All."
+      "Prefetch",
+      1);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.OmniboxDefaultSearchEngine.All."
+      "Prerender",
+      0);
 }
 
 class SearchPreloadUnifiedMetricsDisabledBrowserTest
@@ -2855,6 +2923,41 @@ IN_PROC_BROWSER_TEST_F(
   histogram_tester.ExpectUniqueSample(
       "PreloadServingMetrics.OmniboxDefaultSearchEngine.All",
       0 /* kNoInstantLoad */, 1);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.All.All.All",
+      1);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.All.All.NoInstantLoad",
+      1);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.All.All.Prefetch",
+      0);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.All.All.Prerender",
+      0);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.OmniboxDefaultSearchEngine.All.All",
+      1);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.OmniboxDefaultSearchEngine.All."
+      "NoInstantLoad",
+      1);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.OmniboxDefaultSearchEngine.All."
+      "Prefetch",
+      0);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.OmniboxDefaultSearchEngine.All."
+      "Prerender",
+      0);
 }
 
 // TODO(crbug.com/393195683): User-agent override mismatch causes this test to
@@ -2944,6 +3047,41 @@ IN_PROC_BROWSER_TEST_F(SearchPreloadUnifiedBrowserTest,
   histogram_tester.ExpectUniqueSample(
       "PreloadServingMetrics.OmniboxDefaultSearchEngine.All",
       2 /* kPrerender */, 1);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.All.All.All",
+      1);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.All.All.NoInstantLoad",
+      0);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.All.All.Prefetch",
+      0);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.All.All.Prerender",
+      1);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.OmniboxDefaultSearchEngine.All.All",
+      1);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.OmniboxDefaultSearchEngine.All."
+      "NoInstantLoad",
+      0);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.OmniboxDefaultSearchEngine.All."
+      "Prefetch",
+      0);
+  histogram_tester.ExpectTotalCount(
+      "PreloadServingMetrics.PageLoad.Clients.PaintTiming."
+      "NavigationToFirstContentfulPaint.OmniboxDefaultSearchEngine.All."
+      "Prerender",
+      1);
 }
 
 }  // namespace

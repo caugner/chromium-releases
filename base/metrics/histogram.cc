@@ -282,10 +282,16 @@ HistogramBase* Histogram::Factory::Build() {
         "DevTools.DeveloperResourceLoaded",
         "DevTools.DeveloperResourceScheme",
         "DevTools.ExperimentEnabledAtLaunch",
+        "DevTools.ExperimentDisabledAtLaunch",
         "DevTools.PanelShown",
+        // TODO(crbug.com/559368036): Remove after CrOS redaction_tool uprev rolls out.
+        "Feedback.RedactionTool.Caller",
+        // TODO(crbug.com/561342361): Remove after CrOS redaction_tool uprev rolls out.
+        "Feedback.RedactionTool",
     };
     if (!std::ranges::contains(kKnownBadHistogramsHashes, name_)) {
-      DEBUG_ALIAS_FOR_CSTR(hist_name, std::string(name_).c_str(), 32);
+      SCOPED_CRASH_KEY_STRING256("MismatchedHistogramArgs", "name",
+                                 std::string(name_));
       debug::DumpWithoutCrashing();
     }
 

@@ -23,6 +23,7 @@ class GPUBuffer;
 class GPUCommandBuffer;
 class GPUCopyElementImageDestination;
 class GPUCopyElementImageSource;
+class GPUDrawElementImageSource;
 class GPUImageCopyExternalImage;
 class GPUImageCopyTextureTagged;
 class GPUTexelCopyBufferLayout;
@@ -90,21 +91,25 @@ class GPUQueue : public DawnObject<wgpu::Queue> {
   void copyElementImageToTexture(GPUCopyElementImageSource* source,
                                  GPUCopyElementImageDestination* destination,
                                  ExceptionState& exception_state);
+  void drawElementImageToTexture(GPUDrawElementImageSource* source,
+                                 GPUCopyElementImageDestination* destination,
+                                 ExceptionState& exception_state);
   // }}} End of WebIDL binding implementation.
 
  private:
   bool IsValidDestinationTexture(GPUImageCopyTextureTagged* destination,
                                  wgpu::TexelCopyTextureInfo& dawn_destination,
                                  ExceptionState& exception_state);
-  void CopyFromVideoElement(const ExternalTextureSource source,
-                            const wgpu::Extent2D& video_frame_natural_size,
-                            const wgpu::Origin2D& origin,
-                            const wgpu::Extent3D& copy_size,
-                            const wgpu::TexelCopyTextureInfo& destination,
-                            bool dst_premultiplied_alpha,
-                            PredefinedColorSpace dst_color_space,
-                            bool flipY);
-  void CopyElementImageToTextureInternal(
+  [[nodiscard]] bool CopyFromVideoElement(
+      const ExternalTextureSource source,
+      const wgpu::Extent2D& video_frame_natural_size,
+      const wgpu::Origin2D& origin,
+      const wgpu::Extent3D& copy_size,
+      const wgpu::TexelCopyTextureInfo& destination,
+      bool dst_premultiplied_alpha,
+      PredefinedColorSpace dst_color_space,
+      bool flipY);
+  void DrawElementImageToTextureInternal(
       const V8UnionElementOrElementImage* source,
       std::optional<float> sx,
       std::optional<float> sy,

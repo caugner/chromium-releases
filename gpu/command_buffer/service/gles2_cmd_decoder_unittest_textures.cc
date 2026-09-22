@@ -1006,6 +1006,325 @@ TEST_P(GLES3DecoderTest, CompressedTexImage3DBucket) {
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
 
+// Tests for ScopedCompressedUnpackStateScrub. Per OpenGL ES 3.2, "All pixel
+// storage modes are ignored when decoding a compressed texture image"
+// (sec. 8.7), so the decoder resets UNPACK_ROW_LENGTH / UNPACK_IMAGE_HEIGHT
+// in the real driver around every compressed dispatch that runs while a
+// pixel unpack buffer is bound, restoring the tracked values afterwards
+// (crbug.com/562279351). These tests assert that bracketing at each
+// compressed dispatch site, and its absence when no pixel unpack buffer is
+// bound.
+class GLES3DecoderCompressedUnpackScrubTest : public GLES3DecoderTest {
+ protected:
+  static constexpr GLint kLevel = 0;
+  static constexpr GLsizei kWidth = 4;
+  static constexpr GLsizei kHeight = 4;
+  static constexpr GLsizei kDepth = 4;
+  static constexpr GLint kBorder = 0;
+  static constexpr GLsizei kBufferSize = 16384;
+  // The reported tuple: large enough that a driver consuming these against
+  // the spec computes strides whose products wrap 32 bits.
+  static constexpr GLint kRowLength = 524292;
+  static constexpr GLint kImageHeight = 16384;
+  // Nonzero because the GL mock dispatches calls whose data pointer is null
+  // to separate *NoData mock methods, which the expectations in these tests
+  // would not match.
+  static constexpr uint32_t kPixelUnpackBufferOffset = 16;
+
+  // Expects UNPACK_ROW_LENGTH and then UNPACK_IMAGE_HEIGHT to be applied to
+  // the real driver.
+  void ExpectUnpackGeometry(GLint row_length, GLint image_height) {
+    EXPECT_CALL(*gl_, PixelStorei(GL_UNPACK_ROW_LENGTH, row_length))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, PixelStorei(GL_UNPACK_IMAGE_HEIGHT, image_height))
+        .Times(1)
+        .RetiresOnSaturation();
+  }
+
+  // Binds and sizes a pixel unpack buffer; binding one re-applies the
+  // tracked unpack parameters to the real driver.
+  void SetupPixelUnpackBuffer() {
+    ExpectUnpackGeometry(0, 0);
+    DoBindBuffer(GL_PIXEL_UNPACK_BUFFER, client_buffer_id_, kServiceBufferId);
+    DoBufferData(GL_PIXEL_UNPACK_BUFFER, kBufferSize);
+  }
+
+  // Sets kRowLength / kImageHeight through the command stream; with a pixel
+  // unpack buffer bound they are forwarded to the real driver.
+  void SetLargeUnpackGeometry() {
+    ExpectUnpackGeometry(kRowLength, kImageHeight);
+    cmds::PixelStorei cmd;
+    cmd.Init(GL_UNPACK_ROW_LENGTH, kRowLength);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+    cmd.Init(GL_UNPACK_IMAGE_HEIGHT, kImageHeight);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  }
+};
+
+INSTANTIATE_TEST_SUITE_P(Service,
+                         GLES3DecoderCompressedUnpackScrubTest,
+                         ::testing::Bool());
+
+TEST_P(GLES3DecoderCompressedUnpackScrubTest,
+       CompressedTexImage3DWithPixelUnpackBufferScrubsUnpackState) {
+  const GLenum kTarget = GL_TEXTURE_2D_ARRAY;
+  const GLenum kInternalFormat = GL_COMPRESSED_R11_EAC;
+  const GLsizei kImageSize = 32;
+
+  DoBindTexture(kTarget, client_texture_id_, kServiceTextureId);
+  SetupPixelUnpackBuffer();
+  SetLargeUnpackGeometry();
+
+  // "All pixel storage modes are ignored when decoding a compressed texture
+  // image" (ES 3.2 sec. 8.7): the dispatch must be bracketed by a scrub of
+  // both values to their initial values and a restore of the tracked values
+  // afterwards.
+  {
+    InSequence scrub_then_upload_then_restore;
+    ExpectUnpackGeometry(0, 0);
+    EXPECT_CALL(*gl_,
+                CompressedTexImage3D(kTarget, kLevel, kInternalFormat, kWidth,
+                                     kHeight, kDepth, kBorder, kImageSize, _))
+        .Times(1)
+        .RetiresOnSaturation();
+    ExpectUnpackGeometry(kRowLength, kImageHeight);
+  }
+  EXPECT_CALL(*gl_, GetError())
+      .WillOnce(Return(GL_NO_ERROR))
+      .WillOnce(Return(GL_NO_ERROR))
+      .RetiresOnSaturation();
+
+  cmds::CompressedTexImage3D cmd;
+  cmd.Init(kTarget, kLevel, kInternalFormat, kWidth, kHeight, kDepth,
+           kImageSize, /*data_shm_id=*/0, kPixelUnpackBufferOffset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES3DecoderCompressedUnpackScrubTest,
+       CompressedTexImage3DWithPixelUnpackBufferScrubsDefaultUnpackState) {
+  const GLenum kTarget = GL_TEXTURE_2D_ARRAY;
+  const GLenum kInternalFormat = GL_COMPRESSED_R11_EAC;
+  const GLsizei kImageSize = 32;
+
+  DoBindTexture(kTarget, client_texture_id_, kServiceTextureId);
+  SetupPixelUnpackBuffer();
+
+  // The scrub is deliberately wider than the demonstrated need: it brackets
+  // the dispatch even though the tracked values are already the defaults, so
+  // the guarantee does not depend on the tracked state mirroring the driver
+  // state.
+  {
+    InSequence scrub_then_upload_then_restore;
+    ExpectUnpackGeometry(0, 0);
+    EXPECT_CALL(*gl_,
+                CompressedTexImage3D(kTarget, kLevel, kInternalFormat, kWidth,
+                                     kHeight, kDepth, kBorder, kImageSize, _))
+        .Times(1)
+        .RetiresOnSaturation();
+    ExpectUnpackGeometry(0, 0);
+  }
+  EXPECT_CALL(*gl_, GetError())
+      .WillOnce(Return(GL_NO_ERROR))
+      .WillOnce(Return(GL_NO_ERROR))
+      .RetiresOnSaturation();
+
+  cmds::CompressedTexImage3D cmd;
+  cmd.Init(kTarget, kLevel, kInternalFormat, kWidth, kHeight, kDepth,
+           kImageSize, /*data_shm_id=*/0, kPixelUnpackBufferOffset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES3DecoderCompressedUnpackScrubTest,
+       CompressedTexImage3DWithoutPixelUnpackBufferDoesNotScrub) {
+  const uint32_t kBucketId = 123;
+  const GLenum kTarget = GL_TEXTURE_2D_ARRAY;
+  const GLenum kInternalFormat = GL_COMPRESSED_R11_EAC;
+  const GLsizei kImageSize = 32;
+  CommonDecoder::Bucket* bucket = decoder_->CreateBucket(kBucketId);
+  ASSERT_TRUE(bucket != nullptr);
+  bucket->SetSize(kImageSize);
+
+  DoBindTexture(kTarget, client_texture_id_, kServiceTextureId);
+
+  // Without a pixel unpack buffer these values are tracked service-side but
+  // never forwarded to the real driver (see HandlePixelStorei), so the
+  // compressed dispatch below needs no scrub. StrictMock: any PixelStorei
+  // call in this test is a failure.
+  {
+    cmds::PixelStorei cmd;
+    cmd.Init(GL_UNPACK_ROW_LENGTH, kRowLength);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  }
+  {
+    cmds::PixelStorei cmd;
+    cmd.Init(GL_UNPACK_IMAGE_HEIGHT, kImageHeight);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  }
+
+  EXPECT_CALL(*gl_,
+              CompressedTexImage3D(kTarget, kLevel, kInternalFormat, kWidth,
+                                   kHeight, kDepth, kBorder, kImageSize, _))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, GetError())
+      .WillOnce(Return(GL_NO_ERROR))
+      .WillOnce(Return(GL_NO_ERROR))
+      .RetiresOnSaturation();
+  cmds::CompressedTexImage3DBucket cmd;
+  cmd.Init(kTarget, kLevel, kInternalFormat, kWidth, kHeight, kDepth,
+           kBucketId);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES3DecoderCompressedUnpackScrubTest,
+       CompressedTexImage2DWithPixelUnpackBufferScrubsUnpackState) {
+  const GLenum kTarget = GL_TEXTURE_2D;
+  const GLenum kInternalFormat = GL_COMPRESSED_R11_EAC;
+  const GLsizei kImageSize = 8;
+
+  DoBindTexture(kTarget, client_texture_id_, kServiceTextureId);
+  SetupPixelUnpackBuffer();
+  SetLargeUnpackGeometry();
+
+  // The 2D compressed dispatch must be bracketed by the same scrub/restore
+  // as the 3D one.
+  {
+    InSequence scrub_then_upload_then_restore;
+    ExpectUnpackGeometry(0, 0);
+    EXPECT_CALL(*gl_,
+                CompressedTexImage2D(kTarget, kLevel, kInternalFormat, kWidth,
+                                     kHeight, kBorder, kImageSize, _))
+        .Times(1)
+        .RetiresOnSaturation();
+    ExpectUnpackGeometry(kRowLength, kImageHeight);
+  }
+  EXPECT_CALL(*gl_, GetError())
+      .WillOnce(Return(GL_NO_ERROR))
+      .WillOnce(Return(GL_NO_ERROR))
+      .RetiresOnSaturation();
+
+  cmds::CompressedTexImage2D cmd;
+  cmd.Init(kTarget, kLevel, kInternalFormat, kWidth, kHeight, kImageSize,
+           /*data_shm_id=*/0, kPixelUnpackBufferOffset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES3DecoderCompressedUnpackScrubTest,
+       CompressedTexSubImage3DWithPixelUnpackBufferScrubsUnpackState) {
+  const uint32_t kBucketId = 123;
+  const GLenum kTarget = GL_TEXTURE_2D_ARRAY;
+  const GLenum kInternalFormat = GL_COMPRESSED_R11_EAC;
+  const GLsizei kImageSize = 32;
+
+  EXPECT_CALL(*gl_, GetError()).WillRepeatedly(Return(GL_NO_ERROR));
+
+  CommonDecoder::Bucket* bucket = decoder_->CreateBucket(kBucketId);
+  ASSERT_TRUE(bucket != nullptr);
+  bucket->SetSize(kImageSize);
+
+  DoBindTexture(kTarget, client_texture_id_, kServiceTextureId);
+
+  // Define (and clear) the level with a bucket upload before any PBO exists.
+  EXPECT_CALL(*gl_,
+              CompressedTexImage3D(kTarget, kLevel, kInternalFormat, kWidth,
+                                   kHeight, kDepth, kBorder, kImageSize, _))
+      .Times(1)
+      .RetiresOnSaturation();
+  {
+    cmds::CompressedTexImage3DBucket tex_cmd;
+    tex_cmd.Init(kTarget, kLevel, kInternalFormat, kWidth, kHeight, kDepth,
+                 kBucketId);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(tex_cmd));
+  }
+
+  SetupPixelUnpackBuffer();
+  SetLargeUnpackGeometry();
+
+  // Full-level sub-upload from the pixel unpack buffer (skips the clear
+  // path): the dispatch must be bracketed by scrub and restore.
+  {
+    InSequence scrub_then_upload_then_restore;
+    ExpectUnpackGeometry(0, 0);
+    EXPECT_CALL(*gl_, CompressedTexSubImage3DWithData(
+                          kTarget, kLevel, 0, 0, 0, kWidth, kHeight, kDepth,
+                          kInternalFormat, kImageSize))
+        .Times(1)
+        .RetiresOnSaturation();
+    ExpectUnpackGeometry(kRowLength, kImageHeight);
+  }
+
+  cmds::CompressedTexSubImage3D cmd;
+  cmd.Init(kTarget, kLevel, /*xoffset=*/0, /*yoffset=*/0, /*zoffset=*/0, kWidth,
+           kHeight, kDepth, kInternalFormat, kImageSize,
+           /*data_shm_id=*/0, kPixelUnpackBufferOffset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES3DecoderCompressedUnpackScrubTest,
+       CompressedTexSubImage3DClearPathScrubsUnpackState) {
+  const GLenum kTarget = GL_TEXTURE_2D_ARRAY;
+  const GLenum kInternalFormat = GL_COMPRESSED_RGB8_ETC2;
+  const GLsizei kLevelImageSize = 32;  // whole level, zero-filled by the clear
+  const GLsizei kSubImageSize = 8;     // one 4x4 slice
+
+  EXPECT_CALL(*gl_, GetError()).WillRepeatedly(Return(GL_NO_ERROR));
+
+  DoBindTexture(kTarget, client_texture_id_, kServiceTextureId);
+  SetupPixelUnpackBuffer();
+  SetLargeUnpackGeometry();
+
+  // Immutable compressed storage: the level starts uncleared.
+  EXPECT_CALL(
+      *gl_, TexStorage3D(kTarget, 1, kInternalFormat, kWidth, kHeight, kDepth))
+      .Times(1)
+      .RetiresOnSaturation();
+  {
+    cmds::TexStorage3D cmd;
+    cmd.Init(kTarget, /*levels=*/1, kInternalFormat, kWidth, kHeight, kDepth);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  }
+
+  // The partial sub-upload first zero-fills the uncleared level
+  // (ClearCompressedTextureLevel3D, which unbinds/rebinds the pixel unpack
+  // buffer around a CPU-sourced upload) and then performs the caller's
+  // upload. Both compressed dispatches must be bracketed by the scrub — the
+  // client's values are resident in the driver either way.
+  EXPECT_CALL(*gl_, BindBuffer(GL_PIXEL_UNPACK_BUFFER, _)).Times(AnyNumber());
+  EXPECT_CALL(*gl_, BindTexture(_, _)).Times(AnyNumber());
+  {
+    InSequence clear_then_upload_each_scrubbed;
+    // Zero-fill of the whole level (clear path).
+    ExpectUnpackGeometry(0, 0);
+    EXPECT_CALL(*gl_, CompressedTexSubImage3DWithData(
+                          kTarget, kLevel, 0, 0, 0, kWidth, kHeight, kDepth,
+                          kInternalFormat, kLevelImageSize))
+        .Times(1)
+        .RetiresOnSaturation();
+    ExpectUnpackGeometry(kRowLength, kImageHeight);
+    // The caller's partial upload from the PBO.
+    ExpectUnpackGeometry(0, 0);
+    EXPECT_CALL(*gl_, CompressedTexSubImage3DWithData(
+                          kTarget, kLevel, 0, 0, 0, kWidth, kHeight, 1,
+                          kInternalFormat, kSubImageSize))
+        .Times(1)
+        .RetiresOnSaturation();
+    ExpectUnpackGeometry(kRowLength, kImageHeight);
+  }
+
+  cmds::CompressedTexSubImage3D cmd;
+  cmd.Init(kTarget, kLevel, /*xoffset=*/0, /*yoffset=*/0, /*zoffset=*/0, kWidth,
+           kHeight, /*depth=*/1, kInternalFormat, kSubImageSize,
+           /*data_shm_id=*/0, kPixelUnpackBufferOffset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
 TEST_P(GLES3DecoderTest, CompressedTexImage3DBucketBucketSizeIsZero) {
   const uint32_t kBucketId = 123;
   const uint32_t kBadBucketId = 99;
@@ -4039,6 +4358,48 @@ TEST_P(GLES3DecoderTest, TexStorage3DValidArgs) {
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
 
+TEST_P(GLES3DecoderManualInitTest, ResetTexStorageBaseLevelWorkaround) {
+  InitState init;
+  init.extensions = "GL_EXT_texture_storage";
+  init.gl_version = "OpenGL ES 3.0";
+  init.has_alpha = true;
+  init.has_depth = true;
+  init.context_type = CONTEXT_TYPE_OPENGLES3;
+  GpuDriverBugWorkarounds workarounds;
+  workarounds.reset_tex_storage_base_level = true;
+  InitDecoderWithWorkarounds(init, workarounds);
+
+  DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
+
+  // Set BASE_LEVEL to 1 before calling TexStorage2D.
+  cmds::TexParameteri param_cmd;
+  param_cmd.Init(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 1);
+  EXPECT_CALL(*gl_, TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 1))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_EQ(error::kNoError, ExecuteCmd(param_cmd));
+
+  // Calling TexStorage2DEXT should reset BASE_LEVEL to 0 first, call
+  // TexStorage2DEXT, and then restore BASE_LEVEL to 1.
+  EXPECT_CALL(*gl_, TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, TexStorage2DEXT(GL_TEXTURE_2D, 2, GL_RGBA8, 16, 16))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 1))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, GetError())
+      .WillOnce(Return(GL_NO_ERROR))
+      .WillOnce(Return(GL_NO_ERROR))
+      .RetiresOnSaturation();
+
+  cmds::TexStorage2DEXT storage_cmd;
+  storage_cmd.Init(GL_TEXTURE_2D, 2, GL_RGBA8, 16, 16);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(storage_cmd));
+}
+
 TEST_P(GLES3DecoderTest, TexImage3DValidArgs) {
   const GLenum kTarget = GL_TEXTURE_3D;
   const GLint kLevel = 2;
@@ -4667,6 +5028,79 @@ TEST_P(GLES3DecoderReattachTextureAfterLayerIncreaseTest,
   cmds::TexImage3D cmd;
   cmd.Init(kTarget, kLevel, kInternalFormat, kWidth, kHeight, kNewDepth,
            kFormat, kType, 0, 0);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES3DecoderReattachTextureAfterLayerIncreaseTest,
+       ReattachTextureAfterLayerIncrease_TexStorage3D) {
+  InitState init;
+  init.gl_version = "OpenGL ES 3.0";
+  init.context_type = CONTEXT_TYPE_OPENGLES3;
+  gpu::GpuDriverBugWorkarounds workarounds;
+  // Instantiation parameter is used to enable/disable the workaround.
+  workarounds.reattach_texture_to_fbo_after_layer_increase = GetParam();
+  InitDecoderWithWorkarounds(init, workarounds);
+
+  const GLenum kTarget = GL_TEXTURE_2D_ARRAY;
+  const GLint kLevel = 0;
+  const GLint kLevels = 1;
+  const GLint kInternalFormat = GL_RGBA8;
+  const GLsizei kWidth = 4;
+  const GLsizei kHeight = 4;
+  const GLsizei kDepth = 1;
+  const GLsizei kNewDepth = 2;
+  const GLenum kFormat = GL_RGBA;
+  const GLenum kType = GL_UNSIGNED_BYTE;
+
+  DoBindTexture(kTarget, client_texture_id_, kServiceTextureId);
+  DoTexImage3D(kTarget, kLevel, kInternalFormat, kWidth, kHeight, kDepth, 0,
+               kFormat, kType, 0, 0);
+
+  DoBindFramebuffer(GL_FRAMEBUFFER, client_framebuffer_id_,
+                    kServiceFramebufferId);
+
+  EXPECT_CALL(*gl_,
+              FramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                                      kServiceTextureId, kLevel, 0))
+      .Times(1)
+      .RetiresOnSaturation();
+  cmds::FramebufferTextureLayer attach_cmd;
+  attach_cmd.Init(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, client_texture_id_,
+                  kLevel, 0);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(attach_cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+
+  // Calling TexStorage3D with increased depth should trigger detach,
+  // TexStorage3D, and re-attach when the workaround is enabled.
+  EXPECT_CALL(*gl_, BindFramebufferEXT(_, _)).Times(::testing::AnyNumber());
+  ::testing::InSequence sequence;
+  if (workarounds.reattach_texture_to_fbo_after_layer_increase) {
+    EXPECT_CALL(*gl_, FramebufferTextureLayer(GL_FRAMEBUFFER,
+                                              GL_COLOR_ATTACHMENT0, 0, 0, 0))
+        .Times(1)
+        .RetiresOnSaturation();
+  }
+  EXPECT_CALL(*gl_, GetError())
+      .WillOnce(Return(GL_NO_ERROR))
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, TexStorage3D(kTarget, kLevels, kInternalFormat, kWidth,
+                                 kHeight, kNewDepth))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, GetError())
+      .WillOnce(Return(GL_NO_ERROR))
+      .RetiresOnSaturation();
+  if (workarounds.reattach_texture_to_fbo_after_layer_increase) {
+    EXPECT_CALL(*gl_,
+                FramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                                        kServiceTextureId, kLevel, 0))
+        .Times(1)
+        .RetiresOnSaturation();
+  }
+
+  cmds::TexStorage3D cmd;
+  cmd.Init(kTarget, kLevels, kInternalFormat, kWidth, kHeight, kNewDepth);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }

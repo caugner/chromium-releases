@@ -30,7 +30,6 @@ import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.ui.edge_to_edge.EdgeToEdgeUtils;
 import org.chromium.components.browser_ui.widget.ContextMenuDialog;
 import org.chromium.components.browser_ui.widget.gesture.BackPressHandler;
-import org.chromium.components.browser_ui.widget.gesture.BackPressHandler.BackPressResult;
 import org.chromium.components.embedder_support.contextmenu.ChipDelegate;
 import org.chromium.components.embedder_support.contextmenu.ContextMenuNativeDelegate;
 import org.chromium.components.embedder_support.contextmenu.ContextMenuParams;
@@ -44,7 +43,6 @@ import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.hierarchicalmenu.FlyoutController;
 import org.chromium.ui.hierarchicalmenu.FlyoutController.FlyoutHandler;
 import org.chromium.ui.hierarchicalmenu.HierarchicalMenuController;
-import org.chromium.ui.hierarchicalmenu.HierarchicalMenuController.AccessibilityListObserver;
 import org.chromium.ui.listmenu.ListMenuUtils;
 import org.chromium.ui.modelutil.LayoutViewBuilder;
 import org.chromium.ui.modelutil.MVCListAdapter.ListItem;
@@ -150,7 +148,7 @@ public class ContextMenuCoordinator implements ContextMenuUi, FlyoutHandler<Cont
      * @param params The {@link ContextMenuParams} containing details about the context menu
      *     trigger.
      * @param items A list of {@link ModelList} representing the menu items, grouped into sections.
-     *     Each {@link ModelList} in {@param items} will be separated from the other {@link
+     *     Each {@link ModelList} in {@code items} will be separated from the other {@link
      *     ModelList}s by a horizontal divider.
      * @param onItemClicked A {@link Callback} invoked when a menu item is clicked, passing the
      *     item's ID.
@@ -203,7 +201,7 @@ public class ContextMenuCoordinator implements ContextMenuUi, FlyoutHandler<Cont
                 && !mUsePopupWindow) {
             View chipAnchorView = layout.findViewById(R.id.context_menu_chip_anchor_point);
             mChipController =
-                    new ContextMenuChipController(mActivity, chipAnchorView, () -> dismiss());
+                    new ContextMenuChipController(mActivity, chipAnchorView, this::dismiss);
             chipDelegate.getChipRenderParams(
                     (chipRenderParams) -> {
                         FlyoutController<ContextMenuDialog> controller =
@@ -397,9 +395,7 @@ public class ContextMenuCoordinator implements ContextMenuUi, FlyoutHandler<Cont
                         /* popupMargin= */ null,
                         /* dragDispatchingTargetView= */ null,
                         calculateFlyoutAnchorRect(mActivity, view),
-                        () -> {
-                            dismissRunnable.run();
-                        },
+                        dismissRunnable,
                         listView.getPaddingTop());
 
         listView.setOnScrollChangeListener(scrollListener);

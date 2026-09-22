@@ -205,6 +205,10 @@ void AwFieldTrials::RegisterFeatureOverrides(base::FeatureList* feature_list) {
   // Disable Web Serial API on WebView.
   aw_feature_overrides.DisableFeature(blink::features::kWebSerialAPI);
 
+  // DISABLED_NEEDS_API: WebHID permission prompt needs better support for
+  // web permissions and app-facing APIs.
+  aw_feature_overrides.DisableFeature(blink::features::kWebHID);
+
   // Disable key pinning enforcement on webview.
   aw_feature_overrides.DisableFeature(
       net::features::kStaticKeyPinningEnforcement);
@@ -366,6 +370,10 @@ void AwFieldTrials::RegisterFeatureOverrides(base::FeatureList* feature_list) {
   // DISABLED_TEMPORARY: crbug.com/515084572
   aw_feature_overrides.DisableFeature(
       net::features::kCloseQuicSessionsOnPreFreeze);
+
+  // DISABLED_TEMPORARY: b/568735242
+  aw_feature_overrides.DisableFeature(
+      blink::features::kDisconnectWebSocketOnBFCache);
 }
 
 void AwFieldTrials::EnableRuntimeMutableFeatures(

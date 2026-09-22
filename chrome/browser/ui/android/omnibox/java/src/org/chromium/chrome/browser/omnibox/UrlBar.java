@@ -115,6 +115,8 @@ public class UrlBar extends AutocompleteEditText {
     private @Nullable UrlBarTextContextMenuDelegate mTextContextMenuDelegate;
     private @Nullable Callback<Integer> mUrlDirectionListener;
     private @Nullable Callback<Boolean> mUrlTextWrappingChangeListener;
+    private @Nullable Runnable mDetectAndNotifyOnTextWrappingChanges;
+    private boolean mWrapDetectionScheduled;
     private @Nullable Runnable mManageSearchEnginesCallback;
     private boolean mShowAiMode;
     private @Nullable Callback<Boolean> mShowAiModeCallback;
@@ -126,6 +128,7 @@ public class UrlBar extends AutocompleteEditText {
     private boolean mDesiredCursorVisible = true;
     private boolean mFocusEventEmitted;
     private boolean mAllowFocus = true;
+    private boolean mAllowMultilineInput;
     private boolean mCurrentInputCanBeWrapped;
 
     /** Tracks whether a long-press was performed during the current touch gesture. */
@@ -135,6 +138,11 @@ public class UrlBar extends AutocompleteEditText {
     private boolean mPointerDragActive;
 
     private boolean mPendingScroll;
+
+    // Whether an origin change was reported for a scroll request that had to be deferred until
+    // the next layout pass. The deferred scroll performed from layout() has no origin change
+    // information of its own, so the signal is latched here and consumed when the scroll runs.
+    private boolean mPendingScrollOriginChanged;
 
     // Captures the current intended text scroll type.
     // This may not be effective if mPendingScroll is true.
@@ -234,8 +242,7 @@ public class UrlBar extends AutocompleteEditText {
          * cut/copy actions. If null is returned, the existing text will be cut or copied.
          *
          * @param currentText The current displayed text.
-         * @param selectionStart The selection start in the display text.
-         * @param selectionEnd The selection end in the display text.
+         * @param selection The current text selection range in the URL bar.
          * @return The text to be cut/copied instead of the currently selected text.
          */
         default @Nullable String getReplacementCutCopyText(
@@ -261,8 +268,7 @@ public class UrlBar extends AutocompleteEditText {
          * cut/copy actions. If null is returned, the existing text will be cut or copied.
          *
          * @param currentText The current displayed text.
-         * @param selectionStart The selection start in the display text.
-         * @param selectionEnd The selection end in the display text.
+         * @param selection The current text selection range in the URL bar.
          * @return The text to be cut/copied instead of the currently selected text.
          */
         @Nullable String getReplacementCutCopyText(String currentText, TextSelection selection);
@@ -349,6 +355,12 @@ public class UrlBar extends AutocompleteEditText {
     }
 
     public void destroy() {
+        if (mDetectAndNotifyOnTextWrappingChanges != null) {
+            removeCallbacks(mDetectAndNotifyOnTextWrappingChanges);
+            mDetectAndNotifyOnTextWrappingChanges = null;
+        }
+        mWrapDetectionScheduled = false;
+        mUrlTextWrappingChangeListener = null;
         if (mContextMenuHelper != null) {
             mContextMenuHelper.destroy();
             mContextMenuHelper = null;
@@ -437,9 +449,6 @@ public class UrlBar extends AutocompleteEditText {
 
         // Ensure the URL bar is ready to generate autocomplete suggestions on user input.
         if (focused) setIgnoreTextChangesForAutocomplete(false);
-        if (mFocusChangeCallback != null) {
-            mFocusChangeCallback.onResult(new UrlBarFocusChangeInfo(focused, direction));
-        }
 
         updateCursorVisibility();
 
@@ -448,6 +457,7 @@ public class UrlBar extends AutocompleteEditText {
 
         if (focused) {
             mPendingScroll = false;
+            mPendingScrollOriginChanged = false;
         }
         fixupTextDirection();
 
@@ -457,6 +467,10 @@ public class UrlBar extends AutocompleteEditText {
             // limits.
             setEllipsize(focused ? null : TextUtils.TruncateAt.END);
             if (focused) clearBoundsEllipsisSpans(getText());
+        }
+
+        if (mFocusChangeCallback != null) {
+            mFocusChangeCallback.onResult(new UrlBarFocusChangeInfo(focused, direction));
         }
     }
 
@@ -506,8 +520,15 @@ public class UrlBar extends AutocompleteEditText {
                 && ToolbarVariationUtils.isToolbarUiRefactorEnabled(getContext());
     }
 
+    /** Sets whether this {@link UrlBar} should allow multiline input. */
+    public void setAllowMultilineInput(boolean allowMultiline) {
+        if (mAllowMultilineInput == allowMultiline) return;
+        mAllowMultilineInput = allowMultiline;
+        updateUrlBarForMultilineInput();
+    }
+
     private void updateUrlBarForMultilineInput() {
-        boolean wantWrap = mFocused && mCurrentInputCanBeWrapped;
+        boolean wantWrap = mAllowMultilineInput && mFocused && mCurrentInputCanBeWrapped;
         if (wantWrap == !isHorizontallyScrollable()) return;
         setHorizontallyScrolling(!wantWrap);
     }
@@ -602,10 +623,14 @@ public class UrlBar extends AutocompleteEditText {
                             getTextWithoutAutocomplete(), start, lengthBefore, lengthAfter));
         }
 
-        post(this::detectAndNotifyOnTextWrappingChanges);
+        if (mDetectAndNotifyOnTextWrappingChanges != null && !mWrapDetectionScheduled) {
+            mWrapDetectionScheduled = true;
+            post(mDetectAndNotifyOnTextWrappingChanges);
+        }
     }
 
     private void detectAndNotifyOnTextWrappingChanges() {
+        mWrapDetectionScheduled = false;
         var layout = getLayout();
         boolean textIsWrapped = layout != null && layout.getLineCount() > 1;
 
@@ -760,8 +785,14 @@ public class UrlBar extends AutocompleteEditText {
      *
      * @param listener The listener to be notified.
      */
-    /* package */ void setUrlTextWrappingChangeListener(Callback<Boolean> listener) {
+    /* package */ void setUrlTextWrappingChangeListener(@Nullable Callback<Boolean> listener) {
+        if (mDetectAndNotifyOnTextWrappingChanges != null) {
+            removeCallbacks(mDetectAndNotifyOnTextWrappingChanges);
+        }
+        mWrapDetectionScheduled = false;
         mUrlTextWrappingChangeListener = listener;
+        mDetectAndNotifyOnTextWrappingChanges =
+                listener == null ? null : this::detectAndNotifyOnTextWrappingChanges;
     }
 
     /**
@@ -778,7 +809,7 @@ public class UrlBar extends AutocompleteEditText {
      *
      * @param listener The listener to be notified.
      */
-    public void setTextChangeListener(Callback<String> listener) {
+    public void setTextChangeListener(@Nullable Callback<String> listener) {
         mTextChangeListener = listener;
     }
 
@@ -788,7 +819,7 @@ public class UrlBar extends AutocompleteEditText {
      *
      * @param listener The listener to be notified.
      */
-    public void setRichTextChangeListener(Callback<UrlBarTextChangeInfo> listener) {
+    public void setRichTextChangeListener(@Nullable Callback<UrlBarTextChangeInfo> listener) {
         mRichTextChangeListener = listener;
     }
 
@@ -1151,7 +1182,12 @@ public class UrlBar extends AutocompleteEditText {
         // Request scroll update in case scroll type or view dimensions have changed.
         mCurrentScrollType = scrollType;
         mPendingScroll = isLayoutRequested() || (getLayout() == null);
-        if (mPendingScroll) return;
+        if (mPendingScroll) {
+            mPendingScrollOriginChanged |= originChanged;
+            return;
+        }
+        originChanged |= mPendingScrollOriginChanged;
+        mPendingScrollOriginChanged = false;
 
         if (mFocused) return;
 
@@ -1180,6 +1216,9 @@ public class UrlBar extends AutocompleteEditText {
                 // therefore false negative using regular equality is unlikely.
                 && currentTextSize == mPreviousScrollFontSize
                 && currentIsRtl == mPreviousScrollWasRtl
+                // A previously computed scroll position is only valid for text whose origin ends
+                // at the same index the position was computed for.
+                && mOriginEndIndex == mPreviousScrollOriginEndIndex
                 && isVisibleTextTheSame(text)) {
             scrollTo(mPreviousScrollResultXPosition, 0);
 
@@ -1696,6 +1735,16 @@ public class UrlBar extends AutocompleteEditText {
     float getMaxHeightOfFont() {
         var fontMetrics = getPaint().getFontMetrics();
         return fontMetrics.bottom - fontMetrics.top;
+    }
+
+    /* package */ @Px
+    int getTextWidth() {
+        return (int) Math.ceil(getPaint().measureText(getText().toString()));
+    }
+
+    /* package */ @Px
+    int getWidthWithoutCompoundPadding() {
+        return getWidth() - getCompoundPaddingLeft() - getCompoundPaddingRight();
     }
 
     /**
