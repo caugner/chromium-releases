@@ -80,6 +80,7 @@ class LoginHandlerAndroid : public LoginHandler {
       }
 
       fullscreen_blocker_ = std::move(*blocker);
+
       chrome_http_auth_handler_ = std::make_unique<ChromeHttpAuthHandler>(
           authority, explanation, auth_info().challenger.GetURL(),
           login_model_data);

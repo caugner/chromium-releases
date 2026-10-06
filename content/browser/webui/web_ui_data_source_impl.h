@@ -8,7 +8,6 @@
 #include <stdint.h>
 
 #include <map>
-#include <set>
 #include <string>
 #include <string_view>
 
@@ -62,8 +61,6 @@ class CONTENT_EXPORT WebUIDataSourceImpl : public URLDataSourceImpl,
   void OverrideCrossOriginOpenerPolicy(const std::string& value) override;
   void OverrideCrossOriginEmbedderPolicy(const std::string& value) override;
   void OverrideCrossOriginResourcePolicy(const std::string& value) override;
-  void SetAllowAllOrigins(bool allow_all_origins) override;
-  void AddAccessControlAllowOrigin(const url::Origin& origin) override;
   void DisableTrustedTypesCSP() override;
   void DisableDenyXFrameOptions() override;
   void EnableReplaceI18nInJS() override;
@@ -153,8 +150,6 @@ class CONTENT_EXPORT WebUIDataSourceImpl : public URLDataSourceImpl,
   std::string coop_value_;
   std::string coep_value_;
   std::string corp_value_;
-  bool access_control_allow_all_origins_ = false;
-  std::set<url::Origin> access_control_allow_origins_;
   bool deny_xframe_options_ = true;
   bool add_load_time_data_defaults_ = true;
   bool should_replace_i18n_in_js_ = false;

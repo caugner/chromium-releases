@@ -77,11 +77,7 @@ AnimationFrameTimingMonitor::AnimationFrameTimingMonitor(Client& client,
 
 void AnimationFrameTimingMonitor::Shutdown() {
   enabled_ = false;
-  current_frame_timing_info_.Clear();
-  current_scripts_.clear();
-  congestion_scripts_.clear();
   frame_handling_input_ = nullptr;
-  task_attributed_window_ = nullptr;
   Thread::Current()->RemoveTaskTimeObserver(this);
 }
 
@@ -308,9 +304,6 @@ void AnimationFrameTimingMonitor::OnWorkerTaskCompleted(
     base::TimeTicks start_time,
     base::TimeTicks end_time,
     base::TimeTicks desired_execution_time) {
-  if (!enabled_) {
-    return;
-  }
   entry_point_depth_ = 0;
   pending_script_info_ = std::nullopt;
   current_task_start_ = base::TimeTicks();
@@ -991,7 +984,7 @@ void AnimationFrameTimingMonitor::Will(const probe::ExecuteScript& probe_data) {
   // executing an imported module script.
   // This is true for both imported and element-created scripts.
   v8::Isolate* isolate = probe_data.context->GetIsolate();
-  ScriptState* script_state = ScriptState::From(isolate, probe_data.v8_context);
+  ScriptState* script_state = ScriptState::ForCurrentRealm(isolate);
   if (PushScriptEntryPoint(script_state)) {
     pending_script_info_ = PendingScriptInfo{
         .invoker_type = ScriptTimingInfo::InvokerType::kModuleScript,

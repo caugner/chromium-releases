@@ -61,8 +61,6 @@ class FaviconSource : public content::URLDataSource {
   bool ShouldServiceRequest(const GURL& url,
                             content::BrowserContext* browser_context,
                             int render_process_id) override;
-  std::string GetAccessControlAllowOriginForOrigin(
-      const std::string& origin) override;
 
  protected:
   // Exposed for testing.
