@@ -3,37 +3,38 @@
 # found in the LICENSE file.
 """Definitions of builders in the chromium.linux builder group."""
 
-load("//lib/args.star", "args")
-load("//lib/branches.star", "branches")
-load("//lib/builder_config.star", "builder_config")
-load("//lib/builder_health_indicators.star", "health_spec")
-load("//lib/builders.star", "builders", "gardener_rotations", "os", "siso")
-load("//lib/ci.star", "ci")
-load("//lib/consoles.star", "consoles")
-load("//lib/gn_args.star", "gn_args")
-load("//lib/html.star", "linkify")
-load("//lib/targets.star", "targets")
+load("@chromium-luci//args.star", "args")
+load("@chromium-luci//branches.star", "branches")
+load("@chromium-luci//builder_config.star", "builder_config")
+load("@chromium-luci//builder_health_indicators.star", "health_spec")
+load("@chromium-luci//builders.star", "builders", "os")
+load("@chromium-luci//ci.star", "ci")
+load("@chromium-luci//consoles.star", "consoles")
+load("@chromium-luci//gn_args.star", "gn_args")
+load("@chromium-luci//html.star", "linkify")
+load("@chromium-luci//targets.star", "targets")
+load("//lib/ci_constants.star", "ci_constants")
+load("//lib/gardener_rotations.star", "gardener_rotations")
+load("//lib/siso.star", "siso")
 
 ci.defaults.set(
-    executable = ci.DEFAULT_EXECUTABLE,
+    executable = ci_constants.DEFAULT_EXECUTABLE,
     builder_group = "chromium.linux",
     builder_config_settings = builder_config.ci_settings(
         retry_failed_shards = True,
     ),
-    pool = ci.DEFAULT_POOL,
+    pool = ci_constants.DEFAULT_POOL,
     cores = 8,
     os = os.LINUX_DEFAULT,
     gardener_rotations = gardener_rotations.CHROMIUM,
     tree_closing = True,
-    tree_closing_notifiers = ci.DEFAULT_TREE_CLOSING_NOTIFIERS,
+    tree_closing_notifiers = ci_constants.DEFAULT_TREE_CLOSING_NOTIFIERS,
     main_console_view = "main",
-    execution_timeout = ci.DEFAULT_EXECUTION_TIMEOUT,
-    health_spec = health_spec.DEFAULT,
+    execution_timeout = ci_constants.DEFAULT_EXECUTION_TIMEOUT,
+    health_spec = health_spec.default(),
     notifies = ["chromium.linux"],
-    reclient_enabled = False,
-    service_account = ci.DEFAULT_SERVICE_ACCOUNT,
-    shadow_service_account = ci.DEFAULT_SHADOW_SERVICE_ACCOUNT,
-    siso_enabled = True,
+    service_account = ci_constants.DEFAULT_SERVICE_ACCOUNT,
+    shadow_service_account = ci_constants.DEFAULT_SHADOW_SERVICE_ACCOUNT,
     siso_project = siso.project.DEFAULT_TRUSTED,
     siso_remote_jobs = siso.remote_jobs.HIGH_JOBS_FOR_CI,
 )
@@ -464,7 +465,7 @@ ci.builder(
 ci.thin_tester(
     name = "Linux Tests",
     branch_selector = branches.selector.LINUX_BRANCHES,
-    triggered_by = ["ci/Linux Builder"],
+    parent = "ci/Linux Builder",
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -567,7 +568,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "Linux Tests (dbg)(1)",
     branch_selector = branches.selector.LINUX_BRANCHES,
-    triggered_by = ["ci/Linux Builder (dbg)"],
+    parent = "ci/Linux Builder (dbg)",
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -665,7 +666,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "Linux Tests (Wayland)",
     branch_selector = branches.selector.LINUX_BRANCHES,
-    triggered_by = ["ci/Linux Builder (Wayland)"],
+    parent = "ci/Linux Builder (Wayland)",
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -757,7 +758,6 @@ ci.thin_tester(
 )
 
 ci.thin_tester(
-    # TODO(crbug.com/401284929): Put common config with "Linux Tests (Wayland)" in shared bundle.
     name = "linux-wayland-mutter-rel-tests",
     # TODO(crbug.com/401284929): Uncomment when enabling gardener_rotations and tree_closing.
     # branch_selector = branches.selector.LINUX_BRANCHES,
@@ -768,7 +768,7 @@ ci.thin_tester(
                 "ozone wayland doc",
             ),
         ),
-    triggered_by = ["ci/Linux Builder (Wayland)"],
+    parent = "ci/Linux Builder (Wayland)",
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -787,8 +787,6 @@ ci.thin_tester(
             target_platform = builder_config.target_platform.LINUX,
         ),
         build_gs_bucket = "chromium-linux-archive",
-        # TODO(crbug.com/401284929): Remove this when noble pool is increased
-        run_tests_serially = True,
     ),
     targets = targets.bundle(
         targets = [
@@ -806,11 +804,34 @@ ci.thin_tester(
             "isolate_profile_data",
         ],
         per_test_modifications = {
+            # https://crbug.com/1084469
+            "browser_tests": targets.mixin(
+                args = [
+                    # crbug.com/414750476 PDF extension tests fail with the
+                    # default 1920x1200 resolution used for mutter.
+                    "--mutter-display=1280x800",
+                    "--test-launcher-filter-file=../../testing/buildbot/filters/ozone-linux.browser_tests_mutter.filter",
+                ],
+                # Only retry the individual failed tests instead of rerunning
+                # entire shards.
+                # crbug.com/1473501
+                retry_only_failed_tests = True,
+                swarming = targets.swarming(
+                    expiration_sec = 18000,
+                    hard_timeout_sec = 14400,
+                    shards = 10,
+                ),
+            ),
             "content_browsertests": targets.mixin(
                 # Only retry the individual failed tests instead of rerunning
                 # entire shards.
                 # crbug.com/1473501
                 retry_only_failed_tests = True,
+                swarming = targets.swarming(
+                    expiration_sec = 18000,
+                    hard_timeout_sec = 14400,
+                    shards = 10,
+                ),
             ),
             "interactive_ui_tests": targets.mixin(
                 # https://crbug.com/1192997
@@ -818,6 +839,8 @@ ci.thin_tester(
                     "--test-launcher-filter-file=../../testing/buildbot/filters/ozone-linux.interactive_ui_tests_mutter.filter",
                 ],
                 swarming = targets.swarming(
+                    expiration_sec = 18000,
+                    hard_timeout_sec = 14400,
                     shards = 5,
                 ),
             ),
@@ -887,7 +910,7 @@ ci.builder(
 ci.builder(
     name = "linux-oi-rel",
     description_html = "This builder runs key test suites with OriginKeyedProcessesByDefault (OriginIsolation) enabled, to provide test coverage with the feature enabled.",
-    triggered_by = ["ci/Linux Builder"],
+    parent = "ci/Linux Builder",
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(

@@ -4,7 +4,9 @@
 
 #include "ash/wm/layer_tree_synchronizer.h"
 
+#include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <utility>
 #include <vector>
@@ -25,7 +27,10 @@ namespace {
 
 using Corner = gfx::RRectF::Corner;
 
-constexpr float kEpsilon = std::numeric_limits<float>::epsilon();
+// The expected number of elements in the `original_layers_info_` map.
+// Currently, we expect a maximum of 8 layers to be modified when
+// synchronizing the rounded corners of a window with its transient children.
+constexpr int kExpectedModifiedLayers = 8;
 
 float Square(float n) {
   return std::pow(n, 2);
@@ -141,22 +146,15 @@ struct CircularArc {
       return kNoIntersectingPoint;
     }
 
-    // Single intersection point. Circles are tangent to each other.
-    if (std::abs(d - r1 + r2) < kEpsilon) {  // d == 0
-      float x = (c1.x() + c2.x()) / 2;
-      float y = (c1.y() + c2.y()) / 2;
-      return {{gfx::PointF(x, y)}, /*infinite_points=*/false};
-    }
-
-    // Circles intersect at two points.
-    CHECK_GT(d, std::abs(r1 - r2));
-    CHECK_LT(d, r1 + r2);
-
     float a = (Square(r1) - Square(r2) + Square(d)) / (2 * Square(d));
     float h = std::sqrt(Square(r1) - Square(a)) / d;
 
     float p5_x = c1.x() + a * distance_vec.x();
     float p5_y = c1.y() + a * distance_vec.y();
+
+    if (h == 0) {  // Single intersection point
+      return {{gfx::PointF(p5_x, p5_y)}, /*infinite_points=*/false};
+    }
 
     float p3_x = p5_x - h * distance_vec.y();
     float p3_y = p5_y + h * distance_vec.x();
@@ -301,14 +299,6 @@ bool ShouldOverrideCornerRadius(const gfx::RRectF& rect,
                                 const gfx::RRectF& containing_rect,
                                 Corner corner,
                                 bool consider_curvature) {
-  if (!containing_rect.HasRoundedCorners()) {
-    return false;
-  }
-
-  if (!containing_rect.rect().Contains(rect.rect())) {
-    return false;
-  }
-
   const gfx::Vector2dF rect_corner_radii = rect.GetCornerRadii(corner);
   const gfx::Vector2dF containing_rect_corner_radii =
       containing_rect.GetCornerRadii(corner);
@@ -362,10 +352,20 @@ using Corners = base::flat_set<gfx::RRectF::Corner>;
 Corners FindCornersToOverrideRadius(const gfx::RRectF& rect,
                                     const gfx::RRectF& containing_rect,
                                     bool consider_curvature) {
+  static constexpr uint8_t kNumberOfCorners = 4;
+  static constexpr std::array<Corner, kNumberOfCorners> kCorners{
+      Corner::kUpperLeft, Corner::kUpperRight, Corner::kLowerRight,
+      Corner::kLowerLeft};
+
   Corners corners;
 
-  for (auto corner : {Corner::kUpperLeft, Corner::kUpperRight,
-                      Corner::kLowerRight, Corner::kLowerLeft}) {
+  if (!containing_rect.HasRoundedCorners() ||
+      !containing_rect.rect().Contains(rect.rect())) {
+    return corners;
+  }
+
+  corners.reserve(kNumberOfCorners);
+  for (auto corner : kCorners) {
     if (ShouldOverrideCornerRadius(rect, containing_rect, corner,
                                    consider_curvature)) {
       corners.insert(corner);
@@ -405,7 +405,9 @@ gfx::Transform AccumulateTargetTransform(const ui::Layer* layer,
 // LayerTreeSynchronizerBase:
 
 LayerTreeSynchronizerBase::LayerTreeSynchronizerBase(bool restore_tree)
-    : restore_tree_(restore_tree) {}
+    : restore_tree_(restore_tree) {
+  original_layers_info_.reserve(kExpectedModifiedLayers);
+}
 
 LayerTreeSynchronizerBase::~LayerTreeSynchronizerBase() = default;
 
@@ -440,8 +442,9 @@ bool LayerTreeSynchronizerBase::SynchronizeLayerTreeRoundedCornersImpl(
   // Currently, cc does not support rounded corners for layer whose transform
   // does not preserve 2d-axis alignment and ignores the radii.
   // (See `cc::Layer::SetRoundedCornerRadius()` comment).
-  const bool ignore_layer =
-      !transform.Preserves2dAxisAlignment() || !layer->visible();
+  const bool ignore_layer = layer->rounded_corner_radii().IsEmpty() ||
+                            !layer->visible() ||
+                            !transform.Preserves2dAxisAlignment();
   if (!ignore_layer) {
     // Get the `layer` bounds in the `root_layer_` coordinate space.
     // `transform` accounts for layer offset from its parent.
@@ -580,7 +583,6 @@ void WindowTreeSynchronizer::SynchronizeRoundedCorners(
     bool consider_curvature,
     TransientTreeIgnorePredicate ignore_predicate) {
   CHECK(root_window->Contains(window));
-
   for (auto* window_iter : GetTransientTreeIterator(window, ignore_predicate)) {
     const bool altered = SynchronizeLayerTreeRoundedCorners(
         window_iter->layer(), root_window->layer(), reference_bounds,

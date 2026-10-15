@@ -66,6 +66,9 @@ GPU_EXPORT extern const base::FeatureParam<bool>
     kSkiaGraphiteDawnBackendDebugLabels;
 
 #if BUILDFLAG(IS_WIN)
+GPU_EXPORT extern const base::FeatureParam<bool>
+    kSkiaGraphiteDawnDumpWCOnD3DError;
+
 GPU_EXPORT BASE_DECLARE_FEATURE(kSkiaGraphiteDawnUseD3D12);
 #endif
 
@@ -135,6 +138,8 @@ GPU_EXPORT BASE_DECLARE_FEATURE(kANGLEPerContextBlobCache);
 #if BUILDFLAG(IS_APPLE)
 GPU_EXPORT BASE_DECLARE_FEATURE(kIOSurfaceMultiThreading);
 #endif
+
+GPU_EXPORT BASE_DECLARE_FEATURE(kWebGPUCompatibilityMode);
 
 GPU_EXPORT bool IsGraphiteContextThreadSafe();
 }  // namespace features

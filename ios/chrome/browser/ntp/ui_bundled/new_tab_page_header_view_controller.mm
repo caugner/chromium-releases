@@ -12,6 +12,7 @@
 #import "base/metrics/histogram_macros.h"
 #import "base/metrics/user_metrics.h"
 #import "base/strings/sys_string_conversions.h"
+#import "components/omnibox/common/omnibox_features.h"
 #import "components/prefs/pref_service.h"
 #import "components/signin/public/base/signin_switches.h"
 #import "components/strings/grit/components_strings.h"
@@ -30,6 +31,7 @@
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_header_constants.h"
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_header_view.h"
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_header_view_controller_delegate.h"
+#import "ios/chrome/browser/omnibox/ui/omnibox_container_view.h"
 #import "ios/chrome/browser/shared/model/profile/features.h"
 #import "ios/chrome/browser/shared/public/commands/application_commands.h"
 #import "ios/chrome/browser/shared/public/commands/browser_coordinator_commands.h"
@@ -48,6 +50,7 @@
 #import "ios/chrome/browser/toolbar/ui_bundled/public/fakebox_focuser.h"
 #import "ios/chrome/browser/toolbar/ui_bundled/public/toolbar_utils.h"
 #import "ios/chrome/browser/toolbar/ui_bundled/tab_groups/ui/tab_group_indicator_view.h"
+#import "ios/chrome/common/NSString+Chromium.h"
 #import "ios/chrome/common/material_timing.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #import "ios/chrome/common/ui/util/constraints_ui_util.h"
@@ -92,7 +95,7 @@ const CGFloat kIdentityDiscMaxFontSize = 24;
 @property(nonatomic, strong) NewTabPageHeaderView* headerView;
 @property(nonatomic, strong) UIButton* fakeOmnibox;
 @property(nonatomic, strong) UIButton* accessibilityButton;
-@property(nonatomic, strong) NSString* identityDiscAccessibilityLabel;
+@property(nonatomic, copy) NSString* identityDiscAccessibilityLabel;
 @property(nonatomic, strong, readwrite) UIButton* identityDiscButton;
 @property(nonatomic, strong) UIImage* identityDiscImage;
 @property(nonatomic, strong) UIButton* fakeTapButton;
@@ -108,6 +111,9 @@ const CGFloat kIdentityDiscMaxFontSize = 24;
 
 // Whether or not the user is signed in.
 @property(nonatomic, assign) BOOL isSignedIn;
+
+// Name of the default search engine. Used for the omnibox placeholder text.
+@property(nonatomic, copy) NSString* defaultSearchEngineName;
 
 @end
 
@@ -310,6 +316,7 @@ const CGFloat kIdentityDiscMaxFontSize = 24;
         initWithUseNewBadgeForLensButton:_useNewBadgeForLensButton];
     self.headerView.isGoogleDefaultSearchEngine =
         self.isGoogleDefaultSearchEngine;
+    self.headerView.placeholderText = self.placeholderText;
     self.headerView.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.headerView];
     AddSameConstraints(self.headerView, self.view);
@@ -437,8 +444,7 @@ const CGFloat kIdentityDiscMaxFontSize = 24;
       (fakeOmniboxHeight - kFakeLocationBarHeightMargin) / 2;
   self.accessibilityButton.clipsToBounds = YES;
   self.accessibilityButton.isAccessibilityElement = YES;
-  self.accessibilityButton.accessibilityLabel =
-      l10n_util::GetNSString(IDS_OMNIBOX_EMPTY_HINT);
+  self.accessibilityButton.accessibilityLabel = self.placeholderText;
   [self.fakeOmnibox addSubview:self.accessibilityButton];
   self.accessibilityButton.translatesAutoresizingMaskIntoConstraints = NO;
   AddSameConstraints(self.fakeOmnibox, self.accessibilityButton);
@@ -553,13 +559,13 @@ const CGFloat kIdentityDiscMaxFontSize = 24;
 
   UIColor* backgroundColor =
       IsSignInButtonNoAvatarEnabled()
-          ? [[UIColor colorNamed:kBlueColor] colorWithAlphaComponent:0.08]
+          ? [[UIColor colorNamed:kSolidWhiteColor] colorWithAlphaComponent:0.75]
           : [[UIColor colorNamed:@"fake_omnibox_solid_background_color"]
                 colorWithAlphaComponent:0.8];
   customizationMenuButton.backgroundColor = backgroundColor;
 
   UIColor* tintColor = [UIColor
-      colorNamed:(IsSignInButtonNoAvatarEnabled() ? kBlueColor
+      colorNamed:(IsSignInButtonNoAvatarEnabled() ? kBlue600Color
                                                   : kTextSecondaryColor)];
   customizationMenuButton.tintColor = tintColor;
 
@@ -597,11 +603,12 @@ const CGFloat kIdentityDiscMaxFontSize = 24;
     UIButtonConfiguration* config =
         [UIButtonConfiguration plainButtonConfiguration];
     config.background.backgroundColor =
-        [[UIColor colorNamed:kBlueColor] colorWithAlphaComponent:0.08];
+        [[UIColor colorNamed:kSolidWhiteColor] colorWithAlphaComponent:0.75];
     NSDictionary* attributes = @{
       NSFontAttributeName : PreferredFontForTextStyle(
-          UIFontTextStyleBody, UIFontWeightSemibold, kIdentityDiscMaxFontSize),
-      NSForegroundColorAttributeName : [UIColor colorNamed:kBlueColor],
+          UIFontTextStyleSubheadline, UIFontWeightSemibold,
+          kIdentityDiscMaxFontSize),
+      NSForegroundColorAttributeName : [UIColor colorNamed:kBlue600Color],
     };
     config.attributedTitle = [[NSAttributedString alloc]
         initWithString:l10n_util::GetNSString(IDS_IOS_SIGNIN_BUTTON_TEXT)
@@ -857,11 +864,20 @@ const CGFloat kIdentityDiscMaxFontSize = 24;
   [self updateVoiceSearchDisplay];
 }
 
+- (void)setDefaultSearchEngineName:(NSString*)defaultSearchEngineName {
+  if (_defaultSearchEngineName == defaultSearchEngineName) {
+    return;
+  }
+  _defaultSearchEngineName = defaultSearchEngineName;
+  self.headerView.placeholderText = self.placeholderText;
+}
+
 - (void)updateADPBadgeWithErrorFound:(BOOL)hasAccountError
                                 name:(NSString*)name
                                email:(NSString*)email {
   CHECK(
-      base::FeatureList::IsEnabled(switches::kEnableErrorBadgeOnIdentityDisc));
+      base::FeatureList::IsEnabled(switches::kEnableErrorBadgeOnIdentityDisc) ||
+      base::FeatureList::IsEnabled(switches::kEnableIdentityInAuthError));
 
   if (hasAccountError == _hasAccountError) {
     return;
@@ -884,8 +900,11 @@ const CGFloat kIdentityDiscMaxFontSize = 24;
 
   self.isSignedIn = NO;
 
-  self.identityDiscAccessibilityLabel = l10n_util::GetNSString(
-      IDS_IOS_IDENTITY_DISC_SIGNED_OUT_ACCESSIBILITY_LABEL);
+  self.identityDiscAccessibilityLabel =
+      IsSignInButtonNoAvatarEnabled()
+          ? l10n_util::GetNSString(IDS_IOS_SIGN_IN_BUTTON_ACCESSIBILITY_LABEL)
+          : l10n_util::GetNSString(
+                IDS_IOS_IDENTITY_DISC_SIGNED_OUT_ACCESSIBILITY_LABEL);
 
   // `self.identityDiscButton` should not be updated if the view has not been
   // created yet.
@@ -995,17 +1014,10 @@ const CGFloat kIdentityDiscMaxFontSize = 24;
 - (void)updateIdentityDiscAccessibilityLabelWithName:(NSString*)name
                                                email:(NSString*)email {
   NSString* accountButtonLabel;
-  if (!base::FeatureList::IsEnabled(
-          switches::kEnableErrorBadgeOnIdentityDisc)) {
-    if (name) {
-      accountButtonLabel = l10n_util::GetNSStringF(
-          IDS_IOS_IDENTITY_DISC_WITH_NAME_AND_EMAIL,
-          base::SysNSStringToUTF16(name), base::SysNSStringToUTF16(email));
-    } else {
-      accountButtonLabel = l10n_util::GetNSStringF(
-          IDS_IOS_IDENTITY_DISC_WITH_EMAIL, base::SysNSStringToUTF16(email));
-    }
-  } else {
+  if (base::FeatureList::IsEnabled(kIdentityDiscAccountMenu)) {
+    // _hasAccountError is only set if the feature
+    // `kEnableErrorBadgeOnIdentityDisc` is enabled, and the primary identity
+    // has an error.
     if (name) {
       accountButtonLabel =
           _hasAccountError
@@ -1026,6 +1038,17 @@ const CGFloat kIdentityDiscMaxFontSize = 24;
               : l10n_util::GetNSStringF(
                     IDS_IOS_IDENTITY_DISC_WITH_EMAIL_OPEN_ACCOUNT_MENU,
                     base::SysNSStringToUTF16(email));
+    }
+  } else {
+    // TODO(crbug.com/389915527): Update the following strings to reflect the
+    // error badge introduced with kEnableErrorBadgeOnIdentityDisc.
+    if (name) {
+      accountButtonLabel = l10n_util::GetNSStringF(
+          IDS_IOS_IDENTITY_DISC_WITH_NAME_AND_EMAIL,
+          base::SysNSStringToUTF16(name), base::SysNSStringToUTF16(email));
+    } else {
+      accountButtonLabel = l10n_util::GetNSStringF(
+          IDS_IOS_IDENTITY_DISC_WITH_EMAIL, base::SysNSStringToUTF16(email));
     }
   }
 
@@ -1052,6 +1075,16 @@ const CGFloat kIdentityDiscMaxFontSize = 24;
     [self.headerView
         updateButtonsForUserInterfaceStyle:self.traitCollection
                                                .userInterfaceStyle];
+  }
+}
+
+// Returns the omnibox placeholder text.
+- (NSString*)placeholderText {
+  if (base::FeatureList::IsEnabled(omnibox::kOmniboxMobileParityUpdate)) {
+    return l10n_util::GetNSStringF(IDS_OMNIBOX_EMPTY_HINT_WITH_DSE_NAME,
+                                   self.defaultSearchEngineName.cr_UTF16String);
+  } else {
+    return l10n_util::GetNSString(IDS_OMNIBOX_EMPTY_HINT);
   }
 }
 

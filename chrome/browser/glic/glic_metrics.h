@@ -34,18 +34,20 @@ enum class Error {
 };
 // LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:GlicResponseError)
 
-// LINT.IfChange(EntryPointImpression)
-enum class EntryPointImpression {
-  kBeforeFre = 0,
-  kAfterFreBrowserOnly = 1,
-  kAfterFreOsOnly = 2,
-  kAfterFreEnabled = 3,
-  kAfterFreDisabled = 4,
-  kNotPermitted = 5,
-  kIncompleteFre = 6,
-  kMaxValue = kIncompleteFre,
+// LINT.IfChange(EntryPointStatus)
+enum class EntryPointStatus {
+  kBeforeFreNotEligible = 0,
+  kBeforeFreAndEligible = 1,
+  kIncompleteFreNotEligible = 2,
+  kIncompleteFreAndEligible = 3,
+  kAfterFreBrowserOnly = 4,
+  kAfterFreOsOnly = 5,
+  kAfterFreBrowserAndOs = 6,
+  kAfterFreThreeDotOnly = 7,
+  kAfterFreNotEligible = 8,
+  kMaxValue = kAfterFreNotEligible,
 };
-// LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:GlicEntryPointImpression)
+// LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:GlicEntryPointStatus)
 
 // LINT.IfChange(ResponseSegmentation)
 enum class ResponseSegmentation {
@@ -126,6 +128,17 @@ enum class AttachChangeReason {
 
 // LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:GlicAttachChangeReason)
 
+// LINT.IfChange(GlicRequestEvent)
+// Events related to requests to the Glic API from the web client.
+enum class GlicRequestEvent {
+  kRequestReceived = 0,
+  kRequestSent = 1,
+  kRequestHandlerException = 2,
+  kRequestReceivedWhileHidden = 3,
+  kMaxValue = kRequestReceivedWhileHidden,
+};
+// LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:GlicRequestEvent)
+
 class GlicEnabling;
 class GlicFocusedTabManager;
 class GlicWindowController;
@@ -175,6 +188,12 @@ class GlicMetrics {
   void OnWidgetUserResizeEnded();
   // Called when the glic window finishes closing.
   void OnGlicWindowClose();
+  // Called when glic requests a scroll.
+  void OnGlicScrollAttempt();
+  // Called when scrolling starts (after glic requests to scroll) or if
+  // the operation fails. `success` is true if a scroll was successfully
+  // triggered.
+  void OnGlicScrollComplete(bool success);
 
   // Must be called immediately after constructor before any calls from
   // glic.mojom.
@@ -230,10 +249,10 @@ class GlicMetrics {
   base::RepeatingTimer glic_window_size_timer_;
 
   // A context-free source id used when no web contents is targeted.
-  ukm::SourceId no_url_source_id_;
+  ukm::SourceId no_url_source_id_ = ukm::NoURLSourceId();
   // The source id at the time context is requested. If context was not
   // requested then this is `no_url_source_id_`.
-  ukm::SourceId source_id_;
+  ukm::SourceId source_id_ = ukm::NoURLSourceId();
 
   // The owner of this class is responsible for maintaining appropriate lifetime
   // for controller_.
@@ -261,7 +280,20 @@ class GlicMetrics {
   // The timestamp when the glic window starts to be shown.
   base::TimeTicks show_start_time_;
   // Web client's operation modes.
-  mojom::WebClientMode starting_mode_;
+  mojom::WebClientMode starting_mode_ = mojom::WebClientMode::kUnknown;
+
+  // The following variables are used for recording scroll related metrics.
+  // The number of scroll attempts  (tracked per session and reset when the
+  // session ends).
+  int scroll_attempt_count_ = 0;
+  // These two variables mirror `input_submitted_time_` and
+  // `input_mode_`, but are only set when `OnGlicScrollAttempt()` is
+  // called. They are reset in `OnGlicScrollComplete()`. They are separately
+  // tracked because `OnGlicScrollComplete()` could potentially be called after
+  // `OnResponseStopped()`, which resets `input_submitted_time_` and
+  // `input_mode_`.
+  base::TimeTicks scroll_input_submitted_time_;
+  mojom::WebClientMode scroll_input_mode_;
 };
 
 }  // namespace glic

@@ -6,8 +6,10 @@
 
 #include <utility>
 
+#include "ash/constants/ash_features.h"
 #include "ash/constants/ash_switches.h"
 #include "base/command_line.h"
+#include "base/strings/stringprintf.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/test_future.h"
@@ -378,6 +380,18 @@ TEST_F(ArcActivationNecessityCheckerTest, ManagementTransition) {
 
 TEST_F(ArcActivationNecessityCheckerTest, AlwaysOnVpn) {
   profile_->GetPrefs()->SetString(prefs::kAlwaysOnVpnPackage, "vpn.app.fake");
+  base::test::TestFuture<bool> future;
+  checker_->Check(future.GetCallback());
+  EXPECT_TRUE(future.Get());
+}
+
+TEST_F(ArcActivationNecessityCheckerTest, CoralFeatureEnabled) {
+  base::test::ScopedFeatureList feature_list;
+  // Coral feature is enabled when both flags below are enabled.
+  feature_list.InitWithFeatures(
+      /* enabled_features */ {ash::features::kCoralFeature,
+                              ash::features::kCoralFeatureAllowed},
+      /* disabled_features */ {});
   base::test::TestFuture<bool> future;
   checker_->Check(future.GetCallback());
   EXPECT_TRUE(future.Get());

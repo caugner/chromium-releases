@@ -4,7 +4,7 @@
 
 # Execute this file to set up some common GN arg configs for Chromium builders.
 
-load("//lib/gn_args.star", "gn_args")
+load("@chromium-luci//gn_args.star", "gn_args")
 
 gn_args.config(
     name = "afl",
@@ -278,6 +278,11 @@ gn_args.config(
     args = {
         "enable_cast_receiver": True,
     },
+)
+
+gn_args.config(
+    name = "cast_receiver_perf_optimized",
+    args_file = "//build/config/fuchsia/perf_optimized_cast_receiver_args.gn",
 )
 
 gn_args.config(
@@ -1191,6 +1196,14 @@ gn_args.config(
         "try_builder",
         "no_symbols",
     ],
+)
+
+gn_args.config(
+    name = "release_with_dchecks",
+    args = {
+        "is_debug": False,
+        "dcheck_always_on": True,
+    },
 )
 
 gn_args.config(

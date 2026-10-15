@@ -3,30 +3,32 @@
 # found in the LICENSE file.
 """Definitions of builders in the chromium.gpu builder group."""
 
-load("//lib/args.star", "args")
-load("//lib/branches.star", "branches")
-load("//lib/builder_config.star", "builder_config")
-load("//lib/builder_health_indicators.star", "health_spec")
-load("//lib/builders.star", "cpu", "gardener_rotations", "siso")
-load("//lib/ci.star", "ci")
-load("//lib/consoles.star", "consoles")
-load("//lib/gn_args.star", "gn_args")
-load("//lib/targets.star", "targets")
+load("@chromium-luci//args.star", "args")
+load("@chromium-luci//branches.star", "branches")
+load("@chromium-luci//builder_config.star", "builder_config")
+load("@chromium-luci//builder_health_indicators.star", "health_spec")
+load("@chromium-luci//builders.star", "cpu")
+load("@chromium-luci//ci.star", "ci")
+load("@chromium-luci//consoles.star", "consoles")
+load("@chromium-luci//gn_args.star", "gn_args")
+load("@chromium-luci//targets.star", "targets")
+load("//lib/ci_constants.star", "ci_constants")
+load("//lib/gardener_rotations.star", "gardener_rotations")
+load("//lib/gpu.star", "gpu")
+load("//lib/siso.star", "siso")
 
 ci.defaults.set(
-    executable = ci.DEFAULT_EXECUTABLE,
+    executable = ci_constants.DEFAULT_EXECUTABLE,
     builder_group = "chromium.gpu",
-    pool = ci.gpu.POOL,
+    pool = gpu.ci.POOL,
     gardener_rotations = gardener_rotations.CHROMIUM_GPU,
     tree_closing = True,
-    tree_closing_notifiers = ci.gpu.TREE_CLOSING_NOTIFIERS,
+    tree_closing_notifiers = gpu.ci.TREE_CLOSING_NOTIFIERS,
     contact_team_email = "chrome-gpu-infra@google.com",
-    execution_timeout = ci.DEFAULT_EXECUTION_TIMEOUT,
-    health_spec = health_spec.DEFAULT,
-    reclient_enabled = False,
-    service_account = ci.DEFAULT_SERVICE_ACCOUNT,
-    shadow_service_account = ci.DEFAULT_SHADOW_SERVICE_ACCOUNT,
-    siso_enabled = True,
+    execution_timeout = ci_constants.DEFAULT_EXECUTION_TIMEOUT,
+    health_spec = health_spec.default(),
+    service_account = ci_constants.DEFAULT_SERVICE_ACCOUNT,
+    shadow_service_account = ci_constants.DEFAULT_SHADOW_SERVICE_ACCOUNT,
     siso_project = siso.project.DEFAULT_TRUSTED,
     siso_remote_jobs = siso.remote_jobs.DEFAULT,
     thin_tester_cores = 2,
@@ -59,7 +61,7 @@ consoles.console_view(
     },
 )
 
-ci.gpu.linux_builder(
+gpu.ci.linux_builder(
     name = "Android Release (Nexus 5X)",
     description_html = "Runs a subset of release GPU tests on stable Nexus 5X configs",
     builder_spec = builder_config.builder_spec(
@@ -124,7 +126,7 @@ ci.gpu.linux_builder(
     cq_mirrors_console_view = "mirrors",
 )
 
-ci.gpu.linux_builder(
+gpu.ci.linux_builder(
     name = "Android Release (Pixel 2)",
     branch_selector = branches.selector.ANDROID_BRANCHES,
     description_html = "Runs a subset of release GPU tests on stable Pixel 2 configs",
@@ -183,7 +185,7 @@ ci.gpu.linux_builder(
     cq_mirrors_console_view = "mirrors",
 )
 
-ci.gpu.linux_builder(
+gpu.ci.linux_builder(
     name = "GPU Linux Builder",
     branch_selector = branches.selector.LINUX_BRANCHES,
     description_html = "Builds release Linux x64 binaries for GPU testing",
@@ -226,7 +228,7 @@ ci.gpu.linux_builder(
     cq_mirrors_console_view = "mirrors",
 )
 
-ci.gpu.linux_builder(
+gpu.ci.linux_builder(
     name = "GPU Linux Builder (dbg)",
     description_html = "Builds debug Linux x64 binaries for GPU testing",
     builder_spec = builder_config.builder_spec(
@@ -261,7 +263,7 @@ ci.gpu.linux_builder(
     ),
 )
 
-ci.gpu.mac_builder(
+gpu.ci.mac_builder(
     name = "GPU Mac Builder",
     branch_selector = branches.selector.MAC_BRANCHES,
     description_html = "Builds release Mac x64 binaries for GPU testing",
@@ -307,7 +309,7 @@ ci.gpu.mac_builder(
     cq_mirrors_console_view = "mirrors",
 )
 
-ci.gpu.mac_builder(
+gpu.ci.mac_builder(
     name = "GPU Mac Builder (dbg)",
     description_html = "Builds debug Mac x64 binaries for GPU testing",
     builder_spec = builder_config.builder_spec(
@@ -344,7 +346,7 @@ ci.gpu.mac_builder(
     ),
 )
 
-ci.gpu.windows_builder(
+gpu.ci.windows_builder(
     name = "GPU Win x64 Builder",
     branch_selector = branches.selector.WINDOWS_BRANCHES,
     description_html = "Builds release x64 Windows binaries for GPU testing",
@@ -387,7 +389,7 @@ ci.gpu.windows_builder(
     cq_mirrors_console_view = "mirrors",
 )
 
-ci.gpu.windows_builder(
+gpu.ci.windows_builder(
     name = "GPU Win x64 Builder (dbg)",
     description_html = "Builds debug Windows x64 binaries for GPU testing",
     builder_spec = builder_config.builder_spec(
@@ -427,7 +429,7 @@ ci.gpu.windows_builder(
 ci.thin_tester(
     name = "Linux Debug (NVIDIA)",
     description_html = "Runs a subset of debug GPU tests on stable Linux/NVIDIA GTX 1660 configs",
-    triggered_by = ["GPU Linux Builder (dbg)"],
+    parent = "GPU Linux Builder (dbg)",
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -475,7 +477,7 @@ ci.thin_tester(
     name = "Linux Release (NVIDIA)",
     branch_selector = branches.selector.LINUX_BRANCHES,
     description_html = "Runs a subset of release GPU tests on stable Linux/NVIDIA GTX 1660 configs",
-    triggered_by = ["ci/GPU Linux Builder"],
+    parent = "ci/GPU Linux Builder",
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -524,7 +526,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "Mac Debug (Intel)",
     description_html = "Runs a subset of debug GPU tests on stable Mac/Intel UHD 630 Mac Mini configs",
-    triggered_by = ["GPU Mac Builder (dbg)"],
+    parent = "GPU Mac Builder (dbg)",
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -571,7 +573,7 @@ ci.thin_tester(
     name = "Mac Release (Intel)",
     branch_selector = branches.selector.MAC_BRANCHES,
     description_html = "Runs a subset of release GPU tests on stable Mac/Intel UHD 630 Mac Mini configs",
-    triggered_by = ["ci/GPU Mac Builder"],
+    parent = "ci/GPU Mac Builder",
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -611,7 +613,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "Mac Retina Debug (AMD)",
     description_html = "Runs a subset of debug GPU tests on stable Mac/AMD Macbook Pro configs",
-    triggered_by = ["GPU Mac Builder (dbg)"],
+    parent = "GPU Mac Builder (dbg)",
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -657,7 +659,7 @@ ci.thin_tester(
     name = "Mac Retina Release (AMD)",
     branch_selector = branches.selector.MAC_BRANCHES,
     description_html = "Runs a subset of release GPU tests on stable Mac/AMD Macbook Pro configs",
-    triggered_by = ["ci/GPU Mac Builder"],
+    parent = "ci/GPU Mac Builder",
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -697,7 +699,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "Win10 x64 Debug (NVIDIA)",
     description_html = "Runs a subset of debug GPU tests on stable Windows 10/NVIDIA GTX 1660 configs",
-    triggered_by = ["GPU Win x64 Builder (dbg)"],
+    parent = "GPU Win x64 Builder (dbg)",
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -755,7 +757,7 @@ ci.thin_tester(
     name = "Win10 x64 Release (NVIDIA)",
     branch_selector = branches.selector.WINDOWS_BRANCHES,
     description_html = "Runs a subset of release GPU tests on stable Windows 10/NVIDIA GTX 1660 configs",
-    triggered_by = ["ci/GPU Win x64 Builder"],
+    parent = "ci/GPU Win x64 Builder",
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(

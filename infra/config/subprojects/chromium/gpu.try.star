@@ -2,9 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-load("//lib/builders.star", "cpu", "os", "siso")
-load("//lib/try.star", "try_")
-load("//lib/gn_args.star", "gn_args")
+load("@chromium-luci//builders.star", "cpu", "os")
+load("@chromium-luci//gn_args.star", "gn_args")
+load("@chromium-luci//try.star", "try_")
+load("//lib/siso.star", "siso")
 
 try_.defaults.set(
     bucket = "try",
@@ -20,7 +21,6 @@ try_.defaults.set(
     # Max. pending time for builds. CQ considers builds pending >2h as timed
     # out: http://shortn/_8PaHsdYmlq. Keep this in sync.
     expiration_timeout = 2 * time.hour,
-    reclient_enabled = False,
     service_account = "chromium-try-gpu-builder@chops-service-accounts.iam.gserviceaccount.com",
     siso_enabled = True,
     siso_project = siso.project.DEFAULT_UNTRUSTED,
@@ -363,6 +363,10 @@ gpu_mac_builder(
         "ci/Mac FYI Retina ASAN (AMD)",
     ],
     gn_args = "ci/GPU FYI Mac Builder (asan)",
+    # //tools/grit:brotli_mac_asan_workaround doesn't create bundle
+    # `obj/tools/grit/brotli_mac_asan_workaround/` when cross compiling
+    # from ARM host.
+    cpu = cpu.X86_64,
 )
 
 gpu_mac_builder(
@@ -445,6 +449,10 @@ gpu_mac_builder(
         "ci/Mac FYI ASAN (Intel)",
     ],
     gn_args = "ci/GPU FYI Mac Builder (asan)",
+    # //tools/grit:brotli_mac_asan_workaround doesn't create bundle
+    # `obj/tools/grit/brotli_mac_asan_workaround/` when cross compiling
+    # from ARM host.
+    cpu = cpu.X86_64,
 )
 
 gpu_mac_builder(

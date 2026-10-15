@@ -5,9 +5,9 @@
 #ifndef COMPONENTS_AUTOFILL_IOS_FORM_UTIL_FORM_ACTIVITY_TAB_HELPER_H_
 #define COMPONENTS_AUTOFILL_IOS_FORM_UTIL_FORM_ACTIVITY_TAB_HELPER_H_
 
-#include "base/observer_list.h"
-#include "base/values.h"
-#include "ios/web/public/web_state_observer.h"
+#import "base/observer_list.h"
+#import "base/values.h"
+#import "ios/web/public/web_state_observer.h"
 #import "ios/web/public/web_state_user_data.h"
 
 namespace web {
@@ -24,7 +24,7 @@ inline constexpr char kProgrammaticFormSubmissionHistogram[] =
     "Autofill.iOS.FormSubmission.IsProgrammatic";
 
 inline constexpr char kFormSubmissionOutcomeHistogram[] =
-    "Autofill.iOS.FormSubmission.Outcome";
+    "Autofill.iOS.FormSubmission.OutcomeV2";
 
 inline constexpr char kInvalidSubmittedFormReasonHistogram[] =
     "Autofill.iOS.FormSubmission.Outcome.InvalidFormReason";

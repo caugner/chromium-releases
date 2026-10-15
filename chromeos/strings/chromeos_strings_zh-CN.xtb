@@ -206,6 +206,7 @@
 <translation id="1758018619400202187">EAP-TLS</translation>
 <translation id="1758459542619182298"><ph name="CONTROL_TYPE" /><ph name="KEY_LIST" /></translation>
 <translation id="1759842336958782510">Chrome</translation>
+<translation id="1762353673362288306">你现在只能使用课堂工具</translation>
 <translation id="1762483337755424125">转写内容</translation>
 <translation id="1765169783255151332">快速切换按键</translation>
 <translation id="1768959921651994223">身份验证类型</translation>
@@ -476,6 +477,7 @@
 <translation id="3091839911843451378">失败 - 已停止</translation>
 <translation id="3102119246920354026">缓存</translation>
 <translation id="3103783611481501187">超现实</translation>
+<translation id="3119672627216736407">提供翻译</translation>
 <translation id="3122464029669770682">CPU</translation>
 <translation id="3122614491980756867">水池</translation>
 <translation id="3122883569442693641">更多详情</translation>
@@ -1007,7 +1009,7 @@
 <translation id="5410755018770633464">热狗</translation>
 <translation id="5423849171846380976">已激活</translation>
 <translation id="5430931332414098647">即时网络共享</translation>
-<translation id="5431318178759467895">彩色</translation>
+<translation id="5431318178759467895">颜色</translation>
 <translation id="5457599981699367932">以访客身份浏览</translation>
 <translation id="54609108002486618">受管理</translation>
 <translation id="5461608756903394951">正在下载<ph name="LANGUAGE_NAME" />转写模型</translation>
@@ -1136,6 +1138,7 @@
 <translation id="6058625436358447366">要完成更改，请输入您的旧密码和新密码</translation>
 <translation id="6061772781719867950">HTTPS 请求失败</translation>
 <translation id="6073292342939316679">调低键盘亮度</translation>
+<translation id="6074608334942655098">停止翻译</translation>
 <translation id="6074752328838739425">隐藏摘要</translation>
 <translation id="6075872808778243331">(Android) HTTP 延迟时间</translation>
 <translation id="6078323886959318429">添加快捷方式</translation>
@@ -1403,7 +1406,7 @@
 <translation id="7177485034254901881">此 <ph name="DEVICE_TYPE" /> 由 <ph name="MANAGER" /> 管理。管理员可能会远程配置此设备。</translation>
 <translation id="7180611975245234373">刷新</translation>
 <translation id="7180865173735832675">自定义</translation>
-<translation id="7182063559013288142">即时热点</translation>
+<translation id="7182063559013288142">智能热点</translation>
 <translation id="7184043045742675738">点击任意键自定义您的按钮。使用鼠标或箭头键调整键的位置。</translation>
 <translation id="7187669805838282391">在周三</translation>
 <translation id="7205318498545665455">选择麦克风</translation>
@@ -1459,7 +1462,6 @@
 <translation id="7388345524791662148">“<ph name="RECORDING_NAME" />”的更多选项</translation>
 <translation id="7388959671917308825">内置触控板</translation>
 <translation id="7397270852490618635">关闭浅色主题</translation>
-<translation id="7400166052988585408">教师将在 <ph name="NUM_SECONDS" /> 秒后锁定您的屏幕</translation>
 <translation id="7401543881546089382">删除快捷方式</translation>
 <translation id="7405493795721832710"><ph name="DEVICE_NAME" />已准备好更新</translation>
 <translation id="741244894080940828">换算</translation>
@@ -1614,7 +1616,7 @@
 <translation id="8088963492174775412">按下即可录制</translation>
 <translation id="8094062939584182041">允许 Google 就此问题向您发送电子邮件</translation>
 <translation id="8104083085214006426">您正在使用不安全的开放网络</translation>
-<translation id="8110942816572072814">老师已锁定您的屏幕</translation>
+<translation id="8108879170356113798"><ph name="NUM_SECONDS" /> 秒后你将只能使用课堂工具</translation>
 <translation id="811820734797650957">(Android) 可对网关执行 ping 操作</translation>
 <translation id="8129620843620772246"><ph name="TEMPERATURE_C" />° C</translation>
 <translation id="8131740175452115882">确认</translation>

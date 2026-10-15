@@ -16,8 +16,6 @@ import android.os.Build;
 import android.os.Bundle;
 import android.provider.Browser;
 import android.text.TextUtils;
-import android.window.OnBackInvokedCallback;
-import android.window.OnBackInvokedDispatcher;
 
 import androidx.annotation.IntDef;
 import androidx.annotation.NonNull;
@@ -28,12 +26,15 @@ import org.chromium.base.ContextUtils;
 import org.chromium.base.IntentUtils;
 import org.chromium.base.Log;
 import org.chromium.base.PackageManagerUtils;
+import org.chromium.base.ResettersForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.base.supplier.ObservableSupplier;
 import org.chromium.base.supplier.ObservableSupplierImpl;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.IntentHandler;
+import org.chromium.chrome.browser.app.tab_activity_glue.ReparentingTask;
+import org.chromium.chrome.browser.app.tabwindow.TabWindowManagerSingleton;
 import org.chromium.chrome.browser.back_press.MinimizeAppAndCloseTabBackPressHandler;
 import org.chromium.chrome.browser.back_press.MinimizeAppAndCloseTabBackPressHandler.MinimizeAppAndCloseTabType;
 import org.chromium.chrome.browser.browserservices.intents.BrowserServicesIntentDataProvider;
@@ -45,9 +46,12 @@ import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
 import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
 import org.chromium.chrome.browser.lifecycle.StartStopWithNativeObserver;
+import org.chromium.chrome.browser.multiwindow.MultiInstanceManager;
+import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
 import org.chromium.chrome.browser.preloading.PreloadingDataBridge;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.components.browser_ui.widget.gesture.BackPressHandler;
+import org.chromium.components.browser_ui.widget.gesture.OnSystemNavigationObserver;
 import org.chromium.components.dom_distiller.core.DomDistillerUrlUtils;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.WebContents;
@@ -64,15 +68,19 @@ import java.util.function.Predicate;
 
 /** Responsible for navigating to new pages and going back to previous pages. */
 public class CustomTabActivityNavigationController
-        implements StartStopWithNativeObserver, BackPressHandler {
+        implements StartStopWithNativeObserver, BackPressHandler, OnSystemNavigationObserver {
+    static final String HISTOGRAM_FINISH_REASON = "CustomTabs.Navigation.FinishReason";
+
     private static final String TAG = "CTANavigationCtrl";
 
+    // LINT.IfChange(FinishReason)
     @IntDef({
         FinishReason.USER_NAVIGATION,
         FinishReason.REPARENTING,
         FinishReason.OTHER,
         FinishReason.OPEN_IN_BROWSER,
-        FinishReason.HANDLED_BY_OS
+        FinishReason.HANDLED_BY_OS,
+        FinishReason.NUM_TYPES
     })
     @Target(ElementType.TYPE_USE)
     @Retention(RetentionPolicy.SOURCE)
@@ -84,7 +92,10 @@ public class CustomTabActivityNavigationController
         // The web page is opened in the default browser by starting a new activity.
         int OPEN_IN_BROWSER = 3;
         int HANDLED_BY_OS = 4;
+        int NUM_TYPES = 5;
     }
+
+    // LINT.ThenChange(//tools/metrics/histograms/metadata/custom_tabs/enums.xml:FinishReason)
 
     /** A handler of back presses. */
     public interface BackHandler {
@@ -114,13 +125,13 @@ public class CustomTabActivityNavigationController
 
     @Nullable private FinishHandler mFinishHandler;
 
-    @Nullable private OnBackInvokedCallback mOnSystemBackInvokedCallback;
-
     private boolean mIsFinishing;
 
     private boolean mIsHandlingUserNavigation;
 
     private @FinishReason int mFinishReason;
+
+    private static @Nullable Integer sVersionForTesting;
 
     private final CustomTabActivityTabProvider.Observer mTabObserver =
             new CustomTabActivityTabProvider.Observer() {
@@ -141,18 +152,21 @@ public class CustomTabActivityNavigationController
                 }
 
                 private boolean shouldInterceptBackPress() {
-                    // If this is the first tab created or when all other tabs are closed, we want
-                    // the OS to handle the back event then notify the registered observer that the
-                    // back event has happened.
-                    if (ChromeFeatureList.sCctPredictiveBackGesture.isEnabled()
-                            && mTabController.onlyOneTabRemaining()
-                            && !mIntentDataProvider.isPartialCustomTab()) {
+                    if (shouldDeferToOs()) {
                         return false;
                     }
                     return mTabProvider.getTab() != null
                             && ChromeBrowserInitializer.getInstance().isFullBrowserInitialized();
                 }
             };
+
+    /** Whether the feature of predictive back gesture is supported. */
+    public static boolean supportsPredictiveBackGesture() {
+        boolean isAtLeastB =
+                (sVersionForTesting == null ? Build.VERSION.SDK_INT : sVersionForTesting)
+                        >= Build.VERSION_CODES.BAKLAVA;
+        return isAtLeastB && ChromeFeatureList.sCctPredictiveBackGesture.isEnabled();
+    }
 
     public CustomTabActivityNavigationController(
             CustomTabActivityTabController tabController,
@@ -169,22 +183,13 @@ public class CustomTabActivityNavigationController
         mCloseButtonNavigator = closeButtonNavigator;
         mActivity = activity;
 
-        if (ChromeFeatureList.sCctPredictiveBackGesture.isEnabled()
-                && Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
-            mOnSystemBackInvokedCallback = () -> handleNavigateOnBackByOS();
-            mActivity
-                    .getOnBackInvokedDispatcher()
-                    .registerOnBackInvokedCallback(
-                            OnBackInvokedDispatcher.PRIORITY_SYSTEM_NAVIGATION_OBSERVER,
-                            mOnSystemBackInvokedCallback);
-        }
-
         lifecycleDispatcher.register(this);
         mTabProvider.addObserver(mTabObserver);
         ChromeBrowserInitializer.getInstance()
                 .runNowOrAfterFullBrowserStarted(
                         () -> {
-                            mBackPressStateSupplier.set(mTabProvider.getTab() != null);
+                            mBackPressStateSupplier.set(
+                                    mTabProvider.getTab() != null && !shouldDeferToOs());
                         });
     }
 
@@ -255,11 +260,14 @@ public class CustomTabActivityNavigationController
                                         | Intent.FLAG_ACTIVITY_NEW_DOCUMENT))
                         != 0;
 
-        // TODO(crbug.com/40285983): Add a metric for events handled by the OS and record it.
         RecordUserAction.record("CustomTabs.SystemBack");
         if (mTabProvider.getTab() == null) return false;
 
         if (mTabController.onlyOneTabRemaining()) {
+            MinimizeAppAndCloseTabBackPressHandler.record(
+                    MinimizeAppAndCloseTabType.MINIMIZE_APP_AND_CLOSE_TAB);
+            MinimizeAppAndCloseTabBackPressHandler.recordForCustomTab(
+                    MinimizeAppAndCloseTabType.MINIMIZE_APP_AND_CLOSE_TAB, separateTask);
             finishActivity(reason, separateTask);
             return true;
         }
@@ -300,6 +308,25 @@ public class CustomTabActivityNavigationController
         mIsHandlingUserNavigation = true;
         mCloseButtonNavigator.navigateOnClose(this::finish);
         mIsHandlingUserNavigation = false;
+    }
+
+    // TODO (crbug.com/417460143): Bring new tab to foreground when applicable.
+    /** Opens a URL in an adjacent Activity. */
+    private void openInAdjacentActivity(Tab tab, Activity adjacentActivity) {
+        Intent newIntent = new Intent();
+        int windowId = TabWindowManagerSingleton.getInstance().getIdForWindow(adjacentActivity);
+        newIntent.setClassName(
+                ContextUtils.getApplicationContext(), adjacentActivity.getClass().getName());
+        newIntent.putExtra(IntentHandler.EXTRA_WINDOW_ID, windowId);
+        newIntent.putExtra(IntentHandler.EXTRA_FROM_OPEN_IN_BROWSER, true);
+        IntentUtils.addTrustedIntentExtras(newIntent);
+        MultiWindowUtils.setOpenInOtherWindowIntentExtras(
+                newIntent, mActivity, adjacentActivity.getClass());
+        MultiInstanceManager.onMultiInstanceModeStarted();
+        ReparentingTask.from(tab).setupIntent(newIntent, null);
+        MultiWindowUtils.launchIntentInInstance(newIntent, windowId);
+        finish(REPARENTING);
+        mTabProvider.removeTab();
     }
 
     /**
@@ -361,15 +388,19 @@ public class CustomTabActivityNavigationController
                     ContextUtils.getApplicationContext().getPackageName());
             intent.putExtra(IntentHandler.EXTRA_OPEN_NEW_INCOGNITO_TAB, true);
             IntentUtils.addTrustedIntentExtras(intent);
-
             mActivity.startActivity(intent, startActivityOptions);
             finish(FinishReason.OPEN_IN_BROWSER);
         } else if (canFinishActivity && willChromeHandleIntent) {
-            // Remove observer to not trigger finishing in onAllTabsClosed() callback - we'll use
-            // reparenting finish callback instead.
-            mTabProvider.removeObserver(mTabObserver);
-            mTabController.detachAndStartReparenting(
-                    intent, startActivityOptions, () -> finish(FinishReason.REPARENTING));
+            Activity adjacentActivity = MultiWindowUtils.getAdjacentWindowActivity(mActivity);
+            if (adjacentActivity != null) {
+                openInAdjacentActivity(tab, adjacentActivity);
+            } else {
+                // Remove observer to not trigger finishing in onAllTabsClosed() callback - we'll
+                // use reparenting finish callback instead.
+                mTabProvider.removeObserver(mTabObserver);
+                mTabController.detachAndStartReparenting(
+                        intent, startActivityOptions, () -> finish(REPARENTING));
+            }
         } else {
             if (mIntentDataProvider.isInfoPage()) {
                 IntentHandler.startChromeLauncherActivityForTrustedIntent(intent);
@@ -400,6 +431,10 @@ public class CustomTabActivityNavigationController
         if (mIsFinishing) return;
         mIsFinishing = true;
         mFinishReason = reason;
+
+        RecordHistogram.recordEnumeratedHistogram(
+                HISTOGRAM_FINISH_REASON, mFinishReason, FinishReason.NUM_TYPES);
+
         // Closing the activity destroys the renderer as well. Re-create a spare renderer some
         // time after, so that we have one ready for the next tab open. This does not increase
         // memory consumption, as the current renderer goes away. We create a renderer as a lot
@@ -440,17 +475,16 @@ public class CustomTabActivityNavigationController
     @Override
     public void onStopWithNative() {
         if (mIsFinishing) {
-            if (ChromeFeatureList.sCctPredictiveBackGesture.isEnabled()
-                    && Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA
-                    && mOnSystemBackInvokedCallback != null) {
-                mActivity
-                        .getOnBackInvokedDispatcher()
-                        .unregisterOnBackInvokedCallback(mOnSystemBackInvokedCallback);
-                mOnSystemBackInvokedCallback = null;
-            }
             mTabController.closeAndForgetTab();
         } else {
             mTabController.saveState();
+        }
+    }
+
+    @Override
+    public void onSystemNavigation() {
+        if (supportsPredictiveBackGesture()) {
+            navigateOnBack(FinishReason.HANDLED_BY_OS);
         }
     }
 
@@ -479,11 +513,19 @@ public class CustomTabActivityNavigationController
         assert false : assertMsg;
     }
 
-    private void handleNavigateOnBackByOS() {
-        if (ChromeFeatureList.sCctPredictiveBackGesture.isEnabled()
-                && Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
-            navigateOnBack(FinishReason.HANDLED_BY_OS);
-        }
+    private boolean shouldDeferToOs() {
+        // If this is the first tab created or when all other tabs are closed, we want
+        // the OS to handle the back event. This allows the predictive back gesture to
+        // show the "back to home" animation. The registered observer will be notified
+        // that the back event has been handled by the OS.
+        // Additionally, we verify that an initial tab has been set and the tab count is either one
+        // or zero if it is a tab that is being initially set before updating the tab count.
+        // This behavior is not applicable to partial custom tabs.
+        return supportsPredictiveBackGesture()
+                && (mTabProvider.getInitialTabCreationMode() != TabCreationMode.NONE
+                        && (mTabController.onlyOneTabRemaining()
+                                || mTabController.getTabCount() == 0))
+                && !mIntentDataProvider.isPartialCustomTab();
     }
 
     public BrowserServicesIntentDataProvider getIntentDataProviderForTesting() {
@@ -492,5 +534,14 @@ public class CustomTabActivityNavigationController
 
     public CustomTabActivityTabProvider.Observer getTabObserverForTesting() {
         return mTabObserver;
+    }
+
+    public Integer getVersionForTesting() {
+        return sVersionForTesting;
+    }
+
+    public static void enablePredictiveBackGestureForTesting() {
+        sVersionForTesting = Build.VERSION_CODES.BAKLAVA;
+        ResettersForTesting.register(() -> sVersionForTesting = null);
     }
 }

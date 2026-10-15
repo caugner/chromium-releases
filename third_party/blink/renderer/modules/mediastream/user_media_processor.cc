@@ -15,7 +15,6 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
-#include "base/not_fatal_until.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/task/single_thread_task_runner.h"
@@ -111,8 +110,8 @@ const char* MediaStreamRequestResultToString(MediaStreamRequestResult value) {
       return "FAILED_DUE_TO_SHUTDOWN";
     case MediaStreamRequestResult::KILL_SWITCH_ON:
       return "KILL_SWITCH_ON";
-    case MediaStreamRequestResult::SYSTEM_PERMISSION_DENIED:
-      return "SYSTEM_PERMISSION_DENIED";
+    case MediaStreamRequestResult::PERMISSION_DENIED_BY_SYSTEM:
+      return "PERMISSION_DENIED_BY_SYSTEM";
     case MediaStreamRequestResult::DEVICE_IN_USE:
       return "DEVICE_IN_USE";
     case MediaStreamRequestResult::REQUEST_CANCELLED:
@@ -120,10 +119,9 @@ const char* MediaStreamRequestResultToString(MediaStreamRequestResult value) {
     case MediaStreamRequestResult::START_TIMEOUT:
       return "START_TIMEOUT";
     case MediaStreamRequestResult::NUM_MEDIA_REQUEST_RESULTS:
-      return "NUM_MEDIA_REQUEST_RESULTS";
-    default:
-      NOTREACHED();
+      break;
   }
+  NOTREACHED();
 }
 
 void SendLogMessage(const std::string& message) {
@@ -254,6 +252,8 @@ Vector<blink::VideoInputDeviceCapabilities> ToVideoInputDeviceCapabilities(
 
 String ErrorCodeToString(MediaStreamRequestResult result) {
   switch (result) {
+    case MediaStreamRequestResult::OK:
+      return "OK";
     case MediaStreamRequestResult::PERMISSION_DENIED:
       return "Permission denied";
     case MediaStreamRequestResult::PERMISSION_DISMISSED:
@@ -279,8 +279,8 @@ String ErrorCodeToString(MediaStreamRequestResult result) {
     case MediaStreamRequestResult::FAILED_DUE_TO_SHUTDOWN:
       return "Failed due to shutdown";
     case MediaStreamRequestResult::KILL_SWITCH_ON:
-      return "";
-    case MediaStreamRequestResult::SYSTEM_PERMISSION_DENIED:
+      return "Killswitch on";
+    case MediaStreamRequestResult::PERMISSION_DENIED_BY_SYSTEM:
       return "Permission denied by system";
     case MediaStreamRequestResult::DEVICE_IN_USE:
       return "Device in use";
@@ -288,9 +288,12 @@ String ErrorCodeToString(MediaStreamRequestResult result) {
       return "Request was cancelled";
     case MediaStreamRequestResult::START_TIMEOUT:
       return "Timeout starting video source";
-    default:
-      NOTREACHED();
+    case MediaStreamRequestResult::CONSTRAINT_NOT_SATISFIED:
+      return "Constraint not satisfied";
+    case MediaStreamRequestResult::NUM_MEDIA_REQUEST_RESULTS:
+      break;  // Not a valid enum value.
   }
+  NOTREACHED();
 }
 
 #if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS) && !BUILDFLAG(IS_FUCHSIA)
@@ -593,7 +596,7 @@ void UserMediaProcessor::RequestInfo::OnTrackStarted(
     const blink::WebString& result_name) {
   SendLogMessage(GetOnTrackStartedLogString(source, result));
   auto it = std::ranges::find(sources_waiting_for_callback_, source);
-  CHECK(it != sources_waiting_for_callback_.end(), base::NotFatalUntil::M130);
+  CHECK(it != sources_waiting_for_callback_.end());
   sources_waiting_for_callback_.erase(it);
   // All tracks must be started successfully. Otherwise the request is a
   // failure.
@@ -697,6 +700,8 @@ void UserMediaProcessor::SetupAudioInput() {
   stream_controls->suppress_local_audio_playback =
       request->suppress_local_audio_playback();
 
+  stream_controls->restrict_own_audio = request->restrict_own_audio();
+
   TrackControls& audio_controls = stream_controls->audio;
   audio_controls.stream_type =
       (request->MediaRequestType() == UserMediaRequestType::kAllScreensMedia)
@@ -794,7 +799,6 @@ void UserMediaProcessor::SelectAudioSettings(
         eligible_settings = SelectEligibleSettingsAudioCapture(
             capabilities, user_media_request->AudioConstraints(),
             current_request_info_->stream_controls()->audio.stream_type,
-            user_media_request->ShouldDisableHardwareNoiseSuppression(),
             /*is_reconfiguration_allowed=*/true);
     if (!eligible_settings.has_value()) {
       String failed_constraint_name = String(eligible_settings.error());
@@ -818,7 +822,6 @@ void UserMediaProcessor::SelectAudioSettings(
     auto settings = SelectSettingsAudioCapture(
         capabilities, user_media_request->AudioConstraints(),
         current_request_info_->stream_controls()->audio.stream_type,
-        user_media_request->ShouldDisableHardwareNoiseSuppression(),
         /*is_reconfiguration_allowed=*/true);
     if (!settings.HasValue()) {
       String failed_constraint_name = String(settings.failed_constraint_name());
@@ -2166,7 +2169,7 @@ bool UserMediaProcessor::RemoveLocalSource(MediaStreamSource* source) {
     auto error = MediaStreamAudioSource::From(source)->ErrorCode();
     switch (error.value_or(AudioSourceErrorCode::kUnknown)) {
       case AudioSourceErrorCode::kSystemPermissions:
-        result = MediaStreamRequestResult::SYSTEM_PERMISSION_DENIED;
+        result = MediaStreamRequestResult::PERMISSION_DENIED_BY_SYSTEM;
         message = "System Permssions prevented access to audio capture device";
         break;
       case AudioSourceErrorCode::kDeviceInUse:

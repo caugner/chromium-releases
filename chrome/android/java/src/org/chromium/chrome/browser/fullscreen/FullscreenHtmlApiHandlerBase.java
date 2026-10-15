@@ -118,7 +118,7 @@ public abstract class FullscreenHtmlApiHandlerBase
     private boolean mDisplayEdgeToEdgeFullscreenToBeExited;
     private boolean mIsInMultiWindowMode;
 
-    private FullscreenMultiWindowModeObserver mMultiWindowModeObserver;
+    private final FullscreenMultiWindowModeObserver mMultiWindowModeObserver;
 
     private boolean mNotifyOnNextExit;
 
@@ -561,7 +561,7 @@ public abstract class FullscreenHtmlApiHandlerBase
         //  mode, onLayoutChange doesn't trigger, which results in not showing the browser controls
         //  when we're supposed to, and also messes up the viewport and toolbar.
         if (BuildInfo.getInstance().isAutomotive
-                || EdgeToEdgeUtils.isEnabled()
+                || EdgeToEdgeUtils.isChromeEdgeToEdgeFeatureEnabled()
                 || MultiWindowUtils.getInstance().isInMultiWindowMode(mActivity)) {
             ViewUtils.requestLayout(contentView, "FullscreenHtmlApiHandler.exitFullScreen");
         }
@@ -617,7 +617,7 @@ public abstract class FullscreenHtmlApiHandlerBase
     private void logBrowserControlsForcedUponFullscreenExit() {
         @BrowserControlsForcedUponFullscreenExitState int state;
         boolean isInMultiWindowMode = MultiWindowUtils.getInstance().isInMultiWindowMode(mActivity);
-        boolean edgeToEdgeEnabled = EdgeToEdgeUtils.isEnabled();
+        boolean edgeToEdgeEnabled = EdgeToEdgeUtils.isChromeEdgeToEdgeFeatureEnabled();
         if (isInMultiWindowMode) {
             if (edgeToEdgeEnabled) {
                 state = BrowserControlsForcedUponFullscreenExitState.MULTI_WINDOW_EDGE_TO_EDGE;

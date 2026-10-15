@@ -857,7 +857,9 @@ void PageHandler::Navigate(const std::string& url,
 
   // chrome-untrusted:// WebUIs might perform high-priviledged actions on
   // navigation, disallow navigation to them unless the client is trusted.
-  if (gurl.SchemeIs(kChromeUIUntrustedScheme) && !is_trusted_) {
+  if ((gurl.SchemeIs(kChromeUIUntrustedScheme) ||
+       gurl.SchemeIs(kChromeDevToolsScheme)) &&
+      !is_trusted_) {
     callback->sendFailure(Response::ServerError(
         "Navigating to a URL with a privileged scheme is not allowed"));
     return;
@@ -1368,6 +1370,17 @@ void PageHandler::CaptureScreenshot(
     }
     pending_request->requested_image_size =
         gfx::ScaleToRoundedSize(requested_image_size, scale);
+  }
+
+  // TODO(crbug.com/377715191): this should check RenderWidgetHostViewBase
+  // instead, but there is no easy way to do this today. Once that's possible,
+  // this check should move inside RenderWidetHostImpl::GetSnapshotFromBrowser.
+  if (base::FeatureList::IsEnabled(features::kCDPScreenshotNewSurface)) {
+    if (auto* wc = WebContentsImpl::FromRenderFrameHostImpl(host_)) {
+      // When view is completely hidden, capturing a surface snapshot
+      // will stall because the surface is never presented.
+      CHECK(wc->GetPageVisibilityState() != PageVisibilityState::kHidden);
+    }
   }
 
   widget_host->GetSnapshotFromBrowser(

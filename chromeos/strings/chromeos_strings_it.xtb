@@ -206,6 +206,7 @@
 <translation id="1758018619400202187">EAP-TLS</translation>
 <translation id="1758459542619182298"><ph name="CONTROL_TYPE" /> <ph name="KEY_LIST" /></translation>
 <translation id="1759842336958782510">Chrome</translation>
+<translation id="1762353673362288306">Ora puoi utilizzare solo Strumenti del corso</translation>
 <translation id="1762483337755424125">Trascrizione</translation>
 <translation id="1765169783255151332">Cambia velocemente i tasti</translation>
 <translation id="1768959921651994223">Tipo di autenticazione</translation>
@@ -333,7 +334,7 @@
 <translation id="2276999893457278469">Contenuti Help principali</translation>
 <translation id="2277631741861284101">Registra e condividi facilmente il tuo audio</translation>
 <translation id="2279051792571591988">Ripristina predefinite</translation>
-<translation id="2286454467119466181">Semplice</translation>
+<translation id="2286454467119466181">Simple</translation>
 <translation id="2287186687001756809">Nessuna immagine disponibile. Per aggiungere foto, visita la pagina <ph name="LINK" />.</translation>
 <translation id="2294577623958216786">La programmazione corrente è impostata su <ph name="SUNRISE" />-<ph name="SUNSET" />. Per aggiornare automaticamente la programmazione del tramonto e dell'alba, attiva l'accesso alla posizione del sistema.</translation>
 <translation id="2305172810646967500">nero</translation>
@@ -476,6 +477,7 @@
 <translation id="3091839911843451378">Operazione non riuscita - Interruzione</translation>
 <translation id="3102119246920354026">Cache</translation>
 <translation id="3103783611481501187">surreale</translation>
+<translation id="3119672627216736407">Traduzione disponibile</translation>
 <translation id="3122464029669770682">CPU</translation>
 <translation id="3122614491980756867">piscine</translation>
 <translation id="3122883569442693641">Altri dettagli</translation>
@@ -1136,6 +1138,7 @@
 <translation id="6058625436358447366">Per terminare, inserisci la password vecchia e quella nuova</translation>
 <translation id="6061772781719867950">Richieste HTTPS non riuscite</translation>
 <translation id="6073292342939316679">riduci la luminosità della tastiera</translation>
+<translation id="6074608334942655098">Interrompi traduzione</translation>
 <translation id="6074752328838739425">Nascondi riepilogo</translation>
 <translation id="6075872808778243331">(Android) Latenza HTTP</translation>
 <translation id="6078323886959318429">Aggiungi scorciatoia</translation>
@@ -1459,7 +1462,6 @@ Scarica il modello di trascrizione (fino a 100 MB) per ottenere queste trascrizi
 <translation id="7388345524791662148">Altre opzioni per <ph name="RECORDING_NAME" /></translation>
 <translation id="7388959671917308825">Touchpad integrato</translation>
 <translation id="7397270852490618635">Disattiva il tema chiaro</translation>
-<translation id="7400166052988585408">L'insegnante bloccherà il tuo schermo tra <ph name="NUM_SECONDS" /> secondi</translation>
 <translation id="7401543881546089382">Elimina collegamento</translation>
 <translation id="7405493795721832710">Il dispositivo <ph name="DEVICE_NAME" /> è pronto per l'aggiornamento</translation>
 <translation id="741244894080940828">conversione</translation>
@@ -1614,7 +1616,7 @@ Scarica il modello di trascrizione (fino a 100 MB) per ottenere queste trascrizi
 <translation id="8088963492174775412">Premi per registrare</translation>
 <translation id="8094062939584182041">Consenti a Google di inviarti email relative a questo problema</translation>
 <translation id="8104083085214006426">Stai usando una rete aperta e non protetta</translation>
-<translation id="8110942816572072814">L'insegnante ha bloccato il tuo schermo</translation>
+<translation id="8108879170356113798">Potrai utilizzare Strumenti del corso solo tra <ph name="NUM_SECONDS" /> secondi</translation>
 <translation id="811820734797650957">(Android) È possibile inviare un ping al gateway</translation>
 <translation id="8129620843620772246"><ph name="TEMPERATURE_C" /> °C</translation>
 <translation id="8131740175452115882">Conferma</translation>

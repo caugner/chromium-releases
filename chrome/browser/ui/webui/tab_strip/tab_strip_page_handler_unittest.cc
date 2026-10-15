@@ -13,6 +13,8 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
+#include "chrome/browser/tab_group_sync/tab_group_sync_service_factory.h"
+#include "chrome/browser/ui/tabs/saved_tab_groups/tab_group_sync_service_initialized_observer.h"
 #include "chrome/browser/ui/tabs/tab_group_model.h"
 #include "chrome/browser/ui/webui/tab_strip/tab_strip_ui.h"
 #include "chrome/browser/ui/webui/tab_strip/tab_strip_ui_embedder.h"
@@ -143,6 +145,10 @@ class TabStripPageHandlerTest : public BrowserWithTestWindowTest {
     handler_ = std::make_unique<TestTabStripPageHandler>(
         page_.BindAndGetRemote(), web_ui(), browser(), &stub_embedder_);
     web_ui()->ClearTrackedCalls();
+
+    // Wait for the TabGroupSyncService to properly initialize before making any
+    // changes to tab groups.
+    WaitForTabGroupSyncServiceInitialized(profile());
   }
   void TearDown() override {
     web_contents_.reset();
@@ -158,6 +164,13 @@ class TabStripPageHandlerTest : public BrowserWithTestWindowTest {
                         const tab_strip::mojom::TabGroupVisualData& tab_group) {
     EXPECT_EQ(base::UTF16ToASCII(visual_data.title()), tab_group.title);
     EXPECT_EQ(color_utils::SkColorToRgbString(SK_ColorWHITE), tab_group.color);
+  }
+
+  void WaitForTabGroupSyncServiceInitialized(Profile* profile) {
+    auto observer =
+        std::make_unique<tab_groups::TabGroupSyncServiceInitializedObserver>(
+            tab_groups::TabGroupSyncServiceFactory::GetForProfile(profile));
+    observer->Wait();
   }
 
  protected:
@@ -214,20 +227,12 @@ TEST_F(TabStripPageHandlerTest, GetGroupVisualData) {
       browser()->tab_strip_model()->AddToNewGroup({0});
   const tab_groups::TabGroupVisualData group1_visuals(
       u"Group 1", tab_groups::TabGroupColorId::kGreen);
-  browser()
-      ->tab_strip_model()
-      ->group_model()
-      ->GetTabGroup(group1)
-      ->SetVisualData(group1_visuals);
+  browser()->tab_strip_model()->ChangeTabGroupVisuals(group1, group1_visuals);
   tab_groups::TabGroupId group2 =
       browser()->tab_strip_model()->AddToNewGroup({1});
   const tab_groups::TabGroupVisualData group2_visuals(
       u"Group 2", tab_groups::TabGroupColorId::kCyan);
-  browser()
-      ->tab_strip_model()
-      ->group_model()
-      ->GetTabGroup(group2)
-      ->SetVisualData(group2_visuals);
+  browser()->tab_strip_model()->ChangeTabGroupVisuals(group2, group2_visuals);
 
   tab_strip::mojom::PageHandler::GetGroupVisualDataCallback callback =
       base::BindLambdaForTesting(
@@ -248,11 +253,8 @@ TEST_F(TabStripPageHandlerTest, GroupVisualDataChangedEvent) {
       browser()->tab_strip_model()->AddToNewGroup({0});
   const tab_groups::TabGroupVisualData new_visual_data(
       u"My new title", tab_groups::TabGroupColorId::kGreen);
-  browser()
-      ->tab_strip_model()
-      ->group_model()
-      ->GetTabGroup(expected_group_id)
-      ->SetVisualData(new_visual_data);
+  browser()->tab_strip_model()->ChangeTabGroupVisuals(expected_group_id,
+                                                      new_visual_data);
 
   EXPECT_CALL(
       page_,
@@ -400,11 +402,8 @@ TEST_F(TabStripPageHandlerTest, MoveGroupAcrossWindows) {
   // Create some visual data to make sure it gets transferred.
   const tab_groups::TabGroupVisualData visual_data(
       u"My group", tab_groups::TabGroupColorId::kGreen);
-  new_browser.get()
-      ->tab_strip_model()
-      ->group_model()
-      ->GetTabGroup(group_id)
-      ->SetVisualData(visual_data);
+  new_browser.get()->tab_strip_model()->ChangeTabGroupVisuals(group_id,
+                                                              visual_data);
 
   content::WebContents* moved_contents1 =
       new_browser.get()->tab_strip_model()->GetWebContentsAt(0);
@@ -456,11 +455,8 @@ TEST_F(TabStripPageHandlerTest, NoopMoveGroupAcrossWindowsBreaksContiguity) {
   // Create some visual data to make sure it gets transferred.
   const tab_groups::TabGroupVisualData visual_data(
       u"My group", tab_groups::TabGroupColorId::kGreen);
-  new_browser.get()
-      ->tab_strip_model()
-      ->group_model()
-      ->GetTabGroup(group_id)
-      ->SetVisualData(visual_data);
+  new_browser.get()->tab_strip_model()->ChangeTabGroupVisuals(group_id,
+                                                              visual_data);
 
   web_ui()->ClearTrackedCalls();
 
@@ -483,6 +479,9 @@ TEST_F(TabStripPageHandlerTest, MoveGroupAcrossProfiles) {
   std::unique_ptr<Browser> new_browser = CreateBrowser(
       different_profile, browser()->type(), false, new_window.get());
   AddTab(new_browser.get(), GURL("http://foo"));
+
+  WaitForTabGroupSyncServiceInitialized(different_profile);
+
   tab_groups::TabGroupId group_id =
       new_browser.get()->tab_strip_model()->AddToNewGroup({0});
 

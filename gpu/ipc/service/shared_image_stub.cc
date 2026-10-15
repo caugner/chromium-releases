@@ -39,26 +39,6 @@ constexpr char kSICreationFailureError[] =
 
 }  // namespace
 
-#if BUILDFLAG(IS_WIN)
-namespace base {
-bool operator<(const scoped_refptr<gfx::D3DSharedFence>& lhs,
-               const scoped_refptr<gfx::D3DSharedFence>& rhs) {
-  return lhs->GetDXGIHandleToken() < rhs->GetDXGIHandleToken();
-}
-
-bool operator<(const gfx::DXGIHandleToken& lhs,
-               const scoped_refptr<gfx::D3DSharedFence>& rhs) {
-  return lhs < rhs->GetDXGIHandleToken();
-}
-
-bool operator<(const scoped_refptr<gfx::D3DSharedFence>& lhs,
-               const gfx::DXGIHandleToken& rhs) {
-  return lhs->GetDXGIHandleToken() < rhs;
-}
-
-}  // namespace base
-#endif
-
 namespace gpu {
 SharedImageStub::SharedImageStub(GpuChannel* channel, int32_t route_id)
     : channel_(channel),
@@ -321,8 +301,19 @@ void SharedImageStub::OnCreateSharedImageWithData(
   TRACE_EVENT2("gpu", "SharedImageStub::OnCreateSharedImageWithData", "width",
                params->si_info->meta.size.width(), "height",
                params->si_info->meta.size.height());
-  bool needs_gl = HasGLES2ReadOrWriteUsage(params->si_info->meta.usage);
+
+  auto& metadata = params->si_info->meta;
+
+  bool needs_gl = HasGLES2ReadOrWriteUsage(metadata.usage);
   if (!MakeContextCurrent(needs_gl)) {
+    OnError();
+    return;
+  }
+
+  auto min_size = metadata.format.MaybeEstimatedSizeInBytes(metadata.size);
+  if (params->pixel_data_size == 0 || !min_size ||
+      params->pixel_data_size < min_size.value()) {
+    LOG(ERROR) << "SharedImageStub: upload data size is invalid";
     OnError();
     return;
   }
@@ -349,10 +340,8 @@ void SharedImageStub::OnCreateSharedImageWithData(
       memory.subspan(params->pixel_data_offset, params->pixel_data_size);
 
   if (!factory_->CreateSharedImage(
-          params->mailbox, params->si_info->meta.format,
-          params->si_info->meta.size, params->si_info->meta.color_space,
-          params->si_info->meta.surface_origin,
-          params->si_info->meta.alpha_type, params->si_info->meta.usage,
+          params->mailbox, metadata.format, metadata.size, metadata.color_space,
+          metadata.surface_origin, metadata.alpha_type, metadata.usage,
           GetLabel(params->si_info->debug_label), subspan)) {
     LOG(ERROR) << kSICreationFailureError;
     OnError();
@@ -500,9 +489,9 @@ void SharedImageStub::OnRegisterDxgiFence(const Mailbox& mailbox,
     return;
   }
 
-  mailbox_fences.emplace_hint(mailbox_fences.begin(),
-                              gfx::D3DSharedFence::CreateFromScopedHandle(
-                                  fence_handle.Release(), dxgi_token));
+  mailbox_fences.emplace(dxgi_token,
+                         gfx::D3DSharedFence::CreateFromScopedHandle(
+                             fence_handle.Release(), dxgi_token));
 }
 
 void SharedImageStub::OnUpdateDxgiFence(const Mailbox& mailbox,
@@ -533,7 +522,7 @@ void SharedImageStub::OnUpdateDxgiFence(const Mailbox& mailbox,
     return;
   }
 
-  scoped_refptr<gfx::D3DSharedFence> fence = *fence_it;
+  scoped_refptr<gfx::D3DSharedFence> fence = fence_it->second;
   fence->Update(fence_value);
 
   channel_->gpu_channel_manager()->shared_image_manager()->UpdateExternalFence(
@@ -561,6 +550,10 @@ void SharedImageStub::OnUnregisterDxgiFence(const Mailbox& mailbox,
   }
 
   mailbox_fences.erase(fence_it);
+
+  if (mailbox_fences.empty()) {
+    registered_dxgi_fences_.erase(mailbox_fences_it);
+  }
 }
 
 #endif  // BUILDFLAG(IS_WIN)

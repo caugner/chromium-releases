@@ -11,7 +11,7 @@
 // Requires functions from fill.ts, form.ts, autofill_form_features.ts and
 // child_frame_registration_lib.ts.
 
-import {gCrWebLegacy} from '//ios/web/public/js_messaging/resources/gcrweb.js';
+import {gCrWeb, gCrWebLegacy} from '//ios/web/public/js_messaging/resources/gcrweb.js';
 import {sendWebKitMessage} from '//ios/web/public/js_messaging/resources/utils.js';
 
 /**
@@ -61,6 +61,30 @@ let numberOfPendingMessages: number = 0;
  */
 let formMsgBatchMetadata: FormMsgBatchMetadata = {dropCount: 0};
 
+/**
+ * Parses a string to a boolean.
+ * @param boolStr The string to parse as a boolean.
+ * @returns The boolean value if parsing worked, null otherwise.
+ */
+function stringAsBool(boolStr: string): boolean | null {
+  switch (boolStr) {
+    case 'true':
+      return true;
+    case 'false':
+      return false;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Returns true if form submission events should be listened to in capture mode.
+ */
+function shouldListenToFormSubmissionEventsInCaptureMode(): boolean {
+  // Interpolate the placeholder and parse its string content to the desired
+  // boolean value. It is an error to not be able to parse the placeholder.
+  return stringAsBool('{{PlaceholderFormSubmissionListenerCapture}}')!;
+}
 
 /**
  * Schedule `mesg` to be sent on next runloop.
@@ -143,7 +167,7 @@ function formActivity(evt: Event): void {
 
   const msg = {
     'command': 'form.activity',
-    'frameID': gCrWebLegacy.message.getFrameId(),
+    'frameID': gCrWeb.getFrameId(),
     'formName': gCrWebLegacy.form.getFormIdentifier(form),
     'formRendererID': formRendererID,
     'fieldIdentifier': gCrWebLegacy.form.getFieldIdentifier(field),
@@ -180,6 +204,26 @@ function submitHandler(evt: Event): void {
       evt.target as HTMLFormElement,
       /* messageHandler= */ NATIVE_MESSAGE_HANDLER,
       /* programmaticSubmission= */ false);
+}
+
+/**
+ * A wrapper around `submitHandler()` that catches and reports errors that
+ * happen before calling gCrWebLegacy.form.formSubmitted().
+ */
+function submitHandlerWithErrorWrapper(evt: Event): void {
+  try {
+    submitHandler(evt);
+  } catch (error) {
+    if (gCrWebLegacy.autofill_form_features
+            .isAutofillReportFormSubmissionErrorsEnabled()) {
+      gCrWebLegacy.form.reportFormSubmissionError(
+          error, /*programmaticSubmission=*/ false,
+          /*handler=*/ NATIVE_MESSAGE_HANDLER);
+    } else {
+      // Just let the error go through if not reported.
+      throw error;
+    }
+  }
 }
 
 /**
@@ -254,7 +298,9 @@ function attachListeners(): void {
    * practice and it is less obtrusive to page scripts than capture phase.
    */
   document.addEventListener('keyup', formActivity, false);
-  document.addEventListener('submit', submitHandler, false);
+  document.addEventListener(
+      'submit', submitHandlerWithErrorWrapper,
+      shouldListenToFormSubmissionEventsInCaptureMode());
 
   /**
    * Receipt of cross-frame messages for Child Frame Registration don't use the
@@ -291,7 +337,7 @@ function attachListeners(): void {
 attachListeners();
 
 // Initial page loading can remove the listeners. Schedule a reattach after page
-// build.
+// build. This won't double attach listeners.
 setTimeout(attachListeners, 1000);
 
 /**
@@ -362,7 +408,7 @@ function trackFormMutations(delay: number): void {
       if (!addedFormMessage && formWasAdded) {
         addedFormMessage = {
           'command': 'form.activity',
-          'frameID': gCrWebLegacy.message.getFrameId(),
+          'frameID': gCrWeb.getFrameId(),
           'formName': '',
           'formRendererID': '',
           'fieldIdentifier': '',
@@ -404,7 +450,7 @@ function trackFormMutations(delay: number): void {
               forms.map(form => gCrWebLegacy.fill.getUniqueID(form));
           removedFormMessage = {
             'command': 'form.removal',
-            'frameID': gCrWebLegacy.message.getFrameId(),
+            'frameID': gCrWeb.getFrameId(),
             'removedFormIDs': gCrWebLegacy.stringify(filteredFormIDs),
             'removedFieldIDs': gCrWebLegacy.stringify(removedFormlessFieldsIds),
           };
@@ -416,7 +462,7 @@ function trackFormMutations(delay: number): void {
         // Handle the removed formless field case.
         removedFormMessage = {
           'command': 'form.removal',
-          'frameID': gCrWebLegacy.message.getFrameId(),
+          'frameID': gCrWeb.getFrameId(),
           'removedFieldIDs': gCrWebLegacy.stringify(removedFormlessFieldsIds),
         };
         continue;
@@ -430,7 +476,7 @@ function trackFormMutations(delay: number): void {
         // mutation that is treated the same way as adding a new form.
         addedFormMessage = {
           'command': 'form.activity',
-          'frameID': gCrWebLegacy.message.getFrameId(),
+          'frameID': gCrWeb.getFrameId(),
           'formName': '',
           'formRendererID': '',
           'fieldIdentifier': '',

@@ -4,14 +4,11 @@
 
 #include "chromeos/components/magic_boost/test/fake_magic_boost_state.h"
 
+#include "base/types/expected.h"
 #include "chromeos/components/magic_boost/public/cpp/magic_boost_state.h"
 
 namespace chromeos {
 namespace test {
-
-bool FakeMagicBoostState::IsMagicBoostAvailable() {
-  return is_magic_boost_available_;
-}
 
 bool FakeMagicBoostState::ShouldIncludeOrcaInOptInSync() {
   return false;
@@ -34,12 +31,19 @@ void FakeMagicBoostState::AsyncWriteHMREnabled(bool enabled) {
   UpdateHMREnabled(enabled);
 }
 
-void FakeMagicBoostState::SetMagicBoostAvailability(bool available) {
-  is_magic_boost_available_ = available;
+void FakeMagicBoostState::SetAvailability(bool available) {
+  UpdateMagicBoostAvailable(available);
 }
 
 void FakeMagicBoostState::SetMagicBoostEnabled(bool enabled) {
   UpdateMagicBoostEnabled(enabled);
+}
+
+base::expected<bool, chromeos::MagicBoostState::Error>
+FakeMagicBoostState::IsMagicBoostAvailableExpected() const {
+  // Availability needs to be set explicitly via `SetAvailability` for this
+  // fake.
+  return base::unexpected(chromeos::MagicBoostState::Error::kUninitialized);
 }
 
 }  // namespace test

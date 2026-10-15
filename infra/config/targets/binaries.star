@@ -2,7 +2,14 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-load("//lib/targets.star", "targets")
+"""Binary declarations
+
+Binaries can be referenced by tests and define the label of the compile target
+to be built as well as various aspects that the infrastructure needs to know in
+order to run the binary.
+"""
+
+load("@chromium-luci//targets.star", "targets")
 
 targets.binaries.console_test_launcher(
     name = "absl_hardening_tests",
@@ -713,6 +720,13 @@ targets.binaries.script(
 targets.binaries.windowed_test_launcher(
     name = "components_unittests",
     label = "//components:components_unittests",
+)
+
+targets.binaries.script(
+    name = "component_storage_test",
+    label = "//build/fuchsia/test:component_storage_test",
+    script = "//build/fuchsia/test/component_storage_test.py",
+    skip_usage_check = True,
 )
 
 targets.binaries.windowed_test_launcher(

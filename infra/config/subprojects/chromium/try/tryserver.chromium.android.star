@@ -3,27 +3,28 @@
 # found in the LICENSE file.
 """Definitions of builders in the tryserver.chromium.android builder group."""
 
-load("//lib/branches.star", "branches")
-load("//lib/builder_config.star", "builder_config")
-load("//lib/builders.star", "os", "siso")
-load("//lib/consoles.star", "consoles")
-load("//lib/gn_args.star", "gn_args")
-load("//lib/targets.star", "targets")
-load("//lib/try.star", "try_")
+load("@chromium-luci//branches.star", "branches")
+load("@chromium-luci//builder_config.star", "builder_config")
+load("@chromium-luci//builders.star", "os")
+load("@chromium-luci//consoles.star", "consoles")
+load("@chromium-luci//gn_args.star", "gn_args")
+load("@chromium-luci//targets.star", "targets")
+load("@chromium-luci//try.star", "try_")
+load("//lib/gpu.star", "gpu")
+load("//lib/siso.star", "siso")
+load("//lib/try_constants.star", "try_constants")
 load("//project.star", "settings")
 
 try_.defaults.set(
-    executable = try_.DEFAULT_EXECUTABLE,
+    executable = try_constants.DEFAULT_EXECUTABLE,
     builder_group = "tryserver.chromium.android",
-    pool = try_.DEFAULT_POOL,
+    pool = try_constants.DEFAULT_POOL,
     cores = 8,
     os = os.LINUX_DEFAULT,
     compilator_cores = 32,
-    execution_timeout = try_.DEFAULT_EXECUTION_TIMEOUT,
+    execution_timeout = try_constants.DEFAULT_EXECUTION_TIMEOUT,
     orchestrator_cores = 4,
-    reclient_enabled = False,
-    service_account = try_.DEFAULT_SERVICE_ACCOUNT,
-    siso_enabled = True,
+    service_account = try_constants.DEFAULT_SERVICE_ACCOUNT,
     # crbug.com/372192123 - downloading with "minimum" strategy doesn't work
     # well for Android builds because some steps have additional inputs/outputs
     # they are not configured in the build graph.
@@ -382,38 +383,6 @@ try_.builder(
         configs = [
             "ci/android-16-x64-fyi-rel",
             "release_try_builder",
-        ],
-    ),
-    contact_team_email = "clank-engprod@google.com",
-    siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CQ,
-)
-
-try_.builder(
-    name = "android-15-tablet-x64-dbg",
-    mirrors = [
-        "ci/Android x64 Builder (dbg)",
-        "ci/android-15-tablet-x64-dbg-tests",
-    ],
-    gn_args = gn_args.config(
-        configs = [
-            "ci/Android x64 Builder (dbg)",
-            "debug_try_builder",
-        ],
-    ),
-    contact_team_email = "clank-engprod@google.com",
-    siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CQ,
-)
-
-try_.builder(
-    name = "android-15-tablet-landscape-x64-dbg",
-    mirrors = [
-        "ci/Android x64 Builder (dbg)",
-        "ci/android-15-tablet-landscape-x64-dbg-tests",
-    ],
-    gn_args = gn_args.config(
-        configs = [
-            "ci/Android x64 Builder (dbg)",
-            "debug_try_builder",
         ],
     ),
     contact_team_email = "clank-engprod@google.com",
@@ -1068,30 +1037,6 @@ try_.builder(
 )
 
 try_.builder(
-    name = "android-chrome-13-x64-wpt-android-specific",
-    mirrors = ["ci/android-chrome-13-x64-wpt-android-specific"],
-    gn_args = gn_args.config(
-        configs = [
-            "ci/android-chrome-13-x64-wpt-android-specific",
-            "release_try_builder",
-        ],
-    ),
-    contact_team_email = "chrome-blink-engprod@google.com",
-)
-
-try_.builder(
-    name = "android-webview-13-x64-wpt-android-specific",
-    mirrors = ["ci/android-webview-13-x64-wpt-android-specific"],
-    gn_args = gn_args.config(
-        configs = [
-            "ci/android-webview-13-x64-wpt-android-specific",
-            "release_try_builder",
-        ],
-    ),
-    contact_team_email = "chrome-blink-engprod@google.com",
-)
-
-try_.builder(
     name = "android-webview-12-x64-dbg",
     mirrors = [
         "ci/Android x64 Builder (dbg)",
@@ -1544,7 +1489,7 @@ try_.builder(
     ),
 )
 
-try_.gpu.optional_tests_builder(
+gpu.try_.optional_tests_builder(
     name = "android_optional_gpu_tests_rel",
     branch_selector = branches.selector.ANDROID_BRANCHES,
     description_html = "Runs GPU tests on Pixel 4 devices. Only automatically added to CLs that touch GPU-related files.",
@@ -1640,6 +1585,7 @@ try_.gpu.optional_tests_builder(
     builderless = True,
     ssd = None,
     free_space = None,
+    alerts_enabled = False,
     contact_team_email = "chrome-gpu-infra@google.com",
     main_list_view = "try",
     max_concurrent_builds = 10,
@@ -1678,7 +1624,7 @@ try_.gpu.optional_tests_builder(
     ),
 )
 
-try_.gpu.optional_tests_builder(
+gpu.try_.optional_tests_builder(
     name = "gpu-fyi-cq-android-arm64",
     branch_selector = branches.selector.ANDROID_BRANCHES,
     description_html = "Runs GPU tests on Pixel 6 devices. Only automatically added to CLs that touch GPU-related files.",
@@ -1694,6 +1640,8 @@ try_.gpu.optional_tests_builder(
     builderless = True,
     ssd = None,
     free_space = None,
+    # Exclude gpu fyi builders.
+    alerts_enabled = False,
     contact_team_email = "chrome-gpu-infra@google.com",
     main_list_view = "try",
     max_concurrent_builds = 10,

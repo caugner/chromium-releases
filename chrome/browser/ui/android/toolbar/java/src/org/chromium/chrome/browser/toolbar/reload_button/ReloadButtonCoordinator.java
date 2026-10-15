@@ -10,8 +10,11 @@ import android.graphics.Rect;
 import android.view.View;
 import android.widget.ImageButton;
 
+import androidx.core.graphics.Insets;
+
 import org.chromium.base.supplier.ObservableSupplier;
 import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.theme.ThemeColorProvider;
 import org.chromium.ui.modelutil.PropertyModel;
@@ -51,9 +54,11 @@ public class ReloadButtonCoordinator {
     public ReloadButtonCoordinator(
             ImageButton view,
             ReloadButtonCoordinator.Delegate delegate,
-            ObservableSupplier<Tab> tabSupplier,
+            ObservableSupplier<@Nullable Tab> tabSupplier,
             ObservableSupplier<Boolean> ntpLoadingSupplier,
-            ThemeColorProvider themeColorProvider) {
+            ObservableSupplier<Boolean> enabledSupplier,
+            ThemeColorProvider themeColorProvider,
+            boolean isWebApp) {
         mView = view;
 
         // ThemeColorProvider might not be updated by this time. Keep existing color list.
@@ -80,18 +85,12 @@ public class ReloadButtonCoordinator {
                         themeColorProvider,
                         tabSupplier,
                         ntpLoadingSupplier,
+                        enabledSupplier,
                         (text) -> Toast.showAnchoredToast(mView.getContext(), mView, text),
-                        mView.getResources());
+                        mView.getResources(),
+                        mView.getContext(),
+                        isWebApp);
         PropertyModelChangeProcessor.create(model, mView, ReloadButtonViewBinder::bind);
-    }
-
-    /**
-     * Changes reload button enabled state.
-     *
-     * @param isEnabled indicates whether the button should be enabled or disabled.
-     */
-    public void setEnabled(boolean isEnabled) {
-        mMediator.setEnabled(isEnabled);
     }
 
     /**
@@ -110,6 +109,10 @@ public class ReloadButtonCoordinator {
      */
     public void setOnKeyListener(View.OnKeyListener listener) {
         mMediator.setOnKeyListener(listener);
+    }
+
+    public void setBackgroundInsets(Insets insets) {
+        mMediator.setBackgroundInsets(insets);
     }
 
     /**

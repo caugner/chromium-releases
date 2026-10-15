@@ -30,6 +30,7 @@
 #include "base/nix/xdg_util.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/observer_list.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "chrome/browser/themes/theme_properties.h"  // nogncheck
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -215,13 +216,15 @@ GtkUiPlatform* GtkUi::GetPlatform() {
 }
 
 bool GtkUi::Initialize() {
-  if (!LoadGtk() || !GtkCheckVersion(3, 20)) {
+  const auto* delegate = ui::LinuxUiDelegate::GetInstance();
+  DCHECK(delegate);
+  const auto backend = delegate->GetBackend();
+
+  if (!LoadGtk(backend) || !GtkCheckVersion(3, 20)) {
     return false;
   }
 
-  auto* delegate = ui::LinuxUiDelegate::GetInstance();
-  DCHECK(delegate);
-  platform_ = CreateGtkUiPlatform(delegate->GetBackend());
+  platform_ = CreateGtkUiPlatform(backend);
 
   // Avoid GTK initializing atk-bridge, and let AuraLinux implementation
   // do it once it is ready.
@@ -550,6 +553,15 @@ bool GtkUi::PreferDarkTheme() const {
   g_object_get(gtk_settings_get_default(), "gtk-application-prefer-dark-theme",
                &dark, nullptr);
   return dark;
+}
+
+std::vector<std::string> GtkUi::GetCmdLineFlagsForCopy() const {
+  const auto& gtk_version = GtkVersion();
+  uint32_t major_version =
+      gtk_version.IsValid() ? gtk_version.components()[0] : 0;
+  return {std::string(switches::kUiToolkitFlag) + "=gtk",
+          std::string(switches::kGtkVersionFlag) + "=" +
+              base::NumberToString(major_version)};
 }
 
 void GtkUi::SetDarkTheme(bool dark) {

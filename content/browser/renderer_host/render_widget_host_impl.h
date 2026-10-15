@@ -43,6 +43,7 @@
 #include "content/browser/renderer_host/agent_scheduling_group_host.h"
 #include "content/browser/renderer_host/frame_token_message_queue.h"
 #include "content/browser/renderer_host/input/touch_emulator_impl.h"
+#include "content/browser/renderer_host/mojo_render_input_router_delegate_impl.h"
 #include "content/browser/renderer_host/render_frame_metadata_provider_impl.h"
 #include "content/browser/renderer_host/render_widget_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
@@ -388,8 +389,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   void OnInvalidInputEventSource() override;
   void OnInputIgnored(const blink::WebInputEvent& event) override;
   input::StylusInterface* GetStylusInterface() override;
-  bool IsRendererProcessBlocked() override;
-  void OnInputEventAckTimeout() override;
+  void OnInputEventAckTimeout(base::TimeTicks ack_timeout_ts) override;
   void RendererIsResponsive() override;
   void DidOverscroll(blink::mojom::DidOverscrollParamsPtr params) override;
 
@@ -421,6 +421,9 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   void SetView(RenderWidgetHostViewBase* view);
 
   RenderWidgetHostDelegate* delegate() const { return delegate_; }
+  MojoRenderInputRouterDelegateImpl* mojo_rir_delegate() {
+    return &mojo_rir_delegate_impl_;
+  }
 
   // Bind the provided widget interfaces.
   void BindWidgetInterfaces(
@@ -548,10 +551,11 @@ class CONTENT_EXPORT RenderWidgetHostImpl
     return visual_properties_ack_pending_;
   }
 
-  // Requests the generation of a new CompositorFrame from the renderer.
+  // Requests the generation of a new CompositorFrame from the renderer
+  // by forcing a new surface id.
   // It will return false if the renderer is not ready (e.g. there's an
   // in flight change).
-  bool RequestRepaintForTesting();
+  bool RequestRepaintOnNewSurface();
 
   // Called after every cross-document navigation. Note that for prerender
   // navigations, this is called before the renderer is shown.
@@ -1180,6 +1184,8 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   // changed its state of being blocked.
   void RenderProcessBlockedStateChanged(bool blocked);
 
+  void NotifyVizOfPageVisibilityUpdates();
+
   // 1. Grants permissions to URL (if any)
   // 2. Grants permissions to filenames
   // 3. Grants permissions to file system files.
@@ -1189,7 +1195,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   // Implementation of |hang_monitor_restarter| callback passed to
   // RenderWidgetHostDelegate::RendererUnresponsive if the unresponsiveness
   // was noticed because of input event ack timeout.
-  void RestartInputEventAckTimeoutIfNecessary();
+  void RestartRenderInputRouterInputEventAckTimeout();
 
   void SetupRenderInputRouter();
   void SetupInputRouter();
@@ -1244,6 +1250,11 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   // True if |Destroy()| has been called.
   bool destroyed_ = false;
 
+  // Handles mojo connections for RenderInputRouterDelegate[Client] interface to
+  // allow sycing information between the Browser and the GPU process for input
+  // handling with InputVizard.
+  MojoRenderInputRouterDelegateImpl mojo_rir_delegate_impl_{this};
+
   // Our delegate, which wants to know mainly about keyboard events.
   // It will remain non-null until DetachDelegate() is called.
   raw_ptr<RenderWidgetHostDelegate, FlakyDanglingUntriaged> delegate_;
@@ -1279,6 +1290,10 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   // Records the time when `was_ever_shown_` above becomes `true` for the first
   // time.
   base::TimeTicks first_shown_time_;
+
+  // Records the latest time when |this| widget's visibility state changes from
+  // hidden to shown.
+  base::TimeTicks latest_shown_time_;
 
   // Indicates whether the renderer host has received the first metadata signal
   // implying the renderer has pushed content to cc.

@@ -25,6 +25,9 @@
 #include "ui/events/event_constants.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 
+// Android chrome shortcuts are implemented in KeyboardShortcuts.java.
+static_assert(!BUILDFLAG(IS_ANDROID));
+
 namespace {
 
 // For ChromeOS only: If you plan on adding a new accelerator and want it
@@ -249,14 +252,16 @@ const AcceleratorMapping kAcceleratorMap[] = {
 #endif  // !BUILDFLAG(IS_MAC)
 };
 
+#if !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_CHROMEOS)
 const AcceleratorMapping kTabGroupAcceleratorMap[] = {
     // Tab group commands.
     {ui::VKEY_C, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, IDC_ADD_NEW_TAB_TO_GROUP},
-    {ui::VKEY_D, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, IDC_CREATE_NEW_TAB_GROUP},
+    {ui::VKEY_P, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, IDC_CREATE_NEW_TAB_GROUP},
     {ui::VKEY_X, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, IDC_FOCUS_NEXT_TAB_GROUP},
     {ui::VKEY_Z, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, IDC_FOCUS_PREV_TAB_GROUP},
     {ui::VKEY_W, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, IDC_CLOSE_TAB_GROUP},
 };
+#endif  // !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_CHROMEOS)
 
 const AcceleratorMapping kDevToolsAcceleratorMap[] = {
     {ui::VKEY_F12, ui::EF_NONE, IDC_DEV_TOOLS_TOGGLE},
@@ -321,11 +326,15 @@ std::vector<AcceleratorMapping> GetAcceleratorList() {
                            std::end(kUIDebugAcceleratorMap));
     }
 
+    // Prevent conflicts with global_keyboard_shortcuts_mac.mm and chromeos
+    // accelerators.
+#if !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_CHROMEOS)
     if (tabs::AreTabGroupShortcutsEnabled()) {
       accelerators->insert(accelerators->end(),
                            std::begin(kTabGroupAcceleratorMap),
                            std::end(kTabGroupAcceleratorMap));
     }
+#endif  // !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_CHROMEOS)
   }
 
   return *accelerators;

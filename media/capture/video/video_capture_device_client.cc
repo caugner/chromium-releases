@@ -295,6 +295,9 @@ class BufferPoolBufferHandleProvider
   const int buffer_id_;
 };
 
+VideoEffectsContext::VideoEffectsContext() = default;
+
+#if BUILDFLAG(ENABLE_VIDEO_EFFECTS)
 VideoEffectsContext::VideoEffectsContext(
     mojo::PendingRemote<video_effects::mojom::VideoEffectsProcessor>
         processor_remote,
@@ -302,6 +305,7 @@ VideoEffectsContext::VideoEffectsContext(
         readonly_manager_remote)
     : video_effects_processor_(std::move(processor_remote)),
       readonly_video_effects_manager_(std::move(readonly_manager_remote)) {}
+#endif
 
 VideoEffectsContext::VideoEffectsContext(VideoEffectsContext&& other) = default;
 VideoEffectsContext& VideoEffectsContext::operator=(
@@ -309,6 +313,7 @@ VideoEffectsContext& VideoEffectsContext::operator=(
 
 VideoEffectsContext::~VideoEffectsContext() = default;
 
+#if BUILDFLAG(ENABLE_VIDEO_EFFECTS)
 mojo::PendingRemote<video_effects::mojom::VideoEffectsProcessor>&&
 VideoEffectsContext::TakeVideoEffectsProcessor() {
   return std::move(video_effects_processor_);
@@ -318,6 +323,7 @@ mojo::PendingRemote<media::mojom::ReadonlyVideoEffectsManager>&&
 VideoEffectsContext::TakeReadonlyVideoEffectsManager() {
   return std::move(readonly_video_effects_manager_);
 }
+#endif
 
 #if BUILDFLAG(IS_CHROMEOS)
 VideoCaptureDeviceClient::VideoCaptureDeviceClient(
@@ -1099,7 +1105,8 @@ void VideoCaptureDeviceClient::OnIncomingCapturedY16Data(
     return;
   }
   auto buffer_access = buffer.handle_provider->GetHandleForInProcessAccess();
-  memcpy(buffer_access->data(), data, length);
+  memcpy(buffer_access->data(), data,
+         std::min(static_cast<size_t>(length), buffer_access->mapped_size()));
   const VideoCaptureFormat output_format = VideoCaptureFormat(
       format.frame_size, format.frame_rate, PIXEL_FORMAT_Y16);
   OnIncomingCapturedBuffer(std::move(buffer), output_format, reference_time,

@@ -17,10 +17,12 @@ import android.os.Build.VERSION_CODES;
 import android.util.DisplayMetrics;
 import android.util.Pair;
 import android.util.TypedValue;
+import android.view.Display;
 import android.view.WindowInsets;
 import android.view.WindowManager;
 
 import org.chromium.base.BuildInfo;
+import org.chromium.base.CommandLine;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.build.annotations.NullMarked;
@@ -74,6 +76,19 @@ public abstract class DisplayUtil {
                         org.chromium.ui.R.dimen.automotive_ui_scale_factor,
                         automotiveUiScaleFactor,
                         true);
+        if (CommandLine.getInstance().hasSwitch(DisplaySwitches.CLAMP_AUTOMOTIVE_SCALE_UP)) {
+            String maxAutomotiveScalingString =
+                    CommandLine.getInstance()
+                            .getSwitchValue(DisplaySwitches.CLAMP_AUTOMOTIVE_SCALE_UP);
+            float maxAutomotiveScaling;
+            try {
+                maxAutomotiveScaling = Float.parseFloat(maxAutomotiveScalingString);
+                if (maxAutomotiveScaling < automotiveUiScaleFactor.getFloat()) {
+                    return maxAutomotiveScaling;
+                }
+            } catch (Exception ignored) {
+            }
+        }
         return automotiveUiScaleFactor.getFloat();
     }
 
@@ -374,5 +389,17 @@ public abstract class DisplayUtil {
         int bottomPx = Math.round(globalCoordinatesDp.bottom * displayDensity);
 
         return Pair.create(targetDisplayId, new Rect(leftPx, topPx, rightPx, bottomPx));
+    }
+
+    /**
+     * Determine whether the given context is associated with the default display.
+     *
+     * @param context The context to determine display state.
+     * @return {@code true} if the context is associated with the default display, {@code false}
+     *     otherwise.
+     */
+    public static boolean isContextInDefaultDisplay(Context context) {
+        Display display = DisplayAndroidManager.getDefaultDisplayForContext(context);
+        return display.getDisplayId() == Display.DEFAULT_DISPLAY;
     }
 }

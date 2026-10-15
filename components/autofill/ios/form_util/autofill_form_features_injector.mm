@@ -55,11 +55,6 @@ void SetAutofillFormFeatureFlags(WebFrame* web_frame) {
           base::FeatureList::IsEnabled(kAutofillIsolatedWorldForJavascriptIos));
 
   AutofillFormFeaturesJavaScriptFeature::GetInstance()
-      ->SetAutofillFixPaymentSheetSpam(
-          web_frame,
-          base::FeatureList::IsEnabled(kAutofillFixPaymentSheetSpam));
-
-  AutofillFormFeaturesJavaScriptFeature::GetInstance()
       ->SetAutofillCorrectUserEditedBitInParsedField(
           web_frame, base::FeatureList::IsEnabled(
                          kAutofillCorrectUserEditedBitInParsedField));
@@ -73,6 +68,11 @@ void SetAutofillFormFeatureFlags(WebFrame* web_frame) {
       ->SetAutofillDedupeFormSubmission(
           web_frame,
           base::FeatureList::IsEnabled(kAutofillDedupeFormSubmission));
+
+  AutofillFormFeaturesJavaScriptFeature::GetInstance()
+      ->SetAutofillReportFormSubmissionErrors(
+          web_frame,
+          base::FeatureList::IsEnabled(kAutofillReportFormSubmissionErrors));
 }
 
 AutofillFormFeaturesInjector::~AutofillFormFeaturesInjector() = default;

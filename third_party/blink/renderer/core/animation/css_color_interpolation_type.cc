@@ -11,6 +11,7 @@
 #include "third_party/blink/renderer/core/animation/color_property_functions.h"
 #include "third_party/blink/renderer/core/animation/interpolable_color.h"
 #include "third_party/blink/renderer/core/animation/interpolable_value.h"
+#include "third_party/blink/renderer/core/animation/underlying_value_owner.h"
 #include "third_party/blink/renderer/core/css/css_color.h"
 #include "third_party/blink/renderer/core/css/css_identifier_value.h"
 #include "third_party/blink/renderer/core/css/resolver/style_builder_converter.h"
@@ -146,7 +147,7 @@ InterpolableColor* CSSColorInterpolationType::MaybeCreateInterpolableColor(
   if (state && (value.IsLightDarkValuePair() || value.IsColorMixValue() ||
                 value.IsRelativeColorValue())) {
     ResolveColorValueContext context{
-        .length_resolver = state->CssToLengthConversionData(),
+        .conversion_data = state->CssToLengthConversionData(),
         .text_link_colors = state->GetDocument().GetTextLinkColors(),
         .used_color_scheme = color_scheme,
         .color_provider = color_provider};

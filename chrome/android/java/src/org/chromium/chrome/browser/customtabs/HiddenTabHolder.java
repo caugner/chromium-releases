@@ -33,6 +33,8 @@ import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.RedirectHandlerTabHelper;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabLaunchType;
+import org.chromium.chrome.browser.tab.TabLoadIfNeededCaller;
+import org.chromium.chrome.browser.tab.TabSelectionType;
 import org.chromium.components.embedder_support.util.UrlUtilities;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.WebContents;
@@ -230,7 +232,8 @@ public class HiddenTabHolder {
 
         TabObserverRegistrar registrar = new TabObserverRegistrar();
         CustomTabObserver customTabObserver =
-                new CustomTabObserver(/* openedByChrome= */ false, session);
+                new CustomTabObserver(
+                        /* openedByChrome= */ false, session, /* twaStartupUptimeMillis= */ null);
         CustomTabNavigationEventObserver customTabNavigationEventObserver =
                 new CustomTabNavigationEventObserver(session, /* forPrerender= */ true);
         CustomTabActivityTabController.addTabNavigationObservers(
@@ -374,9 +377,10 @@ public class HiddenTabHolder {
                 IntentUtils.safeGetBooleanExtra(
                         intent, TrustedWebUtils.EXTRA_LAUNCH_AS_TRUSTED_WEB_ACTIVITY, false);
 
+        // Start hidden as Tab needs to be shown after observers are attached.
         Tab tab =
                 WarmupManager.getInstance()
-                        .takeSpareTab(profile, false, TabLaunchType.FROM_EXTERNAL_APP);
+                        .takeSpareTab(profile, true, TabLaunchType.FROM_EXTERNAL_APP);
 
         String url = IntentHandler.getUrlFromIntent(intent);
         LoadUrlParams params = new LoadUrlParams(url);
@@ -395,11 +399,14 @@ public class HiddenTabHolder {
         TabObserverRegistrar registrar = new TabObserverRegistrar();
         SessionHolder<?> token = SessionHolder.getSessionHolderFromIntent(intent);
         CustomTabObserver customTabObserver =
-                new CustomTabObserver(/* openedByChrome= */ false, token);
+                new CustomTabObserver(
+                        /* openedByChrome= */ false, token, /* twaStartupUptimeMillis= */ null);
         CustomTabNavigationEventObserver customTabNavigationEventObserver =
                 new CustomTabNavigationEventObserver(token, /* forPrerender= */ false);
         CustomTabActivityTabController.addTabNavigationObservers(
                 registrar, customTabObserver, customTabNavigationEventObserver, tab, token);
+
+        tab.show(TabSelectionType.FROM_NEW, TabLoadIfNeededCaller.REQUEST_TO_SHOW_TAB_THEN_SHOW);
 
         // Unlike a prerender, this isn't a speculative load, so we can record metrics for it
         // unconditionally.

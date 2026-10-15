@@ -96,7 +96,7 @@ public class BrowserControlsManager implements ActivityStateListener, BrowserCon
 
     private final ObserverList<BrowserControlsStateProvider.Observer> mControlsObservers =
             new ObserverList<>();
-    private FullscreenHtmlApiHandlerBase mHtmlApiHandler;
+    private final FullscreenHtmlApiHandlerBase mHtmlApiHandler;
     @Nullable private Tab mTab;
 
     /** The animator for the Android browser controls. */
@@ -302,7 +302,7 @@ public class BrowserControlsManager implements ActivityStateListener, BrowserCon
                             BrowserControlsOffsetTagsInfo oldOffsetTagsInfo,
                             BrowserControlsOffsetTagsInfo offsetTagsInfo,
                             @BrowserControlsState int constraints) {
-                        int hairlineHeight = mControlContainer.getToolbarHairlineHeight();
+                        int hairlineHeight = getTopControlsHairlineHeight();
                         offsetTagsInfo.mTopControlsAdditionalHeight = hairlineHeight;
                         offsetTagsInfo.mContentConstraints =
                                 new OffsetTagConstraints(0, 0, -mTopControlsHeight, 0);
@@ -560,6 +560,15 @@ public class BrowserControlsManager implements ActivityStateListener, BrowserCon
     }
 
     @Override
+    public int getTopControlsHairlineHeight() {
+        if (mControlContainer == null) {
+            return 0;
+        }  else {
+            return mControlContainer.getToolbarHairlineHeight();
+        }
+    }
+
+    @Override
     public int getTopControlsMinHeight() {
         return mTopControlsMinHeight;
     }
@@ -673,6 +682,24 @@ public class BrowserControlsManager implements ActivityStateListener, BrowserCon
     @Override
     public int getControlsPosition() {
         return mControlsPosition;
+    }
+
+    @Override
+    public boolean isVisibilityForced() {
+        Tab tab = getTab();
+
+        // If the tab gets destroyed, we should be transitioning to a state
+        // where there are no tabs (in which case we show the grid tab
+        // switcher) or we change to another tab (in which case we force the
+        // controls to be visible for a while.)
+        if (tab != null && tab.isDestroyed()) {
+            return true;
+        }
+
+        @BrowserControlsState
+        int constraints = TabBrowserControlsConstraintsHelper.getConstraints(tab);
+        return constraints == BrowserControlsState.HIDDEN
+                || constraints == BrowserControlsState.SHOWN;
     }
 
     @Override
@@ -884,13 +911,6 @@ public class BrowserControlsManager implements ActivityStateListener, BrowserCon
                         && getBottomContentOffset() == getBottomControlsMinHeight());
         updateControlOffset();
         notifyControlOffsetChanged();
-    }
-
-    private boolean isVisibilityForced() {
-        @BrowserControlsState
-        int constraints = TabBrowserControlsConstraintsHelper.getConstraints(getTab());
-        return constraints == BrowserControlsState.HIDDEN
-                || constraints == BrowserControlsState.SHOWN;
     }
 
     private void notifyControlOffsetChanged() {
@@ -1256,8 +1276,7 @@ public class BrowserControlsManager implements ActivityStateListener, BrowserCon
         }
 
         OffsetTagConstraints newTopConstraints =
-                new OffsetTagConstraints(
-                        0, 0, minY - mControlContainer.getToolbarHairlineHeight(), maxY);
+                new OffsetTagConstraints(0, 0, minY - getTopControlsHairlineHeight(), maxY);
         OffsetTagConstraints newContentConstraints = new OffsetTagConstraints(0, 0, minY, maxY);
         BrowserControlsOffsetTagConstraints constraints =
                 new BrowserControlsOffsetTagConstraints(
@@ -1274,6 +1293,10 @@ public class BrowserControlsManager implements ActivityStateListener, BrowserCon
             int oldHeight, int oldMinHeight, int newHeight, int newMinHeight) {
         int minY = 0;
         int maxY = newHeight - newMinHeight;
+
+        // crbug.com/406429149: unlike other browser controls, the height for the custom tabs bottom
+        // controls is inclusive of the shadow's height, so newHeight can be negative.
+        maxY = Math.max(0, maxY);
 
         // See comment in updateTopControlsOffsetTagConstraints(), the logic is similar.
         if (mHasBottomControlsHeightAnimation) {

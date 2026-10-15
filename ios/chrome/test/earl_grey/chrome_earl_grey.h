@@ -701,6 +701,11 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration);
 // Fails if the execution causes an error.
 - (void)evaluateJavaScriptForSideEffect:(NSString*)javaScript;
 
+// Same as -evaluateJavaScriptForSideEffect but executes the javascript in the
+// isolated world instead of the page content world. This allows interacting
+// with the gcrweb objects that are injected there.
+- (void)evaluateJavaScriptInIsolatedWorldForSideEffect:(NSString*)javaScript;
+
 // Returns the user agent that should be used for the mobile version.
 - (NSString*)mobileUserAgentString;
 
@@ -823,6 +828,7 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration);
 - (bool)localStateBooleanPref:(const std::string&)prefName;
 - (int)localStateIntegerPref:(const std::string&)prefName;
 - (std::string)localStateStringPref:(const std::string&)prefName;
+- (base::Time)localStateTimePref:(const std::string&)prefName;
 
 // Sets the integer value for the local state pref with `prefName`. `value`
 // can be either a casted enum or any other numerical value. Local State
@@ -894,6 +900,10 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration);
 
 // Copies `link` as NSURL into the clipboard from the app's perspective.
 - (void)copyLinkAsURLToPasteBoard:(NSString*)link;
+
+// Copies `image` as NSData with PNG representation into the clipboard from the
+// app's perspective.
+- (void)copyImageToPasteboard:(UIImage*)image;
 
 #pragma mark - Context Menus Utilities (EG2)
 
@@ -992,6 +1002,11 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration);
 
 // Forces an override of the variations stored permanent country.
 - (void)overrideVariationsServiceStoredPermanentCountry:(NSString*)country;
+
+#pragma mark - Shared Tab Groups Utilities
+
+// Waits for the MessagingBackendService to be initialized.
+- (NSError*)waitForMessagingBackendServiceInitialized;
 
 @end
 

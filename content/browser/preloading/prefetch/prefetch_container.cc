@@ -537,7 +537,7 @@ PrefetchContainer::PrefetchContainer(
 
   // Disallow prefetching ServiceWorker-controlled responses for isolated
   // network contexts.
-  if (!base::FeatureList::IsEnabled(features::kPrefetchServiceWorker) ||
+  if (!features::IsPrefetchServiceWorkerEnabled(browser_context_.get()) ||
       IsIsolatedNetworkContextRequiredForCurrentPrefetch()) {
     service_worker_state_ = PrefetchServiceWorkerState::kDisallowed;
   }
@@ -1804,6 +1804,13 @@ void PrefetchContainer::MakeResourceRequest(
     AddXClientDataHeader(*request.get());
   }
 
+  // `URLLoaderNetworkServiceObserver`
+  // (`request->trusted_params->url_loader_network_observer`) is NOT set here,
+  // because for prefetching request we don't want to ask users e.g. for
+  // authentication/cert errors, and instead make the prefetch fail. Because of
+  // this, `ServiceWorkerClient::GetOngoingNavigationRequestBeforeCommit()` is
+  // never called. `NavPrefetchBrowserTest` has the corresponding test coverage.
+
   resource_request_ = std::move(request);
 }
 
@@ -2131,6 +2138,9 @@ void PrefetchContainer::NotifyPrefetchResponseReceived(
   // Ensured by the caller `PrefetchService::OnPrefetchResponseStarted()`.
   CHECK(!IsDecoy());
 
+  time_url_request_started_ = head.load_timing.request_start;
+
+  // DevTools plumbing.
   auto* ftn = FrameTreeNode::From(
       RenderFrameHostImpl::FromID(referring_render_frame_host_id_));
   // Don't emit CDP events if the trigger is not Spec Rules or the document
@@ -2138,7 +2148,6 @@ void PrefetchContainer::NotifyPrefetchResponseReceived(
   if (!ftn) {
     return;
   }
-
   devtools_instrumentation::OnPrefetchResponseReceived(ftn, RequestId(),
                                                        GetCurrentURL(), head);
 }
@@ -2232,6 +2241,19 @@ void PrefetchContainer::RecordDurationFromAdded() {
                                                   embedder_histogram_suffix_),
       }),
       time_prefetch_started_.value() - time_added_to_prefetch_service_.value());
+
+  if (!time_url_request_started_.has_value()) {
+    return;
+  }
+
+  base::UmaHistogramTimes(base::StrCat({
+                              "Prefetch.PrefetchContainer."
+                              "AddedToURLRequestStarted.",
+                              GetMetricsSuffixTriggerTypeAndEagerness(
+                                  prefetch_type_, embedder_histogram_suffix_),
+                          }),
+                          time_url_request_started_.value() -
+                              time_added_to_prefetch_service_.value());
 
   if (!time_header_determined_successfully_.has_value()) {
     return;

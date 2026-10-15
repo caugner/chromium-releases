@@ -197,7 +197,8 @@ TEST_F(P2PSocketTcpTest, ReceiveStun) {
   size_t step = 0;
   while (pos < received_data.size()) {
     size_t step_size = std::min(step_sizes[step], received_data.size() - pos);
-    socket_->AppendInputData(&received_data[pos], step_size);
+    socket_->AppendInputData(
+        std::string_view(received_data).substr(pos, step_size));
     pos += step_size;
     if (++step >= std::size(step_sizes))
       step = 0;
@@ -240,7 +241,7 @@ TEST_F(P2PSocketTcpTest, SendAfterStunRequest) {
 
   EXPECT_CALL(*fake_client_.get(), DataReceived(_)).Times(1);
   EXPECT_CALL(*this, SinglePacketReceptionHelper(_, SpanEq(request_packet), _));
-  socket_->AppendInputData(&received_data[0], received_data.size());
+  socket_->AppendInputData(received_data);
 
   webrtc::AsyncSocketPacketOptions options;
   // Now we should be able to send any data to |dest_|.
@@ -324,7 +325,7 @@ TEST_F(P2PSocketTcpTest, SendDataWithPacketOptions) {
   EXPECT_CALL(*fake_client_.get(), SendComplete(_)).Times(1);
   EXPECT_CALL(*fake_client_.get(), DataReceived(_)).Times(1);
   EXPECT_CALL(*this, SinglePacketReceptionHelper(_, SpanEq(request_packet), _));
-  socket_->AppendInputData(&received_data[0], received_data.size());
+  socket_->AppendInputData(received_data);
 
   webrtc::AsyncSocketPacketOptions options;
   options.packet_time_params.rtp_sendtime_extension_id = 3;
@@ -353,13 +354,13 @@ TEST_F(P2PSocketTcpTest, IgnoreEmptyFrame) {
   std::string received_data;
   received_data.append(IntToSize(response_packet.size()));
   received_data.append(response_packet.begin(), response_packet.end());
-  socket_->AppendInputData(&received_data[0], received_data.size());
+  socket_->AppendInputData(received_data);
 
   std::vector<uint8_t> empty_packet;
   received_data.resize(0);
   received_data.append(IntToSize(empty_packet.size()));
   received_data.append(empty_packet.begin(), empty_packet.end());
-  socket_->AppendInputData(&received_data[0], received_data.size());
+  socket_->AppendInputData(received_data);
   EXPECT_CALL(*fake_client_.get(), DataReceived(_)).Times(0);
   EXPECT_CALL(*this, SinglePacketReceptionHelper(_, _, _)).Times(0);
 }
@@ -425,7 +426,8 @@ TEST_F(P2PSocketStunTcpTest, ReceiveStun) {
   size_t step = 0;
   while (pos < received_data.size()) {
     size_t step_size = std::min(step_sizes[step], received_data.size() - pos);
-    socket_->AppendInputData(&received_data[pos], step_size);
+    socket_->AppendInputData(
+        std::string_view(received_data).substr(pos, step_size));
     pos += step_size;
     if (++step >= std::size(step_sizes))
       step = 0;
@@ -682,6 +684,83 @@ TEST_P(P2PSocketTcpWithTlsTest, Basic) {
   EXPECT_TRUE(data_provider.AllReadDataConsumed());
   EXPECT_TRUE(data_provider.AllWriteDataConsumed());
   EXPECT_TRUE(ssl_socket_provider.ConnectDataConsumed());
+}
+
+// Verify that we can send packets using SendBatch
+TEST_F(P2PSocketTcpTest, SendAfterStunRequestWithSendBatch) {
+  // Receive packet from |dest_|.
+  std::vector<uint8_t> request_packet;
+  CreateStunRequest(&request_packet);
+
+  std::string received_data;
+  received_data.append(IntToSize(request_packet.size()));
+  received_data.append(request_packet.begin(), request_packet.end());
+
+  EXPECT_CALL(*fake_client_.get(), SendComplete(_)).Times(2);
+
+  EXPECT_CALL(*fake_client_.get(), DataReceived(_)).Times(1);
+  EXPECT_CALL(*this, SinglePacketReceptionHelper(_, SpanEq(request_packet), _));
+  socket_->AppendInputData(received_data);
+
+  webrtc::AsyncSocketPacketOptions options;
+  // Now we should be able to send any data to |dest_|.
+  std::vector<mojom::P2PSendPacketPtr> packet_batch;
+  std::vector<uint8_t> packet;
+  // CreateRandomPacket(&packet);
+  packet = {0x01, 0x02, 0x03};
+  std::string expected_data;
+  expected_data.append(IntToSize(packet.size()));
+  expected_data.append(packet.begin(), packet.end());
+  packet_batch.emplace_back(mojom::P2PSendPacket::New(
+      packet, P2PPacketInfo(dest_.ip_address, options, 0)));
+  std::vector<uint8_t> packet2;
+  // CreateRandomPacket(&packet2);
+  packet2 = {0x04, 0x05, 0x06};
+  expected_data.append(IntToSize(packet2.size()));
+  expected_data.append(packet2.begin(), packet2.end());
+  packet_batch.emplace_back(mojom::P2PSendPacket::New(
+      packet2, P2PPacketInfo(dest_.ip_address, options, 0)));
+  socket_impl_->SendBatch(std::move(packet_batch));
+
+  EXPECT_EQ(expected_data, sent_data_);
+
+  base::RunLoop().RunUntilIdle();
+}
+
+TEST_F(P2PSocketTcpTest, SendBatchWithBrokenFirstPacket) {
+  // Receive packet from |dest_|.
+  std::vector<uint8_t> request_packet;
+  CreateStunRequest(&request_packet);
+
+  std::string received_data;
+  received_data.append(IntToSize(request_packet.size()));
+  received_data.append(request_packet.begin(), request_packet.end());
+  EXPECT_CALL(*fake_client_.get(), DataReceived(_)).Times(1);
+  EXPECT_CALL(*this, SinglePacketReceptionHelper(_, SpanEq(request_packet), _));
+
+  socket_->AppendInputData(received_data);
+
+  webrtc::AsyncSocketPacketOptions options;
+  std::vector<mojom::P2PSendPacketPtr> packet_batch;
+  std::vector<uint8_t> packet;
+  CreateRandomPacket(&packet);
+  packet_batch.emplace_back(mojom::P2PSendPacket::New(
+      packet, P2PPacketInfo(dest_.ip_address, options, 0)));
+  std::vector<uint8_t> packet2;
+  CreateRandomPacket(&packet2);
+  packet_batch.emplace_back(mojom::P2PSendPacket::New(
+      packet2, P2PPacketInfo(dest_.ip_address, options, 0)));
+  socket_->set_error_on_next_write(net::ERR_FAILED);
+  // We now expect the first packet to cause the connection to be destroyed,
+  // and the second packet to never be processed.
+  auto socket_impl_ptr = socket_impl_.get();
+  socket_delegate_.ExpectDestruction(std::move(socket_impl_));
+  // The socket will be destroyed, so clear our raw_ptr to it to avoid
+  // a dangling pointer warning.
+  socket_ = nullptr;
+  socket_impl_ptr->SendBatch(std::move(packet_batch));
+  // process any queued callbacks.
+  base::RunLoop().RunUntilIdle();
 }
 
 }  // namespace network

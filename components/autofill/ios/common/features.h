@@ -37,13 +37,13 @@ BASE_DECLARE_FEATURE(kAutofillDedupeFormSubmission);
 // TODO(crbug.com/40281788): Remove once launched.
 BASE_DECLARE_FEATURE(kAutofillDynamicallyLoadsFieldsForAddressInput);
 
-// Enables fixing the issue where the payment sheet spams after dismissing a
-// modal dialog that was triggered from the KA (e.g. filling a suggestion).
-BASE_DECLARE_FEATURE(kAutofillFixPaymentSheetSpam);
-
 // Fix for XHR form submission detection when autofill across iframes is
 // enabled.
 BASE_DECLARE_FEATURE(kAutofillFixXhrForXframe);
+
+// Listen to form submission events in capture mode before the events are
+// propagated.
+BASE_DECLARE_FEATURE(kAutofillFormSubmissionEventsInCaptureMode);
 
 // Controls whether to use the isolated content world instead of the page
 // content world for the Autofill JS feature scripts.
@@ -60,6 +60,13 @@ BASE_DECLARE_FEATURE(kAutofillPaymentsSheetV2Ios);
 // directly pick the Autofill suggestions provider instead of intermediating via
 // the FormSuggestionController.
 BASE_DECLARE_FEATURE(kAutofillPaymentsSheetV3Ios);
+
+// Enables the refill functionality to allow autofilling of dynamically
+// expanding forms.
+BASE_DECLARE_FEATURE(kAutofillRefillForFormsIos);
+
+// Reports JS errors that occur upon handling form submission in the renderer.
+BASE_DECLARE_FEATURE(kAutofillReportFormSubmissionErrors);
 
 // Makes the autofill and password infobars sticky on iOS. The sticky infobar
 // sticks there until navigating from an explicit user gesture (e.g. reload or

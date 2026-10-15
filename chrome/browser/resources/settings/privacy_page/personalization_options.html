@@ -96,16 +96,6 @@
         label="$i18n{urlKeyedAnonymizedDataCollection}"
         sub-label="$i18n{urlKeyedAnonymizedDataCollectionDesc}">
     </settings-toggle-button>
-    <template is="dom-if" if="[[shouldShowHistorySearchControl_(
-        showHistorySearchControl_, enableAiSettingsPageRefresh_)]]" restamp>
-      <cr-link-row id="historySearchRow"
-          class="hr"
-          label="$i18n{historySearchSettingLabel}"
-          sub-label="$i18n{historySearchSettingSublabel}"
-          role-description="$i18n{subpageArrowRoleDescription}"
-          on-click="onHistorySearchRowClick_">
-      </cr-link-row>
-    </template>
 <if expr="_google_chrome">
 <if expr="not chromeos_ash">
     <settings-toggle-button id="spellCheckControl"
@@ -135,6 +125,19 @@
           pref="{{prefs.search.suggest_enabled}}"
           label="$i18n{searchSuggestPref}"
           sub-label="$i18n{searchSuggestPrefDesc}">
+      </settings-toggle-button>
+    </template>
+
+    <!-- This toggle is only shown for users with the appropriate enterprise
+        policy enabled. The state is not changeable by the user, so when shown,
+        it is alays selected but disabled. -->
+    <template is="dom-if" if="[[showSearchAggregatorSuggest_]]" restamp>
+      <settings-toggle-button id="searchAggregatorSuggestToggle"
+          pref="[[searchAggregatorSuggestFakePref_]]"
+          disabled
+          class="hr"
+          label="$i18n{searchAggregatorSuggestPref}"
+          sub-label="$i18n{searchAggregatorSuggestPrefDesc}">
       </settings-toggle-button>
     </template>
 

@@ -14,8 +14,11 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/mock_navigation_handle.h"
 #include "content/public/test/test_renderer_host.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
@@ -100,7 +103,7 @@ class TestPredicateEvaluator : public ContentPredicateEvaluator {
   void RequestImmediateEvaluation(content::WebContents* contents,
                                   bool evaluation_result) {
     next_evaluation_result_ = evaluation_result;
-    delegate_->RequestEvaluation(contents);
+    delegate_->NotifyPredicateStateUpdated(contents);
   }
 
   void RequestEvaluationOnNextOperation(content::WebContents* contents,
@@ -112,7 +115,8 @@ class TestPredicateEvaluator : public ContentPredicateEvaluator {
  private:
   void RequestEvaluationIfSpecified() {
     if (contents_for_next_operation_evaluation_) {
-      delegate_->RequestEvaluation(contents_for_next_operation_evaluation_);
+      delegate_->NotifyPredicateStateUpdated(
+          contents_for_next_operation_evaluation_);
     }
     contents_for_next_operation_evaluation_ = nullptr;
   }
@@ -213,6 +217,40 @@ TEST_F(DeclarativeChromeContentRulesRegistryTest, ActiveRulesDoesntGrow) {
   evaluator->RequestEvaluationOnNextOperation(tab.get(), false);
   registry->DidFinishNavigation(tab.get(), &navigation_handle2);
   EXPECT_EQ(0u, registry->GetActiveRulesCountForTesting());
+}
+
+TEST_F(DeclarativeChromeContentRulesRegistryTest, RemoveDuplicateRules) {
+  TestPredicateEvaluator* evaluator = nullptr;
+  scoped_refptr<ChromeContentRulesRegistry> registry(
+      new ChromeContentRulesRegistry(
+          env()->profile(), nullptr,
+          base::BindOnce(&CreateTestEvaluator, &evaluator)));
+
+  auto rule = api::events::Rule::FromValue(base::test::ParseJsonDict(R"({
+          "id": "rule1",
+          "priority": 100,
+          "conditions": [
+           {
+             "instanceType": "declarativeContent.PageStateMatcher",
+             "test_predicate": []
+           }],
+          "actions": [
+            {"instanceType": "declarativeContent.ShowAction"}
+          ]
+      })"));
+  ASSERT_TRUE(rule.has_value());
+  std::vector<const api::events::Rule*> rules({&rule.value()});
+
+  const Extension* extension =
+      env()->MakeExtension(base::test::ParseJsonDict("{\"page_action\": {}}"));
+  registry->AddRulesImpl(extension->id(), rules);
+
+  // Removing duplicate rule IDs should not cause memory corruption.
+  // This test validates that passing the same rule ID multiple times
+  // into RemoveRulesImpl does not result in the same internal rule
+  // iterator being erased more than once.
+  std::vector<std::string> remove_rules_dup = {"rule1", "rule1"};
+  registry->RemoveRulesImpl(extension->id(), remove_rules_dup);
 }
 
 }  // namespace extensions
