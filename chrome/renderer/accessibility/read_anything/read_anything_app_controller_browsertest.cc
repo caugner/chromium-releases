@@ -36,6 +36,7 @@
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "ui/accessibility/accessibility_features.h"
 #include "ui/accessibility/ax_enums.mojom-shared.h"
+#include "ui/accessibility/ax_features.mojom.h"
 #include "ui/accessibility/ax_location_and_scroll_updates.h"
 #include "ui/accessibility/ax_node.h"
 #include "ui/accessibility/ax_node_data.h"
@@ -192,6 +193,8 @@ class ReadAnythingAppControllerTest : public ChromeRenderViewTest {
     // Set the page handler for testing.
     controller_->page_handler_.reset();
     controller_->page_handler_.Bind(page_handler_.BindNewPipeAndPassRemote());
+    EXPECT_CALL(page_handler_, OnDistillationStateChanged(testing::_))
+        .Times(testing::AnyNumber());
 
     // Set distiller for testing.
     auto distiller = std::make_unique<MockAXTreeDistiller>(render_frame);
@@ -333,7 +336,7 @@ class ReadAnythingAppControllerTest : public ChromeRenderViewTest {
   void EnableDocs() {
     scoped_feature_list_.Reset();
     scoped_feature_list_.InitAndEnableFeature(
-        features::kReadAnythingDocsIntegration);
+        ax::mojom::features::kReadAnythingDocsIntegration);
   }
 
   void EnableLineFocus() {
@@ -1759,6 +1762,52 @@ TEST_F(ReadAnythingAppControllerTest, GetUrl) {
   EXPECT_EQ("", controller().GetUrl(6));
 }
 
+TEST_F(ReadAnythingAppControllerTest, GetDocumentUrl) {
+  std::string document_url = "https://www.google.com";
+  ui::AXNodeData root;
+  root.id = 1;
+  root.role = ax::mojom::Role::kRootWebArea;
+  root.AddStringAttribute(ax::mojom::StringAttribute::kUrl, document_url);
+
+  SendUpdateWithNodes({std::move(root)});
+  controller().OnAXTreeDistilled(tree_id_, {});
+
+  EXPECT_EQ(document_url, controller().GetDocumentUrl());
+}
+
+TEST_F(ReadAnythingAppControllerTest, GetHtmlId) {
+  ui::AXNodeData node1;
+  node1.id = 2;
+  node1.AddStringAttribute(ax::mojom::StringAttribute::kHtmlId, "footnote-1");
+
+  ui::AXNodeData node2;
+  node2.id = 3;
+
+  ui::AXNodeData root;
+  root.id = 1;
+  root.child_ids = {node1.id, node2.id};
+  SendUpdateWithNodes({std::move(root), std::move(node1), std::move(node2)});
+
+  controller().OnAXTreeDistilled(tree_id_, {});
+  EXPECT_EQ("footnote-1", controller().GetHtmlId(2));
+  EXPECT_EQ("", controller().GetHtmlId(3));
+  EXPECT_EQ("", controller().GetHtmlId(4));
+}
+
+TEST_F(ReadAnythingAppControllerTest, GetDocumentUrl_ContainsTreeSafetyCheck) {
+  ui::AXTreeID unknown_tree_id = ui::AXTreeID::CreateNewAXTreeID();
+  controller().OnActiveAXTreeIDChanged(unknown_tree_id, ukm::kInvalidSourceId,
+                                       /*is_pdf=*/false);
+  EXPECT_EQ("", controller().GetDocumentUrl());
+}
+
+TEST_F(ReadAnythingAppControllerTest, GetHtmlId_ContainsTreeSafetyCheck) {
+  ui::AXTreeID unknown_tree_id = ui::AXTreeID::CreateNewAXTreeID();
+  controller().OnActiveAXTreeIDChanged(unknown_tree_id, ukm::kInvalidSourceId,
+                                       /*is_pdf=*/false);
+  EXPECT_EQ("", controller().GetHtmlId(2));
+}
+
 TEST_F(ReadAnythingAppControllerTest, ShouldBold) {
   ui::AXNodeData overline_node;
   overline_node.id = 2;
@@ -3179,6 +3228,8 @@ TEST_F(ReadAnythingAppControllerTest,
 
 TEST_F(ReadAnythingAppControllerTest,
        OnStringAttributeChanged_ImageFlagDisabled_DoesNothing) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndDisableFeature(features::kReadAnythingImagesViaAlgorithm);
   static constexpr ui::AXNodeID kImageNodeId = 2;
   std::string placeholder_src = "data:image/svg+xml,...";
   ui::AXNodeData image_node = test::ImageNode(kImageNodeId, placeholder_src);
@@ -3350,11 +3401,16 @@ class ReadAnythingAppControllerImmersiveTest
     scoped_feature_list_.Reset();
     scoped_feature_list_.InitWithFeatures({features::kImmersiveReadAnything},
                                           {});
+    page_handler_.FlushForTesting();
+    Mock::VerifyAndClearExpectations(&page_handler_);
   }
 };
 
 TEST_F(ReadAnythingAppControllerImmersiveTest,
        OnDistillationStateChanged_CalledAfterDistillationEmpty) {
+  model().set_distillation_state(
+      read_anything::mojom::ReadAnythingDistillationState::kNotAttempted);
+
   EXPECT_CALL(page_handler_,
               OnDistillationStateChanged(
                   read_anything::mojom::ReadAnythingDistillationState::
@@ -3456,6 +3512,8 @@ TEST_F(ReadAnythingAppControllerImmersiveTest,
   EXPECT_FALSE(controller().IsUpdateProcessingPaused());
 
   // Set the distillation state to empty.
+  model().set_distillation_state(
+      read_anything::mojom::ReadAnythingDistillationState::kNotAttempted);
   EXPECT_CALL(page_handler_,
               OnDistillationStateChanged(
                   read_anything::mojom::ReadAnythingDistillationState::
@@ -5044,6 +5102,8 @@ class ReadAnythingAppControllerReadabilityTest
     // Set the page handler for testing.
     controller_->page_handler_.reset();
     controller_->page_handler_.Bind(page_handler_.BindNewPipeAndPassRemote());
+    EXPECT_CALL(page_handler_, OnDistillationStateChanged(testing::_))
+        .Times(testing::AnyNumber());
 
     // Set distiller for testing.
     auto distiller = std::make_unique<MockAXTreeDistiller>(render_frame);
@@ -5080,6 +5140,9 @@ TEST_F(ReadAnythingAppControllerReadabilityTest,
        UpdateContent_EmptyContent_Screen2xUsed) {
   Mock::VerifyAndClearExpectations(distiller_);
   Mock::VerifyAndClearExpectations(&page_handler_);
+
+  EXPECT_CALL(page_handler_, OnDistillationStateChanged(testing::_))
+      .Times(testing::AnyNumber());
 
   EXPECT_CALL(*distiller_, Distill).Times(1);
 
@@ -5411,6 +5474,8 @@ class ReadAnythingAppControllerReadabilitySelectTextTest
         ReadAnythingAppModel::DistillationMethod::kReadability);
     model().set_current_content_distillation_method(
         ReadAnythingAppModel::DistillationMethod::kReadability);
+    page_handler_.FlushForTesting();
+    Mock::VerifyAndClearExpectations(&page_handler_);
   }
 
  protected:
@@ -5639,6 +5704,45 @@ TEST_F(ReadAnythingAppControllerReadabilitySelectTextTest,
 
   EXPECT_FALSE(model().requires_readability_distillation());
   EXPECT_TRUE(controller().GetDomDistillerContentHtml().empty());
+}
+
+TEST_F(ReadAnythingAppControllerTest,
+       OnIsSpeechActiveChanged_LogsPlaybackContext) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(features::kImmersiveReadAnything);
+  base::HistogramTester histograms;
+  const char* histogram_name =
+      "Accessibility.ReadAnything.ReadAloud.PlaybackContext";
+
+  // Test Side Panel
+  controller().OnGetPresentationState(
+      read_anything::mojom::ReadAnythingPresentationState::kInSidePanel);
+  controller().OnIsSpeechActiveChanged(true);
+  histograms.ExpectUniqueSample(
+      histogram_name,
+      ReadAloudAppModel::ReadAnythingPlaybackContext::kSidePanel, 1);
+  controller().OnIsSpeechActiveChanged(false);
+
+  // Test Immersive
+  controller().OnGetPresentationState(
+      read_anything::mojom::ReadAnythingPresentationState::kInImmersiveOverlay);
+  controller().OnIsSpeechActiveChanged(true);
+  histograms.ExpectBucketCount(
+      histogram_name,
+      ReadAloudAppModel::ReadAnythingPlaybackContext::kImmersive, 1);
+  histograms.ExpectTotalCount(histogram_name, 2);
+}
+
+TEST_F(ReadAnythingAppControllerTest,
+       OnIsSpeechActiveChanged_NoLogWhenFeatureDisabled) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndDisableFeature(features::kImmersiveReadAnything);
+  base::HistogramTester histograms;
+  const char* histogram_name =
+      "Accessibility.ReadAnything.ReadAloud.PlaybackContext";
+
+  controller().OnIsSpeechActiveChanged(true);
+  histograms.ExpectTotalCount(histogram_name, 0);
 }
 
 TEST_F(ReadAnythingAppControllerTest, LogPageDuration_PdfInSidePanel) {

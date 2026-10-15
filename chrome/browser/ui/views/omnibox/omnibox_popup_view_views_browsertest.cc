@@ -21,6 +21,7 @@
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/color/chrome_color_id.h"
 #include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -408,7 +409,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxPopupViewViewsTest, MAYBE_ClickOmnibox) {
 
   CreatePopupForTestQuery();
 
-  gfx::NativeWindow event_window = browser()->window()->GetNativeWindow();
+  gfx::NativeWindow event_window = browser()->GetWindow()->GetNativeWindow();
 #if defined(USE_AURA)
   event_window = event_window->GetRootWindow();
 #endif
@@ -1063,6 +1064,25 @@ IN_PROC_BROWSER_TEST_F(OmniboxPopupViewViewsTest, AccessibleControlIds) {
       ax::mojom::IntListAttribute::kControlsIds));
 }
 
+IN_PROC_BROWSER_TEST_F(OmniboxPopupViewViewsTest,
+                       InvalidatesMetricsCallbacksOnHide) {
+  CreatePopupForTestQuery();
+  EXPECT_TRUE(controller()->IsPopupOpen());
+
+  // Get a weak pointer using the metrics factory to simulate a pending
+  // callback.
+  auto weak_ptr = GetMetricsWeakPtr();
+  EXPECT_TRUE(weak_ptr);
+
+  // Close the popup view, which should invalidate the pending metrics callback.
+  controller()->autocomplete_controller()->Stop(
+      AutocompleteStopReason::kClobbered);
+  popup_view()->UpdatePopupAppearance();
+
+  EXPECT_FALSE(controller()->IsPopupOpen());
+  EXPECT_FALSE(weak_ptr);
+}
+
 IN_PROC_BROWSER_TEST_F(OmniboxPopupSuggestionGroupHeadersTest,
                        ShowSuggestionGroupHeadersByPageContext) {
   scoped_refptr<FakeAutocompleteProvider> provider =
@@ -1291,10 +1311,10 @@ class OmniboxPopupPermissionBrowserTest : public InProcessBrowserTest {
 
   void SetBrowserBounds(views::Widget* popup_widget, const gfx::Rect& bounds) {
     views::Widget* browser_widget = views::Widget::GetWidgetForNativeWindow(
-        browser()->window()->GetNativeWindow());
+        browser()->GetWindow()->GetNativeWindow());
     WidgetBoundsWaiter browser_waiter(browser_widget);
     WidgetBoundsWaiter popup_waiter(popup_widget);
-    browser()->window()->SetBounds(bounds);
+    browser()->GetWindow()->SetBounds(bounds);
     browser_waiter.Wait();
     popup_waiter.Wait();
   }
@@ -1327,7 +1347,10 @@ class OmniboxPopupPermissionBrowserTest : public InProcessBrowserTest {
 // Open Large -> Shrink, Open Small -> Grow
 IN_PROC_BROWSER_TEST_F(OmniboxPopupPermissionBrowserTest,
                        DynamicWindowResizing) {
-  browser()->window()->GetLocationBar()->GetOmniboxView()->SetUserText(u"test");
+  BrowserWindow::FromBrowser(browser())
+      ->GetLocationBar()
+      ->GetOmniboxView()
+      ->SetUserText(u"test");
   views::Widget* popup_widget = GetPopupWidget();
   ASSERT_TRUE(popup_widget);
 
@@ -1357,7 +1380,10 @@ IN_PROC_BROWSER_TEST_F(OmniboxPopupPermissionBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(OmniboxPopupPermissionBrowserTest,
                        ResetsOnAllFrontendClosureActions) {
-  browser()->window()->GetLocationBar()->GetOmniboxView()->SetUserText(u"test");
+  BrowserWindow::FromBrowser(browser())
+      ->GetLocationBar()
+      ->GetOmniboxView()
+      ->SetUserText(u"test");
   views::Widget* popup_widget = GetPopupWidget();
 
   // Small browser width.

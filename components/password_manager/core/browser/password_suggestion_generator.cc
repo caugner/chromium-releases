@@ -33,6 +33,7 @@
 #include "components/password_manager/core/browser/webauthn_credentials_delegate.h"
 #include "components/password_manager/core/common/password_manager_constants.h"
 #include "components/signin/public/base/consent_level.h"
+#include "components/signin/public/base/signin_switches.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/sync/base/features.h"
 #include "components/sync/service/sync_service.h"
@@ -96,7 +97,8 @@ Suggestion::PasswordSuggestionDetails GetSuggestionDetailsForRecoveryFlow(
 
   return Suggestion::PasswordSuggestionDetails(
       credential.username_value, credential.password_value,
-      credential.backup_password_value.value());
+      credential.backup_password_value.value(), credential.realm,
+      credential.is_grouped_affiliation);
 }
 
 
@@ -306,8 +308,10 @@ void AppendManualFallbackSuggestions(
     suggestion.filtration_policy = filtration_policy;
 
     if (!replaced) {
-      suggestion.children.emplace_back(
-          maybe_username, SuggestionType::kPasswordFieldByFieldFilling);
+      Suggestion fill_username_suggestion{
+          maybe_username, SuggestionType::kPasswordFieldByFieldFilling};
+      fill_username_suggestion.payload = payload;
+      suggestion.children.emplace_back(std::move(fill_username_suggestion));
     }
     suggestion.children.push_back(
         CreateFillPasswordChildSuggestion(credential, is_cross_origin));
@@ -477,7 +481,23 @@ std::vector<Suggestion> PasswordSuggestionGenerator::GetSuggestionsForDomain(
                      autofill::FieldType::PASSWORD));
   }
 
-  if (!fill_data.has_value() && !uses_passkeys && suggestions.empty()) {
+  bool has_qr = false;
+#if BUILDFLAG(ENABLE_DICE_SUPPORT)
+  has_qr =
+      password_client_->IsChromeSigninPage() &&
+      switches::IsMagiChromePasskeyAutofillEnabled() &&
+      password_client_->GetWebAuthnCredentialsDelegateForDriver(
+          password_manager_driver_) &&
+      password_client_
+          ->GetWebAuthnCredentialsDelegateForDriver(password_manager_driver_)
+          ->GetCableQrString()
+          .has_value();
+#endif
+
+  // Don't return early if there is a QR code suggestion. It still needs to be
+  // appended later in the footer section.
+  if (!fill_data.has_value() && !uses_passkeys && !has_qr &&
+      suggestions.empty()) {
     // Probably the credential was deleted in the mean time.
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
     if (CanShowPendingStatePromo(*password_client_)) {
@@ -588,7 +608,6 @@ PasswordSuggestionGenerator::GetManualFallbackSuggestions(
       sync_service->GetUserSettings()->IsUsingExplicitPassphrase();
   std::set<std::string> suggested_signon_realms;
   for (const auto& form : suggested_credentials) {
-    suggested_signon_realms.insert(form.signon_realm);
     const CredentialUIEntry ui_entry = CredentialUIEntry(form);
     const bool is_from_account =
         ui_entry.stored_in.contains(PasswordForm::Store::kAccountStore);
@@ -601,6 +620,10 @@ PasswordSuggestionGenerator::GetManualFallbackSuggestions(
       is_cross_domain = form.match_type.has_value() &&
                         password_manager_util::GetMatchType(form) ==
                             password_manager_util::GetLoginMatchType::kGrouped;
+    }
+    if (!is_cross_domain) {
+      // Insert only same site or affiliated signon realms.
+      suggested_signon_realms.insert(form.signon_realm);
     }
     AppendManualFallbackSuggestions(
         ui_entry, on_password_form, IsCrossDomain(is_cross_domain),
@@ -665,7 +688,28 @@ PasswordSuggestionGenerator::GetWebauthnSignInWithAnotherDeviceSuggestion(
   WebAuthnCredentialsDelegate* delegate =
       password_client_->GetWebAuthnCredentialsDelegateForDriver(
           password_manager_driver_);
-  if (!delegate || !delegate->GetPasskeys().has_value() ||
+  if (!delegate) {
+    return std::nullopt;
+  }
+#if BUILDFLAG(ENABLE_DICE_SUPPORT)
+  if (password_client_->IsChromeSigninPage() &&
+      switches::IsMagiChromePasskeyAutofillEnabled()) {
+    std::optional<std::string> qr_string = delegate->GetCableQrString();
+    if (qr_string.has_value()) {
+      autofill::Suggestion suggestion(
+          l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_PASSKEY_QR_CODE_TITLE),
+          autofill::SuggestionType::kWebauthnPasskeyQrCode);
+      suggestion.payload = autofill::Suggestion::Guid(*qr_string);
+      // Use static filtration policy so that this suggestion is not filtered
+      // out when the user types in the username field. This ensures the QR
+      // code remains visible as the user interacts with the form.
+      suggestion.filtration_policy =
+          autofill::Suggestion::FiltrationPolicy::kStatic;
+      return suggestion;
+    }
+  }
+#endif
+  if (!delegate->GetPasskeys().has_value() ||
       !delegate->IsSecurityKeyOrHybridFlowAvailable()) {
     return std::nullopt;
   }

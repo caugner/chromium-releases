@@ -103,6 +103,7 @@
 #include "extensions/browser/test_extension_prefs.h"
 #include "extensions/common/url_pattern.h"
 #include "media/base/media_switches.h"
+#include "net/base/url_util.h"
 #include "printing/buildflags/buildflags.h"
 #include "services/network/test/test_shared_url_loader_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -832,9 +833,10 @@ TEST_F(RenderViewContextMenuPrefsTest, LoadBrokenImage) {
   ASSERT_TRUE(menu->IsItemPresent(IDC_CONTENT_CONTEXT_LOAD_IMAGE));
 }
 
-TEST_F(RenderViewContextMenuPrefsTest, ContextMenu2026VideoOrderDisabled) {
+TEST_F(RenderViewContextMenuPrefsTest,
+       ContextMenuMenuSimplificationVideoOrderDisabled) {
   base::test::ScopedFeatureList features;
-  features.InitAndDisableFeature(media::kContextMenu2026);
+  features.InitAndDisableFeature(features::kMenuSimplification);
 
   content::ContextMenuParams params = CreateParams(MenuItem::VIDEO);
   params.media_flags |= blink::ContextMenuData::kMediaCanPictureInPicture;
@@ -853,10 +855,11 @@ TEST_F(RenderViewContextMenuPrefsTest, ContextMenu2026VideoOrderDisabled) {
   EXPECT_GT(pip_item->second, loop_item->second);
 }
 
-// Verify that the 2026 video context menu are ordered properly.
-TEST_F(RenderViewContextMenuPrefsTest, ContextMenu2026VideoOrder) {
+// Verify that the MenuSimplification video context menu are ordered properly.
+TEST_F(RenderViewContextMenuPrefsTest,
+       ContextMenuMenuSimplificationVideoOrder) {
   base::test::ScopedFeatureList features;
-  features.InitAndEnableFeature(media::kContextMenu2026);
+  features.InitAndEnableFeature(features::kMenuSimplification);
 
   content::ContextMenuParams params = CreateParams(MenuItem::VIDEO);
   params.media_flags |= blink::ContextMenuData::kMediaCanPictureInPicture;
@@ -969,6 +972,47 @@ TEST_F(RenderViewContextMenuPrefsTest, OpenLinkNavigationInitiatorSet) {
   EXPECT_TRUE(delegate.last_navigation_params()->initiator_origin.has_value());
   EXPECT_EQ(delegate.last_navigation_params()->initiator_origin->GetURL(),
             params.page_url.DeprecatedGetOriginAsURL());
+}
+
+TEST_F(RenderViewContextMenuPrefsTest,
+       SearchWebForNewTabAppendsSourceParameter) {
+  TestNavigationDelegate delegate;
+  web_contents()->SetDelegate(&delegate);
+  content::RenderFrameHost& main_frame = *web_contents()->GetPrimaryMainFrame();
+
+  SetUserSelectedDefaultSearchProvider("https://www.google.com/search", true);
+
+  content::ContextMenuParams params = CreateParams(MenuItem::SELECTION);
+  params.selection_text = u"hello world";
+  auto menu = std::make_unique<TestRenderViewContextMenu>(main_frame, params);
+  menu->Init();
+  menu->ExecuteCommand(IDC_CONTENT_CONTEXT_SEARCHWEBFORNEWTAB, 0);
+
+  ASSERT_TRUE(delegate.last_navigation_params());
+  std::string source_param;
+  EXPECT_TRUE(net::GetValueForKeyInQuery(delegate.last_navigation_params()->url,
+                                         "source", &source_param));
+  EXPECT_EQ("chrome.ctxt", source_param);
+}
+
+TEST_F(RenderViewContextMenuPrefsTest,
+       SearchWebForNewTabDoesNotAppendSourceForNonGoogle) {
+  TestNavigationDelegate delegate;
+  web_contents()->SetDelegate(&delegate);
+  content::RenderFrameHost& main_frame = *web_contents()->GetPrimaryMainFrame();
+
+  SetUserSelectedDefaultSearchProvider("https://www.example.com/search", true);
+
+  content::ContextMenuParams params = CreateParams(MenuItem::SELECTION);
+  params.selection_text = u"hello world";
+  auto menu = std::make_unique<TestRenderViewContextMenu>(main_frame, params);
+  menu->Init();
+  menu->ExecuteCommand(IDC_CONTENT_CONTEXT_SEARCHWEBFORNEWTAB, 0);
+
+  ASSERT_TRUE(delegate.last_navigation_params());
+  std::string source_param;
+  EXPECT_FALSE(net::GetValueForKeyInQuery(
+      delegate.last_navigation_params()->url, "source", &source_param));
 }
 
 TEST_F(RenderViewContextMenuPrefsTest,
@@ -1797,10 +1841,15 @@ TEST_F(RenderViewContextMenuPrefsTest, GetIsNewFeatureAtValue) {
                              kTestUnregisteredFeature},
                             {});
 
-  UserEducationServiceFactory::GetForBrowserContext(profile())
-      ->new_badge_registry()
-      ->RegisterFeature({user_education::features::kNewBadgeTestFeature,
-                         user_education::Metadata()});
+  auto* new_badge_registry =
+      UserEducationServiceFactory::GetForBrowserContext(profile())
+          ->new_badge_registry();
+  if (!new_badge_registry->IsFeatureRegistered(
+          user_education::features::kNewBadgeTestFeature)) {
+    new_badge_registry->RegisterFeature(
+        {user_education::features::kNewBadgeTestFeature,
+         user_education::Metadata()});
+  }
 
   // Initialize the New Badge controller, so that the new badge data for this
   // profile is set.
@@ -2128,6 +2177,9 @@ TEST_P(RenderViewContextMenuReadAnythingTest, MAYBE_AppendPageItems) {
   if (enable_region_search) {
     SetUserSelectedDefaultSearchProvider("https://www.google.com",
                                          /*supports_image_search=*/true);
+  } else {
+    SetUserSelectedDefaultSearchProvider("https://www.example.com",
+                                         /*supports_image_search=*/false);
   }
   menu.SetBrowser(GetBrowser());
   menu.Init();
@@ -2180,6 +2232,26 @@ TEST_P(RenderViewContextMenuReadAnythingTest, MAYBE_AppendPageItems) {
     // Read anything is after translate.
     EXPECT_EQ(model.GetItemCount() - 1, read_anything_index.value());
   }
+}
+
+TEST_P(RenderViewContextMenuReadAnythingTest, GlicNotPresentInReadingMode) {
+  base::test::ScopedFeatureList features;
+  features.InitAndEnableFeature(features::kGlicContextMenu);
+
+  glic::GlicEnabling::SetBypassEnablementChecksForTesting(true);
+
+  // Simulate a context menu request with page level options.
+  content::ContextMenuParams params = CreateParams(MenuItem::PAGE);
+  params.page_url = GURL(chrome::kChromeUIUntrustedReadAnythingSidePanelURL);
+
+  TestRenderViewContextMenu menu(*web_contents()->GetPrimaryMainFrame(),
+                                 params);
+  menu.SetBrowser(GetBrowser());
+  menu.Init();
+
+  EXPECT_FALSE(menu.IsItemPresent(IDC_CONTENT_CONTEXT_GLIC));
+
+  glic::GlicEnabling::SetBypassEnablementChecksForTesting(false);
 }
 
 INSTANTIATE_TEST_SUITE_P(All,
@@ -2311,7 +2383,7 @@ TEST_F(RenderViewContextMenuMenuSimplificationTest, CopySelectionTruncated) {
   size_t index =
       menu.menu_model().GetIndexOfCommandId(IDC_CONTENT_CONTEXT_COPY).value();
   std::u16string label = menu.menu_model().GetLabelAt(index);
-  EXPECT_EQ(label, u"&Copy \"Long text exceeding twen\x2026\"");
+  EXPECT_EQ(label, u"&Copy \x201CLong text exceeding twen\x2026\x201D");
 }
 
 TEST_F(RenderViewContextMenuMenuSimplificationTest, PasswordFieldRestricted) {

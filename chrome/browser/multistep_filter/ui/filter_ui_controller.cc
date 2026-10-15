@@ -4,29 +4,40 @@
 
 #include "chrome/browser/multistep_filter/ui/filter_ui_controller.h"
 
-#include <cmath>
+#include <utility>
+#include <vector>
 
 #include "base/functional/bind.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
+#include "base/notreached.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time/time.h"
+#include "chrome/browser/contextual_cueing/prefs.h"
 #include "chrome/browser/multistep_filter/core/multistep_filter_log_router_factory.h"
 #include "chrome/browser/multistep_filter/core/multistep_filter_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
-#include "chrome/browser/ui/toasts/api/toast_id.h"
-#include "chrome/browser/ui/toasts/toast_controller.h"
+#include "chrome/browser/ui/page_action/action_ids.h"
+#include "chrome/browser/ui/page_action/page_action_controller.h"
+#include "chrome/browser/ui/user_education/browser_user_education_interface.h"
+#include "chrome/common/webui_url_constants.h"
+#include "chrome/grit/generated_resources.h"
+#include "components/feature_engagement/public/feature_constants.h"
 #include "components/multistep_filter/content/filter_initiated_navigation_marker.h"
+#include "components/multistep_filter/core/data_models/suggestion_user_decision.h"
+#include "components/multistep_filter/core/logging/filter_acceptance_metrics_logger.h"
 #include "components/multistep_filter/core/logging/log_entry.h"
 #include "components/multistep_filter/core/logging/multistep_filter_logger.h"
 #include "components/multistep_filter/core/multistep_filter_service.h"
-#include "components/multistep_filter/core/multistep_filter_util.h"
+#include "components/optimization_guide/core/feature_registry/feature_registration.h"
+#include "components/optimization_guide/core/model_execution/feature_keys.h"
+#include "components/optimization_guide/core/optimization_guide_prefs.h"
+#include "components/prefs/pref_service.h"
 #include "components/tabs/public/tab_interface.h"
+#include "components/vector_icons/vector_icons.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/web_contents.h"
+#include "ui/actions/actions.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
@@ -37,60 +48,110 @@ namespace multistep_filter {
 
 namespace {
 
-// TODO(b/515670907): Remove 'const' from parameters passed by value in .cc file
-// as per code review feedback.
-void LogUiAccepted(MultistepFilterLogRouter* const log_router,
-                   const int64_t navigation_id,
-                   const std::string_view triggering_domain) {
-  MULTISTEP_FILTER_LOG(log_router, navigation_id, LogEventType::kUiAccepted,
-                       triggering_domain)
-      << LogDetail{"navigation_attempted", true};
-}
+using SuggestionViewState = FilterUiController::SuggestionViewState;
 
-void LogUiShown(MultistepFilterLogRouter* const log_router,
-                const int64_t navigation_id,
-                const std::string_view triggering_domain,
-                bool ui_shown,
-                const FilterUiController::SuggestionUiData& ui_data) {
-  std::vector<std::string> replacement_strings;
-  for (const std::u16string& param : ui_data.replacement_params) {
-    replacement_strings.push_back(base::UTF16ToUTF8(param));
+constexpr std::string_view ViewStateToString(SuggestionViewState state) {
+  switch (state) {
+    case SuggestionViewState::kInactive:
+      return "inactive";
+    case SuggestionViewState::kShowingInitialCue:
+      return "showing_initial_cue";
+    case SuggestionViewState::kCollapsedInOmnibox:
+      return "collapsed_in_omnibox";
+    case SuggestionViewState::kReopenedFromOmnibox:
+      return "reopened_from_omnibox";
+    case SuggestionViewState::kCollapsedInOmniboxAfterReopen:
+      return "collapsed_in_omnibox_after_reopen";
   }
-
-  MULTISTEP_FILTER_LOG(log_router, navigation_id, LogEventType::kUiShown,
-                       triggering_domain)
-      << LogDetail{"toast_id", static_cast<int>(ui_data.toast_id)}
-      << LogDetail{"ui_shown", ui_shown}
-      << LogDetail{"replacement_params",
-                   base::JoinString(replacement_strings, ", ")};
 }
 
-void LogUiDismissed(MultistepFilterLogRouter* const log_router,
-                    const int64_t navigation_id,
-                    const std::string_view triggering_domain,
-                    const std::string_view suppressed_domain) {
-  MULTISTEP_FILTER_LOG(log_router, navigation_id, LogEventType::kUiDismissed,
-                       triggering_domain)
-      << LogDetail{"suppressed_domain", std::string(suppressed_domain)};
+constexpr std::string_view DecisionToString(SuggestionUserDecision decision) {
+  switch (decision) {
+    case SuggestionUserDecision::kAccepted:
+      return "accepted";
+    case SuggestionUserDecision::kIgnored:
+      return "ignored";
+    case SuggestionUserDecision::kDismissed:
+      return "dismissed";
+    case SuggestionUserDecision::kSettingsOpened:
+      return "settings_opened";
+  }
+}
+
+constexpr LogEventType DecisionToLogEventType(SuggestionUserDecision decision) {
+  switch (decision) {
+    case SuggestionUserDecision::kAccepted:
+      return LogEventType::kSuggestionAccepted;
+    case SuggestionUserDecision::kDismissed:
+      return LogEventType::kSuggestionDismissed;
+    case SuggestionUserDecision::kIgnored:
+    case SuggestionUserDecision::kSettingsOpened:
+      return LogEventType::kSuggestionIgnored;
+  }
+}
+
+void LogSuggestionUiDecision(MultistepFilterLogRouter* log_router,
+                             const FilterUiController::SuggestionState& state,
+                             SuggestionUserDecision decision) {
+  LogEventType event_type = DecisionToLogEventType(decision);
+
+  if (decision == SuggestionUserDecision::kAccepted) {
+    MULTISTEP_FILTER_LOG(log_router, state.suggestion.triggering_navigation_id,
+                         event_type, state.suggestion.triggering_host)
+        << LogDetail{"navigation_attempted", true}
+        << LogDetail{"view_state", ViewStateToString(state.view_state)}
+        << LogDetail{"decision", DecisionToString(decision)};
+  } else {
+    MULTISTEP_FILTER_LOG(log_router, state.suggestion.triggering_navigation_id,
+                         event_type, state.suggestion.triggering_host)
+        << LogDetail{"view_state", ViewStateToString(state.view_state)}
+        << LogDetail{"decision", DecisionToString(decision)};
+  }
+}
+
+void LogSuggestionUiShown(MultistepFilterLogRouter* log_router,
+                          const UrlFilterSuggestion& suggestion,
+                          bool ui_shown,
+                          std::string reason) {
+  if (reason.empty()) {
+    MULTISTEP_FILTER_LOG(log_router, suggestion.triggering_navigation_id,
+                         LogEventType::kSuggestionShown,
+                         suggestion.triggering_host)
+        << LogDetail{"ui_shown", ui_shown};
+  } else {
+    MULTISTEP_FILTER_LOG(log_router, suggestion.triggering_navigation_id,
+                         LogEventType::kSuggestionShown,
+                         suggestion.triggering_host)
+        << LogDetail{"ui_shown", ui_shown}
+        << LogDetail{"reason", std::move(reason)};
+  }
+}
+
+void RecordMetricsDecision(
+    std::optional<FilterUiController::SuggestionState>& state,
+    SuggestionUserDecision decision) {
+  if (!state || !state->metrics_logger) {
+    return;
+  }
+  switch (state->view_state) {
+    case SuggestionViewState::kShowingInitialCue:
+      state->metrics_logger->RecordInitialCueAndOverallDecision(decision);
+      break;
+    case SuggestionViewState::kReopenedFromOmnibox:
+      state->metrics_logger->RecordReopenedCueAndOverallDecision(decision);
+      break;
+    case SuggestionViewState::kCollapsedInOmnibox:
+    case SuggestionViewState::kCollapsedInOmniboxAfterReopen:
+      break;
+    case SuggestionViewState::kInactive:
+      NOTREACHED();
+  }
+  state->metrics_logger.reset();
 }
 
 }  // namespace
 
 DEFINE_USER_DATA(FilterUiController);
-
-FilterUiController::SuggestionUiData::SuggestionUiData(
-    ToastId toast_id,
-    std::vector<std::u16string> replacement_params)
-    : toast_id(toast_id), replacement_params(std::move(replacement_params)) {}
-
-FilterUiController::SuggestionUiData::SuggestionUiData(
-    const SuggestionUiData&) = default;
-
-FilterUiController::SuggestionUiData&
-FilterUiController::SuggestionUiData::operator=(const SuggestionUiData&) =
-    default;
-
-FilterUiController::SuggestionUiData::~SuggestionUiData() = default;
 
 // static
 FilterUiController* FilterUiController::From(tabs::TabInterface* tab) {
@@ -99,147 +160,104 @@ FilterUiController* FilterUiController::From(tabs::TabInterface* tab) {
 
 FilterUiController::FilterUiController(tabs::TabInterface& tab)
     : tabs::ContentsObservingTabFeature(tab),
+      page_actions::PageActionObserver(kActionMultistepFilter),
       scoped_unowned_user_data_(tab.GetUnownedUserDataHost(), *this) {
   if (Profile* profile = tab.GetProfile()) {
     log_router_ = MultistepFilterLogRouterFactory::GetForProfile(profile);
     service_ = MultistepFilterServiceFactory::GetForProfile(profile);
+    pref_service_ = profile->GetPrefs();
+  }
+  if (tab.GetTabFeatures()) {
+    page_action_controller_ = tab.GetTabFeatures()->page_action_controller();
+    if (page_action_controller_) {
+      RegisterAsPageActionObserver(*page_action_controller_);
+    }
   }
 }
 
-FilterUiController::~FilterUiController() = default;
+FilterUiController::~FilterUiController() {
+  if (!suggestion_state_ ||
+      suggestion_state_->view_state == SuggestionViewState::kInactive) {
+    return;
+  }
+  constexpr SuggestionUserDecision kDecision = SuggestionUserDecision::kIgnored;
+  if (service_) {
+    service_->RecordUserInteractionWithSuggestion(kDecision);
+  }
+  LogSuggestionUiDecision(log_router_, *suggestion_state_, kDecision);
+  RecordMetricsDecision(suggestion_state_, kDecision);
+  ClosePromo(kDecision);
+}
 
 void FilterUiController::OnSuggestionGenerated(
     std::optional<UrlFilterSuggestion> suggestion) {
-  if (!suggestion || !tab().GetContents() || !service_) {
+  if (!suggestion) {
+    return;
+  }
+  if (!tab().GetContents() || !service_ || !page_action_controller_ ||
+      !pref_service_) {
+    LogSuggestionUiShown(log_router_, *suggestion, false,
+                         "missing_dependencies");
+    return;
+  }
+  if (!ShouldShowCue()) {
+    LogSuggestionUiShown(log_router_, *suggestion, false,
+                         "smart_suggestions_disabled");
     return;
   }
 
   // Clear any existing suggestion state before showing the new one.
-  ClearSuggestion();
-
-  SuggestionUiData data = GetSuggestionUiData(*suggestion, base::Time::Now());
-  ToastParams params(data.toast_id);
-  params.body_string_replacement_params = data.replacement_params;
-
-  GURL source_url = tab().GetContents()->GetLastCommittedURL();
-  const std::string dismissal_domain = GetEtldPlusOne(source_url);
-  params.toast_close_callback =
-      base::ScopedClosureRunner(GetOnDismissedCallback(
-          std::move(dismissal_domain), suggestion->triggering_navigation_id,
-          suggestion->triggering_domain));
-
-  bool ui_shown = ShowSuggestionUi(std::move(params));
-  if (ui_shown) {
-    service_->DeleteAnnotationsForTask(suggestion->task_type,
-                                       suggestion->triggering_navigation_id,
-                                       suggestion->triggering_domain);
-  }
-  LogUiShown(log_router_, suggestion->triggering_navigation_id,
-             suggestion->triggering_domain, ui_shown, data);
-  current_url_filter_suggestion_ = std::move(suggestion);
+  ClearSuggestion(SuggestionUserDecision::kIgnored);
+  suggestion_state_ =
+      SuggestionState{.suggestion = std::move(*suggestion),
+                      .view_state = SuggestionViewState::kInactive};
+  ShowCue(suggestion_state_->suggestion);
 }
 
-void FilterUiController::ClearSuggestion() {
-  dismissal_weak_factory_.InvalidateWeakPtrs();
-  if (!current_url_filter_suggestion_) {
+void FilterUiController::ClearSuggestion(SuggestionUserDecision decision) {
+  if (!suggestion_state_) {
     return;
   }
-  current_url_filter_suggestion_.reset();
+  if (suggestion_state_->view_state != SuggestionViewState::kInactive) {
+    if (service_) {
+      service_->RecordUserInteractionWithSuggestion(decision);
+    }
+    LogSuggestionUiDecision(log_router_, *suggestion_state_, decision);
+    RecordMetricsDecision(suggestion_state_, decision);
+    ClosePromo(decision);
+  }
+  dismissal_weak_factory_.InvalidateWeakPtrs();
+  suggestion_state_.reset();
+  ClearCue();
 }
 
 void FilterUiController::ApplySuggestion() {
-  if (!current_url_filter_suggestion_ ||
-      current_url_filter_suggestion_->navigation_url.is_empty()) {
+  if (!suggestion_state_ ||
+      suggestion_state_->suggestion.navigation_url.is_empty()) {
     return;
   }
 
-  std::string_view domain = current_url_filter_suggestion_->triggering_domain;
-  LogUiAccepted(log_router_,
-                current_url_filter_suggestion_->triggering_navigation_id,
-                domain);
-
-  GURL url = current_url_filter_suggestion_->navigation_url;
-  // Clearing the suggestion prevents the toast close callback from marking
-  // this as a dismissal because it invalidates the dismissal weak pointers.
-  ClearSuggestion();
+  GURL url = suggestion_state_->suggestion.navigation_url;
+  ClearSuggestion(SuggestionUserDecision::kAccepted);
   NavigateTo(url);
 }
 
-FilterUiController::SuggestionUiData FilterUiController::GetSuggestionUiData(
-    const UrlFilterSuggestion& suggestion,
-    base::Time now) const {
-  int num_filters = suggestion.attribute_ui_labels.size();
-  base::TimeDelta suggestion_age = now - suggestion.extraction_timestamp;
-  if (suggestion_age.is_negative()) {
-    suggestion_age = base::TimeDelta();
+void FilterUiController::OnActionInvoked() {
+  if (!suggestion_state_ || !page_action_controller_) {
+    return;
   }
-
-  std::vector<std::u16string> attribute_strings;
-  std::ranges::transform(suggestion.attribute_ui_labels,
-                         std::back_inserter(attribute_strings),
-                         [](const FilterAttributeUiLabel& label) {
-                           return label.attribute_value;
-                         });
-  std::u16string filter_names = base::JoinString(attribute_strings, u", ");
-
-  // Show the user the ETLD+1 of the domain where the suggestion was generated
-  // from if the suggestion is less than a day old.
-  if (suggestion_age < base::Days(1)) {
-    return {/*toast_id=*/ToastId::kMultistepFilterSuggestionRecent,
-            /*replacement_params=*/{base::NumberToString16(num_filters),
-                                    suggestion.source_domain, filter_names}};
+  switch (suggestion_state_->view_state) {
+    case SuggestionViewState::kShowingInitialCue:
+    case SuggestionViewState::kReopenedFromOmnibox:
+      ApplySuggestion();
+      break;
+    case SuggestionViewState::kInactive:
+      NOTREACHED();
+    case SuggestionViewState::kCollapsedInOmnibox:
+    case SuggestionViewState::kCollapsedInOmniboxAfterReopen:
+      ShowCue(suggestion_state_->suggestion);
+      break;
   }
-
-  std::u16string age_description;
-  if (suggestion_age < base::Days(30)) {
-    age_description = l10n_util::GetPluralStringFUTF16(IDS_TIME_DAYS,
-                                                       suggestion_age.InDays());
-  } else {
-    int num_months =
-        static_cast<int>(std::round(suggestion_age / base::Days(30)));
-    age_description =
-        l10n_util::GetPluralStringFUTF16(IDS_TIME_MONTHS, num_months);
-  }
-
-  return {/*toast_id=*/ToastId::kMultistepFilterSuggestion,
-          /*replacement_params=*/{base::NumberToString16(num_filters),
-                                  age_description, filter_names}};
-}
-
-bool FilterUiController::ShowSuggestionUi(ToastParams params) {
-  BrowserWindowInterface* browser_window_interface =
-      tab().GetBrowserWindowInterface();
-  if (!browser_window_interface) {
-    return false;
-  }
-
-  ToastController* toast_controller =
-      browser_window_interface->GetFeatures().toast_controller();
-  if (!toast_controller) {
-    return false;
-  }
-
-  return toast_controller->MaybeShowToast(std::move(params));
-}
-
-base::OnceClosure FilterUiController::GetOnDismissedCallback(
-    std::string dismissal_domain,
-    int64_t navigation_id,
-    std::string triggering_domain) {
-  return base::BindOnce(&FilterUiController::OnSuggestionDismissed,
-                        dismissal_weak_factory_.GetWeakPtr(),
-                        std::move(dismissal_domain), navigation_id,
-                        std::move(triggering_domain));
-}
-
-void FilterUiController::OnSuggestionDismissed(std::string dismissal_domain,
-                                               int64_t navigation_id,
-                                               std::string triggering_domain) {
-  LogUiDismissed(log_router_, navigation_id, triggering_domain,
-                 dismissal_domain);
-  // This invalidates the weak pointers, including the one that triggered this
-  // callback, making it a OnceClosure effectively.
-  ClearSuggestion();
 }
 
 void FilterUiController::NavigateTo(const GURL& url) {
@@ -255,6 +273,221 @@ void FilterUiController::NavigateTo(const GURL& url) {
       params, base::BindOnce([](content::NavigationHandle& handle) {
         FilterInitiatedNavigationMarker::CreateForNavigationHandle(handle);
       }));
+}
+
+// Items in the contextual cue menu are action buttons rather than toggles,
+// so they are never checked.
+bool FilterUiController::IsCommandIdChecked(int command_id) const {
+  return false;
+}
+
+// All commands in the contextual cue menu are always enabled when visible.
+bool FilterUiController::IsCommandIdEnabled(int command_id) const {
+  return true;
+}
+
+void FilterUiController::ExecuteCommand(int command_id, int event_flags) {
+  switch (command_id) {
+    case internal::kDismissCommand:
+      ClearSuggestion(SuggestionUserDecision::kDismissed);
+      break;
+    case internal::kSettingsCommand:
+      ClearSuggestion(SuggestionUserDecision::kSettingsOpened);
+      OpenSettings();
+      break;
+  }
+}
+
+void FilterUiController::OpenSettings() {
+  // TODO(crbug.com/517999412): Use Delegate pattern to avoid circular
+  // dependency and use chrome::ShowSettingsSubPage instead of manual
+  // navigation.
+  if (content::WebContents* web_contents = tab().GetContents()) {
+    GURL settings_url(chrome::kChromeUISettingsURL);
+    content::OpenURLParams params(
+        settings_url.Resolve(chrome::kSuggestionsSubPage), content::Referrer(),
+        WindowOpenDisposition::NEW_FOREGROUND_TAB,
+        ui::PAGE_TRANSITION_GENERATED,
+        /*is_renderer_initiated=*/false);
+    web_contents->OpenURL(params,
+                          base::BindOnce([](content::NavigationHandle&) {}));
+  }
+}
+
+bool FilterUiController::ShouldShowCue() const {
+  // TODO(b/522733094): Clean this up once proper eligibility integration is
+  // complete.
+  int opt_in_state = pref_service_->GetInteger(
+      optimization_guide::prefs::GetSettingEnabledPrefName(
+          optimization_guide::UserVisibleFeatureKey::kContextualCueing));
+  if (opt_in_state ==
+      std::to_underlying(
+          optimization_guide::prefs::FeatureOptInState::kDisabled)) {
+    return false;
+  }
+
+  // Check enterprise policy.
+  if (pref_service_->GetInteger(
+          optimization_guide::prefs::kChromeSuggestionsSettings) ==
+      std::to_underlying(
+          contextual_cueing::ChromeSuggestionsSettingsValue::kDisabled)) {
+    return false;
+  }
+
+  return true;
+}
+
+void FilterUiController::ShowCue(const UrlFilterSuggestion& suggestion) {
+  const std::u16string& message = suggestion.suggestion_message;
+
+  page_action_controller_->OverrideText(
+      kActionMultistepFilter,
+      l10n_util::GetStringUTF16(IDS_MULTISTEP_FILTER_CUE_ACTION_TEXT));
+
+  page_action_controller_->SetAnchoredMessageText(kActionMultistepFilter,
+                                                  message);
+
+  auto menu_model = std::make_unique<ui::SimpleMenuModel>(this);
+  menu_model->AddItemWithStringIdAndIcon(
+      internal::kDismissCommand, IDS_MULTISTEP_FILTER_CUE_DISMISS,
+      ui::ImageModel::FromVectorIcon(vector_icons::kCloseIcon));
+  menu_model->AddItemWithStringIdAndIcon(
+      internal::kSettingsCommand, IDS_MULTISTEP_FILTER_CUE_SETTINGS,
+      ui::ImageModel::FromVectorIcon(vector_icons::kSettingsIcon));
+  page_action_controller_->SetAnchoredMessageAction(
+      kActionMultistepFilter,
+      page_actions::AnchoredMessageActionIconType::kMenu,
+      std::move(menu_model));
+
+  page_action_controller_->Show(kActionMultistepFilter);
+
+  page_action_controller_->ShowAnchoredMessage(
+      kActionMultistepFilter,
+      {.priority = page_actions::PageActionPriorityCategory::kContextualCue});
+}
+
+void FilterUiController::ClearCue() {
+  if (!page_action_controller_) {
+    return;
+  }
+  page_action_controller_->HideAnchoredMessage(kActionMultistepFilter);
+  page_action_controller_->Hide(kActionMultistepFilter);
+  page_action_controller_->ClearOverrideText(kActionMultistepFilter);
+}
+
+void FilterUiController::OnPageActionAnchoredMessageShown(
+    const page_actions::PageActionState& page_action) {
+  DCHECK_EQ(page_action.action_id, kActionMultistepFilter);
+  if (!suggestion_state_) {
+    return;
+  }
+  switch (suggestion_state_->view_state) {
+    case SuggestionViewState::kInactive:
+      MaybeShowPromo();
+      if (page_action_controller_) {
+        page_action_controller_->OverrideText(
+            kActionMultistepFilter,
+            l10n_util::GetStringUTF16(IDS_MULTISTEP_FILTER_CUE_ACTION_TEXT));
+      }
+      suggestion_state_->view_state = SuggestionViewState::kShowingInitialCue;
+      suggestion_state_->metrics_logger =
+          std::make_unique<FilterAcceptanceMetricsLogger>(
+              suggestion_state_->suggestion.task_type);
+      suggestion_state_->metrics_logger->RecordInitialCueShown();
+      LogSuggestionUiShown(log_router_, suggestion_state_->suggestion,
+                           /*ui_shown=*/true, /*reason=*/"");
+      if (service_) {
+        service_->RecordSuggestionImpression();
+        // Delete similar suggestions from the service as this one is being
+        // shown.
+        service_->DeleteAnnotationsForTask(
+            suggestion_state_->suggestion.task_type,
+            suggestion_state_->suggestion.triggering_navigation_id,
+            suggestion_state_->suggestion.triggering_host);
+      }
+      break;
+    case SuggestionViewState::kCollapsedInOmnibox:
+    case SuggestionViewState::kCollapsedInOmniboxAfterReopen:
+      if (page_action_controller_) {
+        page_action_controller_->OverrideText(
+            kActionMultistepFilter,
+            l10n_util::GetStringUTF16(IDS_MULTISTEP_FILTER_CUE_ACTION_TEXT));
+      }
+      suggestion_state_->view_state = SuggestionViewState::kReopenedFromOmnibox;
+      if (suggestion_state_->metrics_logger) {
+        suggestion_state_->metrics_logger->RecordReopenedCueShown();
+      }
+      break;
+    case SuggestionViewState::kShowingInitialCue:
+    case SuggestionViewState::kReopenedFromOmnibox:
+      NOTREACHED();
+  }
+}
+
+void FilterUiController::OnPageActionAnchoredMessageHidden(
+    const page_actions::PageActionState& page_action) {
+  DCHECK_EQ(page_action.action_id, kActionMultistepFilter);
+  if (!suggestion_state_) {
+    return;
+  }
+
+  constexpr SuggestionUserDecision kDecision = SuggestionUserDecision::kIgnored;
+  switch (suggestion_state_->view_state) {
+    case SuggestionViewState::kShowingInitialCue:
+      LogSuggestionUiDecision(log_router_, *suggestion_state_, kDecision);
+      suggestion_state_->view_state = SuggestionViewState::kCollapsedInOmnibox;
+      ClosePromo(kDecision);
+      if (page_action_controller_) {
+        page_action_controller_->OverrideText(
+            kActionMultistepFilter,
+            suggestion_state_->suggestion.short_suggestion_message);
+      }
+      break;
+    case SuggestionViewState::kReopenedFromOmnibox:
+      LogSuggestionUiDecision(log_router_, *suggestion_state_, kDecision);
+      suggestion_state_->view_state =
+          SuggestionViewState::kCollapsedInOmniboxAfterReopen;
+      if (page_action_controller_) {
+        page_action_controller_->OverrideText(
+            kActionMultistepFilter,
+            suggestion_state_->suggestion.short_suggestion_message);
+      }
+      break;
+    case SuggestionViewState::kInactive:
+    case SuggestionViewState::kCollapsedInOmnibox:
+    case SuggestionViewState::kCollapsedInOmniboxAfterReopen:
+      NOTREACHED();
+  }
+}
+
+void FilterUiController::MaybeShowPromo() {
+  BrowserUserEducationInterface* user_education =
+      BrowserUserEducationInterface::From(tab().GetBrowserWindowInterface());
+  if (user_education) {
+    user_education->MaybeShowFeaturePromo(
+        feature_engagement::kIPHMultistepFilterPromoFeature);
+  }
+}
+
+void FilterUiController::ClosePromo(SuggestionUserDecision decision) {
+  BrowserUserEducationInterface* user_education =
+      BrowserUserEducationInterface::From(tab().GetBrowserWindowInterface());
+  if (!user_education) {
+    return;
+  }
+  switch (decision) {
+    case SuggestionUserDecision::kAccepted:
+    case SuggestionUserDecision::kDismissed:
+    case SuggestionUserDecision::kSettingsOpened:
+      user_education->NotifyFeaturePromoFeatureUsed(
+          feature_engagement::kIPHMultistepFilterPromoFeature,
+          FeaturePromoFeatureUsedAction::kClosePromoIfPresent);
+      break;
+    case SuggestionUserDecision::kIgnored:
+      user_education->AbortFeaturePromo(
+          feature_engagement::kIPHMultistepFilterPromoFeature);
+      break;
+  }
 }
 
 }  // namespace multistep_filter

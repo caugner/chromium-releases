@@ -247,12 +247,19 @@ export class ReadAnythingLogger {
       return;
     }
 
-    // Log the number of paragraphs.
     const paragraphs = wordCountContainer.querySelectorAll('p');
-    this.metrics.recordCount(UmaName.NUMBER_PARAGRAPHS, paragraphs.length);
-
     const headerCounts = ReadAnythingLogger.getHeaderCounts(wordCountContainer);
 
+    this.logOverallStructureMetrics_(headerCounts, paragraphs.length);
+    this.logTopTwoHeaderMetrics_(headerCounts);
+    if (chrome.readingMode.isPdf) {
+      this.logPdfDistilledPageStructure_(headerCounts, paragraphs.length);
+    }
+  }
+
+  private logOverallStructureMetrics_(
+      headerCounts: Array<{tag: string, count: number}>,
+      paragraphCount: number) {
     // The total number of distilled headers.
     const totalHeaderCount =
         headerCounts.reduce((sum, item) => sum + item.count, 0);
@@ -262,9 +269,15 @@ export class ReadAnythingLogger {
     const uniqueHeaderTags = headerCounts.filter(item => item.count > 0).length;
     this.metrics.recordCount(UmaName.UNIQUE_HEADER_TAGS, uniqueHeaderTags);
 
-    this.logTopTwoHeaderMetrics_(headerCounts);
-    if (chrome.readingMode.isPdf) {
-      this.logPdfDistilledPageStructure_(headerCounts, paragraphs.length);
+    // Log the number of paragraphs.
+    this.metrics.recordCount(UmaName.NUMBER_PARAGRAPHS, paragraphCount);
+
+    if (paragraphCount > 0) {
+      // The ratio of headings to paragraphs, scaled by 100.
+      const headingToParagraphRatio =
+          Math.round((totalHeaderCount / paragraphCount) * 100);
+      this.metrics.recordCount(
+          UmaName.HEADING_TO_PARAGRAPH_RATIO, headingToParagraphRatio);
     }
   }
 
@@ -302,6 +315,15 @@ export class ReadAnythingLogger {
     this.metrics.recordBoolean(
         UmaName.TOP_TWO_HEADERS_HAVE_MINIMUM_TWO_ITEMS,
         topTwoHeadersHaveMinimumTwoItems);
+
+    if (presentHeaders.length >= 2 && presentHeaders[1]!.count > 0) {
+      // The ratio of the top level to the second top level header, scaled by
+      // 100.
+      const topTwoHeadingRatio = Math.round(
+          (presentHeaders[0]!.count / presentHeaders[1]!.count) * 100);
+      this.metrics.recordCount(
+          UmaName.TOP_TWO_HEADING_RATIO, topTwoHeadingRatio);
+    }
   }
 
   private logPdfDistilledPageStructure_(

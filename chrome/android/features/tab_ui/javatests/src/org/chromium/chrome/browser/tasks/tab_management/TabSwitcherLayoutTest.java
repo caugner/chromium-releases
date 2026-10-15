@@ -502,12 +502,7 @@ public class TabSwitcherLayoutTest {
         editGroupVisualDataDialogTitle(cta, "Test");
         // Change the color.
         String blueColor = cta.getString(R.string.tab_group_color_blue);
-        String notSelectedStringBlue =
-                cta.getString(
-                        R.string
-                                .accessibility_tab_group_color_picker_color_item_not_selected_description,
-                        blueColor);
-        onView(withContentDescription(notSelectedStringBlue)).perform(click());
+        onView(withContentDescription(blueColor)).perform(click());
 
         // Accept the change.
         onView(withId(R.id.positive_button)).perform(click());
@@ -553,12 +548,7 @@ public class TabSwitcherLayoutTest {
         editGroupVisualDataDialogTitle(cta, "Test");
         // Change the color.
         String blueColor = cta.getString(R.string.tab_group_color_blue);
-        String notSelectedStringBlue =
-                cta.getString(
-                        R.string
-                                .accessibility_tab_group_color_picker_color_item_not_selected_description,
-                        blueColor);
-        onView(withContentDescription(notSelectedStringBlue)).perform(click());
+        onView(withContentDescription(blueColor)).perform(click());
 
         // Decline the change.
         onView(withId(R.id.negative_button)).perform(click());
@@ -1366,6 +1356,49 @@ public class TabSwitcherLayoutTest {
                                                             false)),
                                     drawable.getColor());
                         });
+    }
+
+    @Test
+    @MediumTest
+    public void testPinnedTabGroupUngroupRepro() throws Exception {
+        ChromeTabbedActivity cta = mActivityTestRule.getActivity();
+        prepareTabs(3, 0, null);
+        enterTabSwitcher(cta);
+        verifyTabSwitcherCardCount(cta, 3);
+
+        TabModel tabModel = cta.getTabModelSelector().getCurrentModel();
+        Tab tab0 = ThreadUtils.runOnUiThreadBlocking(() -> tabModel.getTabAt(0));
+        Tab tab1 = ThreadUtils.runOnUiThreadBlocking(() -> tabModel.getTabAt(1));
+        Tab tab2 = ThreadUtils.runOnUiThreadBlocking(() -> tabModel.getTabAt(2));
+
+        // Pin all 3 tabs
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> {
+                    tabModel.pinTab(tab0.getId(), false);
+                    tabModel.pinTab(tab1.getId(), false);
+                    tabModel.pinTab(tab2.getId(), false);
+                });
+
+        int ancestorId = TabUiTestHelper.getTabSwitcherAncestorId(cta);
+
+        // Group Tab 2 (tab1)
+        ThreadUtils.runOnUiThreadBlocking(() -> tabModel.createSingleTabGroup(tab1));
+
+        // Verify Tab 2 (tab1) moved to index 2 (slot 3 outside pinned range) in TabModel
+        assertEquals(
+                tab1.getId(),
+                (int) ThreadUtils.runOnUiThreadBlocking(() -> tabModel.getTabAt(2).getId()));
+
+        // Click 3rd card (index 2) in Tab Switcher (opens tab group dialog)
+        TabUiTestHelper.clickNthCardFromTabSwitcher(cta, 2);
+        TabUiTestHelper.clickFirstTabInDialog(cta);
+
+        // Tab 2 (tab1) should be selected and active
+        assertEquals(
+                tab1.getId(),
+                (int)
+                        ThreadUtils.runOnUiThreadBlocking(
+                                () -> tabModel.getTabAt(tabModel.index()).getId()));
     }
 
     private void verifyModalDialogShowingAnimationCompleteInTabSwitcher() {

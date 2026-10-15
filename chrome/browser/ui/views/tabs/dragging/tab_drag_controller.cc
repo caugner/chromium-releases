@@ -25,14 +25,12 @@
 #include "base/scoped_observation.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_group_sync/tab_group_sync_service_factory.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
 #include "chrome/browser/ui/sad_tab_helper.h"
-#include "chrome/browser/ui/tabs/features.h"
 #include "chrome/browser/ui/tabs/saved_tab_groups/saved_tab_group_utils.h"
 #include "chrome/browser/ui/tabs/split_tab_util.h"
 #include "chrome/browser/ui/tabs/tab_enums.h"
@@ -355,8 +353,7 @@ const int TabDragController::kTouchVerticalDetachMagnetism = 50;
 const int TabDragController::kVerticalDetachMagnetism = 15;
 
 TabDragController::TabDragController()
-    : current_state_(DragState::kNotStarted),
-      source_context_(nullptr),
+    : source_context_(nullptr),
       attached_context_(nullptr),
       can_release_capture_(true),
       old_focused_view_tracker_(std::make_unique<views::ViewTracker>()),
@@ -621,6 +618,14 @@ void TabDragController::OnSystemDnDEnded() {
 TabDragContext* TabDragController::GetSourceContext() {
   return g_tab_drag_controller ? g_tab_drag_controller->source_context_.get()
                                : nullptr;
+}
+
+void TabDragController::SetGroupHeaderWasCollapsedFromDrag(
+    bool was_collapsed_from_drag) {
+  if (drag_data_.group_header_drag_data_.has_value()) {
+    drag_data_.group_header_drag_data_->was_collapsed_from_drag =
+        was_collapsed_from_drag;
+  }
 }
 
 void TabDragController::TabWasAdded() {
@@ -1518,6 +1523,20 @@ TabDragController::Detach(ReleaseCapture release_capture) {
     }
   }
   std::ranges::sort(dragged_indices);
+
+  int next_active_index = TabStripModel::kNoTab;
+  if (drag_data_.group_header_drag_data_.has_value() &&
+      drag_data_.group_header_drag_data_->was_collapsed_from_drag &&
+      !dragged_indices.empty()) {
+    const int last_dragged_index = dragged_indices.back();
+    if (last_dragged_index + 1 < attached_model->count()) {
+      next_active_index =
+          (last_dragged_index + 1) - static_cast<int>(dragged_indices.size());
+    } else if (dragged_indices.front() > 0) {
+      next_active_index = dragged_indices.front() - 1;
+    }
+  }
+
   const std::vector<tab_groups::TabGroupId> groups_to_move =
       attached_model->GetGroupsDestroyedFromRemovingIndices(dragged_indices);
 
@@ -1538,6 +1557,13 @@ TabDragController::Detach(ReleaseCapture release_capture) {
     } else if (attached_context_ == source_context_ &&
                !initial_selection_model_.empty()) {
       RestoreInitialSelection();
+    }
+
+    if (next_active_index != TabStripModel::kNoTab) {
+      attached_model->ActivateTabAt(
+          next_active_index,
+          TabStripUserGestureDetails(
+              TabStripUserGestureDetails::GestureType::kOther));
     }
   }
 
@@ -1670,7 +1696,7 @@ TabDragController::DetachIntoNewBrowserAndRunMoveLoop(
 #endif
 
   dragged_widget->SetVisibilityChangedAnimationsEnabled(false);
-  browser->window()->Show();
+  browser->GetWindow()->Show();
   dragged_widget->SetVisibilityChangedAnimationsEnabled(true);
 
   // When InitialWebUI is enabled, the asynchronous loading of WebUI might cause
@@ -1702,7 +1728,7 @@ TabDragController::DetachIntoNewBrowserAndRunMoveLoop(
   // Activate may trigger a focus loss, destroying us.
   {
     base::WeakPtr<TabDragController> ref(weak_factory_.GetWeakPtr());
-    browser->window()->Activate();
+    browser->GetWindow()->Activate();
     if (!ref) {
       return Liveness::kDeleted;
     }
@@ -1812,7 +1838,7 @@ std::vector<TabSlotView*> TabDragController::GetViewsMatchingDraggedContents(
     // compatible with `TabDragController`, rather than relying on the tab
     // selection model to achieve expected behavior. As is, this is incompatible
     // with the vertical tab strip because the split tabs are contained within
-    // a single dedicated `VerticalSplitTabView`.
+    // a single dedicated `SplitTabView`.
     if (tab_drag_datum.view_type == TabSlotView::ViewType::kTab) {
       TabSlotView* tab_view =
           context->GetTabForContents(tab_drag_datum.contents);
@@ -2328,10 +2354,10 @@ void TabDragController::CompleteDrag() {
             attached_context_->GetWidget()->GetNativeWindow())
             ->browser();
 
-    if (new_browser->app_controller() &&
-        new_browser->app_controller()->has_tab_strip()) {
-      web_app::MaybeAddPinnedHomeTab(new_browser,
-                                     new_browser->app_controller()->app_id());
+    auto* const app_controller =
+        web_app::AppBrowserController::From(new_browser);
+    if (app_controller && app_controller->has_tab_strip()) {
+      web_app::MaybeAddPinnedHomeTab(new_browser, app_controller->app_id());
     }
   }
 
@@ -2672,7 +2698,7 @@ Browser* TabDragController::CreateBrowserForDrag(TabDragContext* source,
   // We need to reset them again so they are honored. On ChromeOS, this is
   // handled in NativeWidgetAura.
   if (!open_as_web_app) {
-    browser->window()->SetBounds(gfx::Rect(initial_size));
+    browser->GetWindow()->SetBounds(gfx::Rect(initial_size));
   }
 #endif
 
@@ -3040,15 +3066,17 @@ void TabDragController::OnDragDropClientDestroying() {
 
 void TabDragController::UpdateDragTarget(TabDragTarget* new_target,
                                          const gfx::Point& point_in_screen) {
-  if (current_drag_target_ && current_drag_target_ != new_target) {
-    current_drag_target_->OnTabDragExited(point_in_screen);
-  }
-  current_drag_target_ = new_target;
-  if (current_drag_target_) {
-    current_drag_target_->OnTabDragEntered();
-    drag_target_destroyed_subscription_ =
-        current_drag_target_->RegisterWillDestroyCallback(base::BindOnce(
-            &TabDragController::ResetDragTarget, base::Unretained(this)));
+  if (current_drag_target_ != new_target) {
+    if (current_drag_target_) {
+      current_drag_target_->OnTabDragExited(point_in_screen);
+    }
+    current_drag_target_ = new_target;
+    if (current_drag_target_) {
+      current_drag_target_->OnTabDragEntered();
+      drag_target_destroyed_subscription_ =
+          current_drag_target_->RegisterWillDestroyCallback(base::BindOnce(
+              &TabDragController::ResetDragTarget, base::Unretained(this)));
+    }
   }
 }
 

@@ -35,8 +35,10 @@
 #include "components/image_fetcher/core/mock_image_fetcher.h"
 #include "components/image_fetcher/core/request_metadata.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
+#include "components/regional_capabilities/regional_capabilities_utils.h"
 #include "components/search_engines/search_engines_test_util.h"
 #include "components/search_engines/template_url.h"
+#include "components/search_engines/template_url_prepopulate_data.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/vector_icons/vector_icons.h"
 #include "content/public/test/browser_test.h"
@@ -56,6 +58,17 @@ namespace {
 // The extension in "extensions/search_provider_override" uses "example.com"
 // as the search URL.
 constexpr char kExtensionSearchUrl[] = "https://www.example.com/?q=Penguin";
+
+// Used to override the prepopulated search engine to a fake default search.
+constexpr TemplateURLPrepopulateData::PrepopulatedEngine kDefaultSearch = {
+    .name = u"Default Search",
+    .keyword = u"defaultsearch.com",
+    .favicon_url = "https://www.defaultsearch.com/favicon.ico",
+    .search_url = "https://www.defaultsearch.com/search?q={searchTerms}",
+    .encoding = "UTF-8",
+    .type = SEARCH_ENGINE_OTHER,
+    .id = 999999,
+};
 
 enum class DefaultSearch {
   kUseDefault,
@@ -184,11 +197,11 @@ class SettingsOverriddenDialogInteractiveUiTest
     });
   }
 
-  auto PerformSearchFromOmnibox() {
-    return Do([this]() {
+  auto PerformSearchFromOmnibox(Browser* target_browser = nullptr) {
+    return Do([this, target_browser]() {
       ui_test_utils::SendToOmniboxAndSubmit(
-          browser(), "Penguin", base::TimeTicks::Now(),
-          /*wait_for_autocomplete_done=*/false);
+          target_browser ? target_browser : browser(), "Penguin",
+          base::TimeTicks::Now(), /*wait_for_autocomplete_done=*/false);
     });
   }
 
@@ -298,6 +311,16 @@ class SettingsOverriddenDialogInteractiveUiTest
  private:
   base::CallbackListSubscription create_services_subscription_;
   extensions::ScopedTestMV2Enabler mv2_enabler_;
+
+  // Override the list of prepopulated search engines to a deterministic set.
+  // This prevents test breaks when the production list changes. See
+  // crbug.com/530120931.
+  regional_capabilities::ScopedPrepopulatedEnginesOverride
+      prepopulated_engines_override_ =
+          regional_capabilities::SetPrepopulatedEnginesOverrideForTesting(
+              /*regional_engines=*/{&TemplateURLPrepopulateData::google,
+                                    &kDefaultSearch},
+              /*other_known_engines=*/{});
 };
 
 class SettingsOverriddenExplicitChoiceDialogInteractiveUiTest
@@ -433,6 +456,34 @@ IN_PROC_BROWSER_TEST_F(SettingsOverriddenExplicitChoiceDialogInteractiveUiTest,
                   WaitForHide(kSettingsOverriddenDialogId));
 }
 
+IN_PROC_BROWSER_TEST_F(SettingsOverriddenExplicitChoiceDialogInteractiveUiTest,
+                       OnlyOneDialogShownAtATimeAcrossWindows) {
+  // Create a second browser window.
+  Browser* second_browser = CreateBrowser(browser()->profile());
+  ASSERT_TRUE(second_browser);
+
+  DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kSecondWebContentsId);
+
+  RunTestSequence(
+      InstrumentTab(kWebContentsId),
+      InstrumentTab(kSecondWebContentsId, /*tab_index=*/std::nullopt,
+                    second_browser),
+
+      SetNewSearchProvider(DefaultSearch::kUseDefault),
+      LoadExtensionOverridingSearch(),
+
+      // Perform search from the first browser's omnibox to trigger the dialog.
+      PerformSearchFromOmnibox(browser()), WaitForDialogToShow(),
+
+      // Now perform search from the second browser's omnibox. Since a dialog is
+      // already showing, it should NOT show the dialog in the second window and
+      // the second window navigation should complete immediately.
+      PerformSearchFromOmnibox(second_browser),
+      // Verify second window navigated to the extension URL immediately.
+      WaitForWebContentsNavigation(kSecondWebContentsId,
+                                   GURL(kExtensionSearchUrl)));
+}
+
 class SettingsOverriddenExplicitChoiceDialogEscapableInteractiveUiTest
     : public SettingsOverriddenExplicitChoiceDialogInteractiveUiTest {
  public:
@@ -547,7 +598,7 @@ IN_PROC_BROWSER_TEST_F(
                                   Not(IsEmpty()))),
                     Contains(Pair(HatsDialog::kHatsPsdNewExtensionName,
                                   "Search Override Extension")))))
-            .WillOnce(testing::Return(true));
+            .WillOnce(testing::Return(HatsService::LaunchError::kNone));
       }),
       PressButton(kNewSettingButtonId), PressButton(kSaveButtonId),
       WaitForHide(kSaveButtonId));
@@ -575,7 +626,7 @@ IN_PROC_BROWSER_TEST_F(
                             Contains(Pair(
                                 HatsDialog::kHatsPsdUserChoice,
                                 HatsDialog::kHatsUserChoicePreviousProvider)))))
-            .WillOnce(testing::Return(true));
+            .WillOnce(testing::Return(HatsService::LaunchError::kNone));
       }),
       PressButton(kPreviousSettingButtonId), PressButton(kSaveButtonId),
       WaitForHide(kSaveButtonId));
@@ -714,7 +765,7 @@ IN_PROC_BROWSER_TEST_F(SettingsOverriddenLegacyDialogHatsInteractiveUiTest,
                             // covered in other HaTS tests.
                             Contains(Pair(HatsDialog::kHatsPsdNewExtensionName,
                                           "Search Override Extension")))))
-            .WillOnce(testing::Return(true));
+            .WillOnce(testing::Return(HatsService::LaunchError::kNone));
       }),
       // Press "Keep it" button.
       PressButton(kKeepItButtonId), WaitForHide(kKeepItButtonId));

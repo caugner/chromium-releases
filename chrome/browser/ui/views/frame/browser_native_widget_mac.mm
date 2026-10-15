@@ -16,20 +16,24 @@
 #include "chrome/browser/browsing_data/browsing_data_important_sites_util.h"
 #include "chrome/browser/global_keyboard_shortcuts_mac.h"
 #include "chrome/browser/media/router/media_router_feature.h"
+#include "chrome/browser/ui/actions/chrome_action_id.h"
+#include "chrome/browser/ui/actions/chrome_action_properties.h"
+#include "chrome/browser/ui/browser_actions.h"
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #import "chrome/browser/ui/cocoa/browser_window_command_handler.h"
 #import "chrome/browser/ui/cocoa/chrome_command_dispatcher_delegate.h"
 #import "chrome/browser/ui/cocoa/touchbar/browser_window_touch_bar_controller.h"
+#include "chrome/browser/ui/immersive/immersive_mode_controller.h"
 #include "chrome/browser/ui/lens/lens_overlay_entry_point_controller.h"
 #include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/tabs/vertical_tab_strip_metrics.h"
 #include "chrome/browser/ui/tabs/vertical_tab_strip_state_controller.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/frame/browser_frame_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/browser_widget.h"
-#include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
 #include "chrome/browser/ui/views/web_apps/frame_toolbar/web_app_frame_toolbar_utils.h"
 #include "chrome/browser/ui/web_applications/app_browser_controller.h"
 #include "chrome/common/pref_names.h"
@@ -49,6 +53,7 @@
 #include "components/remote_cocoa/common/native_widget_ns_window_host.mojom.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "ui/accessibility/platform/ax_platform_node.h"
+#include "ui/actions/actions.h"
 #include "ui/base/accelerators/global_accelerator_listener/global_accelerator_listener.h"
 #import "ui/base/cocoa/window_size_constants.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -252,8 +257,8 @@ void BrowserNativeWidgetMac::ValidateUserInterfaceItem(
       break;
     case IDC_FULLSCREEN: {
       result->new_title.emplace(l10n_util::GetStringUTF16(
-          browser->window()->IsFullscreen() ? IDS_EXIT_FULLSCREEN_MAC
-                                            : IDS_ENTER_FULLSCREEN_MAC));
+          browser->GetWindow()->IsFullscreen() ? IDS_EXIT_FULLSCREEN_MAC
+                                               : IDS_ENTER_FULLSCREEN_MAC));
       break;
     }
     case IDC_SHOW_AS_TAB: {
@@ -328,7 +333,8 @@ void BrowserNativeWidgetMac::ValidateUserInterfaceItem(
       break;
     }
     case IDC_TOGGLE_FULLSCREEN_TOOLBAR: {
-      web_app::AppBrowserController* app_controller = browser->app_controller();
+      web_app::AppBrowserController* app_controller =
+          web_app::AppBrowserController::From(browser);
       if (app_controller) {
         result->new_toggle_state =
             app_controller->AlwaysShowToolbarInFullscreen();
@@ -388,6 +394,18 @@ void BrowserNativeWidgetMac::ValidateUserInterfaceItem(
               tabs::VerticalTabStripStateController::From(browser)) {
         result->new_toggle_state =
             vertical_tab_strip_state_controller->ShouldDisplayVerticalTabs();
+      }
+      break;
+    }
+    case IDC_TOGGLE_VERTICAL_TABS_COLLAPSE: {
+      if (auto* vertical_tab_strip_state_controller =
+              tabs::VerticalTabStripStateController::From(browser)) {
+        result->set_hidden_state = true;
+        result->new_hidden_state =
+            !vertical_tab_strip_state_controller->ShouldDisplayVerticalTabs();
+        result->new_toggle_state =
+            vertical_tab_strip_state_controller->GetCollapseState() !=
+            tabs::VerticalTabStripCollapseState::kExpanded;
       }
       break;
     }
@@ -477,6 +495,33 @@ bool BrowserNativeWidgetMac::ExecuteCommand(
       tabs::RecordVerticalTabStripModeChanged(
           is_vertical, tabs::VerticalTabStripEntryPoint::kMacViewMenu);
     }
+  } else if (command == IDC_TOGGLE_VERTICAL_TABS_COLLAPSE) {
+    NSEvent* current_event = [NSApp currentEvent];
+    if (auto* controller =
+            tabs::VerticalTabStripStateController::From(browser)) {
+      // NSEventTypeApplicationDefined is specifically for test cases.
+      const bool is_keyboard =
+          current_event &&
+          (current_event.type == NSEventTypeKeyDown ||
+           current_event.type == NSEventTypeApplicationDefined);
+      if (is_keyboard) {
+        if (controller->IsCollapsed()) {
+          base::RecordAction(base::UserMetricsAction(
+              "VerticalTabs_TabStrip_KeyboardShortcutToggleUncollapsed"));
+        } else {
+          base::RecordAction(base::UserMetricsAction(
+              "VerticalTabs_TabStrip_KeyboardShortcutToggleCollapsed"));
+        }
+      } else {
+        if (controller->IsCollapsed()) {
+          base::RecordAction(base::UserMetricsAction(
+              "VerticalTabs_TabStrip_ViewMenuToggleUncollapsed"));
+        } else {
+          base::RecordAction(base::UserMetricsAction(
+              "VerticalTabs_TabStrip_ViewMenuToggleCollapsed"));
+        }
+      }
+    }
   } else if (command == IDC_CLEAR_BROWSING_DATA) {
     views::ElementTrackerViews::GetInstance()->NotifyCustomEvent(
         browsing_data_important_sites_util::
@@ -527,8 +572,13 @@ NativeWidgetMacNSWindow* BrowserNativeWidgetMac::CreateNSWindow(
   CHECK(browser_view_);
   NativeWidgetMacNSWindow* ns_window = NativeWidgetMac::CreateNSWindow(params);
   if (features::IsGlassFrameEnabled()) {
-    [ns_window setBackgroundColor:[NSColor clearColor]];
     [ns_window setOpaque:NO];
+    // A completely transparent background ([NSColor clearColor]) causes AppKit
+    // to continuously invalidate the window surface, resulting in high CPU
+    // and energy usage. Using an almost-transparent color (alpha 0.001) avoids
+    // this performance issue while remaining visually indistinguishable.
+    [ns_window setBackgroundColor:[[NSColor windowBackgroundColor]
+                                      colorWithAlphaComponent:0.001]];
   }
   touch_bar_delegate_ = [[BrowserWindowTouchBarViewsDelegate alloc]
       initWithBrowser:browser_view_->browser()

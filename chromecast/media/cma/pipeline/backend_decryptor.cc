@@ -17,9 +17,10 @@ namespace media {
 BackendDecryptor::BackendDecryptor(EncryptionScheme scheme)
     : decrypt_success_(true),
       wait_eos_(false),
-      task_runner_(std::make_unique<TaskRunnerImpl>()) {
+      task_runner_(new TaskRunnerImpl) {
   DCHECK(MediaPipelineBackend::CreateAudioDecryptor);
 
+  task_runner_ = std::make_unique<TaskRunnerImpl>();
   decryptor_ = base::WrapUnique(
       MediaPipelineBackend::CreateAudioDecryptor(scheme, task_runner_.get()));
 
@@ -42,38 +43,32 @@ void BackendDecryptor::Decrypt(scoped_refptr<DecoderBufferBase> buffer) {
   // also needed so that the last buffer can be flushed.
   pending_buffers_.push(buffer);
 
-  if (buffer->end_of_stream()) {
+  if (buffer->end_of_stream())
     wait_eos_ = true;
-  }
 
   MediaPipelineBackend::BufferStatus status = decryptor_->PushBufferForDecrypt(
       buffer.get(),
       buffer->end_of_stream() ? nullptr : buffer->writable_data());
 
-  if (status != MediaPipelineBackend::kBufferPending) {
+  if (status != MediaPipelineBackend::kBufferPending)
     OnPushBufferForDecryptComplete(status);
-  }
 }
 
 void BackendDecryptor::OnPushBufferForDecryptComplete(
     MediaPipelineBackend::BufferStatus status) {
   // If the pushed buffer is EOS, the callback should be called when all the
   // buffers are decrypted.
-  if (wait_eos_) {
+  if (wait_eos_)
     return;
-  }
 
-  if (decrypt_cb_) {
-    decrypt_cb_.Run(
-        decrypt_success_ && status == MediaPipelineBackend::kBufferSuccess,
-        std::move(ready_buffers_));
-  }
+  DCHECK(decrypt_cb_);
+  decrypt_cb_.Run(
+      decrypt_success_ && status == MediaPipelineBackend::kBufferSuccess,
+      std::move(ready_buffers_));
 }
 
 void BackendDecryptor::OnDecryptComplete(bool success) {
-  if (pending_buffers_.empty()) {
-    return;
-  }
+  DCHECK(!pending_buffers_.empty());
 
   // Cache the success value and return it in OnPushBufferForDecryptComplete.
   decrypt_success_ &= success;
@@ -88,11 +83,10 @@ void BackendDecryptor::OnDecryptComplete(bool success) {
   if (wait_eos_ && buffer->end_of_stream()) {
     // Last frame, all the buffers should be decrypted.
     DCHECK(pending_buffers_.empty());
-    if (decrypt_cb_) {
-      LOG(INFO) << "Return all the ready buffers, size = "
-                << ready_buffers_.size();
-      decrypt_cb_.Run(decrypt_success_, std::move(ready_buffers_));
-    }
+    DCHECK(decrypt_cb_);
+    LOG(INFO) << "Return all the ready buffers, size = "
+              << ready_buffers_.size();
+    decrypt_cb_.Run(decrypt_success_, std::move(ready_buffers_));
   }
 }
 

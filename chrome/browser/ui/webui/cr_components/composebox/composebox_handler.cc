@@ -39,38 +39,6 @@
 #include "chrome/browser/ui/user_education/browser_user_education_interface.h"
 #endif
 
-namespace {
-
-class ComposeboxOmniboxClient final : public ContextualOmniboxClient {
- public:
-  ComposeboxOmniboxClient(Profile* profile,
-                          content::WebContents* web_contents,
-                          ComposeboxHandler* composebox_handler);
-
-  ~ComposeboxOmniboxClient() override;
-
-  // OmniboxClient:
-  metrics::OmniboxEventProto::PageClassification GetPageClassification(
-      bool is_prefetch) const override;
-  std::optional<lens::ContextualInputData> GetContextualInputData()
-      const override;
-
-  void OnAutocompleteAccept(
-      const GURL& destination_url,
-      TemplateURLRef::PostContent* post_content,
-      WindowOpenDisposition disposition,
-      ui::PageTransition transition,
-      AutocompleteMatchType::Type match_type,
-      base::TimeTicks match_selection_timestamp,
-      bool destination_url_entered_without_scheme,
-      bool destination_url_entered_with_http_scheme,
-      const std::u16string& text,
-      const AutocompleteMatch& match,
-      const AutocompleteMatch& alternative_nav_match) override;
-
- private:
-  raw_ptr<ComposeboxHandler> composebox_handler_;
-};
 
 ComposeboxOmniboxClient::ComposeboxOmniboxClient(
     Profile* profile,
@@ -118,8 +86,6 @@ void ComposeboxOmniboxClient::OnAutocompleteAccept(
       additional_params, /*is_voice_search=*/false);
 }
 
-}  // namespace
-
 ComposeboxHandler::ComposeboxHandler(
     mojo::PendingReceiver<composebox::mojom::PageHandler> pending_handler,
     mojo::PendingRemote<composebox::mojom::Page> pending_page,
@@ -130,19 +96,17 @@ ComposeboxHandler::ComposeboxHandler(
     content::WebContents* web_contents,
     GetSessionHandleCallback get_session_callback,
     ClearSessionHandleCallback clear_session_callback)
-    : ComposeboxHandler(
-          std::move(pending_handler),
-          std::move(pending_page),
-          std::move(pending_searchbox_handler),
-          std::move(pending_searchbox_page),
-          profile,
-          web_contents,
-          std::make_unique<OmniboxController>(
-              std::make_unique<ComposeboxOmniboxClient>(profile,
-                                                        web_contents,
-                                                        this)),
-          std::move(get_session_callback),
-          std::move(clear_session_callback)) {}
+    : ComposeboxHandler(std::move(pending_handler),
+                        std::move(pending_page),
+                        std::move(pending_searchbox_handler),
+                        std::move(pending_searchbox_page),
+                        profile,
+                        web_contents,
+                        std::make_unique<ComposeboxOmniboxClient>(profile,
+                                                                  web_contents,
+                                                                  this),
+                        std::move(get_session_callback),
+                        std::move(clear_session_callback)) {}
 
 ComposeboxHandler::ComposeboxHandler(
     mojo::PendingReceiver<composebox::mojom::PageHandler> pending_handler,
@@ -152,14 +116,14 @@ ComposeboxHandler::ComposeboxHandler(
     mojo::PendingRemote<searchbox::mojom::Page> pending_searchbox_page,
     Profile* profile,
     content::WebContents* web_contents,
-    std::unique_ptr<OmniboxController> controller,
+    std::unique_ptr<OmniboxClient> omnibox_client,
     GetSessionHandleCallback get_session_callback,
     ClearSessionHandleCallback clear_session_callback)
     : ContextualSearchboxHandler(std::move(pending_searchbox_handler),
                                  std::move(pending_searchbox_page),
                                  profile,
                                  web_contents,
-                                 std::move(controller),
+                                 std::move(omnibox_client),
                                  std::move(get_session_callback)),
       clear_session_callback_(std::move(clear_session_callback)),
       page_{std::move(pending_page)},
@@ -167,9 +131,9 @@ ComposeboxHandler::ComposeboxHandler(
   // Set the callback for getting suggest inputs from the session.
   // The session is owned by WebUI controller and accessed via callback.
   // It is safe to use Unretained because omnibox client is owned by `this`.
-  static_cast<ContextualOmniboxClient*>(omnibox_controller()->client())
-      ->SetSuggestInputsCallback(base::BindRepeating(
-          &ComposeboxHandler::GetSuggestInputs, base::Unretained(this)));
+  static_cast<ContextualOmniboxClient*>(client())->SetSuggestInputsCallback(
+      base::BindRepeating(&ComposeboxHandler::GetSuggestInputs,
+                          base::Unretained(this)));
   autocomplete_controller_observation_.Observe(autocomplete_controller());
 }
 
@@ -256,14 +220,20 @@ void ComposeboxHandler::CloseLensOverlayFromWebUI(
 // Required by composebox::mojom::PageHandler. Delegates to the base class
 // ContextualSearchboxHandler which does not implement that interface.
 void ComposeboxHandler::SetSmartTabSharingActive(bool active) {
+#if !BUILDFLAG(IS_ANDROID)
   ContextualSearchboxHandler::SetSmartTabSharingActive(active);
+#endif
 }
 
 // Required by composebox::mojom::PageHandler. Delegates to the base class
 // ContextualSearchboxHandler which does not implement that interface.
 void ComposeboxHandler::GetSmartTabSharingActive(
     GetSmartTabSharingActiveCallback callback) {
+#if !BUILDFLAG(IS_ANDROID)
   ContextualSearchboxHandler::GetSmartTabSharingActive(std::move(callback));
+#else
+  std::move(callback).Run(false);
+#endif
 }
 
 void ComposeboxHandler::ExecuteAction(uint8_t line,
@@ -287,7 +257,9 @@ void ComposeboxHandler::ClearFiles(bool should_block_auto_suggested_tabs) {
   // Reset the AIM tool mode to not include file upload if it currently does.
   if (GetInputState().active_tool ==
       omnibox::ToolMode::TOOL_MODE_IMAGE_GEN_UPLOAD) {
-    input_state_model_->setActiveTool(omnibox::ToolMode::TOOL_MODE_IMAGE_GEN);
+    if (auto* model = input_state_model()) {
+      model->setActiveTool(omnibox::ToolMode::TOOL_MODE_IMAGE_GEN);
+    }
   }
 }
 
@@ -303,8 +275,7 @@ void ComposeboxHandler::SubmitQuery(const std::string& query_text,
       shift_key);
   omnibox::ChromeAimEntryPoint aim_entry_point =
       PageClassificationToAimEntryPoint(
-          omnibox_controller()->client()->GetPageClassification(
-              /*is_prefetch=*/false));
+          client()->GetPageClassification(/*is_prefetch=*/false));
 
   if (auto* metrics_recorder = GetMetricsRecorder()) {
     int file_count = 0;
@@ -325,14 +296,19 @@ void ComposeboxHandler::SubmitQuery(
     omnibox::ChromeAimEntryPoint aim_entrypoint,
     std::map<std::string, std::string> additional_params,
     bool is_voice_search) {
+  if (!input_state_model()) {
+    InitializeInputStateModel();
+    if (!input_state_model()) {
+      return;
+    }
+  }
+
   if (auto* metrics_recorder = GetMetricsRecorder()) {
     // Record AIM tool and model mode on query submission.
     const auto& input_state = GetInputState();
-    std::vector<omnibox::InputType> active_input_types =
-        contextual_search::InputStateModel::GetCurrentInputTypes(
-            GetContextualSessionHandle());
     metrics_recorder->RecordModesOnSubmission(
-        input_state.active_tool, input_state.active_model, active_input_types);
+        input_state.active_tool, input_state.active_model,
+        input_state_model()->GetEffectiveInputTypes());
   }
 
   ContextualizeQueryAndOpenUrl(query_text, disposition, aim_entrypoint,

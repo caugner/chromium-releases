@@ -85,8 +85,8 @@
   E(kActionFilledCardInformation, IDC_FILLED_CARD_INFORMATION) \
   E(kActionSharingHubScreenshot, IDC_SHARING_HUB_SCREENSHOT) \
   E(kActionVirtualCardEnroll, IDC_VIRTUAL_CARD_ENROLL) \
-  E(kActionFollow, IDC_FOLLOW) \
-  E(kActionUnfollow, IDC_UNFOLLOW) \
+  E(kActionFollow) \
+  E(kActionUnfollow) \
   E(kActionAutofillMandatoryReauth, IDC_AUTOFILL_MANDATORY_REAUTH) \
   E(kActionProfileMenuInAppMenu, IDC_PROFILE_MENU_IN_APP_MENU) \
   E(kActionPasswordsAndAutofillMenu, IDC_PASSWORDS_AND_AUTOFILL_MENU) \
@@ -172,8 +172,6 @@
   E(kActionProfilingEnabled, IDC_PROFILING_ENABLED) \
   E(kActionBookmarksMenu, IDC_BOOKMARKS_MENU) \
   E(kActionExtensionErrors, IDC_EXTENSION_ERRORS) \
-  E(kActionShowSettingsChangeFirst, IDC_SHOW_SETTINGS_CHANGE_FIRST) \
-  E(kActionShowSettingsChangeLast, IDC_SHOW_SETTINGS_CHANGE_LAST) \
   E(kActionShowAvatarMenu, IDC_SHOW_AVATAR_MENU) \
   E(kActionExtensionInstallErrorFirst, IDC_EXTENSION_INSTALL_ERROR_FIRST) \
   E(kActionExtensionInstallErrorLast, IDC_EXTENSION_INSTALL_ERROR_LAST) \
@@ -181,10 +179,7 @@
   E(kActionDevToolsToggle, IDC_DEV_TOOLS_TOGGLE) \
   E(kActionRecentTabsMenu, IDC_RECENT_TABS_MENU) \
   E(kActionRecentTabsNoDeviceTabs, IDC_RECENT_TABS_NO_DEVICE_TABS) \
-  E(kActionShowSettingsResetBubble, IDC_SHOW_SETTINGS_RESET_BUBBLE) \
   E(kActionHelpMenu, IDC_HELP_MENU) \
-  E(kActionShowSrtBubble, IDC_SHOW_SRT_BUBBLE) \
-  E(kActionElevatedRecoveryDialog, IDC_ELEVATED_RECOVERY_DIALOG) \
   E(kActionTakeScreenshot, IDC_TAKE_SCREENSHOT) \
   E(kActionMoreToolsMenu, IDC_MORE_TOOLS_MENU) \
   E(kActionToggleFullscreenToolbar, IDC_TOGGLE_FULLSCREEN_TOOLBAR) \
@@ -195,13 +190,10 @@
   E(kActionShowCollaborationRecentActivity) \
   E(kActionShowManagementPage, IDC_SHOW_MANAGEMENT_PAGE) \
   E(kActionPasteAndGo, IDC_PASTE_AND_GO) \
-  E(kActionShowSaveLocalCardSignInPromoIfApplicable, \
-    IDC_SHOW_SAVE_LOCAL_CARD_SIGN_IN_PROMO_IF_APPLICABLE) \
-  E(kActionCloseSignInPromo, IDC_CLOSE_SIGN_IN_PROMO) \
   E(kActionShowFullUrls, IDC_SHOW_FULL_URLS) \
   E(kActionShowGoogleLensShortcut, IDC_SHOW_GOOGLE_LENS_SHORTCUT) \
   E(kActionShowAiModeOmniboxButton, IDC_SHOW_AI_MODE_OMNIBOX_BUTTON) \
-  E(kActionRecordReplay, IDC_RECORD_REPLAY) \
+  E(kActionRecordReplay) \
   E(kActionShowSearchTools, IDC_SHOW_SEARCH_TOOLS) \
   E(kActionCaretBrowsingToggle, IDC_CARET_BROWSING_TOGGLE) \
   E(kActionChromeTips, IDC_CHROME_TIPS) \
@@ -237,9 +229,10 @@
   E(kActionSpellcheckLanguagesFirst, IDC_SPELLCHECK_LANGUAGES_FIRST) \
   E(kActionSpellcheckLanguagesLast, IDC_SPELLCHECK_LANGUAGES_LAST) \
   E(kActionCheckSpellingWhileTyping, IDC_CHECK_SPELLING_WHILE_TYPING) \
-  E(kActionSpellpanelToggle, IDC_SPELLPANEL_TOGGLE) \
   E(kActionSpellcheckAddToDictionary, IDC_SPELLCHECK_ADD_TO_DICTIONARY) \
   E(kActionSpellcheckMultiLingual, IDC_SPELLCHECK_MULTI_LINGUAL) \
+  E(kActionSpellcheckRemoveFromDictionary, \
+    IDC_SPELLCHECK_REMOVE_FROM_DICTIONARY) \
   /* Writing direction */ \
   E(kActionWritingDirectionMenu, IDC_WRITING_DIRECTION_MENU) \
   E(kActionWritingDirectionDefault, IDC_WRITING_DIRECTION_DEFAULT) \
@@ -275,8 +268,6 @@
   E(kActionContentContextSaveLinkAs, IDC_CONTENT_CONTEXT_SAVELINKAS) \
   E(kActionContentContextCopyLinkLocation, \
     IDC_CONTENT_CONTEXT_COPYLINKLOCATION) \
-  E(kActionContentContextCopyEmailAddress, \
-    IDC_CONTENT_CONTEXT_COPYEMAILADDRESS) \
   E(kActionContentContextOpenLinkWith, IDC_CONTENT_CONTEXT_OPENLINKWITH) \
   E(kActionContentContextCopyLinkText, IDC_CONTENT_CONTEXT_COPYLINKTEXT) \
   E(kActionContentContextOpenLinkInProfile, \
@@ -299,10 +290,8 @@
     IDC_CONTENT_CONTEXT_SEARCHLENSFORIMAGE) \
   E(kActionContentContextGlicShareImage, \
     IDC_CONTENT_CONTEXT_GLICSHAREIMAGE) \
-  E(kActionContentContextTranslateImageWithWeb, \
-    IDC_CONTENT_CONTEXT_TRANSLATEIMAGEWITHWEB) \
-  E(kActionContentContextTranslateImageWithLens, \
-    IDC_CONTENT_CONTEXT_TRANSLATEIMAGEWITHLENS) \
+  E(kActionContentContextTranslateImageWithWeb) \
+  E(kActionContentContextTranslateImageWithLens) \
   /* Audio/video items. */ \
   E(kActionContentContextSaveAvAs, IDC_CONTENT_CONTEXT_SAVEAVAS) \
   E(kActionContentContextCopyAvLocation, IDC_CONTENT_CONTEXT_COPYAVLOCATION) \
@@ -362,6 +351,8 @@
   E(kActionContentContextGeneratePassword, \
     IDC_CONTENT_CONTEXT_GENERATEPASSWORD) \
   E(kActionContentContextExitFullscreen, IDC_CONTENT_CONTEXT_EXIT_FULLSCREEN) \
+  E(kActionContentContextSaveToMemoryBanks, \
+    IDC_CONTENT_CONTEXT_SAVE_TO_MEMORY_BANKS) \
   E(kActionContentContextShowAllSavedPasswords, \
     IDC_CONTENT_CONTEXT_SHOWALLSAVEDPASSWORDS) \
   E(kActionContentContextUsePasskeyFromAnotherDeviceTopLevel, \
@@ -414,7 +405,6 @@
   E(kActionBookmarkManager, IDC_BOOKMARK_MANAGER) \
   E(kActionBookmarkBarAlwaysShow, IDC_BOOKMARK_BAR_ALWAYS_SHOW) \
   E(kActionBookmarkBarShowAppsShortcut, IDC_BOOKMARK_BAR_SHOW_APPS_SHORTCUT) \
-  E(kActionBookmarkBarShowReadingList, IDC_BOOKMARK_BAR_SHOW_READING_LIST) \
   E(kActionBookmarkBarShowManagedBookmarks, \
     IDC_BOOKMARK_BAR_SHOW_MANAGED_BOOKMARKS) \
   E(kActionBookmarkBarTrackPriceForShoppingBookmark, \
@@ -445,22 +435,16 @@
   E(kActionMediaRouterAbout, IDC_MEDIA_ROUTER_ABOUT) \
   E(kActionMediaRouterHelp, IDC_MEDIA_ROUTER_HELP) \
   E(kActionMediaRouterLearnMore, IDC_MEDIA_ROUTER_LEARN_MORE) \
-  E(kActionMediaRouterAlwaysShowToolbarAction, \
-    IDC_MEDIA_ROUTER_ALWAYS_SHOW_TOOLBAR_ACTION) \
-  E(kActionMediaRouterShownByPolicy, IDC_MEDIA_ROUTER_SHOWN_BY_POLICY) \
-  E(kActionMediaRouterShowInToolbar, IDC_MEDIA_ROUTER_SHOW_IN_TOOLBAR) \
   E(kActionMediaRouterToggleMediaRemoting, \
     IDC_MEDIA_ROUTER_TOGGLE_MEDIA_REMOTING) \
   /* Context menu items for media toolbar button */ \
   E(kActionMediaToolbarContextShowOtherSessions, \
     IDC_MEDIA_TOOLBAR_CONTEXT_SHOW_OTHER_SESSIONS) \
   /* Context menu items for media stream status tray */ \
-  E(kActionMediaStreamDeviceStatusTray, IDC_MEDIA_STREAM_DEVICE_STATUS_TRAY) \
   E(kActionMediaContextMediaStreamCaptureListFirst, \
     IDC_MEDIA_CONTEXT_MEDIA_STREAM_CAPTURE_LIST_FIRST) \
   E(kActionMediaContextMediaStreamCaptureListLast, \
     IDC_MEDIA_CONTEXT_MEDIA_STREAM_CAPTURE_LIST_LAST) \
-  E(kActionMediaStreamDeviceAlwaysAllow, IDC_MEDIA_STREAM_DEVICE_ALWAYS_ALLOW) \
   /* Protocol handler menu entries */ \
   E(kActionContentContextProtocolHandlerFirst, \
     IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_FIRST) \
@@ -501,8 +485,7 @@
   E(kActionContentContextAutofillFeedback, \
     IDC_CONTENT_CONTEXT_AUTOFILL_FEEDBACK) \
   /* Autofill context menu commands */ \
-  E(kActionContentContextAutofillImprovedSuggestions, \
-    IDC_CONTENT_CONTEXT_AUTOFILL_PREDICTION_IMPROVEMENTS) \
+  E(kActionContentContextAutofillImprovedSuggestions) \
   E(kActionContentContextAutofillFallbackPasswordsSelectPassword, \
     IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PASSWORDS_SELECT_PASSWORD) \
   E(kActionContentContextAutofillFallbackPasswordsImportPasswords, \
@@ -527,7 +510,7 @@
   E(kActionCommercePriceInsights) \
   E(kActionCommerceDiscounts) \
   /*Vertical Tabs*/ \
-  E(kActionToggleCollapseVertical) \
+  E(kActionToggleCollapseVertical, IDC_TOGGLE_VERTICAL_TABS_COLLAPSE) \
   /*Projects Panel*/ \
   E(kActionToggleProjectsPanel) \
   /*Omnibox Context Menu*/       \
@@ -539,6 +522,7 @@
   E(kActionOmniboxContextSetModelAuto, IDC_OMNIBOX_CONTEXT_SET_MODEL_AUTO)  \
   E(kActionOmniboxContextSetModelThinking, IDC_OMNIBOX_CONTEXT_SET_MODEL_THINKING)  \
   E(kActionOmniboxContextSetModelRegular, IDC_OMNIBOX_CONTEXT_SET_MODEL_REGULAR)  \
+  E(kActionShowPaymentsChurnedUsersBubble) \
 
 #if BUILDFLAG(IS_CHROMEOS)
 #define CHROME_PLATFORM_SPECIFIC_ACTION_IDS \
@@ -546,6 +530,9 @@
 #elif BUILDFLAG(IS_LINUX)
 #define CHROME_PLATFORM_SPECIFIC_ACTION_IDS \
   E(kUseSystemTitleBar, IDC_USE_SYSTEM_TITLE_BAR) \
+  E(kRestoreWindow, IDC_RESTORE_WINDOW)
+#elif BUILDFLAG(IS_WIN)
+#define CHROME_PLATFORM_SPECIFIC_ACTION_IDS \
   E(kRestoreWindow, IDC_RESTORE_WINDOW)
 #else
 #define CHROME_PLATFORM_SPECIFIC_ACTION_IDS
@@ -581,7 +568,7 @@
   E(kActionSidePanelShowLensOverlayResults, IDC_CONTENT_CONTEXT_LENS_OVERLAY) \
   E(kActionSidePanelShowReadAnything, IDC_SHOW_READING_MODE_SIDE_PANEL) \
   E(kActionSidePanelShowReadingList, IDC_READING_LIST_MENU_SHOW_UI) \
-  E(kActionSidePanelShowSearchCompanion, IDC_SHOW_SEARCH_COMPANION) \
+  E(kActionSidePanelShowSearchCompanion) \
   E(kActionSidePanelShowShoppingInsights) \
   E(kActionSidePanelShowSideSearch) \
   E(kActionSidePanelShowMerchantTrust) \
@@ -615,7 +602,7 @@
   E(kActionCopyUrl, IDC_COPY_URL) \
   E(kActionTabGroupsMenu, IDC_SAVED_TAB_GROUPS_MENU) \
   E(kActionTabSearch, IDC_TAB_SEARCH) \
-  E(kActionSplitTab, IDC_SPLIT_TAB) \
+  E(kActionSplitTab, IDC_NEW_SPLIT_TAB) \
   E(kActionFederation) \
   E(kActionGlicContextualCueing) \
   E(kActionShowAiOverlayDialog) \

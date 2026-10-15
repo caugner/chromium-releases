@@ -4,8 +4,6 @@
 
 package org.chromium.chrome.browser.actor.ui;
 
-import static org.chromium.build.NullUtil.assertNonNull;
-
 import org.chromium.base.Callback;
 import org.chromium.base.supplier.MonotonicObservableSupplier;
 import org.chromium.base.supplier.NonNullObservableSupplier;
@@ -44,6 +42,7 @@ class ActorOverlayMediator
     private final Callback<LayoutManager> mLayoutManagerAvailableCallback;
     private final SettableNonNullObservableSupplier<Boolean> mBackPressChangedSupplier =
             ObservableSuppliers.createNonNull(false);
+    private final Runnable mInflateOverlayCallback;
     private final Runnable mBackPressCallback;
     private final Runnable mDismissSnackbarCallback;
 
@@ -58,6 +57,7 @@ class ActorOverlayMediator
      * @param browserControlsVisibilityManager The BrowserControlsVisibilityManager to observe.
      * @param tabObscuringHandler The TabObscuringHandler to obscure the web content.
      * @param layoutManagerSupplier The LayoutManager supplier to observe layout changes.
+     * @param inflateOverlayCallback The callback to ensure the overlay view is inflated.
      * @param backPressCallback The callback to show the snackbar.
      * @param dismissSnackbarCallback The callback to dismiss the snackbar.
      */
@@ -67,6 +67,7 @@ class ActorOverlayMediator
             BrowserControlsVisibilityManager browserControlsVisibilityManager,
             TabObscuringHandler tabObscuringHandler,
             MonotonicObservableSupplier<LayoutManager> layoutManagerSupplier,
+            Runnable inflateOverlayCallback,
             Runnable backPressCallback,
             Runnable dismissSnackbarCallback) {
         mModel = model;
@@ -74,6 +75,7 @@ class ActorOverlayMediator
         mBrowserControlsVisibilityManager = browserControlsVisibilityManager;
         mTabObscuringHandler = tabObscuringHandler;
         mLayoutManagerSupplier = layoutManagerSupplier;
+        mInflateOverlayCallback = inflateOverlayCallback;
         mBackPressCallback = backPressCallback;
         mDismissSnackbarCallback = dismissSnackbarCallback;
         updateTakeOverButtonVisibility();
@@ -167,6 +169,9 @@ class ActorOverlayMediator
 
     private void onCurrentTabChanged(@Nullable Tab tab) {
         mDismissSnackbarCallback.run();
+        // TODO(crbug.com/520161144): We had to remove "assert mTabController != null;" to pass the
+        // test in
+        // org.chromium.chrome.browser.actor.ui.ActorOverlayCoordinatorTest#testTabSwitchToDestroyedTab.
         if (mCurrentTab != null) {
             mCurrentTab.removeObserver(mTabObserver);
             if (mTabController != null) {
@@ -178,8 +183,10 @@ class ActorOverlayMediator
 
         if (mCurrentTab != null) {
             mCurrentTab.addObserver(mTabObserver);
-            mTabController = assertNonNull(ActorUiTabController.from(mCurrentTab));
-            mTabController.addObserver(this);
+            mTabController = ActorUiTabController.from(mCurrentTab);
+            if (mTabController != null) {
+                mTabController.addObserver(this);
+            }
         } else {
             mTabController = null;
         }
@@ -206,6 +213,9 @@ class ActorOverlayMediator
      * @param visible True to make the overlay visible, false to hide it.
      */
     void setOverlayVisible(boolean visible) {
+        if (visible) {
+            mInflateOverlayCallback.run();
+        }
         mModel.set(ActorOverlayProperties.VISIBLE, visible);
         boolean isVisible = mModel.get(ActorOverlayProperties.VISIBLE);
 

@@ -32,15 +32,8 @@ enum class NetworkIsolationPartition : int32_t {
   kFedCmUncredentialedRequests = 2,
   // This use case isolates network state for DNS over HTTPS requests.
   kDnsOverHttps = 3,
-  // This use case isolates network state and V8 code cache for SharedWorkers
-  // with SameSite=None cookie access restrictions (e.g. StorageAccessHandle).
-  //
-  // SharedWorkers that were created via the Storage Access API use a
-  // first-party NetworkIsolationKey, but do not have access to
-  // SameSite=Strict/Lax cookies.
-  kSharedWorkerSameSiteCookiesNone = 4,
 
-  kMaxValue = kSharedWorkerSameSiteCookiesNone,
+  kMaxValue = kDnsOverHttps,
 };
 
 std::string NetworkIsolationPartitionToDebugString(

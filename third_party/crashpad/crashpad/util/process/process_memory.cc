@@ -20,8 +20,6 @@
 
 #include "base/check_op.h"
 #include "base/logging.h"
-#include "base/numerics/safe_conversions.h"
-#include "base/numerics/safe_math.h"
 #include "util/numeric/safe_assignment.h"
 
 namespace crashpad {
@@ -43,13 +41,8 @@ bool ProcessMemory::Read(VMAddress address, VMSize size, void* buffer) const {
       LOG(ERROR) << "short read";
       return false;
     }
-
-    base::CheckedNumeric<size_t> new_local_size = local_size;
-    new_local_size -= bytes_read;
-    if (!new_local_size.AssignIfValid(&local_size)) {
-      LOG(ERROR) << "read more bytes than requested";
-      return false;
-    }
+    DCHECK_LE(static_cast<size_t>(bytes_read), local_size);
+    local_size -= bytes_read;
     address += bytes_read;
     buffer_c += bytes_read;
   }
@@ -83,13 +76,6 @@ bool ProcessMemory::ReadCStringInternal(VMAddress address,
     }
     if (bytes_read == 0) {
       break;
-    }
-
-    base::CheckedNumeric<size_t> checked_read_size = read_size;
-    checked_read_size -= bytes_read;
-    if (!checked_read_size.IsValid()) {
-      LOG(ERROR) << "read more bytes than requested";
-      return false;
     }
 
     char* nul = static_cast<char*>(memchr(buffer, '\0', bytes_read));

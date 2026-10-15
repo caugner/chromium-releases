@@ -25,6 +25,7 @@
 #include "remoting/base/auto_thread_task_runner.h"
 #include "remoting/base/gaia_oauth_client.h"
 #include "remoting/base/logging.h"
+#include "remoting/base/memory_consumer_registry.h"
 #include "remoting/base/url_request_context_getter.h"
 #include "remoting/host/base/host_exit_codes.h"
 #include "remoting/host/base/switches.h"
@@ -69,6 +70,9 @@ using remoting::protocol::PairingRegistry;
 namespace remoting {
 
 int Me2MeNativeMessagingHostMain(int argc, char** argv) {
+  base::ScopedMemoryConsumerRegistry<remoting::MemoryConsumerRegistry>
+      memory_consumer_registry;
+
   // This object instance is required by Chrome code (such as
   // SingleThreadTaskExecutor).
   base::AtExitManager exit_manager;
@@ -118,7 +122,8 @@ int Me2MeNativeMessagingHostMain(int argc, char** argv) {
   io_thread.StartWithOptions(
       base::Thread::Options(base::MessagePumpType::IO, 0));
 
-  base::SingleThreadTaskExecutor main_task_executor(base::MessagePumpType::UI);
+  base::SingleThreadTaskExecutor main_task_executor(base::MessagePumpType::UI,
+                                                    /*is_main_thread=*/true);
   base::RunLoop run_loop;
 
   scoped_refptr<DaemonController> daemon_controller =

@@ -6,6 +6,7 @@
 
 #include "base/containers/enum_set.h"
 #include "base/test/scoped_feature_list.h"
+#include "chrome/browser/dictation/features.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/toasts/api/toast_id.h"
@@ -29,7 +30,11 @@ using ToastIdEnumSet =
 // specification.
 constexpr auto kDeprecatedToastIds =
     std::to_array<std::underlying_type_t<ToastId>>(
-        {/*kLensOverlay=*/4, /*kAddedToComparisonTable=*/6});
+        {/*kLensOverlay=*/4, /*kAddedToComparisonTable=*/6,
+         /*kMultistepFilterSuggestion=*/31,
+         /*kMultistepFilterSuggestionRecent=*/32,
+         /*kEnterpriseCopyAudit=*/46,
+         /*kEnterpriseCopyKeptInManagedChrome=*/47});
 
 ToastIdEnumSet GetActiveToastIds() {
   auto result = ToastIdEnumSet::All();
@@ -53,7 +58,9 @@ class ToastServiceBrowserTest : public InProcessBrowserTest {
          {toast_features::kTranslateToast, {}},
          {features::kGlicActorUi, {{features::kGlicActorUiToastName, "true"}}},
          {multistep_filter::kMultistepFilter, {}},
-         {features::kIndigo, {}}},
+         {features::kIndigo, {}},
+         {autofill::features::kAutofillAmbientAutofill, {}},
+         {dictation::kDictation, {}}},
         /*disabled_features*/ {});
     InProcessBrowserTest::SetUp();
   }

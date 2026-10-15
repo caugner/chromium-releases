@@ -172,15 +172,8 @@ void FedCmAccountSelectionView::OnPageActionClicked() {
         l10n_util::GetStringUTF16(IDS_FEDERATION_SIGNING_IN_TITLE));
     controller->ShowSuggestionChip(kActionFederation);
     controller->Show(kActionFederation);
-    if (!NotifyDelegate([&]() {
-          delegate_->OnAccountSelected(
-              accounts_[0]->identity_provider->idp_metadata.config_url,
-              accounts_[0]->id,
-              accounts_[0]->idp_claimed_login_state.value_or(
-                  accounts_[0]->browser_trusted_login_state));
-        })) {
-      return;
-    }
+    NotifyDelegateOfAccountSelection(*accounts_[0],
+                                     *accounts_[0]->identity_provider);
   } else {
     // For sign-up users, we show a full modal dialog that gathers the necessary
     // permission from the user (e.g. privacy policies and terms of services).
@@ -351,12 +344,8 @@ bool FedCmAccountSelectionView::Show(
 
       if (should_show_verifying_sheet) {
         state_ = State::VERIFYING;
-        if (!NotifyDelegate([&]() {
-              delegate_->OnAccountSelected(
-                  new_idp_data.idp_metadata.config_url, new_accounts_[0]->id,
-                  new_accounts_[0]->idp_claimed_login_state.value_or(
-                      new_accounts_[0]->browser_trusted_login_state));
-            })) {
+        if (!NotifyDelegateOfAccountSelection(*new_accounts_[0],
+                                              new_idp_data)) {
           // `this` has been deleted.
           return false;
         }
@@ -673,9 +662,7 @@ void FedCmAccountSelectionView::CreateOrUpdateViewAndWidget(
 }
 
 void FedCmAccountSelectionView::OnAccountsDisplayed() {
-  if (!NotifyDelegate([&]() { delegate_->OnAccountsDisplayed(); })) {
-    return;
-  }
+  delegate_->OnAccountsDisplayed();
 }
 
 bool FedCmAccountSelectionView::OnAccountSelected(
@@ -706,12 +693,7 @@ bool FedCmAccountSelectionView::OnAccountSelected(
       (state_ == State::SINGLE_ACCOUNT_PICKER &&
        dialog_type_ == DialogType::BUBBLE)) {
     state_ = State::VERIFYING;
-    if (!NotifyDelegate([&]() {
-          delegate_->OnAccountSelected(
-              idp_data.idp_metadata.config_url, account->id,
-              account->idp_claimed_login_state.value_or(
-                  account->browser_trusted_login_state));
-        })) {
+    if (!NotifyDelegateOfAccountSelection(*account, idp_data)) {
       // `this` was deleted.
       return false;
     }
@@ -838,10 +820,7 @@ void FedCmAccountSelectionView::OnLoginToIdP(const GURL& idp_config_url,
         webid::AccountChooserResult::kUseOtherAccountButton;
   }
 
-  if (!NotifyDelegate(
-          [&]() { delegate_->OnLoginToIdP(idp_config_url, idp_login_url); })) {
-    return;
-  }
+  delegate_->OnLoginToIdP(idp_config_url, idp_login_url);
 }
 
 void FedCmAccountSelectionView::OnGotIt(const ui::Event& event) {
@@ -851,10 +830,7 @@ void FedCmAccountSelectionView::OnGotIt(const ui::Event& event) {
     return;
   }
 
-  if (!NotifyDelegate(
-          [&]() { delegate_->OnDismiss(DismissReason::kGotItButton); })) {
-    return;
-  }
+  delegate_->OnDismiss(DismissReason::kGotItButton);
 }
 
 void FedCmAccountSelectionView::OnMoreDetails(const ui::Event& event) {
@@ -864,13 +840,8 @@ void FedCmAccountSelectionView::OnMoreDetails(const ui::Event& event) {
     return;
   }
 
-  if (!NotifyDelegate([&]() { delegate_->OnMoreDetails(); })) {
-    return;
-  }
-  if (!NotifyDelegate(
-          [&]() { delegate_->OnDismiss(DismissReason::kMoreDetailsButton); })) {
-    return;
-  }
+  delegate_->OnMoreDetails();
+  delegate_->OnDismiss(DismissReason::kMoreDetailsButton);
 }
 
 content::WebContents* FedCmAccountSelectionView::ShowModalDialog(
@@ -1064,12 +1035,20 @@ void FedCmAccountSelectionView::OnPopupWindowDestroyed() {
   Close(/*notify_delegate=*/true, /*hide_widget=*/false);
 }
 
-bool FedCmAccountSelectionView::NotifyDelegate(
-    base::FunctionRef<void()> notify_callback) {
-  base::WeakPtr<FedCmAccountSelectionView> weak_this =
-      weak_ptr_factory_.GetWeakPtr();
-  notify_callback();
-  return weak_this != nullptr;
+bool FedCmAccountSelectionView::NotifyDelegateOfAccountSelection(
+    const Account& account,
+    const content::IdentityProviderData& idp_data) {
+  DCHECK(state_ == State::VERIFYING || state_ == State::AUTO_REAUTHN);
+
+  base::WeakPtr<FedCmAccountSelectionView> weak_ptr(
+      weak_ptr_factory_.GetWeakPtr());
+  delegate_->OnAccountSelected(idp_data.idp_metadata.config_url, account.id,
+                               account.idp_claimed_login_state.value_or(
+                                   account.browser_trusted_login_state));
+
+  // AccountSelectionView::Delegate::OnAccountSelected() might delete this.
+  // See https://crbug.com/40248291 for details.
+  return static_cast<bool>(weak_ptr);
 }
 
 void FedCmAccountSelectionView::ShowVerifyingSheet(

@@ -37,6 +37,7 @@
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/contextual_search/tab_contextualization_controller.h"
+#include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/side_panel/side_panel_ui.h"
 #include "chrome/browser/ui/tabs/public/tab_features.h"
 #include "chrome/common/chrome_paths.h"
@@ -175,9 +176,13 @@ namespace contextual_tasks {
 class ContextualTasksInteractiveUiTest : public InteractiveBrowserTest {
  public:
   ContextualTasksInteractiveUiTest() {
+    // TODO(crbug.com/452061489): Fix tests that fail when the WebUI Omnibox is
+    // enabled and then remove the two omnibox features below.
     scoped_feature_list_.InitWithFeatures(
         /*enabled_features=*/{kContextualTasks},
-        /*disabled_features=*/{lens::features::kLensSendRawFileMediaTypes});
+        /*disabled_features=*/{lens::features::kLensSendRawFileMediaTypes,
+                               omnibox::internal::kWebUIOmniboxPopup,
+                               omnibox::internal::kWebUIOmniboxAimPopup});
     tab_context_override_ =
         tabs::TabFeatures::GetUserDataFactoryForTesting()
             .AddOverrideForTesting<
@@ -309,6 +314,12 @@ class ContextualTasksInteractiveUiTest : public InteractiveBrowserTest {
 
     EXPECT_CALL(*mock_aim, GetSearchboxConfig())
         .WillRepeatedly(testing::Return(config));
+
+    ON_CALL(*mock_aim, IsAimUrl(_, _))
+        .WillByDefault(
+            [](const GURL& url, std::optional<std::string> host_override) {
+              return url.host().find(kMockAimPageHost) != std::string::npos;
+            });
 
     // Satisfy the native navigation interception checks.
     EXPECT_CALL(*mock_aim, HasAimUrlParams(_))
@@ -878,7 +889,7 @@ class ContextualTasksInteractiveUiTest : public InteractiveBrowserTest {
 
 // TODO(crbug.com/500717050): Parameterize this test suite on the feature flag.
 // TODO(crbug.com/524797987): Re-enable this test.
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_WIN)
 #define MAYBE_AddAndRemovePdfChipFromComposebox \
   DISABLED_AddAndRemovePdfChipFromComposebox
 #else
@@ -934,7 +945,7 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksInteractiveUiTest,
 }
 
 // TODO(crbug.com/524797987): Re-enable this test.
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_WIN)
 #define MAYBE_AddAndRemoveImageChipFromComposebox \
   DISABLED_AddAndRemoveImageChipFromComposebox
 #else
@@ -2286,10 +2297,7 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksInteractiveUiTest,
   ContextualTasksPanelController* coordinator =
       ContextualTasksPanelController::From(browser());
 
-  // Context Management will not show tabs as chips.
-  const int expected_turn2_viewport_image_count =
-      base::FeatureList::IsEnabled(omnibox::kContextManagementInComposebox) ? 1
-                                                                            : 0;
+  const int expected_turn2_viewport_image_count = 0;
 
   RunTestSequence(
       InstrumentTab(kPrimaryTab, 0), Do([&]() {
@@ -2558,6 +2566,37 @@ IN_PROC_BROWSER_TEST_P(ContextualTasksInteractiveUiTestParameterized,
       SelectTab(kTabStripElementId, 0), WaitForShow(kInnerWebContentsId));
 
   RunTestSequence(std::move(sequence));
+}
+
+IN_PROC_BROWSER_TEST_F(ContextualTasksInteractiveUiTest,
+                       ComposeboxLensButtonIsEnabled) {
+  DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kSidePanelId);
+  DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kOpenedTab);
+  const GURL kThreadUrl("https://www.google.com/search?q=thread");
+  // #lensIcon is in the inner cr-composebox nested under the contextual tasks
+  // composebox, hence the doubled #composebox.
+  const DeepQuery kLensIcon = {"contextual-tasks-app", "#composebox",
+                               "#composebox", "#lensIcon"};
+  RunTestSequence(
+      InstrumentTab(kPrimaryTab, 0), SelectTab(kTabStripElementId, 0),
+      OpenContextualTasksInCurrentTab(GURL(kCujInterceptionUrl)),
+      InstrumentNextTab(kOpenedTab),
+      SimulateThreadLinkAndOpenPanel(kSidePanelId),
+      WaitForWebContentsReady(kOpenedTab),
+      CheckElement(
+          kOpenedTab,
+          [kThreadUrl](ui::TrackedElement* el) {
+            auto* web_contents = AsInstrumentedWebContents(el)->web_contents();
+            const GURL& url = web_contents->GetLastCommittedURL();
+            std::string actual_q;
+            std::string expected_q;
+            return url.host() == chrome::kChromeUIContextualTasksHost &&
+                   net::GetValueForKeyInQuery(url, "q", &actual_q) &&
+                   net::GetValueForKeyInQuery(kThreadUrl, "q", &expected_q) &&
+                   actual_q == expected_q;
+          }),
+      WaitForElementExists(kSidePanelId, kLensIcon),
+      WaitForJsResultAt(kSidePanelId, kLensIcon, "el => !el.disabled", true));
 }
 
 }  // namespace contextual_tasks

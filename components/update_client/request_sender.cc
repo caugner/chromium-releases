@@ -21,6 +21,7 @@
 #include "components/update_client/configurator.h"
 #include "components/update_client/network.h"
 #include "components/update_client/update_client_errors.h"
+#include "components/update_client/update_client_metrics.h"
 #include "components/update_client/utils.h"
 #include "url/gurl.h"
 
@@ -110,8 +111,8 @@ void RequestSender::SendInternal() {
   VLOG(2) << "url: " << url.spec();
 
   if (use_signing_) {
-    std::string request_query_string;
-    signer_.SignRequest(request_body_, &request_query_string);
+    std::string request_query_string =
+        signer_.PrepareRequestParameters(request_body_);
     url = BuildUpdateUrl(url, request_query_string);
   }
   VLOG_IF(2, !url.is_valid()) << "url is not valid.";
@@ -160,9 +161,11 @@ void RequestSender::SendInternalComplete(
     }
 
     CHECK(use_signing_);
-    if (signer_.ValidateResponse(
-            response_body,
-            SelectCupServerProof(response_cup_server_proof, response_etag))) {
+    const bool valid = signer_.ValidateResponse(
+        response_body,
+        SelectCupServerProof(response_cup_server_proof, response_etag));
+    if (valid) {
+      metrics::RecordCupFallbackToEtag2(response_cup_server_proof.empty());
       base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
           FROM_HERE, base::BindOnce(TakeRequestSenderCallback(), 0,
                                     response_body, retry_after_sec));

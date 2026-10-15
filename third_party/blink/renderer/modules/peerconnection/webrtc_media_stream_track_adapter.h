@@ -56,7 +56,7 @@ class MODULES_EXPORT WebRtcMediaStreamTrackAdapter
       const WebRtcMediaStreamTrackAdapter&) = delete;
 
   // Must be called before all external references are released (i.e. before
-  // destruction). Can be called from any thread. Disposing may finish
+  // destruction). Invoke on the main thread. Disposing may finish
   // asynchronously using the webrtc signaling thread and the main thread. After
   // calling this method it is safe to release all external references to the
   // adapter.
@@ -110,11 +110,9 @@ class MODULES_EXPORT WebRtcMediaStreamTrackAdapter
   void FinalizeRemoteTrackInitializationOnMainThread();
   void EnsureTrackIsInitialized();
 
-  // The disposal logic starts and finishes on the main thread, although it can
-  // be initiated from any thread. Local tracks and remote video tracks are
-  // disposed synchronously. Remote audio tracks are disposed asynchronously
-  // with a jump to the webrtc signaling thread and back.
-  void DisposeOnMainThread();
+  // Disposing starts and finishes on the main thread. Local tracks and remote
+  // video tracks are disposed synchronously. Remote audio tracks are disposed
+  // asynchronously with a jump to the webrtc signaling thread and back.
   void DisposeLocalAudioTrack();
   void DisposeLocalVideoTrack();
   void DisposeRemoteAudioTrack();

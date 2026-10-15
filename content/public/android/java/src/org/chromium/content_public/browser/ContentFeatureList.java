@@ -10,9 +10,7 @@ import org.chromium.base.MutableBooleanParamWithSafeDefault;
 import org.chromium.base.MutableFlagWithSafeDefault;
 import org.chromium.base.MutableIntParamWithSafeDefault;
 import org.chromium.build.annotations.NullMarked;
-import org.chromium.components.cached_flags.CachedFeatureParam;
 import org.chromium.components.cached_flags.CachedFlag;
-import org.chromium.components.cached_flags.IntCachedFeatureParam;
 import org.chromium.content.common.ContentInternalFeatures;
 import org.chromium.content_public.common.ContentFeatures;
 import org.chromium.ui.accessibility.AccessibilityFeatures;
@@ -62,7 +60,6 @@ public class ContentFeatureList {
             "AndroidEnableBackgroundMediaCapturing";
 
     public static final String ANDROID_CAPTURE_KEY_EVENTS = "AndroidCaptureKeyEvents";
-    public static final String ANDROID_CARET_BROWSING = "AndroidCaretBrowsing";
 
     public static final String ANDROID_DEV_TOOLS_FRONTEND = "AndroidDevToolsFrontend";
     public static final String ANDROID_FORCE_TEXT_INPUT_STATE_UPDATE_UPON_FOCUS =
@@ -136,21 +133,27 @@ public class ContentFeatureList {
             sAccessibilityDeprecateJavaNodeCacheDisableCache =
                     sAccessibilityDeprecateJavaNodeCache.newBooleanParam("disable_cache", false);
 
-    public static final MutableFlagWithSafeDefault sAccessibilityMagnificationFollowsFocus =
-            new MutableFlagWithSafeDefault(
-                    ContentFeatureMap.getInstance(),
-                    AccessibilityFeatures.ACCESSIBILITY_MAGNIFICATION_FOLLOWS_FOCUS,
-                    true);
+    public static final MutableFlagWithSafeDefault
+            sAccessibilityMagnificationFollowsFocusKeyboardAttached =
+                    new MutableFlagWithSafeDefault(
+                            ContentFeatureMap.getInstance(),
+                            AccessibilityFeatures
+                                    .ACCESSIBILITY_MAGNIFICATION_FOLLOWS_FOCUS_KEYBOARD_ATTACHED,
+                            true);
+
+    public static final MutableFlagWithSafeDefault
+            sAccessibilityMagnificationFollowsFocusNoKeyboard =
+                    new MutableFlagWithSafeDefault(
+                            ContentFeatureMap.getInstance(),
+                            AccessibilityFeatures
+                                    .ACCESSIBILITY_MAGNIFICATION_FOLLOWS_FOCUS_NO_KEYBOARD,
+                            false);
 
     public static final MutableFlagWithSafeDefault sAccessibilityRequestScopedContentChangedEvents =
             new MutableFlagWithSafeDefault(
                     ContentFeatureMap.getInstance(),
                     ContentFeatures.ACCESSIBILITY_REQUEST_SCOPED_CONTENT_CHANGED_EVENTS,
                     false);
-
-    public static final MutableFlagWithSafeDefault sAndroidCaretBrowsing =
-            new MutableFlagWithSafeDefault(
-                    ContentFeatureMap.getInstance(), ContentFeatures.ANDROID_CARET_BROWSING, false);
 
     public static final MutableFlagWithSafeDefault sStrictHighRankProcessLRU =
             new MutableFlagWithSafeDefault(
@@ -190,13 +193,13 @@ public class ContentFeatureList {
             new MutableFlagWithSafeDefault(
                     ContentFeatureMap.getInstance(),
                     ContentFeatures.ANDROID_DESKTOP_ZOOM_SCALING,
-                    false);
+                    true);
 
     public static final MutableIntParamWithSafeDefault sAndroidDesktopZoomScalingFactor =
-            sAndroidDesktopZoomScaling.newIntParam("desktop-zoom-scaling-factor", 100);
+            sAndroidDesktopZoomScaling.newIntParam("desktop-zoom-scaling-factor", 109);
 
     public static final MutableIntParamWithSafeDefault sAndroidMonitorZoomScalingFactor =
-            sAndroidDesktopZoomScaling.newIntParam("monitor-zoom-scaling-factor", 100);
+            sAndroidDesktopZoomScaling.newIntParam("monitor-zoom-scaling-factor", 120);
 
     public static final CachedFlag sSandboxedProcessServiceLimitOnAndroid =
             new CachedFlag(
@@ -205,20 +208,6 @@ public class ContentFeatureList {
                     /* defaultValue= */ false,
                     /* defaultValueInTests= */ true);
 
-    public static final IntCachedFeatureParam sSandboxedProcessServiceLimitOnAndroidCount =
-            new IntCachedFeatureParam(
-                    ContentFeatureMap.getInstance(),
-                    ContentInternalFeatures.SANDBOXED_PROCESS_SERVICE_LIMIT_ON_ANDROID,
-                    "count",
-                    98);
-
     public static final List<CachedFlag> sCachedFlags =
             List.of(sSandboxedProcessServiceLimitOnAndroid);
-
-    public static final List<CachedFeatureParam<?>> sParamsCached =
-            List.of(
-                    // keep-sorted start
-                    sSandboxedProcessServiceLimitOnAndroidCount
-                    // keep-sorted end
-                    );
 }

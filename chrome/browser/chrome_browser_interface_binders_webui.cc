@@ -31,7 +31,6 @@
 #include "chrome/browser/ui/webui/personal_context_internals/personal_context_internals.mojom.h"
 #include "chrome/browser/ui/webui/personal_context_internals/personal_context_internals_ui.h"
 #include "chrome/browser/ui/webui/policy/policy_ui.h"
-#include "chrome/browser/ui/webui/privacy_sandbox/privacy_sandbox_internals_ui.h"
 #include "chrome/browser/ui/webui/segmentation_internals/segmentation_internals_ui.h"
 #include "chrome/browser/ui/webui/subresource_filter/subresource_filter_internals_ui.h"
 #include "chrome/browser/ui/webui/usb_internals/usb_internals.mojom.h"
@@ -74,6 +73,10 @@
 #endif
 
 #if BUILDFLAG(ENABLE_WEBUI_NTP)
+#include "chrome/browser/new_tab_page/modules/file_suggestion/drive_suggestion.mojom.h"
+#include "chrome/browser/new_tab_page/modules/v2/calendar/google_calendar.mojom.h"
+#include "chrome/browser/new_tab_page/modules/v2/most_relevant_tab_resumption/most_relevant_tab_resumption.mojom.h"
+#include "chrome/browser/new_tab_page/new_tab_page_util.h"
 #include "chrome/browser/ui/webui/new_tab_page/action_chips/action_chips.mojom.h"
 #include "chrome/browser/ui/webui/new_tab_page/new_tab_page_ui.h"
 #include "components/search/ntp_features.h"
@@ -236,10 +239,6 @@ void PopulateChromeWebUIFrameBindersPartsAllPlatforms(
                                          LocationInternalsUI>(map);
 
   RegisterWebUIControllerInterfaceBinder<
-      privacy_sandbox_internals::mojom::PageHandler,
-      privacy_sandbox_internals::PrivacySandboxInternalsUI>(map);
-
-  RegisterWebUIControllerInterfaceBinder<
       actor_internals::mojom::PageHandlerFactory, ActorInternalsUI>(map);
 
   if (base::FeatureList::IsEnabled(
@@ -248,9 +247,13 @@ void PopulateChromeWebUIFrameBindersPartsAllPlatforms(
         policy::mojom::PolicyPageHandlerFactory, PolicyUI>(map);
   }
 
-  if (base::FeatureList::IsEnabled(contextual_tasks::kContextualTasks)) {
+  if (contextual_tasks::IsContextualTasksUIEnabled()) {
     RegisterWebUIControllerInterfaceBinder<
         contextual_tasks::mojom::PageHandlerFactory, ContextualTasksUI>(map);
+    RegisterWebUIControllerInterfaceBinder<
+        contextual_tasks_internals::mojom::
+            ContextualTasksInternalsPageHandlerFactory,
+        ContextualTasksUI>(map);
   }
 
   RegisterWebUIControllerInterfaceBinder<
@@ -275,6 +278,20 @@ void PopulateChromeWebUIFrameBindersPartsAllPlatforms(
   if (base::FeatureList::IsEnabled(ntp_features::kNtpNextFeatures)) {
     content::RegisterWebUIControllerInterfaceBinder<
         action_chips::mojom::ActionChipsHandlerFactory, NewTabPageUI>(map);
+  }
+  if (base::FeatureList::IsEnabled(
+          ntp_features::kNtpMostRelevantTabResumptionModule)) {
+    content::RegisterWebUIControllerInterfaceBinder<
+        ntp::most_relevant_tab_resumption::mojom::PageHandler, NewTabPageUI>(
+        map);
+  }
+  if (IsDriveModuleEnabled()) {
+    content::RegisterWebUIControllerInterfaceBinder<
+        file_suggestion::mojom::DriveSuggestionHandler, NewTabPageUI>(map);
+  }
+  if (base::FeatureList::IsEnabled(ntp_features::kNtpCalendarModule)) {
+    content::RegisterWebUIControllerInterfaceBinder<
+        ntp::calendar::mojom::GoogleCalendarPageHandler, NewTabPageUI>(map);
   }
 #endif  // BUILDFLAG(ENABLE_WEBUI_NTP)
 
@@ -351,6 +368,8 @@ void PopulateChromeWebUIFrameBinders(
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
     BUILDFLAG(IS_CHROMEOS)
   RegisterWebUIControllerInterfaceBinder<skills::mojom::PageHandlerFactory,
+                                         skills::SkillsUI>(map);
+  RegisterWebUIControllerInterfaceBinder<skills::mojom::SkillsPageHandler,
                                          skills::SkillsUI>(map);
 #endif
 

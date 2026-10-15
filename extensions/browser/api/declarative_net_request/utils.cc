@@ -500,7 +500,7 @@ size_t GetEnabledStaticRuleCount(const CompositeMatcher* composite_matcher) {
   size_t enabled_static_rule_count = 0;
   for (const std::unique_ptr<RulesetMatcher>& matcher :
        composite_matcher->matchers()) {
-    if (matcher->id() == kDynamicRulesetID) {
+    if (!IsRulesetStatic(matcher->id())) {
       continue;
     }
 

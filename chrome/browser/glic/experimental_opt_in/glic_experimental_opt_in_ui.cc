@@ -81,7 +81,9 @@ bool GlicExperimentalOptInUIConfig::IsWebUIEnabled(
 }
 
 GlicExperimentalOptInUI::GlicExperimentalOptInUI(content::WebUI* web_ui)
-    : ui::MojoWebUIController(web_ui) {
+    : ui::MojoWebUIController(web_ui,
+                              /*enable_chrome_send=*/false,
+                              /*enable_chrome_histograms=*/true) {
   Profile* profile = Profile::FromWebUI(web_ui);
   content::WebUIDataSource* source = content::WebUIDataSource::CreateAndAdd(
       profile, chrome::kChromeUIGlicExperimentalOptInHost);
@@ -119,6 +121,9 @@ GlicExperimentalOptInUI::GlicExperimentalOptInUI(content::WebUI* web_ui)
   source->AddString(
       "glicExperimentalTriggeringOptInURL",
       GetExperimentalTriggeringOptInURL(profile, required_state_).spec());
+  source->AddBoolean(
+      "glicDevEnabled",
+      base::CommandLine::ForCurrentProcess()->HasSwitch(::switches::kGlicDev));
 
   static constexpr webui::LocalizedString kStrings[] = {
       {"offlineNoticeHeader", IDS_GLIC_OFFLINE_NOTICE_HEADER},

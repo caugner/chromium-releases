@@ -1,9 +1,9 @@
 {
-    "project": "chromium-m150",
-    "project_title": "Chromium M150",
-    "ref": "refs/branch-heads/7871",
-    "chrome_project": "chrome-m150",
-    "dawn_ref": "refs/heads/chromium/7871",
+    "project": "chromium-m151",
+    "project_title": "Chromium M151",
+    "ref": "refs/branch-heads/7922",
+    "chrome_project": "chrome-m151",
+    "dawn_ref": "refs/heads/chromium/7922",
     "is_main": false,
     "platforms": {
         "android": {

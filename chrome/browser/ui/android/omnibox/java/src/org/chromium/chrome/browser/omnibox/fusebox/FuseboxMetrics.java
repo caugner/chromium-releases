@@ -47,8 +47,13 @@ public class FuseboxMetrics {
     static final String FILE_ATTACHMENT_SIZE_LIMIT_CHECK_HISTOGRAM =
             "Omnibox.MobileFusebox.AttachmentSizeLimitCheck";
 
+    // LINT.IfChange(ToolMode)
     @VisibleForTesting /* package */ static final int TOOL_MODE_HISTOGRAM_BOUND = 11;
-    @VisibleForTesting /* package */ static final int MODEL_MODE_HISTOGRAM_BOUND = 5;
+    // LINT.ThenChange(//tools/metrics/histograms/metadata/omnibox/enums.xml:OmniboxToolMode)
+    // LINT.IfChange(ModelMode)
+    @VisibleForTesting /* package */ static final int MODEL_MODE_HISTOGRAM_BOUND = 8;
+
+    // LINT.ThenChange(//tools/metrics/histograms/metadata/omnibox/enums.xml:OmniboxModelMode)
 
     // LINT.IfChange(AiModeActivationSource)
     @IntDef({
@@ -80,6 +85,7 @@ public class FuseboxMetrics {
         FuseboxAttachmentButtonType.CLIPBOARD,
         FuseboxAttachmentButtonType.SUGGESTED_TAB,
         FuseboxAttachmentButtonType.RECENT_TAB,
+        FuseboxAttachmentButtonType.DRIVE_FILES,
         FuseboxAttachmentButtonType.COUNT
     })
     @Retention(RetentionPolicy.SOURCE)
@@ -92,7 +98,8 @@ public class FuseboxMetrics {
         int CLIPBOARD = 5;
         int SUGGESTED_TAB = 6;
         int RECENT_TAB = 7;
-        int COUNT = 8;
+        int DRIVE_FILES = 8;
+        int COUNT = 9;
     }
 
     // LINT.ThenChange(//tools/metrics/histograms/metadata/omnibox/enums.xml:FuseboxAttachmentButtonType)
@@ -296,6 +303,7 @@ public class FuseboxMetrics {
             case FuseboxAttachmentButtonType.CLIPBOARD -> "Clipboard";
             case FuseboxAttachmentButtonType.SUGGESTED_TAB -> "SuggestedTab";
             case FuseboxAttachmentButtonType.RECENT_TAB -> "RecentTab";
+            case FuseboxAttachmentButtonType.DRIVE_FILES -> "DriveFiles";
             default -> "";
         };
     }
@@ -314,7 +322,6 @@ public class FuseboxMetrics {
                     model.get(FuseboxProperties.POPUP_ATTACH_GALLERY_VISIBLE);
             case FuseboxAttachmentButtonType.FILES ->
                     model.get(FuseboxProperties.POPUP_ATTACH_FILE_VISIBLE);
-
             case FuseboxAttachmentButtonType.RECENT_TAB ->
                     model.get(FuseboxProperties.POPUP_RECENT_TABS_HEADER_VISIBLE);
             default -> false;

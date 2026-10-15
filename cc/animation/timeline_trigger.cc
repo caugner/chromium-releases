@@ -68,7 +68,8 @@ void TimelineTrigger::Update(const ScrollTree& scroll_tree,
                              AnimationEvents* events,
                              base::TimeTicks monotonic_time) {
   ScrollTimeline* scroll_timeline =
-      ToScrollTimeline(timeline_.Read(*this).get());
+      reinterpret_cast<ScrollTimeline*>(timeline_.Read(*this).get());
+  DCHECK(scroll_timeline);
 
   // Triggers only function based on the active tree.
   if (!scroll_timeline->IsActive(scroll_tree, /*is_active_tree=*/true)) {

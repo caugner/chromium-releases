@@ -7,9 +7,14 @@
 #import <QuartzCore/QuartzCore.h>
 
 #import "base/check.h"
+#import "base/functional/bind.h"
+#import "base/location.h"
+#import "base/task/sequenced_task_runner.h"
+#import "base/time/time.h"
 #import "base/trace_event/trace_event.h"
 #import "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/app_bar/ui/app_bar_constants.h"
+#import "ios/chrome/browser/app_bar/ui/app_bar_container_view_controller.h"
 #import "ios/chrome/browser/assistant/ui/assistant_container_layout_utils.h"
 #import "ios/chrome/browser/assistant/ui/assistant_container_presentation_context.h"
 #import "ios/chrome/browser/assistant/ui/assistant_container_view_controller.h"
@@ -22,8 +27,9 @@
 #import "ios/chrome/browser/scene/ui/scene_view_controller_delegate.h"
 #import "ios/chrome/browser/scene/ui/scene_view_delegate.h"
 #import "ios/chrome/browser/shared/coordinator/scene/state/layout_state.h"
+#import "ios/chrome/browser/shared/coordinator/scene/state/layout_state_passkey.h"
 #import "ios/chrome/browser/shared/public/commands/app_bar_commands.h"
-#import "ios/chrome/browser/shared/public/commands/bwg_commands.h"
+#import "ios/chrome/browser/shared/public/commands/gemini_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/shared/ui/chrome_overlay_window/chrome_overlay_container_view.h"
 #import "ios/chrome/browser/shared/ui/util/layout_guide_names.h"
@@ -36,11 +42,24 @@
 #import "ui/base/device_form_factor.h"
 #import "ui/base/l10n/l10n_util.h"
 
+namespace layout_state {
+class SceneViewControllerPassKeyFactory {
+ public:
+  static base::PassKey<SceneViewControllerPassKeyFactory> CreateKey() {
+    return base::PassKey<SceneViewControllerPassKeyFactory>();
+  }
+};
+}  // namespace layout_state
+
 namespace {
 
 // Transition delay between IPH presentations.
 constexpr NSTimeInterval kIPHTransitionDelay = 0.5;
 
+// Helper function to return the domain passkey used to mutate the layout state.
+inline LayoutStateScenePassKey PassKey() {
+  return layout_state::SceneViewControllerPassKeyFactory::CreateKey();
+}
 }  // namespace
 
 @interface SceneViewController () <LayoutStateObserver, SceneViewDelegate>
@@ -82,8 +101,6 @@ constexpr NSTimeInterval kIPHTransitionDelay = 0.5;
 
   // The last fullscreen progress value received.
   CGFloat _fullscreenProgress;
-  // Whether the assistant container is visible.
-  BOOL _assistantVisible;
 }
 
 - (instancetype)init {
@@ -155,11 +172,12 @@ constexpr NSTimeInterval kIPHTransitionDelay = 0.5;
 
   view.backgroundColor = [UIColor colorNamed:kSecondaryBackgroundColor];
 
-  [self
+  [view
       registerForTraitChanges:
           @[ UITraitHorizontalSizeClass.class, UITraitVerticalSizeClass.class ]
-                   withAction:@selector(onSystemTraitChange)];
-  [self onSystemTraitChange];
+                   withTarget:self
+                       action:@selector(viewTraitDidChange)];
+  [self viewTraitDidChange];
 }
 
 - (void)viewWillTransitionToSize:(CGSize)size
@@ -177,7 +195,8 @@ constexpr NSTimeInterval kIPHTransitionDelay = 0.5;
           id<UIViewControllerTransitionCoordinatorContext> context) {
         if (IsChromeNextIaEnabled()) {
           [weakSelf.layoutState updateAppBarPositionWithView:weakSelf.view
-                                                 coordinator:coordinator];
+                                                 coordinator:coordinator
+                                                     passKey:PassKey()];
         }
       }
                       completion:nil];
@@ -185,7 +204,8 @@ constexpr NSTimeInterval kIPHTransitionDelay = 0.5;
 
 - (void)viewDidLayoutSubviews {
   [super viewDidLayoutSubviews];
-  self.layoutState.windowedMode = IsWindowedMode(self.view.window);
+  [self.layoutState setWindowedMode:IsWindowedMode(self.view.window)
+                            passKey:PassKey()];
   [self updateAssistantTopConstraints:self.layoutState.containedLayoutActive];
   if (!IsFullscreenRefactoringEnabled()) {
     [self applyFrameForLayout];
@@ -193,6 +213,11 @@ constexpr NSTimeInterval kIPHTransitionDelay = 0.5;
   // This is necessary as the app bar container doesn't get all the refreshes
   // when resizing the window.
   [_appBar.view setNeedsLayout];
+  // Re-resolves the bottom anchor once the target toolbar is in the view
+  // hierarchy.
+  if (_assistantContainerViewController) {
+    [_assistantContainerViewController layoutInParentView:self.view];
+  }
 }
 
 - (void)viewSafeAreaInsetsDidChange {
@@ -306,7 +331,6 @@ constexpr NSTimeInterval kIPHTransitionDelay = 0.5;
 }
 
 - (void)setAssistantContainerVisible:(BOOL)visible {
-  _assistantVisible = visible;
   UIView* assistantView = _assistantShadowView;
   if (!assistantView) {
     return;
@@ -368,9 +392,9 @@ constexpr NSTimeInterval kIPHTransitionDelay = 0.5;
 - (void)layoutState:(LayoutState*)layoutState
     didChangeContainedLayoutSupported:(BOOL)supported {
   if (supported && _assistantContainerViewController) {
-    layoutState.containedLayoutActive = YES;
+    [layoutState setContainedLayoutActive:YES scenePassKey:PassKey()];
   } else if (!supported) {
-    layoutState.containedLayoutActive = NO;
+    [layoutState setContainedLayoutActive:NO scenePassKey:PassKey()];
   }
   [self updateAssistantLayout];
 }
@@ -382,6 +406,11 @@ constexpr NSTimeInterval kIPHTransitionDelay = 0.5;
 
 - (void)layoutState:(LayoutState*)layoutState
     didChangeAppBarPosition:(AppBarPosition)appBarPosition {
+  [self updateLayoutForViews];
+}
+
+- (void)layoutState:(LayoutState*)layoutState
+    didChangeGeminiFloatyInvoked:(BOOL)geminiFloatyInvoked {
   [self updateLayoutForViews];
 }
 
@@ -420,11 +449,18 @@ constexpr NSTimeInterval kIPHTransitionDelay = 0.5;
   _sideAppContentTopConstraint.constant = constant;
 }
 
-// Updates the layout state when system traits change.
-- (void)onSystemTraitChange {
-  self.layoutState.containedLayoutSupported =
-      IsSidePanelLayout(self.traitCollection);
-  self.layoutState.windowedMode = IsWindowedMode(self.view.window);
+// Called when the view's trait collection changes.
+- (void)viewTraitDidChange {
+  if (IsChromeNextIaEnabled()) {
+    [self.layoutState updateAppBarPositionWithView:self.view
+                                       coordinator:nil
+                                           passKey:PassKey()];
+  }
+  [self.layoutState
+      setContainedLayoutSupported:IsSidePanelLayout(self.view.traitCollection)
+                          passKey:PassKey()];
+  [self.layoutState setWindowedMode:IsWindowedMode(self.view.window)
+                            passKey:PassKey()];
 }
 
 // Helper to update app content constraints for panel layout.
@@ -563,35 +599,10 @@ constexpr NSTimeInterval kIPHTransitionDelay = 0.5;
 - (void)applyFrameForAppContentLayout {
   CGRect frame = self.view.bounds;
   UIEdgeInsets insets = [self appBarInsets];
-  insets.left += [self sidePanelLeftInset];
-
-  CGFloat panelWidth = [self assistantSidePanelWidth];
-
-  if (self.layoutState.containedLayoutSupported &&
-      _assistantContainerViewController && panelWidth > 0) {
-    CGFloat safeAreaTop = self.view.safeAreaInsets.top;
-    CGFloat margin = _assistantVisible ? kAssistantContainerMargin : 0.0;
-    // The base top inset uses the safe area if anchored to the status bar,
-    // otherwise it uses the container margin.
-    CGFloat baseTop =
-        (safeAreaTop > 0) ? safeAreaTop : kAssistantContainerMargin;
-
-    insets.right += margin;
-    insets.top += _assistantVisible ? baseTop : 0.0;
-    insets.bottom += margin;
-  }
 
   CGRect contentFrame = UIEdgeInsetsInsetRect(frame, insets);
   _appContentContainerView.frame = contentFrame;
-  if (self.layoutState.containedLayoutActive && !IsChromeNextIaEnabled()) {
-    // When the Assistant side panel is active, use bounds to avoid a double
-    // shift of the origin.
-    // However, when IsChromeNextIaEnabled() is true, the view hierarchy is
-    // inverted (when fullscreen refactor is disabled). In that mode, we must
-    // use frame to avoid misplacing the view at the left edge.
-    _appContentView.frame = _appContentContainerView.bounds;
-    return;
-  }
+
   _appContentView.frame = _appContentContainerView.frame;
 }
 
@@ -614,17 +625,20 @@ constexpr NSTimeInterval kIPHTransitionDelay = 0.5;
   UIEdgeInsets insets = UIEdgeInsetsZero;
   switch (position) {
     case AppBarPosition::kLeft:
-      insets.left += kAppBarHeightLandscape;
+      insets.left += AppBarHeightLandscape();
       break;
 
     case AppBarPosition::kRight:
-      insets.right += kAppBarHeightLandscape;
+      insets.right += AppBarHeightLandscape();
       break;
 
     case AppBarPosition::kBottom: {
+      CGFloat minHeight =
+          IsAppBarHiddenInFullscreen() ? 0 : kAppBarHeightFullscreen;
+      CGFloat portraitHeight =
+          CurrentAppBarHeightPortrait(self.layoutState.geminiFloatyInvoked);
       CGFloat appBarHeight =
-          kAppBarHeightFullscreen -
-          _fullscreenProgress * (kAppBarHeightFullscreen - kAppBarHeight);
+          minHeight - _fullscreenProgress * (minHeight - portraitHeight);
       insets.bottom += appBarHeight;
       break;
     }
@@ -635,27 +649,7 @@ constexpr NSTimeInterval kIPHTransitionDelay = 0.5;
   return insets;
 }
 
-// Calculates the width of the Assistant Side Panel based on current bounds.
-- (CGFloat)assistantSidePanelWidth {
-  return MIN(self.view.bounds.size.width * kAssistantSidePanelWidthMultiplier,
-             kAssistantSidePanelMaxWidth);
-}
 
-// Calculates left inset for the Assistant Side Panel.
-- (CGFloat)sidePanelLeftInset {
-  if (!self.layoutState.containedLayoutSupported ||
-      !_assistantContainerViewController) {
-    return 0;
-  }
-
-  CGFloat panelWidth = [self assistantSidePanelWidth];
-  if (panelWidth <= 0) {
-    return 0;
-  }
-
-  CGFloat width = panelWidth + _assistantLeadingConstraint.constant;
-  return MAX(0, width + kAssistantContainerMargin);
-}
 
 // Helper method for dismissal block when attempting to show the Gemini floaty
 // if invoked.
@@ -722,10 +716,8 @@ constexpr NSTimeInterval kIPHTransitionDelay = 0.5;
         constraintLessThanOrEqualToConstant:kAssistantSidePanelMaxWidth],
   ];
 
-  if (IsFullscreenRefactoringEnabled()) {
-    [self setupAppContentConstraintsForPanel:assistantView];
-    [self updateAssistantTopConstraints:self.layoutState.containedLayoutActive];
-  }
+  [self setupAppContentConstraintsForPanel:assistantView];
+  [self updateAssistantTopConstraints:self.layoutState.containedLayoutActive];
 }
 
 // Sets up constraints for the app content view when the assistant side panel is
@@ -777,19 +769,6 @@ constexpr NSTimeInterval kIPHTransitionDelay = 0.5;
   ];
 
   _assistantSheetConstraints = sheetConstraints;
-  if (IsFullscreenRefactoringEnabled() && !IsChromeNextIaEnabled()) {
-    _assistantSheetConstraints =
-        [sheetConstraints arrayByAddingObjectsFromArray:@[
-          [_appContentContainerView.leadingAnchor
-              constraintEqualToAnchor:view.leadingAnchor],
-          [_appContentContainerView.trailingAnchor
-              constraintEqualToAnchor:view.trailingAnchor],
-          [_appContentContainerView.topAnchor
-              constraintEqualToAnchor:view.topAnchor],
-          [_appContentContainerView.bottomAnchor
-              constraintEqualToAnchor:view.bottomAnchor],
-        ]];
-  }
 }
 
 // Dismissal callback method for the first IA promo IPH.
@@ -798,11 +777,11 @@ constexpr NSTimeInterval kIPHTransitionDelay = 0.5;
   [self.appBarHandler hideIPHBackground];
   if (reason == IPHDismissalReasonType::kTappedNext && geminiEligible) {
     __weak __typeof(self) weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
-                                 (int64_t)(kIPHTransitionDelay * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{
-                     [weakSelf showSecondIAPromo];
-                   });
+    base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
+        FROM_HERE, base::BindOnce(^{
+          [weakSelf showSecondIAPromo];
+        }),
+        base::Seconds(kIPHTransitionDelay));
   } else {
     [self.mutator newIAPromoIPHDismissed];
   }

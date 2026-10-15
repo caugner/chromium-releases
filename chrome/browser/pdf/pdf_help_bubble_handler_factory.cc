@@ -28,6 +28,8 @@ namespace pdf {
 DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(PdfHelpBubbleHandlerFactory,
                                       kPdfGlicSummarizeElementId);
 DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(PdfHelpBubbleHandlerFactory,
+                                      kPdfInkSignaturesAddTextElementId);
+DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(PdfHelpBubbleHandlerFactory,
                                       kPdfInkSignaturesDrawElementId);
 
 // static
@@ -74,6 +76,7 @@ void PdfHelpBubbleHandlerFactory::CreateHelpBubbleHandler(
       ui::ElementContext(this, base::PassKey<PdfHelpBubbleHandlerFactory>()),
       std::vector<ui::ElementIdentifier>{
           PdfHelpBubbleHandlerFactory::kPdfGlicSummarizeElementId,
+          PdfHelpBubbleHandlerFactory::kPdfInkSignaturesAddTextElementId,
           PdfHelpBubbleHandlerFactory::kPdfInkSignaturesDrawElementId});
   tracked_element_handler_->BindInterface(std::move(tracked_element_handler));
   help_bubble_handler_ = std::make_unique<user_education::HelpBubbleHandler>(

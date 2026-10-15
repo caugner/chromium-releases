@@ -64,6 +64,7 @@ import org.chromium.blink.mojom.HandwritingGestureResult;
 import org.chromium.blink.mojom.InputCursorAnchorInfo;
 import org.chromium.blink.mojom.StylusWritingGestureData;
 import org.chromium.blink_public.web.WebInputEventModifier;
+import org.chromium.blink_public.web.WebTextInputFlags;
 import org.chromium.blink_public.web.WebTextInputMode;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
@@ -86,6 +87,7 @@ import org.chromium.content_public.common.ContentFeatures;
 import org.chromium.mojo.system.MessagePipeHandle;
 import org.chromium.mojo.system.MojoException;
 import org.chromium.mojo.system.impl.CoreImpl;
+import org.chromium.ui.base.DeviceInput;
 import org.chromium.ui.base.ViewUtils;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.base.ime.TextInputAction;
@@ -271,6 +273,14 @@ public class ImeAdapterImpl
         }
     }
 
+    public static boolean isAccessibilityMagnificationFollowsFocusEnabled() {
+        if (DeviceInput.supportsKeyboard(ContextUtils.getApplicationContext())) {
+            return ContentFeatureList.sAccessibilityMagnificationFollowsFocusKeyboardAttached
+                    .isEnabled();
+        }
+        return ContentFeatureList.sAccessibilityMagnificationFollowsFocusNoKeyboard.isEnabled();
+    }
+
     /**
      * Get {@link ImeAdapter} object used for the give WebContents. {@link #create()} should precede
      * any calls to this. Returns null if the web contents are not initialized or if UserDataHost
@@ -423,6 +433,15 @@ public class ImeAdapterImpl
     public void previewGesture(StylusWritingGestureData gestureData) {
         adjustForWindowPosition(gestureData);
         getStylusWritingImeCallback().handleStylusWritingGestureAction(-1, gestureData);
+    }
+
+    /** Signals to Blink to cancel and clear any active handwriting preview spans. */
+    public void cancelPreviewGesture() {
+        if (mNativeImeAdapterAndroid == 0) {
+            Log.e(TAG, "cancelPreviewGesture called after native adapter was destroyed.");
+            return;
+        }
+        ImeAdapterImplJni.get().cancelPreviewGesture(mNativeImeAdapterAndroid);
     }
 
     void handleGesture(OngoingGesture request) {
@@ -619,6 +638,11 @@ public class ImeAdapterImpl
     }
 
     @Override
+    public InputMethodManagerWrapper getInputMethodManagerWrapper() {
+        return mInputMethodManagerWrapper;
+    }
+
+    @Override
     public void setAllowFullscreenIme(boolean allow) {
         mAllowFullscreenIme = allow;
     }
@@ -796,7 +820,10 @@ public class ImeAdapterImpl
             }
 
             boolean editable = focusedNodeEditable();
-            boolean password = textInputType == TextInputType.PASSWORD;
+            boolean password =
+                    textInputType == TextInputType.PASSWORD
+                            || (textInputFlags & WebTextInputFlags.HAS_BEEN_PASSWORD_FIELD) != 0
+                            || (textInputFlags & WebTextInputFlags.HAS_BEEN_CUSTOM_PASSWORD) != 0;
             updateNodeAttributes(editable, password);
             if (mCursorAnchorInfoController != null
                     && (!TextUtils.equals(mLastText, text)
@@ -1604,7 +1631,7 @@ public class ImeAdapterImpl
         // Note: `SDK_INT_FULL` added in `BAKLAVA`, hence two checks.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA
                 && Build.VERSION.SDK_INT_FULL >= Build.VERSION_CODES_FULL.BAKLAVA_1
-                && ContentFeatureList.sAccessibilityMagnificationFollowsFocus.isEnabled()) {
+                && isAccessibilityMagnificationFollowsFocusEnabled()) {
             Rect nodePix =
                     fromViewportDipToViewContentPix(
                             nodeLeftDip, nodeTopDip, nodeRightDip, nodeBottomDip, containerView);
@@ -1849,7 +1876,7 @@ public class ImeAdapterImpl
         // Request view system keep caret on screen when moved.
         if (isSelectionMove
                 && cursorAnchorInfo.insertionMarker != null
-                && ContentFeatureList.sAccessibilityMagnificationFollowsFocus.isEnabled()) {
+                && isAccessibilityMagnificationFollowsFocusEnabled()) {
             // Convert caret bounds from CSS pixels to device pixels relative to root view.
             var caretCss = cursorAnchorInfo.insertionMarker;
             Rect caretPix =
@@ -2230,6 +2257,8 @@ public class ImeAdapterImpl
         // Stylus Writing
         void handleStylusWritingGestureAction(
                 long nativeImeAdapterAndroid, int id, ByteBuffer gestureData);
+
+        void cancelPreviewGesture(long nativeImeAdapterAndroid);
 
         void performSpellCheck(long nativeImeAdapterAndroid);
 

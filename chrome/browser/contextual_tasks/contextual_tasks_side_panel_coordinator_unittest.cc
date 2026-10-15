@@ -33,6 +33,8 @@
 #include "components/prefs/pref_service.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "components/tabs/public/mock_tab_interface.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_renderer_host.h"
 #include "content/public/test/web_contents_tester.h"
@@ -40,13 +42,18 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if !BUILDFLAG(IS_ANDROID)
+#include "chrome/browser/ui/actions/chrome_action_id.h"
+#include "chrome/browser/ui/actions/chrome_actions.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/hats/hats_service_factory.h"
 #include "chrome/browser/ui/hats/mock_hats_service.h"
 #include "chrome/browser/ui/hats/survey_config.h"
+#include "chrome/browser/ui/lens/test_lens_search_controller.h"
 #include "chrome/browser/ui/tabs/tab_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/test_tab_strip_model_delegate.h"
+#include "chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model.h"
+#include "ui/actions/actions.h"
 #endif
 
 using testing::_;
@@ -108,6 +115,9 @@ class ContextualTasksSidePanelCoordinatorTest : public testing::Test {
  public:
   void SetUp() override {
     profile_ = std::make_unique<TestingProfile>();
+#if !BUILDFLAG(IS_ANDROID)
+    InitializeActionIdStringMapping();
+#endif
 
     ContextualTasksServiceFactory::GetInstance()->SetTestingFactory(
         profile_.get(),
@@ -200,8 +210,12 @@ class ContextualTasksSidePanelCoordinatorTest : public testing::Test {
     // WebContents must be destroyed before Profile.
     web_contents_list_.clear();
     tabs_.clear();
+    mock_tab_user_data_hosts_.clear();
 
     profile_.reset();
+#if !BUILDFLAG(IS_ANDROID)
+    actions::ActionIdMap::ResetMapsForTesting();
+#endif
   }
 
   tabs::TabInterface* CreateMockTab() {
@@ -214,6 +228,12 @@ class ContextualTasksSidePanelCoordinatorTest : public testing::Test {
                                                      base::NullCallback());
 
     ON_CALL(*tab, GetContents()).WillByDefault(Return(web_contents_ptr));
+
+    auto host = std::make_unique<ui::UnownedUserDataHost>();
+    ON_CALL(*tab, GetUnownedUserDataHost()).WillByDefault(ReturnRef(*host));
+    ON_CALL(Const(*tab), GetUnownedUserDataHost())
+        .WillByDefault(ReturnRef(*host));
+    mock_tab_user_data_hosts_.push_back(std::move(host));
 
     tabs::TabInterface* tab_ptr = tab.get();
     tabs_.push_back(std::move(tab));
@@ -286,6 +306,8 @@ class ContextualTasksSidePanelCoordinatorTest : public testing::Test {
 
   std::vector<std::unique_ptr<tabs::TabInterface>> tabs_;
   std::vector<std::unique_ptr<content::WebContents>> web_contents_list_;
+  std::vector<std::unique_ptr<ui::UnownedUserDataHost>>
+      mock_tab_user_data_hosts_;
 };
 
 TEST_F(ContextualTasksSidePanelCoordinatorTest,
@@ -295,6 +317,29 @@ TEST_F(ContextualTasksSidePanelCoordinatorTest,
   EXPECT_CALL(*mock_controller_, CreateTask()).Times(1);
   coordinator_->Show(false,
                      omnibox::ChromeAimEntryPoint::UNKNOWN_AIM_ENTRY_POINT);
+}
+
+TEST_F(ContextualTasksSidePanelCoordinatorTest, GetActiveEntrySource) {
+  ContextualTask task(base::Uuid::GenerateRandomV4());
+  ON_CALL(*mock_controller_, GetContextualTaskForTab(_))
+      .WillByDefault(Return(task));
+
+  EXPECT_EQ(ContextualTasksPanelController::EntrySource::kOther,
+            coordinator_->GetActiveEntrySource());
+
+  coordinator_->Show(false,
+                     omnibox::ChromeAimEntryPoint::
+                         DESKTOP_CHROME_LENS_CONTEXTUAL_SEARCHBOX_ENTRY_POINT);
+
+  EXPECT_EQ(ContextualTasksPanelController::EntrySource::kLensOverlay,
+            coordinator_->GetActiveEntrySource());
+
+  coordinator_->Show(
+      false,
+      omnibox::ChromeAimEntryPoint::DESKTOP_CHROME_COBROWSE_TOOLBAR_BUTTON);
+
+  EXPECT_EQ(ContextualTasksPanelController::EntrySource::kOther,
+            coordinator_->GetActiveEntrySource());
 }
 
 TEST_F(ContextualTasksSidePanelCoordinatorTest, ShowSidePanelSetsEntryPoint) {
@@ -327,6 +372,93 @@ TEST_F(ContextualTasksSidePanelCoordinatorTest, CloseSidePanelWhenNotEligible) {
               Close(ContextualTasksPanelHost::AnimationStyle::kStandard));
   TriggerOnEligibilityChange(false);
   EXPECT_EQ(0u, coordinator_->GetNumberOfActiveTasks());
+}
+
+TEST_F(ContextualTasksSidePanelCoordinatorTest,
+       CloseSidePanelDiscardsCacheIfNoEntryPoint) {
+  base::test::ScopedFeatureList local_feature_list;
+  local_feature_list.InitWithFeaturesAndParameters(
+      {{kContextualTasks, {}},
+       {kContextualTasksEphemeralBrandedEntryPoint,
+        {{"ContextualTasksEntryPoint", "no-entry-point"}}}},
+      {});
+
+  ClearCacheForTesting();
+
+  base::Uuid active_task_id = base::Uuid::GenerateRandomV4();
+  CreateCachedWebContentsForTesting(active_task_id, true);
+
+  base::Uuid inactive_task_id = base::Uuid::GenerateRandomV4();
+  CreateCachedWebContentsForTesting(inactive_task_id, true);
+
+  tabs::TabInterface* active_tab = tab_list_->GetActiveTab();
+  SessionID active_tab_id =
+      sessions::SessionTabHelper::IdForTab(active_tab->GetContents());
+  ContextualTask active_task(active_task_id);
+  active_task.AddThread(Thread(ThreadType::kAiMode, "thread_1", "Title", 1000));
+  EXPECT_CALL(*mock_controller_, GetContextualTaskForTab(active_tab_id))
+      .WillRepeatedly(Return(active_task));
+  EXPECT_CALL(*mock_controller_, GetTabsAssociatedWithTask(active_task_id))
+      .WillRepeatedly(Return(std::vector<SessionID>{active_tab_id}));
+  tabs::TabInterface* inactive_tab = CreateMockTab();
+  SessionID inactive_tab_id =
+      sessions::SessionTabHelper::IdForTab(inactive_tab->GetContents());
+  ContextualTask inactive_task(inactive_task_id);
+
+  EXPECT_CALL(*mock_controller_, GetContextualTaskForTab(inactive_tab_id))
+      .WillRepeatedly(Return(inactive_task));
+  EXPECT_CALL(*mock_controller_, GetTabsAssociatedWithTask(inactive_task_id))
+      .WillRepeatedly(Return(std::vector<SessionID>{inactive_tab_id}));
+
+  UpdateWebContentsForActiveTab();
+  ASSERT_EQ(coordinator_->GetActiveWebContents(),
+            GetWebContentsForTaskForTesting(active_task_id));
+
+  EXPECT_EQ(2u, coordinator_->GetNumberOfActiveTasks());
+
+  EXPECT_CALL(*mock_panel_host_,
+              Close(ContextualTasksPanelHost::AnimationStyle::kStandard));
+  coordinator_->Close();
+
+  EXPECT_EQ(1u, coordinator_->GetNumberOfActiveTasks());
+  EXPECT_EQ(0u, GetNumberOfActiveTasksForTesting(active_task_id));
+  EXPECT_EQ(1u, GetNumberOfActiveTasksForTesting(inactive_task_id));
+}
+
+TEST_F(ContextualTasksSidePanelCoordinatorTest,
+       CloseSidePanelKeepsCacheIfEntryPointSet) {
+  base::test::ScopedFeatureList local_feature_list;
+  local_feature_list.InitWithFeaturesAndParameters(
+      {{kContextualTasks, {}},
+       {kContextualTasksEphemeralBrandedEntryPoint,
+        {{"ContextualTasksEntryPoint", "toolbar-ephemeral-branded"}}}},
+      {});
+
+  ClearCacheForTesting();
+
+  base::Uuid active_task_id = base::Uuid::GenerateRandomV4();
+  CreateCachedWebContentsForTesting(active_task_id, true);
+
+  tabs::TabInterface* active_tab = tab_list_->GetActiveTab();
+  SessionID active_tab_id =
+      sessions::SessionTabHelper::IdForTab(active_tab->GetContents());
+  EXPECT_CALL(*mock_controller_, GetContextualTaskForTab(active_tab_id))
+      .WillRepeatedly(Return(ContextualTask(active_task_id)));
+  EXPECT_CALL(*mock_controller_, GetTabsAssociatedWithTask(active_task_id))
+      .WillRepeatedly(Return(std::vector<SessionID>{active_tab_id}));
+
+  UpdateWebContentsForActiveTab();
+  ASSERT_EQ(coordinator_->GetActiveWebContents(),
+            GetWebContentsForTaskForTesting(active_task_id));
+
+  EXPECT_EQ(1u, coordinator_->GetNumberOfActiveTasks());
+
+  EXPECT_CALL(*mock_panel_host_,
+              Close(ContextualTasksPanelHost::AnimationStyle::kStandard));
+  coordinator_->Close();
+
+  EXPECT_EQ(1u, coordinator_->GetNumberOfActiveTasks());
+  EXPECT_EQ(1u, GetNumberOfActiveTasksForTesting(active_task_id));
 }
 
 #if !BUILDFLAG(IS_ANDROID)
@@ -423,6 +555,130 @@ TEST_F(ContextualTasksSidePanelCoordinatorTest, CleanUpUnusedWebContents) {
   // 2. task_id2 should STILL be there because it's active.
   EXPECT_EQ(1u, GetNumberOfActiveTasksForTesting(task_id2));
 }
+
+TEST_F(ContextualTasksSidePanelCoordinatorTest, OpenInZeroStateCreatesNewTask) {
+  ContextualTask old_task(base::Uuid::GenerateRandomV4());
+  tabs::TabInterface* active_tab = tab_list_->GetActiveTab();
+  SessionID active_tab_id =
+      sessions::SessionTabHelper::IdForTab(active_tab->GetContents());
+
+  // Setup: The active tab is currently associated with old_task.
+  EXPECT_CALL(*mock_controller_, GetContextualTaskForTab(active_tab_id))
+      .WillOnce(Return(old_task))
+      .WillRepeatedly(Return(std::nullopt));
+  EXPECT_CALL(*mock_controller_,
+              GetTabsAssociatedWithTask(old_task.GetTaskId()))
+      .WillRepeatedly(Return(std::vector<SessionID>{active_tab_id}));
+
+  EXPECT_CALL(*mock_controller_,
+              DisassociateTabFromTask(old_task.GetTaskId(), active_tab_id))
+      .Times(1);
+  EXPECT_CALL(*mock_controller_, CreateTask()).Times(1);
+
+  coordinator_->OpenInZeroState();
+}
+
+TEST_F(ContextualTasksSidePanelCoordinatorTest,
+       CloseZeroStateTaskDisassociatesTab) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeatureWithParameters(
+      kContextualTasksEphemeralBrandedEntryPoint,
+      {{"ContextualTasksEntryPoint", "toolbar-ephemeral-branded"}});
+
+  ContextualTask zero_state_task(base::Uuid::GenerateRandomV4());
+  tabs::TabInterface* active_tab = tab_list_->GetActiveTab();
+  SessionID active_tab_id =
+      sessions::SessionTabHelper::IdForTab(active_tab->GetContents());
+
+  EXPECT_CALL(*mock_controller_, GetContextualTaskForTab(active_tab_id))
+      .WillRepeatedly(Return(zero_state_task));
+  EXPECT_CALL(*mock_controller_,
+              GetTabsAssociatedWithTask(zero_state_task.GetTaskId()))
+      .WillRepeatedly(Return(std::vector<SessionID>{active_tab_id}));
+
+  EXPECT_CALL(
+      *mock_controller_,
+      DisassociateTabFromTask(zero_state_task.GetTaskId(), active_tab_id))
+      .Times(1);
+
+  coordinator_->Close();
+}
+
+TEST_F(ContextualTasksSidePanelCoordinatorTest,
+       CloseTaskWithThreadPreservesTab) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeatureWithParameters(
+      kContextualTasksEphemeralBrandedEntryPoint,
+      {{"ContextualTasksEntryPoint", "toolbar-ephemeral-branded"}});
+
+  ContextualTask thread_task(base::Uuid::GenerateRandomV4());
+  thread_task.AddThread(
+      Thread(ThreadType::kAiMode, "thread_123", "Title", 1000));
+  tabs::TabInterface* active_tab = tab_list_->GetActiveTab();
+  SessionID active_tab_id =
+      sessions::SessionTabHelper::IdForTab(active_tab->GetContents());
+
+  EXPECT_CALL(*mock_controller_, GetContextualTaskForTab(active_tab_id))
+      .WillRepeatedly(Return(thread_task));
+  EXPECT_CALL(*mock_controller_,
+              GetTabsAssociatedWithTask(thread_task.GetTaskId()))
+      .WillRepeatedly(Return(std::vector<SessionID>{active_tab_id}));
+
+  EXPECT_CALL(*mock_controller_,
+              DisassociateTabFromTask(thread_task.GetTaskId(), active_tab_id))
+      .Times(0);
+
+  coordinator_->Close();
+}
+
+#if !BUILDFLAG(IS_ANDROID)
+TEST_F(ContextualTasksSidePanelCoordinatorTest,
+       OpenInZeroState_PinnedToolbarButton) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(kEnableContextualTasksPinButtonInToolbar);
+
+  // Pin the action in the PinnedToolbarActionsModel.
+  auto* model = PinnedToolbarActionsModel::Get(profile_.get());
+  ASSERT_TRUE(model);
+  model->UpdatePinnedState(kActionSidePanelShowContextualTasks,
+                           /*should_pin=*/true);
+
+  ContextualTask task(base::Uuid::GenerateRandomV4());
+  ON_CALL(*mock_controller_, GetContextualTaskForTab(_))
+      .WillByDefault(Return(task));
+
+  auto* mock_ui_service = static_cast<MockContextualTasksUiService*>(
+      ContextualTasksUiServiceFactory::GetForBrowserContext(profile_.get()));
+
+  EXPECT_CALL(
+      *mock_ui_service,
+      SetInitialEntryPointForTask(
+          task.GetTaskId(), omnibox::ChromeAimEntryPoint::
+                                DESKTOP_CHROME_COBROWSE_PINNED_TOOLBAR_BUTTON))
+      .Times(1);
+
+  coordinator_->OpenInZeroState();
+}
+
+TEST_F(ContextualTasksSidePanelCoordinatorTest,
+       CloseLensSessionWhenShowingPanel) {
+  tabs::TabInterface* active_tab = tab_list_->GetActiveTab();
+  ASSERT_TRUE(active_tab);
+
+  testing::NiceMock<lens::MockLensSearchController> mock_lens_controller(
+      active_tab);
+
+  EXPECT_CALL(mock_lens_controller, IsActive()).WillOnce(Return(true));
+  EXPECT_CALL(
+      mock_lens_controller,
+      CloseLensSync(lens::LensOverlayDismissalSource::kUnexpectedSidePanelOpen))
+      .Times(1);
+
+  coordinator_->Show(
+      /*transition_from_tab=*/false,
+      omnibox::ChromeAimEntryPoint::DESKTOP_CHROME_COBROWSE_TOOLBAR_BUTTON);
+}
+#endif
 
 TEST_F(ContextualTasksSidePanelCoordinatorTest,
        CloseSidePanelLogsMetrics_LensOverlay) {
@@ -689,4 +945,138 @@ TEST_F(ContextualTasksSidePanelCoordinatorTest, OnTabRemoved_PanelClosed) {
                    "ContextualTasks.Tab.UserAction."
                    "ClosedBackgroundTabWithSidePanelOpen"));
 }
+
+TEST_F(ContextualTasksSidePanelCoordinatorTest,
+       OnActiveTabChanged_OpenFullTab) {
+  // Test case 1: Switches to full tab (side panel closed) -> OpenFullTab is
+  // recorded
+  {
+    base::UserActionTester user_action_tester;
+    tabs::TabInterface* tab = CreateMockTab();
+    content::WebContentsTester::For(tab->GetContents())
+        ->NavigateAndCommit(GURL("chrome://contextual-tasks"));
+    coordinator_->OnActiveTabChanged(*tab_list_, tab);
+    EXPECT_EQ(1, user_action_tester.GetActionCount(
+                     "ContextualTasks.TabChange.UserAction.OpenFullTab"));
+  }
+
+  // Test case 2: Switches to full tab but side panel is open -> OpenFullTab is
+  // not recorded
+  {
+    base::UserActionTester user_action_tester;
+    ON_CALL(*mock_panel_host_, IsPanelOpenForContextualTask())
+        .WillByDefault(Return(true));
+    tabs::TabInterface* tab = CreateMockTab();
+    content::WebContentsTester::For(tab->GetContents())
+        ->NavigateAndCommit(GURL("chrome://contextual-tasks"));
+    coordinator_->OnActiveTabChanged(*tab_list_, tab);
+    EXPECT_EQ(0, user_action_tester.GetActionCount(
+                     "ContextualTasks.TabChange.UserAction.OpenFullTab"));
+  }
+
+  // Test case 3: Switches to non AIM tab -> OpenFullTab is not recorded
+  {
+    base::UserActionTester user_action_tester;
+    ON_CALL(*mock_panel_host_, IsPanelOpenForContextualTask())
+        .WillByDefault(Return(false));
+    tabs::TabInterface* tab = CreateMockTab();
+    content::WebContentsTester::For(tab->GetContents())
+        ->NavigateAndCommit(GURL("https://google.com"));
+    coordinator_->OnActiveTabChanged(*tab_list_, tab);
+    EXPECT_EQ(0, user_action_tester.GetActionCount(
+                     "ContextualTasks.TabChange.UserAction.OpenFullTab"));
+  }
+}
+
+TEST_F(ContextualTasksSidePanelCoordinatorTest,
+       OnActiveTabChanged_LinkClickInTab) {
+  base::UserActionTester user_action_tester;
+
+  // 1. Setup: Start with contextual tasks tab active.
+  tabs::TabInterface* ct_tab = CreateMockTab();
+  content::WebContentsTester::For(ct_tab->GetContents())
+      ->NavigateAndCommit(GURL("chrome://contextual-tasks"));
+
+  // Make ct_tab active.
+  ON_CALL(*tab_list_, GetActiveTab()).WillByDefault(Return(ct_tab));
+  coordinator_->OnActiveTabChanged(*tab_list_, ct_tab);
+
+  int initial_count = user_action_tester.GetActionCount(
+      "ContextualTasks.TabChange.UserAction.OpenFullTab");
+  EXPECT_EQ(initial_count, 1);
+
+  // 2. Click link flow:
+  // Create a new tab (simulating the link destination).
+  tabs::TabInterface* new_tab = CreateMockTab();
+  // Simulate CopyStateFrom (new_tab committed URL is
+  // chrome://contextual-tasks).
+  content::WebContentsTester::For(new_tab->GetContents())
+      ->NavigateAndCommit(GURL("chrome://contextual-tasks"));
+
+  // Mock new_tab's opener to be ct_tab.
+  ON_CALL(*tab_list_, GetOpenerForTab(new_tab->GetHandle()))
+      .WillByDefault(Return(ct_tab));
+
+  // Activate new_tab.
+  ON_CALL(*tab_list_, GetActiveTab()).WillByDefault(Return(new_tab));
+  coordinator_->OnActiveTabChanged(*tab_list_, new_tab);
+
+  // Detach ct_tab.
+  coordinator_->OnTabRemoved(*tab_list_, ct_tab,
+                             TabRemovedReason::kInsertedIntoSidePanel);
+
+  // Show side panel.
+  coordinator_->Show(true,
+                     omnibox::ChromeAimEntryPoint::UNKNOWN_AIM_ENTRY_POINT);
+
+  // Verify: No new OpenFullTab was logged.
+  int final_count = user_action_tester.GetActionCount(
+      "ContextualTasks.TabChange.UserAction.OpenFullTab");
+  EXPECT_EQ(final_count, 1);
+}
+
+TEST_F(ContextualTasksSidePanelCoordinatorTest, Show_StandardAnimation) {
+  EXPECT_CALL(*mock_panel_host_,
+              Show(ContextualTasksPanelHost::AnimationStyle::kStandard))
+      .Times(1);
+  coordinator_->Show(
+      /*transition_from_tab=*/false,
+      omnibox::ChromeAimEntryPoint::UNKNOWN_AIM_ENTRY_POINT,
+      /*use_no_animation=*/false);
+}
+
+TEST_F(ContextualTasksSidePanelCoordinatorTest,
+       Show_TransitionFromTabAnimation) {
+  EXPECT_CALL(
+      *mock_panel_host_,
+      Show(ContextualTasksPanelHost::AnimationStyle::kTransitionFromTab))
+      .Times(1);
+  coordinator_->Show(
+      /*transition_from_tab=*/true,
+      omnibox::ChromeAimEntryPoint::UNKNOWN_AIM_ENTRY_POINT,
+      /*use_no_animation=*/false);
+}
+
+TEST_F(ContextualTasksSidePanelCoordinatorTest, Show_NoAnimation) {
+  EXPECT_CALL(*mock_panel_host_,
+              Show(ContextualTasksPanelHost::AnimationStyle::kNoAnimation))
+      .Times(1);
+  coordinator_->Show(
+      /*transition_from_tab=*/false,
+      omnibox::ChromeAimEntryPoint::UNKNOWN_AIM_ENTRY_POINT,
+      /*use_no_animation=*/true);
+}
+
+TEST_F(ContextualTasksSidePanelCoordinatorTest,
+       Show_NoAnimation_OverridesTransition) {
+  EXPECT_CALL(*mock_panel_host_,
+              Show(ContextualTasksPanelHost::AnimationStyle::kNoAnimation))
+      .Times(1);
+  coordinator_->Show(
+      /*transition_from_tab=*/true,
+      omnibox::ChromeAimEntryPoint::UNKNOWN_AIM_ENTRY_POINT,
+      /*use_no_animation=*/true);
+}
+
 }  // namespace contextual_tasks
+

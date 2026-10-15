@@ -35,6 +35,7 @@
 #include "chrome/browser/contextual_tasks/contextual_tasks_tab_visit_tracker.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_utils.h"
+#include "chrome/browser/contextual_tasks/entry_point_eligibility_manager.h"
 #include "chrome/browser/contextual_tasks/site_exclusion_detail.h"
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -339,20 +340,28 @@ ContextualTasksContextService::ContextualTasksContextService(
       embedder_metadata_provider_);
   scoped_page_embeddings_service_observation_.Observe(page_embeddings_service_);
 
-  if (optimization_guide_keyed_service_) {
-    model_handler_ = std::make_unique<ContextualTasksContextModelHandler>(
-        optimization_guide_keyed_service_,
-        base::ThreadPool::CreateSequencedTaskRunner(
-            {base::MayBlock(), base::TaskPriority::USER_BLOCKING}));
-  }
+  model_handler_ = std::make_unique<ContextualTasksContextModelHandler>(
+      optimization_guide_keyed_service_,
+      base::ThreadPool::CreateSequencedTaskRunner(
+          {base::MayBlock(), base::TaskPriority::USER_BLOCKING}));
 }
 
 ContextualTasksContextService::~ContextualTasksContextService() = default;
 
 // static
 bool ContextualTasksContextService::GetIsSmartTabSharingEnabled(
-    const Profile* profile) {
-  if (profile && profile->GetPrefs() &&
+    Profile* profile) {
+  if (!profile) {
+    return false;
+  }
+  // Users can open the Contextual Tasks side panel even when they are not
+  // eligible for cobrowsing (and thus not eligible to add tabs or use Smart Tab
+  // Sharing). Explicitly check entry point eligibility here so Smart Tab
+  // Sharing UI and features are hidden when ineligible.
+  if (!EntryPointEligibilityManager::IsEligible(profile)) {
+    return false;
+  }
+  if (profile->GetPrefs() &&
       profile->GetPrefs()->GetInteger(
           kContextualTasksSmartTabSharingSettings) ==
           static_cast<int>(SmartTabSharingSettingsValue::kDisabled)) {
@@ -488,7 +497,7 @@ void ContextualTasksContextService::OnQueryEmbeddingReady(
     int64_t request_id,
     std::vector<std::string> passages,
     std::vector<passage_embeddings::Embedding> embeddings,
-    passage_embeddings::Embedder::TaskId task_id,
+    uint64_t job_id,
     passage_embeddings::ComputeEmbeddingsStatus status) {
   base::UmaHistogramTimes("ContextualTasks.Context.QueryEmbeddingLatency",
                           tick_clock_->NowTicks() - start_time);
@@ -814,6 +823,8 @@ TabSignals ContextualTasksContextService::ComputeTabSignals(
     candidate_tab_embeddings =
         page_embeddings_service_->GetEmbeddings(web_contents->GetPrimaryPage());
   }
+  base::UmaHistogramBoolean("ContextualTasks.Context.CandidateTabHasEmbeddings",
+                            !candidate_tab_embeddings.empty());
 
   tab_signals.similarity_scores =
       GetEmbeddingScores(query_state.query_embedding, candidate_tab_embeddings);

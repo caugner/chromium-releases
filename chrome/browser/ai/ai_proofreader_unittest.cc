@@ -31,6 +31,7 @@
 #include "services/on_device_model/public/cpp/features.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/features_generated.h"
 #include "third_party/blink/public/mojom/ai/ai_manager.mojom.h"
 #include "third_party/blink/public/mojom/ai/model_streaming_responder.mojom.h"
 
@@ -124,6 +125,12 @@ optimization_guide::proto::FeatureTextSafetyConfiguration CreateSafetyConfig() {
 }
 
 class AIProofreaderTest : public AITestUtils::AITestBase {
+ public:
+  AIProofreaderTest() {
+    scoped_feature_list_.InitAndEnableFeature(
+        blink::features::kAIProofreadingAPI);
+  }
+
  protected:
   optimization_guide::proto::OnDeviceModelExecutionFeatureConfig CreateConfig()
       override {
@@ -203,6 +210,9 @@ class AIProofreaderTest : public AITestUtils::AITestBase {
     auto result = proofreader_client.result().Take();
     EXPECT_OK(result);
   }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 TEST_F(AIProofreaderTest, CreateProofreaderNoService) {
@@ -411,7 +421,7 @@ TEST_F(AIProofreaderTest, InputLimitExceededError) {
   auto proofreader_remote = GetAIProofreaderRemote();
 
   fake_broker_->settings().set_size_in_tokens(
-      blink::mojom::kWritingAssistanceMaxInputTokenSize + 1);
+      blink::mojom::kTinyModelMaxInputTokenSize + 1);
 
   AITestUtils::TestStreamingResponder responder;
   proofreader_remote->Proofread(kInputString, responder.BindRemote());
@@ -419,9 +429,9 @@ TEST_F(AIProofreaderTest, InputLimitExceededError) {
   EXPECT_EQ(responder.error_status(),
             blink::mojom::ModelStreamingResponseStatus::kErrorInputTooLarge);
   ASSERT_EQ(responder.quota_error_info().requested,
-            blink::mojom::kWritingAssistanceMaxInputTokenSize + 1);
+            blink::mojom::kTinyModelMaxInputTokenSize + 1);
   ASSERT_EQ(responder.quota_error_info().quota,
-            blink::mojom::kWritingAssistanceMaxInputTokenSize);
+            blink::mojom::kTinyModelMaxInputTokenSize);
 }
 
 TEST_F(AIProofreaderTest, ProofreadMultipleResponse) {

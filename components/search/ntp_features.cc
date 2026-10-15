@@ -49,6 +49,20 @@ BASE_FEATURE(kCustomizeChromeWallpaperSearchInspirationCard,
 // If enabled, the EnergyEffect for Realbox will be shown.
 BASE_FEATURE(kEnergyEffect, base::FEATURE_DISABLED_BY_DEFAULT);
 
+const base::FeatureParam<EnergyEffectVariant>::Option
+    kEnergyEffectVariantOptions[] = {
+        {EnergyEffectVariant::kEnergyEffectOriginal, "energy-effect-original"},
+        {EnergyEffectVariant::kEnergyEffectDarkerShadow,
+         "energy-effect-darker-shadow"},
+        {EnergyEffectVariant::kPreEnergyEffectWithBorder,
+         "pre-energy-effect-with-border"},
+        {EnergyEffectVariant::kEnergyEffectFusebox, "energy-effect-fusebox"},
+};
+
+const base::FeatureParam<EnergyEffectVariant> kEnergyEffectVariantParam{
+    &kEnergyEffect, "EnergyEffectVariantParam",
+    EnergyEffectVariant::kEnergyEffectOriginal, &kEnergyEffectVariantOptions};
+
 // If enabled, the EnergyEffect animation for Realbox will be shown.
 BASE_FEATURE(kEnergyEffectAnimation, base::FEATURE_DISABLED_BY_DEFAULT);
 
@@ -69,12 +83,7 @@ BASE_FEATURE(kNtpBackgroundImageErrorDetection,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
 // If enabled, calendar module will be shown.
-BASE_FEATURE(kNtpCalendarModule,
-#if BUILDFLAG(IS_ANDROID)
-             base::FEATURE_DISABLED_BY_DEFAULT);
-#else
-             base::FEATURE_ENABLED_BY_DEFAULT);
-#endif
+BASE_FEATURE(kNtpCalendarModule, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // If enabled, chrome cart module will be shown.
 BASE_FEATURE(kNtpChromeCartModule,
@@ -87,6 +96,12 @@ BASE_FEATURE(kNtpChromeCartModule,
 // If enabled, customization of Chrome will be promoted on the NTP.
 BASE_FEATURE(kNtpCustomizeChromeAutoOpen, base::FEATURE_ENABLED_BY_DEFAULT);
 
+// When enabled, ChromeContentBrowserClient::OverrideNavigationParams no
+// longer treats NTP-sourced renderer-initiated link clicks as browser-
+// initiated.
+BASE_FEATURE(kNtpDisableBrowserInitiatedLinks,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 #if !defined(OFFICIAL_BUILD)
 // If enabled, dummy modules will be shown.
 // This is a development switch. Keep indefinitely.
@@ -95,12 +110,7 @@ BASE_FEATURE(kNtpDummyModules, base::FEATURE_DISABLED_BY_DEFAULT);
 
 // If enabled, Google Drive module will be shown.
 // This is a kill switch. Keep indefinitely.
-BASE_FEATURE(kNtpDriveModule,
-#if BUILDFLAG(IS_ANDROID)
-             base::FEATURE_DISABLED_BY_DEFAULT);
-#else
-             base::FEATURE_ENABLED_BY_DEFAULT);
-#endif
+BASE_FEATURE(kNtpDriveModule, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // If enabled, the NTP Drive module does not require sync.
 BASE_FEATURE(kNtpDriveModuleHistorySyncRequirement,
@@ -109,6 +119,9 @@ BASE_FEATURE(kNtpDriveModuleHistorySyncRequirement,
 // If enabled, segmentation data will be collected to decide whether or not to
 // show the Drive module.
 BASE_FEATURE(kNtpDriveModuleSegmentation, base::FEATURE_DISABLED_BY_DEFAULT);
+
+// If enabled, branded NTPs use the 2026 version of the Google logo.
+BASE_FEATURE(kNtpGoogleLogo26, base::FEATURE_DISABLED_BY_DEFAULT);
 
 // If enabled, logo will be shown.
 // This is a kill switch. Keep indefinitely.
@@ -184,11 +197,7 @@ BASE_FEATURE(kNtpShortcuts, base::FEATURE_ENABLED_BY_DEFAULT);
 // If enabled, the Tab Resumption module will be shown.
 // TODO(b/516245005): Enable Tab Resumption Module for Android.
 BASE_FEATURE(kNtpMostRelevantTabResumptionModule,
-#if BUILDFLAG(IS_ANDROID)
-             base::FEATURE_DISABLED_BY_DEFAULT);
-#else
              base::FEATURE_ENABLED_BY_DEFAULT);
-#endif
 
 // If enabled, the Tab Resumption module will be allowed to fallback to the
 // favicon server when fetching favicons for displayed continuation suggestions.
@@ -234,7 +243,7 @@ BASE_FEATURE(kNtpMicrosoftAuthenticationModule,
 #endif
 
 // If enabled, the features of NTP Next (AI action chips etc.) will be shown.
-BASE_FEATURE(kNtpNextFeatures, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kNtpNextFeatures, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // If enabled, the Canvas action chip will be shown.
 BASE_FEATURE(kNtpNextCanvasChip, base::FEATURE_DISABLED_BY_DEFAULT);
@@ -260,12 +269,24 @@ BASE_FEATURE(kNtpTabGroupsModuleZeroState,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
 // If enabled, stale modules will be auto-removed from the NTP.
+// TODO(b/525245973): Enable on Android once customize chrome is implemented.
+#if BUILDFLAG(IS_ANDROID)
+BASE_FEATURE(kNtpFeatureOptimizationModuleRemoval,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+#else
 BASE_FEATURE(kNtpFeatureOptimizationModuleRemoval,
              base::FEATURE_ENABLED_BY_DEFAULT);
+#endif
 
 // If enabled, stale shortcuts will be auto-removed from the NTP.
+// TODO(b/525245973): Enable on Android once customize chrome is implemented.
+#if BUILDFLAG(IS_ANDROID)
+BASE_FEATURE(kNtpFeatureOptimizationShortcutsRemoval,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+#else
 BASE_FEATURE(kNtpFeatureOptimizationShortcutsRemoval,
              base::FEATURE_ENABLED_BY_DEFAULT);
+#endif
 
 // If enabled, the dismiss module buttons will be removed from the NTP modules.
 BASE_FEATURE(kNtpFeatureOptimizationDismissModulesRemoval,
@@ -281,7 +302,7 @@ BASE_FEATURE(kNtpDoodleMurals, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kNtpAnimatedCaret, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // If enabled, adds a Whats New Page Edition for Next Features.
-BASE_FEATURE(kLightningTakeoverEdition, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kLightningTakeoverEdition, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // If enabled, the shortcuts will be redesigned.
 BASE_FEATURE(kNtpShortcutsRedesign, base::FEATURE_DISABLED_BY_DEFAULT);

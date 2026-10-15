@@ -55,13 +55,13 @@ DrivePickerUntrustedHostUI::DrivePickerUntrustedHostUI(content::WebUI* web_ui)
   source->OverrideContentSecurityPolicy(
       network::mojom::CSPDirectiveName::ScriptSrc,
       "script-src 'self' chrome-untrusted://resources/ "
-      "https://apis.google.com;");
+      "chrome-untrusted://webui-test https://apis.google.com;");
   source->OverrideContentSecurityPolicy(
       network::mojom::CSPDirectiveName::ConnectSrc,
       "connect-src 'self' https://apis.google.com;");
   source->OverrideContentSecurityPolicy(
       network::mojom::CSPDirectiveName::FrameSrc,
-      "frame-src 'self' https://docs.google.com;");
+      "frame-src 'self' https://docs.google.com https://consent.google.com;");
   source->OverrideContentSecurityPolicy(
       network::mojom::CSPDirectiveName::ImgSrc,
       "img-src 'self' chrome-untrusted://resources/ "
@@ -125,6 +125,13 @@ void DrivePickerUntrustedHostUI::ShowDrivePicker(
   }
 }
 
+void DrivePickerUntrustedHostUI::LoadConsentKitUrl(
+    const GURL& consent_kit_url) {
+  if (page_.is_bound() && page_.is_connected()) {
+    page_->LoadConsentKitUrl(consent_kit_url);
+  }
+}
+
 void DrivePickerUntrustedHostUI::OnPageDisconnected() {
   if (pending_request_) {
     mojo::Remote<drive_picker_host::mojom::DrivePickerResultHandler>(
@@ -132,5 +139,26 @@ void DrivePickerUntrustedHostUI::OnPageDisconnected() {
         ->OnError(
             drive_picker_host::mojom::DrivePickerError::kMojoDisconnected);
     pending_request_.reset();
+  }
+}
+
+void DrivePickerUntrustedHostUI::OnConsentKitIframeMessage(
+    mojo_base::ProtoWrapper message_wrapper) {
+  if (delegate_) {
+    delegate_->OnConsentKitIframeMessage(std::move(message_wrapper));
+  }
+}
+
+void DrivePickerUntrustedHostUI::OnConsentKitPrivacyFlowResult(
+    mojo_base::ProtoWrapper result_wrapper) {
+  if (delegate_) {
+    delegate_->OnConsentKitPrivacyFlowResult(std::move(result_wrapper));
+  }
+}
+
+void DrivePickerUntrustedHostUI::OnConsentKitError(
+    const std::string& error_message) {
+  if (delegate_) {
+    delegate_->OnConsentKitError(error_message);
   }
 }

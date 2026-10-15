@@ -48,6 +48,7 @@
 <translation id="1129383337808748948">ផ្ទុក <ph name="CONTENT_TITLE" /> ឡើងវិញ</translation>
 <translation id="1142002900084379065">រូបថត​ថ្មីៗ</translation>
 <translation id="114221662579355151">ការធ្វើ​បែបនេះ​ផ្ដល់​សិទ្ធិចូលប្រើ​កាមេរ៉ា​ដល់ <ph name="APP1_NAME" />, <ph name="APP2_NAME" /> ព្រមទាំង​គ្រប់កម្មវិធី និង​គេហទំព័រ​ដែលមាន​ការ​អនុញ្ញាត​ឱ្យប្រើ​កាមេរ៉ា។ អ្នកអាចនឹង​ត្រូវផ្ទុក​ទំព័របណ្ដាញ​ឡើងវិញ ឬ​ចាប់ផ្ដើម​កម្មវិធីនេះ​ឡើងវិញ។</translation>
+<translation id="1145593918056169051">ម៉ាស៊ីនបោះពុម្ព​បានឈប់</translation>
 <translation id="1147991416141538220">ដើម្បី​ស្នើសុំ​សិទ្ធិចូល​ប្រើប្រាស់ សូម​ទាក់ទង​អ្នកគ្រប់គ្រង​ឧបករណ៍​នេះ​។</translation>
 <translation id="1148499908455722006">បើក​ប្រអប់ព័ត៌មាន​សម្រាប់ <ph name="USER_NAME" /></translation>
 <translation id="1150989369772528668">ប្រតិទិន</translation>
@@ -151,6 +152,7 @@
 <translation id="1383876407941801731">ស្វែងរក</translation>
 <translation id="1388728792929436380"><ph name="DEVICE_TYPE" /> ​នឹងចាប់ផ្ដើម​ឡើងវិញ នៅពេលបញ្ចប់​ការដំឡើងកំណែ​។</translation>
 <translation id="1390113502208199250">អ្នក​នឹង​ត្រូវ​កំណត់​ឧបករណ៍​នេះ​ដូច​ចេញ​ពី​រោងចក្រ ដើម្បី​ប្រើប្រាស់​មុខងារ Chrome Education Upgrade។</translation>
+<translation id="1390907927270446471"><ph name="PROFILE_USERNAME" /> មិនទទួលបានសិទ្ធិក្នុងការបោះពុម្ពតាម <ph name="PRINTER_NAME" /> ទេ។ សូមទាក់ទង​អ្នកគ្រប់គ្រង​របស់អ្នក។</translation>
 <translation id="1391102559483454063">បើក</translation>
 <translation id="1394698770495054737">ព្រាល​ទាំងស្រុង</translation>
 <translation id="1395878931462960119">{DAYS,plural, =1{1 ថ្ងៃមុន}other{# ថ្ងៃមុន}}</translation>
@@ -169,6 +171,7 @@
 <translation id="1426410128494586442">បាទ/ចាស</translation>
 <translation id="142655739075382478"><ph name="APP_NAME" /> ត្រូវបាន​ទប់ស្កាត់</translation>
 <translation id="142765311413773645">អាជ្ញាបណ្ណ <ph name="APP_NAME" /> បានផុតកំណត់​ហើយ</translation>
+<translation id="1430915738399379752">បោះពុម្ព</translation>
 <translation id="1435537621343861112">មិនអាច​ចាប់ផ្ដើម​ការសរសេរ​តាមអាន​បានទេ។ មីក្រូហ្វូន​របស់អ្នក​ត្រូវបាន​បិទ។</translation>
 <translation id="1445031758921122223">បានទាញយកឯកសារនៃការគ្រប់គ្រងមុខ</translation>
 <translation id="1447907279406111651">ឥឡូវនេះ · ចប់​នៅម៉ោង <ph name="END_TIME" /></translation>
@@ -229,6 +232,7 @@
 <translation id="1597880963776148053">ការណែនាំនៅជំហានទី <ph name="STEP" /> នៃ <ph name="TOTAL_STEPS" />។ កម្មវិធី​ដែលបើក និង​បានខ្ទាស់​របស់អ្នក​នៅលើធ្នើរដែលស្ថិតផ្នែកនៅខាងក្រោមនៃអេក្រង់របស់អ្នក។ ចុច Alt + Shift + L រួចចុច tab ដើម្បីផ្ដោតលើធាតុលើធ្នើរ។</translation>
 <translation id="1602085790802918092">កំពុង​ចាប់ផ្ដើម​ម៉ាស៊ីន​និម្មិត</translation>
 <translation id="1602874809115667351"><ph name="LAUNCHER_KEY_NAME" /> + ព្រួញចុះក្រោម</translation>
+<translation id="1604432177629086300">​មិន​អាចបោះពុម្ព​បានទេ។ សូមពិនិត្យ​​ម៉ាស៊ីនបោះពុម្ព រួច​ព្យាយាម​ម្ដងទៀត។</translation>
 <translation id="1604857178818051494">ផ្អាក​មេឌៀ</translation>
 <translation id="1607312127821884567">ច្រានចោល​ការរៀបចំ​ការមើល​កម្មវិធី​លើ​ទូរសព្ទ​របស់​អ្នក</translation>
 <translation id="1610778689852195798">"ត្រឡប់វិញ"</translation>
@@ -372,6 +376,7 @@
 <translation id="2053312383184521053">ទិន្នន័យក្នុងស្ថានភាពទុកចោល</translation>
 <translation id="2064048859448024834">ការមើលកាមេរ៉ា​សាកល្បង​ត្រូវបានបើក</translation>
 <translation id="2067220651560163985">បង្ហាញ​សីតុណ្ហភាព​ជាអង្សាសេ</translation>
+<translation id="206960706005837784"><ph name="APP_NAME" /> បានបញ្ចប់​ការបោះពុម្ព​ទៅ <ph name="PRINTER_NAME" /></translation>
 <translation id="2075520525463668108">បិទ/បើក<ph name="CAPTURE_MEDIUM" />។ <ph name="CAPTURE_MEDIUM" />គឺ<ph name="CAPTURE_STATE" /></translation>
 <translation id="2079545284768500474">ត្រឡប់វិញ</translation>
 <translation id="2086334242442703436">បើកផ្ទាំង​ជ្រើសរើស​រូបអារម្មណ៍</translation>
@@ -441,6 +446,7 @@
 <translation id="2328561734797404498">សូម​ចាប់ផ្តើម​ឧបករណ៍​របស់អ្នក​ឡើងវិញ ដើម្បី​ប្រើ <ph name="APP_NAME" />។</translation>
 <translation id="2335091074961603075">Chromebook ឬឧបករណ៍​ប៊្លូធូស​របស់អ្នក​កំពុងប្រើ​ប៊្លូធូស​កំណែ​ចាស់។ សូមប្រើ​មីក្រូហ្វូន​ខាងក្នុង ដើម្បីទទួលបាន​គុណភាព​សំឡេង​កាន់តែប្រសើរ។</translation>
 <translation id="2336214675195760012">{NUM_DAYS,plural, =1{<ph name="MANAGER" /> តម្រូវឱ្យអ្នក​ភ្ជាប់ Wi-Fi នៅថ្ងៃនេះ ដើម្បីទាញយកកំណែថ្មី។ ឬទាញយកតាមរយៈការ​តភ្ជាប់អ៊ីនធឺណិតផ្អែកតាមទិន្នន័យដែលប្រើ (អាចមានការគិតថ្លៃ)។}other{<ph name="MANAGER" /> តម្រូវឱ្យអ្នកភ្ជាប់ Wi-Fi និងទាញយកកំណែថ្មី មុនថ្ងៃផុតកំណត់។ ឬទាញយកតាមរយៈការ​តភ្ជាប់អ៊ីនធឺណិតផ្អែកតាមទិន្នន័យដែលប្រើ (អាចមានការគិតថ្លៃ)។}}</translation>
+<translation id="2336258397628212480"><ph name="APP_NAME" /> កំពុង​បោះពុម្ព 1 ទំព័រ​ទៅ <ph name="PRINTER_NAME" /></translation>
 <translation id="2336381494582898602">Powerwash</translation>
 <translation id="2339073806695260576">ចុច​ប៊ូតុង​ប៊ិច​នៅ​លើ​ធ្នើ ដើម្បី​កត់​ចំណាំ ថត​រូបអេក្រង់ ប្រើ​សញ្ញាព្រួញ​ឡាស៊ែរ ឬ​កែវពង្រីក។</translation>
 <translation id="2341729377289034582">បាន​ចាក់សោ​ឱ្យ​ស្ថិត​ក្នុងទិសដៅបញ្ឈរ</translation>
@@ -532,6 +538,7 @@
 <translation id="254900897760075745">ចម្លង​ខ្លឹមសារ​ដែល​បាន​ជ្រើសរើស​ទៅ​ឃ្លីបបត</translation>
 <translation id="2549711466868162843">កែលម្អ​ពន្លឺ</translation>
 <translation id="2549985041256363841">ចាប់​ផ្តើម​ថត</translation>
+<translation id="2552966063069741410">ល្វែងម៉ោង</translation>
 <translation id="2562459326218811217">បានដោត​ឧបករណ៍ ប៉ុន្តែ​សាកថ្មមិនចូលទេ។ សូម​សាកល្បងប្រើ​ឆ្នាំង​សាក​ដែលមាន​កម្លាំងវ៉ាត់ (W) ធំជាង ឬប្រើ​ឆ្នាំង​សាក​ដើម​របស់អ្នក។</translation>
 <translation id="256712445991462162">កម្មវិធីពង្រីកដែលបានភ្ជាប់</translation>
 <translation id="2573588302192866788">មិន​អាចភ្ជាប់ <ph name="NAME" /> បានទេ</translation>
@@ -621,6 +628,7 @@
 <translation id="2838379631617906747">កំពុងដំឡើង</translation>
 <translation id="2838589015763961627">ចាកចេញ​ពី​អេក្រង់​ពេញ​ដើម្បី​ប្ដូរទំហំ</translation>
 <translation id="2840766858109427815">ទៅកាន់​ទំព័រ​បន្ទាប់</translation>
+<translation id="2841013758207633010">ពេលវេលា</translation>
 <translation id="2841907151129139818">បានប្ដូរទៅ​មុខងារថេប្លេត</translation>
 <translation id="2843560154284403323">ដើម្បីបញ្ចប់​ការរៀបចំ Linux សូមដំឡើងកំណែ ChromeOS រួចព្យាយាម​ម្ដងទៀត។</translation>
 <translation id="2844169650293029770">ឧបករណ៍ USB-C (រន្ធមុខផ្នែកខាងឆ្វេង)</translation>
@@ -753,6 +761,7 @@
 <translation id="3206735939915734551">បើក/បិទ​ Caps Lock</translation>
 <translation id="3207953481422525583">ការ​កំណត់​អ្នកប្រើប្រាស់</translation>
 <translation id="3208321278970793882">កម្មវិធី</translation>
+<translation id="32101887417650595">មិនអាចភ្ជាប់ជាមួយ​ម៉ាស៊ីនបោះពុម្ព​បានទេ</translation>
 <translation id="3212221635583599601">ភ្ជាប់​ទៅអ៊ីនធឺណិត ដើម្បី​ធ្វើសកម្មភាព​ច្រើនទៀត</translation>
 <translation id="3213571860604332401">រក្សាទុក​តំណ​ជា​ចំណាំ</translation>
 <translation id="3217205077783620295">កម្រិត​សំឡេង​ត្រូវបានបើក ការបិទ​នឹងបិទសំឡេង។</translation>
@@ -821,6 +830,7 @@
 <translation id="3431517721463707585">តុទី 14</translation>
 <translation id="3433507769937235446">ចាក់សោ​នៅពេលទុកចោល</translation>
 <translation id="3434107140712555581"><ph name="BATTERY_PERCENTAGE" />%</translation>
+<translation id="343578350365773421">អស់ក្រដាស</translation>
 <translation id="3435967511775410570">ស្គាល់ស្នាម​ម្រាមដៃហើយ</translation>
 <translation id="3437677362970530951">ហ្គេមនៅលើ Play Store និងប្រព័ន្ធហ្គេមផ្សេងទៀត</translation>
 <translation id="3439896670700055005">ផ្ទុក​ទំព័រ​បច្ចុប្បន្ន​​​ឡើងវិញ​ដោយ​មិន​ចាំបាច់​ប្រើ​ខ្លឹមសារ​ដែលបាន​ទុកក្នុងឃ្លាំងបម្រុង</translation>
@@ -997,6 +1007,7 @@
 <translation id="3848526302597027234">ចូលប្រើការ​អនុញ្ញាតខាងក្រោម៖</translation>
 <translation id="385051799172605136">ថយក្រោយ</translation>
 <translation id="385300504083504382">ផ្នែកចាប់ផ្តើម</translation>
+<translation id="3854976556788175030">ថាសដាក់​ក្រដាសបោះពុម្ពពេញហើយ</translation>
 <translation id="3857807444929313943">លើកឡើង បន្ទាប់មកប៉ះម្តងទៀត</translation>
 <translation id="3859364108019690">មិន​អាច​ផ្សាយ​កម្មវិធី​បាន​ទេ</translation>
 <translation id="3861638017150647085">មិនមាន​ឈ្មោះអ្នកប្រើប្រាស់ "<ph name="USERNAME" />" ទេ</translation>
@@ -1049,6 +1060,7 @@
 <translation id="401993194061514265">មិន​អាច​ប្រើ​ហ្វឺត​បាន​ទេ។ បើក Screencast ឡើងវិញ។</translation>
 <translation id="4021716437419160885">រំកិលចុះក្រោម</translation>
 <translation id="4022497978915111141">ចាក់សោ​ឧបករណ៍</translation>
+<translation id="4023048917751563912"><ph name="APP_NAME" /> កំពុង​បោះពុម្ព <ph name="PAGE_NUMBER" /> ទំព័រ​ទៅ <ph name="PRINTER_NAME" /></translation>
 <translation id="4024840464866786680">ប្រសិនបើអ្នកបានភ្លេចកូដ PIN និងពាក្យសម្ងាត់របស់អ្នក ឬបានផ្លាស់ប្ដូរពាក្យសម្ងាត់គណនី Google របស់អ្នកថ្មីៗនេះ សូមសាកល្បងស្ដារអ្នកប្រើប្រាស់នេះឡើងវិញ។</translation>
 <translation id="4026843240379844265">ផ្លាស់ទី​វិនដូ​សកម្ម​ពី​ផ្ទាំង​អេក្រង់​មួយ​ទៅ​ផ្ទាំង​អេក្រង់​មួយ​ទៀត</translation>
 <translation id="4028481283645788203">តម្រូវឱ្យបញ្ចូលពាក្យសម្ងាត់​សម្រាប់សុវត្ថិភាពបន្ថែម</translation>
@@ -1275,6 +1287,7 @@
 <translation id="4633636853437260449">ចុច Ctrl+W ដើម្បីលុប</translation>
 <translation id="4633757335284074492">បម្រុង​ទុក​ទៅ​ក្នុង Google ថាស។ ងាយស្រួល​ក្នុងការ​ស្ដារ​ទិន្នន័យ​ ឬ​ប្ដូរ​ឧបករណ៍បានគ្រប់ពេល។ ការបម្រុង​ទុកនេះ​រួមបញ្ចូល​ទាំង​ទិន្នន័យ​កម្មវិធី។ ការបម្រុងទុក​ត្រូវបាន​បង្ហោះ​ទៅ Google និង​អ៊ីនគ្រីប​ដោយប្រើ​ពាក្យសម្ងាត់​គណនី Google របស់​កូនអ្នក។</translation>
 <translation id="4635501805800894201">{0,plural, =0{ប្ដូរកំណែ​ឧបករណ៍ទៅកំណែមុនឥឡូវនេះ}=1{ប្ដូរកំណែ​ឧបករណ៍​ទៅកំណែមុន​ក្នុងរយៈពេល 1 វិនាទី}other{ប្ដូរកំណែ​ឧបករណ៍​ទៅកំណែមុន​ក្នុងរយៈពេល # វិនាទី}}</translation>
+<translation id="4641539339823703554">Chrome មិនអាចកំណត់ពេលវេលាប្រព័ន្ធ។ សូមពិនិត្យពេលវេលាខាងក្រោម ហើយកែតម្រូវវាបើចាំបាច់។</translation>
 <translation id="4642092649622328492">ថត​រូប​អេក្រង់​មួយ​ផ្នែក</translation>
 <translation id="4643833688073835173">Chromebook របស់អ្នកប្រើ​ឧបករណ៍ចាប់សញ្ញា​ដែលភ្ជាប់មកជាមួយស្រាប់ ដើម្បីចាប់ដឹងថា​មានមនុស្សនៅពី​មុខឧបករណ៍របស់អ្នក។ ទិន្នន័យទាំងអស់​ត្រូវបានដំណើរការ​នៅលើឧបករណ៍របស់​អ្នកភ្លាមៗ បន្ទាប់មកត្រូវបានលុប។ ទិន្នន័យឧបករណ៍​ចាប់សញ្ញាមិនត្រូវ​បានផ្ញើទៅ Google ទេ។</translation>
 <translation id="4644727592819780893">តំបន់តូចពេក មិន​អាច​មើល​សាកល្បង​លើ​កាមេរ៉ា​បាន​ទេ</translation>
@@ -1577,6 +1590,7 @@
 <translation id="5491186829646618080">មាន​កំណែថ្មីនៃកម្មវិធី​បង្កប់</translation>
 <translation id="5503884284981862082">បិទ/បើក​ Google assistant</translation>
 <translation id="550391772491508736">បន្តការភ្ជាប់</translation>
+<translation id="5505307013568720083">អស់ទឹកថ្នាំ</translation>
 <translation id="5506975627792768506">បិទ ឬ​បើក​កែវពង្រីក</translation>
 <translation id="5507778598655387680"><ph name="VOLUME_LEVEL" />, ការចុច enter នឹងបិទ​សំឡេង។</translation>
 <translation id="5512042095225963688">លុប​ពាក្យ​មុន</translation>
@@ -1688,12 +1702,14 @@
 <translation id="5791926618942305301">នៅក្នុង​ការថត​អេក្រង់ សូម​កំណត់ទៅ<ph name="TYPE" /><ph name="SOURCE" />។ ចុច tab ដើម្បី​ជ្រើសរើស​ប្រភេទ​នៃការថត។ ចុច enter ដើម្បី​ថត។ ដើម្បី​ជ្រើសរើស​កន្លែង​ដែលត្រូវ​ថត សូម​កំណត់ទៅ​រូបថត​អេក្រង់​មួយផ្នែក។ ប្រសិនបើ​មិនទាន់​ដំណើរការទេ សូមចុច​ដកឃ្លា ដើម្បី​ជ្រើសរើស​តំបន់។</translation>
 <translation id="579415080077680903">បិទ​សំឡេង</translation>
 <translation id="5802516411616338943">បើកការកំណត់រហ័ស</translation>
+<translation id="5804241973901381774">ការអនុញ្ញាត</translation>
 <translation id="5804651031882187592">បិទការកំណត់ "ចាក់សោស៊ីម"</translation>
 <translation id="5805809050170488595">ចុចដើម្បីបើកដំណើរការ <ph name="NETWORK_NAME" /></translation>
 <translation id="5818796501620225415">អ្នកអាចបន្ថែមពេលវេលា ឬបញ្ចប់វគ្គផ្ដោតអារម្មណ៍របស់អ្នក</translation>
 <translation id="5819918159912280082">Chromebook របស់អ្នកបានចាប់ផ្ដើម​ឡើងវិញដោយ​មិនបាន​រំពឹងទុក។ បើកវិនដូ និងកម្មវិធីមុនៗរបស់អ្នក។</translation>
 <translation id="5823239091726045201">Google កិច្ចការ​នៅលើ​បណ្ដាញ</translation>
 <translation id="5825969630400862129">ការកំណត់​ឧបករណ៍ដែល​បានភ្ជាប់</translation>
+<translation id="5828633471261496623">កំពុងបោះពុម្ព...</translation>
 <translation id="5830180081891717894"><ph name="WINDOWS" /> ទៀត</translation>
 <translation id="5830205393314753525">មិនអាច​បើក <ph name="APP_NAME" /> បានទេ</translation>
 <translation id="583281660410589416">មិនស្គាល់</translation>
@@ -1718,6 +1734,7 @@
 <translation id="5892014525522223653">អ្នកគ្មានអ៊ីនធឺណិតទេ។</translation>
 <translation id="5895138241574237353">ចាប់ផ្តើមឡើងវិញ</translation>
 <translation id="589817443623831496">ការស្កេនលក្ខណៈចំណុច</translation>
+<translation id="5901494423252125310">គម្របម៉ាស៊ីនបោះពុម្ពបើក</translation>
 <translation id="5901630391730855834">លឿង</translation>
 <translation id="5904614460720589786">មិនអាចរៀបចំ <ph name="APP_NAME" /> បានទេ ដោយសារ​មានបញ្ហា​ក្នុងការកំណត់រចនាសម្ព័ន្ធ។ សូមទាក់ទង​អ្នកគ្រប់គ្រង​របស់អ្នក។ លេខ​កូដ​បញ្ហា៖ <ph name="ERROR_CODE" />។</translation>
 <translation id="5910726859585389579"><ph name="DEVICE_TYPE" /> គ្មានអ៊ីនធឺណិតទេ</translation>
@@ -1782,6 +1799,7 @@
         <ph name="BEGIN_PARAGRAPH2" />ការបិទ​មុខងារនេះ​មិនប៉ះពាល់​ដល់សមត្ថភាព​របស់ឧបករណ៍នេះ​ក្នុងការ​បញ្ជូន​ព័ត៌មាន​ដែលចាំបាច់​សម្រាប់​សេវាកម្មចាំបាច់ ដូចជា​សុវត្ថិភាព និង​បច្ចុប្បន្នភាព​ប្រព័ន្ធ​នោះទេ។<ph name="END_PARAGRAPH2" />
         <ph name="BEGIN_PARAGRAPH3" />ម្ចាស់អាច​គ្រប់គ្រង​មុខងារនេះ​ពី ការកំណត់ &gt; កម្រិតខ្ពស់ &gt; បញ្ជូន​ទិន្នន័យ​ប្រើប្រាស់ និង​វិភាគទៅ Google ដោយ​ស្វ័យប្រវត្តិ។<ph name="END_PARAGRAPH3" />
         <ph name="BEGIN_PARAGRAPH4" />ប្រសិនបើ​បើក​ការកំណត់​សកម្មភាពកម្មវិធី និងគេហទំព័របន្ថែម​សម្រាប់​កូនរបស់អ្នក ទិន្នន័យនេះ​អាចត្រូវ​បានរក្សាទុក​ទៅ​គណនី Google របស់គាត់។ ស្វែងយល់បន្ថែម​អំពី​ការកំណត់​ទាំងនេះ និង​របៀបកែតម្រូវ​ការកំណត់​ទាំងនេះ​តាមរយៈ families.google.com។<ph name="END_PARAGRAPH4" /></translation>
+<translation id="6052261338768299955"><ph name="APP_NAME" /> កំពុង​ព្យាយាម​បោះពុម្ព​ទៅ <ph name="PRINTER_NAME" /></translation>
 <translation id="6054305421211936131">ចូលគណនី​ដោយ​ប្រើ​កាតឆ្លាត​វៃ</translation>
 <translation id="6059276912018042191">ផ្ទាំង Chrome ថ្មីៗ</translation>
 <translation id="606147842285839995">ExpressKey 3</translation>
@@ -1795,6 +1813,7 @@
 <translation id="6073451960410192870">បញ្ឈប់ការថត</translation>
 <translation id="6074087755403037157">បណ្ដាញបេតា</translation>
 <translation id="6075098173600599596">ប្ដូរ​អក្សរ​តូចធំ</translation>
+<translation id="6080689532560039067">ពិនិត្យពេលវេលាប្រព័ន្ធរបស់អ្នក</translation>
 <translation id="6091929401758362855">កម្រង​សំឡេង៖ <ph name="PLAYLIST_TITLE" /></translation>
 <translation id="6093867385179428431">បានបិទដោយអ្នកគ្រប់គ្រង</translation>
 <translation id="6095008505822982596">ល្បឿននៃការនិយាយ</translation>
@@ -1884,6 +1903,7 @@
 <translation id="6337159624125741244">កែវពង្រីក​ពេញអេក្រង់​ត្រូវបាន​បើក</translation>
 <translation id="6338485349199627913"><ph name="DISPLAY_NAME" /> គឺជា​រយៈពេល​ចូលប្រើ​ដែល​ស្ថិតក្រោមការគ្រប់គ្រងរបស់ <ph name="MANAGER" /></translation>
 <translation id="6340148837564298498">ប្រសិនបើ​អ្នកភ្លេច​កូដ PIN របស់អ្នក សូម​សាកល្បង​ស្ដារអ្នកប្រើប្រាស់នេះ​ឡើងវិញ។</translation>
+<translation id="634208815998129842">កម្មវិធីគ្រប់គ្រងភារកិច្ច</translation>
 <translation id="6344138931392227467">បានភ្ជាប់ <ph name="DEVICE_NAME" /></translation>
 <translation id="6345418402353744910">តម្រូវឱ្យមានពាក្យសម្ងាត់ និងឈ្មោះអ្នកប្រើប្រាស់របស់អ្នក​សម្រាប់ប្រូកស៊ី <ph name="PROXY" /> ដើម្បីអាចឱ្យអ្នកគ្រប់គ្រងកំណត់​រចនាសម្ព័ន្ធបណ្ដាញរបស់អ្នក</translation>
 <translation id="6348449481487610270"><ph name="MODIFIER_ONE" /><ph name="MODIFIER_TWO" /><ph name="KEY_ONE" /> បន្ទាប់មក <ph name="MODIFIER_THREE" /><ph name="KEY_TWO" /> ឬ <ph name="KEY_THREE" /></translation>
@@ -2089,6 +2109,7 @@
 <translation id="6921427376813842559">ប្ដូរកំណែ​ឧបករណ៍</translation>
 <translation id="6929081673585394903">បង្ហាញ​ការគ្រប់គ្រង</translation>
 <translation id="6931576957638141829">រក្សា​ទុក​ទៅ</translation>
+<translation id="6935286146439255109">​បានបាត់ថាសក្រដាស</translation>
 <translation id="6935857786205183008">បញ្ឈរ</translation>
 <translation id="6942518653766415536">ម៉ឺនុយ​ទម្រង់ថត</translation>
 <translation id="6945221475159498467">ជ្រើសរើស</translation>
@@ -2111,6 +2132,7 @@
 <translation id="6988094684494323731">កំពុង​ចាប់ផ្ដើម​ទម្រង់ផ្ទុក Linux</translation>
 <translation id="7000027735917578303">ការកំណត់​តុ និង​វិនដូ</translation>
 <translation id="7001036685275644873">កំពុងបម្រុងទុក​កម្មវិធី និងឯកសារ Linux</translation>
+<translation id="7001066449188684145">តម្រូវឱ្យកំណត់អត្តសញ្ញាណ ដើម្បីបោះពុម្ពតាម <ph name="PRINTER_NAME" />។ សូមទាក់ទង​អ្នកគ្រប់គ្រង​របស់អ្នក។</translation>
 <translation id="7004910047186208204">ភ្ជាប់​ទៅ​ទិន្នន័យទូរសព្ទចល័ត</translation>
 <translation id="7005239792648594238">បើកកម្មវិធី ដើម្បី​ចាប់ផ្ដើម</translation>
 <translation id="7014684956566476813">បានភ្ជាប់ជាមួយ​ឧបករណ៍ដែលមាន​ឈ្មោះថា <ph name="DEVICE_NAME" /></translation>
@@ -2150,6 +2172,7 @@
 <translation id="7108254681523785542">ជ្រើសរើស​ធាតុ ដើម្បីដាក់វាចូល។ អ្នកអាច​មើលឃើញឃ្លីបបត​ដោយចុច <ph name="SHORTCUT_KEY_NAME" /> + v។</translation>
 <translation id="7108338896283013870">លាក់</translation>
 <translation id="7108933416628942903">ចាក់​សោ​ឥឡូវ​នេះ</translation>
+<translation id="7116554090938189816">វិញ្ញាបនបត្រ SSL របស់​ម៉ាស៊ីន​បោះពុម្ព​ផុតកំណត់ហើយ។ សូម​ចាប់ផ្ដើម​ម៉ាស៊ីន​បោះពុម្ព​ឡើងវិញ រួចព្យាយាម​ម្ដងទៀត។</translation>
 <translation id="7116969082764510092">តុទី 11</translation>
 <translation id="7118268675952955085">រូបថត​អេក្រង់</translation>
 <translation id="7118597077555700347">បើក <ph name="SEARCH_RESULT_TEXT" /></translation>
@@ -2200,6 +2223,7 @@
 <translation id="7312210124139670355">អ្នកគ្រប់គ្រងរបស់អ្នកកំពុងកំណត់ eSIM របស់អ្នកឡើងវិញ។ ការកំណត់ឡើងវិញនេះ​អាចចំណាយមួយភ្លែត។</translation>
 <translation id="7312761820869643657">ប្ដូរកំណែ​ឧបករណ៍ទៅកំណែមុន</translation>
 <translation id="7313193732017069507">ពង្រីកកាមេរ៉ា</translation>
+<translation id="7325209047678309347">ជាប់ក្រដាស</translation>
 <translation id="7327989755579928735"><ph name="MANAGER" /> បានបិទការជួសជុល ADB។ បន្ទាប់ពីអ្នកចាប់ផ្ដើម <ph name="DEVICE_TYPE" /> ឡើងវិញ អ្នកនឹងមិនអាចដំឡើងកម្មវិធីពីប្រភពខាងក្រៅបានទេ។</translation>
 <translation id="73289266812733869">បានដកការជ្រើសរើស</translation>
 <translation id="7330397557116570022">ចូល​ទៅកាន់​កន្លែងបញ្ចូលអក្សរ ដើម្បីប្រើ​ការសរសេរ​តាមអាន</translation>
@@ -2574,6 +2598,7 @@
 <translation id="8339706171276328417"><ph name="ACTION_DESCRIPTION" /> · <ph name="TIME" /></translation>
 <translation id="834414266279889566">ធាតុចេញ​មិនល្អ</translation>
 <translation id="8345019317483336363">បានជ្រើសរើស​វិនដូ <ph name="WINDOW_TITLE" /></translation>
+<translation id="8347227221149377169">ការងារ​បោះពុម្ព</translation>
 <translation id="8349826889576450703">កម្មវិធី​ចាប់ផ្ដើម</translation>
 <translation id="8349964124165471584">បើក​តំណ​ក្នុង​​វិនដូថ្មី</translation>
 <translation id="8351131234907093545">បង្កើត​កំណត់​ចំណាំ</translation>
@@ -2612,6 +2637,7 @@
 <translation id="8458259704995116343">ការចាប់ផ្ដើម VM មិនបាន​សម្រេចទេ។</translation>
 <translation id="84613761564611563">បានស្នើ UI សម្រាប់កំណត់រចនាសម្ព័ន្ធបណ្តាញ សូមរង់ចាំ...</translation>
 <translation id="8462305545768648477">បិទមុខងារជ្រើសរើសដើម្បីអាន</translation>
+<translation id="8463001014623882202">ការផ្ដល់សិទ្ធិមិនបានសម្រេចទេ</translation>
 <translation id="8466665972451889002">បង្ហាញ​ធាតុ​នៅក្នុង <ph name="GROUP_NAME" /></translation>
 <translation id="8468806060683421065">ផុតកំណត់នៅថ្ងៃ<ph name="DUE_DATE_AND_TIME" /></translation>
 <translation id="8473301994082929012"><ph name="ORGANIZATION_NAME" /> មាន <ph name="FEATURE_STATE" /> <ph name="FEATURE_NAME" />។</translation>

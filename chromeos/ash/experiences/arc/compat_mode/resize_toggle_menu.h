@@ -90,7 +90,7 @@ class ResizeToggleMenu : public views::WidgetObserver,
   bool IsBubbleShown() const;
 
  protected:
-  virtual  void UpdateSelectedButton();
+  virtual void UpdateSelectedButton();
 
  private:
   friend class ResizeToggleMenuTest;

@@ -55,6 +55,7 @@ class TabUnderlineController
   // Note: This flow is distinct from the GLIC flow.
   void OnContextTabsChanged(
       const std::set<tabs::TabHandle>& context_tabs) override;
+  void OnActiveTaskContextProviderDestroyed() override;
 
  private:
   // Called when the focused tab changes with the focused tab data object.

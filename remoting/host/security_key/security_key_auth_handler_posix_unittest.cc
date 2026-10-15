@@ -11,13 +11,19 @@
 #include <memory>
 #include <string>
 
+#include "base/callback_list.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
+#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/strings/string_view_util.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/task/thread_pool.h"
+#include "base/test/run_until.h"
 #include "base/test/task_environment.h"
-#include "base/threading/thread.h"
 #include "base/time/time.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -57,37 +63,30 @@ const uint8_t kResponseData[] = {0x00, 0x00, 0x00, 0x01, 0x42};
 
 const uint8_t kSshErrorData[] = {0x00, 0x00, 0x00, 0x01, 0x05};
 
-void RunUntilIdle() {
-  base::RunLoop run_loop;
-  run_loop.RunUntilIdle();
-}
-
 }  // namespace
 
 class SecurityKeyAuthHandlerPosixTest : public testing::Test {
  public:
   SecurityKeyAuthHandlerPosixTest()
       : run_loop_(new base::RunLoop()),
-        file_thread_("SecurityKeyAuthHandlerPosixTest_FileThread"),
         expected_request_data_(
             base::as_string_view(base::span(kRequestData).subspan<4>())),
         client_response_data_(
             base::as_string_view(base::span(kResponseData).subspan<4>())) {
     EXPECT_TRUE(temp_dir_.CreateUniqueTempDir());
     socket_path_ = temp_dir_.GetPath().Append(kSocketFilename);
-    remoting::SecurityKeyAuthHandlerPosix::SetSecurityKeySocketName(
-        socket_path_);
-
-    EXPECT_TRUE(file_thread_.StartWithOptions(
-        base::Thread::Options(base::MessagePumpType::IO, 0)));
 
     send_message_callback_ = base::BindRepeating(
         &SecurityKeyAuthHandlerPosixTest::SendMessageToClient,
         base::Unretained(this));
 
-    auth_handler_ = remoting::SecurityKeyAuthHandler::Create(
-        /*client_session_details=*/nullptr, send_message_callback_,
-        file_thread_.task_runner());
+    auto file_task_runner = base::ThreadPool::CreateSequencedTaskRunner(
+        {base::MayBlock(), base::TaskPriority::BEST_EFFORT});
+
+    auth_handler_ = remoting::SecurityKeyAuthHandlerPosix::CreateForTesting(
+        socket_path_, file_task_runner);
+    auth_handler_->SetSendMessageCallback(send_message_callback_, this);
+
     EXPECT_NE(auth_handler_.get(), nullptr);
   }
 
@@ -100,10 +99,12 @@ class SecurityKeyAuthHandlerPosixTest : public testing::Test {
     ASSERT_EQ(auth_handler_->GetActiveConnectionCountForTest(), 0u);
     auth_handler_->CreateSecurityKeyConnection();
 
-    ASSERT_TRUE(file_thread_.task_runner()->PostTaskAndReply(
-        FROM_HERE, base::BindOnce(&RunUntilIdle), run_loop_->QuitClosure()));
-    run_loop_->Run();
-    run_loop_ = std::make_unique<base::RunLoop>();
+    // Wait until the socket file is created on disk, which indicates the
+    // background file task has completed and the handler is listening.
+    // This is 100% deterministic and avoids any manual RunLoops or banned
+    // RunUntilIdle patterns.
+    ASSERT_TRUE(
+        base::test::RunUntil([&]() { return base::PathExists(socket_path_); }));
 
     ASSERT_EQ(auth_handler_->GetActiveConnectionCountForTest(), 0u);
   }
@@ -171,12 +172,18 @@ class SecurityKeyAuthHandlerPosixTest : public testing::Test {
     ASSERT_EQ(bytes_read, request_len);
   }
 
- protected:
-  base::test::SingleThreadTaskEnvironment task_environment_{
-      base::test::SingleThreadTaskEnvironment::MainThreadType::IO};
-  std::unique_ptr<base::RunLoop> run_loop_;
+  void WaitForSocketClose(net::UnixDomainClientSocket* socket) {
+    auto buffer = base::MakeRefCounted<net::IOBufferWithSize>(1);
+    net::TestCompletionCallback read_callback;
+    int rv = socket->Read(buffer.get(), 1, read_callback.callback());
+    rv = read_callback.GetResult(rv);
+    ASSERT_TRUE(rv == 0 || rv == net::ERR_CONNECTION_CLOSED);
+  }
 
-  base::Thread file_thread_;
+ protected:
+  base::test::TaskEnvironment task_environment_{
+      base::test::TaskEnvironment::MainThreadType::IO};
+  std::unique_ptr<base::RunLoop> run_loop_;
 
   // Object under test.
   std::unique_ptr<SecurityKeyAuthHandler> auth_handler_;
@@ -405,6 +412,78 @@ TEST_F(SecurityKeyAuthHandlerPosixTest, HandleClientErrorMessage) {
 
   // SSH Error should be received.
   WaitForErrorData(&client_socket);
+}
+
+TEST_F(SecurityKeyAuthHandlerPosixTest,
+       OnSecurityKeyRequest_SafeWhenCallbackNull) {
+  CreateSocketAndWait();
+
+  // 1. Establish the connection by connecting a client socket.
+  net::UnixDomainClientSocket client_socket(socket_path_.value(), false);
+  net::TestCompletionCallback connect_callback;
+  int rv = client_socket.Connect(connect_callback.callback());
+  ASSERT_EQ(connect_callback.GetResult(rv), net::OK);
+
+  // 2. Clear the callback.
+  auth_handler_->ClearSendMessageCallback(this);
+
+  // 3. Write request data (which will trigger OnIncomingData).
+  WriteRequestData(&client_socket);
+
+  // 4. Verify that the connection was closed immediately (EOF).
+  WaitForSocketClose(&client_socket);
+
+  // 5. Verify the connection was cleaned up.
+  ASSERT_FALSE(auth_handler_->IsValidConnectionId(1));
+  ASSERT_EQ(auth_handler_->GetActiveConnectionCountForTest(), 0u);
+}
+
+TEST_F(SecurityKeyAuthHandlerPosixTest, CreateConnectionIsIdempotent) {
+  CreateSocketAndWait();
+
+  // Calling it again should not recreate the socket or crash.
+  auth_handler_->CreateSecurityKeyConnection();
+
+  // Verify we can still connect to the socket.
+  net::UnixDomainClientSocket client_socket(socket_path_.value(), false);
+  net::TestCompletionCallback connect_callback;
+  int rv = client_socket.Connect(connect_callback.callback());
+  ASSERT_EQ(connect_callback.GetResult(rv), net::OK);
+
+  // Verify the connection is tracked.
+  WriteRequestData(&client_socket);
+  WaitForSendMessageToClient();
+  CheckHostDataMessage(1);
+}
+
+TEST_F(SecurityKeyAuthHandlerPosixTest,
+       ClearSendMessageCallbackIgnoresMismatchedClient) {
+  // Attempt to clear the callback with a mismatched client ID.
+  const void* mismatched_client_id = reinterpret_cast<const void*>(0xdeadbeef);
+  auth_handler_->ClearSendMessageCallback(mismatched_client_id);
+
+  CreateSocketAndWait();
+
+  net::UnixDomainClientSocket client_socket(socket_path_.value(), false);
+  net::TestCompletionCallback connect_callback;
+  int rv = client_socket.Connect(connect_callback.callback());
+  ASSERT_EQ(connect_callback.GetResult(rv), net::OK);
+
+  // Verify that the callback is STILL active and receives the message.
+  WriteRequestData(&client_socket);
+  WaitForSendMessageToClient();
+  CheckHostDataMessage(1);
+
+  // Now clear it with the CORRECT client ID.
+  auth_handler_->ClearSendMessageCallback(this);
+
+  // Verify that subsequent requests are dropped and connection is closed.
+  net::UnixDomainClientSocket client_socket2(socket_path_.value(), false);
+  rv = client_socket2.Connect(connect_callback.callback());
+  ASSERT_EQ(connect_callback.GetResult(rv), net::OK);
+
+  WriteRequestData(&client_socket2);
+  WaitForSocketClose(&client_socket2);
 }
 
 }  // namespace remoting

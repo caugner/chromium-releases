@@ -46,6 +46,7 @@
 #include "chrome/browser/ui/views/autofill/popup/popup_loading_view.h"
 #include "chrome/browser/ui/views/autofill/popup/popup_no_suggestions_view.h"
 #include "chrome/browser/ui/views/autofill/popup/popup_personal_context_notice_view.h"
+#include "chrome/browser/ui/views/autofill/popup/popup_row_content_view.h"
 #include "chrome/browser/ui/views/autofill/popup/popup_row_factory_utils.h"
 #include "chrome/browser/ui/views/autofill/popup/popup_row_view.h"
 #include "chrome/browser/ui/views/autofill/popup/popup_search_bar_view.h"
@@ -287,18 +288,7 @@ bool PopupViewViews::Show(
     search_bar_->Focus();
   }
 
-  if (autoselect_first_suggestion && controller_->GetLineCount() > 0) {
-    // Selecting first selectable row.
-    // TODO(crbug.com/327931044): Remove the if condition and make the else as
-    // the default as part of cleanup.
-    if (!controller_->GetSuggestionAt(0).HasDeactivatedStyle()) {
-      SetSelectedCell(CellIndex{0u, PopupRowView::CellType::kContent},
-                      PopupCellSelectionSource::kNonUserInput);
-    } else {
-      SetSelectedCell(std::nullopt, PopupCellSelectionSource::kNonUserInput);
-      SelectNextRow(PopupCellSelectionSource::kNonUserInput);
-    }
-  }
+  MaybeAutoSelectSuggestion(autoselect_first_suggestion);
 
   // `SetSelectedCell` can hide the popup and destroy the controller.
   if (!controller_) {
@@ -339,6 +329,30 @@ bool PopupViewViews::Show(
   }
 
   return !CanActivate() || (GetWidget() && GetWidget()->IsActive());
+}
+
+void PopupViewViews::MaybeAutoSelectSuggestion(
+    AutoselectFirstSuggestion force_by_trigger_source) {
+  if (!controller_ || controller_->GetLineCount() == 0) {
+    return;
+  }
+
+  const SuggestionType first_suggestion_type =
+      controller_->GetSuggestionAt(0).type;
+
+  if (ShouldAutoselectFirstSuggestion(force_by_trigger_source,
+                                      first_suggestion_type)) {
+    // Selecting first selectable row.
+    // TODO(crbug.com/327931044): Remove the if condition and make the else as
+    // the default as part of cleanup.
+    if (!controller_->GetSuggestionAt(0).HasDeactivatedStyle()) {
+      SetSelectedCell(CellIndex{0u, PopupRowView::CellType::kContent},
+                      PopupCellSelectionSource::kNonUserInput);
+    } else {
+      SetSelectedCell(std::nullopt, PopupCellSelectionSource::kNonUserInput);
+      SelectNextRow(PopupCellSelectionSource::kNonUserInput);
+    }
+  }
 }
 
 void PopupViewViews::Hide() {
@@ -797,6 +811,7 @@ void PopupViewViews::OnSuggestionsChanged(bool prefer_prev_arrow_side) {
     return;
   }
 
+  MaybeAutoSelectSuggestion();
   MaybeAnnouncePasswordRecoveryPopup();
   MaybeAnnounceLoadingState();
   if (!MaybeA11yFocusInformationalSuggestion()) {
@@ -930,7 +945,7 @@ void PopupViewViews::SetSelectedCell(
       // Since cell selection is based on virtual focus and not real focus,
       // we need to manually unfocus the settings link when updating virtual
       // focus.
-      if (!TrackAndRun(this,
+      if (!TrackAndRun(footnote,
                        [footnote]() { footnote->UnfocusSettingsLink(); })) {
         return;
       }
@@ -1101,13 +1116,19 @@ void PopupViewViews::InitViews() {
       views::BoxLayout::Orientation::kVertical));
 
   if (search_bar_config_) {
+    const bool is_at_memory =
+        controller_ &&
+        controller_->GetMainFillingProduct() == FillingProduct::kAtMemory;
     search_bar_ = AddChildView(std::make_unique<PopupSearchBarView>(
         search_bar_config_->placeholder, *this,
-        controller_ &&
-            controller_->GetMainFillingProduct() == FillingProduct::kAtMemory,
-        controller_ && controller_->IsSearching()));
+        /*show_indicator=*/is_at_memory,
+        /*show_search_icon_sparkle=*/is_at_memory,
+        /*debounce_delay=*/
+        is_at_memory ? base::TimeDelta()
+                     : PopupSearchBarView::kInputChangeCallbackDelay));
     search_bar_->SetProperty(views::kMarginsKey,
                              gfx::Insets::VH(GetContentsVerticalPadding(), 0));
+    search_bar_->SetLoading(controller_ && controller_->IsSearching());
     AddChildView(std::make_unique<PopupSeparatorView>(/*vertical_padding=*/0));
   }
 
@@ -1187,8 +1208,8 @@ void PopupViewViews::CreateSuggestionViews() {
               body_container->AddChildView(std::make_unique<PopupTitleView>(
                   suggestions[current_line_number].main_text.value)));
           break;
-        case SuggestionType::kMixedFormMessage:
         case SuggestionType::kInsecureContextPaymentDisabledMessage:
+        case SuggestionType::kMixedFormMessage:
           rows_.push_back(
               body_container->AddChildView(std::make_unique<PopupWarningView>(
                   suggestions[current_line_number])));
@@ -1198,6 +1219,15 @@ void PopupViewViews::CreateSuggestionViews() {
               body_container->AddChildView(std::make_unique<PopupLoadingView>(
                   suggestions[current_line_number]
                       .expected_number_of_suggestions.value_or(1))));
+          break;
+        }
+        case SuggestionType::kPersonalContextNotice: {
+          rows_.push_back(body_container->AddChildView(
+              std::make_unique<PopupPersonalContextNoticeView>(
+                  /*a11y_selection_delegate=*/*this,
+                  /*selection_delegate=*/*this, controller(),
+                  current_line_number,
+                  std::make_unique<PopupRowContentView>())));
           break;
         }
         // The default section contains all selectable rows and includes
@@ -1351,10 +1381,6 @@ void PopupViewViews::CreateSuggestionViews() {
           std::make_unique<PopupBnplFootnoteView>(
               controller(), /*a11y_selection_delegate=*/*this,
               base::BindRepeating(&DefaultA11yAnnouncer))));
-    } else if (suggestions[current_line_number].type ==
-               SuggestionType::kPersonalContextNotice) {
-      rows_.push_back(footer_container_->AddChildView(
-          std::make_unique<PopupPersonalContextNoticeView>()));
     } else {
       rows_.push_back(footer_container_->AddChildView(CreatePopupRowView(
           controller(), /*a11y_selection_delegate=*/*this,

@@ -533,6 +533,15 @@ targets.binaries.generated_script(
     module_scheme = "tast",
 )
 
+targets.binaries.generated_script(
+    name = "chrome_flaky_tast_tests",
+    label = "//chromeos:chrome_flaky_tast_tests",
+    args = [
+        "--logs-dir=${ISOLATED_OUTDIR}",
+    ],
+    module_scheme = "tast",
+)
+
 targets.binaries.console_test_launcher(
     name = "chrome_elf_unittests",
     label = "//chrome/chrome_elf:chrome_elf_unittests",
@@ -1447,14 +1456,6 @@ targets.binaries.generated_script(
 targets.binaries.generated_script(
     name = "ios_crash_xcuitests_module",
     label = "//third_party/crashpad/crashpad/test/ios:ios_crash_xcuitests_module",
-    # All references have been moved to starlark
-    skip_usage_check = True,
-    module_scheme = "xctest",
-)
-
-targets.binaries.generated_script(
-    name = "ios_swift_interop_xcuitests_module",
-    label = "//ios/chrome/test/swift_interop:ios_swift_interop_xcuitests_module",
     # All references have been moved to starlark
     skip_usage_check = True,
     module_scheme = "xctest",

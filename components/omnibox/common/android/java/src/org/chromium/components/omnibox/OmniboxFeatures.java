@@ -113,6 +113,11 @@ public class OmniboxFeatures {
     public static final CachedFlag sAsyncViewInflation =
             newFlag(OmniboxFeatureList.OMNIBOX_ASYNC_VIEW_INFLATION, FeatureState.ENABLED_IN_TEST);
 
+    public static final CachedFlag sFuseboxAsyncInflation =
+            newFlag(
+                    OmniboxFeatureList.OMNIBOX_FUSEBOX_ASYNC_INFLATION,
+                    FeatureState.ENABLED_IN_TEST);
+
     public static final CachedFlag sJumpStartOmnibox =
             newFlag(OmniboxFeatureList.JUMP_START_OMNIBOX, FeatureState.ENABLED_IN_TEST);
 
@@ -128,17 +133,19 @@ public class OmniboxFeatures {
     public static final CachedFlag sStarterPackExpansion =
             newFlag(OmniboxFeatureList.STARTER_PACK_EXPANSION, FeatureState.ENABLED_IN_PROD);
 
+    public static final CachedFlag sOmniboxSessionlessVoiceSearch =
+            newFlag(
+                    OmniboxFeatureList.OMNIBOX_SESSIONLESS_VOICE_SEARCH,
+                    FeatureState.ENABLED_IN_PROD);
+
     private static final CachedFlag sOmniboxMultimodalInput =
             newFlag(OmniboxFeatureList.OMNIBOX_MULTIMODAL_INPUT, FeatureState.ENABLED_IN_TEST);
-
-    public static final BooleanCachedFeatureParam sCompactFusebox =
-            newBooleanParam(sOmniboxMultimodalInput, "compact_fusebox", false);
 
     public static final BooleanCachedFeatureParam sMultiattachmentFusebox =
             newBooleanParam(sOmniboxMultimodalInput, "multi_context", true);
 
     public static final BooleanCachedFeatureParam sRedirectComposeplateButton =
-            newBooleanParam(sOmniboxMultimodalInput, "redirect_composeplate_button", true);
+            newBooleanParam(sOmniboxMultimodalInput, "redirect_composeplate_button", false);
 
     /** A necessary but not sufficient condition to show the current tab button. */
     public static final BooleanCachedFeatureParam sAllowCurrentTab =
@@ -173,9 +180,6 @@ public class OmniboxFeatures {
 
     public static final BooleanCachedFeatureParam sWrapAutocompleteText =
             newBooleanParam(sOmniboxMultimodalInput, "wrap_autocomplete_text", false);
-
-    public static final CachedFlag sOmniboxImprovementForLFF =
-            newFlag(OmniboxFeatureList.OMNIBOX_IMPROVEMENT_FOR_LFF, FeatureState.ENABLED_IN_PROD);
 
     public static final CachedFlag sAIMSuppressVerbatimMatch =
             newFlag(OmniboxFeatureList.AIM_SUPPRESS_VERBATIM_MATCH, FeatureState.ENABLED_IN_PROD);
@@ -240,20 +244,6 @@ public class OmniboxFeatures {
     // suggestions on SearchActivity.
     public static final BooleanCachedFeatureParam sJumpStartOmniboxCoverRecentlyVisitedPage =
             newBooleanParam(sJumpStartOmnibox, "jump_start_cover_recently_visited_page", false);
-
-    // This parameter enables showing the switch-to-tab chip on large form factors.
-    public static final BooleanCachedFeatureParam sOmniboxImprovementForLFFSwitchToTabChip =
-            newBooleanParam(sOmniboxImprovementForLFF, "switch_to_tab_chip", true);
-
-    // This parameter enables removing suggestion via "x" button.
-    public static final BooleanCachedFeatureParam
-            sOmniboxImprovementForLFFRemoveSuggestionViaButton =
-                    newBooleanParam(
-                            sOmniboxImprovementForLFF, "remove_suggestion_via_button", true);
-
-    // This parameter enables persisting editing state.
-    public static final BooleanCachedFeatureParam sOmniboxImprovementForLFFPersistEditingState =
-            newBooleanParam(sOmniboxImprovementForLFF, "persist_editing_state", false);
 
     // Omnibox Diagnostics
     private static final CachedFlag sDiagnostics =

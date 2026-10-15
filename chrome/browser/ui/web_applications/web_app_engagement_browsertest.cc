@@ -13,6 +13,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
+#include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -20,6 +21,7 @@
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
 #include "chrome/browser/ui/browser_window/public/profile_browser_collection.h"
+#include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "chrome/browser/ui/startup/startup_types.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -146,7 +148,14 @@ namespace web_app {
 
 class WebAppEngagementBrowserTest : public WebAppBrowserTestBase {
  public:
-  WebAppEngagementBrowserTest() = default;
+  WebAppEngagementBrowserTest() {
+    // TODO(crbug.com/452061489): Fix tests for when WebUI Omnibox is enabled
+    // and then remove this.
+    scoped_feature_list_.InitWithFeatures(
+        /*enabled_features=*/{},
+        /*disabled_features=*/{omnibox::internal::kWebUIOmniboxPopup,
+                               omnibox::internal::kWebUIOmniboxAimPopup});
+  }
   WebAppEngagementBrowserTest(const WebAppEngagementBrowserTest&) = delete;
   WebAppEngagementBrowserTest& operator=(const WebAppEngagementBrowserTest&) =
       delete;
@@ -206,6 +215,7 @@ class WebAppEngagementBrowserTest : public WebAppBrowserTestBase {
   }
 
   std::optional<webapps::InstallResultCode> result_code_;
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 IN_PROC_BROWSER_TEST_F(WebAppEngagementBrowserTest, AppInWindow) {
@@ -289,7 +299,7 @@ IN_PROC_BROWSER_TEST_F(WebAppEngagementBrowserTest, AppInTab) {
   webapps::AppId app_id = InstallWebAppAndCountApps(std::move(web_app_info));
 
   Browser* browser = LaunchBrowserForWebAppInTab(app_id);
-  EXPECT_FALSE(browser->app_controller());
+  EXPECT_FALSE(web_app::AppBrowserController::From(browser));
   NavigateViaLinkClickToURLAndWait(browser, example_url);
 
   Histograms histograms;
@@ -325,7 +335,7 @@ IN_PROC_BROWSER_TEST_F(WebAppEngagementBrowserTest, DiyAppInTab) {
   webapps::AppId app_id = InstallWebAppAndCountApps(std::move(web_app_info));
 
   Browser* browser = LaunchBrowserForWebAppInTab(app_id);
-  EXPECT_FALSE(browser->app_controller());
+  EXPECT_FALSE(web_app::AppBrowserController::From(browser));
   NavigateViaLinkClickToURLAndWait(browser, example_url);
 
   Histograms histograms;
@@ -364,7 +374,7 @@ IN_PROC_BROWSER_TEST_F(WebAppEngagementBrowserTest, AppWithoutScope) {
   Browser* browser = LaunchWebAppBrowserAndWait(app_id);
 
   EXPECT_EQ(GetAppIdFromApplicationName(browser->app_name()), app_id);
-  EXPECT_TRUE(browser->app_controller());
+  EXPECT_TRUE(web_app::AppBrowserController::From(browser));
   NavigateViaLinkClickToURLAndWait(browser, example_url);
 
   Histograms histograms;
@@ -532,7 +542,7 @@ IN_PROC_BROWSER_TEST_F(WebAppEngagementBrowserTest, NavigateAwayFromAppTab) {
   webapps::AppId app_id = InstallWebAppAndCountApps(std::move(web_app_info));
 
   Browser* browser = LaunchBrowserForWebAppInTab(app_id);
-  EXPECT_FALSE(browser->app_controller());
+  EXPECT_FALSE(web_app::AppBrowserController::From(browser));
 
   NavigateViaLinkClickToURLAndWait(browser, start_url);
   {

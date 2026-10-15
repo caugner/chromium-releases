@@ -645,6 +645,10 @@ void X11Window::SetTitle(const std::u16string& title) {
                                  x11::GetAtom("UTF8_STRING"), utf8str);
   connection_->SetStringProperty(xwindow_, x11::Atom::WM_NAME,
                                  x11::GetAtom("UTF8_STRING"), utf8str);
+  connection_->SetStringProperty(xwindow_, x11::Atom::WM_ICON_NAME,
+                                 x11::Atom::STRING, utf8str);
+  connection_->SetStringProperty(xwindow_, x11::GetAtom("_NET_WM_ICON_NAME"),
+                                 x11::GetAtom("UTF8_STRING"), utf8str);
 }
 
 void X11Window::SetCapture() {
@@ -1857,6 +1861,10 @@ gfx::Size X11Window::GetSize() {
   return GetBoundsInPixels().size();
 }
 
+base::WeakPtr<ui::X11DesktopWindowMoveClient::Delegate> X11Window::AsWeakPtr() {
+  return weak_ptr_factory_.GetWeakPtr();
+}
+
 void X11Window::QuitDragLoop() {
   DCHECK(drag_loop_);
   drag_loop_->EndMoveLoop();
@@ -1910,16 +1918,11 @@ void X11Window::CreateXWindow(const PlatformWindowInitProperties& properties) {
                              : connection_->default_screen().white_pixel;
 
   switch (properties.type) {
-    case PlatformWindowType::kMenu:
-      req.override_redirect = x11::Bool32(true);
-      break;
-    case PlatformWindowType::kTooltip:
-      req.override_redirect = x11::Bool32(true);
-      break;
-    case PlatformWindowType::kPopup:
-      req.override_redirect = x11::Bool32(true);
-      break;
+    case PlatformWindowType::kBubble:
     case PlatformWindowType::kDrag:
+    case PlatformWindowType::kMenu:
+    case PlatformWindowType::kPopup:
+    case PlatformWindowType::kTooltip:
       req.override_redirect = x11::Bool32(true);
       break;
     default:

@@ -48,9 +48,6 @@ import java.util.function.Supplier;
  */
 @NullMarked
 public class MenuButtonCoordinator extends ToolbarChildButton {
-    public interface SetFocusFunction {
-        void setFocus(boolean focus, int reason);
-    }
 
     /** Delegate for handling the visibility of the menu button. */
     public interface VisibilityDelegate {
@@ -80,7 +77,7 @@ public class MenuButtonCoordinator extends ToolbarChildButton {
      * @param controlsVisibilityDelegate Delegate for forcing persistent display of browser
      *     controls.
      * @param windowAndroid The WindowAndroid instance.
-     * @param setUrlBarFocusFunction Function that allows setting focus on the url bar.
+     * @param clearOmniboxFocus Runnable to clear focus on the url bar.
      * @param requestRenderRunnable Runnable that requests a re-rendering of the compositor view
      *     containing the app menu button.
      * @param canShowAppUpdateBadge Whether the app menu update badge can be shown if there is a
@@ -98,7 +95,7 @@ public class MenuButtonCoordinator extends ToolbarChildButton {
             OneshotSupplier<AppMenuCoordinator> appMenuCoordinatorSupplier,
             BrowserStateBrowserControlsVisibilityDelegate controlsVisibilityDelegate,
             WindowAndroid windowAndroid,
-            SetFocusFunction setUrlBarFocusFunction,
+            Runnable clearOmniboxFocus,
             Runnable requestRenderRunnable,
             boolean canShowAppUpdateBadge,
             Supplier<Boolean> isInOverviewModeSupplier,
@@ -142,7 +139,7 @@ public class MenuButtonCoordinator extends ToolbarChildButton {
                         requestRenderRunnable,
                         isInOverviewModeSupplier,
                         controlsVisibilityDelegate,
-                        setUrlBarFocusFunction,
+                        clearOmniboxFocus,
                         appMenuCoordinatorSupplier,
                         windowAndroid,
                         menuButtonStateSupplier,
@@ -187,18 +184,21 @@ public class MenuButtonCoordinator extends ToolbarChildButton {
      * Set the underlying MenuButton view. Use only if the MenuButton instance isn't available at
      * construction time, e.g. if it's lazily inflated. This should only be called once, unless
      * switching the active toolbar.
+     *
      * @param menuButton The underlying MenuButton view.
      */
-    public void setMenuButton(MenuButton menuButton) {
-        assert menuButton != null;
+    public void setMenuButton(@Nullable MenuButton menuButton) {
         mMenuButton = menuButton;
 
         if (mChangeProcessor != null) {
             mChangeProcessor.destroy();
+            mChangeProcessor = null;
         }
-        mChangeProcessor =
-                PropertyModelChangeProcessor.create(
-                        mPropertyModel, menuButton, new MenuButtonViewBinder());
+        if (menuButton != null) {
+            mChangeProcessor =
+                    PropertyModelChangeProcessor.create(
+                            mPropertyModel, menuButton, new MenuButtonViewBinder());
+        }
     }
 
     /**

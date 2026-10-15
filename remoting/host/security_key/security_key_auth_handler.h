@@ -8,15 +8,14 @@
 #include <memory>
 #include <string>
 
+#include "base/files/file_path.h"
 #include "base/functional/callback.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "remoting/host/mojom/remote_security_key.mojom.h"
-
-namespace base {
-class SingleThreadTaskRunner;
-}  // namespace base
 
 namespace remoting {
 
@@ -34,22 +33,31 @@ class SecurityKeyAuthHandler {
 
   static void set_use_mojo_handler(bool use_mojo_handler);
 
+  using CreateHandlerCallbackForTesting =
+      base::RepeatingCallback<std::unique_ptr<SecurityKeyAuthHandler>(
+          ClientSessionDetails* client_session_details)>;
+  static void SetCreateHandlerCallbackForTesting(
+      CreateHandlerCallbackForTesting callback);
+
   // Creates a platform-specific SecurityKeyAuthHandler.
-  // All invocations of |send_message_callback| are guaranteed to occur before
-  // the underlying SecurityKeyAuthHandler object is destroyed.  It is not safe
-  // to destroy the SecurityKeyAuthHandler object within the callback.
   // |client_session_details| will be valid until this instance is destroyed.
   static std::unique_ptr<SecurityKeyAuthHandler> Create(
-      ClientSessionDetails* client_session_details,
-      const SendMessageCallback& send_message_callback,
-      scoped_refptr<base::SingleThreadTaskRunner> file_task_runner);
+      ClientSessionDetails* client_session_details);
 
   // Binds a SecurityKeyForwarder receiver for receiving SK forwarding requests.
   virtual void BindSecurityKeyForwarder(
       mojo::PendingReceiver<mojom::SecurityKeyForwarder> receiver);
 
-  // Sets the callback used to send messages to the client.
-  virtual void SetSendMessageCallback(const SendMessageCallback& callback) = 0;
+  // Sets the callback used to send messages to the client, associated with
+  // the given |client_id| (typically the transport's 'this' pointer).
+  virtual void SetSendMessageCallback(const SendMessageCallback& callback,
+                                      const void* client_id) = 0;
+
+  // Clears the callback if the registered |client_id| matches the caller.
+  virtual void ClearSendMessageCallback(const void* client_id) = 0;
+
+  // Returns a weak pointer to this handler.
+  virtual base::WeakPtr<SecurityKeyAuthHandler> GetWeakPtr() = 0;
 
   // Creates the platform specific connection to handle security key requests.
   virtual void CreateSecurityKeyConnection() = 0;

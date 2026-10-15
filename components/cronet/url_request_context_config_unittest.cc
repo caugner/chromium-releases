@@ -22,6 +22,7 @@
 #include "net/base/host_port_pair.h"
 #include "net/base/http_user_agent_settings.h"
 #include "net/base/net_errors.h"
+#include "net/base/network_handle.h"
 #include "net/base/network_isolation_key.h"
 #include "net/cert/cert_verifier.h"
 #include "net/dns/host_resolver.h"
@@ -298,7 +299,13 @@ TEST(URLRequestContextConfigTest, TestExperimentalOptionParsing) {
   std::unique_ptr<net::HostResolver::ResolveHostRequest> resolve_request =
       context->host_resolver()->CreateRequest(
           net::HostPortPair("abcde", 80), net::NetworkAnonymizationKey(),
-          net::NetLogWithSource(), std::nullopt);
+          net::handles::kInvalidNetworkHandle, net::NetLogWithSource(),
+          std::nullopt);
+  EXPECT_EQ(net::OK, resolve_request->Start(
+                         base::BindOnce([](int error) { NOTREACHED(); })));
+  resolve_request = context->host_resolver()->CreateRequest(
+      net::HostPortPair("abcde", 80), net::NetworkAnonymizationKey(),
+      /* target_network= */ 1, net::NetLogWithSource(), std::nullopt);
   EXPECT_EQ(net::OK, resolve_request->Start(
                          base::BindOnce([](int error) { NOTREACHED(); })));
 
@@ -1675,5 +1682,112 @@ INSTANTIATE_TEST_SUITE_P(
          .retry_on_alternate_network_before_handshake_option = true,
          .expected_retry_on_alternate_network_before_handshake = true},
     }));
+
+std::optional<base::TimeDelta> GetInitialDelayForBrokenAlternativeService(
+    const std::string& options_json) {
+  std::unique_ptr<URLRequestContextConfig> config =
+      URLRequestContextConfig::CreateURLRequestContextConfig(
+          /*enable_quic=*/true,
+          /*enable_spdy=*/true,
+          /*enable_brotli=*/false,
+          URLRequestContextConfig::HttpCacheType::DISABLED,
+          /*http_cache_max_size=*/0,
+          /*load_disable_cache=*/false,
+          /*storage_path=*/"",
+          /*accept_language=*/"",
+          /*user_agent=*/"", options_json, std::unique_ptr<net::CertVerifier>(),
+          /*enable_network_quality_estimator=*/false,
+          /*bypass_public_key_pinning_for_local_trust_anchors=*/true,
+          /*network_thread_priority=*/std::nullopt,
+          /*proxy_options=*/std::optional<cronet::proto::ProxyOptions>());
+
+  net::URLRequestContextBuilder builder;
+  config->ConfigureURLRequestContextBuilder(&builder,
+                                            /*network_tasks=*/nullptr);
+  builder.set_proxy_config_service(
+      std::make_unique<net::ProxyConfigServiceFixed>(
+          net::ProxyConfigWithAnnotation::CreateDirect()));
+
+  std::unique_ptr<net::URLRequestContext> context(builder.Build());
+  return context->quic_context()
+      ->params()
+      ->initial_delay_for_broken_alternative_service;
+}
+
+TEST(URLRequestContextConfigTest,
+     BrokenAlternativeServiceDelay_FeatureDisabled_NoOption) {
+  base::test::TaskEnvironment task_environment_(
+      base::test::TaskEnvironment::MainThreadType::IO);
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndDisableFeature(
+      kCronetInitialDelayForBrokenAlternativeService);
+
+  EXPECT_EQ(GetInitialDelayForBrokenAlternativeService("{}"), std::nullopt);
+}
+
+TEST(URLRequestContextConfigTest,
+     BrokenAlternativeServiceDelay_FeatureDisabled_WithOption) {
+  base::test::TaskEnvironment task_environment_(
+      base::test::TaskEnvironment::MainThreadType::IO);
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndDisableFeature(
+      kCronetInitialDelayForBrokenAlternativeService);
+
+  EXPECT_EQ(GetInitialDelayForBrokenAlternativeService(
+                "{\"QUIC\":{\"initial_delay_for_broken_alternative_service_"
+                "seconds\":5}}"),
+            base::Seconds(5));
+}
+
+TEST(URLRequestContextConfigTest,
+     BrokenAlternativeServiceDelay_FeatureEnabledDefault_NoOption) {
+  base::test::TaskEnvironment task_environment_(
+      base::test::TaskEnvironment::MainThreadType::IO);
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(
+      kCronetInitialDelayForBrokenAlternativeService);
+
+  EXPECT_EQ(GetInitialDelayForBrokenAlternativeService("{}"),
+            base::Seconds(300));
+}
+
+TEST(URLRequestContextConfigTest,
+     BrokenAlternativeServiceDelay_FeatureEnabledCustom_NoOption) {
+  base::test::TaskEnvironment task_environment_(
+      base::test::TaskEnvironment::MainThreadType::IO);
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeatureWithParameters(
+      kCronetInitialDelayForBrokenAlternativeService, {{"delay_seconds", "1"}});
+
+  EXPECT_EQ(GetInitialDelayForBrokenAlternativeService("{}"), base::Seconds(1));
+}
+
+TEST(URLRequestContextConfigTest,
+     BrokenAlternativeServiceDelay_FeatureEnabledCustom_WithOption) {
+  base::test::TaskEnvironment task_environment_(
+      base::test::TaskEnvironment::MainThreadType::IO);
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeatureWithParameters(
+      kCronetInitialDelayForBrokenAlternativeService, {{"delay_seconds", "1"}});
+
+  EXPECT_EQ(GetInitialDelayForBrokenAlternativeService(
+                "{\"QUIC\":{\"initial_delay_for_broken_alternative_service_"
+                "seconds\":5}}"),
+            base::Seconds(1));
+}
+
+TEST(URLRequestContextConfigTest,
+     BrokenAlternativeServiceDelay_FeatureEnabledDefault_WithOption) {
+  base::test::TaskEnvironment task_environment_(
+      base::test::TaskEnvironment::MainThreadType::IO);
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(
+      kCronetInitialDelayForBrokenAlternativeService);
+
+  EXPECT_EQ(GetInitialDelayForBrokenAlternativeService(
+                "{\"QUIC\":{\"initial_delay_for_broken_alternative_service_"
+                "seconds\":5}}"),
+            base::Seconds(300));
+}
 
 }  // namespace cronet

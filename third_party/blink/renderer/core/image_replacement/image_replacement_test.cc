@@ -58,6 +58,18 @@ size_t CountDrawImageRectOps(const cc::PaintRecord& record) {
   return count;
 }
 
+// Returns a 1x1 transparent GIF image as a vector of bytes.
+Vector<char> GetTransparentGifBytes() {
+  static const unsigned char kGifBytes[] = {
+      0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80,
+      0x00, 0x00, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x21, 0xf9, 0x04,
+      0x01, 0x00, 0x00, 0x00, 0x00, 0x2c, 0x00, 0x00, 0x00, 0x00, 0x01,
+      0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44, 0x01, 0x00, 0x3b};
+  Vector<char> gif_data;
+  gif_data.append_range(kGifBytes);
+  return gif_data;
+}
+
 class ClickEventListener : public NativeEventListener {
  public:
   void Invoke(ExecutionContext*, Event* event) override { clicked_ = true; }
@@ -88,15 +100,16 @@ class MockImageReplacementHost : public mojom::blink::ImageReplacementHost {
  public:
   void ReplacementFrameAttached(
       const blink::LocalFrameToken& frame_token,
-      mojom::blink::ImageDataPtr original_image,
-      const std::optional<base::Token>& tracked_element_id) override {
-    EXPECT_TRUE(original_image);
-    if (original_image) {
-      EXPECT_GT(original_image->webp_bytes.size(), 0u);
+      mojom::blink::ReplacementDataPtr replacement_data) override {
+    EXPECT_TRUE(replacement_data);
+    EXPECT_TRUE(replacement_data->original_image);
+    if (replacement_data->original_image) {
+      EXPECT_GT(replacement_data->original_image->webp_bytes.size(), 0u);
 
       // Decode the image.
-      auto data = SkData::MakeWithCopy(original_image->webp_bytes.data(),
-                                       original_image->webp_bytes.size());
+      auto data = SkData::MakeWithCopy(
+          replacement_data->original_image->webp_bytes.data(),
+          replacement_data->original_image->webp_bytes.size());
       auto codec = SkWebpDecoder::Decode(data, nullptr);
       EXPECT_TRUE(codec);
       if (codec) {
@@ -108,8 +121,9 @@ class MockImageReplacementHost : public mojom::blink::ImageReplacementHost {
       }
     }
     frame_token_ = frame_token;
-    original_image_ = std::move(original_image);
-    tracked_element_id_ = tracked_element_id;
+    original_image_ = std::move(replacement_data->original_image);
+    tracked_element_id_ = replacement_data->tracked_element_id;
+    replacement_data_ = std::move(replacement_data);
   }
 
   const std::optional<blink::LocalFrameToken>& frame_token() const {
@@ -118,6 +132,10 @@ class MockImageReplacementHost : public mojom::blink::ImageReplacementHost {
 
   const std::optional<base::Token>& tracked_element_id() const {
     return tracked_element_id_;
+  }
+
+  const mojom::blink::ReplacementDataPtr& replacement_data() const {
+    return replacement_data_;
   }
 
   const SkBitmap& decoded_bitmap() const { return decoded_bitmap_; }
@@ -131,6 +149,7 @@ class MockImageReplacementHost : public mojom::blink::ImageReplacementHost {
   std::optional<blink::LocalFrameToken> frame_token_;
   mojom::blink::ImageDataPtr original_image_;
   std::optional<base::Token> tracked_element_id_;
+  mojom::blink::ReplacementDataPtr replacement_data_;
   SkBitmap decoded_bitmap_;
 };
 
@@ -631,14 +650,7 @@ TEST_F(ImageReplacementSimTest, ImageReplacementWaitsForLoadAndResumes) {
       DocumentImageReplacements::From(GetDocument()).GetImageReplacement(img);
   ASSERT_TRUE(replacement);
 
-  // 1x1 transparent GIF
-  static const unsigned char kGifBytes[] = {
-      0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80,
-      0x00, 0x00, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x21, 0xf9, 0x04,
-      0x01, 0x00, 0x00, 0x00, 0x00, 0x2c, 0x00, 0x00, 0x00, 0x00, 0x01,
-      0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44, 0x01, 0x00, 0x3b};
-  Vector<char> gif_data;
-  gif_data.append_range(kGifBytes);
+  Vector<char> gif_data = GetTransparentGifBytes();
   // Finish image load.
   image_resource.Complete(gif_data);
   test::RunPendingTasks();
@@ -920,6 +932,397 @@ TEST_F(ImageReplacementSimTest, ImageReplacementResetAfterSrcChange) {
 
   // Replacement should be reset.
   EXPECT_FALSE(img->HasImageReplacement());
+}
+
+TEST_F(ImageReplacementSimTest, ImageReplacementSendsObjectFit) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(features::kImageReplacement);
+  SimRequest main_resource("https://example.com/index.html", "text/html");
+  LoadURL("https://example.com/index.html");
+  main_resource.Complete(R"(
+    <style>
+      #target { object-fit: cover; }
+    </style>
+    <img src="data:image/gif;base64,R0lGODlhAQABAIAAAP///////yH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
+         id="target"></img>
+  )");
+
+  Compositor().BeginFrame();
+  test::RunPendingTasks();
+
+  HTMLImageElement* img = To<HTMLImageElement>(
+      GetDocument().getElementById(AtomicString("target")));
+  ASSERT_TRUE(img);
+  ASSERT_TRUE(img->GetLayoutObject());
+
+  auto result = ImageReplacement::CreateAndBindReceiver(*img);
+  ASSERT_TRUE(result.has_value());
+
+  mojo::Remote<mojom::blink::ImageReplacement> replacement_remote(
+      std::move(result.value()));
+
+  MockImageReplacementHost mock_host;
+  replacement_remote->StartReplacement(
+      mock_host.receiver().BindNewPipeAndPassRemote(), std::nullopt);
+  test::RunPendingTasks();
+
+  ASSERT_TRUE(mock_host.replacement_data());
+  EXPECT_EQ(mock_host.replacement_data()->object_fit,
+            mojom::blink::ObjectFit::kCover);
+}
+
+TEST_F(ImageReplacementSimTest, ImageReplacementNotResetAfterSizeChange) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(features::kImageReplacement);
+  SimRequest main_resource("https://example.com/index.html", "text/html");
+  SimSubresourceRequest image_resource1("https://example.com/foo.png",
+                                        "image/png");
+  SimSubresourceRequest image_resource2("https://example.com/bar.png",
+                                        "image/png");
+  LoadURL("https://example.com/index.html");
+  main_resource.Complete(R"(
+    <style>
+      #target { width: 50px; height: 50px; }
+    </style>
+    <img loading="lazy"
+         sizes="auto"
+         srcset="foo.png 100w, bar.png 200w"
+         src="foo.png"
+         id="target">
+    </img>
+  )");
+
+  Vector<char> gif_data = GetTransparentGifBytes();
+
+  HTMLImageElement* img = To<HTMLImageElement>(
+      GetDocument().getElementById(AtomicString("target")));
+  ASSERT_TRUE(img);
+
+  Compositor().BeginFrame();
+  test::RunPendingTasks();
+
+  // Kick off the deferred load.
+  img->LoadDeferredImageBlockingLoad();
+  test::RunPendingTasks();
+
+  image_resource1.Complete(gif_data);
+  test::RunPendingTasks();
+  Compositor().BeginFrame();
+
+  ASSERT_TRUE(img->complete());
+
+  auto result = ImageReplacement::CreateAndBindReceiver(*img);
+  ASSERT_TRUE(result.has_value());
+
+  mojo::Remote<mojom::blink::ImageReplacement> replacement_remote(
+      std::move(result.value()));
+
+  MockImageReplacementHost mock_host;
+  replacement_remote->StartReplacement(
+      mock_host.receiver().BindNewPipeAndPassRemote(), std::nullopt);
+  test::RunPendingTasks();
+
+  EXPECT_TRUE(img->HasImageReplacement());
+  EXPECT_EQ(img->ImageSourceURL(), "foo.png");
+
+  // Update layout size of the image to 150px and trigger selection of the
+  // second srcset URL.
+  img->SetInlineStyleProperty(CSSPropertyID::kWidth, "150px");
+  Compositor().BeginFrame();
+  test::RunPendingTasks();
+
+  // The image's source should have updated.
+  EXPECT_EQ(img->ImageSourceURL(), "bar.png");
+
+  // The image replacement should not be reset.
+  EXPECT_TRUE(img->HasImageReplacement());
+
+  // Finish loading the new image resource.
+  image_resource2.Complete(gif_data);
+  test::RunPendingTasks();
+
+  // The image replacement should still not be reset.
+  EXPECT_TRUE(img->HasImageReplacement());
+}
+
+TEST_F(ImageReplacementSimTest,
+       ImageReplacementNotResetAfterPictureSourceViewportSizeChange) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(features::kImageReplacement);
+  SimRequest main_resource("https://example.com/index.html", "text/html");
+  SimSubresourceRequest image_resource1("https://example.com/foo.png",
+                                        "image/png");
+  SimSubresourceRequest image_resource2("https://example.com/bar.png",
+                                        "image/png");
+  LoadURL("https://example.com/index.html");
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(300, 300));
+  main_resource.Complete(R"HTML(
+    <picture id="picture">
+      <source id="source1" media="(max-width: 400px)" srcset="foo.png">
+      <source id="source2" media="(max-width: 800px)" srcset="bar.png">
+      <img src="fallback.png" id="target">
+    </picture>
+  )HTML");
+
+  Vector<char> gif_data = GetTransparentGifBytes();
+
+  HTMLImageElement* img = To<HTMLImageElement>(
+      GetDocument().getElementById(AtomicString("target")));
+  ASSERT_TRUE(img);
+
+  Compositor().BeginFrame();
+  test::RunPendingTasks();
+
+  // Kick off the deferred load.
+  img->LoadDeferredImageBlockingLoad();
+  test::RunPendingTasks();
+  image_resource1.Complete(gif_data);
+  test::RunPendingTasks();
+  Compositor().BeginFrame();
+  ASSERT_TRUE(img->complete());
+
+  auto result = ImageReplacement::CreateAndBindReceiver(*img);
+  ASSERT_TRUE(result.has_value());
+
+  mojo::Remote<mojom::blink::ImageReplacement> replacement_remote(
+      std::move(result.value()));
+  MockImageReplacementHost mock_host;
+  replacement_remote->StartReplacement(
+      mock_host.receiver().BindNewPipeAndPassRemote(), std::nullopt);
+  test::RunPendingTasks();
+
+  EXPECT_TRUE(img->HasImageReplacement());
+  EXPECT_EQ(img->ImageSourceURL(), "foo.png");
+
+  // Resize viewport to 600x600.
+  // - source1 media: (max-width: 400px) -> no longer matches.
+  // - source2 media: (max-width: 800px) -> matches.
+  // This triggers the selection of bar.png as the source URL.
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(600, 600));
+  Compositor().BeginFrame();
+  test::RunPendingTasks();
+
+  EXPECT_EQ(img->ImageSourceURL(), "bar.png");
+
+  // The image replacement should not be reset.
+  EXPECT_TRUE(img->HasImageReplacement());
+
+  // Finish loading the new image resource.
+  image_resource2.Complete(gif_data);
+  test::RunPendingTasks();
+
+  // The image replacement should still not be reset.
+  EXPECT_TRUE(img->HasImageReplacement());
+}
+
+TEST_F(ImageReplacementSimTest,
+       ImageReplacementNotResetAfterSizeChangeWhileLoading) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(features::kImageReplacement);
+  SimRequest main_resource("https://example.com/index.html", "text/html");
+  SimSubresourceRequest image_resource1("https://example.com/foo.png",
+                                        "image/png");
+  SimSubresourceRequest image_resource2("https://example.com/bar.png",
+                                        "image/png");
+  LoadURL("https://example.com/index.html");
+  main_resource.Complete(R"(
+    <style>
+      #target { width: 50px; height: 50px; }
+    </style>
+    <img loading="lazy"
+         sizes="auto" srcset="foo.png 100w, bar.png 200w"
+         src="foo.png"
+         id="target">
+    </img>
+  )");
+
+  Vector<char> gif_data = GetTransparentGifBytes();
+
+  HTMLImageElement* img = To<HTMLImageElement>(
+      GetDocument().getElementById(AtomicString("target")));
+  ASSERT_TRUE(img);
+
+  // Perform initial layout and deliver ResizeObserver notifications to trigger
+  // OnResize().
+  Compositor().BeginFrame();
+  test::RunPendingTasks();
+
+  // Kick off the deferred load of foo.png.
+  img->LoadDeferredImageBlockingLoad();
+  test::RunPendingTasks();
+
+  // At this point, image_resource1 is loading, but complete() is false.
+  ASSERT_FALSE(img->complete());
+  EXPECT_EQ(img->ImageSourceURL(), "foo.png");
+
+  // Bind the image replacement receiver. Since complete() is false, this is a
+  // pending replacement.
+  auto result = ImageReplacement::CreateAndBindReceiver(*img);
+  ASSERT_TRUE(result.has_value());
+
+  mojo::Remote<mojom::blink::ImageReplacement> replacement_remote(
+      std::move(result.value()));
+  MockImageReplacementHost mock_host;
+  replacement_remote->StartReplacement(
+      mock_host.receiver().BindNewPipeAndPassRemote(), std::nullopt);
+  test::RunPendingTasks();
+
+  // Replacement is registered but not active (disposition is still
+  // kPrimaryContent).
+  EXPECT_FALSE(img->HasImageReplacement());
+
+  // Update layout size of the image to 150px and trigger OnResize().
+  // This will select bar.png and start loading it.
+  img->SetInlineStyleProperty(CSSPropertyID::kWidth, "150px");
+  Compositor().BeginFrame();
+  test::RunPendingTasks();
+
+  EXPECT_EQ(img->ImageSourceURL(), "bar.png");
+
+  // Replacement should still be pending and not active.
+  EXPECT_FALSE(img->HasImageReplacement());
+
+  // Finish loading the new size-changed image (bar.png).
+  image_resource2.Complete(gif_data);
+  test::RunPendingTasks();
+
+  // Now that the new image loaded, the replacement should resume and be active.
+  EXPECT_TRUE(img->HasImageReplacement());
+}
+
+TEST_F(ImageReplacementSimTest,
+       ImageReplacementNotResetAfterViewportSizeChange) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(features::kImageReplacement);
+  SimRequest main_resource("https://example.com/index.html", "text/html");
+  SimSubresourceRequest image_resource1("https://example.com/foo.png",
+                                        "image/png");
+  SimSubresourceRequest image_resource2("https://example.com/bar.png",
+                                        "image/png");
+  LoadURL("https://example.com/index.html");
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(100, 100));
+  main_resource.Complete(R"(
+    <style>
+      #target { width: 50vw; height: 50vw; }
+    </style>
+    <img loading="lazy"
+         sizes="auto"
+         srcset="foo.png 100w, bar.png 200w"
+         src="foo.png"
+         id="target"></img>
+  )");
+
+  Vector<char> gif_data = GetTransparentGifBytes();
+
+  HTMLImageElement* img = To<HTMLImageElement>(
+      GetDocument().getElementById(AtomicString("target")));
+  ASSERT_TRUE(img);
+
+  Compositor().BeginFrame();
+  test::RunPendingTasks();
+
+  // Kick off the deferred load.
+  img->LoadDeferredImageBlockingLoad();
+  test::RunPendingTasks();
+  image_resource1.Complete(gif_data);
+  test::RunPendingTasks();
+  Compositor().BeginFrame();
+  ASSERT_TRUE(img->complete());
+
+  auto result = ImageReplacement::CreateAndBindReceiver(*img);
+  ASSERT_TRUE(result.has_value());
+
+  mojo::Remote<mojom::blink::ImageReplacement> replacement_remote(
+      std::move(result.value()));
+  MockImageReplacementHost mock_host;
+  replacement_remote->StartReplacement(
+      mock_host.receiver().BindNewPipeAndPassRemote(), std::nullopt);
+  test::RunPendingTasks();
+
+  EXPECT_TRUE(img->HasImageReplacement());
+  EXPECT_EQ(img->ImageSourceURL(), "foo.png");
+
+  // Resize viewport to 300x300, which updates image layout size to 150px and
+  // triggers the selection of bar.png as source URL.
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(300, 300));
+  Compositor().BeginFrame();
+  test::RunPendingTasks();
+
+  EXPECT_EQ(img->ImageSourceURL(), "bar.png");
+
+  // The image replacement should not be reset.
+  EXPECT_TRUE(img->HasImageReplacement());
+
+  // Finish loading the new image resource.
+  image_resource2.Complete(gif_data);
+  test::RunPendingTasks();
+
+  // The image replacement should still not be reset.
+  EXPECT_TRUE(img->HasImageReplacement());
+}
+
+TEST_F(ImageReplacementSimTest,
+       ImageReplacementNotResetAfterSizesAttributeUpdate) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(features::kImageReplacement);
+  SimRequest main_resource("https://example.com/index.html", "text/html");
+  SimSubresourceRequest image_resource1("https://example.com/foo.png",
+                                        "image/png");
+  SimSubresourceRequest image_resource2("https://example.com/bar.png",
+                                        "image/png");
+  LoadURL("https://example.com/index.html");
+  main_resource.Complete(R"(
+    <img sizes="50px"
+         srcset="foo.png 100w, bar.png 200w"
+         src="foo.png"
+         id="target">
+    </img>
+  )");
+
+  Vector<char> gif_data = GetTransparentGifBytes();
+
+  HTMLImageElement* img = To<HTMLImageElement>(
+      GetDocument().getElementById(AtomicString("target")));
+  ASSERT_TRUE(img);
+
+  Compositor().BeginFrame();
+  test::RunPendingTasks();
+
+  image_resource1.Complete(gif_data);
+  test::RunPendingTasks();
+  Compositor().BeginFrame();
+
+  ASSERT_TRUE(img->complete());
+
+  auto result = ImageReplacement::CreateAndBindReceiver(*img);
+  ASSERT_TRUE(result.has_value());
+
+  mojo::Remote<mojom::blink::ImageReplacement> replacement_remote(
+      std::move(result.value()));
+
+  MockImageReplacementHost mock_host;
+  replacement_remote->StartReplacement(
+      mock_host.receiver().BindNewPipeAndPassRemote(), std::nullopt);
+  test::RunPendingTasks();
+
+  EXPECT_TRUE(img->HasImageReplacement());
+  EXPECT_EQ(img->ImageSourceURL(), "foo.png");
+
+  // Update sizes attribute of the image to 150px and trigger selection of the
+  // second srcset URL.
+  img->setAttribute(html_names::kSizesAttr, AtomicString("150px"));
+  Compositor().BeginFrame();
+  test::RunPendingTasks();
+
+  // The image's source should have updated.
+  EXPECT_EQ(img->ImageSourceURL(), "bar.png");
+
+  // Finish loading the new image resource.
+  image_resource2.Complete(gif_data);
+  test::RunPendingTasks();
+
+  // The image replacement should not be reset.
+  EXPECT_TRUE(img->HasImageReplacement());
 }
 
 }  // namespace blink

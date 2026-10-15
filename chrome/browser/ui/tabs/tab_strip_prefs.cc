@@ -7,7 +7,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/actions/chrome_action_id.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/tab_search_feature.h"
 #include "chrome/browser/ui/tabs/features.h"
 #include "chrome/browser/ui/tabs/vertical_tab_strip_state.h"
 #include "chrome/browser/ui/tabs/vertical_tab_strip_state_controller.h"
@@ -20,32 +19,17 @@
 #include "components/prefs/pref_service.h"
 #include "ui/actions/actions.h"
 
-namespace {
-
-std::optional<bool> g_tab_search_trailing_tabstrip_at_startup;
-}
-
 namespace tabs {
 
-bool GetDefaultTabSearchRightAligned() {
-  // These platforms are all left aligned, the others should be right.
-#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
-  return false;
-#else
-  return true;
-#endif
-}
-
 void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterBooleanPref(prefs::kTabSearchRightAligned,
-                                GetDefaultTabSearchRightAligned());
   registry->RegisterBooleanPref(prefs::kTabSearchPinnedToTabstrip, true);
-  registry->RegisterBooleanPref(
-      prefs::kTabSearchPinnedToTabstripMigrationComplete, false);
-  registry->RegisterBooleanPref(
-      prefs::kTabSearchPinnedToTabstripMigrationComplete2, false);
   registry->RegisterBooleanPref(prefs::kProjectsPanelPinnedToTabstrip, true);
-  registry->RegisterBooleanPref(prefs::kEverythingMenuPinnedToTabstrip, true);
+  registry->RegisterBooleanPref(
+      prefs::kEverythingMenuPinnedToTabstrip,
+      !base::FeatureList::IsEnabled(
+          tabs::kMigrateEverythingMenuPinnedToTabstrip));
+  registry->RegisterBooleanPref(
+      prefs::kEverythingMenuPinnedToTabstripMigrationComplete, false);
   registry->RegisterBooleanPref(prefs::kVerticalTabsEnabled, false);
   registry->RegisterBooleanPref(
       prefs::kVerticalTabsExpandOnHoverEnabled,
@@ -54,42 +38,6 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(prefs::kVerticalTabsCollapsedState, false);
   registry->RegisterIntegerPref(prefs::kVerticalTabsUncollapsedWidth,
                                 kVerticalTabStripDefaultUncollapsedWidth);
-}
-
-void MigrateTabSearchPref(PrefService* profile_prefs) {
-  if (profile_prefs->GetBoolean(
-          prefs::kTabSearchPinnedToTabstripMigrationComplete2)) {
-    return;
-  }
-
-  // If the user was hit by the broken migration (MigrationComplete was true
-  // but they are not in the toolbar experiment), they will have their pin
-  // state set to false. Reset it to true for them.
-  if (profile_prefs->GetBoolean(
-          prefs::kTabSearchPinnedToTabstripMigrationComplete) &&
-      !features::HasTabSearchToolbarButton()) {
-    profile_prefs->SetBoolean(prefs::kTabSearchPinnedToTabstrip, true);
-  }
-
-  if (features::HasTabSearchToolbarButton()) {
-    const std::optional<std::string>& tab_search_action_id =
-        actions::ActionIdMap::ActionIdToString(kActionTabSearch);
-    if (tab_search_action_id.has_value()) {
-      const base::ListValue& pinned_actions =
-          profile_prefs->GetList(prefs::kPinnedActions);
-      bool is_pinned = false;
-      for (const auto& action : pinned_actions) {
-        if (action.is_string() && action.GetString() == *tab_search_action_id) {
-          is_pinned = true;
-          break;
-        }
-      }
-      profile_prefs->SetBoolean(prefs::kTabSearchPinnedToTabstrip, is_pinned);
-    }
-  }
-
-  profile_prefs->SetBoolean(prefs::kTabSearchPinnedToTabstripMigrationComplete2,
-                            true);
 }
 
 void MigrateHoverCardMemoryPref(PrefService* local_prefs) {
@@ -104,6 +52,28 @@ void MigrateHoverCardMemoryPref(PrefService* local_prefs) {
                           true);
 }
 
+void MigrateEverythingMenuPinnedToTabstripPref(PrefService* profile_prefs) {
+  // If the migration hasn't started yet or is complete, return early.
+  if (!base::FeatureList::IsEnabled(
+          tabs::kMigrateEverythingMenuPinnedToTabstrip) ||
+      profile_prefs->GetBoolean(
+          prefs::kEverythingMenuPinnedToTabstripMigrationComplete)) {
+    return;
+  }
+
+  // If a user has previously enabled vertical tabs and hasn't changed the value
+  // of `prefs::kEverythingMenuPinnedToTabstrip` then set the value to be true.
+  // This is needed because the default value of the pref is changing to false
+  // for users who haven't seen the pinned button yet.
+  if (!profile_prefs->HasPrefPath(prefs::kEverythingMenuPinnedToTabstrip) &&
+      profile_prefs->GetBoolean(prefs::kVerticalTabsEnabledFirstTime)) {
+    profile_prefs->SetBoolean(prefs::kEverythingMenuPinnedToTabstrip, true);
+  }
+
+  profile_prefs->SetBoolean(
+      prefs::kEverythingMenuPinnedToTabstripMigrationComplete, true);
+}
+
 TabSearchPosition GetTabSearchPosition(
     const BrowserWindowInterface* browser_window) {
   if (browser_window) {
@@ -113,30 +83,7 @@ TabSearchPosition GetTabSearchPosition(
       return TabSearchPosition::kVerticalTabstrip;
     }
   }
-
-  if (base::FeatureList::IsEnabled(tabs::kHorizontalTabStripComboButton)) {
-    return TabSearchPosition::kLeadingHorizontalTabstrip;
-  }
-
-  const bool has_tab_search_toolbar_button =
-      features::HasTabSearchToolbarButton();
-  if (has_tab_search_toolbar_button) {
-    return TabSearchPosition::kToolbarButton;
-  }
-
-  // If this pref has already been read, we need to return the same value.
-  if (!g_tab_search_trailing_tabstrip_at_startup.has_value()) {
-    g_tab_search_trailing_tabstrip_at_startup =
-        GetDefaultTabSearchRightAligned();
-  }
-
-  return g_tab_search_trailing_tabstrip_at_startup.value()
-             ? TabSearchPosition::kTrailingHorizontalTabstrip
-             : TabSearchPosition::kLeadingHorizontalTabstrip;
-}
-
-void SetTabSearchRightAlignedForTesting(bool is_right_aligned) {
-  g_tab_search_trailing_tabstrip_at_startup = is_right_aligned;
+  return TabSearchPosition::kLeadingHorizontalTabstrip;
 }
 
 }  // namespace tabs

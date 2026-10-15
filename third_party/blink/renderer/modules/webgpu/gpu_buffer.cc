@@ -172,7 +172,7 @@ GPUBuffer* GPUBuffer::Create(GPUDevice* device,
     GPU* gpu = device->adapter()->gpu();
     gpu->TrackMappableBuffer(buffer);
     device->TrackMappableBuffer(buffer);
-    device->GetDawnControlClient()->TrackMappableBuffer(buffer->GetHandle());
+    buffer->mappable_buffer_handles_ = gpu->GetMappableBufferHandles();
   }
 
   return buffer;
@@ -197,8 +197,8 @@ GPUBuffer::GPUBuffer(GPUDevice* device,
 }
 
 GPUBuffer::~GPUBuffer() {
-  if (GetDawnControlClient()) {
-    GetDawnControlClient()->UntrackMappableBuffer(GetHandle());
+  if (mappable_buffer_handles_) {
+    mappable_buffer_handles_->erase(GetHandle());
   }
   DissociateMailbox();
 }
@@ -287,9 +287,9 @@ void GPUBuffer::destroy(v8::Isolate* isolate) {
   // Destroyed, so it can never be mapped again. Stop tracking.
   device_->adapter()->gpu()->UntrackMappableBuffer(this);
   device_->UntrackMappableBuffer(this);
-  if (GetDawnControlClient()) {
-    GetDawnControlClient()->UntrackMappableBuffer(GetHandle());
-  }
+  // Drop the reference to the mapped buffer handles. No longer
+  // need to remove the wgpu::Buffer from this set in ~GPUBuffer.
+  mappable_buffer_handles_ = nullptr;
 }
 
 uint64_t GPUBuffer::size() const {

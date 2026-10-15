@@ -174,6 +174,11 @@ InputHandler::ScrollStatus InputHandler::ScrollBegin(ScrollState* scroll_state,
     scroll_status.raster_inducing =
         GetScrollTree().CanRealizeScrollsOnPendingTree(
             *CurrentlyScrollingNode());
+    // Performance Scroll Timing API: re-latch starts a new record.
+    if (compositor_delegate_->GetSettings().enable_scroll_performance_timing) {
+      scroll_timing_controller_.DidScrollBegin(
+          type, scroll_state->data()->event_timestamp);
+    }
     return scroll_status;
   }
 
@@ -298,6 +303,12 @@ InputHandler::ScrollStatus InputHandler::ScrollBegin(ScrollState* scroll_state,
       scroll_tree.CanRealizeScrollsOnPendingTree(*scrolling_node);
 
   DidLatchToScroller(*scroll_state, type);
+
+  // Performance Scroll Timing API: start record once latched on the compositor.
+  if (compositor_delegate_->GetSettings().enable_scroll_performance_timing) {
+    scroll_timing_controller_.DidScrollBegin(
+        type, scroll_state->data()->event_timestamp);
+  }
 
   // If the viewport is scrolling and it cannot consume any delta hints, the
   // scroll event will need to get bubbled if the viewport is for a guest or
@@ -477,8 +488,6 @@ InputHandlerScrollResult InputHandler::ScrollUpdate(
   InputHandlerScrollResult scroll_result;
   scroll_result.did_scroll = did_scroll_content || did_scroll_top_controls;
   scroll_result.hit_snap_constraint = hit_snap_constraint;
-  // TODO(crbug.com/41102897): Refactor did_root_overscroll to instead store the
-  // ElementId of scroller that consumed the overscroll.
   scroll_result.did_overscroll_root =
       is_root_scroller && !unused_scroll_delta.IsZero();
   scroll_result.accumulated_root_overscroll = accumulated_root_overscroll_;
@@ -640,6 +649,11 @@ InputHandlerScrollEndResult InputHandler::ScrollEnd(
     }
     snap_animation_data_map_.erase(scroll_node->element_id);
   } else if (latched_node) {
+    // Performance Scroll Timing API: finalize record at GestureScrollEnd time.
+    if (compositor_delegate_->GetSettings().enable_scroll_performance_timing) {
+      scroll_timing_controller_.DidScrollEnd(latched_scroll_type_.value());
+    }
+
     scrollbar_controller_->ResetState();
 
     // Note that if we deferred the scroll end then we should not snap. We will
@@ -859,8 +873,6 @@ void InputHandler::SetSynchronousInputHandlerRootScrollOffset(
   // After applying the synchronous input handler's scroll offset, tell it what
   // we ended up with.
   UpdateRootLayerStateForSynchronousInputHandler();
-
-  compositor_delegate_->SetNeedsFullViewportRedraw();
 }
 
 void InputHandler::PinchGestureBegin(const gfx::Point& anchor,
@@ -1383,6 +1395,10 @@ void InputHandler::ProcessCommitDeltas(
     last_latched_scroller_ = ElementId();
     last_latched_scroll_source_type_ = ScrollSourceType::kNone;
   }
+
+  // Performance Scroll Timing API: hand completed records to the main thread.
+  commit_data->scroll_timing_infos =
+      scroll_timing_controller_.TakeCompletedScrollTimingInfos();
 }
 
 void InputHandler::TickAnimations(base::TimeTicks monotonic_time) {
@@ -2281,6 +2297,12 @@ void InputHandler::ScrollLatchedScroller(ScrollState& scroll_state,
     return;
   }
 
+  // Performance Scroll Timing API: capture the latched scroller on the first
+  // effective update of the gesture.
+  if (compositor_delegate_->GetSettings().enable_scroll_performance_timing) {
+    scroll_timing_controller_.DidScrollUpdate(scroll_node.element_id);
+  }
+
   if (!GetViewport().ShouldScroll(scroll_node)) {
     // If the applied delta is within 45 degrees of the input
     // delta, bail out to make it easier to scroll just one layer
@@ -2334,7 +2356,9 @@ ScrollNode* InputHandler::FindNodeToLatch(ScrollState* scroll_state,
   ScrollNode* scroll_node = nullptr;
   ScrollNode* first_scrollable_node = nullptr;
   for (ScrollNode* cur_node = starting_node; cur_node;
-       cur_node = scroll_tree.MutableParent(cur_node)) {
+       cur_node = scroll_tree.HasParent(*cur_node)
+                      ? &scroll_tree.MutableParent(*cur_node)
+                      : nullptr) {
     if (GetViewport().ShouldScroll(*cur_node)) {
       // Don't chain scrolls past a viewport node. Once we reach that, we
       // should scroll using the appropriate viewport node which may not be
@@ -2637,7 +2661,9 @@ bool InputHandler::IsScrolledBy(LayerImpl* child, ScrollNode* ancestor) {
   ScrollTree& scroll_tree = GetScrollTree();
   for (ScrollNode* scroll_node =
            &scroll_tree.MutableNode(child->scroll_tree_index());
-       scroll_node; scroll_node = scroll_tree.MutableParent(scroll_node)) {
+       scroll_node; scroll_node = scroll_tree.HasParent(*scroll_node)
+                                      ? &scroll_tree.MutableParent(*scroll_node)
+                                      : nullptr) {
     if (scroll_node->id == ancestor->id)
       return true;
   }

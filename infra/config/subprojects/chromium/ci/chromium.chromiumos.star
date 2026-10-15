@@ -3,7 +3,6 @@
 # found in the LICENSE file.
 """Definitions of builders in the chromium.chromiumos builder group."""
 
-load("@chromium-luci//args.star", "args")
 load("@chromium-luci//branches.star", "branches")
 load("@chromium-luci//builder_config.star", "builder_config")
 load("@chromium-luci//builder_health_indicators.star", "health_spec")
@@ -105,7 +104,6 @@ ci.builder(
             "chromiumos_preflight",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "simple|release|x64",
         short_name = "asn",
@@ -156,7 +154,6 @@ ci.builder(
             "chromiumos_preflight",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "simple|release|x64",
         short_name = "cfi",
@@ -213,7 +210,6 @@ ci.builder(
             "chromiumos_preflight",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "simple|debug|x64",
         short_name = "dbg",
@@ -270,7 +266,6 @@ ci.builder(
             "chromiumos_preflight",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "simple|release|x64",
         short_name = "compile",
@@ -309,19 +304,16 @@ ci.thin_tester(
     targets = targets.bundle(
         targets = [
             "gpu_chromeos_telemetry_tests",
-            "chromeos_vm_gtests",
             "chromeos_isolated_scripts",
         ],
         mixins = [
             "chromeos-generic-vm",
-            "retry_only_failed_tests",
         ],
     ),
     targets_settings = targets.settings(
         browser_config = targets.browser_config.CROS_CHROME,
         os_type = targets.os_type.CROS,
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "simple|release|x64",
         short_name = "gtest",
@@ -330,64 +322,6 @@ ci.thin_tester(
     cq_mirrors_console_view = "mirrors",
     contact_team_email = "chromeos-chrome-build@google.com",
     notifies = ["chrome-fake-vaapi-test"],
-    siso_remote_jobs = siso.remote_jobs.HIGH_JOBS_FOR_CI,
-)
-
-ci.thin_tester(
-    name = "chromeos-amd64-generic-rel-tast",
-    branch_selector = branches.selector.CROS_LTS_BRANCHES,
-    description_html = "This is a tester builder for Ash chrome." +
-                       " This builder only run tast tests. If you see" +
-                       " test failures, please contact ChromeOS gardeners" +
-                       " for help.",
-    parent = "ci/chromeos-amd64-generic-rel",
-    builder_spec = builder_config.builder_spec(
-        execution_mode = builder_config.execution_mode.TEST,
-        gclient_config = builder_config.gclient_config(
-            config = "chromium",
-            apply_configs = ["chromeos"],
-        ),
-        chromium_config = builder_config.chromium_config(
-            config = "chromium",
-            apply_configs = ["mb"],
-            build_config = builder_config.build_config.RELEASE,
-            target_arch = builder_config.target_arch.INTEL,
-            target_bits = 64,
-            target_platform = builder_config.target_platform.CHROMEOS,
-            target_cros_boards = [
-                "amd64-generic",
-            ],
-            cros_boards_with_qemu_images = "amd64-generic-vm",
-        ),
-    ),
-    targets = targets.bundle(
-        targets = [
-            "chromeos_vm_tast",
-        ],
-        mixins = [
-            "chromeos-generic-vm",
-        ],
-        per_test_modifications = {
-            "chrome_all_tast_tests": targets.mixin(
-                args = [
-                    "--tast-shard-method=hash",
-                ],
-            ),
-        },
-    ),
-    targets_settings = targets.settings(
-        browser_config = targets.browser_config.CROS_CHROME,
-        os_type = targets.os_type.CROS,
-    ),
-    # Tast tests should be monitored by CrOS gardeners, not Chromium gardeners.
-    gardener_rotations = args.ignore_default(gardener_rotations.CHROMIUMOS),
-    console_view_entry = consoles.console_view_entry(
-        category = "simple|release|x64",
-        short_name = "tast",
-    ),
-    main_console_view = "main",
-    cq_mirrors_console_view = "mirrors",
-    contact_team_email = "chromeos-chrome-build@google.com",
     siso_remote_jobs = siso.remote_jobs.HIGH_JOBS_FOR_CI,
 )
 
@@ -430,7 +364,6 @@ ci.builder(
             "chromiumos_preflight",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "simple|debug",
         short_name = "arm",
@@ -473,7 +406,6 @@ ci.builder(
             "chromiumos_preflight",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "simple|release",
         short_name = "arm",
@@ -526,7 +458,6 @@ ci.builder(
     targets_settings = targets.settings(
         browser_config = targets.browser_config.CROS_CHROME,
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "simple|release",
         short_name = "a64",
@@ -583,7 +514,7 @@ ci.builder(
             ),
             "browser_tests": targets.mixin(
                 swarming = targets.swarming(
-                    shards = 160,
+                    shards = 200,
                 ),
             ),
             "content_browsertests": targets.mixin(
@@ -619,7 +550,6 @@ ci.builder(
             ),
         },
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "default",
         short_name = "dbg",
@@ -686,7 +616,6 @@ ci.builder(
             "x86-64",
             "isolate_profile_data",
             "linux-jammy",
-            "retry_only_failed_tests",
         ],
         per_test_modifications = {
             "absl_hardening_tests": targets.mixin(
@@ -783,7 +712,6 @@ ci.builder(
             "x86-64",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "default|cfm",
         short_name = "cfm",

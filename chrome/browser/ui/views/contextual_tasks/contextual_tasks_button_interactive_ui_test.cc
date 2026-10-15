@@ -19,12 +19,13 @@
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/signin/identity_test_environment_profile_adaptor.h"
 #include "chrome/browser/ui/actions/chrome_action_id.h"
+#include "chrome/browser/ui/browser_actions.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/side_panel/side_panel_ui.h"
 #include "chrome/browser/ui/tabs/features.h"
-#include "chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model.h"
 #include "chrome/browser/ui/tabs/vertical_tab_strip_state_controller.h"
+#include "chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/contextual_tasks/contextual_tasks_button.h"
 #include "chrome/browser/ui/views/contextual_tasks/contextual_tasks_close_tab_button.h"
@@ -253,7 +254,9 @@ class ContextualTasksButtonInteractiveTestBase : public InteractiveBrowserTest {
 
   auto ClearPrimaryAccount() {
     return Do([&]() {
+#if !BUILDFLAG(IS_CHROMEOS)
       identity_test_env()->ClearPrimaryAccount();
+#endif
       GetTestingService()->GetFakeEligibilityManager()->SetIsEligible(false);
     });
   }
@@ -291,8 +294,9 @@ class ContextualTasksEphemeralButtonInteractiveTest
   void SetUp() override {
     scoped_feature_list_.InitWithFeaturesAndParameters(
         {{contextual_tasks::kContextualTasks,
-          {{"ContextualTasksEntryPoint", "toolbar-ephemeral-branded"},
-           {"ContextualTasksExpandButtonOptions", "toolbar-close-button"}}},
+          {{"ContextualTasksExpandButtonOptions", "toolbar-close-button"}}},
+         {contextual_tasks::kContextualTasksEphemeralBrandedEntryPoint,
+          {{"ContextualTasksEntryPoint", "toolbar-ephemeral-branded"}}},
          {contextual_tasks::kContextualTasksHideCloseButtonInVerticalTabs, {}},
          {tabs::kVerticalTabs, {}}},
         {});
@@ -327,6 +331,9 @@ class ContextualTasksEphemeralButtonInteractiveTest
       SessionID session_id = sessions::SessionTabHelper::IdForTab(web_contents);
       GetContextualTasksService()->AssociateTabWithTask(task.GetTaskId(),
                                                         session_id);
+      GetContextualTasksService()->UpdateThreadForTask(
+          task.GetTaskId(), contextual_tasks::ThreadType::kAiMode,
+          "test_server_id", std::nullopt, "Test Title");
     });
   }
 
@@ -349,6 +356,13 @@ class ContextualTasksEphemeralButtonInteractiveTest
   auto SimulateOpeningContextualTaskSidePanel() {
     return Do([&] {
       contextual_tasks::ContextualTasksPanelController::From(browser())->Show();
+      content::WebContents* side_panel_contents =
+          contextual_tasks::ContextualTasksPanelController::From(browser())
+              ->GetActiveWebContents();
+      if (side_panel_contents) {
+        contextual_tasks::GetWebUiInterface(side_panel_contents)
+            ->SetIsAiPage(true);
+      }
     });
   }
 
@@ -440,44 +454,6 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksEphemeralButtonInteractiveTest,
       WaitForShow(kContextualTasksEphemeralToolbarButtonElementId));
 }
 
-#if BUILDFLAG(IS_WIN) && defined(ADDRESS_SANITIZER)
-#define MAYBE_ButtonVisibilityIsPreservedAsSidePanelToggles \
-  DISABLED_ButtonVisibilityIsPreservedAsSidePanelToggles
-#else
-#define MAYBE_ButtonVisibilityIsPreservedAsSidePanelToggles \
-  ButtonVisibilityIsPreservedAsSidePanelToggles
-#endif
-IN_PROC_BROWSER_TEST_F(ContextualTasksEphemeralButtonInteractiveTest,
-                       MAYBE_ButtonVisibilityIsPreservedAsSidePanelToggles) {
-  if ((true)) {
-    GTEST_SKIP() << "Branded variant button visibility behavior differs.";
-  }
-
-  RunTestSequence(
-      SignIntoEligibleAccount(), InstrumentTab(kFirstTab),
-      AddInstrumentedTab(kSecondTab, GetTestURL()),
-      SelectTab(kTabStripElementId, 1),
-      EnsureNotPresent(
-          kContextualTasksEphemeralToolbarButtonElementId),
-      CreateTaskForTab(0), SelectTab(kTabStripElementId, 0),
-      SimulateOpeningContextualTaskSidePanel(),
-      SimulateClosingContextualTaskSidePanel(),
-      WaitForShow(kContextualTasksEphemeralToolbarButtonElementId),
-      PressButton(kContextualTasksEphemeralToolbarButtonElementId),
-      WaitForShow(kSidePanelElementId),
-      EnsurePresent(kContextualTasksEphemeralToolbarButtonElementId),
-      EnsureNotPresent(
-          ContextualTasksCloseTabButton::kContextualTasksCloseTabButton),
-      SimulateNavigateToAiPage(),
-      EnsurePresent(
-          ContextualTasksCloseTabButton::kContextualTasksCloseTabButton),
-      PressButton(kContextualTasksEphemeralToolbarButtonElementId),
-      WaitForHide(kSidePanelElementId),
-      EnsurePresent(kContextualTasksEphemeralToolbarButtonElementId),
-      EnsureNotPresent(
-          ContextualTasksCloseTabButton::kContextualTasksCloseTabButton));
-}
-
 IN_PROC_BROWSER_TEST_F(ContextualTasksEphemeralButtonInteractiveTest,
                        CloseButtonHiddenInVerticalTabs) {
   RunTestSequence(
@@ -500,11 +476,10 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksEphemeralButtonInteractiveTest,
           ContextualTasksCloseTabButton::kContextualTasksCloseTabButton));
 }
 
+// Immersive fullscreen mode is only supported on ChromeOS and macOS.
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_MAC)
 IN_PROC_BROWSER_TEST_F(ContextualTasksEphemeralButtonInteractiveTest,
                        CloseButtonHiddenInImmersiveMode) {
-#if !(BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_MAC))
-  GTEST_SKIP() << "Immersive mode not supported on this platform.";
-#else
   RunTestSequence(
       SignIntoEligibleAccount(), InstrumentTab(kFirstTab),
       AddInstrumentedTab(kSecondTab, GetTestURL()),
@@ -521,29 +496,21 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksEphemeralButtonInteractiveTest,
       // Verify close button is hidden.
       EnsureNotPresent(
           ContextualTasksCloseTabButton::kContextualTasksCloseTabButton));
-#endif
 }
 
 IN_PROC_BROWSER_TEST_F(ContextualTasksEphemeralButtonInteractiveTest,
                        BackgroundUpdatesOnImmersiveModeChange) {
-#if !BUILDFLAG(IS_CHROMEOS) || !BUILDFLAG(IS_MAC)
-  GTEST_SKIP() << "Immersive mode not supported on this platform.";
-#else
   RunTestSequence(
       SignIntoEligibleAccount(), InstrumentTab(kFirstTab),
       AddInstrumentedTab(kSecondTab, GetTestURL()),
       SelectTab(kTabStripElementId, 0),
-      EnsureNotPresent(
-          kContextualTasksEphemeralToolbarButtonElementId),
+      EnsureNotPresent(kContextualTasksEphemeralToolbarButtonElementId),
       CreateTaskForTab(0),
-      EnsureNotPresent(
-          kContextualTasksEphemeralToolbarButtonElementId),
+      EnsureNotPresent(kContextualTasksEphemeralToolbarButtonElementId),
       SimulateOpeningContextualTaskSidePanel(),
-      EnsureNotPresent(
-          kContextualTasksEphemeralToolbarButtonElementId),
+      EnsureNotPresent(kContextualTasksEphemeralToolbarButtonElementId),
       SimulateClosingContextualTaskSidePanel(),
-      WaitForShow(kContextualTasksEphemeralToolbarButtonElementId),
-      Do([&]() {
+      WaitForShow(kContextualTasksEphemeralToolbarButtonElementId), Do([&]() {
         // Simulate entering immersive mode.
         auto* controller = ImmersiveModeController::From(browser());
         controller->SetEnabled(true);
@@ -551,7 +518,7 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksEphemeralButtonInteractiveTest,
       EnsurePresent(kContextualTasksEphemeralToolbarButtonElementId),
       CheckView(kContextualTasksEphemeralToolbarButtonElementId,
                 [](ContextualTasksButton* button) {
-                  return button->GetBackground() != nullptr;
+                  return button->ShouldApplyCircularBackgroundShadow();
                 }),
       Do([&]() {
         // Simulate exiting immersive mode.
@@ -559,8 +526,8 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksEphemeralButtonInteractiveTest,
         controller->SetEnabled(false);
       }),
       WaitForShow(kContextualTasksEphemeralToolbarButtonElementId));
-#endif
 }
+#endif
 
 IN_PROC_BROWSER_TEST_F(ContextualTasksEphemeralButtonInteractiveTest,
                        HideButtonWhenPinned) {
@@ -580,13 +547,33 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksEphemeralButtonInteractiveTest,
       WaitForHide(kContextualTasksEphemeralToolbarButtonElementId));
 }
 
+IN_PROC_BROWSER_TEST_F(ContextualTasksEphemeralButtonInteractiveTest,
+                       PinnedButtonVisibilityUpdatesOnEligibilityChange) {
+  RunTestSequence(SignIntoEligibleAccount(), Do([&]() {
+                    actions::ActionItem* action_item =
+                        actions::ActionManager::Get().FindAction(
+                            kActionSidePanelShowContextualTasks,
+                            browser()->browser_actions()->root_action_item());
+                    ASSERT_NE(action_item, nullptr);
+                    EXPECT_TRUE(action_item->GetVisible());
+                  }),
+                  ClearPrimaryAccount(), Do([&]() {
+                    actions::ActionItem* action_item =
+                        actions::ActionManager::Get().FindAction(
+                            kActionSidePanelShowContextualTasks,
+                            browser()->browser_actions()->root_action_item());
+                    ASSERT_NE(action_item, nullptr);
+                    EXPECT_FALSE(action_item->GetVisible());
+                  }));
+}
 
 class ContextualTasksEphemeralBrandedButtonInteractiveTest
     : public ContextualTasksEphemeralButtonInteractiveTest {
  public:
   void SetUp() override {
     scoped_feature_list_.InitWithFeaturesAndParameters(
-        {{contextual_tasks::kContextualTasks,
+        {{contextual_tasks::kContextualTasks, {}},
+         {contextual_tasks::kContextualTasksEphemeralBrandedEntryPoint,
           {{"ContextualTasksEntryPoint", "toolbar-ephemeral-branded"}}}},
         {});
     InteractiveBrowserTest::SetUp();
@@ -596,7 +583,7 @@ class ContextualTasksEphemeralBrandedButtonInteractiveTest
   base::test::ScopedFeatureList scoped_feature_list_;
 };
 
-IN_PROC_BROWSER_TEST_F(ContextualTasksEphemeralBrandedButtonInteractiveTest,
+IN_PROC_BROWSER_TEST_F(ContextualTasksEphemeralButtonInteractiveTest,
                        ButtonHidesOnContextualTasksPage) {
   RunTestSequence(
       SignIntoEligibleAccount(), InstrumentTab(kFirstTab),

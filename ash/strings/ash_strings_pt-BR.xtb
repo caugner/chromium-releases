@@ -48,6 +48,7 @@
 <translation id="1129383337808748948">Atualizar <ph name="CONTENT_TITLE" /></translation>
 <translation id="1142002900084379065">Fotos recentes</translation>
 <translation id="114221662579355151">Essa ação libera o acesso à câmera para <ph name="APP1_NAME" />, <ph name="APP2_NAME" /> e todos os apps e sites com essa permissão. Talvez seja necessário atualizar a página da Web ou reiniciar o app.</translation>
+<translation id="1145593918056169051">A impressora parou</translation>
 <translation id="1147991416141538220">Para solicitar acesso, entre em contato com o administrador deste dispositivo.</translation>
 <translation id="1148499908455722006">Abrir a caixa de diálogo de informações da conta <ph name="USER_NAME" /></translation>
 <translation id="1150989369772528668">Agenda</translation>
@@ -138,7 +139,7 @@
 <translation id="1338950911836659113">Excluindo...</translation>
 <translation id="1340378040547539434">Diminuir zoom na página</translation>
 <translation id="1341926407152459446">Usar "<ph name="DEVICE_NAME" />" para entrada e saída de áudio</translation>
-<translation id="1346403631707626730">Envie dados de uso e diagnóstico. Ajude a melhorar a experiência da criança com o Android enviando automaticamente ao Google dados de diagnóstico, de uso de apps e do dispositivo. Eles não serão usados para identificar a criança e vão melhorar o sistema, a estabilidade de apps e muito mais. Alguns dados agregados também vão ajudar apps e parceiros do Google, por exemplo, os desenvolvedores Android. Se a opção Atividade Adicional na Web e de Apps estiver ativada para seu filho, esses dados poderão ser salvos na Conta do Google dele. <ph name="BEGIN_LINK1" />Saiba mais sobre as métricas<ph name="BEGIN_LINK1_END" />Saiba mais<ph name="END_LINK1" /></translation>
+<translation id="1346403631707626730">Envie dados de uso e diagnóstico. Ajude a melhorar a experiência da criança com o Android enviando automaticamente ao Google dados de diagnóstico, de uso de apps e do dispositivo. Eles não serão usados para identificar a criança e vão melhorar o sistema, a estabilidade de apps e muito mais. Alguns dados agregados também vão ajudar apps e parceiros do Google, por exemplo, os desenvolvedores Android. Se a opção "Atividade na Web e de apps adicional" estiver ativada para seu filho, esses dados poderão ser salvos na Conta do Google dele. <ph name="BEGIN_LINK1" />Saiba mais sobre as métricas<ph name="BEGIN_LINK1_END" />Saiba mais<ph name="END_LINK1" /></translation>
 <translation id="1346748346194534595">À direita</translation>
 <translation id="1350494136075914725">Em andamento · Mudar para a guia</translation>
 <translation id="1351937230027495976">Recolher menu</translation>
@@ -151,6 +152,7 @@
 <translation id="1383876407941801731">Pesquise</translation>
 <translation id="1388728792929436380">O <ph name="DEVICE_TYPE" /> será reiniciado quando as atualizações forem concluídas.</translation>
 <translation id="1390113502208199250">Você precisará redefinir este dispositivo para a configuração original se quiser usar recursos do Upgrade do Chrome Education.</translation>
+<translation id="1390907927270446471"><ph name="PROFILE_USERNAME" /> não tem autorização para imprimir com a <ph name="PRINTER_NAME" />. Entre em contato com o administrador.</translation>
 <translation id="1391102559483454063">Ativado</translation>
 <translation id="1394698770495054737">Desfoque total</translation>
 <translation id="1395878931462960119">{DAYS,plural, =1{1 dia atrás}one{# dia atrás}other{# dias atrás}}</translation>
@@ -169,6 +171,7 @@
 <translation id="1426410128494586442">Sim</translation>
 <translation id="142655739075382478">O app <ph name="APP_NAME" /> está bloqueado</translation>
 <translation id="142765311413773645">A licença do app <ph name="APP_NAME" /> expirou</translation>
+<translation id="1430915738399379752">Imprimir</translation>
 <translation id="1435537621343861112">Não foi possível iniciar o ditado. Seu microfone está desativado.</translation>
 <translation id="1445031758921122223">Transferência de arquivos de controle facial concluída</translation>
 <translation id="1447907279406111651">Agora ⋅ Termina às <ph name="END_TIME" /></translation>
@@ -229,6 +232,7 @@
 <translation id="1597880963776148053">Etapa <ph name="STEP" /> de <ph name="TOTAL_STEPS" /> do tour. Os apps fixados e abertos aparecem na estante, na parte de baixo da tela. Pressione Alt + Shift + L e pressione Tab para focar nos itens da estante.</translation>
 <translation id="1602085790802918092">Iniciando a máquina virtual</translation>
 <translation id="1602874809115667351"><ph name="LAUNCHER_KEY_NAME" /> + seta para baixo</translation>
+<translation id="1604432177629086300">Não foi possível imprimir. Verifique a impressora e tente novamente</translation>
 <translation id="1604857178818051494">Pausar mídia</translation>
 <translation id="1607312127821884567">Dispensar configuração de visualização de apps do smartphone</translation>
 <translation id="1610778689852195798">"Desfazer"</translation>
@@ -372,6 +376,7 @@
 <translation id="2053312383184521053">Dados em estado de inatividade</translation>
 <translation id="2064048859448024834">Visualização da câmera ativada</translation>
 <translation id="2067220651560163985">Mostrar temperatura em Celsius</translation>
+<translation id="206960706005837784"><ph name="APP_NAME" /> terminou de imprimir em <ph name="PRINTER_NAME" /></translation>
 <translation id="2075520525463668108">Ativar ou desativar o recurso <ph name="CAPTURE_MEDIUM" />. O recurso <ph name="CAPTURE_MEDIUM" /> está <ph name="CAPTURE_STATE" /></translation>
 <translation id="2079545284768500474">Desfazer</translation>
 <translation id="2086334242442703436">Abrir seletor de emojis</translation>
@@ -441,6 +446,7 @@
 <translation id="2328561734797404498">Reinicie o dispositivo para usar o app <ph name="APP_NAME" />.</translation>
 <translation id="2335091074961603075">Seu Chromebook ou dispositivo Bluetooth está usando uma versão mais antiga do Bluetooth. Use o microfone interno para melhorar a qualidade do áudio.</translation>
 <translation id="2336214675195760012">{NUM_DAYS,plural, =1{<ph name="MANAGER" /> precisa que você se conecte hoje ao Wi-Fi para baixar uma atualização. Você também pode usar uma conexão limitada (sujeito a cobranças).}one{<ph name="MANAGER" /> precisa que você se conecte ao Wi-Fi e baixe uma atualização antes do fim do prazo. Você também pode usar uma conexão limitada (sujeito a cobranças).}other{<ph name="MANAGER" /> precisa que você se conecte ao Wi-Fi e baixe uma atualização antes do fim do prazo. Você também pode usar uma conexão limitada (sujeito a cobranças).}}</translation>
+<translation id="2336258397628212480"><ph name="APP_NAME" /> está imprimindo 1 página em <ph name="PRINTER_NAME" /></translation>
 <translation id="2336381494582898602">Powerwash</translation>
 <translation id="2339073806695260576">Toque no botão da stylus na estante para criar uma nota, fazer uma captura de tela e usar o apontador laser ou a lupa.</translation>
 <translation id="2341729377289034582">Bloqueado na vertical</translation>
@@ -473,7 +479,7 @@
 <translation id="2402411679569069051">Para desbloquear o Chromebook, use sua impressão digital ou desbloqueie o smartphone</translation>
 <translation id="240545663114741956">Pressione <ph name="ACCELERATOR" /> duas vezes para sair.</translation>
 <translation id="2406710117564540804">Ativar/desativar o modo Não perturbe</translation>
-<translation id="240789602312469910">Envie dados de uso e diagnóstico. Ajude a melhorar a experiência da criança com o Android enviando automaticamente ao Google dados de diagnóstico, de uso de apps e do dispositivo. Eles não serão usados para identificar a criança e vão melhorar o sistema, a estabilidade de apps e muito mais. Alguns dados agregados também vão ajudar apps e parceiros do Google, por exemplo, os desenvolvedores Android. Essa <ph name="BEGIN_LINK1" />configuração<ph name="END_LINK1" /> é aplicada pelo proprietário, que pode optar por enviar dados de uso e diagnóstico deste dispositivo para o Google. Se a configuração Atividade Adicional na Web e de Apps estiver ativada para a criança, esses dados poderão ser salvos na Conta do Google dela. <ph name="BEGIN_LINK2" />Saiba mais sobre as métricas<ph name="BEGIN_LINK2_END" />Saiba mais<ph name="END_LINK2" /></translation>
+<translation id="240789602312469910">Envie dados de uso e diagnóstico. Ajude a melhorar a experiência da criança com o Android enviando automaticamente ao Google dados de diagnóstico, de uso de apps e do dispositivo. Eles não serão usados para identificar a criança e vão melhorar o sistema, a estabilidade de apps e muito mais. Alguns dados agregados também vão ajudar apps e parceiros do Google, por exemplo, os desenvolvedores Android. Essa <ph name="BEGIN_LINK1" />configuração<ph name="END_LINK1" /> é aplicada pelo proprietário, que pode optar por enviar dados de uso e diagnóstico deste dispositivo para o Google. Se a configuração "Atividade na Web e de apps adicional" estiver ativada para a criança, esses dados poderão ser salvos na Conta do Google dela. <ph name="BEGIN_LINK2" />Saiba mais sobre as métricas<ph name="BEGIN_LINK2_END" />Saiba mais<ph name="END_LINK2" /></translation>
 <translation id="2408955596600435184">Informe seu PIN</translation>
 <translation id="2412593942846481727">Atualização disponível</translation>
 <translation id="2416438829169535743">Sair da visualização?</translation>
@@ -532,6 +538,7 @@
 <translation id="254900897760075745">Copiar conteúdo selecionado para a área de transferência</translation>
 <translation id="2549711466868162843">Ajustar iluminação</translation>
 <translation id="2549985041256363841">Iniciar gravação</translation>
+<translation id="2552966063069741410">Fuso horário</translation>
 <translation id="2562459326218811217">O dispositivo está conectado, mas não está carregando. Tente usar um carregador com mais watts (W) ou o original.</translation>
 <translation id="256712445991462162">a lupa em área fixa</translation>
 <translation id="2573588302192866788">Falha ao conectar <ph name="NAME" /></translation>
@@ -621,6 +628,7 @@ Caso contrário, o touchpad integrado será reativado em <ph name="TIMEOUT_SECON
 <translation id="2838379631617906747">Instalando</translation>
 <translation id="2838589015763961627">Saia da tela cheia para redimensionar</translation>
 <translation id="2840766858109427815">Avançar para a próxima página</translation>
+<translation id="2841013758207633010">Tempo</translation>
 <translation id="2841907151129139818">Modo tablet ativado</translation>
 <translation id="2843560154284403323">Para concluir a configuração do Linux, atualize o ChromeOS e tente novamente.</translation>
 <translation id="2844169650293029770">Dispositivo USB-C (porta frontal da esquerda)</translation>
@@ -718,7 +726,7 @@ Caso contrário, o touchpad integrado será reativado em <ph name="TIMEOUT_SECON
 <translation id="3095995014811312755">versão</translation>
 <translation id="309749186376891736">Mover cursor</translation>
 <translation id="3100071818310370858">Usar o local. Autorizar os apps e serviços com permissão de localização a usar o local deste dispositivo. O Google pode coletar periodicamente e usar dados de local de modo anônimo para melhorar a Precisão de Local e os serviços com base na localização. <ph name="BEGIN_LINK1" />Saiba mais sobre o local<ph name="BEGIN_LINK1_END" />Saiba mais<ph name="END_LINK1" /></translation>
-<translation id="3104948640446684649">Envie dados de uso e diagnóstico. No momento, este dispositivo está enviando automaticamente ao Google dados de diagnóstico, de uso de apps e do dispositivo. Eles ajudarão a melhorar o sistema, a estabilidade de apps e muito mais. Alguns dados agregados também vão ajudar apps e parceiros do Google, por exemplo, os desenvolvedores Android. Se a configuração Atividade Adicional na Web e de Apps estiver ativada, esses dados poderão ser salvos na sua Conta do Google. <ph name="BEGIN_LINK2" />Saiba mais sobre as métricas<ph name="BEGIN_LINK2_END" />Saiba mais<ph name="END_LINK2" /></translation>
+<translation id="3104948640446684649">Envie dados de uso e diagnóstico. No momento, este dispositivo está enviando automaticamente ao Google dados de diagnóstico, de uso de apps e do dispositivo. Eles ajudarão a melhorar o sistema, a estabilidade de apps e muito mais. Alguns dados agregados também vão ajudar apps e parceiros do Google, por exemplo, os desenvolvedores Android. Se a configuração "Atividade na Web e de apps adicional" estiver ativada, esses dados poderão ser salvos na sua Conta do Google. <ph name="BEGIN_LINK2" />Saiba mais sobre as métricas<ph name="BEGIN_LINK2_END" />Saiba mais<ph name="END_LINK2" /></translation>
 <translation id="3105917916468784889">Faça uma captura de tela</translation>
 <translation id="3105990244222795498"><ph name="DEVICE_NAME" /> (Bluetooth)</translation>
 <translation id="3107155169630537783">A notificação de boas-vindas é <ph name="STATE" /></translation>
@@ -753,6 +761,7 @@ Caso contrário, o touchpad integrado será reativado em <ph name="TIMEOUT_SECON
 <translation id="3206735939915734551">Ativar/desativar o Caps Lock</translation>
 <translation id="3207953481422525583">Configurações do usuário</translation>
 <translation id="3208321278970793882">App</translation>
+<translation id="32101887417650595">Não foi possível se conectar à impressora</translation>
 <translation id="3212221635583599601">Conecte-se à Internet para mais opções</translation>
 <translation id="3213571860604332401">Salvar link como favorito</translation>
 <translation id="3217205077783620295">O som está ativado. Alterná-lo desativará o som.</translation>
@@ -821,6 +830,7 @@ Caso contrário, o touchpad integrado será reativado em <ph name="TIMEOUT_SECON
 <translation id="3431517721463707585">Espaço de trabalho 14</translation>
 <translation id="3433507769937235446">Bloquear ao sair</translation>
 <translation id="3434107140712555581"><ph name="BATTERY_PERCENTAGE" />%</translation>
+<translation id="343578350365773421">Sem papel</translation>
 <translation id="3435967511775410570">Impressão digital reconhecida</translation>
 <translation id="3437677362970530951">Jogos na Play Store e em outras plataformas</translation>
 <translation id="3439896670700055005">Atualizar a página atual sem usar conteúdo em cache</translation>
@@ -997,6 +1007,7 @@ Conecte o dispositivo a uma fonte de energia.</translation>
 <translation id="3848526302597027234">Acessar estas permissões:</translation>
 <translation id="385051799172605136">Voltar</translation>
 <translation id="385300504083504382">Começo</translation>
+<translation id="3854976556788175030">A bandeja de saída está cheia</translation>
 <translation id="3857807444929313943">Tire o dedo e toque novamente</translation>
 <translation id="3859364108019690">Não é possível fazer streaming de apps</translation>
 <translation id="3861638017150647085">O nome de usuário "<ph name="USERNAME" />" não está disponível</translation>
@@ -1049,6 +1060,7 @@ Conecte o dispositivo a uma fonte de energia.</translation>
 <translation id="401993194061514265">Marcador indisponível; Abra o Screencast novamente.</translation>
 <translation id="4021716437419160885">Rolar para baixo</translation>
 <translation id="4022497978915111141">Bloquear dispositivo</translation>
+<translation id="4023048917751563912"><ph name="APP_NAME" /> está imprimindo <ph name="PAGE_NUMBER" /> páginas em <ph name="PRINTER_NAME" /></translation>
 <translation id="4024840464866786680">Se você esqueceu o PIN e a senha do dispositivo ou mudou a senha da sua Conta do Google recentemente, tente recuperar o usuário.</translation>
 <translation id="4026843240379844265">Mover janela ativa entre telas</translation>
 <translation id="4028481283645788203">A senha é necessária para aumentar a segurança</translation>
@@ -1129,7 +1141,7 @@ Alguns recursos estão limitados para aumentar a duração da bateria.</translat
 <translation id="4236726631849783264">Um lembrete sobre as ações sugeridas</translation>
 <translation id="4239069858505860023">GPRS</translation>
 <translation id="4240486403425279990">Modo de visão geral</translation>
-<translation id="4242533952199664413">Abrir configurações</translation>
+<translation id="4242533952199664413">Abrir configurações.</translation>
 <translation id="4244765461494758482">Essas configurações estão sendo sincronizadas com outros dispositivos ChromeOS. Você pode mudar isso aqui ou gerenciar a lista completa nas Configurações.</translation>
 <translation id="4247123849143712100">Atualizar e desligar</translation>
 <translation id="4249248555939881673">Aguardando conexão da rede...</translation>
@@ -1276,6 +1288,7 @@ Alguns recursos estão limitados para aumentar a duração da bateria.</translat
 <translation id="4633636853437260449">Pressione Ctrl+W para excluir</translation>
 <translation id="4633757335284074492">Fazer backup no Google Drive Restaure dados ou troque de dispositivo a qualquer momento com facilidade. O backup inclui dados do app. Os backups são enviados ao Google e criptografados usando a senha da Conta do Google da criança.</translation>
 <translation id="4635501805800894201">{0,plural, =0{Reverta o dispositivo para a versão anterior agora}=1{Reverta o dispositivo para a versão anterior em até 1 segundo}one{Reverta o dispositivo para a versão anterior em até # segundo}other{Reverta o dispositivo para a versão anterior em até # segundos}}</translation>
+<translation id="4641539339823703554">Não foi possível para o Google Chrome configurar a hora do sistema. Verifique a hora abaixo e corrija-a, se necessário.</translation>
 <translation id="4642092649622328492">Fazer uma captura de tela parcial</translation>
 <translation id="4643833688073835173">Seu Chromebook usa um sensor integrado para detectar pessoas em frente ao dispositivo. Todos os dados são processados no dispositivo imediatamente e, em seguida, excluídos. Os dados do sensor nunca são enviados ao Google.</translation>
 <translation id="4644727592819780893">A região é muito pequena para caber na câmera</translation>
@@ -1578,6 +1591,7 @@ Nenhum dispositivo conectado.</translation>
 <translation id="5491186829646618080">Atualizações de firmware disponíveis</translation>
 <translation id="5503884284981862082">Abrir/fechar o Google Assistente</translation>
 <translation id="550391772491508736">Retomar transmissão</translation>
+<translation id="5505307013568720083">Sem tinta</translation>
 <translation id="5506975627792768506">Ativar ou desativar a lupa</translation>
 <translation id="5507778598655387680"><ph name="VOLUME_LEVEL" />, pressione Enter para desativar o áudio.</translation>
 <translation id="5512042095225963688">Excluir palavra anterior</translation>
@@ -1663,7 +1677,7 @@ Nenhum dispositivo conectado.</translation>
 <translation id="573413375004481890">Este dispositivo não é compatível com essa quantidade de telas. Por isso, uma delas foi desconectada</translation>
 <translation id="574392208103952083">Médio</translation>
 <translation id="5745612484876805746">O modo noturno será ativado automaticamente ao pôr do sol</translation>
-<translation id="5749214722697335450">Envie dados de uso e diagnóstico. Ajude a melhorar sua experiência com o Android enviando automaticamente ao Google dados de diagnóstico, de uso de apps e do dispositivo. Eles ajudarão a melhorar o sistema, a estabilidade de apps e muito mais. Alguns dados agregados também vão ajudar apps e parceiros do Google, por exemplo, os desenvolvedores Android. Se a configuração Atividade Adicional na Web e de Apps estiver ativada, esses dados poderão ser salvos na sua Conta do Google. <ph name="BEGIN_LINK1" />Saiba mais sobre as métricas<ph name="BEGIN_LINK1_END" />Saiba mais<ph name="END_LINK1" /></translation>
+<translation id="5749214722697335450">Envie dados de uso e diagnóstico. Ajude a melhorar sua experiência com o Android enviando automaticamente ao Google dados de diagnóstico, de uso de apps e do dispositivo. Eles ajudarão a melhorar o sistema, a estabilidade de apps e muito mais. Alguns dados agregados também vão ajudar apps e parceiros do Google, por exemplo, os desenvolvedores Android. Se a configuração "Atividade na Web e de apps adicional" estiver ativada, esses dados poderão ser salvos na sua Conta do Google. <ph name="BEGIN_LINK1" />Saiba mais sobre as métricas<ph name="BEGIN_LINK1_END" />Saiba mais<ph name="END_LINK1" /></translation>
 <translation id="5750765938512549687">Bluetooth desativado</translation>
 <translation id="5758114525425072423">Iniciar o Foco. Timer definido para <ph name="FOCUS_DURATION" />.</translation>
 <translation id="5759522586053040964">Saiba como outras pessoas vão ouvir sua voz. Para interromper, clique no ícone de teste ou feche o painel de videochamada.</translation>
@@ -1681,7 +1695,7 @@ Nenhum dispositivo conectado.</translation>
 <translation id="5775936059231769503">Ative ou desative o ponto de acesso. O ponto de acesso está desativado.</translation>
 <translation id="5777841717266010279">Interromper compartilhamento de tela?</translation>
 <translation id="5779721926447984944">Arquivos fixados</translation>
-<translation id="5780940414249100901">Envie dados de uso e diagnóstico. No momento, este dispositivo está enviando automaticamente ao Google dados de diagnóstico, de uso de apps e do dispositivo. Eles não serão usados para identificar a criança e vão melhorar o sistema, a estabilidade de apps e muito mais. Alguns dados agregados também vão ajudar apps e parceiros do Google, por exemplo, os desenvolvedores Android. Essa <ph name="BEGIN_LINK1" />configuração<ph name="END_LINK1" /> é aplicada pelo proprietário. Se a configuração Atividade Adicional na Web e de Apps estiver ativada para a criança, esses dados poderão ser salvos na Conta do Google dela. <ph name="BEGIN_LINK2" />Saiba mais sobre as métricas<ph name="BEGIN_LINK2_END" />Saiba mais<ph name="END_LINK2" /></translation>
+<translation id="5780940414249100901">Envie dados de uso e diagnóstico. No momento, este dispositivo está enviando automaticamente ao Google dados de diagnóstico, de uso de apps e do dispositivo. Eles não serão usados para identificar a criança e vão melhorar o sistema, a estabilidade de apps e muito mais. Alguns dados agregados também vão ajudar apps e parceiros do Google, por exemplo, os desenvolvedores Android. Essa <ph name="BEGIN_LINK1" />configuração<ph name="END_LINK1" /> é aplicada pelo proprietário. Se a configuração "Atividade na Web e de apps adicional" estiver ativada para a criança, esses dados poderão ser salvos na Conta do Google dela. <ph name="BEGIN_LINK2" />Saiba mais sobre as métricas<ph name="BEGIN_LINK2_END" />Saiba mais<ph name="END_LINK2" /></translation>
 <translation id="5787431783058088906">Aproveite o benefício</translation>
 <translation id="5788127256798019331">Arquivos do Google Play</translation>
 <translation id="5788535737706478207">Reabrir a última guia ou janela fechada</translation>
@@ -1689,12 +1703,14 @@ Nenhum dispositivo conectado.</translation>
 <translation id="5791926618942305301">Na captura de tela, defina como <ph name="SOURCE" /> <ph name="TYPE" />. Pressione Tab para escolher o tipo de captura. Pressione Enter para capturar. Para selecionar a área, defina como uma captura de tela parcial. Pressione a barra de espaço para selecionar a região, se ainda não estiver ativa.</translation>
 <translation id="579415080077680903">Silenciar</translation>
 <translation id="5802516411616338943">Abrir as Configurações Rápidas</translation>
+<translation id="5804241973901381774">Permissões</translation>
 <translation id="5804651031882187592">Desative a configuração "Bloquear chip"</translation>
 <translation id="5805809050170488595">Clique para ativar <ph name="NETWORK_NAME" /></translation>
 <translation id="5818796501620225415">Você pode adicionar mais tempo ou encerrar sua sessão de foco</translation>
 <translation id="5819918159912280082">Seu Chromebook foi reiniciado de maneira inesperada. Abra as janelas e os apps anteriores.</translation>
 <translation id="5823239091726045201">Google Tarefas na Web</translation>
 <translation id="5825969630400862129">Configurações de dispositivos conectados</translation>
+<translation id="5828633471261496623">Imprimindo...</translation>
 <translation id="5830180081891717894">Mais <ph name="WINDOWS" /></translation>
 <translation id="5830205393314753525">Não foi possível abrir o app <ph name="APP_NAME" /></translation>
 <translation id="583281660410589416">Desconhecido</translation>
@@ -1719,6 +1735,7 @@ Nenhum dispositivo conectado.</translation>
 <translation id="5892014525522223653">Você está off-line.</translation>
 <translation id="5895138241574237353">Reiniciar</translation>
 <translation id="589817443623831496">Verificação por ponto</translation>
+<translation id="5901494423252125310">A porta da impressora está aberta</translation>
 <translation id="5901630391730855834">Amarelo</translation>
 <translation id="5904614460720589786">Não foi possível definir o app <ph name="APP_NAME" /> devido a um problema de configuração. Entre em contato com o administrador. Código do erro: <ph name="ERROR_CODE" />.</translation>
 <translation id="5910726859585389579"><ph name="DEVICE_TYPE" /> está off-line</translation>
@@ -1783,6 +1800,7 @@ Nenhum dispositivo conectado.</translation>
         <ph name="BEGIN_PARAGRAPH2" />A desativação desse recurso não afeta a capacidade do dispositivo de enviar as informações necessárias para serviços essenciais, como atualizações do sistema e segurança.<ph name="END_PARAGRAPH2" />
         <ph name="BEGIN_PARAGRAPH3" />O proprietário pode controlar esse recurso em Configurações &gt; Avançado &gt; Enviar automaticamente dados de uso e diagnóstico ao Google.<ph name="END_PARAGRAPH3" />
         <ph name="BEGIN_PARAGRAPH4" />Se a configuração Atividade Adicional na Web e de Apps estiver ativada para uma criança, esses dados poderão ser salvos na Conta do Google dela. Saiba mais sobre essas configurações e como ajustá-las em families.google.com.<ph name="END_PARAGRAPH4" /></translation>
+<translation id="6052261338768299955"><ph name="APP_NAME" /> está tentando imprimir em <ph name="PRINTER_NAME" /></translation>
 <translation id="6054305421211936131">Fazer login com cartão inteligente</translation>
 <translation id="6059276912018042191">Guias recentes do Chrome</translation>
 <translation id="606147842285839995">ExpressKey 3</translation>
@@ -1797,6 +1815,7 @@ Nenhum dispositivo conectado.</translation>
 <translation id="6073451960410192870">Parar de gravar</translation>
 <translation id="6074087755403037157">Canal Beta</translation>
 <translation id="6075098173600599596">Mudar capitalização</translation>
+<translation id="6080689532560039067">Verifique a hora do seu sistema</translation>
 <translation id="6091929401758362855">Playlist: <ph name="PLAYLIST_TITLE" /></translation>
 <translation id="6093867385179428431">Desativada pelo administrador</translation>
 <translation id="6095008505822982596">Velocidade da fala</translation>
@@ -1869,7 +1888,7 @@ Nenhum dispositivo conectado.</translation>
 <translation id="6288235558961782912"><ph name="USER_EMAIL_ADDRESS" /> pode ser adicionado novamente com a permissão do familiar responsável.</translation>
 <translation id="6291221004442998378">Não está carregando</translation>
 <translation id="6291580570300353047">Não é possível restaurar devido à falta de espaço de armazenamento.</translation>
-<translation id="6297986260307280218">Envie dados de uso e diagnóstico. Ajude a melhorar sua experiência com o Android enviando automaticamente ao Google dados de diagnóstico, de uso de apps e do dispositivo. Eles ajudarão a melhorar o sistema, a estabilidade de apps e muito mais. Alguns dados agregados também vão ajudar apps e parceiros do Google, por exemplo, os desenvolvedores Android. Essa <ph name="BEGIN_LINK1" />configuração<ph name="END_LINK1" /> é aplicada pelo proprietário. que pode optar por enviar dados de uso e diagnóstico deste dispositivo para o Google. Se a configuração Atividade Adicional na Web e de Apps estiver ativada, esses dados poderão ser salvos na sua Conta do Google. <ph name="BEGIN_LINK2" />Saiba mais sobre as métricas<ph name="BEGIN_LINK2_END" />Saiba mais<ph name="END_LINK2" /></translation>
+<translation id="6297986260307280218">Envie dados de uso e diagnóstico. Ajude a melhorar sua experiência com o Android enviando automaticamente ao Google dados de diagnóstico, de uso de apps e do dispositivo. Eles ajudarão a melhorar o sistema, a estabilidade de apps e muito mais. Alguns dados agregados também vão ajudar apps e parceiros do Google, por exemplo, os desenvolvedores Android. Essa <ph name="BEGIN_LINK1" />configuração<ph name="END_LINK1" /> é aplicada pelo proprietário. que pode optar por enviar dados de uso e diagnóstico deste dispositivo para o Google. Se a configuração "Atividade na Web e de apps adicional" estiver ativada, esses dados poderão ser salvos na sua Conta do Google. <ph name="BEGIN_LINK2" />Saiba mais sobre as métricas<ph name="BEGIN_LINK2_END" />Saiba mais<ph name="END_LINK2" /></translation>
 <translation id="6298183524022479114">Personalize este dispositivo no app</translation>
 <translation id="6298962879096096191">Usar o Google Play para instalar apps do Android</translation>
 <translation id="6304076460080088478">Feche ou minimize as janelas anônimas para pesquisar sobre o que está na tela com o Google Lens</translation>
@@ -1886,6 +1905,7 @@ Nenhum dispositivo conectado.</translation>
 <translation id="6337159624125741244">A lupa de tela cheia está ativada</translation>
 <translation id="6338485349199627913"><ph name="DISPLAY_NAME" /> é uma sessão gerenciada por <ph name="MANAGER" /></translation>
 <translation id="6340148837564298498">Se você esqueceu o PIN, tente recuperar o usuário.</translation>
+<translation id="634208815998129842">Gerenciador de tarefas</translation>
 <translation id="6344138931392227467"><ph name="DEVICE_NAME" /> conectado</translation>
 <translation id="6345418402353744910">É preciso inserir seu nome de usuário e sua senha para o proxy <ph name="PROXY" />. Assim, o administrador poderá configurar sua rede.</translation>
 <translation id="6348449481487610270"><ph name="MODIFIER_ONE" /> + <ph name="MODIFIER_TWO" /> + <ph name="KEY_ONE" /> e depois <ph name="MODIFIER_THREE" /> + <ph name="KEY_TWO" /> ou <ph name="KEY_THREE" /></translation>
@@ -2091,6 +2111,7 @@ Nova instalação</translation>
 <translation id="6921427376813842559">Atualize o dispositivo</translation>
 <translation id="6929081673585394903">Mostrar controles</translation>
 <translation id="6931576957638141829">Salvar em</translation>
+<translation id="6935286146439255109">A bandeja de papel não foi encontrada</translation>
 <translation id="6935857786205183008">Retrato</translation>
 <translation id="6942518653766415536">Menu de formato de gravação</translation>
 <translation id="6945221475159498467">Selecionar</translation>
@@ -2113,6 +2134,7 @@ Nova instalação</translation>
 <translation id="6988094684494323731">Iniciando o contêiner Linux</translation>
 <translation id="7000027735917578303">Configurações de janelas e espaços de trabalho</translation>
 <translation id="7001036685275644873">Fazendo backup dos apps e arquivos do Linux</translation>
+<translation id="7001066449188684145">A identificação é necessária para imprimir com a <ph name="PRINTER_NAME" />. Entre em contato com o administrador.</translation>
 <translation id="7004910047186208204">Conectar-se aos dados móveis</translation>
 <translation id="7005239792648594238">Abra um app para começar</translation>
 <translation id="7014684956566476813">Conectado a um dispositivo chamado <ph name="DEVICE_NAME" /></translation>
@@ -2152,6 +2174,7 @@ Nova instalação</translation>
 <translation id="7108254681523785542">Selecione um item para colar. Para conferir a área de transferência, pressione <ph name="SHORTCUT_KEY_NAME" /> + v.</translation>
 <translation id="7108338896283013870">Ocultar</translation>
 <translation id="7108933416628942903">Bloquear agora</translation>
+<translation id="7116554090938189816">O certificado SSL expirou. Reinicie a impressora e tente de novo.</translation>
 <translation id="7116969082764510092">Espaço de trabalho 11</translation>
 <translation id="7118268675952955085">captura de tela</translation>
 <translation id="7118597077555700347">Abrir <ph name="SEARCH_RESULT_TEXT" /></translation>
@@ -2203,6 +2226,7 @@ Nova instalação</translation>
 <translation id="7312210124139670355">O administrador está redefinindo o eSIM. Pode levar alguns minutos..</translation>
 <translation id="7312761820869643657">Reverta o dispositivo para a versão anterior</translation>
 <translation id="7313193732017069507">Abrir câmera</translation>
+<translation id="7325209047678309347">Atolamento de papel</translation>
 <translation id="7327989755579928735"><ph name="MANAGER" /> desativou a depuração do adb. Não será possível transferir apps por sideload depois de reiniciar o <ph name="DEVICE_TYPE" />.</translation>
 <translation id="73289266812733869">Desmarcado</translation>
 <translation id="7330397557116570022">Para usar o Ditado, vá até um campo de texto</translation>
@@ -2577,6 +2601,7 @@ Para desligar o dispositivo, toque no botão liga/desliga novamente e pressione.
 <translation id="8339706171276328417"><ph name="ACTION_DESCRIPTION" /> · <ph name="TIME" /></translation>
 <translation id="834414266279889566">Resultado ruim</translation>
 <translation id="8345019317483336363">Janela <ph name="WINDOW_TITLE" /> selecionada</translation>
+<translation id="8347227221149377169">Trabalhos de impressão</translation>
 <translation id="8349826889576450703">iniciador</translation>
 <translation id="8349964124165471584">Abrir link em uma nova janela</translation>
 <translation id="8351131234907093545">Criar nota</translation>
@@ -2615,6 +2640,7 @@ Para desligar o dispositivo, toque no botão liga/desliga novamente e pressione.
 <translation id="8458259704995116343">Falha ao iniciar a VM.</translation>
 <translation id="84613761564611563">Interface de usuário de configuração de rede solicitada. Aguarde...</translation>
 <translation id="8462305545768648477">Fechar o Selecionar para Ouvir</translation>
+<translation id="8463001014623882202">Falha na autorização</translation>
 <translation id="8466665972451889002">Mostrar itens no grupo <ph name="GROUP_NAME" /></translation>
 <translation id="8468806060683421065">prazo: <ph name="DUE_DATE_AND_TIME" /></translation>
 <translation id="8473301994082929012"><ph name="ORGANIZATION_NAME" /> <ph name="FEATURE_STATE" /> o recurso <ph name="FEATURE_NAME" />.</translation>
@@ -2765,7 +2791,7 @@ Para desligar o dispositivo, toque no botão liga/desliga novamente e pressione.
 <translation id="8874184842967597500">Não conectado</translation>
 <translation id="8876148469852588625">Evento <ph name="EVENT_POSITION" /> de <ph name="EVENT_TOTAL_COUNT" /></translation>
 <translation id="8876661425082386199">Verifique sua conexão</translation>
-<translation id="8883478023074930307">Envie dados de uso e diagnóstico. No momento, este dispositivo está enviando automaticamente ao Google dados de diagnóstico, de uso de apps e do dispositivo. Eles ajudarão a melhorar o sistema, a estabilidade de apps e muito mais. Alguns dados agregados também vão ajudar apps e parceiros do Google, por exemplo, os desenvolvedores Android. Essa <ph name="BEGIN_LINK1" />configuração<ph name="END_LINK1" /> é aplicada pelo proprietário. Se a configuração Atividade Adicional na Web e de Apps estiver ativada, esses dados poderão ser salvos na sua Conta do Google. <ph name="BEGIN_LINK2" />Saiba mais sobre as métricas<ph name="BEGIN_LINK2_END" />Saiba mais<ph name="END_LINK2" /></translation>
+<translation id="8883478023074930307">Envie dados de uso e diagnóstico. No momento, este dispositivo está enviando automaticamente ao Google dados de diagnóstico, de uso de apps e do dispositivo. Eles ajudarão a melhorar o sistema, a estabilidade de apps e muito mais. Alguns dados agregados também vão ajudar apps e parceiros do Google, por exemplo, os desenvolvedores Android. Essa <ph name="BEGIN_LINK1" />configuração<ph name="END_LINK1" /> é aplicada pelo proprietário. Se a configuração "Atividade na Web e de apps adicional" estiver ativada, esses dados poderão ser salvos na sua Conta do Google. <ph name="BEGIN_LINK2" />Saiba mais sobre as métricas<ph name="BEGIN_LINK2_END" />Saiba mais<ph name="END_LINK2" /></translation>
 <translation id="8885424115080869847">Não foi possível se conectar ao YouTube Music</translation>
 <translation id="8888253246822647887">O app será aberto após a conclusão do upgrade. Os upgrades podem levar alguns minutos.</translation>
 <translation id="888982883502837004">Há atualizações de firmware disponíveis para seu dispositivo. Clique para revisar e atualizar.</translation>
@@ -2866,7 +2892,7 @@ Para desligar o dispositivo, toque no botão liga/desliga novamente e pressione.
 <translation id="9194617393863864469">Fazer login com outro usuário...</translation>
 <translation id="9195857219954068558">Seu Chromebook foi atualizado. Abra as janelas e os apps anteriores.</translation>
 <translation id="9195990613383871904">Amanhã</translation>
-<translation id="9199853905755292769">Envie dados de uso e diagnóstico. No momento, este dispositivo está enviando automaticamente ao Google dados de diagnóstico, de uso de apps e do dispositivo. Eles não serão usados para identificar a criança e vão ajudar a melhorar o sistema, a estabilidade de apps e muito mais. Alguns dados agregados também vão ajudar apps e parceiros do Google, por exemplo, os desenvolvedores Android. Se a configuração Atividade Adicional na Web e de Apps estiver ativada para a criança, esses dados poderão ser salvos na Conta do Google dela. <ph name="BEGIN_LINK2" />Saiba mais sobre as métricas<ph name="BEGIN_LINK2_END" />Saiba mais<ph name="END_LINK2" /></translation>
+<translation id="9199853905755292769">Envie dados de uso e diagnóstico. No momento, este dispositivo está enviando automaticamente ao Google dados de diagnóstico, de uso de apps e do dispositivo. Eles não serão usados para identificar a criança e vão ajudar a melhorar o sistema, a estabilidade de apps e muito mais. Alguns dados agregados também vão ajudar apps e parceiros do Google, por exemplo, os desenvolvedores Android. Se a configuração "Atividade na Web e de apps adicional" estiver ativada para a criança, esses dados poderão ser salvos na Conta do Google dela. <ph name="BEGIN_LINK2" />Saiba mais sobre as métricas<ph name="BEGIN_LINK2_END" />Saiba mais<ph name="END_LINK2" /></translation>
 <translation id="9201044636667689546">Conecte <ph name="NAME" /> ao Chromebook</translation>
 <translation id="9201374708878217446"><ph name="CONNECTION_STATUS" />, gerenciada pelo seu administrador</translation>
 <translation id="9201842707396338580">Algo deu errado. Entre em contato com o proprietário ou administrador do dispositivo. Código do erro: <ph name="ERROR_CODE" />.</translation>

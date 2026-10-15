@@ -20,6 +20,7 @@ import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.contextual_tasks.fusebox.ContextualTasksFuseboxManager;
+import org.chromium.chrome.browser.feedback.FeedbackPolicyManager;
 import org.chromium.chrome.browser.feedback.HelpAndFeedbackLauncherFactory;
 import org.chromium.chrome.browser.omnibox.voice.VoiceRecognitionIntentHandler;
 import org.chromium.chrome.browser.omnibox.voice.VoiceRecognitionIntentHandler.VoiceInteractionSource;
@@ -111,6 +112,9 @@ public class ContextualTasksBridge implements ChromeAndroidTaskFeature {
 
     @CalledByNative
     void openFeedbackUi(String pageUrl) {
+        if (!FeedbackPolicyManager.getInstance().isUserFeedbackAllowed()) {
+            return;
+        }
         Activity activity = mWindowAndroid.getActivity().get();
         if (activity == null) return;
 
@@ -204,6 +208,17 @@ public class ContextualTasksBridge implements ChromeAndroidTaskFeature {
         return ContextualTasksBridgeJni.get().isContextualTasksUrl(url);
     }
 
+    /**
+     * Returns whether the Contextual Tasks side panel is open for the given tab.
+     *
+     * @param tab The tab to check.
+     * @return True if the panel is open.
+     */
+    public static boolean isPanelOpen(@Nullable Tab tab) {
+        if (tab == null || tab.getWebContents() == null) return false;
+        return ContextualTasksBridgeJni.get().isPanelOpen(tab.getWebContents());
+    }
+
     @NativeMethods
     public interface Natives {
         long init(
@@ -222,5 +237,7 @@ public class ContextualTasksBridge implements ChromeAndroidTaskFeature {
         String getTaskIdForTab(@JniType("content::WebContents*") WebContents webContents);
 
         boolean isContextualTasksUrl(@JniType("GURL") GURL url);
+
+        boolean isPanelOpen(@JniType("content::WebContents*") WebContents webContents);
     }
 }

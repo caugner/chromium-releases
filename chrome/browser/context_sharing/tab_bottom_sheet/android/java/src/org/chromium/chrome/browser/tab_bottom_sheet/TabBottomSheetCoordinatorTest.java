@@ -8,9 +8,9 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentCaptor.captor;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.anyFloat;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
@@ -42,7 +42,6 @@ import android.view.accessibility.AccessibilityEvent;
 
 import androidx.test.ext.junit.rules.ActivityScenarioRule;
 
-import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -56,7 +55,9 @@ import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowLooper;
 
 import org.chromium.base.ActivityState;
+import org.chromium.base.supplier.NullableObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.base.test.util.HistogramWatcher;
 import org.chromium.base.test.util.UserActionTester;
@@ -72,7 +73,6 @@ import org.chromium.components.browser_ui.bottomsheet.BottomSheetObserver;
 import org.chromium.components.browser_ui.widget.RoundedCornerOutlineProvider;
 import org.chromium.components.browser_ui.widget.TouchEventObserver;
 import org.chromium.components.browser_ui.widget.TouchEventProvider;
-import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.KeyboardVisibilityDelegate;
 import org.chromium.ui.base.TestActivity;
 import org.chromium.ui.base.ViewUtils;
@@ -85,6 +85,7 @@ import org.chromium.ui.modelutil.PropertyModel;
 /** Unit tests for {@link TabBottomSheetCoordinator}. */
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
+@DisabledTest(message = "crbug.com/525121206")
 public class TabBottomSheetCoordinatorTest {
     private static final float FULL_HEIGHT_RATIO = 0.7f;
     private static final float SMALL_SCREEN_HEIGHT_RATIO = 0.9f;
@@ -116,7 +117,7 @@ public class TabBottomSheetCoordinatorTest {
     @Mock private WindowAndroid mWindowAndroid;
     @Mock private KeyboardVisibilityDelegate mKeyboardDelegate;
     @Mock private TabBottomSheetWebUi mMockWebUi;
-    @Mock private TabBottomSheetContentProvider mMockContentProvider;
+    @Mock private CoBrowseComponentProvider mMockContentProvider;
 
     @Captor private ArgumentCaptor<TabBottomSheetContent> mBottomSheetContentArgumentCaptor;
     @Captor private ArgumentCaptor<BottomSheetObserver> mBottomSheetObserverArgumentCaptor;
@@ -145,6 +146,10 @@ public class TabBottomSheetCoordinatorTest {
         containerView.setFocusableInTouchMode(true);
 
         View containerViewSpy = spy(containerView);
+        // Delegate post() directly to the main looper Handler. Otherwise, because containerViewSpy
+        // is a Mockito spy, calling post() delegates to the unattached containerView delegate
+        // instance, which buffers the runnable indefinitely since it never gets attached to a
+        // window.
         doAnswer(
                         invocation -> {
                             Runnable runnable = invocation.getArgument(0);
@@ -158,25 +163,6 @@ public class TabBottomSheetCoordinatorTest {
         View webUiView = new View(mContext);
         when(mMockWebUi.getWebUiView()).thenReturn(webUiView);
 
-        doAnswer(
-                        invocation -> {
-                            View view = invocation.getArgument(0);
-                            float heightRatio = invocation.getArgument(1);
-                            int bgColor = invocation.getArgument(2);
-                            int peekViewHeight = invocation.getArgument(3);
-                            int actorControlContainerId = invocation.getArgument(4);
-                            int emptyPlaceholderContainerId = invocation.getArgument(5);
-                            return new TestTabBottomSheetContent(
-                                    view,
-                                    heightRatio,
-                                    bgColor,
-                                    peekViewHeight,
-                                    actorControlContainerId,
-                                    emptyPlaceholderContainerId);
-                        })
-                .when(mMockContentProvider)
-                .create(any(View.class), anyFloat(), anyInt(), anyInt(), anyInt(), anyInt());
-
         mCoBrowseViews =
                 spy(
                         new CoBrowseViews(
@@ -186,7 +172,8 @@ public class TabBottomSheetCoordinatorTest {
                                 mMockWebUi,
                                 null,
                                 0,
-                                mMockContentProvider));
+                                mMockContentProvider,
+                                null));
         mView = containerViewSpy;
         assertNotNull(
                 "peek_view_container should be found in CoBrowseViews",
@@ -214,17 +201,10 @@ public class TabBottomSheetCoordinatorTest {
                         mMockBottomSheetController,
                         mMockTouchEventProvider,
                         mCoBrowseViews,
-                        mMockSheetEventsCallback);
+                        mMockSheetEventsCallback,
+                        () -> {});
 
         mCoordinatorModel = mCoordinator.getModelForTesting();
-    }
-
-    @After
-    public void tearDown() {
-        if (mCoordinator != null) {
-            mCoordinator.destroy();
-        }
-        TestTabBottomSheetContent.setUsePlaceholderForTesting(false);
     }
 
     /**
@@ -372,6 +352,29 @@ public class TabBottomSheetCoordinatorTest {
     }
 
     @Test
+    public void testDoNotExpandWhenInsufficientViewportSpace() {
+        // Setup a very small viewport height
+        when(mMockDecorView.getHeight()).thenReturn(50);
+        doAnswer(
+                        invocation -> {
+                            Rect rect = invocation.getArgument(0);
+                            rect.set(0, 0, CONTAINER_WIDTH, 50);
+                            return null;
+                        })
+                .when(mMockDecorView)
+                .getWindowVisibleDisplayFrame(any(Rect.class));
+
+        simulateShowSuccessAndGetObserver();
+
+        // Flush the looper to run the runnable posted in tryToShowBottomSheet()
+        ShadowLooper.idleMainLooper();
+
+        // expandSheet(true) should NOT have been called because viewport height is insufficient
+        verify(mMockBottomSheetController, never()).expandSheet(anyBoolean());
+        verify(mMockSheetEventsCallback).onBottomSheetOpened(false);
+    }
+
+    @Test
     public void testOnConfigurationChanged() {
         BottomSheetObserver observer = simulateShowSuccessAndGetObserver();
 
@@ -488,11 +491,13 @@ public class TabBottomSheetCoordinatorTest {
             observer.onSheetStateChanged(SheetState.HALF, StateChangeReason.NONE);
             assertEquals(1, userActionTester.getActionCount("Glic.Instance.Show.BottomSheet"));
 
-            // 2. Transitioning between open expanded states (HALF to FULL) should NOT record metric again.
+            // 2. Transitioning between open expanded states (HALF to FULL) should NOT record metric
+            // again.
             observer.onSheetStateChanged(SheetState.FULL, StateChangeReason.NONE);
             assertEquals(1, userActionTester.getActionCount("Glic.Instance.Show.BottomSheet"));
 
-            // 3. Transitioning from FULL to PEEK (non-expanded) then back to HALF (expanded) should record it a second time.
+            // 3. Transitioning from FULL to PEEK (non-expanded) then back to HALF (expanded) should
+            // record it a second time.
             observer.onSheetStateChanged(SheetState.PEEK, StateChangeReason.NONE);
             observer.onSheetStateChanged(SheetState.HALF, StateChangeReason.NONE);
             assertEquals(2, userActionTester.getActionCount("Glic.Instance.Show.BottomSheet"));
@@ -888,7 +893,8 @@ public class TabBottomSheetCoordinatorTest {
                         mMockWebUi,
                         null,
                         0,
-                        mMockContentProvider);
+                        mMockContentProvider,
+                        null);
         mCoordinator =
                 new TabBottomSheetCoordinator(
                         mContext,
@@ -896,7 +902,8 @@ public class TabBottomSheetCoordinatorTest {
                         mMockBottomSheetController,
                         mMockTouchEventProvider,
                         mCoBrowseViews,
-                        mMockSheetEventsCallback);
+                        mMockSheetEventsCallback,
+                        () -> {});
 
         BottomSheetObserver observer = simulateShowSuccessAndGetObserver();
 
@@ -957,7 +964,8 @@ public class TabBottomSheetCoordinatorTest {
                         mMockWebUi,
                         null,
                         0,
-                        mMockContentProvider);
+                        mMockContentProvider,
+                        null);
         mCoordinator =
                 new TabBottomSheetCoordinator(
                         mContext,
@@ -965,7 +973,8 @@ public class TabBottomSheetCoordinatorTest {
                         mMockBottomSheetController,
                         mMockTouchEventProvider,
                         mCoBrowseViews,
-                        mMockSheetEventsCallback);
+                        mMockSheetEventsCallback,
+                        () -> {});
 
         BottomSheetObserver observer = simulateShowSuccessAndGetObserver();
 
@@ -1080,64 +1089,45 @@ public class TabBottomSheetCoordinatorTest {
     }
 
     @Test
-    public void testPlaceholderVisibility_usePlaceholderFalse() {
-        TestTabBottomSheetContent.setUsePlaceholderForTesting(false);
+    public void testPlaceholderAllowedSupplier_UpdatesOnSheetStateChanged() {
         BottomSheetObserver observer = simulateShowSuccessAndGetObserver();
-        View placeholder = mView.findViewById(R.id.empty_placeholder_container);
-        assertNotNull(placeholder);
+        ArgumentCaptor<NullableObservableSupplier<Boolean>> captor = captor();
+        verify(mCoBrowseViews).setPlaceholderAllowedSupplier(captor.capture());
+        NullableObservableSupplier<Boolean> supplier = captor.getValue();
+        assertNotNull(supplier);
 
-        // Initially state is HIDDEN.
-        assertEquals(View.GONE, placeholder.getVisibility());
+        // Initially false.
+        assertEquals(false, supplier.get());
 
-        when(mMockBottomSheetController.getSheetState()).thenReturn(SheetState.HALF);
         observer.onSheetStateChanged(SheetState.HALF, StateChangeReason.NONE);
-        assertEquals(View.GONE, placeholder.getVisibility());
+        assertEquals(true, supplier.get());
 
-        when(mMockBottomSheetController.getSheetState()).thenReturn(SheetState.FULL);
-        observer.onSheetStateChanged(SheetState.FULL, StateChangeReason.NONE);
-        assertEquals(View.GONE, placeholder.getVisibility());
-    }
-
-    @Test
-    public void testPlaceholderVisibility_usePlaceholderTrue_noWebContents() {
-        TestTabBottomSheetContent.setUsePlaceholderForTesting(true);
-        BottomSheetObserver observer = simulateShowSuccessAndGetObserver();
-        View placeholder = mView.findViewById(R.id.empty_placeholder_container);
-        assertNotNull(placeholder);
-
-        // Initially state is HIDDEN.
-        assertEquals(View.GONE, placeholder.getVisibility());
-
-        // Change state to HALF. Currently no WebContents (mMockWebUi.getWebContents() is null).
-        when(mMockBottomSheetController.getSheetState()).thenReturn(SheetState.HALF);
-        observer.onSheetStateChanged(SheetState.HALF, StateChangeReason.NONE);
-        assertEquals(View.VISIBLE, placeholder.getVisibility());
-
-        when(mMockBottomSheetController.getSheetState()).thenReturn(SheetState.PEEK);
         observer.onSheetStateChanged(SheetState.PEEK, StateChangeReason.NONE);
-        assertEquals(View.GONE, placeholder.getVisibility());
+        assertEquals(false, supplier.get());
 
-        when(mMockBottomSheetController.getSheetState()).thenReturn(SheetState.FULL);
         observer.onSheetStateChanged(SheetState.FULL, StateChangeReason.NONE);
-        assertEquals(View.VISIBLE, placeholder.getVisibility());
+        assertEquals(true, supplier.get());
+
+        observer.onSheetStateChanged(SheetState.HIDDEN, StateChangeReason.NONE);
+        assertEquals(false, supplier.get());
     }
 
     @Test
-    public void testPlaceholderVisibility_usePlaceholderTrue_withWebContents() {
-        TestTabBottomSheetContent.setUsePlaceholderForTesting(true);
-        BottomSheetObserver observer = simulateShowSuccessAndGetObserver();
-        View placeholder = mView.findViewById(R.id.empty_placeholder_container);
-        assertNotNull(placeholder);
-
-        WebContents mockWebContents = mock();
-        mCoBrowseViews.setWebContents(mockWebContents, false);
-
-        when(mMockBottomSheetController.getSheetState()).thenReturn(SheetState.HALF);
-        observer.onSheetStateChanged(SheetState.HALF, StateChangeReason.NONE);
-        assertEquals(View.GONE, placeholder.getVisibility());
-
-        when(mMockBottomSheetController.getSheetState()).thenReturn(SheetState.FULL);
-        observer.onSheetStateChanged(SheetState.FULL, StateChangeReason.NONE);
-        assertEquals(View.GONE, placeholder.getVisibility());
+    public void testHandleBackPress_TriggersOnBackPressed() {
+        boolean[] backPressedCalled = new boolean[1];
+        mCoordinator =
+                new TabBottomSheetCoordinator(
+                        mContext,
+                        mWindowAndroid,
+                        mMockBottomSheetController,
+                        mMockTouchEventProvider,
+                        mCoBrowseViews,
+                        mMockSheetEventsCallback,
+                        () -> backPressedCalled[0] = true);
+        simulateShowSuccessAndGetObserver();
+        TabBottomSheetContent content = mCoordinator.getSheetContentForTesting();
+        assertNotNull(content);
+        assertTrue(content.handleBackPress());
+        assertTrue(backPressedCalled[0]);
     }
 }

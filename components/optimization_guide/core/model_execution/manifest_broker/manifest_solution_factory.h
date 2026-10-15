@@ -7,6 +7,7 @@
 
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/containers/flat_map.h"
@@ -98,7 +99,8 @@ class ManifestSolutionFactory {
                           UsageTracker& usage_tracker,
                           on_device_model::ServiceClient& service_client,
                           OnDeviceModelAccessController& access_controller,
-                          base::OnceClosure on_init_complete);
+                          base::OnceClosure on_init_complete,
+                          base::RepeatingClosure on_solutions_updated);
   ~ManifestSolutionFactory();
 
   // Notifies the factory of a change in an asset's state.
@@ -109,7 +111,8 @@ class ManifestSolutionFactory {
   void UpdateSolutions();
 
   // Get debug info about the current models.
-  std::vector<mojom::BrokerModelInfoPtr> GetBrokerModels() const;
+  std::vector<std::pair<mojom::BrokerModelInfoPtr, base::FilePath>>
+  GetBrokerModels() const;
 
   const Manifest& manifest() const { return manifest_; }
 
@@ -163,6 +166,7 @@ class ManifestSolutionFactory {
   base::flat_map<std::string, SolutionState> solutions_;
 
   base::RepeatingClosure on_asset_init_;
+  base::RepeatingClosure on_solutions_updated_;
 
   base::WeakPtrFactory<ManifestSolutionFactory> weak_ptr_factory_{this};
 };

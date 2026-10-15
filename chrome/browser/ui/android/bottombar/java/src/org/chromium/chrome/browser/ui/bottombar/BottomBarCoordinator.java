@@ -15,6 +15,7 @@ import org.chromium.base.lifetime.Destroyable;
 import org.chromium.base.supplier.NonNullObservableSupplier;
 import org.chromium.base.supplier.NullableObservableSupplier;
 import org.chromium.build.annotations.NullMarked;
+import org.chromium.chrome.browser.layouts.LayoutStateProvider;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.theme.ThemeColorProvider;
@@ -66,7 +67,8 @@ public class BottomBarCoordinator implements BottomBar, Destroyable {
             BottomBarMediator.VisibilityDelegate visibilityDelegate,
             NullableObservableSupplier<Profile> profileSupplier,
             NonNullObservableSupplier<Boolean> omniboxFocusStateSupplier,
-            NonNullObservableSupplier<ModalDialogManager> modalDialogManagerSupplier) {
+            NonNullObservableSupplier<ModalDialogManager> modalDialogManagerSupplier,
+            LayoutStateProvider layoutStateProvider) {
         Context context = parent.getContext();
         mView =
                 (BottomBarView)
@@ -97,7 +99,8 @@ public class BottomBarCoordinator implements BottomBar, Destroyable {
                         profileSupplier,
                         omniboxFocusStateSupplier,
                         mPromoDialogCoordinator,
-                        actionRegistry);
+                        actionRegistry,
+                        layoutStateProvider);
         mPromoDialogCoordinator.setListener(mMediator);
 
         mTabSupplier = tabSupplier;
@@ -118,7 +121,8 @@ public class BottomBarCoordinator implements BottomBar, Destroyable {
                             ActionId.HOME_BUTTON,
                             homeContainer,
                             HomeActionButtonBinder::bind,
-                            BottomBarProperties.IS_HOME_BUTTON_VISIBLE));
+                            BottomBarProperties.IS_HOME_BUTTON_VISIBLE,
+                            /* initiallyVisible= */ true));
         }
 
         BottomBarButtonContainer extraContainer = view.getContainerForAction(ActionId.GLIC);
@@ -128,7 +132,15 @@ public class BottomBarCoordinator implements BottomBar, Destroyable {
                         ActionId.GLIC,
                         extraContainer,
                         GlicActionButtonBinder::bind,
-                        BottomBarProperties.IS_GLIC_BUTTON_VISIBLE));
+                        BottomBarProperties.IS_EXTRA_BUTTON_VISIBLE,
+                        /* initiallyVisible= */ false));
+        configs.add(
+                new ActionConfig(
+                        ActionId.AI_MODE,
+                        extraContainer,
+                        ActionButtonBinder::bind,
+                        BottomBarProperties.IS_EXTRA_BUTTON_VISIBLE,
+                        /* initiallyVisible= */ false));
 
         BottomBarButtonContainer newTabContainer = view.getContainerForAction(ActionId.NEW_TAB);
         assert newTabContainer != null : "New tab container not found";
@@ -137,7 +149,8 @@ public class BottomBarCoordinator implements BottomBar, Destroyable {
                         ActionId.NEW_TAB,
                         newTabContainer,
                         ActionButtonBinder::bind,
-                        BottomBarProperties.IS_NEW_TAB_BUTTON_VISIBLE));
+                        BottomBarProperties.IS_NEW_TAB_BUTTON_VISIBLE,
+                        /* initiallyVisible= */ true));
 
         BottomBarButtonContainer tabSwitcherContainer =
                 view.getContainerForAction(ActionId.TAB_SWITCHER);
@@ -147,7 +160,8 @@ public class BottomBarCoordinator implements BottomBar, Destroyable {
                         ActionId.TAB_SWITCHER,
                         tabSwitcherContainer,
                         TabSwitcherActionButtonBinder::bind,
-                        BottomBarProperties.IS_TAB_SWITCHER_BUTTON_VISIBLE));
+                        BottomBarProperties.IS_TAB_SWITCHER_BUTTON_VISIBLE,
+                        /* initiallyVisible= */ true));
 
         if (BottomBarConfigUtils.shouldIncludeAppMenuButton()) {
             BottomBarButtonContainer menuContainer = view.getContainerForAction(ActionId.APP_MENU);
@@ -164,7 +178,8 @@ public class BottomBarCoordinator implements BottomBar, Destroyable {
                             ActionId.APP_MENU,
                             menuContainer,
                             AppMenuActionButtonBinder::bind,
-                            BottomBarProperties.IS_APP_MENU_BUTTON_VISIBLE));
+                            BottomBarProperties.IS_APP_MENU_BUTTON_VISIBLE,
+                            /* initiallyVisible= */ true));
         }
 
         return configs;

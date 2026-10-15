@@ -38,11 +38,14 @@
 #include "chrome/browser/glic/test_support/test_result.h"
 #include "chrome/browser/tab_list/tab_list_interface.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/side_panel/side_panel_ui.h"
+#include "chrome/browser/ui/side_panel/side_panel_ui_provider.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/platform_browser_test.h"
 #include "components/feature_engagement/test/scoped_iph_feature_list.h"
 #include "components/tabs/public/tab_interface.h"
 #include "content/public/test/browser_test_utils.h"
+#include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
 #include "ui/base/base_window.h"
@@ -50,7 +53,6 @@
 #include "url/gurl.h"
 
 #if BUILDFLAG(IS_ANDROID)
-#include "base/android/android_info.h"
 #include "base/android/device_info.h"
 #include "chrome/browser/flags/android/chrome_feature_list.h"
 #include "chrome/browser/ui/android/tab_model/tab_model.h"
@@ -111,9 +113,10 @@ template <typename T>
     return base::ok();
   }
   std::stringstream ss;
-  ss << message << " Expected: " << expected_value << ", saw values: {";
+  ss << message << " Expected: " << base::ToString(expected_value)
+     << ", saw values: {";
   for (const auto& value : ignored_values) {
-    ss << value << ", ";
+    ss << base::ToString(value) << ", ";
   }
   ss << "}";
   return base::unexpected(ss.str());
@@ -154,7 +157,6 @@ class GlicBrowserTestMixin : public T {
         {syncer::kReplaceSyncPromosWithSignInPromos, {}},
 #endif
 #if BUILDFLAG(IS_ANDROID)
-        {chrome::android::kBrowserWindowInterfaceMobile, {}},
         {chrome::android::kTabBottomSheet, {}},
 #endif
     // TODO(crbug.com/516793173): Remove this compile-time check once C++
@@ -162,9 +164,11 @@ class GlicBrowserTestMixin : public T {
     // Java.
 #if BUILDFLAG(IS_DESKTOP_ANDROID)
         {chrome::android::kEnableAndroidSidePanel, {}},
+        {chrome::android::kEnableAndroidSidePanelLogs, {}},
         {features::kGlicAndroidSidePanel, {}},
 #endif
     };
+
     glic_test_environment_.SetGlicPagePath(
         "/glic/browser_tests/minimal_client.html");
     scoped_feature_list_.InitWithFeaturesAndParameters(enabled_features, {});
@@ -185,15 +189,18 @@ class GlicBrowserTestMixin : public T {
     // builds.
     command_line->AppendSwitch(switches::kForceDesktopAndroid);
 #endif
+#if BUILDFLAG(IS_ANDROID)
+    // Disable the first-run experience (FRE) so that when we launch a new
+    // ChromeTabbedActivity in tests, it shows the browser window instead of the
+    // FRE onboarding screens.
+    command_line->AppendSwitch("disable-fre");
+#endif
   }
 
   void SetUp() override {
-#if BUILDFLAG(IS_ANDROID)
-    if (base::android::android_info::sdk_int() <
-        base::android::android_info::SDK_VERSION_S) {
-      GTEST_SKIP() << "Glic requires Android S+ to run";
+    if (!glic::GlicEnabling::IsOsVersionSupported()) {
+      GTEST_SKIP() << "OS version not supported by Glic";
     }
-#endif
     T::SetUp();
   }
 
@@ -203,9 +210,14 @@ class GlicBrowserTestMixin : public T {
     activation_controller_ =
         std::make_unique<views::test::MockActivationController>();
 #endif
-#if defined(TOOLKIT_VIEWS)
-    SidePanelCoordinator::From(GetBrowser())->DisableAnimationsForTesting();
-#endif
+
+    // Disable side panel animations on supported platforms.
+    if (IsSidePanelEnabled()) {
+      SidePanelUI* side_panel_ui = SidePanelUIProvider::From(GetBrowser());
+      CHECK(side_panel_ui);
+      side_panel_ui->SetNoDelaysForTesting(true);
+      side_panel_ui->DisableAnimationsForTesting();
+    }
 
     CHECK(glic_test_environment_.SetupEmbeddedTestServers(
         T::embedded_test_server(), &T::embedded_https_test_server()));
@@ -222,6 +234,10 @@ class GlicBrowserTestMixin : public T {
     activation_controller_.reset();
 #endif
     T::TearDownOnMainThread();
+    // Ensure all pending UI thread tasks (such as Mojo disconnects or Android
+    // JNI cleanup tasks) have finished running before the test fixture is
+    // destroyed (which destroys ScopedFeatureList).
+    base::RunLoop().RunUntilIdle();
   }
 
   // Toggles the Glic UI.
@@ -238,6 +254,20 @@ class GlicBrowserTestMixin : public T {
   [[nodiscard]] TestResult<GlicInstanceImpl*> OpenGlicForActiveTab() {
     ToggleGlicForActiveTab(/*prevent_close=*/true);
     return WaitForGlicOpen(T::GetTabListInterface()->GetActiveTab());
+  }
+
+  [[nodiscard]] TestResult<> WaitForInstanceDeletion(
+      base::WeakPtr<GlicInstanceImpl> instance) {
+    return RunUntilEqual<GlicInstanceImpl*>([&]() { return instance.get(); },
+                                            nullptr);
+  }
+
+  [[nodiscard]] TestResult<> WaitForInstanceAwakened(
+      GlicInstance* instance = nullptr) {
+    auto* instance_impl = GetInstanceImpl(instance);
+    return RunUntilEqual<bool>(
+        [&]() { return instance_impl->IsHibernated(); }, false,
+        "WaitForInstanceAwakened: instance did not wake up");
   }
 
   void RegisterConversation(GlicInstance* instance,
@@ -355,10 +385,15 @@ class GlicBrowserTestMixin : public T {
   TestResult<> CloseGlicForTabAndWait(tabs::TabInterface* tab) {
     GlicInstanceImpl* instance = GetInstanceForTab(tab);
     if (!instance) {
-      return base::unexpected("No Glic instance found for tab to close");
+      return base::ok();
     }
-    instance->Close(tab);
-    return WaitForGlicClose(instance);
+    base::WeakPtr<GlicInstanceImpl> weak_instance = instance->GetWeakPtr();
+    instance->Close(EmbedderKey(tab), CloseOptions());
+    RETURN_IF_ERROR(
+        WaitForSidePanelState(tab, GlicSidePanelCoordinator::State::kClosed));
+
+    return WaitForWebUiContentsVisibility(weak_instance.get(),
+                                          content::Visibility::HIDDEN);
   }
 
   [[nodiscard]] TestResult<GlicInstanceImpl*> WaitForGlicInstanceBoundToTab(
@@ -606,11 +641,9 @@ class GlicBrowserTestMixin : public T {
 
   GURL GetGuestURL() { return glic_test_environment_.GetGuestURL(); }
 
-  void SetGlicFreUrlOverride(const GURL& url) {
-    glic_test_environment_.SetGlicFreUrlOverride(url);
-  }
 
-  [[nodiscard]] TestResult<void> WaitForGlicClient(GlicInstance* instance) {
+  [[nodiscard]] TestResult<void> WaitForGlicClient(
+      GlicInstance* instance = nullptr) {
     auto* instance_impl = GetInstanceImpl(instance);
     return RunUntilEqual(
         [&]() { return instance_impl->host().IsWebClientConnected(); }, true,

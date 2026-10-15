@@ -311,6 +311,10 @@ NSMenuItem* BuildViewMenu(NSApplication* nsapp,
               Item(IDS_SWITCH_TO_VERTICAL_TAB)
                   .command_id(IDC_TOGGLE_VERTICAL_TABS)
                   .remove_if(!tabs::IsVerticalTabsFeatureEnabled()),
+              Item(IDS_VERTICAL_TABS_VIEW_MENU_TOGGLE_COLLAPSE)
+                  .command_id(IDC_TOGGLE_VERTICAL_TABS_COLLAPSE)
+                  .key_equivalent(@"L", NSEventModifierFlagCommand)
+                  .remove_if(!tabs::IsVerticalTabsFeatureEnabled()),
               Item(IDS_CUSTOMIZE_TOUCH_BAR)
                   .tag(IDC_CUSTOMIZE_TOUCH_BAR)
                   .action(@selector(toggleTouchBarCustomizationPalette:))
@@ -416,12 +420,15 @@ NSMenuItem* BuildBookmarksMenu(NSApplication* nsapp,
     return nil;
   }
 
+  const int bookmarks_manager_string_id =
+      features::IsMenuSimplificationEnabled() ? IDS_BOOKMARK_MANAGER_V2
+                                              : IDS_BOOKMARK_MANAGER;
   // clang-format off
   NSMenuItem* item =
       Item(IDS_BOOKMARKS_MENU)
           .tag(IDC_BOOKMARKS_MENU)
           .submenu({
-              Item(IDS_BOOKMARK_MANAGER)
+              Item(bookmarks_manager_string_id)
                   .command_id(IDC_SHOW_BOOKMARK_MANAGER),
               Item().is_separator()
                   .tag(IDC_BOOKMARK_THIS_TAB),

@@ -44,6 +44,7 @@
 #include "chrome/browser/signin/signin_promo_util.h"
 #include "chrome/browser/signin/signin_ui_util.h"
 #include "chrome/browser/signin/signin_util.h"
+#include "chrome/browser/subscription_eligibility/subscription_eligibility_service_factory.h"
 #include "chrome/browser/sync/sync_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -70,6 +71,8 @@
 #include "chrome/browser/ui/web_applications/app_browser_controller.h"
 #include "chrome/browser/ui/webui/signin/signin_ui_error.h"
 #include "chrome/browser/ui/webui/signin/signin_utils_desktop.h"
+#include "chrome/browser/user_education/user_education_service.h"
+#include "chrome/browser/user_education/user_education_service_factory.h"
 #include "chrome/browser/webauthn/passkey_unlock_manager.h"
 #include "chrome/browser/webauthn/passkey_unlock_manager_factory.h"
 #include "chrome/common/pref_names.h"
@@ -89,8 +92,10 @@
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/primary_account_mutator.h"
 #include "components/strings/grit/components_strings.h"
+#include "components/subscription_eligibility/subscription_eligibility_service.h"
 #include "components/sync/base/features.h"
 #include "components/sync/service/sync_service.h"
+#include "components/user_education/common/new_badge/new_badge_controller.h"
 #include "components/vector_icons/vector_icons.h"
 #include "device/fido/public/features.h"
 #include "net/base/url_util.h"
@@ -109,6 +114,10 @@
 #include "ui/strings/grit/ui_strings.h"
 #include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/widget/widget.h"
+
+#if BUILDFLAG(ENABLE_DICE_SUPPORT)
+#include "chrome/browser/signin/cross_device_signin_promo_manager.h"
+#endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
 
 #if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
 #include "chrome/browser/enterprise/signin/enterprise_signin_prefs.h"
@@ -184,7 +193,7 @@ ProfileMenuView::~ProfileMenuView() = default;
 void ProfileMenuView::OnClose() {
   bool is_browser_window_active =
       skip_window_active_check_for_testing_ ||
-      (browser().window() && browser().window()->IsActive());
+      (browser().GetWindow() && browser().GetWindow()->IsActive());
   if (!actionable_item_clicked() && is_browser_window_active) {
     // Launch a HaTS survey only if the user dismissed the menu without
     // selecting an item (e.g., by clicking outside or pressing ESC), and the
@@ -466,7 +475,8 @@ void ProfileMenuView::OnOtherProfileSelected(
     // support switching profiles, but also possibly installing the app into a
     // different profile. Regular PWAs can only switch to profiles where the app
     // is already installed.
-    const webapps::AppId& app_id = browser().app_controller()->app_id();
+    const webapps::AppId& app_id =
+        web_app::AppBrowserController::From(&browser())->app_id();
 #if BUILDFLAG(IS_MAC)
     if (app_id != ash::kPasswordManagerAppId) {
       apps::AppShimManager::Get()->LaunchAppInProfile(app_id, profile_path);
@@ -803,8 +813,9 @@ ProfileMenuView::GetIdentitySectionParams(const ProfileAttributesEntry& entry) {
             /*size_for_placeholder_avatar=*/kIdentityImageSizeForButton,
             /*use_high_res_file=*/true,
             GetPlaceholderAvatarIconParamsVisibleAgainstColor(
-                browser().window()->GetColorProvider()->GetColor(
-                    ui::kColorButtonBackgroundProminent)));
+                BrowserWindow::FromBrowser(&browser())
+                    ->GetColorProvider()
+                    ->GetColor(ui::kColorButtonBackgroundProminent)));
       } else {
         account_image = account_info_for_promos.account_image;
       }
@@ -919,6 +930,15 @@ ProfileMenuView::GetIdentitySectionParams(const ProfileAttributesEntry& entry) {
     params.button_action = base::BindRepeating(
         &ProfileMenuView::OnSigninButtonClicked, base::Unretained(this),
         account_info_for_signin_action, button_type, access_point);
+  }
+
+  // TODO(crbug.com/522296672): Specify the right way to obtain this information
+  // as `GetAiSubscriptionTier` only works for certain groups of users.
+  subscription_eligibility::SubscriptionEligibilityService*
+      subscription_service = subscription_eligibility::
+          SubscriptionEligibilityServiceFactory::GetForProfile(&profile());
+  if (subscription_service) {
+    params.ai_subscription_tier = subscription_service->GetAiSubscriptionTier();
   }
 
   return params;
@@ -1197,6 +1217,9 @@ void ProfileMenuView::MaybeBuildSignoutButton() {
 
 void ProfileMenuView::BuildFeatureButtons() {
   CHECK(!profile().IsGuestSession());
+#if BUILDFLAG(ENABLE_DICE_SUPPORT)
+  MaybeBuildCrossDeviceSigninButton();
+#endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
   signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForProfile(&profile());
   // May add the button asynchronously, order is not be guaranteed.
@@ -1216,18 +1239,56 @@ void ProfileMenuView::BuildFeatureButtons() {
   MaybeBuildSignoutButton();
 }
 
+#if BUILDFLAG(ENABLE_DICE_SUPPORT)
+void ProfileMenuView::MaybeBuildCrossDeviceSigninButton() {
+  if (ShouldShowCrossDeviceSigninPromo(
+          CrossDeviceSigninPromoEntryPoint::kProfileMenu, &profile())) {
+    bool is_new = false;
+    if (switches::kCrossDeviceSigninFromDesktopNewBadge.Get() &&
+        UserEducationService::MaybeShowNewBadge(
+            &profile(), switches::kCrossDeviceSigninFromDesktop)) {
+      is_new = true;
+    }
+
+    AddFeatureButton(
+        l10n_util::GetStringUTF16(
+            IDS_PROFILE_MENU_SIGNIN_ON_PHONE_BUTTON_LABEL),
+        base::BindRepeating(&ProfileMenuView::OnCrossDeviceSigninButtonClicked,
+                            base::Unretained(this)),
+        kMobileIcon,
+        /*icon_to_image_ratio=*/1.0f, is_new);
+  }
+}
+
+void ProfileMenuView::OnCrossDeviceSigninButtonClicked() {
+  UserEducationService::MaybeNotifyNewBadgeFeatureUsed(
+      &profile(), switches::kCrossDeviceSigninFromDesktop);
+
+  OnActionableItemClicked(ActionableItem::kSigninOnPhoneButton);
+  if (!perform_menu_actions()) {
+    return;
+  }
+  Browser* browser_ptr = &browser();
+  GetWidget()->CloseWithReason(views::Widget::ClosedReason::kUnspecified);
+  OpenSigninToPhoneQrCodeBubble(browser_ptr,
+                                CrossDeviceSigninPromoEntryPoint::kProfileMenu,
+                                base::DoNothing());
+}
+#endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
+
 void ProfileMenuView::GetProfilesForOtherProfilesSection(
     std::vector<ProfileAttributesEntry*>& available_profiles) const {
   CHECK(!profile().IsGuestSession());
 #if BUILDFLAG(IS_MAC)
   const bool is_regular_web_app =
       web_app::AppBrowserController::IsWebApp(&browser()) &&
-      (browser().app_controller()->app_id() != ash::kPasswordManagerAppId);
+      web_app::AppBrowserController::From(&browser())->app_id() !=
+          ash::kPasswordManagerAppId;
   std::set<base::FilePath> available_profile_paths;
   if (is_regular_web_app) {
     available_profile_paths =
         AppShimRegistry::Get()->GetInstalledProfilesForApp(
-            browser().app_controller()->app_id());
+            web_app::AppBrowserController::From(&browser())->app_id());
   }
 #endif
 
@@ -1257,14 +1318,27 @@ void ProfileMenuView::GetProfilesForOtherProfilesSection(
 void ProfileMenuView::BuildOtherProfilesSection(
     const std::vector<ProfileAttributesEntry*>& available_profiles) {
   for (ProfileAttributesEntry* profile_entry : available_profiles) {
-    AddAvailableProfile(
+    ui::ImageModel avatar_image =
         ui::ImageModel::FromImage(profile_entry->GetAvatarIcon(
             kOtherProfileImageSize,
             /*use_high_res_file=*/true,
             GetPlaceholderAvatarIconParamsVisibleAgainstColor(
-                browser().window()->GetColorProvider()->GetColor(
-                    ui::kColorMenuBackground)))),
-        profile_entry->GetName(),
+                BrowserWindow::FromBrowser(&browser())
+                    ->GetColorProvider()
+                    ->GetColor(ui::kColorMenuBackground))));
+    if (base::FeatureList::IsEnabled(
+            features::kEnableAiSubscriptionAvatarRing) &&
+        profile_entry->GetAiSubscriptionTier() > 0) {
+      avatar_image = ui::ImageModel::FromImageSkia(AddAiRingToAvatar(
+          avatar_image,
+          *BrowserWindow::FromBrowser(&browser())->GetColorProvider(),
+          kOtherProfileImageSize));
+    } else {
+      avatar_image = ProfileMenuViewBase::GetCircularSizedImage(
+          avatar_image, kOtherProfileImageSize);
+    }
+    AddAvailableProfile(
+        avatar_image, profile_entry->GetName(),
         /*is_guest=*/false,
         base::BindRepeating(&ProfileMenuView::OnOtherProfileSelected,
                             base::Unretained(this), profile_entry->GetPath()));

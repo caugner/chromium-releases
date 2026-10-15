@@ -40,9 +40,6 @@ void MockInputDispositionHandler::OnWheelEventAck(
   acked_wheel_event_ = event.event;
   acked_wheel_event_state_ = ack_result;
   RecordAckCalled(event.event.GetType(), ack_result);
-  if (on_wheel_event_ack_closure_) {
-    std::move(on_wheel_event_ack_closure_).Run();
-  }
 }
 
 void MockInputDispositionHandler::OnTouchEventAck(
@@ -76,9 +73,6 @@ void MockInputDispositionHandler::OnGestureEventAck(
   VLOG(1) << __FUNCTION__ << " called!";
   acked_gesture_event_ = event.event;
   RecordAckCalled(event.event.GetType(), ack_result);
-  if (on_gesture_event_ack_closure_) {
-    std::move(on_gesture_event_ack_closure_).Run();
-  }
 }
 
 size_t MockInputDispositionHandler::GetAndResetAckCount() {

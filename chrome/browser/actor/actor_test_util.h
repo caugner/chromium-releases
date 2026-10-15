@@ -200,6 +200,9 @@ optimization_guide::proto::Actions MakeMediaControl(
 
 std::unique_ptr<ToolRequest> MakeClickRequest(content::RenderFrameHost& rfh,
                                               int content_node_id);
+std::unique_ptr<ToolRequest> MakeDirectElementActivationClickRequest(
+    content::RenderFrameHost& rfh,
+    int content_node_id);
 std::unique_ptr<ToolRequest> MakeClickRequest(tabs::TabInterface& tab,
                                               const gfx::Point& click_point);
 std::unique_ptr<ToolRequest> MakeHistoryBackRequest(tabs::TabInterface& tab);
@@ -366,6 +369,11 @@ class MockActorTaskDelegate : public ActorTaskDelegate {
               (override));
 
   MOCK_METHOD(void,
+              OnTaskTabsVisibilityChanged,
+              (TaskId task_id, bool has_visible_tab),
+              (override));
+
+  MOCK_METHOD(void,
               RequestToShowCredentialSelectionDialog,
               (TaskId task_id,
                (const base::flat_map<std::string, gfx::Image>&)icons,
@@ -394,6 +402,11 @@ class MockActorTaskDelegate : public ActorTaskDelegate {
                std::vector<autofill::ActorFormFillingRequest> requests,
                base::WeakPtr<AutofillSelectionDialogEventHandler> handler,
                AutofillSuggestionSelectedCallback callback),
+              (override));
+
+  MOCK_METHOD(void,
+              RequestToShowGmailOtpOptInDialog,
+              (TaskId task_id, GmailOtpOptInCallback callback),
               (override));
 
   base::WeakPtr<MockActorTaskDelegate> GetWeakPtr() {

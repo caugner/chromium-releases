@@ -29,6 +29,7 @@ class PdfHelpBubbleHandlerFactory
           help_bubble::mojom::PdfHelpBubbleHandlerFactory> {
  public:
   DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kPdfGlicSummarizeElementId);
+  DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kPdfInkSignaturesAddTextElementId);
   DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kPdfInkSignaturesDrawElementId);
 
   using HelpFactoryPendingReceiver =

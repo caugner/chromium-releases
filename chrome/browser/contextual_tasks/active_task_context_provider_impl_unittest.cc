@@ -14,6 +14,7 @@
 #include "base/test/bind.h"
 #include "base/test/gmock_callback_support.h"
 #include "base/test/mock_callback.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/uuid.h"
 #include "build/build_config.h"
 #include "chrome/browser/contextual_search/contextual_search_web_contents_helper.h"
@@ -31,6 +32,7 @@
 #include "components/contextual_tasks/public/context_decoration_params.h"
 #include "components/contextual_tasks/public/contextual_task.h"
 #include "components/contextual_tasks/public/contextual_task_context.h"
+#include "components/contextual_tasks/public/features.h"
 #include "components/contextual_tasks/public/mock_contextual_tasks_service.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "components/tab_groups/tab_group_visual_data.h"
@@ -57,11 +59,13 @@ class MockObserver : public ActiveTaskContextProvider::Observer {
               OnContextTabsChanged,
               (const std::set<tabs::TabHandle>&),
               (override));
+  MOCK_METHOD(void, OnActiveTaskContextProviderDestroyed, (), (override));
 };
 
 class ActiveTaskContextProviderImplTest : public testing::Test {
  public:
   void SetUp() override {
+    InitializeFeatureList();
     profile_ = std::make_unique<TestingProfile>();
     browser_window_ = std::make_unique<NiceMock<MockBrowserWindowInterface>>();
 
@@ -103,6 +107,10 @@ class ActiveTaskContextProviderImplTest : public testing::Test {
     provider_->AddObserver(&observer_);
   }
 
+  virtual void InitializeFeatureList() {
+    feature_list_.InitAndEnableFeature(kContextualTasks);
+  }
+
   void TearDown() override {
     provider_->RemoveObserver(&observer_);
     provider_.reset();
@@ -138,6 +146,7 @@ class ActiveTaskContextProviderImplTest : public testing::Test {
   }
 
  protected:
+  base::test::ScopedFeatureList feature_list_;
   content::BrowserTaskEnvironment task_environment_;
   content::RenderViewHostTestEnabler rvh_test_enabler_;
   std::unique_ptr<TestingProfile> profile_;
@@ -423,6 +432,61 @@ TEST_F(ActiveTaskContextProviderImplTest,
   for (auto& observer : tab_list_observers_) {
     observer.OnActiveTabChanged(*tab_list_, tab1);
   }
+}
+
+TEST_F(ActiveTaskContextProviderImplTest, ObserverNotifiedOnDestruction) {
+  NiceMock<MockBrowserWindowInterface> local_window;
+  ui::UnownedUserDataHost local_user_data_host;
+  ON_CALL(local_window, GetUnownedUserDataHost())
+      .WillByDefault(ReturnRef(local_user_data_host));
+
+  auto local_provider = std::make_unique<ActiveTaskContextProviderImpl>(
+      &local_window, contextual_tasks_service_);
+
+  NiceMock<MockObserver> local_observer;
+  local_provider->AddObserver(&local_observer);
+
+  EXPECT_CALL(local_observer, OnActiveTaskContextProviderDestroyed()).Times(1);
+
+  local_provider.reset();
+}
+
+class ActiveTaskContextProviderImplFeatureDisabledTest
+    : public ActiveTaskContextProviderImplTest {
+ public:
+  void InitializeFeatureList() override {
+    feature_list_.InitWithFeatures(
+        {}, {kContextualTasksSidePanel, kContextualTasks});
+  }
+};
+
+TEST_F(ActiveTaskContextProviderImplFeatureDisabledTest,
+       RefreshContextWhenFeatureDisabled) {
+  EXPECT_CALL(*contextual_tasks_panel_controller_,
+              GetSessionHandleForActiveTabOrPanel())
+      .Times(0);
+  EXPECT_CALL(observer_, OnContextTabsChanged(std::set<tabs::TabHandle>()))
+      .Times(1);
+
+  provider_->RefreshContext();
+}
+
+class ActiveTaskContextProviderImplSidePanelOnlyTest
+    : public ActiveTaskContextProviderImplTest {
+ public:
+  void InitializeFeatureList() override {
+    feature_list_.InitWithFeatures({kContextualTasksSidePanel},
+                                   {kContextualTasks});
+  }
+};
+
+TEST_F(ActiveTaskContextProviderImplSidePanelOnlyTest,
+       RefreshContextWhenSidePanelOnlyEnabled) {
+  EXPECT_CALL(*contextual_tasks_panel_controller_,
+              GetSessionHandleForActiveTabOrPanel())
+      .WillOnce(testing::Return(std::make_pair(std::nullopt, nullptr)));
+
+  provider_->RefreshContext();
 }
 
 }  // namespace contextual_tasks

@@ -112,11 +112,22 @@ class ContextualCueingController
   void OnCueInteraction(ContextualCueingInteraction interaction_type,
                         CueTargetType cue_type,
                         const std::string& cuj,
-                        CueActionData action);
+                        CueActionData action,
+                        std::string cue_id);
 
  private:
   // Initiates a model execution request to MES for the current window state.
   void InitiateModelExecutionRequest();
+
+  // The V1 single-source evaluation path, triggered by page content
+  // annotations. Performs URL eligibility checks, category classification
+  // (delegated to the registered CueTarget), quota/backoff checks, and then
+  // invokes InitiateModelExecutionRequest() if all checks pass.
+  //
+  // TODO(b/523306363): Remove once the V2 multi-source path is fully launched.
+  void RunGlicSingleSourcePath(
+      const page_content_annotations::HistoryVisit& visit,
+      const page_content_annotations::PageContentAnnotationsResult& result);
 
   // Retrieves favicon for a specific web contents.
   void FetchFavicon(tabs::TabInterface* tab,
@@ -129,6 +140,7 @@ class ContextualCueingController
   // Callback for when the model execution response is received.
   void OnModelExecutionResponseReceived(
       optimization_guide::proto::Tab active_tab,
+      std::vector<optimization_guide::proto::Tab> background_tabs,
       optimization_guide::OptimizationGuideModelExecutionResult result,
       std::unique_ptr<optimization_guide::ModelQualityLogEntry> log_entry);
 
@@ -149,9 +161,11 @@ class ContextualCueingController
   std::pair<std::vector<tabs::TabHandle>, CueTabMetrics> GetTabsToShow(
       const optimization_guide::proto::ContextualCue& cue);
 
-  void ShowCue(CueTargetType cue_type,
-               const CueTarget& target,
-               const optimization_guide::proto::ContextualCue& cue);
+  void ShowCue(
+      CueTargetType cue_type,
+      const CueTarget& target,
+      const optimization_guide::proto::ContextualCue& cue,
+      const std::vector<optimization_guide::proto::Tab>& background_tabs);
 #if !BUILDFLAG(IS_ANDROID)
   void MaybeShowTabList(
       page_actions::PageActionController* page_action_controller,
@@ -160,6 +174,7 @@ class ContextualCueingController
   void OnCueClicked(CueTargetType cue_type,
                     std::string cuj,
                     CueActionData action,
+                    std::string cue_id,
                     actions::ActionItem*,
                     actions::ActionInvocationContext);
   void OnCueHidden();

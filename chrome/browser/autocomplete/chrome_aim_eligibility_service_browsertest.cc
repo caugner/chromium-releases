@@ -36,6 +36,7 @@
 #include "components/omnibox/browser/aim_eligibility_service.h"
 #include "components/omnibox/browser/aim_eligibility_service_features.h"
 #include "components/omnibox/browser/omnibox_prefs.h"
+#include "components/omnibox/common/omnibox_features.h"
 #include "components/prefs/pref_service.h"
 #include "components/search/search.h"
 #include "components/search_engines/template_url.h"
@@ -1235,7 +1236,8 @@ class ChromeAimEligibilityServiceOAuthBrowserTest
         {{omnibox::kAimEnabled, {}},
          {omnibox::kAimServerEligibilityEnabled, {}},
          {omnibox::kAimServerRequestOnStartupEnabled, {}},
-         {omnibox::kAimEligibilityServiceIdentityImprovements, {}}},
+         {omnibox::kAimEligibilityServiceIdentityImprovements,
+          {{"oauth_enabled", "true"}}}},
         // Disabled features.
         {});
     InProcessBrowserTest::SetUp();

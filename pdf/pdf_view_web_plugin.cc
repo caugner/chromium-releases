@@ -245,7 +245,8 @@ bool IsPrintPreviewUrl(std::string_view url) {
 }
 
 int ExtractPrintPreviewPageIndex(std::string_view src_url) {
-  // Sample `src_url` format: chrome-untrusted://print/id/page_index/print.pdf
+  // Sample `src_url` format:
+  // chrome-untrusted://print/token/page_index/print.pdf
   // The page_index is zero-based, but can be negative with special meanings.
   std::vector<std::string_view> url_substr =
       base::SplitStringPiece(src_url.substr(kChromeUntrustedPrintHost.size()),
@@ -312,8 +313,9 @@ class PdfViewWebPlugin::PdfInkModuleClientImpl : public PdfInkModuleClient {
 
   // PdfInkModuleClient:
   void AddFont(FontId font_id,
+               const std::string& font_name,
                base::span<const uint8_t> serialized_typeface) override {
-    plugin_->engine_->AddFont(font_id, serialized_typeface);
+    plugin_->engine_->AddFont(font_id, font_name, serialized_typeface);
   }
 
   void ClearSelection() override { plugin_->engine_->ClearTextSelection(); }
@@ -327,9 +329,11 @@ class PdfViewWebPlugin::PdfInkModuleClientImpl : public PdfInkModuleClient {
   void DrawText(int page_index,
                 InkTextId id,
                 base::span<const InkTextInfo> text_info,
+                float ascent,
                 double pdf_zoom,
                 const InkTextBoxAttributes& attributes) override {
-    plugin_->engine_->DrawText(page_index, id, text_info, pdf_zoom, attributes);
+    plugin_->engine_->DrawText(page_index, id, text_info, ascent, pdf_zoom,
+                               attributes);
   }
 
   void ExtendSelectionByPoint(const gfx::PointF& point) override {
@@ -391,10 +395,8 @@ class PdfViewWebPlugin::PdfInkModuleClientImpl : public PdfInkModuleClient {
     return plugin_->engine_->IsSelectableTextOrLinkArea(point);
   }
 
-  DocumentInkTextBoxesMap LoadTextAnnotationsFromPdf(
-      GenerateTextIdCallback generate_text_id_callback) override {
-    return plugin_->engine_->LoadTextAnnotationsFromPdf(
-        std::move(generate_text_id_callback));
+  DocumentInkTextBoxesMap LoadTextAnnotationsFromPdf() override {
+    return plugin_->engine_->LoadTextAnnotationsFromPdf();
   }
 
   DocumentV2InkPathShapesMap LoadV2InkPathsFromPdf() override {
@@ -480,7 +482,7 @@ class PdfViewWebPlugin::PdfInkModuleClientImpl : public PdfInkModuleClient {
     plugin_->engine_->UpdateStrokeActive(page_index, id, active);
   }
 
-  void UpdateTextActiveAndInvalidate(InkTextId id, bool active) override {
+  void UpdateTextActiveAndInvalidate(TextId id, bool active) override {
     plugin_->engine_->UpdateTextActiveAndInvalidate(id, active);
   }
 
@@ -1770,6 +1772,10 @@ void PdfViewWebPlugin::GetMostVisiblePageIndex(
     return;
   }
   std::move(callback).Run(page_index);
+}
+
+void PdfViewWebPlugin::HasMeaningfulText(HasMeaningfulTextCallback callback) {
+  std::move(callback).Run(engine_ && engine_->HasMeaningfulText());
 }
 
 void PdfViewWebPlugin::GetPageText(int32_t page_index,
@@ -3191,13 +3197,6 @@ void PdfViewWebPlugin::SendThumbnail(base::DictValue reply,
   reply.Set("width", thumbnail.image_size().width());
   reply.Set("height", thumbnail.image_size().height());
   client_->PostMessage(std::move(reply));
-
-#if BUILDFLAG(ENABLE_PDF_INK2)
-  if (ink_module_) {
-    ink_module_->GenerateAndSendInkThumbnail(page_index,
-                                             thumbnail.image_size());
-  }
-#endif
 }
 
 #if BUILDFLAG(ENABLE_PDF_INK2)

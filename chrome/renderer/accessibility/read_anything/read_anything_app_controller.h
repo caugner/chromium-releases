@@ -187,6 +187,7 @@ class ReadAnythingAppController
                      const std::string& content) override;
   void OnReadabilityDistillationStateChanged(
       read_anything::mojom::ReadAnythingDistillationState new_state) override;
+  void OnMainFrameSameDocumentNavigation(const GURL& url) override;
 
 #if BUILDFLAG(IS_CHROMEOS)
   void OnDeviceLocked() override;
@@ -284,6 +285,8 @@ class ReadAnythingAppController
   std::u16string GetPrefixText(ui::AXNodeID ax_node_id) const;
   std::string GetTextDirection(ui::AXNodeID ax_node_id) const;
   std::string GetUrl(ui::AXNodeID ax_node_id) const;
+  std::string GetDocumentUrl() const;
+  std::string GetHtmlId(ui::AXNodeID ax_node_id) const;
   std::string GetAltText(ui::AXNodeID ax_node_id) const;
   std::string GetDomDistillerTitle() const;
   std::string GetDomDistillerContentHtml() const;
@@ -469,7 +472,7 @@ class ReadAnythingAppController
 
   void ExecuteJavaScript(const std::string& script);
 
-  // Returns true if a draw occured.
+  // Returns true if a draw occurred.
   bool PostProcessSelection();
 
   // Signals that the side panel has finished loading and it's safe to show
@@ -519,7 +522,9 @@ class ReadAnythingAppController
   // accurate for voices that don't support word boundaries.
   void RecordEstimatedWordsHeard();
 
-  void RecordDistillationSuccess();
+  void RecordScreen2xDistillationStatus();
+  void RecordDistillationStatus(
+      read_anything::mojom::DistillationStatus status);
 
   // Given a boundary position within the current granularity, identifies the
   // nodes that needs to be highlighted (e.g. until the word boundary), and
@@ -625,11 +630,13 @@ class ReadAnythingAppController
   // drawing instead.
   std::unique_ptr<base::RetainingOneShotTimer> pdf_draw_debouncer_;
 
-  base::OneShotTimer timer_;
+  // Since Screen2x distillation takes some time to occur, distillation success
+  // and failure occurs after kDistillationLoggingDelayMs.
+  base::OneShotTimer distillation_status_logging_delay_timer_;
 
   // The number of times distillation completes successfully after a page
   // change. Used for logging.
-  int distillationsCompleted_;
+  int distillations_completed_;
 
   // The distilled title result of DOM distiller distillation.
   std::string dom_distiller_title_;

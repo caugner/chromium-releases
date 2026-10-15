@@ -170,7 +170,6 @@ packager_builder(
     # https://luci-scheduler.appspot.com/jobs/chromium/android-avd-packager
     schedule = "triggered",
     triggered_by = [],
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "packager|android",
         short_name = "avd",
@@ -207,7 +206,6 @@ packager_builder(
     executable = "recipe:android/sdk_packager",
     schedule = "0 7 * * *",
     triggered_by = [],
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "packager|android",
         short_name = "sdk",
@@ -384,11 +382,6 @@ packager_builder(
                 "sdk_package_name": "system-images;android-37.0;google_apis_ps16k;x86_64",
                 "cipd_yaml": "third_party/android_sdk/cipd/system_images/android-37.0/google_apis_ps16k/x86_64.yaml",
             },
-            {
-                "sdk_package_name": "system-images;android-36.0-CANARY;google_apis;x86_64",
-                "cipd_yaml": "third_party/android_sdk/cipd/system_images/android-36.0-CANARY/google_apis/x86_64.yaml",
-                "sdk_channel": "CANARY",
-            },
         ],
     },
 )
@@ -398,7 +391,6 @@ ci.builder(
     executable = "recipe:android/device_flasher",
     schedule = "0 9 * * 1,3",  # at 9am UTC every Monday and Wednesday.
     triggered_by = [],
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         short_name = "flash",
     ),

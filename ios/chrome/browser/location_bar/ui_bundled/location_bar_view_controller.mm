@@ -36,6 +36,8 @@
 #import "ios/chrome/browser/location_bar/ui_bundled/location_bar_mutator.h"
 #import "ios/chrome/browser/location_bar/ui_bundled/location_bar_placeholder_type.h"
 #import "ios/chrome/browser/location_bar/ui_bundled/location_bar_steady_view.h"
+#import "ios/chrome/browser/menu/ui_bundled/action_factory.h"
+#import "ios/chrome/browser/menu/ui_bundled/menu_histograms.h"
 #import "ios/chrome/browser/omnibox/public/omnibox_constants.h"
 #import "ios/chrome/browser/omnibox/ui/text_field_view_containing.h"
 #import "ios/chrome/browser/orchestrator/ui_bundled/location_bar_offset_provider.h"
@@ -43,7 +45,7 @@
 #import "ios/chrome/browser/shared/model/prefs/pref_names.h"
 #import "ios/chrome/browser/shared/public/commands/activity_service_commands.h"
 #import "ios/chrome/browser/shared/public/commands/browser_coordinator_commands.h"
-#import "ios/chrome/browser/shared/public/commands/bwg_commands.h"
+#import "ios/chrome/browser/shared/public/commands/gemini_commands.h"
 #import "ios/chrome/browser/shared/public/commands/help_commands.h"
 #import "ios/chrome/browser/shared/public/commands/lens_commands.h"
 #import "ios/chrome/browser/shared/public/commands/lens_overlay_commands.h"
@@ -178,6 +180,7 @@ const CGFloat kGeminiLiveCircleSize = 20.0;
 
 @implementation LocationBarViewController {
   BOOL _isNTP;
+  BOOL _active;
   // Stores a snapshot of the fakebox buttons that is overlaid on the Location
   // Bar and anchored to the trailing edge during focus transitions (when it is
   // faded out) and defocus transitions (when it is faded in).
@@ -276,6 +279,11 @@ const CGFloat kGeminiLiveCircleSize = 20.0;
 }
 
 - (void)updateTrailingButtonState {
+  if (IsNextOldDesignEnabled()) {
+    self.trailingButtonState = kShareButton;
+    return;
+  }
+
   BOOL shouldShowVoiceSearch =
       self.traitCollection.horizontalSizeClass ==
           UIUserInterfaceSizeClassRegular ||
@@ -329,8 +337,6 @@ const CGFloat kGeminiLiveCircleSize = 20.0;
   [self.locationBarSteadyView setBadgeView:self.badgeView];
   if (self.readerModeChipView) {
     [self.locationBarSteadyView setReaderModeChipView:self.readerModeChipView];
-    [self.layoutGuideCenter referenceView:self.readerModeChipView
-                                underName:kReaderModeOptionsEntrypointGuide];
   }
 
   if (IsPageActionMenuEnabled()) {
@@ -339,15 +345,11 @@ const CGFloat kGeminiLiveCircleSize = 20.0;
                addTarget:self
                   action:@selector(handlePageActionMenuEntrypointTapped)
         forControlEvents:UIControlEventTouchUpInside];
-    [self.layoutGuideCenter referenceView:_pageActionMenuEntrypointView
-                                underName:kPageActionMenuEntrypointGuide];
   }
 
   if (IsLensOverlayAllowedByPolicy(_profilePrefs)) {
     _lensOverlayPlaceholderView = [[LensOverlayEntrypointButton alloc]
         initWithProfilePrefs:_profilePrefs];
-    [self.layoutGuideCenter referenceView:_lensOverlayPlaceholderView
-                                underName:kLensOverlayEntrypointGuide];
 
     [_lensOverlayPlaceholderView
                addTarget:self
@@ -437,9 +439,10 @@ const CGFloat kGeminiLiveCircleSize = 20.0;
   [self updateTrailingButtonState];
   [self switchToEditing:NO];
 
-  [self registerForTraitChanges:
-            @[ UITraitHorizontalSizeClass.class, UITraitVerticalSizeClass.class ]
-                     withAction:@selector(updateTrailingButtonState)];
+  [self
+      registerForTraitChanges:
+          @[ UITraitHorizontalSizeClass.class, UITraitVerticalSizeClass.class ]
+                   withAction:@selector(updateTrailingButtonState)];
 
   [self registerForTraitChanges:@[ UITraitHorizontalSizeClass.class ]
                      withAction:@selector(sizeClassDidChange)];
@@ -458,6 +461,16 @@ const CGFloat kGeminiLiveCircleSize = 20.0;
   if (IsProactiveSuggestionsFrameworkEnabled()) {
     _locationBarSteadyView.pageActionMenuHandler = self.pageActionMenuHandler;
   }
+
+  [self updateLayoutGuides];
+}
+
+- (void)setActive:(BOOL)active {
+  if (_active == active) {
+    return;
+  }
+  _active = active;
+  [self updateLayoutGuides];
 }
 
 #pragma mark - FullscreenUIElement
@@ -769,7 +782,7 @@ const CGFloat kGeminiLiveCircleSize = 20.0;
           removeTarget:nil
                 action:nil
       forControlEvents:UIControlEventAllEvents];
-  self.locationBarSteadyView.trailingButton.hidden = NO;
+  [self.locationBarSteadyView setTrailingButtonHidden:NO];
 
   TrailingButtonState state = self.trailingButtonState;
   if (state == kShareButton && self.hideShareButtonWhileOnIncognitoNTP) {
@@ -778,7 +791,7 @@ const CGFloat kGeminiLiveCircleSize = 20.0;
 
   switch (state) {
     case kNoButton: {
-      self.locationBarSteadyView.trailingButton.hidden = YES;
+      [self.locationBarSteadyView setTrailingButtonHidden:YES];
       break;
     };
     case kShareButton: {
@@ -931,6 +944,49 @@ const CGFloat kGeminiLiveCircleSize = 20.0;
         forControlEvents:UIControlEventTouchUpInside];
 }
 
+// Updates the layout guides to point to the entrypoints in this toolbar.
+- (void)updateLayoutGuides {
+  if (!self.isViewLoaded) {
+    return;
+  }
+  if (_active) {
+    if (self.readerModeChipView) {
+      [self.layoutGuideCenter referenceView:self.readerModeChipView
+                                  underName:kReaderModeOptionsEntrypointGuide];
+    }
+    if (_pageActionMenuEntrypointView) {
+      [self.layoutGuideCenter referenceView:_pageActionMenuEntrypointView
+                                  underName:kPageActionMenuEntrypointGuide];
+    }
+    if (IsLensOverlayAllowedByPolicy(_profilePrefs)) {
+      [self.layoutGuideCenter referenceView:_lensOverlayPlaceholderView
+                                  underName:kLensOverlayEntrypointGuide];
+    }
+  } else {
+    if (self.readerModeChipView &&
+        [self.layoutGuideCenter
+            referencedViewUnderName:kReaderModeOptionsEntrypointGuide] ==
+            self.readerModeChipView) {
+      [self.layoutGuideCenter referenceView:nil
+                                  underName:kReaderModeOptionsEntrypointGuide];
+    }
+    if (_pageActionMenuEntrypointView &&
+        [self.layoutGuideCenter
+            referencedViewUnderName:kPageActionMenuEntrypointGuide] ==
+            _pageActionMenuEntrypointView) {
+      [self.layoutGuideCenter referenceView:nil
+                                  underName:kPageActionMenuEntrypointGuide];
+    }
+    if (IsLensOverlayAllowedByPolicy(_profilePrefs) &&
+        [self.layoutGuideCenter
+            referencedViewUnderName:kLensOverlayEntrypointGuide] ==
+            _lensOverlayPlaceholderView) {
+      [self.layoutGuideCenter referenceView:nil
+                                  underName:kLensOverlayEntrypointGuide];
+    }
+  }
+}
+
 #pragma mark - UIContextMenuInteractionDelegate
 
 - (UIMenu*)contextMenuUIMenu:(NSArray<UIMenuElement*>*)suggestedActions {
@@ -990,6 +1046,17 @@ const CGFloat kGeminiLiveCircleSize = 20.0;
   } else {
     // Keep the suggested actions to have the copy action in a separate section.
     [menuElements addObjectsFromArray:suggestedActions];
+  }
+
+  if ([self.delegate locationBarCanSendTabToSelf]) {
+    ActionFactory* actionFactory = [[ActionFactory alloc]
+        initWithScenario:kMenuScenarioHistogramToolbarMenu];
+    UIAction* sendTabAction = [actionFactory actionToSendTabToSelfWithBlock:^{
+      dispatch_async(dispatch_get_main_queue(), ^{
+        [weakSelf.delegate locationBarSendTabToSelfTapped];
+      });
+    }];
+    [menuElements addObject:sendTabAction];
   }
 
   std::optional<std::set<ClipboardContentType>> clipboard_content_types =
@@ -1163,13 +1230,20 @@ const CGFloat kGeminiLiveCircleSize = 20.0;
     willDisplayMenuForConfiguration:(UIContextMenuConfiguration*)configuration
                            animator:
                                (id<UIContextMenuInteractionAnimating>)animator {
-  if (!IsGeminiCopresenceEnabled()) {
-    return;
-  }
 
   [self.geminiHandler
       hideFloatyIfInvokedAnimated:YES
                        fromSource:gemini::FloatyUpdateSource::ContextMenu];
+}
+
+- (void)contextMenuInteraction:(UIContextMenuInteraction*)interaction
+       willEndForConfiguration:(UIContextMenuConfiguration*)configuration
+                      animator:(id<UIContextMenuInteractionAnimating>)animator {
+  self.activeContextMenuAnimator = animator;
+  __weak LocationBarViewController* weakSelf = self;
+  [animator addCompletion:^{
+    weakSelf.activeContextMenuAnimator = nil;
+  }];
 }
 
 - (BOOL)canPerformAction:(SEL)action withSender:(id)sender {

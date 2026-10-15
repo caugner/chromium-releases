@@ -9,7 +9,6 @@
 #include <utility>
 #include <variant>
 
-#include "base/command_line.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
 #include "base/memory/safety_checks.h"
@@ -39,7 +38,6 @@
 #include "content/browser/worker_host/dedicated_worker_hosts_for_document.h"
 #include "content/browser/worker_host/dedicated_worker_service_impl.h"
 #include "content/browser/worker_host/worker_script_fetcher.h"
-#include "content/browser/worker_host/worker_util.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/network_service_util.h"
@@ -49,7 +47,6 @@
 #include "content/public/browser/site_isolation_policy.h"
 #include "content/public/common/child_process_id_util.h"
 #include "content/public/common/content_client.h"
-#include "content/public/common/content_switches.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "mojo/public/cpp/system/message_pipe.h"
 #include "net/base/isolation_info.h"
@@ -66,11 +63,11 @@
 #include "third_party/blink/public/common/service_worker/service_worker_scope_match.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
-#include "third_party/blink/public/common/web_preferences/web_preferences.h"
 #include "third_party/blink/public/mojom/back_forward_cache_not_restored_reasons.mojom.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom.h"
 #include "third_party/blink/public/mojom/loader/fetch_client_settings_object.mojom.h"
 #include "third_party/blink/public/mojom/script_source_location.mojom.h"
+#include "third_party/perfetto/include/perfetto/tracing/track.h"
 
 #if !BUILDFLAG(IS_ANDROID)
 #include "content/browser/direct_sockets/direct_sockets_service_impl.h"
@@ -91,8 +88,7 @@ DedicatedWorkerHost::DedicatedWorkerHost(
     network::mojom::ClientSecurityStatePtr creator_client_security_state,
     const PolicyContainerPolicies& creator_policies,
     base::WeakPtr<CrossOriginEmbedderPolicyReporter> creator_coep_reporter,
-    const std::optional<base::UnguessableToken>&
-        creator_network_restrictions_id,
+    const base::UnguessableToken& creator_network_restrictions_id,
     mojo::PendingReceiver<blink::mojom::DedicatedWorkerHost> host,
     net::StorageAccessApiStatus storage_access_api_status)
     : service_(service),
@@ -360,13 +356,7 @@ void DedicatedWorkerHost::StartScriptLoad(
   // initiator origin to keep consistency with WorkerScriptFetcher, but probably
   // this should be calculated based on the worker origin as the factories be
   // used for subresource loading on the worker.
-  std::optional<blink::web_pref::WebPreferences> web_preferences;
-  if (creator_render_frame_host) {
-    web_preferences = creator_render_frame_host->GetOrCreateWebPreferences();
-  }
-  file_url_support_ = DoesCreatorAllowFileUrlSupport(
-      creator_origin_, web_preferences ? &*web_preferences : nullptr,
-      creator_worker ? creator_worker->file_url_support() : false);
+  file_url_support_ = creator_origin_.scheme() == url::kFileScheme;
 
   // For blob URL workers, inherit the controller from the worker's parent.
   // See https://w3c.github.io/ServiceWorker/#control-and-use-worker-client
@@ -403,8 +393,9 @@ void DedicatedWorkerHost::StartScriptLoad(
       nearest_ancestor_render_frame_host->GetSiteInstance()->GetPartitionDomain(
           storage_partition_impl);
 
-  TRACE_EVENT_BEGIN("loading", "WorkerScriptFetcher CreateAndStart",
-                    perfetto::Track::FromPointer(this));
+  TRACE_EVENT_BEGIN(
+      "loading", "WorkerScriptFetcher CreateAndStart",
+      perfetto::NamedTrack::FromPointer("content::DedicatedWorkerHost", this));
   WorkerScriptFetcher::CreateAndStart(
       worker_process_host_->GetDeprecatedID(), token_, script_url,
       *nearest_ancestor_render_frame_host, creator_render_frame_host,
@@ -414,7 +405,7 @@ void DedicatedWorkerHost::StartScriptLoad(
       nearest_ancestor_render_frame_host->GetIsolationInfoForSubresources(),
       std::move(client_security_state), credentials_mode,
       std::move(outside_fetch_client_settings_object),
-      network::mojom::RequestDestination::kWorker, file_url_support_,
+      network::mojom::RequestDestination::kWorker,
       storage_partition_impl->GetServiceWorkerContext(),
       service_worker_handle_.get(), std::move(blob_url_loader_factory), nullptr,
       storage_partition_impl, partition_domain,
@@ -434,7 +425,8 @@ void DedicatedWorkerHost::DidStartScriptLoad(
     std::optional<WorkerScriptFetcherResult> result) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   // WorkerScriptFetcher CreateAndStart
-  TRACE_EVENT_END("loading", perfetto::Track::FromPointer(this));
+  TRACE_EVENT_END("loading", perfetto::NamedTrack::FromPointer(
+                                 "content::DedicatedWorkerHost", this));
   TRACE_EVENT("loading", "DedicatedWorkerHost::DidStartScriptLoad",
               "final_response_url", script_request_url_);
 
@@ -584,6 +576,9 @@ void DedicatedWorkerHost::DidStartScriptLoad(
   result->subresource_loader_factories->set_bypass_redirect_checks(
       bypass_redirect_checks);
 
+  auto policy_container_host = base::MakeRefCounted<PolicyContainerHost>(
+      std::move(result->policy_container_policies));
+
   blink::mojom::ServiceWorkerContainerInfoForClientPtr container_info;
   blink::mojom::ControllerServiceWorkerInfoPtr controller;
   if (service_worker_handle_->service_worker_client()) {
@@ -604,8 +599,7 @@ void DedicatedWorkerHost::DidStartScriptLoad(
     std::tie(container_info, controller) =
         service_worker_handle_->scoped_service_worker_client()
             ->CommitResponseAndRelease(
-                /*rfh_id=*/std::nullopt,
-                std::move(result->policy_container_policies),
+                /*rfh_id=*/std::nullopt, policy_container_host->policies(),
                 std::move(coep_reporter), std::move(dip_reporter),
                 ukm::kInvalidSourceId);
   }
@@ -616,6 +610,7 @@ void DedicatedWorkerHost::DidStartScriptLoad(
       subresource_loader_updater_.BindNewPipeAndPassReceiver(),
       std::move(controller),
       BindAndPassRemoteForBackForwardCacheControllerHost(),
+      policy_container_host->CreatePolicyContainerForBlink(),
       std::move(coep_reporting_observer), std::move(dip_reporting_observer));
   if (service_worker_handle_->service_worker_client()) {
     service_worker_handle_->service_worker_client()->SetContainerReady();
@@ -815,11 +810,7 @@ void DedicatedWorkerHost::CreateWebSocketConnector(
               ancestor_render_frame_host_id_.frame_routing_id),
           GetWorkerStorageKey().origin(),
           ancestor_render_frame_host->GetIsolationInfoForSubresources(),
-          worker_client_security_state_->Clone(),
-          // TODO(crbug.com/492462310): Pass network_restrictions_id from the
-          // ancestor frame so Connection-Allowlist is enforced for dedicated
-          // worker WebSocket connections.
-          /*network_restrictions_id=*/std::nullopt),
+          worker_client_security_state_->Clone(), network_restrictions_id_),
       std::move(receiver));
 }
 
@@ -834,13 +825,15 @@ void DedicatedWorkerHost::CreateWebTransportConnector(
     receiver.ResetWithReason(0, "The parent frame has already been gone.");
     return;
   }
-  mojo::MakeSelfOwnedReceiver(std::make_unique<WebTransportConnectorImpl>(
-                                  worker_process_host_->GetDeprecatedID(),
-                                  ancestor_render_frame_host->GetWeakPtr(),
-                                  GetWorkerStorageKey().origin(),
-                                  isolation_info_.network_anonymization_key(),
-                                  worker_client_security_state_->Clone()),
-                              std::move(receiver));
+  mojo::MakeSelfOwnedReceiver(
+      std::make_unique<WebTransportConnectorImpl>(
+          worker_process_host_->GetDeprecatedID(),
+          ancestor_render_frame_host->GetWeakPtr(),
+          GetWorkerStorageKey().origin(),
+          isolation_info_.network_anonymization_key(),
+          worker_client_security_state_->Clone(),
+          network_restrictions_id_),
+      std::move(receiver));
 }
 
 void DedicatedWorkerHost::CreateWakeLockService(
@@ -1049,6 +1042,7 @@ void DedicatedWorkerHost::ObserveNetworkServiceCrash(
   auto params = network::mojom::URLLoaderFactoryParams::New();
   params->process_id = ToOriginatingProcessId(worker_process_host_->GetID());
   params->debug_tag = "DedicatedWorkerHost::ObserveNetworkServiceCrash";
+  params->network_restrictions_id = network_restrictions_id_;
   network_service_connection_error_handler_holder_.reset();
   storage_partition_impl->GetNetworkContext()->CreateURLLoaderFactory(
       network_service_connection_error_handler_holder_

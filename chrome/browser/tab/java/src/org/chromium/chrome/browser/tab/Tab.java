@@ -103,6 +103,9 @@ public interface Tab extends TabLifecycle {
     /** Returns the web contents associated with this tab. */
     @Nullable WebContents getWebContents();
 
+    /** Returns the navigation start time in milliseconds of the latest navigation. */
+    long getNavigationStartMs();
+
     /**
      * Returns the {@link Activity} {@link Context} if this {@link Tab} is attached to an {@link
      * Activity}, otherwise the themed application context (e.g. hidden tab or browser action tab).
@@ -246,6 +249,13 @@ public interface Tab extends TabLifecycle {
      * tab holds frozen WebContents state that is yet to be inflated.
      */
     boolean isFrozen();
+
+    /**
+     * Suppresses view focus changes for the WebContents.
+     *
+     * @param suppressed Whether to suppress focus changes.
+     */
+    void setFocusChangeSuppressed(boolean suppressed);
 
     /**
      * Returns Whether the tab can currently be interacted with by the user. This requires the view

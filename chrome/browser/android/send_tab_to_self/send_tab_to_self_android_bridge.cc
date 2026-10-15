@@ -20,6 +20,7 @@
 #include "chrome/browser/send_tab_to_self/send_tab_to_self_page_handler.h"
 #include "chrome/browser/sync/send_tab_to_self_sync_service_factory.h"
 #include "components/send_tab_to_self/entry_point_display_reason.h"
+#include "components/send_tab_to_self/metrics_util.h"
 #include "components/send_tab_to_self/page_context.h"
 #include "components/send_tab_to_self/send_tab_to_self_entry.h"
 #include "components/send_tab_to_self/send_tab_to_self_model.h"
@@ -32,6 +33,7 @@
 // Must come after all headers that specialize FromJniType() / ToJniType().
 #include "chrome/android/chrome_jni_headers/SendTabToSelfAndroidBridge_jni.h"
 #include "chrome/android/chrome_jni_headers/TargetDeviceInfo_jni.h"
+#include "chrome/browser/tab/jni_headers/SendTabToSelfTabCardLabelData_jni.h"
 
 using base::android::ConvertJavaStringToUTF8;
 using base::android::ConvertUTF8ToJavaString;
@@ -71,11 +73,14 @@ static void JNI_SendTabToSelfAndroidBridge_SendTabToDevice(
     const JavaRef<jstring>& j_target_device_sync_cache_guid,
     const JavaRef<jstring>& j_url,
     const JavaRef<jstring>& j_title,
-    const JavaRef<jobject>& j_callback) {
+    const JavaRef<jobject>& j_callback,
+    int32_t j_entry_point) {
   const std::string target_device_sync_cache_guid =
       ConvertJavaStringToUTF8(env, j_target_device_sync_cache_guid);
   const std::string url = ConvertJavaStringToUTF8(env, j_url);
   const std::string title = ConvertJavaStringToUTF8(env, j_title);
+  const ShareEntryPoint entry_point =
+      static_cast<ShareEntryPoint>(j_entry_point);
 
   // TODO(crbug.com/492072882) Consider adding a `CHECK` once Android is updated
   // to always provide the callback.
@@ -97,7 +102,7 @@ static void JNI_SendTabToSelfAndroidBridge_SendTabToDevice(
   if (web_contents) {
     SendTabToSelfPageHandler::GetOrCreateForWebContents(web_contents)
         ->SendTabToDevice(target_device_sync_cache_guid, GURL(url), title,
-                          std::move(commit_confirmation));
+                          std::move(commit_confirmation), entry_point);
     return;
   }
 
@@ -110,7 +115,7 @@ static void JNI_SendTabToSelfAndroidBridge_SendTabToDevice(
   CHECK(model);
   model->SendEntry(GURL(url), title, target_device_sync_cache_guid,
                    PageContext(), NavigationHistory(),
-                   std::move(commit_confirmation));
+                   std::move(commit_confirmation), entry_point);
 }
 
 // Marks the entry with the associated GUID as opened.
@@ -127,6 +132,21 @@ static void JNI_SendTabToSelfAndroidBridge_MarkEntryOpened(
   }
 }
 
+static void JNI_SendTabToSelfAndroidBridge_MarkEntryActivated(
+    JNIEnv* env,
+    Profile* profile,
+    const JavaRef<jstring>& j_guid,
+    jint j_entry_point) {
+  auto* service = SendTabToSelfSyncServiceFactory::GetForProfile(profile);
+  SendTabToSelfModel* model =
+      service ? service->GetSendTabToSelfModel() : nullptr;
+  if (model) {
+    const std::string guid = ConvertJavaStringToUTF8(env, j_guid);
+    model->MarkEntryActivated(
+        guid, static_cast<ShareActivatedEntryPoint>(j_entry_point));
+  }
+}
+
 // Marks the entry with the associated GUID as dismissed.
 static void JNI_SendTabToSelfAndroidBridge_DismissEntry(
     JNIEnv* env,
@@ -140,7 +160,6 @@ static void JNI_SendTabToSelfAndroidBridge_DismissEntry(
     model->DismissEntry(guid);
   }
 }
-
 
 static ScopedJavaLocalRef<jobject>
 JNI_SendTabToSelfAndroidBridge_GetEntryPointDisplayReason(
@@ -165,11 +184,45 @@ JNI_SendTabToSelfAndroidBridge_GetEntryPointDisplayReason(
   return jni_zero::ToJavaInteger(env, static_cast<int32_t>(*reason));
 }
 
-void AttachTabLabel(TabAndroid* tab, std::string_view device_name) {
+static void JNI_SendTabToSelfAndroidBridge_RecordTargetDeviceCount(
+    JNIEnv* env,
+    jint j_entry_point,
+    jint j_display_reason,
+    jint j_device_count) {
+  CHECK_LE(0, j_entry_point);
+  CHECK_LE(j_entry_point, static_cast<jint>(ShareEntryPoint::kMaxValue));
+  CHECK_LE(0, j_display_reason);
+  CHECK_LE(j_display_reason,
+           static_cast<jint>(EntryPointDisplayReason::kMaxValue));
+  RecordTargetDeviceCount(
+      static_cast<ShareEntryPoint>(j_entry_point),
+      static_cast<EntryPointDisplayReason>(j_display_reason),
+      static_cast<size_t>(j_device_count));
+}
+
+static void JNI_SendTabToSelfTabCardLabelData_MarkEntryActivated(
+    JNIEnv* env,
+    Profile* profile,
+    const JavaRef<jstring>& j_guid,
+    jint j_entry_point) {
+  auto* service = SendTabToSelfSyncServiceFactory::GetForProfile(profile);
+  SendTabToSelfModel* model =
+      service ? service->GetSendTabToSelfModel() : nullptr;
+  if (model) {
+    const std::string guid = ConvertJavaStringToUTF8(env, j_guid);
+    model->MarkEntryActivated(
+        guid, static_cast<ShareActivatedEntryPoint>(j_entry_point));
+  }
+}
+
+void AttachTabLabel(TabAndroid* tab,
+                    std::string_view guid,
+                    std::string_view device_name) {
   CHECK(tab);
   JNIEnv* env = base::android::AttachCurrentThread();
   Java_SendTabToSelfAndroidBridge_attachTabLabel(
-      env, tab->GetJavaObject(), ConvertUTF8ToJavaString(env, device_name));
+      env, tab->GetJavaObject(), ConvertUTF8ToJavaString(env, guid),
+      ConvertUTF8ToJavaString(env, device_name));
 }
 
 void ShowMessageBanner(content::WebContents* web_contents,
@@ -184,3 +237,4 @@ void ShowMessageBanner(content::WebContents* web_contents,
 
 DEFINE_JNI(SendTabToSelfAndroidBridge)
 DEFINE_JNI(TargetDeviceInfo)
+DEFINE_JNI(SendTabToSelfTabCardLabelData)

@@ -815,6 +815,9 @@ Called by update_extension_histograms.py.-->
   <int value="573"
       label="PASSWORDS_PRIVATE_ON_PASSWORD_MANAGER_ACTIONABLE_ERROR_CHANGED"/>
   <int value="574" label="INDIGO_PRIVATE_ON_REGENERATE_STARTED"/>
+  <int value="575" label="DICTATION_PRIVATE_ON_START_STREAM"/>
+  <int value="576" label="DICTATION_PRIVATE_ON_END_STREAM"/>
+  <int value="577" label="DICTATION_PRIVATE_ON_CONTEXT_UPDATE"/>
 </enum>
 
 <!-- LINT.ThenChange(//extensions/browser/extension_event_histogram_value.h:HistogramValue) -->
@@ -2912,6 +2915,8 @@ Called by update_extension_histograms.py.-->
   <int value="1973" label="GLICPRIVATE_ACTIVATETABWITHCONVERSATION"/>
   <int value="1974" label="CONTEXTUALTASKSPRIVATE_GETSTATE"/>
   <int value="1975" label="CONTEXTUALTASKSPRIVATE_LAUNCHPANELINNEWTAB"/>
+  <int value="1976" label="DICTATIONPRIVATE_UPDATETRANSCRIPTION"/>
+  <int value="1977" label="DICTATIONPRIVATE_SETSTREAMSTATE"/>
 </enum>
 
 <!-- LINT.ThenChange(//extensions/browser/extension_function_histogram_value.h:HistogramValue) -->
@@ -3010,11 +3015,6 @@ Called by update_extension_histograms.py.-->
   <int value="8" label="COMMAND_LINE"/>
   <int value="9" label="EXTERNAL_POLICY"/>
   <int value="10" label="EXTERNAL_COMPONENT"/>
-</enum>
-
-<enum name="ExtensionMV2DeprecationAction">
-  <int value="0" label="Extension Removed"/>
-  <int value="1" label="Extension ReEnabled"/>
 </enum>
 
 <enum name="ExtensionNavigationScheme">
@@ -3306,6 +3306,7 @@ Called by update_extension_permission.py.-->
   <int value="266" label="kGlicPrivateInvoke"/>
   <int value="267" label="kIndigoPrivate"/>
   <int value="268" label="kContextualTasksPrivate"/>
+  <int value="269" label="kDictationPrivate"/>
 </enum>
 
 <enum name="ExtensionPolicyReinstallReason">
@@ -3313,6 +3314,12 @@ Called by update_extension_permission.py.-->
   <int value="1" label="Corrupted Chrome Web Store extension"/>
   <int value="2" label="Corrupted non-webstore extension"/>
   <int value="4" label="Non-webstore extension without hashes skipped"/>
+</enum>
+
+<enum name="ExtensionRuntimeUninstallURLHost">
+  <int value="0" label="HTTPS"/>
+  <int value="1" label="Local HTTP"/>
+  <int value="2" label="Remote HTTP"/>
 </enum>
 
 <enum name="ExtensionsDatabaseOperation">

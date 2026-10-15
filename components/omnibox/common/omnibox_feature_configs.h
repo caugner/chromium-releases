@@ -167,31 +167,6 @@ struct AiMode : Config<AiMode> {
   bool check_ai_eligibility_gws_side = false;
 };
 
-// If enabled, show the AIM entrypoint in the omnibox.
-struct AiModeOmniboxEntryPoint : Config<AiModeOmniboxEntryPoint> {
-  AiModeOmniboxEntryPoint();
-  // Whether the AIM entrypoint is enabled.
-  bool enabled;
-
-  // Never display AIM hint text.
-  bool hide_aim_hint_text;
-
-  // Whether to hide the AIM hint text on NTP open.
-  bool hide_aim_hint_text_on_ntp_open;
-
-  // Whether to hide the other (non-AIM) page actions on NTP.
-  bool hide_other_page_actions_on_ntp;
-
-  // The maximum number of times the hint can be shown per day.
-  int aim_hint_impression_limit_daily;
-
-  // The maximum number of times the hint can be shown in total.
-  int aim_hint_impression_limit_total;
-
-  // Whether impression limits for the AIM hint are enabled.
-  bool enable_hint_impression_limits;
-};
-
 // A config struct for features related to contextual search in omnibox.
 struct ContextualSearch : Config<ContextualSearch> {
   ContextualSearch();
@@ -466,8 +441,6 @@ struct SearchAggregatorProvider : Config<SearchAggregatorProvider> {
   // Minimum length input must be to run the
   // `EnterpriseSearchAggregatorProvider`.
   int min_query_length;
-  // If true, the response will be parsed in a utility process.
-  bool parse_response_in_utility_process;
   // If true, the newer Discovery Engine OAuth scope will be used in suggestions
   // requests.
   bool use_discovery_engine_oauth_scope;

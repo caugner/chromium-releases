@@ -29,13 +29,13 @@ import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 
+import org.chromium.base.FeatureOverrides;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.transit.ViewFinder;
 import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.CriteriaHelper;
 import org.chromium.base.test.util.DisabledTest;
-import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.base.test.util.Restriction;
 import org.chromium.chrome.R;
@@ -132,41 +132,10 @@ public class TabbedRootUiCoordinatorTest {
 
     @Test
     @MediumTest
-    @DisableFeatures(ChromeFeatureList.ANDROID_BOOKMARK_BAR)
-    @Restriction({DeviceFormFactor.PHONE})
-    @DisabledTest  // TODO(crbug.com/447525636): Re-enable tests.
-    public void testTopControlsHeightWithBookmarkBarWhenFlagIsDisabledOnPhone() {
-        mPage = mActivityTestRule.startOnBlankPage();
-        mTabbedRootUiCoordinator =
-                (TabbedRootUiCoordinator) mPage.getActivity().getRootUiCoordinatorForTesting();
-        ThreadUtils.runOnUiThreadBlocking(
-                () -> {
-                    testTopControlsHeightWithBookmarkBar(/* expectBookmarkBar= */ false);
-                });
-    }
-
-    @Test
-    @MediumTest
-    @DisableFeatures(ChromeFeatureList.ANDROID_BOOKMARK_BAR)
-    @Restriction(DeviceFormFactor.TABLET_OR_DESKTOP)
-    public void testTopControlsHeightWithBookmarkBarWhenFlagIsDisabledOnTablet() {
-        final ChromeTabbedActivity activity = mActivityTestRule.getActivity();
-        mPage = mActivityTestRule.startOnBlankPage();
-        mTabbedRootUiCoordinator =
-                (TabbedRootUiCoordinator) mPage.getActivity().getRootUiCoordinatorForTesting();
-        ThreadUtils.runOnUiThreadBlocking(
-                () -> {
-                    testTopControlsHeightWithBookmarkBar(/* expectBookmarkBar= */ false);
-                });
-    }
-
-    @Test
-    @MediumTest
-    @EnableFeatures(ChromeFeatureList.ANDROID_BOOKMARK_BAR)
     @Restriction({DeviceFormFactor.PHONE})
     @DisabledTest
     // TODO(crbug.com/447525636): Re-enable tests.
-    public void testTopControlsHeightWithBookmarkBarWhenFlagIsEnabledOnPhone() {
+    public void testTopControlsHeightWithBookmarkBarOnPhone() {
         mPage = mActivityTestRule.startOnBlankPage();
         mTabbedRootUiCoordinator =
                 (TabbedRootUiCoordinator) mPage.getActivity().getRootUiCoordinatorForTesting();
@@ -178,12 +147,12 @@ public class TabbedRootUiCoordinatorTest {
 
     @Test
     @MediumTest
-    @EnableFeatures(ChromeFeatureList.ANDROID_BOOKMARK_BAR)
     @Restriction(DeviceFormFactor.TABLET_OR_DESKTOP)
-    public void testTopControlsHeightWithBookmarkBarWhenFlagIsEnabledOnTablet() {
+    public void testTopControlsHeightWithBookmarkBarOnTablet() {
         mPage = mActivityTestRule.startOnBlankPage();
         mTabbedRootUiCoordinator =
                 (TabbedRootUiCoordinator) mPage.getActivity().getRootUiCoordinatorForTesting();
+
         ThreadUtils.runOnUiThreadBlocking(
                 () -> {
                     final ChromeTabbedActivity activity = mActivityTestRule.getActivity();
@@ -282,6 +251,7 @@ public class TabbedRootUiCoordinatorTest {
 
     @Test
     @MediumTest
+    @CommandLineFlags.Remove({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
     public void testMaybeShowGlicPromo_WouldTrigger_ToolbarNotPinned() {
         mPage = mActivityTestRule.startOnBlankPage();
         mTabbedRootUiCoordinator =
@@ -324,6 +294,7 @@ public class TabbedRootUiCoordinatorTest {
 
     @Test
     @MediumTest
+    @CommandLineFlags.Remove({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
     public void testMaybeShowGlicPromo_WouldTrigger_ToolbarPinned() {
         mPage = mActivityTestRule.startOnBlankPage();
         mTabbedRootUiCoordinator =
@@ -367,6 +338,7 @@ public class TabbedRootUiCoordinatorTest {
 
     @Test
     @MediumTest
+    @CommandLineFlags.Remove({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
     public void testMaybeShowGlicPromo_WouldNotTrigger() {
         mPage = mActivityTestRule.startOnBlankPage();
         mTabbedRootUiCoordinator =
@@ -402,6 +374,50 @@ public class TabbedRootUiCoordinatorTest {
                 AdaptiveToolbarButtonVariant.AUTO, AdaptiveToolbarPrefs.getCustomizationSetting());
         // Promo coordinator should be non-null (shown).
         assertNotNull(mTabbedRootUiCoordinator.getGlicPromoCoordinatorForTesting());
+
+        // Verify that the trigger event was notified to the tracker.
+        verify(mTracker).notifyEvent(EventConstants.ADAPTIVE_TOOLBAR_GLIC_IPH_TRIGGER);
+    }
+
+    @Test
+    @MediumTest
+    @CommandLineFlags.Remove({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
+    public void testMaybeShowGlicPromo_DisabledByParam() {
+        mPage = mActivityTestRule.startOnBlankPage();
+        mTabbedRootUiCoordinator =
+                (TabbedRootUiCoordinator) mPage.getActivity().getRootUiCoordinatorForTesting();
+
+        GlicEnabling.setEnabledForTesting(true);
+        ChromeSharedPreferences.getInstance().removeKey(ChromePreferenceKeys.GLIC_PROMO_ACCEPTED);
+        FeatureOverrides.overrideParam(ChromeFeatureList.GLIC, "glic-bottom-sheet-promo", false);
+
+        // Mock tracker wouldTriggerHelpUi to return false.
+        doReturn(false)
+                .when(mTracker)
+                .wouldTriggerHelpUi(
+                        FeatureConstants.ADAPTIVE_BUTTON_PIN_GLIC_TOOLBAR_BUTTON_FEATURE);
+        TrackerFactory.setTrackerForTests(mTracker);
+
+        // Toolbar is AUTO (not pinned).
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> {
+                    AdaptiveToolbarPrefs.saveToolbarButtonManualOverride(
+                            AdaptiveToolbarButtonVariant.AUTO);
+                });
+
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> {
+                    mTabbedRootUiCoordinator.maybeShowGlicPromo();
+                });
+
+        assertFalse(
+                ChromeSharedPreferences.getInstance()
+                        .readBoolean(ChromePreferenceKeys.GLIC_PROMO_ACCEPTED, false));
+        // Toolbar should still be AUTO.
+        assertEquals(
+                AdaptiveToolbarButtonVariant.AUTO, AdaptiveToolbarPrefs.getCustomizationSetting());
+        // Promo coordinator should be null (not shown due to param).
+        assertNull(mTabbedRootUiCoordinator.getGlicPromoCoordinatorForTesting());
 
         // Verify that the trigger event was notified to the tracker.
         verify(mTracker).notifyEvent(EventConstants.ADAPTIVE_TOOLBAR_GLIC_IPH_TRIGGER);

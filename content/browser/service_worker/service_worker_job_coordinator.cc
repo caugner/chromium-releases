@@ -45,9 +45,8 @@ void ServiceWorkerJobCoordinator::JobQueue::Pop(
     ServiceWorkerRegisterJobBase* job) {
   DCHECK(job == jobs_.front().get());
   jobs_.pop_front();
-  if (!jobs_.empty()) {
+  if (!jobs_.empty())
     StartOneJob();
-  }
 }
 
 void ServiceWorkerJobCoordinator::JobQueue::StartOneJob() {
@@ -56,12 +55,9 @@ void ServiceWorkerJobCoordinator::JobQueue::StartOneJob() {
 }
 
 void ServiceWorkerJobCoordinator::JobQueue::AbortAll() {
-  while (!jobs_.empty()) {
-    std::unique_ptr<ServiceWorkerRegisterJobBase> job =
-        std::move(jobs_.front());
-    jobs_.pop_front();
+  for (const auto& job : jobs_)
     job->Abort();
-  }
+  jobs_.clear();
 }
 
 ServiceWorkerJobCoordinator::ServiceWorkerJobCoordinator(
@@ -133,38 +129,27 @@ void ServiceWorkerJobCoordinator::Update(
 
 void ServiceWorkerJobCoordinator::Abort(const GURL& scope,
                                         const blink::StorageKey& key) {
-  UniqueRegistrationKey reg_key(scope, key);
-  while (true) {
-    auto pending_jobs = job_queues_.find(reg_key);
-    if (pending_jobs == job_queues_.end()) {
-      return;
-    }
-    JobQueue queue = std::move(pending_jobs->second);
-    job_queues_.erase(pending_jobs);
-    queue.AbortAll();
-  }
+  auto pending_jobs = job_queues_.find(UniqueRegistrationKey(scope, key));
+  if (pending_jobs == job_queues_.end())
+    return;
+  pending_jobs->second.AbortAll();
+  job_queues_.erase(pending_jobs);
 }
 
 void ServiceWorkerJobCoordinator::AbortAll() {
-  while (!job_queues_.empty()) {
-    auto it = job_queues_.begin();
-    JobQueue queue = std::move(it->second);
-    job_queues_.erase(it);
-    queue.AbortAll();
-  }
+  for (auto& job_pair : job_queues_)
+    job_pair.second.AbortAll();
+  job_queues_.clear();
 }
 
 void ServiceWorkerJobCoordinator::FinishJob(const GURL& scope,
                                             const blink::StorageKey& key,
                                             ServiceWorkerRegisterJobBase* job) {
-  UniqueRegistrationKey reg_key(scope, key);
-  auto pending_jobs = job_queues_.find(reg_key);
+  auto pending_jobs = job_queues_.find(UniqueRegistrationKey(scope, key));
   CHECK(pending_jobs != job_queues_.end()) << "Deleting non-existent job.";
   pending_jobs->second.Pop(job);
-  pending_jobs = job_queues_.find(reg_key);
-  if (pending_jobs != job_queues_.end() && pending_jobs->second.empty()) {
+  if (pending_jobs->second.empty())
     job_queues_.erase(pending_jobs);
-  }
 }
 
 }  // namespace content

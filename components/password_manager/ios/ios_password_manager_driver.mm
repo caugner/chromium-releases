@@ -203,7 +203,7 @@ const GURL& IOSPasswordManagerDriver::GetLastCommittedURL() const {
 }
 
 const url::Origin& IOSPasswordManagerDriver::GetLastCommittedOrigin() const {
-  NOTREACHED();
+  return security_origin_;
 }
 
 bool IOSPasswordManagerDriver::HasCrossOriginAncestor() const {
@@ -219,6 +219,14 @@ gfx::RectF IOSPasswordManagerDriver::TransformToRootCoordinates(
 void IOSPasswordManagerDriver::CheckViewAreaVisible(
     autofill::FieldRendererId field_id,
     base::OnceCallback<void(bool)>) {
+  NOTREACHED();
+}
+
+bool IOSPasswordManagerDriver::HasValidURL(bool may_kill_renderer) {
+  NOTREACHED();
+}
+
+bool IOSPasswordManagerDriver::IsRenderFrameHostSupported() {
   NOTREACHED();
 }
 

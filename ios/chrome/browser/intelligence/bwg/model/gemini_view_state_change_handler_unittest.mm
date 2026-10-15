@@ -21,8 +21,10 @@ class FakeGeminiViewStateChangeHandlerTarget
     last_view_state_changed_ = view_state;
   }
   void OnProcessingStatusChanged(
-      ios::provider::GeminiClientMode processing_status) override {
+      ios::provider::GeminiClientMode processing_status,
+      ios::provider::GeminiDormantReason dormant_reason) override {
     last_processing_status_changed_ = processing_status;
+    last_dormant_reason_changed_ = dormant_reason;
   }
   void SetLastShownViewState(
       ios::provider::GeminiViewState view_state) override {
@@ -31,14 +33,26 @@ class FakeGeminiViewStateChangeHandlerTarget
   void CollapseFloatyIfInvoked() override { collapse_floaty_called_ = true; }
   void OnLiveButtonTapped() override { live_button_tapped_called_ = true; }
   void OnGeminiLiveUserDidBargeIn() override { barge_in_called_ = true; }
+  void OnGeminiLiveUserDidPressStopButton() override {
+    stop_button_pressed_called_ = true;
+  }
+  void OnModeChanged(ios::provider::GeminiViewMode mode) override {
+    last_mode_changed_ = mode;
+  }
+  void OnGeminiUIDidAppear() override { ui_did_appear_called_ = true; }
 
   std::optional<ios::provider::GeminiViewState> last_view_state_changed_;
   std::optional<ios::provider::GeminiClientMode>
       last_processing_status_changed_;
+  std::optional<ios::provider::GeminiDormantReason>
+      last_dormant_reason_changed_;
   std::optional<ios::provider::GeminiViewState> last_shown_view_state_;
   bool collapse_floaty_called_ = false;
   bool live_button_tapped_called_ = false;
   bool barge_in_called_ = false;
+  bool stop_button_pressed_called_ = false;
+  std::optional<ios::provider::GeminiViewMode> last_mode_changed_;
+  bool ui_did_appear_called_ = false;
 };
 
 class GeminiViewStateChangeHandlerTest : public PlatformTest {
@@ -80,6 +94,23 @@ TEST_F(GeminiViewStateChangeHandlerTest, TestDidUpdateProcessingStatus) {
                  conversationID:@"conversation_id"];
   EXPECT_THAT(target_.last_processing_status_changed_,
               testing::Optional(ios::provider::GeminiClientMode::kListening));
+  EXPECT_THAT(target_.last_dormant_reason_changed_,
+              testing::Optional(ios::provider::GeminiDormantReason::kUnknown));
+}
+
+// Tests that the handler correctly notifies the target when processing status
+// changes with a dormant reason.
+TEST_F(GeminiViewStateChangeHandlerTest,
+       TestDidUpdateProcessingStatusWithDormantReason) {
+  [handler_
+      didUpdateProcessingStatus:ios::provider::GeminiClientMode::kDormant
+                  dormantReason:ios::provider::GeminiDormantReason::kUserStop
+                      sessionID:@"session_id"
+                 conversationID:@"conversation_id"];
+  EXPECT_THAT(target_.last_processing_status_changed_,
+              testing::Optional(ios::provider::GeminiClientMode::kDormant));
+  EXPECT_THAT(target_.last_dormant_reason_changed_,
+              testing::Optional(ios::provider::GeminiDormantReason::kUserStop));
 }
 
 // Tests that the handler requests collapsing the floaty when requested to
@@ -135,6 +166,26 @@ TEST_F(GeminiViewStateChangeHandlerTest, TestGeminiLiveUserDidBargeIn) {
 TEST_F(GeminiViewStateChangeHandlerTest, TestLiveButtonTapped) {
   [handler_ geminiLiveUserDidTapLiveButton];
   EXPECT_TRUE(target_.live_button_tapped_called_);
+}
+
+// Tests that the handler correctly forwards geminiUIDidAppear calls.
+TEST_F(GeminiViewStateChangeHandlerTest, TestGeminiUIDidAppear) {
+  [handler_ geminiUIDidAppear];
+  EXPECT_TRUE(target_.ui_did_appear_called_);
+}
+
+// Tests that the handler correctly forwards didSwitchToMode calls.
+TEST_F(GeminiViewStateChangeHandlerTest, TestDidSwitchToMode) {
+  [handler_ didSwitchToMode:ios::provider::GeminiViewMode::kLive];
+  EXPECT_THAT(target_.last_mode_changed_,
+              testing::Optional(ios::provider::GeminiViewMode::kLive));
+}
+
+// Tests that the handler correctly forwards geminiLiveUserDidPressStopButton
+// calls.
+TEST_F(GeminiViewStateChangeHandlerTest, TestGeminiLiveUserDidPressStopButton) {
+  [handler_ geminiLiveUserDidPressStopButton];
+  EXPECT_TRUE(target_.stop_button_pressed_called_);
 }
 
 }  // namespace

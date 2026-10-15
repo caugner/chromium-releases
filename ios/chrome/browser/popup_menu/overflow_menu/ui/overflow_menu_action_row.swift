@@ -41,6 +41,12 @@ struct OverflowMenuActionRow: View {
   /// The size of the "N" IPH icon.
   private static let newLabelIconWidth: CGFloat = 15
 
+  /// The size of the preview image.
+  private static let previewImageSize: CGFloat = 24
+
+  /// The size of the fallback preview image.
+  private static let fallbackImageSize: CGFloat = 18
+
   // The duration that the view's highlight should persist.
   private static let highlightDuration: DispatchTimeInterval = .seconds(2)
 
@@ -105,7 +111,7 @@ struct OverflowMenuActionRow: View {
         .labelStyle(.iconOnly)
         .tint(.chromeBlue)
         .accessibilityRemoveTraits(.isSelected)
-        rowIcon
+        rowIcon?.foregroundColor(action.symbolTintColor.map { Color(uiColor: $0) })
         centerTextView
         Spacer()
       }
@@ -123,9 +129,22 @@ struct OverflowMenuActionRow: View {
           newLabelIconView
         }
         Spacer()
-        if let rowIcon = rowIcon {
-          rowIcon
+        if let previewImage = action.previewImage {
+          CircularPreviewContainer(size: Self.previewImageSize) {
+            Image(uiImage: previewImage)
+              .resizable()
+              .aspectRatio(contentMode: .fill)
+          }
+        } else if let fallbackPreviewImage = action.fallbackPreviewImage {
+          Image(uiImage: fallbackPreviewImage)
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(
+              width: Self.fallbackImageSize,
+              height: Self.fallbackImageSize
+            )
         }
+        rowIcon?.foregroundColor(action.symbolTintColor.map { Color(uiColor: $0) })
       }
       .padding([.trailing], Self.rowEndPadding)
     }
@@ -213,5 +232,27 @@ struct OverflowMenuActionRow: View {
         }
       }
       .accessibilityIdentifier("overflowRowIPHBadgeIdentifier")
+  }
+}
+
+/// A generic circular container with a 1pt separator-colored border.
+/// It clips its content to a circle.
+struct CircularPreviewContainer<Content: View>: View {
+  var size: CGFloat
+  var content: Content
+
+  init(size: CGFloat, @ViewBuilder content: () -> Content) {
+    self.size = size
+    self.content = content()
+  }
+
+  var body: some View {
+    ZStack {
+      Circle()
+        .stroke(Color(uiColor: .separator), lineWidth: 1)
+      content
+        .clipShape(Circle())
+    }
+    .frame(width: size, height: size)
   }
 }

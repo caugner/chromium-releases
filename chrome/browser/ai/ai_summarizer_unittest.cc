@@ -134,6 +134,12 @@ optimization_guide::proto::FeatureTextSafetyConfiguration CreateSafetyConfig() {
 #endif  // !BUILDFLAG(IS_ANDROID)
 
 class AISummarizerTest : public AITestUtils::AITestBase {
+ public:
+  AISummarizerTest() {
+    scoped_feature_list_.InitAndEnableFeature(
+        blink::features::kAISummarizationAPI);
+  }
+
  protected:
   optimization_guide::proto::OnDeviceModelExecutionFeatureConfig CreateConfig()
       override {
@@ -215,6 +221,9 @@ class AISummarizerTest : public AITestUtils::AITestBase {
     auto result = summarizer_client.result().Take();
     EXPECT_OK(result);
   }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 TEST(AISummarizerStandaloneTest, CombineContexts) {
@@ -898,7 +907,8 @@ class AISummarizerManifestTest : public AITestUtils::AITestManifestBase {
  public:
   AISummarizerManifestTest() {
     scoped_feature_list_.InitWithFeaturesAndParameters(
-        {{blink::features::kAISummarizationPerformancePreference, {}},
+        {{blink::features::kAISummarizationAPI, {}},
+         {blink::features::kAISummarizationPerformancePreference, {}},
          {optimization_guide::kOptimizationGuideManifestBroker, {}},
          {on_device_model::features::kOnDeviceModelLitertLmBackend, {}}},
         {});
@@ -1261,6 +1271,39 @@ TEST_F(AISummarizerManifestTest, SummarizeWithSpeedPreferenceAndContextFails) {
   EXPECT_FALSE(responder.WaitForCompletion());
   EXPECT_EQ(responder.error_status(),
             blink::mojom::ModelStreamingResponseStatus::kErrorInvalidRequest);
+}
+
+TEST_F(AISummarizerManifestTest, InputLimitExceededErrorSpeedPreference) {
+  auto options = GetDefaultOptions();
+  options->preference = blink::mojom::PerformancePreference::kSpeed;
+  options->output_language = blink::mojom::AILanguageCode::New("en");
+
+  fake_manifest_broker_->client().RequestAssetsFor(
+      "summarizer_small_expert_model");
+
+  TestCreateSummarizerClient summarizer_client;
+  GetAIManagerRemote()->CreateSummarizer(
+      summarizer_client.BindNewPipeAndPassRemote(), std::move(options),
+      /*monitor=*/mojo::NullRemote());
+
+  auto result = summarizer_client.result().Take();
+  ASSERT_TRUE(result.has_value());
+
+  mojo::Remote<blink::mojom::AISummarizer> summarizer_remote(
+      std::move(result.value()));
+
+  fake_manifest_broker_->settings().set_size_in_tokens(
+      blink::mojom::kTinyModelMaxInputTokenSize + 1);
+
+  AITestUtils::TestStreamingResponder responder;
+  summarizer_remote->Summarize("input", "", responder.BindRemote());
+  EXPECT_FALSE(responder.WaitForCompletion());
+  EXPECT_EQ(responder.error_status(),
+            blink::mojom::ModelStreamingResponseStatus::kErrorInputTooLarge);
+  ASSERT_EQ(responder.quota_error_info().requested,
+            blink::mojom::kTinyModelMaxInputTokenSize + 1);
+  ASSERT_EQ(responder.quota_error_info().quota,
+            blink::mojom::kTinyModelMaxInputTokenSize);
 }
 
 TEST_F(AISummarizerManifestTest, CanCreateAndCreateWithManifestGemma4) {

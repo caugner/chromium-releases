@@ -161,6 +161,76 @@ public class TabStripTransitionCoordinatorUnitTest {
     }
 
     @Test
+    public void initWithVerticalTabsEnabled() {
+        setUpTabStripTransitionCoordinator(
+                /* isInDesktopWindow= */ false,
+                LARGE_NORMAL_WINDOW_WIDTH,
+                /* initDelegate= */ true,
+                /* suppressTabStripAtStart= */ true);
+
+        assertEquals(
+                "Tab strip height should be 0 when vertical tabs are enabled.",
+                0,
+                mCoordinator.getTabStripHeight());
+
+        assertEquals(
+                "No height transition should be requested.",
+                NOTHING_OBSERVED,
+                mTestHandler.heightRequested);
+    }
+
+    @Test
+    public void suppressTabStrip_DesktopWindow() {
+        setUpTabStripTransitionCoordinator(
+                /* isInDesktopWindow= */ true, LARGE_DESKTOP_WINDOW_WIDTH);
+        verifyFadeTransitionState(/* expectedScrimOpacity= */ 0f);
+
+        int expectedHeight = TEST_TAB_STRIP_HEIGHT + mReservedTopPadding;
+        assertEquals(
+                "Tab strip height requested is incorrect.",
+                expectedHeight,
+                mTestHandler.heightRequested);
+
+        mTestHandler.reset();
+
+        mCoordinator.suppressTabStrip(true);
+        RobolectricUtil.runAllBackgroundAndUiIncludingDelayed();
+
+        verifyFadeTransitionState(/* expectedScrimOpacity= */ 1f);
+        assertEquals("Height requested should be 0.", 0, mTestHandler.heightRequested);
+    }
+
+    @Test
+    public void suppressTabStrip_DesktopWindow_Toggle() {
+        setUpTabStripTransitionCoordinator(
+                /* isInDesktopWindow= */ true, LARGE_DESKTOP_WINDOW_WIDTH);
+        verifyFadeTransitionState(/* expectedScrimOpacity= */ 0f);
+        int expectedHeight = TEST_TAB_STRIP_HEIGHT + mReservedTopPadding;
+        assertEquals(
+                "Tab strip height requested is incorrect.",
+                expectedHeight,
+                mTestHandler.heightRequested);
+
+        mTestHandler.reset();
+
+        mCoordinator.suppressTabStrip(true);
+        RobolectricUtil.runAllBackgroundAndUiIncludingDelayed();
+        verifyFadeTransitionState(/* expectedScrimOpacity= */ 1f);
+        assertEquals("Height requested should be 0.", 0, mTestHandler.heightRequested);
+
+        mTestHandler.reset();
+
+        mCoordinator.suppressTabStrip(false);
+        RobolectricUtil.runAllBackgroundAndUiIncludingDelayed();
+
+        verifyFadeTransitionState(/* expectedScrimOpacity= */ 0f);
+        assertEquals(
+                "Height requested should be restored.",
+                expectedHeight,
+                mTestHandler.heightRequested);
+    }
+
+    @Test
     public void hideTabStrip() {
         setDeviceWidthDp(NARROW_NORMAL_WINDOW_WIDTH);
 
@@ -1050,11 +1120,23 @@ public class TabStripTransitionCoordinatorUnitTest {
 
     private void setUpTabStripTransitionCoordinator(boolean isInDesktopWindow, int windowWidth) {
         setUpTabStripTransitionCoordinator(
-                isInDesktopWindow, windowWidth, /* initDelegate= */ true);
+                isInDesktopWindow,
+                windowWidth,
+                /* initDelegate= */ true,
+                /* suppressTabStripAtStart= */ false);
     }
 
     private void setUpTabStripTransitionCoordinator(
             boolean isInDesktopWindow, int windowWidth, boolean initDelegate) {
+        setUpTabStripTransitionCoordinator(
+                isInDesktopWindow, windowWidth, initDelegate, /* suppressTabStripAtStart= */ false);
+    }
+
+    private void setUpTabStripTransitionCoordinator(
+            boolean isInDesktopWindow,
+            int windowWidth,
+            boolean initDelegate,
+            boolean suppressTabStripAtStart) {
         if (mDesktopWindowStateManager != null) {
             int stripHeight = TEST_TAB_STRIP_HEIGHT + (isInDesktopWindow ? mReservedTopPadding : 0);
             var appHeaderRect =
@@ -1076,7 +1158,8 @@ public class TabStripTransitionCoordinatorUnitTest {
                         mTabObscuringHandler,
                         mDesktopWindowStateManager,
                         mDelegateSupplier,
-                        mTestHandler);
+                        mTestHandler,
+                        suppressTabStripAtStart);
         RobolectricUtil.runAllBackgroundAndUiIncludingDelayed();
     }
 
@@ -1100,10 +1183,7 @@ public class TabStripTransitionCoordinatorUnitTest {
     }
 
     private void assertTabStripHeightForMargins(int tabStripHeight) {
-        assertEquals(
-                "ControlContainer height for margins received a different value.",
-                tabStripHeight,
-                mTestHandler.controlContainerHeight);
+        assertEquals(tabStripHeight, mDelegate.heightChanged);
     }
 
     private void assertObservedHeight(int tabStripHeight) {
@@ -1207,18 +1287,21 @@ public class TabStripTransitionCoordinatorUnitTest {
         public int heightRequested = NOTHING_OBSERVED;
         public int controlContainerHeight = NOTHING_OBSERVED;
         public boolean applyScrimOverlay;
+        public int topPadding;
 
         @Override
         public void onTransitionRequested(
-                int newHeight, boolean applyScrimOverlay, Runnable transitionStartedCallback) {
+                int newHeight,
+                int topPadding,
+                boolean applyScrimOverlay,
+                Runnable transitionStartedCallback) {
             this.heightRequested = newHeight;
-            this.controlContainerHeight = newHeight;
             this.applyScrimOverlay = applyScrimOverlay;
             if (transitionStartedCallback != null) {
                 transitionStartedCallback.run();
             }
             if (mDelegate != null) {
-                mDelegate.onHeightChanged(newHeight, applyScrimOverlay);
+                mDelegate.onHeightChanged(newHeight, topPadding, applyScrimOverlay);
                 mDelegate.onHeightTransitionFinished(true);
             }
         }
@@ -1245,7 +1328,7 @@ public class TabStripTransitionCoordinatorUnitTest {
         }
 
         @Override
-        public void onHeightChanged(int newHeight, boolean applyScrimOverlay) {
+        public void onHeightChanged(int newHeight, int topPadding, boolean applyScrimOverlay) {
             heightChanged = newHeight;
             this.applyScrimOverlay = applyScrimOverlay;
         }

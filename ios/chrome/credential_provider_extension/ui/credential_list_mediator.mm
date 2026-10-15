@@ -7,11 +7,11 @@
 #import <AuthenticationServices/AuthenticationServices.h>
 
 #import "ios/chrome/common/credential_provider/credential_store.h"
+#import "ios/chrome/common/credential_provider/net_util.h"
 #import "ios/chrome/credential_provider_extension/ui/credential_list_consumer.h"
 #import "ios/chrome/credential_provider_extension/ui/credential_list_ui_handler.h"
 #import "ios/chrome/credential_provider_extension/ui/credential_response_handler.h"
 #import "ios/chrome/credential_provider_extension/ui/feature_flags.h"
-#import "ios/chrome/credential_provider_extension/ui/net_util.h"
 #import "ios/chrome/credential_provider_extension/ui/ui_util.h"
 
 @interface CredentialListMediator () <CredentialListHandler>
@@ -220,7 +220,7 @@
   if (credential.registryControlledDomain.length == 0) {
     return NO;
   }
-  return credential_provider_extension::SecureHostsMatch(
+  return credential_provider::SecureHostsMatch(
       requestedHost, credential.registryControlledDomain);
 }
 
@@ -230,7 +230,8 @@
     matchesServiceIdentifiers:
         (NSArray<ASCredentialServiceIdentifier*>*)serviceIdentifiers {
   for (ASCredentialServiceIdentifier* serviceIdentifier in serviceIdentifiers) {
-    NSString* requestedHost = HostForServiceIdentifier(serviceIdentifier);
+    NSString* requestedHost =
+        credential_provider::HostForIdentifier(serviceIdentifier.identifier);
     if (!requestedHost) {
       continue;
     }
@@ -241,24 +242,12 @@
       return YES;
     }
 
-    // Do not fall through to the NSURL-host fallback for android:// service
-    // identifiers. NSURL parses "android://<hash>@<package>" as a generic
-    // RFC 3986 URI and yields .host == <package>, which would let a web
-    // origin whose DNS name collides with the Java package name match an
-    // unrelated Android-app credential.
-    if ([credential.serviceIdentifier hasPrefix:@"android://"]) {
-      continue;
-    }
-
     // Fallback to matching the parsed host of the credential's
     // serviceIdentifier.
-    NSURL* credURL = credential.serviceIdentifier
-                         ? [NSURL URLWithString:credential.serviceIdentifier]
-                         : nil;
-    NSString* credHost = credURL.host ?: credential.serviceIdentifier;
+    NSString* credHost =
+        credential_provider::HostForIdentifier(credential.serviceIdentifier);
 
-    if (credential_provider_extension::SecureHostsMatch(requestedHost,
-                                                        credHost)) {
+    if (credential_provider::SecureHostsMatch(requestedHost, credHost)) {
       return YES;
     }
   }

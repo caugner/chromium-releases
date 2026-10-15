@@ -902,7 +902,7 @@ class InteractiveGlicTestMixin : public T {
   }
 
   Host* GetHost() {
-    GlicInstance* instance = GetGlicInstance();
+    GlicInstanceImpl* instance = GetGlicInstanceImpl();
     if (!instance) {
       return nullptr;
     }
@@ -953,9 +953,6 @@ class InteractiveGlicTestMixin : public T {
 
   GURL GetGuestURL() { return glic_test_environment_.GetGuestURL(); }
 
-  void SetGlicFreUrlOverride(const GURL& url) {
-    glic_test_environment_.SetGlicFreUrlOverride(url);
-  }
 
   // `InteractiveGlicTestMixin` is configured to operate a single browser, but
   // it can change which browser it operates. This changes the browser to be

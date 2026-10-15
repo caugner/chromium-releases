@@ -10,7 +10,6 @@
 #include "chrome/browser/contextual_cueing/contextual_cueing_enums.h"
 #include "chrome/browser/contextual_cueing/contextual_cueing_service.h"
 #include "chrome/browser/contextual_cueing/contextual_cueing_service_factory.h"
-#include "chrome/grit/generated_resources.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/vector_icons/vector_icons.h"
 #include "ui/base/models/image_model.h"
@@ -51,13 +50,15 @@ ContextualCueingMenuModel::ContextualCueingMenuModel(
     base::WeakPtr<ContextualCueingController> controller,
     CueTargetType cue_type,
     std::string cuj,
-    CueActionData data)
+    CueActionData data,
+    std::string cue_id)
     : ui::SimpleMenuModel(this),
       profile_(profile),
       controller_(controller),
       cue_type_(cue_type),
       cuj_(cuj),
-      data_(std::move(data)) {
+      data_(std::move(data)),
+      cue_id_(cue_id) {
   contextual_cueing_service_ =
       ContextualCueingServiceFactory::GetForProfile(profile_);
 
@@ -97,8 +98,8 @@ void ContextualCueingMenuModel::ExecuteCommand(int command_id,
     return;
   }
 
-  controller_->OnCueInteraction(*interaction, cue_type_, cuj_,
-                                std::move(data_));
+  controller_->OnCueInteraction(*interaction, cue_type_, cuj_, std::move(data_),
+                                cue_id_);
 }
 
 }  // namespace contextual_cueing

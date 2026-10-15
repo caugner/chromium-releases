@@ -48,6 +48,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/webauthn/passkey_upgrade_request_controller.h"
 #include "chrome/browser/webauthn/authenticator_request_dialog_controller.h"
 #include "chrome/browser/webauthn/authenticator_request_dialog_model.h"
@@ -823,7 +824,16 @@ class EnclaveAuthenticatorBrowserTest : public EnclaveAuthenticatorTestBase {
     std::unique_ptr<base::RunLoop> run_loop_;
   };
 
-  EnclaveAuthenticatorBrowserTest() = default;
+  EnclaveAuthenticatorBrowserTest() {
+    scoped_feature_list_.InitWithFeatures(
+        {device::kWebAuthnCreatePinWhenSystemUvDisabled,
+         device::kWebAuthnEnclaveUseAuthDataFromEnclave},
+        /*disabled_features=*/
+        // TODO(crbug.com/452061489): Fix tests that fail when the WebUI Omnibox
+        // is enabled and then remove the two omnibox features.
+        {omnibox::internal::kWebUIOmniboxPopup,
+         omnibox::internal::kWebUIOmniboxAimPopup});
+  }
   ~EnclaveAuthenticatorBrowserTest() override = default;
 
   EnclaveAuthenticatorBrowserTest(const EnclaveAuthenticatorBrowserTest&) =
@@ -908,8 +918,7 @@ class EnclaveAuthenticatorBrowserTest : public EnclaveAuthenticatorTestBase {
   std::unique_ptr<ModelObserver> model_observer_;
   raw_ptr<ChromeAuthenticatorRequestDelegate> request_delegate_;
   base::HistogramTester histogram_tester_;
-  base::test::ScopedFeatureList scoped_feature_list_{
-      device::kWebAuthnCreatePinWhenSystemUvDisabled};
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 // Parses the string resulting from the Javascript snippets that exercise the
@@ -2702,7 +2711,7 @@ IN_PROC_BROWSER_TEST_F(EnclaveAuthenticatorBrowserTest, BiometricsInPWA) {
       browser()->profile(),
       /*user_gesture=*/true));
   ASSERT_EQ(app_browser->type(), Browser::Type::TYPE_APP);
-  app_browser->window()->Show();
+  app_browser->GetWindow()->Show();
 
   ASSERT_TRUE(NavigateToURLWithDisposition(
       app_browser, https_server_.GetURL("www.example.com", "/title1.html"),

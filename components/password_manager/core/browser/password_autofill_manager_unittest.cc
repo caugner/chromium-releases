@@ -178,6 +178,8 @@ class MockPasswordManagerDriver : public StubPasswordManagerDriver {
       (override));
   MOCK_METHOD(PasswordManager*, GetPasswordManager, (), (override));
   MOCK_METHOD(bool, CanShowAutofillUi, (), (const override));
+  MOCK_METHOD(bool, HasValidURL, (bool), (override));
+  MOCK_METHOD(bool, IsRenderFrameHostSupported, (), (override));
 
   gfx::RectF TransformToRootCoordinates(
       const gfx::RectF& bounds_in_frame_coordinates) override {
@@ -483,6 +485,18 @@ TEST_F(PasswordAutofillManagerTest, PreviewSuggestion) {
 
   password_autofill_manager_->DidNavigateMainFrame();
   EXPECT_FALSE(
+      password_autofill_manager_->PreviewSuggestionForTest(test_username_));
+}
+
+TEST_F(PasswordAutofillManagerTest, PreviewGroupedSuggestion) {
+  fill_data().preferred_login.is_grouped_affiliation = true;
+  TestPasswordManagerClient client;
+  InitializePasswordAutofillManager(&client, nullptr);
+
+  // Grouped suggestions should be masked using an 8-character long mask.
+  EXPECT_CALL(*client.mock_driver(),
+              PreviewSuggestion(test_username_, std::u16string(8, '*')));
+  EXPECT_TRUE(
       password_autofill_manager_->PreviewSuggestionForTest(test_username_));
 }
 
@@ -1976,6 +1990,45 @@ TEST_F(PasswordAutofillManagerTest, WebAuthnSignInLaunchesWebAuthnFlow) {
                                                   SuggestionPosition{.row = 0});
 }
 
+TEST_F(PasswordAutofillManagerTest, WebAuthnSuggestionsLogMetrics) {
+  TestPasswordManagerClient client;
+  NiceMock<MockAutofillClient> autofill_client;
+  InitializePasswordAutofillManager(&client, &autofill_client);
+
+  // Test kWebauthnSignInWithAnotherDevice
+  {
+    base::HistogramTester histograms;
+    EXPECT_CALL(*webauthn_credentials_delegate_,
+                LaunchSecurityKeyOrHybridFlow());
+    Suggestion suggestion(
+        autofill::SuggestionType::kWebauthnSignInWithAnotherDevice);
+    suggestion.payload = autofill::Suggestion::Payload();
+    password_autofill_manager_->DidAcceptSuggestion(
+        suggestion, SuggestionPosition{.row = 0});
+
+    histograms.ExpectUniqueSample(kDropdownSelectedHistogram,
+                                  metrics_util::PasswordDropdownSelectedOption::
+                                      kWebAuthnSignInWithAnotherDevice,
+                                  1);
+  }
+
+  // Test kWebauthnPasskeyQrCode
+  {
+    base::HistogramTester histograms;
+    EXPECT_CALL(*webauthn_credentials_delegate_,
+                LaunchSecurityKeyOrHybridFlow());
+    Suggestion suggestion(autofill::SuggestionType::kWebauthnPasskeyQrCode);
+    suggestion.payload = autofill::Suggestion::Payload();
+    password_autofill_manager_->DidAcceptSuggestion(
+        suggestion, SuggestionPosition{.row = 0});
+
+    histograms.ExpectUniqueSample(
+        kDropdownSelectedHistogram,
+        metrics_util::PasswordDropdownSelectedOption::kWebAuthnPasskeyQrCode,
+        1);
+  }
+}
+
 // Test that the AutofillSuggestionAvailability is set according to the popup
 // availability.
 TEST_F(PasswordAutofillManagerTest,
@@ -2029,9 +2082,16 @@ TEST_F(PasswordAutofillManagerTest, NoPreviewSuggestionWithAuthBeforeFilling) {
 }
 
 TEST_F(PasswordAutofillManagerTest, ManualFallback_InvokesFlow) {
+  base::test::ScopedFeatureList security_checks_feature_list{
+      features::kPasswordManualFallbackSecurityChecks};
   TestPasswordManagerClient client;
   InitializePasswordAutofillManager(&client,
                                     /*autofill_client=*/nullptr);
+
+  ON_CALL(*client.mock_driver(), HasValidURL(/*may_kill_renderer=*/true))
+      .WillByDefault(Return(true));
+  ON_CALL(*client.mock_driver(), IsRenderFrameHostSupported())
+      .WillByDefault(Return(true));
   autofill::TriggeringField field = kTriggeringField;
   field.trigger_source =
       autofill::AutofillSuggestionTriggerSource::kManualFallbackPasswords;
@@ -2042,10 +2102,59 @@ TEST_F(PasswordAutofillManagerTest, ManualFallback_InvokesFlow) {
   password_autofill_manager_->ShowSuggestions(field);
 }
 
-TEST_F(PasswordAutofillManagerTest, ManualFallback_FlowResetOnNavigation) {
+TEST_F(PasswordAutofillManagerTest,
+       ManualFallback_UrlInsecure_NoManualFallback) {
+  base::test::ScopedFeatureList security_checks_feature_list{
+      features::kPasswordManualFallbackSecurityChecks};
   TestPasswordManagerClient client;
   InitializePasswordAutofillManager(&client,
                                     /*autofill_client=*/nullptr);
+
+  ON_CALL(*client.mock_driver(), HasValidURL(/*may_kill_renderer=*/true))
+      .WillByDefault(Return(false));
+  ON_CALL(*client.mock_driver(), IsRenderFrameHostSupported())
+      .WillByDefault(Return(true));
+  EXPECT_CALL(manual_fallback_flow(), RunFlow).Times(0);
+  autofill::TriggeringField field = kTriggeringField;
+  field.trigger_source =
+      autofill::AutofillSuggestionTriggerSource::kManualFallbackPasswords;
+  field.bounds = gfx::RectF(1, 1, 2, 2);
+  field.text_direction = base::i18n::LEFT_TO_RIGHT;
+  password_autofill_manager_->ShowSuggestions(field);
+}
+
+TEST_F(PasswordAutofillManagerTest,
+       ManualFallback_FrameHostNotSupported_NoManualFallback) {
+  base::test::ScopedFeatureList security_checks_feature_list{
+      features::kPasswordManualFallbackSecurityChecks};
+  TestPasswordManagerClient client;
+  InitializePasswordAutofillManager(&client,
+                                    /*autofill_client=*/nullptr);
+
+  ON_CALL(*client.mock_driver(), HasValidURL(/*may_kill_renderer=*/true))
+      .WillByDefault(Return(true));
+  ON_CALL(*client.mock_driver(), IsRenderFrameHostSupported())
+      .WillByDefault(Return(false));
+  EXPECT_CALL(manual_fallback_flow(), RunFlow).Times(0);
+  autofill::TriggeringField field = kTriggeringField;
+  field.trigger_source =
+      autofill::AutofillSuggestionTriggerSource::kManualFallbackPasswords;
+  field.bounds = gfx::RectF(1, 1, 2, 2);
+  field.text_direction = base::i18n::LEFT_TO_RIGHT;
+  password_autofill_manager_->ShowSuggestions(field);
+}
+
+TEST_F(PasswordAutofillManagerTest, ManualFallback_FlowResetOnNavigation) {
+  base::test::ScopedFeatureList security_checks_feature_list{
+      features::kPasswordManualFallbackSecurityChecks};
+  TestPasswordManagerClient client;
+  InitializePasswordAutofillManager(&client,
+                                    /*autofill_client=*/nullptr);
+
+  ON_CALL(*client.mock_driver(), HasValidURL(/*may_kill_renderer=*/true))
+      .WillByDefault(Return(true));
+  ON_CALL(*client.mock_driver(), IsRenderFrameHostSupported())
+      .WillByDefault(Return(true));
   autofill::TriggeringField field = kTriggeringField;
   field.trigger_source =
       autofill::AutofillSuggestionTriggerSource::kManualFallbackPasswords;
@@ -2184,6 +2293,26 @@ TEST_F(PasswordAutofillManagerTest, EmitUMAIfAtLeastOneGroupedCredential) {
   histograms.ExpectUniqueSample(
       "PasswordManager.FillSuggestionsGroupedMatchAccepted", /*sample=*/false,
       /*expected_bucket_count=*/1);
+}
+
+TEST_F(PasswordAutofillManagerTest,
+       PasswordRecoveryFlow_GroupedBackupSuggestion_TriggersConfirmation) {
+  fill_data().preferred_login.backup_password_value = kAliceBackupPassword;
+  TestPasswordManagerClient client;
+  NiceMock<MockAutofillClient> autofill_client;
+  InitializePasswordAutofillManager(&client, &autofill_client);
+  Suggestion::PasswordSuggestionDetails payload(
+      test_username_, test_password_, backup_password_,
+      /*signon_realm=*/"https://grouped.com/", /*is_cross_domain=*/true);
+
+  EXPECT_CALL(client, ShowCrossDomainConfirmationPopup);
+  EXPECT_CALL(*client.mock_driver(), FillSuggestion).Times(0);
+
+  password_autofill_manager_->DidAcceptSuggestion(
+      autofill::test::CreateAutofillSuggestion(
+          autofill::SuggestionType::kBackupPasswordEntry, test_username_,
+          payload),
+      SuggestionPosition{.row = 0});
 }
 #endif
 
@@ -2332,7 +2461,8 @@ TEST_F(PasswordAutofillManagerTest,
   NiceMock<MockAutofillClient> autofill_client;
   InitializePasswordAutofillManager(&client, &autofill_client);
   const Suggestion::Payload& payload = Suggestion::PasswordSuggestionDetails(
-      test_username_, test_password_, backup_password_);
+      test_username_, test_password_, backup_password_,
+      /*signon_realm=*/"", /*is_cross_domain=*/false);
 
   EXPECT_CALL(*client.mock_driver(),
               FillSuggestion(test_username_, backup_password_, _));
@@ -2355,7 +2485,8 @@ TEST_F(PasswordAutofillManagerTest,
   TestPasswordManagerClient client;
   InitializePasswordAutofillManager(&client, nullptr);
   const Suggestion::PasswordSuggestionDetails payload(
-      test_username_, test_password_, backup_password_);
+      test_username_, test_password_, backup_password_,
+      /*signon_realm=*/"", /*is_cross_domain=*/false);
   const Suggestion suggestion = autofill::test::CreateAutofillSuggestion(
       autofill::SuggestionType::kBackupPasswordEntry, test_username_, payload);
 
@@ -2363,6 +2494,26 @@ TEST_F(PasswordAutofillManagerTest,
       *client.mock_driver(),
       PreviewSuggestion(test_username_,
                         std::u16string(backup_password_.length(), '*')));
+  password_autofill_manager_->DidSelectSuggestion(suggestion);
+  testing::Mock::VerifyAndClearExpectations(client.mock_driver());
+
+  EXPECT_EQ(client.GetUndoPasswordChangeController()->GetState(test_username_),
+            PasswordRecoveryState::kRegularFlow);
+}
+
+TEST_F(PasswordAutofillManagerTest,
+       PasswordRecoveryFlow_PreviewGroupedBackupSuggestion) {
+  TestPasswordManagerClient client;
+  InitializePasswordAutofillManager(&client, nullptr);
+  const Suggestion::PasswordSuggestionDetails payload(
+      test_username_, test_password_, backup_password_,
+      /*signon_realm=*/"", /*is_cross_domain=*/true);
+  const Suggestion suggestion = autofill::test::CreateAutofillSuggestion(
+      autofill::SuggestionType::kBackupPasswordEntry, test_username_, payload);
+
+  // Grouped backup suggestions should be masked using an 8-character long mask.
+  EXPECT_CALL(*client.mock_driver(),
+              PreviewSuggestion(test_username_, std::u16string(8, '*')));
   password_autofill_manager_->DidSelectSuggestion(suggestion);
   testing::Mock::VerifyAndClearExpectations(client.mock_driver());
 
@@ -2380,7 +2531,8 @@ TEST_F(
 
   InitializePasswordAutofillManager(&client, nullptr);
   const Suggestion::PasswordSuggestionDetails payload(
-      test_username_, test_password_, backup_password_);
+      test_username_, test_password_, backup_password_,
+      /*signon_realm=*/"", /*is_cross_domain=*/false);
   const Suggestion suggestion = autofill::test::CreateAutofillSuggestion(
       autofill::SuggestionType::kBackupPasswordEntry, test_username_, payload);
 
@@ -2396,7 +2548,8 @@ TEST_F(PasswordAutofillManagerTest,
   NiceMock<MockAutofillClient> autofill_client;
   InitializePasswordAutofillManager(&client, &autofill_client);
   const Suggestion::Payload& payload = Suggestion::PasswordSuggestionDetails(
-      test_username_, test_password_, backup_password_);
+      test_username_, test_password_, backup_password_,
+      /*signon_realm=*/"", /*is_cross_domain=*/false);
 
   EXPECT_CALL(*client.mock_driver(),
               FillSuggestion(test_username_, backup_password_, _));

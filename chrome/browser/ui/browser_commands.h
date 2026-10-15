@@ -113,7 +113,7 @@ void NewWindow(BrowserWindowInterface* browser);
 void NewIncognitoWindow(Profile* profile);
 void CloseWindow(BrowserWindowInterface* browser);
 content::WebContents& NewTab(BrowserWindowInterface* browser,
-                             NewTabTypes context = NewTabTypes::kNewTabCommand);
+                             NewTabTypes context);
 void NewTabToRight(BrowserWindowInterface* browser);
 void NewTabFromClipboardURL(BrowserWindowInterface* browser);
 void CloseTab(BrowserWindowInterface* browser);
@@ -205,6 +205,8 @@ void FocusPreviousTabGroup(BrowserWindowInterface* browser);
 // Takes all ungrouped tabs and places them in a new group.
 // Returns true if a group was made, and false otherwise.
 bool GroupAllUngroupedTabs(BrowserWindowInterface* browser);
+// Returns true if there is at least one ungrouped, non-pinned tab.
+bool CanGroupAllUngroupedTabs(BrowserWindowInterface* browser);
 // Creates a new tab at the end of the group which last had the active tab.
 void AddNewTabToRecentGroup(BrowserWindowInterface* browser);
 // Unfocuses the currently focused tab group, if any.
@@ -273,8 +275,10 @@ void ShowTabSearch(BrowserWindowInterface* browser);
 void CloseTabSearch(BrowserWindowInterface* browser);
 void ToggleTabSearchPin(BrowserWindowInterface* browser);
 void ToggleContextualTasksSidePanel(BrowserWindowInterface* browser);
+void ToggleContextualTasksSidePanelZeroState(BrowserWindowInterface* browser);
 void ToggleVerticalTabs(BrowserWindowInterface* browser);
 void ToggleVerticalTabsExpandOnHover(BrowserWindowInterface* browser);
+void ToggleCollapseVerticalTabs(BrowserWindowInterface* browser);
 bool CanCloseFind(BrowserWindowInterface* browser);
 void CloseFind(BrowserWindowInterface* browser);
 void Zoom(BrowserWindowInterface* browser, content::PageZoom zoom);

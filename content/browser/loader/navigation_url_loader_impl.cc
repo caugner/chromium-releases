@@ -1442,19 +1442,8 @@ void NavigationURLLoaderImpl::OnReceiveResponse(
   TRACE_EVENT("navigation", "NavigationURLLoaderImpl::OnReceiveResponse",
               perfetto::Flow::FromPointer(this));
   DCHECK(!cached_metadata);
-  if (loader_holder_.HasExclusiveTask()) {
-    // Receiving a response while an exclusive task (such as header parsing
-    // for a redirect or an interceptor check) is in flight violates the
-    // URLLoaderClient protocol. Cancel immediately.
-    if (loader_holder_.url_loader()) {
-      loader_holder_.url_loader()->CancelWithError(
-          net::ERR_UNEXPECTED,
-          std::string_view(base::NumberToString(net::ERR_UNEXPECTED)));
-    } else {
-      OnComplete(network::URLLoaderCompletionStatus(net::ERR_UNEXPECTED));
-    }
-    return;
-  }
+  // TODO(https://crbug.com/434182226): Remove DUMP_WILL_BE_.
+  DUMP_WILL_BE_CHECK(!loader_holder_.HasExclusiveTask());
   LogQueueTimeHistogram("Navigation.QueueTime.OnReceiveResponse",
                         resource_request().is_outermost_main_frame);
 
@@ -1594,32 +1583,27 @@ void NavigationURLLoaderImpl::CallOnReceivedResponse(
 void NavigationURLLoaderImpl::OnReceiveRedirect(
     const net::RedirectInfo& redirect_info,
     network::mojom::URLResponseHeadPtr head) {
+  // TODO(https://crbug.com/434182226): Remove DUMP_WILL_BE_.
+  DUMP_WILL_BE_CHECK(!loader_holder_.HasExclusiveTask());
   LogQueueTimeHistogram("Navigation.QueueTime.OnReceiveRedirect",
                         resource_request().is_outermost_main_frame);
   net::Error error = net::OK;
 
-  if (loader_holder_.HasExclusiveTask()) {
-    // A redirect shouldn't be received while another exclusive task is already
-    // in flight. Receiving an overlapping redirect from a network service
-    // violates the URLLoaderClient protocol. Fail the navigation immediately.
-    error = net::ERR_UNEXPECTED;
-  } else if (url_.SchemeIsBlob()) {
+  bool bypass_redirect_checks =
+      base::FeatureList::IsEnabled(features::kBypassRedirectChecksPerRequest)
+          ? head->bypass_redirect_checks
+          : bypass_redirect_checks_;
+
+  if (url_.SchemeIsBlob()) {
     // Loading a blob URL never produces a redirect.
     error = net::ERR_UNSAFE_REDIRECT;
-  } else {
-    bool bypass_redirect_checks =
-        base::FeatureList::IsEnabled(features::kBypassRedirectChecksPerRequest)
-            ? head->bypass_redirect_checks
-            : bypass_redirect_checks_;
-
-    if (!bypass_redirect_checks &&
-        !IsSafeRedirectTarget(url_, redirect_info.new_url)) {
-      error = net::ERR_UNSAFE_REDIRECT;
-    } else if (--redirect_limit_ == 0) {
-      error = net::ERR_TOO_MANY_REDIRECTS;
-      if (redirect_info.is_signed_exchange_fallback_redirect) {
-        UMA_HISTOGRAM_BOOLEAN("SignedExchange.FallbackRedirectLoop", true);
-      }
+  } else if (!bypass_redirect_checks &&
+             !IsSafeRedirectTarget(url_, redirect_info.new_url)) {
+    error = net::ERR_UNSAFE_REDIRECT;
+  } else if (--redirect_limit_ == 0) {
+    error = net::ERR_TOO_MANY_REDIRECTS;
+    if (redirect_info.is_signed_exchange_fallback_redirect) {
+      UMA_HISTOGRAM_BOOLEAN("SignedExchange.FallbackRedirectLoop", true);
     }
   }
   if (error != net::OK) {
@@ -1634,9 +1618,8 @@ void NavigationURLLoaderImpl::OnReceiveRedirect(
           error, std::string_view(base::NumberToString(error)));
     } else {
       // TODO(https://crbug.com/434182226): Turn this to `CHECK()`.
-      DUMP_WILL_BE_CHECK(loader_holder_.state() ==
-                             LoaderHolder::State::kLoadingViaReceiver ||
-                         loader_holder_.state() == LoaderHolder::State::kNone);
+      DUMP_WILL_BE_CHECK_EQ(loader_holder_.state(),
+                            LoaderHolder::State::kLoadingViaReceiver);
       // TODO(crbug.com/40118809): Make sure ResetWithReason() is called
       // on the original `url_loader_`.
       OnComplete(network::URLLoaderCompletionStatus(error));
@@ -2160,11 +2143,6 @@ NavigationURLLoaderImpl::NavigationURLLoaderImpl(
               perfetto::Flow::FromPointer(this));
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  TRACE_EVENT_BEGIN("navigation", "Navigation timeToResponseStarted",
-                    perfetto::Track::FromPointer(this),
-                    request_info_->common_params->navigation_start,
-                    "FrameTreeNode id", frame_tree_node_id_);
-
   mojo::PendingRemote<network::mojom::AcceptCHFrameObserver>
       accept_ch_frame_observer;
   // Use |kNavigationNetworkResponse| thread runner. Messages received related
@@ -2326,11 +2304,16 @@ NavigationURLLoaderImpl::CreateNetworkLoaderFactory(
   }
 
   if (header_client) {
+    // A standard frame navigation request does not need network
+    // restrictions id to be passed, so we pass NoOp id.
+    // Navigations are subjected to Connection Allowlists via the
+    // `NavigationRequest::IsAllowedByConnectionAllowlist` check instead.
     return base::MakeRefCounted<network::WrapperSharedURLLoaderFactory>(
         CreateURLLoaderFactoryWithHeaderClient(
             std::move(header_client), std::move(factory_builder),
             storage_partition, std::move(devtools_cookie_overrides),
-            std::move(cookie_overrides)));
+            std::move(cookie_overrides),
+            network::GetNoOpNetworkRestrictionsId()));
   } else {
     if (!devtools_cookie_overrides.empty() || !cookie_overrides.empty()) {
       network::mojom::URLLoaderFactoryParamsPtr params =
@@ -2457,11 +2440,7 @@ void NavigationURLLoaderImpl::NotifyResponseStarted(
     bool is_download,
     network::mojom::URLResponseHeadPtr response_head) {
   TRACE_EVENT("navigation", "NavigationURLLoaderImpl::NotifyResponseStarted",
-              perfetto::Flow::FromPointer(this));
-  // End "Navigation timeToResponseStarted" trace event.
-  TRACE_EVENT_END("navigation", perfetto::Track::FromPointer(this),
-                  "&NavigationURLLoaderImpl", static_cast<void*>(this),
-                  "success", true);
+              perfetto::TerminatingFlow::FromPointer(this));
 
   NavigationURLLoaderDelegate::EarlyHints early_hints;
   if (early_hints_manager_) {
@@ -2504,10 +2483,8 @@ void NavigationURLLoaderImpl::NotifyRequestRedirected(
 
 void NavigationURLLoaderImpl::NotifyRequestFailed(
     const network::URLLoaderCompletionStatus& status) {
-  // End "Navigation timeToResponseStarted" trace event.
-  TRACE_EVENT_END("navigation", perfetto::Track::FromPointer(this),
-                  "&NavigationURLLoaderImpl", static_cast<void*>(this),
-                  "success", false);
+  TRACE_EVENT("navigation", "NavigationURLLoaderImpl::NotifyRequestFailed",
+              perfetto::TerminatingFlow::FromPointer(this));
   delegate_->OnRequestFailed(status);
 }
 
@@ -2519,7 +2496,8 @@ NavigationURLLoaderImpl::CreateURLLoaderFactoryWithHeaderClient(
     network::URLLoaderFactoryBuilder factory_builder,
     StoragePartitionImpl* partition,
     std::optional<net::CookieSettingOverrides> devtools_cookie_overrides,
-    std::optional<net::CookieSettingOverrides> cookie_overrides) {
+    std::optional<net::CookieSettingOverrides> cookie_overrides,
+    const base::UnguessableToken& network_restrictions_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (url_loader_factory::GetTestingInterceptor()) {
@@ -2533,6 +2511,7 @@ NavigationURLLoaderImpl::CreateURLLoaderFactoryWithHeaderClient(
   params->process_id = network::OriginatingProcessId::browser();
   params->is_trusted = true;
   params->is_orb_enabled = false;
+  params->network_restrictions_id = network_restrictions_id;
   params->disable_web_security =
       base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableWebSecurity);

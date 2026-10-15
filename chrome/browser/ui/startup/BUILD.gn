@@ -359,6 +359,10 @@ source_set("impl") {
       "//chrome/credential_provider/common:common_constants",
     ]
   }
+
+  if (!is_android) {
+    deps += [ "//chrome/browser/ui:browser_tab_strip_tracker" ]
+  }
 }
 
 if (is_win) {
@@ -488,6 +492,7 @@ if (!is_android) {
       "//chrome/browser/ui/startup/focus:browser_tests",
       "//chrome/browser/ui/toasts",
       "//chrome/browser/ui/web_applications",
+      "//chrome/browser/ui/window_metadata",
       "//chrome/browser/web_applications",
       "//chrome/browser/web_applications:web_applications_test_support",
       "//chrome/common:chrome_features",
@@ -567,6 +572,7 @@ if (!is_android && !is_chromeos_device) {
       "//chrome/browser:main_extra_parts",
       "//chrome/browser/prefs:util",
       "//chrome/browser/sessions",
+      "//chrome/browser/ui:simple_message_box_internal",
       "//chrome/browser/ui/browser_window",
       "//chrome/browser/ui/tabs:tab_strip",
       "//chrome/common:constants",

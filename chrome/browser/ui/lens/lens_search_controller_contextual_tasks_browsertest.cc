@@ -985,7 +985,7 @@ class ContextualTasksRoutingEnabledTest
          {contextual_tasks::kContextualTasksForceEntryPointEligibility, {}},
          {lens::features::kLensOverlay, {}},
          {lens::features::kLensOverlayContextualSearchbox, {}}},
-        {});
+        {lens::features::kLensSidePanelUnification});
     InProcessBrowserTest::SetUp();
   }
 
@@ -1022,7 +1022,8 @@ class ContextualTasksRoutingIneligibleTest
     feature_list_.InitWithFeatures(
         {contextual_tasks::kContextualTasks, lens::features::kLensOverlay,
          lens::features::kLensOverlayContextualSearchbox},
-        {contextual_tasks::kContextualTasksForceEntryPointEligibility});
+        {contextual_tasks::kContextualTasksForceEntryPointEligibility,
+         lens::features::kLensSidePanelUnification});
     InProcessBrowserTest::SetUp();
   }
 

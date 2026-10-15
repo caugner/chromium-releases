@@ -21,11 +21,16 @@
 #include "content/public/browser/file_select_listener.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
+#include "printing/buildflags/buildflags.h"
 #include "ui/android/window_android.h"
 #include "ui/base/base_window.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_util.h"
 #include "ui/snapshot/snapshot.h"
+
+#if BUILDFLAG(ENABLE_PRINTING)
+#include "components/printing/browser/print_composite_client.h"
+#endif
 
 namespace glic {
 
@@ -135,17 +140,6 @@ std::unique_ptr<GlicUiEmbedder> GlicSidePanelUi::CreateInactiveEmbedder()
   return GlicInactiveSidePanelUi::CreateForVisibleTab(tab_, *delegate_);
 }
 
-void GlicSidePanelUi::Resize(const gfx::Size& size,
-                             base::TimeDelta duration,
-                             base::OnceClosure callback) {
-  NOTIMPLEMENTED();
-  std::move(callback).Run();
-}
-
-void GlicSidePanelUi::EnableDragResize(bool enabled) {
-  NOTIMPLEMENTED();
-}
-
 void GlicSidePanelUi::Attach() {
   // The Side Panel Ui is already attached, do nothing.
 }
@@ -156,10 +150,6 @@ void GlicSidePanelUi::Detach() {
   }
   // NOTE: `this` will be destroyed after this call.
   delegate_->Detach(*tab_);
-}
-
-void GlicSidePanelUi::SetMinimumWidgetSize(const gfx::Size& size) {
-  NOTIMPLEMENTED();
 }
 
 void GlicSidePanelUi::SwitchConversation(
@@ -291,6 +281,19 @@ void GlicSidePanelUi::RunFileChooser(
     const blink::mojom::FileChooserParams& params) {
   FileSelectHelper::RunFileChooser(render_frame_host, std::move(listener),
                                    params);
+}
+
+void GlicSidePanelUi::PrintCrossProcessSubframe(
+    content::WebContents* web_contents,
+    const gfx::Rect& rect,
+    int document_cookie,
+    content::RenderFrameHost* subframe_host) const {
+#if BUILDFLAG(ENABLE_PRINTING)
+  auto* client = printing::PrintCompositeClient::FromWebContents(web_contents);
+  if (client) {
+    client->PrintCrossProcessSubframe(rect, document_cookie, subframe_host);
+  }
+#endif
 }
 
 }  // namespace glic

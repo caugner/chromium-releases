@@ -7,15 +7,22 @@
 #import "base/strings/string_number_conversions.h"
 #import "base/strings/sys_string_conversions.h"
 #import "base/time/time.h"
+#import "components/feature_engagement/public/event_constants.h"
+#import "components/feature_engagement/public/tracker.h"
+#import "components/prefs/pref_service.h"
 #import "ios/chrome/browser/intelligence/bwg/metrics/gemini_metrics.h"
 #import "ios/chrome/browser/intelligence/bwg/model/gemini_session_delegate.h"
 #import "ios/chrome/browser/intelligence/bwg/model/gemini_tab_helper.h"
 #import "ios/chrome/browser/intelligence/bwg/utils/gemini_constants.h"
+#import "ios/chrome/browser/intelligence/bwg/utils/gemini_prefs.h"
 #import "ios/chrome/browser/intelligence/features/features.h"
+#import "ios/chrome/browser/shared/model/prefs/pref_names.h"
+#import "ios/chrome/browser/shared/model/profile/profile_ios.h"
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list.h"
-#import "ios/chrome/browser/shared/public/commands/bwg_commands.h"
+#import "ios/chrome/browser/shared/public/commands/gemini_commands.h"
 #import "ios/chrome/browser/shared/public/commands/settings_commands.h"
 #import "ios/public/provider/chrome/browser/bwg/gemini_api.h"
+#import "ios/web/public/web_state.h"
 
 namespace {
 
@@ -113,6 +120,10 @@ IOSGeminiSessionCancellationReason HistogramEnumFromGeminiCancelType(
 @implementation GeminiSessionHandler {
   // The associated WebStateList.
   raw_ptr<WebStateList> _webStateList;
+  // The feature engagement tracker.
+  raw_ptr<feature_engagement::Tracker> _tracker;
+  // The PrefService.
+  raw_ptr<PrefService> _prefService;
   // Session start time for duration tracking.
   base::TimeTicks _sessionStartTime;
   // Tracks if user has received the first response in current session.
@@ -121,15 +132,20 @@ IOSGeminiSessionCancellationReason HistogramEnumFromGeminiCancelType(
   BOOL _hasSubmittedFirstPrompt;
   base::TimeTicks _lastPromptSentTime;
   BOOL _lastPromptHadPageContext;
+  BOOL _lastPromptUsedMultiTab;
   BOOL _waitingForResponse;
   // Track prompts per session.
   int _totalPromptsInSession;
 }
 
-- (instancetype)initWithWebStateList:(WebStateList*)webStateList {
+- (instancetype)initWithWebStateList:(WebStateList*)webStateList
+                             tracker:(feature_engagement::Tracker*)tracker
+                         prefService:(PrefService*)prefService {
   self = [super init];
   if (self) {
     _webStateList = webStateList;
+    _tracker = tracker;
+    _prefService = prefService;
   }
   return self;
 }
@@ -147,12 +163,31 @@ IOSGeminiSessionCancellationReason HistogramEnumFromGeminiCancelType(
   [self.geminiViewStateDelegate didSwitchToViewState:viewState];
 }
 
+// TODO(crbug.com/526669545): Remove this method once the dormantReason is fully
+// plugged in.
 - (void)didUpdateProcessingStatus:(ios::provider::GeminiClientMode)processStatus
                         sessionID:(NSString*)sessionID
                    conversationID:(NSString*)conversationID {
   [self.geminiViewStateDelegate didUpdateProcessingStatus:processStatus
                                                 sessionID:sessionID
                                            conversationID:conversationID];
+}
+
+- (void)didUpdateProcessingStatus:(ios::provider::GeminiClientMode)processStatus
+                    dormantReason:
+                        (ios::provider::GeminiDormantReason)dormantReason
+                        sessionID:(NSString*)sessionID
+                   conversationID:(NSString*)conversationID {
+  if (IsGeminiLiveDormantReasonsEnabled()) {
+    [self.geminiViewStateDelegate didUpdateProcessingStatus:processStatus
+                                              dormantReason:dormantReason
+                                                  sessionID:sessionID
+                                             conversationID:conversationID];
+  } else {
+    [self.geminiViewStateDelegate didUpdateProcessingStatus:processStatus
+                                                  sessionID:sessionID
+                                             conversationID:conversationID];
+  }
 }
 
 // TODO(crbug.com/504596190): Remove this method when internal code doesn't use
@@ -179,51 +214,12 @@ IOSGeminiSessionCancellationReason HistogramEnumFromGeminiCancelType(
   // Reset prompt counters for new session.
   _totalPromptsInSession = 0;
 
-  [self dismissOtherActiveSessionsUsingClientID:clientID];
+  [self.geminiViewStateDelegate geminiUIDidAppear];
 }
 
 - (void)UIDidDisappearWithClientID:(NSString*)clientID
                           serverID:(NSString*)serverID {
-  [_geminiHandler dismissGeminiFlowWithCompletion:nil];
-
-  web::WebState* webState = [self webStateWithClientID:clientID];
-  if (!webState) {
-    return;
-  }
-  // Get the GeminiTabHelper from the WebState.
-  GeminiTabHelper* geminiTabHelper = GeminiTabHelper::FromWebState(webState);
-  // WebState should always be valid as long as the tab is open.
-  if (!geminiTabHelper) {
-    // Early exit if no valid tab helper is found.
-    return;
-  }
-  bool isFirstSession = geminiTabHelper->GetIsFirstRun();
-  geminiTabHelper->SetIsFirstRun(false);
-
-  // Record session duration.
-  if (!_sessionStartTime.is_null()) {
-    base::TimeDelta session_duration =
-        base::TimeTicks::Now() - _sessionStartTime;
-
-    // Determine session type.
-    IOSGeminiSessionType session_type;
-    if (_hasSubmittedFirstPrompt) {
-      session_type = IOSGeminiSessionType::kWithPrompt;
-    } else {
-      session_type = IOSGeminiSessionType::kAbandoned;
-    }
-
-    RecordGeminiSessionLengthByType(session_duration, isFirstSession,
-                                    session_type);
-    RecordGeminiSessionTime(session_duration);
-    _sessionStartTime = base::TimeTicks();
-  }
-  // Reset latency tracking on session end.
-  _waitingForResponse = NO;
-  _lastPromptSentTime = base::TimeTicks();
-  // Record prompt counts for the session.
-  RecordSessionPromptCount(_totalPromptsInSession);
-  RecordSessionFirstPrompt(_hasSubmittedFirstPrompt);
+  [self dismissAndRecordMetrics];
 }
 
 - (void)startReceivingResponseWithSessionID:(NSString*)sessionID
@@ -243,7 +239,8 @@ IOSGeminiSessionCancellationReason HistogramEnumFromGeminiCancelType(
   // Calculate and record response latency.
   if (_waitingForResponse && !_lastPromptSentTime.is_null()) {
     base::TimeDelta latency = base::TimeTicks::Now() - _lastPromptSentTime;
-    RecordResponseLatency(latency, _lastPromptHadPageContext, isImageGenerated);
+    RecordResponseLatency(latency, _lastPromptHadPageContext, isImageGenerated,
+                          _lastPromptUsedMultiTab);
 
     // Reset latency tracking.
     _waitingForResponse = NO;
@@ -267,12 +264,18 @@ IOSGeminiSessionCancellationReason HistogramEnumFromGeminiCancelType(
               imagesAttachedCount:(NSUInteger)imagesAttachedCount
                    longPressImage:(BOOL)longPressImage
               pageContextAttached:(BOOL)pageContextAttached {
+  NSUInteger tabsAttachedCount =
+      self.attachedTabsCountProvider ? self.attachedTabsCountProvider() : 0;
+  BOOL usedMultiTab =
+      self.isMultiTabUsedProvider ? self.isMultiTabUsedProvider() : NO;
+
   _totalPromptsInSession++;
 
   // Record that a prompt was sent with arguments.
   RecordGeminiPromptSent(isNanoBananaToolSelected,
                          static_cast<int>(imagesAttachedCount), longPressImage,
-                         pageContextAttached);
+                         pageContextAttached,
+                         static_cast<int>(tabsAttachedCount), usedMultiTab);
 
   // Check if this is the user's first prompt.
   IOSGeminiFirstPromptSubmissionMethod method =
@@ -288,18 +291,21 @@ IOSGeminiSessionCancellationReason HistogramEnumFromGeminiCancelType(
   // Start latency tracking.
   _lastPromptSentTime = base::TimeTicks::Now();
   _lastPromptHadPageContext = pageContextAttached;
+  _lastPromptUsedMultiTab = usedMultiTab;
   _waitingForResponse = YES;
+
+  if (_tracker && inputType == gemini::InputType::kWhatCanGeminiDo &&
+      IsZeroStateSuggestionsCentralizationEnabled()) {
+    _tracker->NotifyEvent(
+        feature_engagement::events::kIOSGeminiWhatCanGeminiDoTapped);
+  }
 }
 
 // Called when a new chat button is tapped.
 - (void)didTapNewChatButtonWithSessionID:(NSString*)sessionID
                           conversationID:(NSString*)conversationID {
-  web::WebState* webState = [self webStateWithClientID:sessionID];
-  if (!webState) {
-    return;
-  }
-  GeminiTabHelper* geminiTabHelper = GeminiTabHelper::FromWebState(webState);
-  geminiTabHelper->DeleteGeminiSessionInStorage();
+  gemini::DeleteGeminiSessionInStorage(_prefService);
+
   // Ensure page context is attached for a new chat.
   ios::provider::UpdatePageAttachmentState(
       ios::provider::GeminiPageContextAttachmentState::kAttached);
@@ -360,12 +366,64 @@ IOSGeminiSessionCancellationReason HistogramEnumFromGeminiCancelType(
   RecordGeminiRegenerateButtonTapped(optionType);
 }
 
+- (void)didRequestToDetachTabWithID:(NSString*)tabID {
+  if (self.tabDetachRequestCallback) {
+    self.tabDetachRequestCallback(tabID);
+  }
+}
+
 - (void)geminiLiveUserDidBargeIn {
   [self.geminiViewStateDelegate geminiLiveUserDidBargeIn];
 }
 
 - (void)geminiLiveUserDidTapLiveButton {
   [self.geminiViewStateDelegate geminiLiveUserDidTapLiveButton];
+}
+
+- (void)geminiLiveUserDidPressStopButton {
+  [self.geminiViewStateDelegate geminiLiveUserDidPressStopButton];
+}
+
+- (void)didSwitchToMode:(ios::provider::GeminiViewMode)mode {
+  [self.geminiViewStateDelegate didSwitchToMode:mode];
+}
+
+- (void)geminiLiveIntroShown:(UIViewController*)viewController {
+  if (_prefService) {
+    gemini::SetGeminiLiveIntroPlayed(_prefService);
+  }
+}
+
+- (void)geminiLive:(UIViewController*)viewController
+    showMicrophoneAlertWithCompletion:(void (^)(BOOL granted))completion {
+  [self.geminiHandler
+      showGeminiLiveMicrophoneAlertWithBaseViewController:viewController
+                                               completion:completion];
+}
+
+- (void)geminiLive:(UIViewController*)viewController
+    showConsentScreenWithCompletion:(void (^)(BOOL accepted))completion {
+  [self.geminiHandler
+      startGeminiLiveFirstRunWithBaseViewController:viewController
+                                         completion:^(BOOL success) {
+                                           if (!success) {
+                                             // TODO(crbug.com/535588632):
+                                             // switch directly to expanded
+                                             // floaty state once the method is
+                                             // bridged.
+                                             ios::provider::SwitchToMode(
+                                                 ios::provider::GeminiViewMode::
+                                                     kFloaty,
+                                                 /*animated=*/YES);
+                                           }
+                                           if (completion) {
+                                             completion(success);
+                                           }
+                                         }];
+}
+
+- (void)didRequestDismissal {
+  [self dismissAndRecordMetrics];
 }
 
 #pragma mark - Private
@@ -387,33 +445,44 @@ IOSGeminiSessionCancellationReason HistogramEnumFromGeminiCancelType(
 // Updates the session state in storage with the given client ID and server ID.
 - (void)updateSessionWithClientID:(NSString*)clientID
                          serverID:(NSString*)serverID {
-  web::WebState* webState = [self webStateWithClientID:clientID];
+  // Get the visible URL of the current tab for user prefs update.
+  web::WebState* webState = _webStateList->GetActiveWebState();
   if (!webState) {
     return;
   }
 
-  GeminiTabHelper* geminiTabHelper = GeminiTabHelper::FromWebState(webState);
-  geminiTabHelper->CreateOrUpdateGeminiSessionInStorage(
-      base::SysNSStringToUTF8(serverID));
+  gemini::CreateOrUpdateConversationIdPrefs(base::SysNSStringToUTF8(serverID),
+                                            webState->GetVisibleURL().spec(),
+                                            _prefService);
 }
 
-// Sets all BWG sessions inactive other than for the WebState matching
-// `clientID`.
-- (void)dismissOtherActiveSessionsUsingClientID:(NSString*)clientID {
-  // TODO(crbug.com/437338434): Keep track of last known active instance to not
-  // have to iterate over all WebStates.
-  for (int i = 0; i < _webStateList->count(); i++) {
-    web::WebState* webState = _webStateList->GetWebStateAt(i);
-    NSString* webStateUniqueID = base::SysUTF8ToNSString(
-        base::NumberToString(webState->GetUniqueIdentifier().identifier()));
-    if (!webState->IsRealized() ||
-        [webStateUniqueID isEqualToString:clientID]) {
-      continue;
+- (void)dismissAndRecordMetrics {
+  [_geminiHandler dismissGeminiFlowWithCompletion:nil];
+
+  // Record session duration.
+  if (!_sessionStartTime.is_null()) {
+    base::TimeDelta session_duration =
+        base::TimeTicks::Now() - _sessionStartTime;
+
+    // Determine session type.
+    IOSGeminiSessionType session_type;
+    if (_hasSubmittedFirstPrompt) {
+      session_type = IOSGeminiSessionType::kWithPrompt;
+    } else {
+      session_type = IOSGeminiSessionType::kAbandoned;
     }
 
-    GeminiTabHelper* geminiTabHelper = GeminiTabHelper::FromWebState(webState);
-    geminiTabHelper->DeactivateGeminiSession();
+    RecordGeminiSessionLengthByType(session_duration, _isFirstSession,
+                                    session_type);
+    RecordGeminiSessionTime(session_duration);
+    _sessionStartTime = base::TimeTicks();
   }
+  // Reset latency tracking on session end.
+  _waitingForResponse = NO;
+  _lastPromptSentTime = base::TimeTicks();
+  // Record prompt counts for the session.
+  RecordSessionPromptCount(_totalPromptsInSession);
+  RecordSessionFirstPrompt(_hasSubmittedFirstPrompt);
 }
 
 @end

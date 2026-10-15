@@ -384,7 +384,7 @@ bool AccountCanMakeChoiceScreenChoice(
   // Treat accounts with signin::Tribool::kUnknown (this covers signed-out
   // users, and signed-in users where the capability is not known yet) as able
   // to make a choice.
-  return account_info.capabilities
+  return account_info.GetAccountCapabilities()
              .can_make_chrome_search_engine_choice_screen_choice() !=
          signin::Tribool::kFalse;
 #else
@@ -878,18 +878,10 @@ void SearchEngineChoiceService::RecordChoiceMade(
   ClearSearchEngineChoiceInvalidation(*profile_prefs_);
 
   if (should_keep_existing_choice_record) {
-#if BUILDFLAG(CHOICE_SCREEN_IN_CHROME)
     // There is an existing record AND we should keep it. In this case, being
     // called from a choice screen is not expected.
-    //
-    // This check is skipped on non-chrome choice platforms, as on Android we
-    // use the `kChoiceScreen` value for choices imported from the OS, where we
-    // don't have control on reprompts and other ways of a choice to be
-    // re-imported. As we observed hits there, we suppress the check for now to
-    // limit useless crash reports.
     CHECK_NE(choice_location, ChoiceMadeLocation::kChoiceScreen,
              base::NotFatalUntil::M153);
-#endif  // BUILDFLAG(CHOICE_SCREEN_IN_CHROME)
     return;
   }
 

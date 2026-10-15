@@ -21,6 +21,17 @@
 // NOTE: Within each of the following sections, the IDs are ordered roughly by
 // how they appear in the GUI/menus (left to right, top to bottom, etc.).
 
+// LINT.IfChange(BrowserCommandIds)
+// =============================================================================
+// When adding a new IDC_* command below, you MUST also create
+// a corresponding declarative ActionItem in the modern Actions framework.
+// (Pure ActionItems added without legacy IDC_* commands are allowed).
+//
+// Quick Guide:
+// 1. Map ID in //chrome/browser/ui/actions/chrome_action_id.h: E(kActionFoo, IDC_FOO)
+// 2. Wire callback in BrowserActions::Initialize...() (browser_actions.cc).
+// =============================================================================
+
 // Navigation commands
 // TODO: Reorder to be in visible order; collapse holes
 #define IDC_BACK                        33000
@@ -86,13 +97,14 @@
 #define IDC_TOGGLE_VERTICAL_TABS        34058
 #define IDC_VERTICAL_TABS_SEND_FEEDBACK 34059
 #define IDC_TOGGLE_VERTICAL_TABS_EXPAND_ON_HOVER 34060
+#define IDC_TOGGLE_VERTICAL_TABS_COLLAPSE 34061
 
 // Web app window commands
-#define IDC_COPY_URL                    34061
-#define IDC_OPEN_IN_CHROME              34062
-#define IDC_WEB_APP_SETTINGS            34063
-#define IDC_WEB_APP_MENU_APP_INFO       34064
-#define IDC_WEB_APP_UPGRADE_DIALOG      34065
+#define IDC_COPY_URL                    34071
+#define IDC_OPEN_IN_CHROME              34072
+#define IDC_WEB_APP_SETTINGS            34073
+#define IDC_WEB_APP_MENU_APP_INFO       34074
+#define IDC_WEB_APP_UPGRADE_DIALOG      34075
 
 #if BUILDFLAG(IS_CHROMEOS)
 // Move window to other user commands
@@ -244,8 +256,6 @@
 #define IDC_BOOKMARKS_MENU              40029
 #define IDC_SAVED_TAB_GROUPS_MENU       40030
 #define IDC_EXTENSION_ERRORS            40031
-#define IDC_SHOW_SETTINGS_CHANGE_FIRST  40033
-#define IDC_SHOW_SETTINGS_CHANGE_LAST   40133
 #define IDC_SHOW_AVATAR_MENU            40134
 #define IDC_EXTENSION_INSTALL_ERROR_FIRST 40135
 #define IDC_EXTENSION_INSTALL_ERROR_LAST 40235
@@ -253,11 +263,8 @@
 #define IDC_DEV_TOOLS_TOGGLE            40237
 #define IDC_RECENT_TABS_MENU            40239
 #define IDC_RECENT_TABS_NO_DEVICE_TABS  40240
-#define IDC_SHOW_SETTINGS_RESET_BUBBLE  40241
 #define IDC_DISTILL_PAGE                40243
 #define IDC_HELP_MENU                   40244
-#define IDC_SHOW_SRT_BUBBLE             40246
-#define IDC_ELEVATED_RECOVERY_DIALOG    40247
 #define IDC_TAKE_SCREENSHOT             40248
 #define IDC_MORE_TOOLS_MENU             40249
 #define IDC_TOGGLE_FULLSCREEN_TOOLBAR   40250
@@ -267,8 +274,6 @@
 #define IDC_INSTALL_PWA                 40254
 #define IDC_SHOW_MANAGEMENT_PAGE             40255
 #define IDC_PASTE_AND_GO                40256
-#define IDC_SHOW_SAVE_LOCAL_CARD_SIGN_IN_PROMO_IF_APPLICABLE 40257
-#define IDC_CLOSE_SIGN_IN_PROMO        40258
 #define IDC_SHOW_FULL_URLS             40259
 #define IDC_CARET_BROWSING_TOGGLE      40260
 #define IDC_CHROME_TIPS                40263
@@ -307,6 +312,7 @@
 #define IDC_REPORT_UNSAFE_SITE 40302
 #define IDC_SHOW_READING_MODE_KEYBOARD 40303
 #define IDC_SHOW_TABS_FROM_OTHER_DEVICES_SIDE_PANEL 40304
+#define IDC_CHROME_ENTERPRISE_RELEASE_NOTES 40305
 
 // Spell-check
 // Insert any additional suggestions before _LAST; these have to be consecutive.
@@ -322,9 +328,9 @@
 #define IDC_SPELLCHECK_LANGUAGES_FIRST  41006
 #define IDC_SPELLCHECK_LANGUAGES_LAST   41106
 #define IDC_CHECK_SPELLING_WHILE_TYPING 41107
-#define IDC_SPELLPANEL_TOGGLE           41109
 #define IDC_SPELLCHECK_ADD_TO_DICTIONARY 41110
 #define IDC_SPELLCHECK_MULTI_LINGUAL    41111
+#define IDC_SPELLCHECK_REMOVE_FROM_DICTIONARY 41112
 
 // Writing direction
 #define IDC_WRITING_DIRECTION_MENU       41120
@@ -362,7 +368,6 @@
 #define IDC_CONTENT_CONTEXT_OPENLINKOFFTHERECORD 50102
 #define IDC_CONTENT_CONTEXT_SAVELINKAS 50103
 #define IDC_CONTENT_CONTEXT_COPYLINKLOCATION 50104
-#define IDC_CONTENT_CONTEXT_COPYEMAILADDRESS 50105
 #define IDC_CONTENT_CONTEXT_OPENLINKWITH 50106
 #define IDC_CONTENT_CONTEXT_COPYLINKTEXT 50107
 #define IDC_CONTENT_CONTEXT_OPENLINKINPROFILE 50108
@@ -426,6 +431,7 @@
 // is rolled out.
 #define IDC_CONTENT_CONTEXT_GENERATEPASSWORD 50176
 #define IDC_CONTENT_CONTEXT_EXIT_FULLSCREEN 50177
+#define IDC_CONTENT_CONTEXT_SAVE_TO_MEMORY_BANKS 50183
 // TODO(b/316143236): Remove this entry once `kPasswordManualFallbackAvailable`
 // is rolled out.
 #define IDC_CONTENT_CONTEXT_SHOWALLSAVEDPASSWORDS 50178
@@ -485,7 +491,6 @@
 #define IDC_BOOKMARK_MANAGER 51012
 #define IDC_BOOKMARK_BAR_ALWAYS_SHOW 51013
 #define IDC_BOOKMARK_BAR_SHOW_APPS_SHORTCUT 51014
-#define IDC_BOOKMARK_BAR_SHOW_READING_LIST 51015
 #define IDC_BOOKMARK_BAR_SHOW_MANAGED_BOOKMARKS 51016
 #define IDC_BOOKMARK_BAR_TRACK_PRICE_FOR_SHOPPING_BOOKMARK 51017
 #define IDC_BOOKMARK_BAR_UNTRACK_PRICE_FOR_SHOPPING_BOOKMARK 51018
@@ -526,9 +531,6 @@
 #define IDC_MEDIA_ROUTER_ABOUT 51200
 #define IDC_MEDIA_ROUTER_HELP 51201
 #define IDC_MEDIA_ROUTER_LEARN_MORE 51202
-#define IDC_MEDIA_ROUTER_ALWAYS_SHOW_TOOLBAR_ACTION 51204
-#define IDC_MEDIA_ROUTER_SHOWN_BY_POLICY 51206
-#define IDC_MEDIA_ROUTER_SHOW_IN_TOOLBAR 51207
 #define IDC_MEDIA_ROUTER_TOGGLE_MEDIA_REMOTING 51208
 
 // Context menu items for media toolbar button
@@ -541,10 +543,8 @@
 #define IDC_UPDATE_SIDE_PANEL_PIN_STATE 51211
 
 // Context menu items for media stream status tray
-#define IDC_MEDIA_STREAM_DEVICE_STATUS_TRAY 51300
 #define IDC_MEDIA_CONTEXT_MEDIA_STREAM_CAPTURE_LIST_FIRST 51301
 #define IDC_MEDIA_CONTEXT_MEDIA_STREAM_CAPTURE_LIST_LAST 51399
-#define IDC_MEDIA_STREAM_DEVICE_ALWAYS_ALLOW 51400
 
 // Protocol handler menu entries
 #define IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_FIRST     52000
@@ -632,6 +632,7 @@
 #define IDC_OMNIBOX_CONTEXT_SET_MODEL_REGULAR                 54017
 #define IDC_OMNIBOX_CONTEXT_SET_MODEL_PRO_NO_GEN_UI           54018
 #define IDC_OMNIBOX_CONTEXT_SHARED_TABS_SUBMENU               54019
+#define IDC_OMNIBOX_CONTEXT_SMART_TAB_SHARING                 54020
 
 // NOTE: The last valid command value is 57343 (0xDFFF)
 // See http://msdn.microsoft.com/en-us/library/t2zechd4(VS.71).aspx
@@ -646,5 +647,6 @@
 // each other, by only using every Nth id (where N is the number of unbounded
 // menus).
 #define IDC_FIRST_UNBOUNDED_MENU COMMAND_ID_FIRST_UNBOUNDED
+// LINT.ThenChange(//chrome/browser/ui/actions/chrome_action_id.h)
 
 #endif  // CHROME_APP_CHROME_COMMAND_IDS_H_

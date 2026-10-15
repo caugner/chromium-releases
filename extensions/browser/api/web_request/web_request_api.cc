@@ -866,7 +866,8 @@ void WebRequestAPI::ProxyWebSocket(
     const net::SiteForCookies& site_for_cookies,
     const std::optional<std::string>& user_agent,
     mojo::PendingRemote<network::mojom::WebSocketHandshakeClient>
-        handshake_client) {
+        handshake_client,
+    mojo::PendingRemote<network::mojom::TrustedHeaderClient> header_client) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(MayHaveProxiesForFrame(frame));
 
@@ -882,9 +883,10 @@ void WebRequestAPI::ProxyWebSocket(
   WebRequestProxyingWebSocket::StartProxying(
       std::move(factory), url, site_for_cookies, user_agent,
       std::move(handshake_client), has_extra_headers, has_security_info,
-      frame->GetProcess()->GetDeprecatedID(), frame->GetRoutingID(),
-      &request_id_generator_, frame->GetLastCommittedOrigin(),
-      frame->GetProcess()->GetBrowserContext(), proxies_.get());
+      std::move(header_client), frame->GetProcess()->GetDeprecatedID(),
+      frame->GetRoutingID(), &request_id_generator_,
+      frame->GetLastCommittedOrigin(), frame->GetProcess()->GetBrowserContext(),
+      proxies_.get());
 }
 
 void WebRequestAPI::ProxyWebTransport(
@@ -963,8 +965,7 @@ bool WebRequestAPI::IsAvailableToWebViewEmbedderWebUIFrame(
       render_frame_host->GetBrowserContext();
   content::RenderFrameHost* embedder_frame =
       render_frame_host->GetOutermostMainFrameOrEmbedder();
-  const GURL& embedder_url =
-      util::GetURLForExtensionPermissionCheck(embedder_frame);
+  const auto& embedder_url = embedder_frame->GetLastCommittedURL();
   // TODO(crbug.com/40288053): Remove the scheme check once we're sure
   // that WebUIs with WebView run in real WebUI processes and check the
   // context type using |IsAvailableToWebViewEmbedderWebPageFrame()| below.
@@ -1025,8 +1026,7 @@ bool WebRequestAPI::IsAvailableToWebViewEmbedderWebPageFrame(
   Feature::Availability availability =
       ExtensionAPI::GetSharedInstance()->IsAvailable(
           "webRequestInternal", /*extension=*/nullptr,
-          mojom::ContextType::kWebPage,
-          util::GetURLForExtensionPermissionCheck(embedder_frame),
+          mojom::ContextType::kWebPage, embedder_frame->GetLastCommittedURL(),
           CheckAliasStatus::ALLOWED, util::GetBrowserContextId(browser_context),
           BrowserFrameContextData(embedder_frame));
   return availability.is_available();

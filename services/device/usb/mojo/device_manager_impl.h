@@ -59,11 +59,6 @@ class DeviceManagerImpl : public mojom::UsbDeviceManager,
       const std::vector<uint8_t>& blocked_interface_classes,
       mojo::PendingReceiver<mojom::UsbDevice> device_receiver,
       mojo::PendingRemote<mojom::UsbDeviceClient> device_client) override;
-  void GetUnrestrictedDevice(
-      const std::string& guid,
-      const std::vector<uint8_t>& blocked_interface_classes,
-      mojo::PendingReceiver<mojom::UsbDevice> device_receiver,
-      mojo::PendingRemote<mojom::UsbDeviceClient> device_client) override;
   void GetSecurityKeyDevice(
       const std::string& guid,
       mojo::PendingReceiver<mojom::UsbDevice> device_receiver,
@@ -115,8 +110,7 @@ class DeviceManagerImpl : public mojom::UsbDeviceManager,
       mojo::PendingReceiver<mojom::UsbDevice> device_receiver,
       mojo::PendingRemote<mojom::UsbDeviceClient> device_client,
       base::span<const uint8_t> blocked_interface_classes,
-      bool allow_security_key_requests,
-      bool allow_unrestricted_control_transfers);
+      bool allow_security_key_requests);
 
   std::unique_ptr<UsbService> usb_service_;
   base::ScopedObservation<UsbService, UsbService::Observer> observation_{this};

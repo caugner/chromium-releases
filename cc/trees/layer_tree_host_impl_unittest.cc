@@ -36,6 +36,7 @@
 #include "cc/input/main_thread_scrolling_reason.h"
 #include "cc/input/page_scale_animation.h"
 #include "cc/input/scroll_elasticity_helper.h"
+#include "cc/input/scroll_timing_info.h"
 #include "cc/input/scroll_utils.h"
 #include "cc/input/scrollbar_controller.h"
 #include "cc/layers/append_quads_context.h"
@@ -165,6 +166,9 @@ MATCHER(UniquePtrMatches, negation ? "do not match" : "match") {
 class CommitToActiveTreeLayerTreeHostImplTest
     : public LayerTreeHostImplTestBase {
  public:
+  CommitToActiveTreeLayerTreeHostImplTest()
+      : LayerTreeHostImplTestBase(base::test::ScopedFeatureList()) {}
+
   LayerTreeSettings DefaultSettings() override {
     LayerTreeSettings settings = LayerTreeHostImplTestBase::DefaultSettings();
     settings.commit_to_active_tree = true;
@@ -211,6 +215,9 @@ INSTANTIATE_ANIMATIONS_TREE_TEST_P(LayerTreeHostImplTimelinesTest);
 class FluentOverlayScrollbarLayerTreeHostImplTest
     : public LayerTreeHostImplTestBase {
  public:
+  FluentOverlayScrollbarLayerTreeHostImplTest()
+      : LayerTreeHostImplTestBase(base::test::ScopedFeatureList()) {}
+
   void SetUp() override {
     LayerTreeSettings settings = DefaultSettings();
     settings.enable_fluent_overlay_scrollbar = true;
@@ -437,6 +444,31 @@ TEST_P(CompositorFrameProducingLayerTreeHostImplTest,
   ASSERT_EQ(fake_layer_tree_frame_sink->num_sent_frames(), 1u);
 }
 
+TEST_P(CompositorFrameProducingLayerTreeHostImplTest,
+       ResourcelessDrawNoLayers) {
+  CreateHostImpl(DefaultSettings(), FakeLayerTreeFrameSink::CreateSoftware());
+
+  // No layers.
+  EXPECT_TRUE(host_impl_->active_tree()->LayerListIsEmpty());
+  // CanDraw should return false because there are no layers and we are not in
+  // resourceless draw mode yet.
+  EXPECT_FALSE(host_impl_->CanDraw());
+
+  auto* fake_layer_tree_frame_sink =
+      static_cast<FakeLayerTreeFrameSink*>(host_impl_->layer_tree_frame_sink());
+  EXPECT_EQ(fake_layer_tree_frame_sink->num_sent_frames(), 0u);
+
+  gfx::Transform identity;
+  gfx::Rect viewport(100, 100);
+  const bool resourceless_software_draw = true;
+
+  // This should work now and send a frame because we support drawing without
+  // layers specifically for resourceless software draws.
+  host_impl_->OnDraw(identity, viewport, resourceless_software_draw, false);
+
+  EXPECT_EQ(fake_layer_tree_frame_sink->num_sent_frames(), 1u);
+}
+
 TEST_P(LayerTreeHostImplTest, ScrollDeltaNoLayers) {
   host_impl_->active_tree()->SetRootLayerForTesting(nullptr);
 
@@ -605,6 +637,76 @@ TEST_P(LayerTreeHostImplTest, ScrollUpdateAndEndNoOpWithoutBegin) {
 
     GetInputHandler().ScrollEnd(/*should_snap=*/false, std::nullopt);
   }
+}
+
+namespace {
+
+// Builds a touchscreen ScrollBegin ScrollState with the hardware event
+// timestamp set, the way the InputHandlerProxy populates it from the
+// originating WebGestureEvent.
+std::unique_ptr<ScrollState> BeginStateWithTimestamp(
+    base::TimeTicks event_timestamp) {
+  ScrollStateData data;
+  data.is_beginning = true;
+  data.delta_y_hint = 10;
+  data.is_direct_manipulation = true;
+  data.event_timestamp = event_timestamp;
+  return std::make_unique<ScrollState>(data);
+}
+
+}  // namespace
+
+// Performance Scroll Timing API: with the LayerTreeSettings flag enabled,
+// a touchscreen gesture that latches a scroller emits a ScrollTimingInfo
+// whose start_time reflects the hardware event timestamp.
+TEST_F(CommitToActiveTreeLayerTreeHostImplTest,
+       ScrollPerformanceTimingEmitsRecordWithHardwareTimestampWhenEnabled) {
+  LayerTreeSettings settings = DefaultSettings();
+  settings.enable_scroll_performance_timing = true;
+  CreateHostImpl(settings, CreateLayerTreeFrameSink());
+  SetupViewportLayersOuterScrolls(gfx::Size(100, 100), gfx::Size(1000, 1000));
+
+  const base::TimeTicks event_timestamp =
+      base::TimeTicks::Now() - base::Milliseconds(5);
+
+  GetInputHandler().ScrollBegin(BeginStateWithTimestamp(event_timestamp).get(),
+                                ui::ScrollInputType::kTouchscreen);
+  GetInputHandler().ScrollUpdate(UpdateState(
+      gfx::Point(), gfx::Vector2d(0, 10), ui::ScrollInputType::kTouchscreen));
+  GetInputHandler().ScrollEnd(/*should_snap=*/false, std::nullopt);
+
+  std::unique_ptr<CompositorCommitData> commit_data =
+      host_impl_->ProcessCompositorDeltas(
+          /* main_thread_mutator_host */ nullptr);
+  ASSERT_EQ(1u, commit_data->scroll_timing_infos.size());
+  const ScrollTimingInfo& info = commit_data->scroll_timing_infos.front();
+  EXPECT_EQ(event_timestamp, info.start_time);
+  ASSERT_TRUE(info.input_type.has_value());
+  EXPECT_EQ(ui::ScrollInputType::kTouchscreen, *info.input_type);
+  EXPECT_TRUE(info.element_id);
+}
+
+// Performance Scroll Timing API: with the LayerTreeSettings flag disabled,
+// the same gesture produces no ScrollTimingInfo. Guards against the cc
+// wiring firing when the runtime feature is off.
+TEST_F(CommitToActiveTreeLayerTreeHostImplTest,
+       ScrollPerformanceTimingNoRecordWhenDisabled) {
+  LayerTreeSettings settings = DefaultSettings();
+  settings.enable_scroll_performance_timing = false;
+  CreateHostImpl(settings, CreateLayerTreeFrameSink());
+  SetupViewportLayersOuterScrolls(gfx::Size(100, 100), gfx::Size(1000, 1000));
+
+  GetInputHandler().ScrollBegin(
+      BeginStateWithTimestamp(base::TimeTicks::Now()).get(),
+      ui::ScrollInputType::kTouchscreen);
+  GetInputHandler().ScrollUpdate(UpdateState(
+      gfx::Point(), gfx::Vector2d(0, 10), ui::ScrollInputType::kTouchscreen));
+  GetInputHandler().ScrollEnd(/*should_snap=*/false, std::nullopt);
+
+  std::unique_ptr<CompositorCommitData> commit_data =
+      host_impl_->ProcessCompositorDeltas(
+          /* main_thread_mutator_host */ nullptr);
+  EXPECT_TRUE(commit_data->scroll_timing_infos.empty());
 }
 
 // Test that specifying a scroller to ScrollBegin (i.e. avoid hit testing)
@@ -5467,7 +5569,7 @@ TEST_P(LayerTreeHostImplTest, CompositorFrameMetadata) {
   DrawFrame();
   {
     viz::CompositorFrameMetadata metadata =
-        host_impl_->MakeCompositorFrameMetadata();
+        host_impl_->MakeCompositorFrameMetadata(FrameData());
     EXPECT_EQ(gfx::PointF(), metadata.root_scroll_offset);
     EXPECT_EQ(1, metadata.page_scale_factor);
     EXPECT_EQ(gfx::SizeF(50, 50), metadata.scrollable_viewport_size);
@@ -5486,13 +5588,13 @@ TEST_P(LayerTreeHostImplTest, CompositorFrameMetadata) {
                                              ui::ScrollInputType::kWheel));
   {
     viz::CompositorFrameMetadata metadata =
-        host_impl_->MakeCompositorFrameMetadata();
+        host_impl_->MakeCompositorFrameMetadata(FrameData());
     EXPECT_EQ(gfx::PointF(0, 10), metadata.root_scroll_offset);
   }
   GetInputHandler().ScrollEnd(/*should_snap=*/false, std::nullopt);
   {
     viz::CompositorFrameMetadata metadata =
-        host_impl_->MakeCompositorFrameMetadata();
+        host_impl_->MakeCompositorFrameMetadata(FrameData());
     EXPECT_EQ(gfx::PointF(0, 10), metadata.root_scroll_offset);
   }
 
@@ -5508,7 +5610,7 @@ TEST_P(LayerTreeHostImplTest, CompositorFrameMetadata) {
   GetInputHandler().ScrollEnd(/*should_snap=*/false, std::nullopt);
   {
     viz::CompositorFrameMetadata metadata =
-        host_impl_->MakeCompositorFrameMetadata();
+        host_impl_->MakeCompositorFrameMetadata(FrameData());
     EXPECT_EQ(gfx::PointF(0, 10), metadata.root_scroll_offset);
     EXPECT_EQ(2, metadata.page_scale_factor);
     EXPECT_EQ(gfx::SizeF(25, 25), metadata.scrollable_viewport_size);
@@ -5521,7 +5623,7 @@ TEST_P(LayerTreeHostImplTest, CompositorFrameMetadata) {
   host_impl_->active_tree()->SetPageScaleOnActiveTree(4);
   {
     viz::CompositorFrameMetadata metadata =
-        host_impl_->MakeCompositorFrameMetadata();
+        host_impl_->MakeCompositorFrameMetadata(FrameData());
     EXPECT_EQ(gfx::PointF(0, 10), metadata.root_scroll_offset);
     EXPECT_EQ(4, metadata.page_scale_factor);
     EXPECT_EQ(gfx::SizeF(12.5f, 12.5f), metadata.scrollable_viewport_size);
@@ -8383,17 +8485,17 @@ TEST_P(LayerTreeHostImplTest, MayThrottleIfUnusedFrames) {
   viz::CompositorFrameMetadata metadata;
 
   // By default, throttling should be allowed.
-  metadata = host_impl_->MakeCompositorFrameMetadata();
+  metadata = host_impl_->MakeCompositorFrameMetadata(FrameData());
   EXPECT_TRUE(metadata.may_throttle_if_undrawn_frames);
 
   // If requested, frames should request no throttling.
   host_impl_->SetMayThrottleIfUndrawnFrames(false);
-  metadata = host_impl_->MakeCompositorFrameMetadata();
+  metadata = host_impl_->MakeCompositorFrameMetadata(FrameData());
   EXPECT_FALSE(metadata.may_throttle_if_undrawn_frames);
 
   // Explicitly set it back to the default, for completeness.
   host_impl_->SetMayThrottleIfUndrawnFrames(true);
-  metadata = host_impl_->MakeCompositorFrameMetadata();
+  metadata = host_impl_->MakeCompositorFrameMetadata(FrameData());
   EXPECT_TRUE(metadata.may_throttle_if_undrawn_frames);
 }
 
@@ -12482,16 +12584,25 @@ TEST_P(LayerTreeHostImplTest, RemoveUnreferencedRenderPass) {
                 gfx::Transform());
 
   // Add a quad to each pass so they aren't empty.
+  auto* sqs1 = pass1->CreateAndAppendSharedQuadState();
   auto* color_quad = pass1->CreateAndAppendDrawQuad<viz::SolidColorDrawQuad>();
+  color_quad->shared_quad_state = sqs1;
   color_quad->material = viz::DrawQuad::Material::kSolidColor;
+
+  auto* sqs2 = pass2->CreateAndAppendSharedQuadState();
   color_quad = pass2->CreateAndAppendDrawQuad<viz::SolidColorDrawQuad>();
+  color_quad->shared_quad_state = sqs2;
   color_quad->material = viz::DrawQuad::Material::kSolidColor;
+
+  auto* sqs3 = pass3->CreateAndAppendSharedQuadState();
   color_quad = pass3->CreateAndAppendDrawQuad<viz::SolidColorDrawQuad>();
+  color_quad->shared_quad_state = sqs3;
   color_quad->material = viz::DrawQuad::Material::kSolidColor;
 
   // pass3 is referenced by pass2.
   auto* rpdq =
       pass2->CreateAndAppendDrawQuad<viz::CompositorRenderPassDrawQuad>();
+  rpdq->shared_quad_state = sqs2;
   rpdq->material = viz::DrawQuad::Material::kCompositorRenderPass;
   rpdq->render_pass_id = pass3->id;
 
@@ -12524,17 +12635,22 @@ TEST_P(LayerTreeHostImplTest, RemoveEmptyRenderPass) {
                 gfx::Transform());
 
   // pass1 is not empty, but pass2 and pass3 are.
+  auto* sqs1 = pass1->CreateAndAppendSharedQuadState();
   auto* color_quad = pass1->CreateAndAppendDrawQuad<viz::SolidColorDrawQuad>();
+  color_quad->shared_quad_state = sqs1;
   color_quad->material = viz::DrawQuad::Material::kSolidColor;
 
   // pass3 is referenced by pass2.
+  auto* sqs2 = pass2->CreateAndAppendSharedQuadState();
   auto* rpdq =
       pass2->CreateAndAppendDrawQuad<viz::CompositorRenderPassDrawQuad>();
+  rpdq->shared_quad_state = sqs2;
   rpdq->material = viz::DrawQuad::Material::kCompositorRenderPass;
   rpdq->render_pass_id = pass3->id;
 
   // pass2 is referenced by pass1.
   rpdq = pass1->CreateAndAppendDrawQuad<viz::CompositorRenderPassDrawQuad>();
+  rpdq->shared_quad_state = sqs1;
   rpdq->material = viz::DrawQuad::Material::kCompositorRenderPass;
   rpdq->render_pass_id = pass2->id;
 
@@ -14776,7 +14892,11 @@ struct PreservationTestCase {
 
 class LayerTreeHostImplEventMetricPreservationTest
     : public LayerTreeHostImplTestBase,
-      public testing::WithParamInterface<PreservationTestCase> {};
+      public testing::WithParamInterface<PreservationTestCase> {
+ public:
+  LayerTreeHostImplEventMetricPreservationTest()
+      : LayerTreeHostImplTestBase(base::test::ScopedFeatureList()) {}
+};
 
 INSTANTIATE_TEST_SUITE_P(
     LayerTreeHostImplEventMetricPreservationTest,
@@ -15576,7 +15696,7 @@ TEST_P(LayerTreeHostImplTest, CollectTrackedElementRects) {
 
   viz::TrackedElementRects compositor_rects =
       host_impl_->CollectTrackedElementRects(
-          /*is_for_compositor_frame_metadata=*/true);
+          /*is_for_compositor_frame_metadata=*/true, /*need_occlusion=*/false);
   EXPECT_EQ(1u, compositor_rects.size());
   EXPECT_TRUE(compositor_rects.contains(kFeature1));
   EXPECT_EQ(1u, compositor_rects.at(kFeature1).size());
@@ -15584,11 +15704,221 @@ TEST_P(LayerTreeHostImplTest, CollectTrackedElementRects) {
 
   viz::TrackedElementRects render_frame_rects =
       host_impl_->CollectTrackedElementRects(
-          /*is_for_compositor_frame_metadata=*/false);
+          /*is_for_compositor_frame_metadata=*/false,
+          /*need_occlusion=*/false);
   EXPECT_EQ(1u, render_frame_rects.size());
   EXPECT_TRUE(render_frame_rects.contains(kFeature0));
   EXPECT_EQ(1u, render_frame_rects.at(kFeature0).size());
   EXPECT_EQ(kId1, render_frame_rects.at(kFeature0)[0].id);
+}
+
+TEST_P(LayerTreeHostImplTest, CollectTrackedElementRectsWithFixedOcclusion) {
+  SetupViewportLayersOuterScrolls(gfx::Size(100, 100), gfx::Size(1000, 1000));
+
+  LayerImpl* root = host_impl_->active_tree()->root_layer();
+  LayerImpl* outer_scroll = OuterViewportScrollLayer();
+  ASSERT_TRUE(outer_scroll);
+
+  // Tracked element layer (scrolling).
+  auto* tracked_layer =
+      AddLayer<SolidColorLayerImpl>(host_impl_->active_tree());
+  tracked_layer->SetBounds(gfx::Size(50, 50));
+  tracked_layer->SetDrawsContent(true);
+  CopyProperties(outer_scroll, tracked_layer);
+  // Place it at (10, 10) in the scroll content.
+  tracked_layer->SetOffsetToTransformParent(gfx::Vector2dF(10, 10));
+
+  const base::Token kId1 = base::Token(1, 2);
+  const viz::TrackedElementFeature kFeature0 =
+      static_cast<viz::TrackedElementFeature>(0);
+
+  viz::TrackedElementRects combined_rects;
+  combined_rects[kFeature0] = {viz::TrackedElementRect(
+      kId1, gfx::Rect(0, 0, 50, 50),
+      /*should_add_to_compositor_frame_metadata=*/false,
+      /*should_exclude_fixed_and_sticky_occlusions=*/true)};
+  tracked_layer->SetTrackedElementRects(combined_rects);
+
+  // Fixed occluder layer (non-scrolling, sibling of outer_scroll in
+  // properties).
+  auto* fixed_occluder =
+      AddLayer<SolidColorLayerImpl>(host_impl_->active_tree());
+  fixed_occluder->SetBounds(
+      gfx::Size(100, 20));  // Covers y = 0..20 in viewport.
+  fixed_occluder->SetDrawsContent(true);
+  CopyProperties(root, fixed_occluder);
+  // Place it at (0, 0) in screen space.
+  fixed_occluder->SetOffsetToTransformParent(gfx::Vector2dF(0, 0));
+
+  UpdateDrawProperties(host_impl_->active_tree());
+
+  // Collect rects for render frame metadata (is_for_compositor_frame_metadata =
+  // false).
+  viz::TrackedElementRects rects = host_impl_->CollectTrackedElementRects(
+      /*is_for_compositor_frame_metadata=*/false, /*need_occlusion=*/true);
+
+  EXPECT_EQ(1u, rects.size());
+  EXPECT_TRUE(rects.contains(kFeature0));
+  EXPECT_EQ(1u, rects.at(kFeature0).size());
+
+  // The tracked element is at (10, 10) to (60, 60) in screen space.
+  // The fixed occluder covers y = 0..20 in screen space.
+  // The overlapping vertical range is y = 10..20 (10 pixels).
+  // So the visible bounds of the tracked element should have the top 10 pixels
+  // subtracted: (10, 10, 50, 50) -> (10, 20, 50, 40).
+  EXPECT_EQ(gfx::Rect(10, 20, 50, 40), rects.at(kFeature0)[0].visible_bounds);
+}
+
+TEST_P(LayerTreeHostImplTest,
+       CollectTrackedElementRectsSkipSameTransformOcclusion) {
+  SetupViewportLayersOuterScrolls(gfx::Size(100, 100), gfx::Size(1000, 1000));
+
+  LayerImpl* root = host_impl_->active_tree()->root_layer();
+
+  // Layer A (Tracked):
+  auto* tracked_layer =
+      AddLayer<SolidColorLayerImpl>(host_impl_->active_tree());
+  tracked_layer->SetBounds(gfx::Size(50, 50));
+  tracked_layer->SetDrawsContent(true);
+  CopyProperties(root, tracked_layer);
+  tracked_layer->SetOffsetToTransformParent(gfx::Vector2dF(10, 10));
+
+  const base::Token kId1 = base::Token(1, 2);
+  const viz::TrackedElementFeature kFeature0 =
+      static_cast<viz::TrackedElementFeature>(0);
+
+  viz::TrackedElementRects combined_rects;
+  combined_rects[kFeature0] = {viz::TrackedElementRect(
+      kId1, gfx::Rect(0, 0, 50, 50),
+      /*should_add_to_compositor_frame_metadata=*/false,
+      /*should_exclude_fixed_and_sticky_occlusions=*/true)};
+  tracked_layer->SetTrackedElementRects(combined_rects);
+
+  // Layer B (Occluder - shares root transform index with Layer A).
+  auto* occluder_layer =
+      AddLayer<SolidColorLayerImpl>(host_impl_->active_tree());
+  occluder_layer->SetBounds(gfx::Size(20, 20));
+  occluder_layer->SetDrawsContent(true);
+  CopyProperties(root, occluder_layer);
+  occluder_layer->SetOffsetToTransformParent(
+      gfx::Vector2dF(10, 10));  // Overlaps top-left of Layer A.
+
+  UpdateDrawProperties(host_impl_->active_tree());
+
+  viz::TrackedElementRects rects = host_impl_->CollectTrackedElementRects(
+      /*is_for_compositor_frame_metadata=*/false, /*need_occlusion=*/true);
+
+  EXPECT_EQ(1u, rects.size());
+  EXPECT_TRUE(rects.contains(kFeature0));
+  EXPECT_EQ(1u, rects.at(kFeature0).size());
+
+  // Since Layer A and Layer B share the same transform node, Layer B should be
+  // skipped. Visible bounds should remain fully unoccluded: (10, 10, 50, 50).
+  EXPECT_EQ(gfx::Rect(10, 10, 50, 50), rects.at(kFeature0)[0].visible_bounds);
+}
+
+TEST_P(LayerTreeHostImplTest,
+       CollectTrackedElementRectsSkipScrollingOcclusion) {
+  SetupViewportLayersOuterScrolls(gfx::Size(100, 100), gfx::Size(1000, 1000));
+
+  LayerImpl* outer_scroll = OuterViewportScrollLayer();
+  ASSERT_TRUE(outer_scroll);
+
+  // Tracked element layer (scrolling).
+  auto* tracked_layer =
+      AddLayer<SolidColorLayerImpl>(host_impl_->active_tree());
+  tracked_layer->SetBounds(gfx::Size(50, 50));
+  tracked_layer->SetDrawsContent(true);
+  CopyProperties(outer_scroll, tracked_layer);
+  tracked_layer->SetOffsetToTransformParent(gfx::Vector2dF(10, 10));
+
+  const base::Token kId1 = base::Token(1, 2);
+  const viz::TrackedElementFeature kFeature0 =
+      static_cast<viz::TrackedElementFeature>(0);
+
+  viz::TrackedElementRects combined_rects;
+  combined_rects[kFeature0] = {viz::TrackedElementRect(
+      kId1, gfx::Rect(0, 0, 50, 50),
+      /*should_add_to_compositor_frame_metadata=*/false,
+      /*should_exclude_fixed_and_sticky_occlusions=*/true)};
+  tracked_layer->SetTrackedElementRects(combined_rects);
+
+  // Create a separate scrolling transform node for the occluding layer.
+  auto* occluder_layer =
+      AddLayer<SolidColorLayerImpl>(host_impl_->active_tree());
+  occluder_layer->SetBounds(gfx::Size(20, 20));
+  occluder_layer->SetDrawsContent(true);
+  CopyProperties(outer_scroll, occluder_layer);
+  CreateTransformNode(occluder_layer);  // This gives it its own transform node.
+  occluder_layer->SetOffsetToTransformParent(
+      gfx::Vector2dF(10, 10));  // Overlaps top-left.
+
+  UpdateDrawProperties(host_impl_->active_tree());
+
+  viz::TrackedElementRects rects = host_impl_->CollectTrackedElementRects(
+      /*is_for_compositor_frame_metadata=*/false, /*need_occlusion=*/true);
+
+  EXPECT_EQ(1u, rects.size());
+  EXPECT_TRUE(rects.contains(kFeature0));
+  EXPECT_EQ(1u, rects.at(kFeature0).size());
+
+  // The occluder_layer's transform node walks up to outer_scroll (which is
+  // outer_scroll_id). So IsFixedOrStickyOccluderTransform returns false for it.
+  // Thus it is NOT collected as an occluder, and no occlusion subtraction
+  // happens. Visible bounds remain (10, 10, 50, 50).
+  EXPECT_EQ(gfx::Rect(10, 10, 50, 50), rects.at(kFeature0)[0].visible_bounds);
+}
+
+TEST_P(LayerTreeHostImplTest,
+       CollectTrackedElementRectsWithoutOcclusionSubtraction) {
+  SetupViewportLayersOuterScrolls(gfx::Size(100, 100), gfx::Size(1000, 1000));
+
+  LayerImpl* root = host_impl_->active_tree()->root_layer();
+  LayerImpl* outer_scroll = OuterViewportScrollLayer();
+  ASSERT_TRUE(outer_scroll);
+
+  // Tracked element layer (scrolling).
+  auto* tracked_layer =
+      AddLayer<SolidColorLayerImpl>(host_impl_->active_tree());
+  tracked_layer->SetBounds(gfx::Size(50, 50));
+  tracked_layer->SetDrawsContent(true);
+  CopyProperties(outer_scroll, tracked_layer);
+  tracked_layer->SetOffsetToTransformParent(gfx::Vector2dF(10, 10));
+
+  const base::Token kId1 = base::Token(1, 2);
+  const viz::TrackedElementFeature kFeature0 =
+      static_cast<viz::TrackedElementFeature>(0);
+
+  viz::TrackedElementRects combined_rects;
+  combined_rects[kFeature0] = {viz::TrackedElementRect(
+      kId1, gfx::Rect(0, 0, 50, 50),
+      /*should_add_to_compositor_frame_metadata=*/false,
+      /*should_exclude_fixed_and_sticky_occlusions=*/false)};
+  tracked_layer->SetTrackedElementRects(combined_rects);
+
+  // Fixed occluder layer (non-scrolling, sibling of outer_scroll in
+  // properties).
+  auto* fixed_occluder =
+      AddLayer<SolidColorLayerImpl>(host_impl_->active_tree());
+  fixed_occluder->SetBounds(
+      gfx::Size(100, 20));  // Covers y = 0..20 in viewport.
+  fixed_occluder->SetDrawsContent(true);
+  CopyProperties(root, fixed_occluder);
+  fixed_occluder->SetOffsetToTransformParent(gfx::Vector2dF(0, 0));
+
+  UpdateDrawProperties(host_impl_->active_tree());
+
+  viz::TrackedElementRects rects = host_impl_->CollectTrackedElementRects(
+      /*is_for_compositor_frame_metadata=*/false, /*need_occlusion=*/true);
+
+  EXPECT_EQ(1u, rects.size());
+  EXPECT_TRUE(rects.contains(kFeature0));
+  EXPECT_EQ(1u, rects.at(kFeature0).size());
+
+  // Since should_exclude_fixed_and_sticky_occlusions is false, the fixed
+  // occluder should NOT subtract from the tracked element's visible bounds.
+  // Visible bounds should remain (10, 10, 50, 50).
+  EXPECT_EQ(gfx::Rect(10, 10, 50, 50), rects.at(kFeature0)[0].visible_bounds);
 }
 
 }  // namespace cc

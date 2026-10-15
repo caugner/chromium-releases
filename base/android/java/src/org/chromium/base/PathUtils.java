@@ -5,7 +5,6 @@
 package org.chromium.base;
 
 import android.content.Context;
-import android.content.pm.ApplicationInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
@@ -25,7 +24,6 @@ import org.chromium.build.annotations.Nullable;
 import org.chromium.build.annotations.RequiresNonNull;
 
 import java.io.File;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -98,20 +96,49 @@ public abstract class PathUtils {
         }
     }
 
+    /**
+     * A path is canonical if it starts with a slash, does not contain null, and each component
+     * between slashes is not empty or a single dot (/./) or a double dot (/../).
+     *
+     * @path path Path to test for canonical form.
+     * @return whether the path is in canonical form.
+     */
+    public static boolean isPathCanonical(String path) {
+        if (path == null || path.isEmpty() || path.charAt(0) != '/' || path.indexOf('\0') != -1) {
+            return false;
+        }
+        if (path.equals("/")) {
+            return true;
+        }
+        while (true) {
+            int nextSlash = path.indexOf('/', 1);
+            int endComponent = nextSlash == -1 ? path.length() : nextSlash;
+            String component = path.substring(1, endComponent);
+            if (component.isEmpty() || component.equals(".") || component.equals("..")) {
+                return false;
+            }
+            if (nextSlash == -1) {
+                return true;
+            }
+            path = path.substring(nextSlash);
+        }
+    }
+
     // TODO(crbug.com/41484704): Merge the Chrome and WebView implementations
     // of isPathUnderAppDir into one.
     public static boolean isPathUnderAppDir(String path, Context context) {
-        File file = new File(path);
+        // Assume path is malicious and return true if path is not canonical.
+        if (!isPathCanonical(path)) {
+            return true;
+        }
         File dataDir = context.getDataDir();
         File externalDir = ContextUtils.getApplicationContext().getExternalFilesDir(null);
-        try {
-            Path fileRealPath = file.toPath().toRealPath();
-            return (fileRealPath.startsWith(dataDir.toPath().toRealPath())
-                    || (externalDir != null
-                            && fileRealPath.startsWith(externalDir.toPath().toRealPath())));
-        } catch (Exception e) {
-            return false;
-        }
+        // Assume that dataDir and externalDir are already canonical paths and do simple
+        // String.startsWith() checks.  Also assume that the path input is not a symlink that clank
+        // will resolve to an internal file. Avoid File.getCanonicalPath() which blocks, or
+        // Path.getRealPath() which blocks and throws for non-existent paths.
+        return path.startsWith(dataDir.toString())
+                || (externalDir != null && path.startsWith(externalDir.toString()));
     }
 
     /**
@@ -392,21 +419,6 @@ public abstract class PathUtils {
         }
 
         return absolutePaths.toArray(new String[absolutePaths.size()]);
-    }
-
-    /**
-     * @return the path to native libraries.
-     */
-    @SuppressWarnings("unused")
-    @CalledByNative
-    private static @JniType("std::string") String getNativeLibraryDirectory() {
-        ApplicationInfo ai = ContextUtils.getApplicationContext().getApplicationInfo();
-        if ((ai.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
-                || (ai.flags & ApplicationInfo.FLAG_SYSTEM) == 0) {
-            return ai.nativeLibraryDir;
-        }
-
-        return "/system/lib/";
     }
 
     /**

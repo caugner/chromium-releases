@@ -7,11 +7,9 @@
 #include <memory>
 #include <utility>
 
-#include "base/command_line.h"
 #include "base/functional/callback_helpers.h"
 #include "base/run_loop.h"
 #include "base/scoped_observation.h"
-#include "base/test/scoped_command_line.h"
 #include "base/test/scoped_feature_list.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/browser/storage_partition_impl.h"
@@ -19,7 +17,6 @@
 #include "content/browser/worker_host/dedicated_worker_host_factory_impl.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_features.h"
-#include "content/public/common/content_switches.h"
 #include "content/public/test/navigation_simulator.h"
 #include "content/public/test/test_browser_context.h"
 #include "content/test/test_render_view_host.h"
@@ -29,11 +26,11 @@
 #include "mojo/public/cpp/test_support/test_utils.h"
 #include "net/base/isolation_info.h"
 #include "net/storage_access_api/status.h"
+#include "services/network/public/cpp/constants.h"
 #include "services/network/public/mojom/client_security_state.mojom.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/common/tokens/tokens_mojom_traits.h"
-#include "third_party/blink/public/common/web_preferences/web_preferences.h"
 #include "third_party/blink/public/mojom/loader/fetch_client_settings_object.mojom.h"
 #include "third_party/blink/public/mojom/service_worker/controller_service_worker.mojom.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_container.mojom.h"
@@ -67,7 +64,7 @@ class MockDedicatedWorker
             net::IsolationInfo::CreateTransient(/*nonce=*/std::nullopt),
             network::mojom::ClientSecurityState::New(),
             PolicyContainerPolicies(), coep_reporter->GetWeakPtr(),
-            /*network_restrictions_id=*/std::nullopt),
+            network::GetTestNetworkRestrictionsId()),
         factory_.BindNewPipeAndPassReceiver());
 
     auto fetch_client_settings_object =
@@ -110,6 +107,7 @@ class MockDedicatedWorker
       blink::mojom::ControllerServiceWorkerInfoPtr controller_info,
       mojo::PendingRemote<blink::mojom::BackForwardCacheControllerHost>
           back_forward_cache_controller_host,
+      blink::mojom::PolicyContainerPtr policy_container,
       mojo::PendingReceiver<blink::mojom::ReportingObserver>
           coep_reporting_observer,
       mojo::PendingReceiver<blink::mojom::ReportingObserver>
@@ -160,12 +158,6 @@ class DedicatedWorkerServiceImplTest
   DedicatedWorkerService* GetDedicatedWorkerService() const {
     return browser_context_->GetDefaultStoragePartition()
         ->GetDedicatedWorkerService();
-  }
-
-  DedicatedWorkerServiceImpl* GetDedicatedWorkerServiceImpl() const {
-    return static_cast<DedicatedWorkerServiceImpl*>(
-        browser_context_->GetDefaultStoragePartition()
-            ->GetDedicatedWorkerService());
   }
 
  private:
@@ -298,118 +290,6 @@ TEST_F(DedicatedWorkerServiceImplTest, DedicatedWorkerServiceObserver) {
   EXPECT_TRUE(observer.dedicated_worker_infos().empty());
 }
 
-TEST_F(DedicatedWorkerServiceImplTest, FileUrlSupportInheritance) {
-  TestDedicatedWorkerServiceObserver observer;
-  base::ScopedObservation<DedicatedWorkerService,
-                          DedicatedWorkerService::Observer>
-      scoped_observation(&observer);
-  scoped_observation.Observe(GetDedicatedWorkerService());
-
-  const GURL kFileUrl("file:///path/to/page.html");
-  const auto origin = url::Origin::Create(kFileUrl);
-  std::unique_ptr<TestWebContents> web_contents = CreateWebContents(kFileUrl);
-  TestRenderFrameHost* rfh = web_contents->GetPrimaryMainFrame();
-
-  // 1. Without switch or web preferences, file_url_support should be false.
-  {
-    auto mock_worker = std::make_unique<MockDedicatedWorker>(
-        rfh->GetProcess()->GetID(), rfh->GetGlobalId(), origin);
-    observer.RunUntilWorkerEvent();
-
-    ASSERT_EQ(observer.dedicated_worker_infos().size(), 1u);
-    blink::DedicatedWorkerToken token =
-        observer.dedicated_worker_infos().begin()->first;
-    DedicatedWorkerHost* host =
-        GetDedicatedWorkerServiceImpl()->GetDedicatedWorkerHostFromToken(token);
-    ASSERT_TRUE(host);
-    EXPECT_FALSE(host->file_url_support());
-
-    mock_worker = nullptr;
-    observer.RunUntilWorkerEvent();
-    EXPECT_TRUE(observer.dedicated_worker_infos().empty());
-  }
-
-  // 2. With WebPreferences::allow_file_access_from_file_urls, file_url_support
-  // should be true.
-  {
-    blink::web_pref::WebPreferences prefs =
-        web_contents->GetOrCreateWebPreferences();
-    prefs.allow_file_access_from_file_urls = true;
-    web_contents->SetWebPreferences(prefs);
-
-    auto mock_worker = std::make_unique<MockDedicatedWorker>(
-        rfh->GetProcess()->GetID(), rfh->GetGlobalId(), origin);
-    observer.RunUntilWorkerEvent();
-
-    ASSERT_EQ(observer.dedicated_worker_infos().size(), 1u);
-    blink::DedicatedWorkerToken token =
-        observer.dedicated_worker_infos().begin()->first;
-    DedicatedWorkerHost* host =
-        GetDedicatedWorkerServiceImpl()->GetDedicatedWorkerHostFromToken(token);
-    ASSERT_TRUE(host);
-    EXPECT_TRUE(host->file_url_support());
-
-    mock_worker = nullptr;
-    observer.RunUntilWorkerEvent();
-    EXPECT_TRUE(observer.dedicated_worker_infos().empty());
-
-    prefs.allow_file_access_from_file_urls = false;
-    web_contents->SetWebPreferences(prefs);
-  }
-
-  // 3. With WebPreferences::allow_universal_access_from_file_urls,
-  // file_url_support should be true.
-  {
-    blink::web_pref::WebPreferences prefs =
-        web_contents->GetOrCreateWebPreferences();
-    prefs.allow_universal_access_from_file_urls = true;
-    web_contents->SetWebPreferences(prefs);
-
-    auto mock_worker = std::make_unique<MockDedicatedWorker>(
-        rfh->GetProcess()->GetID(), rfh->GetGlobalId(), origin);
-    observer.RunUntilWorkerEvent();
-
-    ASSERT_EQ(observer.dedicated_worker_infos().size(), 1u);
-    blink::DedicatedWorkerToken token =
-        observer.dedicated_worker_infos().begin()->first;
-    DedicatedWorkerHost* host =
-        GetDedicatedWorkerServiceImpl()->GetDedicatedWorkerHostFromToken(token);
-    ASSERT_TRUE(host);
-    EXPECT_TRUE(host->file_url_support());
-
-    mock_worker = nullptr;
-    observer.RunUntilWorkerEvent();
-    EXPECT_TRUE(observer.dedicated_worker_infos().empty());
-
-    prefs.allow_universal_access_from_file_urls = false;
-    web_contents->SetWebPreferences(prefs);
-  }
-
-  // 4. With switches::kAllowFileAccessFromFiles, file_url_support should be
-  // true.
-  {
-    base::test::ScopedCommandLine scoped_command_line;
-    scoped_command_line.GetProcessCommandLine()->AppendSwitch(
-        switches::kAllowFileAccessFromFiles);
-
-    auto mock_worker = std::make_unique<MockDedicatedWorker>(
-        rfh->GetProcess()->GetID(), rfh->GetGlobalId(), origin);
-    observer.RunUntilWorkerEvent();
-
-    ASSERT_EQ(observer.dedicated_worker_infos().size(), 1u);
-    blink::DedicatedWorkerToken token =
-        observer.dedicated_worker_infos().begin()->first;
-    DedicatedWorkerHost* host =
-        GetDedicatedWorkerServiceImpl()->GetDedicatedWorkerHostFromToken(token);
-    ASSERT_TRUE(host);
-    EXPECT_TRUE(host->file_url_support());
-
-    mock_worker = nullptr;
-    observer.RunUntilWorkerEvent();
-    EXPECT_TRUE(observer.dedicated_worker_infos().empty());
-  }
-}
-
 class DedicatedWorkerHostFactoryImplTest
     : public RenderViewHostImplTestHarness {
  public:
@@ -457,7 +337,7 @@ TEST_F(DedicatedWorkerHostFactoryImplTest, CrossOriginScriptOriginCheck) {
             net::IsolationInfo::CreateTransient(std::nullopt),
             network::mojom::ClientSecurityState::New(),
             PolicyContainerPolicies(), coep_reporter->GetWeakPtr(),
-            /*network_restrictions_id=*/std::nullopt);
+            network::GetTestNetworkRestrictionsId());
       };
 
   auto start_script_load =
@@ -608,7 +488,8 @@ TEST_F(DedicatedWorkerHostFactoryImplTest, CrossOriginScriptOriginCheck) {
               net::IsolationInfo::CreateTransient(std::nullopt),
               network::mojom::ClientSecurityState::New(),
               PolicyContainerPolicies(), coep_reporter->GetWeakPtr(),
-              /*network_restrictions_id=*/std::nullopt);
+              /*network_restrictions_id=*/
+              network::GetTestNetworkRestrictionsId());
         };
 
     mojo::Remote<blink::mojom::DedicatedWorkerHostFactory> factory;

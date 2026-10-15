@@ -6,13 +6,19 @@
 #include "third_party/blink/public/mojom/permissions/permission.mojom-blink.h"
 #include "third_party/blink/public/strings/grit/permission_element_strings.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/space_split_string.h"
+#include "third_party/blink/renderer/core/event_type_names.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/html/user_media_request_provider.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/inspector/inspector_audits_issue.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/text/platform_locale.h"
+#include "third_party/blink/renderer/platform/web_test_support.h"
+#include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -90,7 +96,6 @@ Vector<PermissionDescriptorPtr> ParsePermissionDescriptorsFromString(
 
   return Vector<PermissionDescriptorPtr>();
 }
-
 }  // namespace
 
 // static
@@ -105,47 +110,32 @@ HTMLUserMediaElement::HTMLUserMediaElement(Document& document)
 }
 
 void HTMLUserMediaElement::Trace(Visitor* visitor) const {
+  visitor->Trace(error_);
   HTMLCapabilityElementBase::Trace(visitor);
   Supplementable<HTMLUserMediaElement>::Trace(visitor);
 }
 
 bool HTMLUserMediaElement::IsLegacyMode() const {
-  // If the 'type' attribute is explicitly defined, we fallback to legacy
-  // behavior.
-  return FastHasAttribute(html_names::kTypeAttr);
+  return RuntimeEnabledFeatures::UserMediaElementLegacyEnabled(
+             GetExecutionContext()) &&
+         hasAttribute(html_names::kTypeAttr);
 }
-void HTMLUserMediaElement::OnConstraintsSet(bool has_video, bool has_audio) {
-  has_constraints_ = true;
-  // If permission descriptors are already set, we do not need to update them.
-  // This would be the case for legacy mode when the 'type' attribute is set.
-  // We do not want to update the permission descriptors in this case as type
-  // attribute is supposed to take precedence.
-  if (!permission_descriptors_.empty()) {
-    return;
-  }
-  if (has_video) {
-    permission_descriptors_.push_back(
-        CreatePermissionDescriptor(PermissionName::VIDEO_CAPTURE));
-  }
-  if (has_audio) {
-    permission_descriptors_.push_back(
-        CreatePermissionDescriptor(PermissionName::AUDIO_CAPTURE));
-  }
 
-  // Logic to handle registration when descriptors are set after insertion.
-  if (!permission_descriptors_.empty()) {
-    // Register with the cache to start receiving status updates
-    MaybeRegisterCacheClient();
-    // Register with the browser process (PEPC) to bind Mojo interfaces.
-    MaybeRegisterPageEmbeddedPermissionControl();
-    // Update the element's appearance based on initial cached statuses.
-    UpdatePermissionStatusAndAppearance();
+DOMException* HTMLUserMediaElement::error() const {
+  if (IsLegacyMode()) {
+    return nullptr;
   }
+  return error_.Get();
 }
 
 void HTMLUserMediaElement::AttributeChanged(
     const AttributeModificationParams& params) {
   if (params.name == html_names::kTypeAttr) {
+    if (!RuntimeEnabledFeatures::UserMediaElementLegacyEnabled(
+            GetExecutionContext())) {
+      HTMLCapabilityElementBase::AttributeChanged(params);
+      return;
+    }
     // `type` should only take effect once, when is added to the permission
     // element. Removing, or modifying the attribute has no effect.
     if (!type_.IsNull()) {
@@ -181,25 +171,86 @@ void HTMLUserMediaElement::OnPermissionStatusChange(
   HTMLCapabilityElementBase::OnPermissionStatusChange(permission_name, status);
 
   if (PermissionsGranted() && HasPendingPermissionRequest() &&
-      has_constraints_) {
+      !IsLegacyMode()) {
     StartMediaStreamRequest();
   }
 }
 
+void HTMLUserMediaElement::OnEmbeddedPermissionsDecided(
+    mojom::blink::EmbeddedPermissionControlResult result) {
+  // TODO(b/519072607): Make sure only the correct events are dispatched for OT
+  // and MVP clients.
+  HTMLCapabilityElementBase::OnEmbeddedPermissionsDecided(result);
+  if (IsLegacyMode()) {
+    return;
+  }
+  if (result == mojom::blink::EmbeddedPermissionControlResult::kDismissed ||
+      result == mojom::blink::EmbeddedPermissionControlResult::kDenied) {
+    SetError(MakeGarbageCollected<DOMException>(
+        DOMExceptionCode::kNotAllowedError,
+        result == mojom::blink::EmbeddedPermissionControlResult::kDismissed
+            ? "Permission dismissed"
+            : "Permission denied"));
+    EnqueueEvent(*Event::Create(event_type_names::kCancel),
+                 TaskType::kDOMManipulation);
+  }
+}
+
 void HTMLUserMediaElement::DefaultEventHandler(Event& event) {
+  if (IsLegacyMode()) {
+    HTMLCapabilityElementBase::DefaultEventHandler(event);
+    return;
+  }
+
+  if (event.type() == event_type_names::kDOMActivate) {
+    if ((!GetExecutionContext() || !GetExecutionContext()->IsSecureContext()) &&
+        !RuntimeEnabledFeatures::BypassPepcSecurityForTestingEnabled()) {
+      AuditsIssue::ReportPermissionElementIssue(
+          GetExecutionContext(), GetDomNodeId(),
+          protocol::Audits::PermissionElementIssueTypeEnum::NonSecureContext,
+          GetType(), /*is_warning=*/false);
+      event.SetDefaultHandled();
+      return;
+    }
+    if (!GetDocument().GetFrame() ||
+        (!LocalFrame::HasTransientUserActivation(GetDocument().GetFrame()) &&
+         !RuntimeEnabledFeatures::BypassPepcSecurityForTestingEnabled())) {
+      AuditsIssue::ReportPermissionElementIssue(
+          GetExecutionContext(), GetDomNodeId(),
+          protocol::Audits::PermissionElementIssueTypeEnum::
+              MissingTransientUserActivation,
+          GetType(), /*is_warning=*/false);
+      OnActivationFailed(
+          "The permission element activation must be triggered by a user "
+          "gesture.");
+      event.SetDefaultHandled();
+      return;
+    }
+  }
+
   // HTMLCapabilityElementBase::HandleActivation checks that the event is
   // trusted before proceeding with the permission request.
   // If the element only has type attribute and no constraints, we do not want
   // to start a getUserMedia request, the usermedia will keep functioning in the
   // legacy mode.
   if (event.type() == event_type_names::kDOMActivate && PermissionsGranted() &&
-      has_constraints_) {
+      !IsLegacyMode()) {
     HTMLCapabilityElementBase::HandleActivation(
         event, blink::BindOnce(&HTMLUserMediaElement::StartMediaStreamRequest,
                                WrapWeakPersistent(this)));
     return;
   }
   HTMLCapabilityElementBase::DefaultEventHandler(event);
+}
+
+void HTMLUserMediaElement::OnActivationFailed(const String& error_message) {
+  if (IsLegacyMode()) {
+    return;
+  }
+  SetError(MakeGarbageCollected<DOMException>(
+      DOMExceptionCode::kInvalidStateError, error_message));
+  EnqueueEvent(*Event::Create(event_type_names::kError),
+               TaskType::kDOMManipulation);
 }
 
 mojom::blink::EmbeddedPermissionRequestDescriptorPtr
@@ -226,7 +277,7 @@ void HTMLUserMediaElement::StartMediaStreamRequest() {
   // constraints and the required permissions.
   CHECK_GT(permission_descriptors_.size(), 0U);
   CHECK_LE(permission_descriptors_.size(), 2U);
-  CHECK(has_constraints_);
+  CHECK(!IsLegacyMode());
   CHECK(PermissionsGranted());
   if (GetDocument().domWindow()) {
     if (auto* provider =
@@ -263,7 +314,7 @@ void HTMLUserMediaElement::UpdateAppearance() {
   bool granted = PermissionsGranted();
 
   uint16_t untranslated_message_id;
-  if (has_constraints_) {
+  if (!IsLegacyMode()) {
     untranslated_message_id =
         permission_count == 1
             ? GetUntranslatedMessageIDSinglePermission(permission_name, false)
@@ -295,6 +346,32 @@ void HTMLUserMediaElement::UpdateIcon(PermissionName permission) {
       return;
   }
   permission_internal_icon()->SetIcon(icon_type);
+}
+
+Node::InsertionNotificationRequest HTMLUserMediaElement::InsertedInto(
+    ContainerNode& insertion_point) {
+  HTMLCapabilityElementBase::InsertedInto(insertion_point);
+  if (!IsLegacyMode() && permission_descriptors_.empty()) {
+    GetTaskRunner()->PostTask(
+        FROM_HERE,
+        blink::BindOnce(&HTMLUserMediaElement::ApplyDefaultConstraints,
+                        WrapWeakPersistent(this)));
+  }
+  return kInsertionDone;
+}
+
+void HTMLUserMediaElement::ApplyDefaultConstraints() {
+  if (!IsLegacyMode() && permission_descriptors_.empty()) {
+    permission_descriptors_.push_back(
+        CreatePermissionDescriptor(PermissionName::VIDEO_CAPTURE));
+    permission_descriptors_.push_back(
+        CreatePermissionDescriptor(PermissionName::AUDIO_CAPTURE));
+  }
+  if (isConnected() && !permission_descriptors_.empty()) {
+    MaybeRegisterCacheClient();
+    MaybeRegisterPageEmbeddedPermissionControl();
+    UpdatePermissionStatusAndAppearance();
+  }
 }
 
 }  // namespace blink

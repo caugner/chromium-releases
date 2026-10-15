@@ -11,6 +11,7 @@ import android.animation.ObjectAnimator;
 import android.app.Activity;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.text.TextUtils;
 import android.util.Pair;
 import android.view.Gravity;
 import android.view.LayoutInflater;
@@ -25,6 +26,7 @@ import android.widget.TextView;
 
 import androidx.annotation.ColorInt;
 import androidx.annotation.Px;
+import androidx.core.text.BidiFormatter;
 import androidx.core.view.ViewCompat;
 
 import org.chromium.base.Callback;
@@ -310,8 +312,12 @@ public class SnackbarView implements InsetObserver.WindowInsetObserver {
                 mAdditionalBottomMarginPxObserver);
     }
 
-    boolean isShowing() {
+    public boolean isShowing() {
         return mContainerView.isShown();
+    }
+
+    public boolean isBeingDragged() {
+        return mIsBeingDragged;
     }
 
     void bringToFront() {
@@ -323,11 +329,13 @@ public class SnackbarView implements InsetObserver.WindowInsetObserver {
      * reader is enabled.
      */
     public void updateAccessibilityPaneTitle() {
-        StringBuilder accessibilityText = new StringBuilder(mMessageView.getContentDescription());
+        BidiFormatter bidiFormatter = BidiFormatter.getInstance();
+        StringBuilder accessibilityText =
+                new StringBuilder(bidiFormatter.unicodeWrap(mMessageView.getContentDescription()));
         if (mActionButtonView.getContentDescription() != null) {
             accessibilityText
                     .append(". ")
-                    .append(mActionButtonView.getContentDescription())
+                    .append(bidiFormatter.unicodeWrap(mActionButtonView.getContentDescription()))
                     .append(". ")
                     .append(
                             mContainerView
@@ -415,7 +423,7 @@ public class SnackbarView implements InsetObserver.WindowInsetObserver {
     }
 
     private boolean updateInternal(Snackbar snackbar, boolean animate) {
-        if (mSnackbar == snackbar) return false;
+        boolean isNewSnackbar = (mSnackbar != snackbar);
         mSnackbar = snackbar;
         mMessageView.setMaxLines(snackbar.getDefaultLines() ? DEFAULT_LINES : MAX_LINES);
         mMessageView.setTemplate(snackbar.getTemplateText());
@@ -460,7 +468,7 @@ public class SnackbarView implements InsetObserver.WindowInsetObserver {
         } else {
             mProfileImageView.setVisibility(View.GONE);
         }
-        return true;
+        return isNewSnackbar;
     }
 
     /**
@@ -480,10 +488,10 @@ public class SnackbarView implements InsetObserver.WindowInsetObserver {
         return (FrameLayout.LayoutParams) mContainerView.getLayoutParams();
     }
 
-    private void setViewText(TextView view, CharSequence text, boolean animate) {
-        if (view.getText().toString().equals(text)) return;
+    private void setViewText(TextView view, @Nullable CharSequence text, boolean animate) {
+        if (TextUtils.equals(view.getText(), text)) return;
         view.animate().cancel();
-        if (animate) {
+        if (animate && view.getAlpha() < 1.0f) {
             view.setAlpha(0.0f);
             view.setText(text);
             view.animate().alpha(1.f).setDuration(mAnimationDuration).setListener(null);

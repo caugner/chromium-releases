@@ -4,16 +4,41 @@
 
 #import "ios/chrome/browser/app_bar/ui/app_bar_constants.h"
 
-const CGFloat kAppBarHeight = 77;
+#import "ios/chrome/browser/shared/public/features/features.h"
+
+namespace {
+const CGFloat kAppBarHeightDefault = 77;
+const CGFloat kAppBarHeightLandscapeDefault = 69;
+}  // namespace
 
 const CGFloat kAppBarHeightFullscreen = 62;
 
-const CGFloat kAppBarHeightLandscape = 69;
+CGFloat AppBarHeightPortrait() {
+  if (IsAppBarLabelsHidden()) {
+    return kAppBarHeightFullscreen;
+  }
+  return kAppBarHeightDefault;
+}
 
-const CGFloat kAppBarCornerRadius = 22.0;
+CGFloat CurrentAppBarHeightPortrait(BOOL gemini_floaty_invoked) {
+  if (gemini_floaty_invoked && IsAppBarHiddenInFullscreen()) {
+    return kAppBarHeightFullscreen;
+  }
+  return AppBarHeightPortrait();
+}
+
+CGFloat AppBarHeightLandscape() {
+  return kAppBarHeightLandscapeDefault;
+}
 
 NSString* const kAppBarAssistantButtonId = @"kAppBarAssistantButtonId";
 NSString* const kAppBarTabGridButtonIdentifier =
     @"kAppBarTabGridButtonIdentifier";
 NSString* const kAppBarNewTabButtonIdentifier =
     @"kAppBarNewTabButtonIdentifier";
+
+const char kAppBarAssistantButtonTappedHistogram[] =
+    "IOS.AppBar.AssistantButtonTapped";
+
+const char kAppBarAssistantButtonStateOnLoadHistogram[] =
+    "IOS.AppBar.AssistantButtonStateOnLoad";

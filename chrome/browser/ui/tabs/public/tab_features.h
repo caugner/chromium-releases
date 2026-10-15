@@ -56,7 +56,9 @@ class ContentAnnotatorTabHelper;
 
 namespace autofill {
 class BubbleManager;
+class OmniboxAutofillBubbleController;
 class OmniboxAutofillPageActionController;
+class PaymentsChurnedUsersBubbleController;
 }  // namespace autofill
 
 namespace actor {
@@ -182,6 +184,7 @@ namespace tabs {
 
 class ContextHighlightTabFeature;
 class InactiveWindowMouseEventController;
+class PageContextEligibilityHelper;
 class TabAlertController;
 class TabAttachmentTracker;
 class TabCreationMetricsController;
@@ -530,6 +533,16 @@ class TabFeatures {
   std::unique_ptr<autofill::OmniboxAutofillPageActionController>
       omnibox_autofill_page_action_controller_;
 
+  // Responsible for managing the bubble that displays after the
+  // "Autofill payment" chip is clicked.
+  std::unique_ptr<autofill::OmniboxAutofillBubbleController>
+      omnibox_autofill_bubble_controller_;
+
+  // Responsible for managing the bubble that prompts a user to turn on payments
+  // autofill if they have turned it off.
+  std::unique_ptr<autofill::PaymentsChurnedUsersBubbleController>
+      payments_churned_users_bubble_controller_;
+
   std::unique_ptr<AskBeforeHttpDialogController>
       ask_before_http_dialog_controller_;
 
@@ -556,6 +569,9 @@ class TabFeatures {
 
   std::unique_ptr<skills::SkillsUiTabControllerInterface>
       skills_ui_tab_controller_;
+
+  std::unique_ptr<tabs::PageContextEligibilityHelper>
+      page_context_eligibility_helper_;
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
     BUILDFLAG(IS_CHROMEOS)

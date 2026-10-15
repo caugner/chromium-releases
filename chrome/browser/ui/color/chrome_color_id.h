@@ -58,6 +58,8 @@
   E_CPONLY(kColorAvatarButtonNormalRipple) \
   E_CPONLY(kColorAvatarStroke) \
   E_CPONLY(kColorAvatarFillForContrast) \
+  E_CPONLY(kColorAiSubscriptionRingGradientStart) \
+  E_CPONLY(kColorAiSubscriptionRingGradientEnd) \
   /* Bookmark Manager page colors. */ \
   E_CPONLY(kColorBookmarkManagerItemBackgroundSelected) \
   E_CPONLY(kColorBookmarkManagerItemOutline) \
@@ -124,7 +126,6 @@
   E_CPONLY(kColorContextualTasksBannerPromoBackground) \
   E_CPONLY(kColorContextualTasksBannerPromoText) \
   E_CPONLY(kColorContextualTasksBannerPromoIconBackground) \
-  E_CPONLY(kColorContextualTasksBannerPromoIconForeground) \
   /* Desktop media picker view. */ \
   E_CPONLY(kColorDesktopMediaPickerDescriptionLabel) \
   /* Desktop media tab list colors. */ \
@@ -177,6 +178,12 @@
   E_CPONLY(kColorFeaturePromoBubbleDefaultButtonBackground) \
   E_CPONLY(kColorFeaturePromoBubbleDefaultButtonForeground) \
   E_CPONLY(kColorFeaturePromoBubbleForeground) \
+  /* Feature Showcase colors. */ \
+  E_CPONLY(kColorFeatureShowcaseStepperCheck) \
+  E_CPONLY(kColorFeatureShowcaseStepperDot) \
+  E_CPONLY(kColorFeatureShowcaseThemePickerWrapperBackground) \
+  E_CPONLY(kColorFeatureShowcaseThemePickerBackground) \
+  E_CPONLY(kColorFeatureShowcaseThemeColorBorder) \
   E_CPONLY(kColorFeatureLensPromoBubbleBackground) \
   E_CPONLY(kColorFeatureLensPromoBubbleForeground) \
   /* Find bar colors. */ \

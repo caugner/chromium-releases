@@ -20,6 +20,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "mojo/core/embedder/embedder.h"
+#include "remoting/base/buildflags.h"
 #include "remoting/base/crash/crash_reporting_crashpad.h"
 #include "remoting/base/logging.h"
 
@@ -32,6 +33,7 @@
 #include "remoting/base/file_path_util_linux.h"
 #endif  // BUILDFLAG(IS_LINUX)
 
+#include "remoting/base/memory_consumer_registry.h"
 #include "remoting/host/base/host_exit_codes.h"
 #include "remoting/host/base/switches.h"
 #include "remoting/host/evaluate_capability.h"
@@ -56,19 +58,20 @@ namespace remoting {
 
 // Known entry points.
 int SingleProcessHostProcessMain();
+#if BUILDFLAG(REMOTING_MULTI_PROCESS)
 int NetworkProcessMain();
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
 int DaemonProcessMain();
 int DesktopProcessMain();
+int PeerConnectionProcessMain();
 #endif
 #if BUILDFLAG(IS_WIN)
 int FileChooserMain();
 int RdpDesktopSessionMain();
 int UrlForwarderConfiguratorMain();
 #endif  // BUILDFLAG(IS_WIN)
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX)
 int XSessionChooserMain();
-#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#endif  // BUILDFLAG(IS_LINUX)
 
 namespace {
 
@@ -187,13 +190,15 @@ MainRoutineFn SelectMainRoutine(const std::string& process_type) {
 
   if (process_type == kProcessTypeSingleProcessHost) {
     main_routine = &SingleProcessHostProcessMain;
+#if BUILDFLAG(REMOTING_MULTI_PROCESS)
   } else if (process_type == kProcessTypeNetwork) {
     main_routine = &NetworkProcessMain;
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
   } else if (process_type == kProcessTypeDaemon) {
     main_routine = &DaemonProcessMain;
   } else if (process_type == kProcessTypeDesktop) {
     main_routine = &DesktopProcessMain;
+  } else if (process_type == kProcessTypePeerConnection) {
+    main_routine = &PeerConnectionProcessMain;
 #endif
 #if BUILDFLAG(IS_WIN)
   } else if (process_type == kProcessTypeFileChooser) {
@@ -203,10 +208,10 @@ MainRoutineFn SelectMainRoutine(const std::string& process_type) {
   } else if (process_type == kProcessTypeUrlForwarderConfigurator) {
     main_routine = &UrlForwarderConfiguratorMain;
 #endif  // BUILDFLAG(IS_WIN)
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX)
   } else if (process_type == kProcessTypeXSessionChooser) {
     main_routine = &XSessionChooserMain;
-#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#endif  // BUILDFLAG(IS_LINUX)
   }
 
   return main_routine;
@@ -215,6 +220,9 @@ MainRoutineFn SelectMainRoutine(const std::string& process_type) {
 }  // namespace
 
 int HostMain(int argc, char** argv) {
+  base::ScopedMemoryConsumerRegistry<remoting::MemoryConsumerRegistry>
+      memory_consumer_registry;
+
 #if BUILDFLAG(IS_APPLE)
   // Needed so we don't leak objects when threads are created.
   base::apple::ScopedNSAutoreleasePool pool;
@@ -319,7 +327,7 @@ int HostMain(int argc, char** argv) {
   // Mac, where the broker process is the agent process broker.
   is_broker_process |= main_routine == &SingleProcessHostProcessMain;
 #endif
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
+#if BUILDFLAG(REMOTING_MULTI_PROCESS)
   // For multi-process hosts, the daemon process acts as the broker.
   is_broker_process |= main_routine == &DaemonProcessMain;
 #endif

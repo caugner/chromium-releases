@@ -2,10 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import '//resources/cr_elements/cr_button/cr_button.js';
+import 'chrome://resources/cr_elements/cr_button/cr_button.js';
 
-import {OpenWindowProxyImpl} from '//resources/js/open_window_proxy.js';
-import {CrLitElement} from '//resources/lit/v3_0/lit.rollup.js';
+import {OpenWindowProxyImpl} from 'chrome://resources/js/open_window_proxy.js';
+import {CrLitElement} from 'chrome://resources/lit/v3_0/lit.rollup.js';
 
 import {DisclaimerState} from './aim_eligibility.mojom-webui.js';
 import type {DriveStatus, EligibilityState} from './aim_eligibility.mojom-webui.js';
@@ -49,6 +49,7 @@ export class AimEligibilityAppElement extends CrLitElement {
     isEligible: false,
     isEligibleByDse: false,
     isEligibleByPolicy: false,
+    isThirdPartyEligibleByPolicy: false,
     isEligibleByServer: false,
     isServerEligibilityEnabled: false,
     lastUpdated: new Date(0),
@@ -131,6 +132,11 @@ export class AimEligibilityAppElement extends CrLitElement {
   protected getPolicyEligibilityText_(): string {
     return this.eligibilityState_.isEligibleByPolicy ? '✓ Allowed' :
                                                        '✗ Blocked';
+  }
+
+  protected getThirdPartyPolicyEligibilityText_(): string {
+    return this.eligibilityState_.isThirdPartyEligibleByPolicy ? '✓ Allowed' :
+                                                                 '✗ Blocked';
   }
 
   protected getDseEligibilityText_(): string {

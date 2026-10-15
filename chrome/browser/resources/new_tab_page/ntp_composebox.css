@@ -88,6 +88,13 @@ cr-composebox-submit::part(submit) {
   top: 10px;
 }
 
+@media (forced-colors: active) {
+  #contextEntrypoint::part(context-menu-entrypoint-icon),
+  #voiceSearchButton {
+    --cr-icon-button-fill-color: ButtonText;
+  }
+}
+
 #composebox[inert] {
   pointer-events: none;
 }
@@ -109,16 +116,49 @@ cr-composebox-submit::part(submit) {
   position: relative;
 }
 
+/* Specific to the NTP. If generic voice search styling,
+ * add to shared styles.
+ */
 :host([in-voice-search-mode]) {
-  box-shadow: 2px 10px 18px -5px rgb(0, 0, 0, 0.1);
-}
-
-cr-composebox-voice-search {
-  z-index: 2;
+  box-shadow: var(--cr-searchbox-shadow);
 }
 
 :host([in-voice-search-mode]) cr-composebox-input::part(cancel),
 :host([in-voice-search-mode]) cr-composebox-submit::part(submit) {
   opacity: 0;
   transition: var(--icon-exit-transition);
+}
+
+:host-context([energy-effect-enabled_][energy-effect-variant_='energy-effect-darker-shadow']) {
+  --box-shadow-energy-effect: 0 4px 18px -2px rgba(60, 64, 67, 0.20);
+}
+
+:host-context([energy-effect-enabled_][energy-effect-variant_='pre-energy-effect-with-border']) {
+  --box-shadow-energy-effect: var(--cr-searchbox-shadow);
+  --color-composebox-input-plate-outline: #CCCFD9;
+}
+
+:host([is-dark]):host-context([energy-effect-enabled_][energy-effect-variant_='pre-energy-effect-with-border']) {
+  --color-composebox-input-plate-outline: #4D5263;
+}
+
+:host-context([energy-effect-enabled_][energy-effect-variant_='energy-effect-fusebox']) {
+  --box-shadow-energy-effect: 0 2px 6px 0 rgba(60, 64, 67, 0.16);
+}
+
+:host-context([energy-effect-enabled_]:not([energy-effect-variant_='pre-energy-effect-with-border'])) {
+  --color-composebox-input-plate-outline: #DADCE0;
+}
+
+:host([is-dark]):host-context([energy-effect-enabled_]:not([energy-effect-variant_='pre-energy-effect-with-border'])) {
+  --color-composebox-input-plate-outline: #4E5059;
+}
+
+:host-context([energy-effect-enabled_]) search-animated-glow {
+  inset: 1px;
+  z-index: -1;
+}
+
+:host-context([energy-effect-enabled_]) search-animated-glow::part(composebox-background) {
+  inset: 1px;
 }

@@ -135,7 +135,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Notifications.Android.ImageMemorySizeInKB" units="KB"
-    expires_after="2026-05-31">
+    expires_after="2027-05-31">
   <owner>peilinwang@google.com</owner>
   <owner>clank-performance-team@google.com</owner>
   <summary>
@@ -561,7 +561,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Notifications.Cros.Actions.{NotificationAction}"
-    enum="NotificationTypeDetailed" expires_after="2026-09-13">
+    enum="NotificationTypeDetailed" expires_after="2026-11-29">
   <owner>newcomer@chromium.org</owner>
   <owner>cros-status-area-eng@google.com</owner>
   <summary>
@@ -769,7 +769,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Notifications.Engagement.{Type}.Volume{Volume}"
-    units="site-engagement-score*2" expires_after="2026-10-11">
+    units="site-engagement-score*2" expires_after="2026-12-16">
   <owner>antoniosartori@chromium.org</owner>
   <owner>feuunk@chromium.org</owner>
   <summary>
@@ -834,6 +834,29 @@ chromium-metrics-reviews@google.com.
     to the notification service in the app shim process dies, and this wasn't
     because the user closed the app nor because chrome initiated the disconnect.
   </summary>
+</histogram>
+
+<histogram name="Notifications.macOS.AttributionOutcome"
+    enum="MacNotificationAttributionOutcome" expires_after="2027-03-01">
+  <owner>mek@chromium.org</owner>
+  <owner>pwa-team@google.com</owner>
+  <summary>
+    Records the outcome of attempting to attribute a Web App notification to its
+    App Shim on macOS. Recorded when displaying a notification that has a Web
+    App ID.
+  </summary>
+</histogram>
+
+<histogram name="Notifications.macOS.DeliveryResult.{Style}"
+    units="NSErrorCode" expires_after="2027-03-01">
+  <owner>mek@chromium.org</owner>
+  <owner>pwa-team@google.com</owner>
+  <summary>
+    Records the result of adding a notification request to the macOS
+    UNUserNotificationCenter. Recorded when the macOS API completion handler is
+    called. Logs 0 for success, or the NSError code on failure.
+  </summary>
+  <token key="Style" variants="MacOSNotificationStyle"/>
 </histogram>
 
 <histogram name="Notifications.macOS.ServiceProcessKilled" units="ms"
@@ -1102,7 +1125,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="Notifications.Scheduler.NotificationLifeCycleEvent{NotificationSchedulerClientType}"
     enum="NotificationSchedulerNotificationLifeCycleEvent"
-    expires_after="2026-10-11">
+    expires_after="2026-12-13">
   <owner>shaktisahu@chromium.org</owner>
   <owner>nyquist@chromium.org</owner>
   <summary>
@@ -1129,7 +1152,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="Notifications.Scheduler.Tips.FeatureTypeAction{NotificationTipsFeatureType}"
-    enum="NotificationSchedulerUserActionType" expires_after="2026-10-11">
+    enum="NotificationSchedulerUserActionType" expires_after="2026-12-16">
   <owner>wylieb@google.com</owner>
   <owner>bjfong@google.com</owner>
   <summary>
@@ -1152,7 +1175,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Notifications.Scheduler.Tips.FeatureTypeShown"
-    enum="TipsNotificationsFeatureType" expires_after="2026-10-11">
+    enum="TipsNotificationsFeatureType" expires_after="2026-12-16">
   <owner>wylieb@google.com</owner>
   <owner>bjfong@google.com</owner>
   <summary>
@@ -1164,7 +1187,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="Notifications.Tips.FeatureTipPromo.EventType{NotificationTipsFeatureType}"
-    enum="TipsNotificationsFeatureTipPromoEventType" expires_after="2026-10-11">
+    enum="TipsNotificationsFeatureTipPromoEventType" expires_after="2026-12-16">
   <owner>wylieb@google.com</owner>
   <owner>bjfong@google.com</owner>
   <summary>

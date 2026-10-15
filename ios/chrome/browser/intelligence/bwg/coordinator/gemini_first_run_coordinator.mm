@@ -14,17 +14,18 @@
 #import "ios/chrome/browser/intelligence/bwg/coordinator/gemini_first_run_mediator.h"
 #import "ios/chrome/browser/intelligence/bwg/coordinator/gemini_first_run_mediator_delegate.h"
 #import "ios/chrome/browser/intelligence/bwg/metrics/gemini_metrics.h"
+#import "ios/chrome/browser/intelligence/bwg/model/gemini_browser_agent.h"
 #import "ios/chrome/browser/intelligence/bwg/model/gemini_service_factory.h"
 #import "ios/chrome/browser/intelligence/bwg/model/gemini_tab_helper.h"
 #import "ios/chrome/browser/intelligence/bwg/ui/gemini_consent_configuration.h"
-#import "ios/chrome/browser/intelligence/bwg/ui/gemini_fre_wrapper_view_controller.h"
+#import "ios/chrome/browser/intelligence/bwg/ui/gemini_first_run_wrapper_view_controller.h"
 #import "ios/chrome/browser/intelligence/features/features.h"
 #import "ios/chrome/browser/shared/model/browser/browser.h"
 #import "ios/chrome/browser/shared/model/prefs/pref_names.h"
 #import "ios/chrome/browser/shared/model/profile/profile_ios.h"
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list.h"
-#import "ios/chrome/browser/shared/public/commands/bwg_commands.h"
 #import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
+#import "ios/chrome/browser/shared/public/commands/gemini_commands.h"
 #import "ios/chrome/browser/shared/public/commands/help_commands.h"
 #import "ios/chrome/browser/shared/public/commands/scene_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
@@ -44,17 +45,17 @@
   // Mediator for handling all logic related to Gemini first run promo.
   GeminiFirstRunMediator* _mediator;
 
-  // Wrapper view controller for the First Run Experience (FRE) UI.
-  GeminiFREWrapperViewController* _viewController;
+  // Wrapper view controller for the First Run Experience UI.
+  GeminiFirstRunWrapperViewController* _viewController;
 
   // Handler for sending Gemini commands.
-  id<BWGCommands> _geminiCommandsHandler;
+  id<GeminiCommands> _geminiHandler;
 
   // The `gemini::EntryPoint` the coordinator was initialized from.
   gemini::EntryPoint _entryPoint;
 
-  // Type of Gemini FRE.
-  GeminiFREType _FREType;
+  // Type of Gemini First Run.
+  GeminiFirstRunType _firstRunType;
 
   // The completion block passed from Mediator when consent UI is dismissed.
   void (^_consentCompletion)(void);
@@ -75,12 +76,12 @@
 - (instancetype)initWithBaseViewController:(UIViewController*)viewController
                                    browser:(Browser*)browser
                             fromEntryPoint:(gemini::EntryPoint)entryPoint
-                                   FREType:(GeminiFREType)FREType
+                              firstRunType:(GeminiFirstRunType)firstRunType
                          completionHandler:(void (^)(BOOL success))completion {
   self = [super initWithBaseViewController:viewController browser:browser];
   if (self) {
     _entryPoint = entryPoint;
-    _FREType = FREType;
+    _firstRunType = firstRunType;
     _completion = completion;
   }
   return self;
@@ -101,7 +102,7 @@
   }
 
   CommandDispatcher* dispatcher = self.browser->GetCommandDispatcher();
-  _geminiCommandsHandler = HandlerForProtocol(dispatcher, BWGCommands);
+  _geminiHandler = HandlerForProtocol(dispatcher, GeminiCommands);
   _helpCommandsHandler = HandlerForProtocol(dispatcher, HelpCommands);
 
   _mediator = [[GeminiFirstRunMediator alloc]
@@ -123,19 +124,21 @@
   [self prepareAIHubIPH];
 
   GeminiConsentConfiguration* consentConfig =
-      [_mediator consentConfigurationForFREType:_FREType];
-  _viewController = [[GeminiFREWrapperViewController alloc]
-             initWithPromo:_mediator.shouldShowPromo
-                   FREType:_FREType
-      consentConfiguration:consentConfig];
+      [_mediator consentConfigurationForFirstRunType:_firstRunType];
+  BOOL showPromo =
+      _mediator.shouldShowPromo && (_firstRunType != GeminiFirstRunType::kLive);
+  _viewController =
+      [[GeminiFirstRunWrapperViewController alloc] initWithPromo:showPromo
+                                                    firstRunType:_firstRunType
+                                            consentConfiguration:consentConfig];
   _viewController.sheetPresentationController.delegate = self;
   _viewController.mutator = _mediator;
 
   [self.baseViewController presentViewController:_viewController
                                         animated:YES
                                       completion:^{
-                                        // Record FRE was shown.
-                                        RecordFREShown();
+                                        // Record the First Run was shown.
+                                        RecordFirstRunShown();
                                       }];
 
   [super start];
@@ -148,29 +151,47 @@
 #pragma mark - Public
 
 - (void)stopWithCompletion:(ProceduralBlock)completion {
-  GeminiTabHelper* geminiTabHelper = [self activeWebStateGeminiTabHelper];
-  if (geminiTabHelper) {
-    geminiTabHelper->SetPreventContextualPanelEntryPoint(NO);
+  // Retain self to survive synchronous teardown from the completion block.
+  __strong __typeof(self) strongSelf =
+      IsGeminiCoordinatorTeardownFixEnabled() ? self : nil;
+  if (strongSelf) {
+    GeminiTabHelper* geminiTabHelper =
+        [strongSelf activeWebStateGeminiTabHelper];
+    if (geminiTabHelper) {
+      geminiTabHelper->SetPreventContextualPanelEntryPoint(NO);
+    }
+    [strongSelf presentPageActionMenuIPH];
+  } else {
+    GeminiTabHelper* geminiTabHelper = [self activeWebStateGeminiTabHelper];
+    if (geminiTabHelper) {
+      geminiTabHelper->SetPreventContextualPanelEntryPoint(NO);
+    }
+    [self presentPageActionMenuIPH];
   }
 
-  [self presentPageActionMenuIPH];
   _viewController = nil;
-  _geminiCommandsHandler = nil;
+  _geminiHandler = nil;
   _helpCommandsHandler = nil;
+  [_mediator disconnect];
   _mediator = nil;
   _prefService = nil;
   _tracker = nil;
   _completion = nil;
   if (!_consentCompletion) {
-    [self dismissPresentedViewWithCompletion:completion];
+    if (strongSelf) {
+      [strongSelf dismissPresentedViewWithCompletion:completion];
+    } else {
+      [self dismissPresentedViewWithCompletion:completion];
+    }
   }
   [super stop];
 }
 
-#pragma mark - GeminiMediatorDelegate
+#pragma mark - GeminiFirstRunMediatorDelegate
 
 - (void)dismissGeminiConsentUIWithCompletion:(void (^)())completion {
-  if (_FREType == GeminiFREType::kLive) {
+  BOOL hasConsented = _prefService->GetBoolean(prefs::kIOSGeminiLiveConsent);
+  if (_firstRunType == GeminiFirstRunType::kLive && hasConsented) {
     if (completion) {
       _consentCompletion = completion;
     }
@@ -187,15 +208,24 @@
 }
 
 - (void)dismissGeminiFlow {
-  [_geminiCommandsHandler dismissGeminiFlowWithCompletion:nil];
+  [_geminiHandler dismissGeminiFlowWithCompletion:nil];
 }
 
 #pragma mark - UISheetPresentationControllerDelegate
 
-// Handles the dismissal of the UI.
+// Handles the dismissal of the FRE UI.
 - (void)presentationControllerDidDismiss:
     (UIPresentationController*)presentationController {
-  [_geminiCommandsHandler dismissGeminiFlowWithCompletion:nil];
+  if (_firstRunType == GeminiFirstRunType::kLive) {
+    [_mediator disconnect];
+    if (_completion) {
+      void (^completion)(BOOL) = _completion;
+      _completion = nil;
+      completion(NO);
+    }
+  } else {
+    [_geminiHandler dismissGeminiFlowWithCompletion:nil];
+  }
 }
 
 #pragma mark - Private
@@ -203,33 +233,22 @@
 // Checks the current microphone permission status and prompts the user if
 // needed.
 - (void)handleLiveMicPermission {
-  CHECK(_FREType == GeminiFREType::kLive);
-  AVAuthorizationStatus status =
-      [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeAudio];
-  switch (status) {
-    case AVAuthorizationStatusNotDetermined: {
-      __weak __typeof(self) weakSelf = self;
-      [AVCaptureDevice
-          requestAccessForMediaType:AVMediaTypeAudio
-                  completionHandler:^(BOOL granted) {
-                    __strong __typeof(weakSelf) strongSelf = weakSelf;
-                    if (!strongSelf) {
-                      return;
-                    }
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                      [strongSelf handleLiveMicPermissionResult:granted];
-                    });
-                  }];
-      break;
-    }
-    case AVAuthorizationStatusAuthorized:
-      [self handleLiveMicPermissionResult:YES];
-      break;
-    case AVAuthorizationStatusDenied:
-    case AVAuthorizationStatusRestricted:
-      [self showMicrophoneSettingsAlert];
-      break;
+  CHECK(_firstRunType == GeminiFirstRunType::kLive);
+  GeminiBrowserAgent* geminiBrowserAgent =
+      GeminiBrowserAgent::FromBrowser(self.browser);
+  if (!geminiBrowserAgent) {
+    [self handleLiveMicPermissionResult:NO];
+    return;
   }
+  __weak __typeof(self) weakSelf = self;
+  geminiBrowserAgent->ShowGeminiLiveMicrophoneAlert(
+      _viewController ? _viewController : self.baseViewController,
+      ^(BOOL granted) {
+        __strong __typeof(weakSelf) strongSelf = weakSelf;
+        if (strongSelf) {
+          [strongSelf handleLiveMicPermissionResult:granted];
+        }
+      });
 }
 
 // Handles the result of the microphone permission request.
@@ -250,55 +269,17 @@
     _viewController = nil;
   } else {
     _consentCompletion = nil;
+    __weak __typeof(self) weakSelf = self;
+    [self dismissPresentedViewWithCompletion:^{
+      __strong __typeof(weakSelf) strongSelf = weakSelf;
+      if (strongSelf && strongSelf->_completion) {
+        void (^completion)(BOOL) = strongSelf->_completion;
+        strongSelf->_completion = nil;
+        completion(NO);
+      }
+    }];
+    _viewController = nil;
   }
-}
-
-// Shows a custom alert directing the user to iOS Settings to enable the
-// microphone.
-- (void)showMicrophoneSettingsAlert {
-  UIAlertController* alert = [UIAlertController
-      alertControllerWithTitle:l10n_util::GetNSString(
-                                   IDS_IOS_GEMINI_LIVE_MICROPHONE_ALERT_TITLE)
-                       message:l10n_util::GetNSString(
-                                   IDS_IOS_GEMINI_LIVE_MICROPHONE_ALERT_DETAIL)
-                preferredStyle:UIAlertControllerStyleAlert];
-
-  __weak __typeof(self) weakSelf = self;
-  [alert
-      addAction:
-          [UIAlertAction
-              actionWithTitle:
-                  l10n_util::GetNSString(
-                      IDS_IOS_GEMINI_LIVE_MICROPHONE_ALERT_GO_TO_SETTINGS)
-                        style:UIAlertActionStyleDefault
-                      handler:^(UIAlertAction* action) {
-                        NSURL* settingsURL = [NSURL
-                            URLWithString:UIApplicationOpenSettingsURLString];
-                        [[UIApplication sharedApplication] openURL:settingsURL
-                                                           options:@{}
-                                                 completionHandler:nil];
-                        __strong __typeof(weakSelf) strongSelf = weakSelf;
-                        if (strongSelf) {
-                          [strongSelf dismissPresentedViewWithCompletion:nil];
-                          strongSelf->_viewController = nil;
-                        }
-                      }]];
-
-  [alert addAction:[UIAlertAction
-                       actionWithTitle:
-                           l10n_util::GetNSString(
-                               IDS_IOS_GEMINI_LIVE_MICROPHONE_ALERT_NO_THANKS)
-                                 style:UIAlertActionStyleCancel
-                               handler:^(UIAlertAction* action) {
-                                 __strong __typeof(weakSelf) strongSelf =
-                                     weakSelf;
-                                 if (strongSelf) {
-                                   [strongSelf
-                                       dismissPresentedViewWithCompletion:nil];
-                                   strongSelf->_viewController = nil;
-                                 }
-                               }]];
-  [_viewController presentViewController:alert animated:YES completion:nil];
 }
 
 // Dismisses presented view.

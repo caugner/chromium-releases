@@ -8,7 +8,6 @@
 #include <optional>
 #include <vector>
 
-#include "base/check.h"
 #include "base/time/time.h"
 #include "cc/animation/animation_export.h"
 #include "cc/animation/animation_timeline.h"
@@ -183,16 +182,21 @@ class CC_ANIMATION_EXPORT ScrollTimeline : public AnimationTimeline {
 
   ProtectedSequenceForbidden<std::optional<ScrollOffsets>> active_offsets_;
   ProtectedSequenceWritable<std::optional<ScrollOffsets>> pending_offsets_;
+
+  // Current time from the last active-tree tick, used to detect an unchanged
+  // scroll offset between frames (so an idle page avoids redundant ticks).
+  // Reset on (re)activation and property push, as the scroller may change.
+  ProtectedSequenceForbidden<std::optional<base::TimeTicks>> last_tick_time_;
 };
 
 inline ScrollTimeline* ToScrollTimeline(AnimationTimeline* timeline) {
-  CHECK(timeline->IsScrollTimeline());
+  DCHECK(timeline->IsScrollTimeline());
   return static_cast<ScrollTimeline*>(timeline);
 }
 
 inline const ScrollTimeline* ToScrollTimeline(
     const AnimationTimeline* timeline) {
-  CHECK(timeline->IsScrollTimeline());
+  DCHECK(timeline->IsScrollTimeline());
   return static_cast<const ScrollTimeline*>(timeline);
 }
 

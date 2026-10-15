@@ -120,8 +120,7 @@ class CONTENT_EXPORT DedicatedWorkerHost final
       network::mojom::ClientSecurityStatePtr creator_client_security_state,
       const PolicyContainerPolicies& creator_policies,
       base::WeakPtr<CrossOriginEmbedderPolicyReporter> creator_coep_reporter,
-      const std::optional<base::UnguessableToken>&
-          creator_network_restrictions_id,
+      const base::UnguessableToken& creator_network_restrictions_id,
       mojo::PendingReceiver<blink::mojom::DedicatedWorkerHost> host,
       net::StorageAccessApiStatus storage_access_api_status);
 
@@ -150,8 +149,7 @@ class CONTENT_EXPORT DedicatedWorkerHost final
     return network_restrictions_id_;
   }
 
-  const std::optional<base::UnguessableToken>& creator_network_restrictions_id()
-      const {
+  const base::UnguessableToken& creator_network_restrictions_id() const {
     return creator_network_restrictions_id_;
   }
 
@@ -245,8 +243,6 @@ class CONTENT_EXPORT DedicatedWorkerHost final
   ServiceWorkerMainResourceHandle* service_worker_handle() {
     return service_worker_handle_.get();
   }
-
-  bool file_url_support() const { return file_url_support_; }
 
 #if BUILDFLAG(ENABLE_COMPUTE_PRESSURE)
   PressureServiceForDedicatedWorker* pressure_service() {
@@ -472,7 +468,7 @@ class CONTENT_EXPORT DedicatedWorkerHost final
 
   // Nonce used to restrict network traffic for the main script fetch of this
   // worker.
-  const std::optional<base::UnguessableToken> creator_network_restrictions_id_;
+  const base::UnguessableToken creator_network_restrictions_id_;
 
   // The policies of the creator context. Used for inheritance.
   const PolicyContainerPolicies creator_policies_;

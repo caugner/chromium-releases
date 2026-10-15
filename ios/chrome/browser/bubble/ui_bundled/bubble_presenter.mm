@@ -32,6 +32,7 @@
 #import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_controller.h"
 #import "ios/chrome/browser/fullscreen/ui_bundled/scoped_fullscreen_disabler.h"
 #import "ios/chrome/browser/intelligence/bwg/utils/gemini_constants.h"
+#import "ios/chrome/browser/intelligence/features/features.h"
 #import "ios/chrome/browser/ntp/model/new_tab_page_tab_helper.h"
 #import "ios/chrome/browser/ntp/shared/metrics/feed_metrics_recorder.h"
 #import "ios/chrome/browser/overlays/model/public/overlay_presenter.h"
@@ -45,8 +46,8 @@
 #import "ios/chrome/browser/shared/model/url/url_util.h"
 #import "ios/chrome/browser/shared/model/utils/first_run_util.h"
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list.h"
-#import "ios/chrome/browser/shared/public/commands/bwg_commands.h"
 #import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
+#import "ios/chrome/browser/shared/public/commands/gemini_commands.h"
 #import "ios/chrome/browser/shared/public/commands/page_action_menu_entry_point_commands.h"
 #import "ios/chrome/browser/shared/public/commands/popup_menu_commands.h"
 #import "ios/chrome/browser/shared/public/commands/tab_strip_commands.h"
@@ -367,11 +368,8 @@ constexpr CGFloat kAdditionalBorderMargin = 4;
 
   BubbleArrowDirection arrowDirection;
   if (IsChromeNextIaEnabled()) {
-    BOOL isBottomOmnibox = IsBottomOmniboxAvailable() &&
-                           GetApplicationContext()->GetLocalState()->GetBoolean(
-                               omnibox::kIsOmniboxInBottomPosition);
-    arrowDirection =
-        isBottomOmnibox ? BubbleArrowDirectionDown : BubbleArrowDirectionUp;
+    arrowDirection = [self isBottomOmnibox] ? BubbleArrowDirectionDown
+                                            : BubbleArrowDirectionUp;
 
   } else {
     arrowDirection = IsSplitToolbarMode(self.rootViewController)
@@ -493,7 +491,11 @@ constexpr CGFloat kAdditionalBorderMargin = 4;
 }
 
 - (void)presentLensOverlayTipBubble {
-  if (![self canPresentBubble]) {
+  BOOL checkTabScrolledToTop = YES;
+  if (IsChromeNextIaEnabled() && ![self isBottomOmnibox]) {
+    checkTabScrolledToTop = NO;
+  }
+  if (![self canPresentBubbleWithCheckTabScrolledToTop:checkTabScrolledToTop]) {
     return;
   }
 
@@ -781,9 +783,11 @@ constexpr CGFloat kAdditionalBorderMargin = 4;
   toolbarSwipeGestureIPH.delegate = self;
   [self.rootViewController.view addSubview:toolbarSwipeGestureIPH];
   AddSameConstraints(toolbarSwipeGestureIPH, guide);
-  [self.geminiHandler
-      hideFloatyIfInvokedAnimated:NO
-                       fromSource:gemini::FloatyUpdateSource::GestureIph];
+  if (IsPageActionMenuEnabled()) {
+    [self.geminiHandler
+        hideFloatyIfInvokedAnimated:NO
+                         fromSource:gemini::FloatyUpdateSource::GestureIph];
+  }
   [toolbarSwipeGestureIPH startAnimation];
   _toolbarSwipeGestureIPH = toolbarSwipeGestureIPH;
 }
@@ -912,10 +916,11 @@ constexpr CGFloat kAdditionalBorderMargin = 4;
   }
 }
 
-- (void)presentGeminiImageRemixBubbleWithBWGHandler:(id<BWGCommands>)BWGHandler
-                    pageActionMenuEntryPointHandler:
-                        (id<PageActionMenuEntryPointCommands>)
-                            pageActionMenuEntryPointHandler {
+- (void)presentGeminiImageRemixBubbleWithGeminiHandler:
+            (id<GeminiCommands>)geminiHandler
+                       pageActionMenuEntryPointHandler:
+                           (id<PageActionMenuEntryPointCommands>)
+                               pageActionMenuEntryPointHandler {
   if (![self canPresentBubbleWithCheckTabScrolledToTop:NO]) {
     return;
   }
@@ -970,7 +975,7 @@ constexpr CGFloat kAdditionalBorderMargin = 4;
             reason == IPHDismissalReasonType::kTappedAnchorView) {
           base::RecordAction(
               base::UserMetricsAction("MobileGeminiImageRemixIPHTapped"));
-          [BWGHandler
+          [geminiHandler
               startGeminiFlowWithStartupState:
                   [[GeminiStartupState alloc]
                       initWithEntryPoint:gemini::EntryPoint::ImageRemixIPH]];
@@ -1007,10 +1012,12 @@ constexpr CGFloat kAdditionalBorderMargin = 4;
       !dismissButtonTappedEvent.empty()) {
     _engagementTracker->NotifyEvent(dismissButtonTappedEvent);
   }
-  [self.geminiHandler
-      updateFloatyVisibilityIfEligibleAnimated:NO
-                                    fromSource:gemini::FloatyUpdateSource::
-                                                   GestureIph];
+  if (IsPageActionMenuEnabled()) {
+    [self.geminiHandler
+        updateFloatyVisibilityIfEligibleAnimated:NO
+                                      fromSource:gemini::FloatyUpdateSource::
+                                                     GestureIph];
+  }
 }
 
 - (void)gestureInProductHelpView:(GestureInProductHelpView*)view
@@ -1426,9 +1433,11 @@ constexpr CGFloat kAdditionalBorderMargin = 4;
     [self.rootViewController.view addSubview:gestureIPHView];
     gestureIPHView.delegate = self;
     AddSameConstraints(gestureIPHView, contentAreaGuide);
-    [self.geminiHandler
-        hideFloatyIfInvokedAnimated:NO
-                         fromSource:gemini::FloatyUpdateSource::GestureIph];
+    if (IsPageActionMenuEnabled()) {
+      [self.geminiHandler
+          hideFloatyIfInvokedAnimated:NO
+                           fromSource:gemini::FloatyUpdateSource::GestureIph];
+    }
     return gestureIPHView;
   }
   return nil;
@@ -1532,6 +1541,13 @@ constexpr CGFloat kAdditionalBorderMargin = 4;
     _infobarModalPresenter = nullptr;
   }
   _overlayPresenterObserver = nullptr;
+}
+
+// Returns whether the omnibox is in the bottom position.
+- (BOOL)isBottomOmnibox {
+  return IsBottomOmniboxAvailable() &&
+         GetApplicationContext()->GetLocalState()->GetBoolean(
+             omnibox::kIsOmniboxInBottomPosition);
 }
 
 @end
