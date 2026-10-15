@@ -17,14 +17,13 @@
 
 #if BUILDFLAG(IS_CHROMEOS)
 #include "ash/constants/ash_features.h"
-#include "base/feature_list.h"
 #endif
 
 #if BUILDFLAG(IS_WIN)
 #include "base/win/windows_version.h"
 #endif
 
-#if BUILDFLAG(IS_LINUX) && defined(ARCH_CPU_X86_FAMILY)
+#if (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC)) && defined(ARCH_CPU_X86_FAMILY)
 #include "base/cpu.h"
 #endif
 
@@ -54,6 +53,24 @@ bool IsSupportedLinux() {
 }
 #endif  // BUILDFLAG(IS_LINUX)
 
+#if BUILDFLAG(IS_MAC)
+bool IsSupportedMac() {
+#if defined(ARCH_CPU_X86_FAMILY)
+  // Check if the CPU has the required instruction set to run the Speech
+  // On-Device API (SODA) library. SODA requires AVX support on macOS x86_64.
+  // Pre-2011 Intel Macs (e.g. Penryn, Nehalem, Westmere) running modern
+  // macOS via OpenCore Legacy Patcher lack AVX. Without AVX, SODA falls
+  // back to a gemmlowp SSE4.1 kernel that crashes on macOS x86_64.
+  static bool has_avx = base::CPU().has_avx();
+  return has_avx;
+#elif defined(ARCH_CPU_ARM_FAMILY)
+  return true;
+#else
+  return false;
+#endif  // defined(ARCH_CPU_X86_FAMILY)
+}
+#endif  // BUILDFLAG(IS_MAC)
+
 #if BUILDFLAG(IS_WIN)
 bool IsSupportedWin() {
   return true;
@@ -70,10 +87,12 @@ bool IsOnDeviceSpeechRecognitionSupported() {
   return IsSupportedChromeOS();
 #elif BUILDFLAG(IS_LINUX)
   return IsSupportedLinux();
+#elif BUILDFLAG(IS_MAC)
+  return IsSupportedMac();
 #elif BUILDFLAG(IS_WIN)
   return IsSupportedWin();
 #else
-  return true;
+  return false;
 #endif
 }
 

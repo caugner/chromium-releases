@@ -475,6 +475,7 @@ class CORE_EXPORT HTMLMediaElement
   HTMLMediaElement(const QualifiedName&, Document&);
   ~HTMLMediaElement() override;
   void Dispose();
+  bool IsDisposing() const { return is_disposing_; }
 
   // Returns a constant reference to the HeapMojoAssociatedRemoteSet holding all
   // the bound remotes for the media::mojom::blink::MediaPlayerObserver
@@ -593,7 +594,6 @@ class CORE_EXPORT HTMLMediaElement
   // state is updated. This is typically handled during `UpdatePlayState`.
   virtual void UpdateVideoVisibilityTracker() {}
 
-
   void SetShowPosterFlag(bool value);
 
   void SetReadyState(ReadyState);
@@ -601,7 +601,7 @@ class CORE_EXPORT HTMLMediaElement
 
   // WebMediaPlayerClient implementation.
   void NetworkStateChanged() final;
-  void ReadyStateChanged() final;
+  void ReadyStateChanged() override;
   void TimeChanged() final;
   void Repaint() final;
   void DurationChanged() final;
@@ -1121,6 +1121,8 @@ class CORE_EXPORT HTMLMediaElement
       HeapMojoAssociatedReceiverSet<media::mojom::blink::MediaPlayer,
                                     HTMLMediaElement>>>
       media_player_receiver_set_;
+
+  bool is_disposing_ = false;
 };
 
 template <>

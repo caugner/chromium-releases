@@ -580,6 +580,16 @@ TEST_F(MultiBufferDataSourceTest, Range_NotSatisfiable) {
   Stop();
 }
 
+TEST_F(MultiBufferDataSourceTest, Range_NotSatisfiableOpaque) {
+  Initialize(kHttpUrl, false);
+  WebURLResponse response = response_generator_->GenerateResponse(416);
+  response.SetType(network::mojom::blink::FetchResponseType::kOpaque);
+  Respond(response);
+  EXPECT_TRUE(data_source_->WouldTaintOrigin());
+  EXPECT_FALSE(loading());
+  Stop();
+}
+
 // Special carve-out for Apache versions that choose to return a 200 for
 // Range:0- ("because it's more efficient" than a 206)
 TEST_F(MultiBufferDataSourceTest, Range_SupportedButReturned200) {
@@ -646,6 +656,29 @@ TEST_F(MultiBufferDataSourceTest, Range_ServerLied) {
   Respond(response_generator_->Generate200());
 
   EXPECT_TRUE(loading());
+  Stop();
+}
+
+TEST_F(MultiBufferDataSourceTest, GetUrlDataOrigin_NoDataOrigin) {
+  InitializeWith200Response();
+  // Without a data origin, it should fallback to url() via
+  // GetUrlAfterRedirects().
+  EXPECT_EQ(data_source_->GetUrlDataOrigin(), GURL(kHttpUrl));
+  Stop();
+}
+
+TEST_F(MultiBufferDataSourceTest, GetUrlDataOrigin_WithDataOrigin) {
+  Initialize(kHttpUrl, true);
+
+  EXPECT_CALL(host_, SetTotalBytes(response_generator_->content_length()));
+  WebURLResponse response = response_generator_->Generate200();
+  response.SetCurrentRequestUrl(KURL(kHttpDifferentOriginUrl));
+  Respond(response);
+
+  EXPECT_CALL(host_, AddBufferedByteRange(0, kDataSize));
+  ReceiveData(kDataSize);
+
+  EXPECT_EQ(data_source_->GetUrlDataOrigin(), GURL(kHttpDifferentOriginUrl));
   Stop();
 }
 

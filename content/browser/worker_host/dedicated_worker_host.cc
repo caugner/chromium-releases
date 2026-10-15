@@ -42,6 +42,7 @@
 #include "content/browser/worker_host/dedicated_worker_service_impl.h"
 #include "content/browser/worker_host/worker_script_fetcher.h"
 #include "content/browser/worker_host/worker_util.h"
+#include "content/common/features.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/network_service_util.h"
@@ -226,8 +227,8 @@ void DedicatedWorkerHost::CreateLockManager(
     mojo::PendingReceiver<blink::mojom::LockManager> receiver) {
   GetStoragePartitionImpl()->BindLockManager(
       GetWorkerStorageKey(), GetToken().value(), std::move(receiver));
-  GetStoragePartitionImpl()->GetLockManager()->AddLockObserver(GetToken().value(),
-                                                            this);
+  GetStoragePartitionImpl()->GetLockManager()->AddLockObserver(
+      GetToken().value(), this);
 }
 
 bool DedicatedWorkerHost::OnLockContention() {
@@ -382,8 +383,7 @@ void DedicatedWorkerHost::StartScriptLoad(
     parent_service_worker_client =
         creator_render_frame_host->GetLastCommittedServiceWorkerClient();
   } else {
-    parent_service_worker_client =
-        creator_worker->service_worker_handle()->service_worker_client();
+    parent_service_worker_client = creator_worker->GetServiceWorkerClient();
   }
   std::string fetch_event_client_id;
   if (parent_service_worker_client) {
@@ -541,7 +541,6 @@ void DedicatedWorkerHost::DidStartScriptLoad(
     worker_client_security_state_->cross_origin_embedder_policy =
         result->main_script_load_params->response_head->parsed_headers
             ->cross_origin_embedder_policy;
-
   }
 
   // The worker global scope's document isolation policy is the same as its
@@ -604,9 +603,21 @@ void DedicatedWorkerHost::DidStartScriptLoad(
   auto policy_container_host = base::MakeRefCounted<PolicyContainerHost>(
       std::move(result->policy_container_policies));
 
+  // A worker sandboxed without `allow-same-origin` has an opaque origin and
+  // is not eligible to use service workers (mirroring
+  // `NavigationRequest::CommitNavigation()`).
+  if (base::FeatureList::IsEnabled(
+          features::kServiceWorkerDropHandleForCSPSandboxedWorker) &&
+      service_worker_handle_ &&
+      (policy_container_host->policies().sandbox_flags &
+       network::mojom::WebSandboxFlags::kOrigin) ==
+          network::mojom::WebSandboxFlags::kOrigin) {
+    service_worker_handle_.reset();
+  }
+
   blink::mojom::ServiceWorkerContainerInfoForClientPtr container_info;
   blink::mojom::ControllerServiceWorkerInfoPtr controller;
-  if (service_worker_handle_->service_worker_client()) {
+  if (GetServiceWorkerClient()) {
     // TODO(crbug.com/40153087): Propagate dedicated worker ukm::SourceId
     // here.
     mojo::PendingRemote<network::mojom::CrossOriginEmbedderPolicyReporter>
@@ -637,8 +648,8 @@ void DedicatedWorkerHost::DidStartScriptLoad(
       BindAndPassRemoteForBackForwardCacheControllerHost(),
       policy_container_host->CreatePolicyContainerForBlink(),
       std::move(coep_reporting_observer), std::move(dip_reporting_observer));
-  if (service_worker_handle_->service_worker_client()) {
-    service_worker_handle_->service_worker_client()->SetContainerReady();
+  if (auto service_worker_client = GetServiceWorkerClient()) {
+    service_worker_client->SetContainerReady();
   }
 }
 
@@ -705,6 +716,7 @@ DedicatedWorkerHost::CreateNetworkFactoryForSubresources(
               : network::mojom::TrustTokenOperationPolicyVerdict::kForbid,
           ancestor_render_frame_host->GetCookieSettingOverrides(),
           network_restrictions_id_,
+          /*renderer_accessible_http_cache_write_enabled=*/false,
           "DedicatedWorkerHost::CreateNetworkFactoryForSubresources");
   // Worker subresources are not outermost-main-frame requests even when their
   // creator frame is outermost.
@@ -835,8 +847,8 @@ void DedicatedWorkerHost::CreateWebSocketConnector(
           ancestor_render_frame_host->GetGlobalId(), ancestor_document_,
           GetWorkerStorageKey().origin(),
           ancestor_render_frame_host->GetIsolationInfoForSubresources(),
-          worker_client_security_state_->Clone(), network_restrictions_id_,
-          GetToken().value()),
+          worker_client_security_state_->Clone(), storage_access_api_status_,
+          network_restrictions_id_, GetToken().value()),
       std::move(receiver));
 }
 
@@ -994,7 +1006,6 @@ void DedicatedWorkerHost::BindSerialService(
   ancestor_render_frame_host->BindSerialService(std::move(receiver));
 }
 
-#if !BUILDFLAG(IS_ANDROID)
 void DedicatedWorkerHost::BindHidService(
     mojo::PendingReceiver<blink::mojom::HidService> receiver) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -1008,7 +1019,6 @@ void DedicatedWorkerHost::BindHidService(
 
   ancestor_render_frame_host->GetHidService(std::move(receiver));
 }
-#endif
 
 void DedicatedWorkerHost::CreateBucketManagerHost(
     mojo::PendingReceiver<blink::mojom::BucketManagerHost> receiver) {

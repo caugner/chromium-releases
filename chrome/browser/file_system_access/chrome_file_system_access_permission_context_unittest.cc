@@ -1084,8 +1084,15 @@ TEST_F(ChromeFileSystemAccessPermissionContextTest,
 #endif  // BUILDFLAG(IS_MAC)
 
 #if BUILDFLAG(IS_WIN)
-TEST_F(ChromeFileSystemAccessPermissionContextTest,
+TEST_F(ChromeFileSystemAccessPermissionContextNoSymbolicLinkCheckTest,
        ConfirmSensitiveEntryAccess_UNCPath) {
+  // The synthetic UNC paths tested here do not exist on disk/network;
+  // attempting to normalize them triggers slow Windows network/SMB timeouts on
+  // non-existent hosts before returning the original path unmodified. Testing
+  // with `features::kFileSystemAccessSymbolicLinkCheck` disabled allows
+  // testing the UNC syntax and admin share parsing logic directly in memory
+  // without timeouts. Symbolic link resolution itself is tested separately in
+  // `ChromeFileSystemAccessPermissionContextSymbolicLinkCheckTest`.
   EXPECT_EQ(ConfirmSensitiveEntryAccessSync(
                 permission_context(),
                 PathInfo(FILE_PATH_LITERAL("\\\\server\\share\\foo\\bar")),
@@ -1386,46 +1393,82 @@ TEST_F(ChromeFileSystemAccessPermissionContextNoSymbolicLinkCheckTest,
             SensitiveDirectoryResult::kAllowed);
 }
 
+#endif  // BUILDFLAG(IS_WIN)
+
 // Testing that the */.git/hooks are all blocked.
 TEST_F(ChromeFileSystemAccessPermissionContextTest,
        ConfirmSensitiveEntryAccess_SuffixWriteBlock) {
+#if defined(FILE_PATH_USES_DRIVE_LETTERS)
+  base::FilePath root(FILE_PATH_LITERAL("c:\\"));
+#else
+  base::FilePath root(FILE_PATH_LITERAL("/"));
+#endif
   // Parent folder is not blocked.
   EXPECT_EQ(ConfirmSensitiveEntryAccessSync(
-                permission_context(), PathInfo(FILE_PATH_LITERAL("\\\\.git")),
+                permission_context(),
+                PathInfo(root.Append(FILE_PATH_LITERAL(".git"))),
                 HandleType::kDirectory, UserAction::kSave),
             SensitiveDirectoryResult::kAllowed);
   // .git/hooks is blocked for save.
-  EXPECT_EQ(
-      ConfirmSensitiveEntryAccessSync(
-          permission_context(), PathInfo(FILE_PATH_LITERAL("\\\\.git\\hooks")),
-          HandleType::kDirectory, UserAction::kSave),
-      SensitiveDirectoryResult::kAbort);
+  EXPECT_EQ(ConfirmSensitiveEntryAccessSync(
+                permission_context(),
+                PathInfo(root.Append(FILE_PATH_LITERAL(".git"))
+                             .Append(FILE_PATH_LITERAL("hooks"))),
+                HandleType::kDirectory, UserAction::kSave),
+            SensitiveDirectoryResult::kAbort);
   // .git/hooks is not blocked for read.
-  EXPECT_EQ(
-      ConfirmSensitiveEntryAccessSync(
-          permission_context(), PathInfo(FILE_PATH_LITERAL("\\\\.git\\hooks")),
-          HandleType::kDirectory, UserAction::kOpen),
-      SensitiveDirectoryResult::kAllowed);
+  EXPECT_EQ(ConfirmSensitiveEntryAccessSync(
+                permission_context(),
+                PathInfo(root.Append(FILE_PATH_LITERAL(".git"))
+                             .Append(FILE_PATH_LITERAL("hooks"))),
+                HandleType::kDirectory, UserAction::kOpen),
+            SensitiveDirectoryResult::kAllowed);
   // .git/hooks inside another folder is blocked for save.
   EXPECT_EQ(ConfirmSensitiveEntryAccessSync(
                 permission_context(),
-                PathInfo(FILE_PATH_LITERAL("\\\\a\\.git\\hooks")),
+                PathInfo(root.Append(FILE_PATH_LITERAL("a"))
+                             .Append(FILE_PATH_LITERAL(".git"))
+                             .Append(FILE_PATH_LITERAL("hooks"))),
                 HandleType::kDirectory, UserAction::kSave),
             SensitiveDirectoryResult::kAbort);
   // The subfolder under .git/hooks folder is blocked for save.
   EXPECT_EQ(ConfirmSensitiveEntryAccessSync(
                 permission_context(),
-                PathInfo(FILE_PATH_LITERAL("\\\\a\\.git\\hooks\\b")),
+                PathInfo(root.Append(FILE_PATH_LITERAL("a"))
+                             .Append(FILE_PATH_LITERAL(".git"))
+                             .Append(FILE_PATH_LITERAL("hooks"))
+                             .Append(FILE_PATH_LITERAL("b"))),
+                HandleType::kDirectory, UserAction::kSave),
+            SensitiveDirectoryResult::kAbort);
+  // Case variations of .git/hooks are blocked for save.
+  EXPECT_EQ(ConfirmSensitiveEntryAccessSync(
+                permission_context(),
+                PathInfo(root.Append(FILE_PATH_LITERAL(".GIT"))
+                             .Append(FILE_PATH_LITERAL("hooks"))),
+                HandleType::kDirectory, UserAction::kSave),
+            SensitiveDirectoryResult::kAbort);
+  EXPECT_EQ(ConfirmSensitiveEntryAccessSync(
+                permission_context(),
+                PathInfo(root.Append(FILE_PATH_LITERAL(".git"))
+                             .Append(FILE_PATH_LITERAL("HOOKS"))),
+                HandleType::kDirectory, UserAction::kSave),
+            SensitiveDirectoryResult::kAbort);
+  EXPECT_EQ(ConfirmSensitiveEntryAccessSync(
+                permission_context(),
+                PathInfo(root.Append(FILE_PATH_LITERAL("a"))
+                             .Append(FILE_PATH_LITERAL(".Git"))
+                             .Append(FILE_PATH_LITERAL("Hooks"))
+                             .Append(FILE_PATH_LITERAL("b"))),
                 HandleType::kDirectory, UserAction::kSave),
             SensitiveDirectoryResult::kAbort);
   // Other suffix is allowed.
-  EXPECT_EQ(
-      ConfirmSensitiveEntryAccessSync(
-          permission_context(), PathInfo(FILE_PATH_LITERAL("\\\\.git\\hook")),
-          HandleType::kDirectory, UserAction::kSave),
-      SensitiveDirectoryResult::kAllowed);
+  EXPECT_EQ(ConfirmSensitiveEntryAccessSync(
+                permission_context(),
+                PathInfo(root.Append(FILE_PATH_LITERAL(".git"))
+                             .Append(FILE_PATH_LITERAL("hook"))),
+                HandleType::kDirectory, UserAction::kSave),
+            SensitiveDirectoryResult::kAllowed);
 }
-#endif
 
 #if BUILDFLAG(IS_ANDROID)
 TEST_F(ChromeFileSystemAccessPermissionContextTest,
@@ -1545,6 +1588,26 @@ TEST_F(ChromeFileSystemAccessPermissionContextSymbolicLinkCheckTest,
                                       HandleType::kFile, UserAction::kOpen),
       SensitiveDirectoryResult::kAbort);
 }
+
+#if BUILDFLAG(IS_WIN)
+TEST_F(ChromeFileSystemAccessPermissionContextSymbolicLinkCheckTest,
+       ConfirmSensitiveEntryAccess_ResolveSymbolicLinkToLocalUNC) {
+  base::FilePath symlink = temp_dir_.GetPath().AppendASCII("symlink_to_unc");
+  base::FilePath target(FILE_PATH_LITERAL("\\\\localhost\\c$\\Windows"));
+
+  CreateSymbolicLinkResult result =
+      CreateSymbolicLinkForTesting(target, symlink);
+  if (result == CreateSymbolicLinkResult::kUnsupported) {
+    GTEST_SKIP();
+  }
+  ASSERT_EQ(result, CreateSymbolicLinkResult::kSucceeded);
+
+  EXPECT_EQ(ConfirmSensitiveEntryAccessSync(
+                permission_context(), PathInfo(symlink), HandleType::kDirectory,
+                UserAction::kOpen),
+            SensitiveDirectoryResult::kAbort);
+}
+#endif  // BUILDFLAG(IS_WIN)
 
 #if BUILDFLAG(IS_MAC)
 // Verifies that symbolic links resolving into sensitive paths on the data
