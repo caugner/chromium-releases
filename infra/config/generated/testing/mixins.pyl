@@ -518,7 +518,7 @@
     'swarming': {
       'dimensions': {
         'cpu': 'x86-64',
-        'os': 'Mac-14|Mac-15',
+        'os': 'Mac-14',
       },
     },
   },
@@ -594,7 +594,7 @@
     'swarming': {
       'dimensions': {
         'cpu': 'arm64',
-        'os': 'Mac-14|Mac-15',
+        'os': 'Mac-15',
       },
     },
   },
@@ -602,7 +602,7 @@
     'swarming': {
       'dimensions': {
         'cpu': 'x86-64',
-        'os': 'Mac-14|Mac-15',
+        'os': 'Mac-15',
       },
     },
   },
@@ -666,32 +666,6 @@
       },
     },
   },
-  'mac_retina_nvidia_gpu_experimental': {
-    'fail_if_unused': False,
-    'swarming': {
-      'dimensions': {
-        'cpu': 'x86-64',
-        'gpu': '10de:0fe9',
-        'hidpi': '1',
-        'os': 'Mac-11.7.9',
-        'pool': 'chromium.tests.gpu',
-        'display_attached': '1',
-      },
-    },
-  },
-  'mac_retina_nvidia_gpu_stable': {
-    'fail_if_unused': False,
-    'swarming': {
-      'dimensions': {
-        'cpu': 'x86-64',
-        'gpu': '10de:0fe9',
-        'hidpi': '1',
-        'os': 'Mac-11.7.9',
-        'pool': 'chromium.tests.gpu',
-        'display_attached': '1',
-      },
-    },
-  },
   'mac_toolchain': {
     'swarming': {
       'cipd_packages': [
@@ -734,6 +708,16 @@
       '--buildbucket-id=${buildbucket_build_id}',
     ],
   },
+  'skylab-20-tests-per-shard': {
+    'skylab': {
+      'cros_test_max_in_shard': 20
+    },
+  },
+  'skylab-50-tests-per-shard': {
+    'skylab': {
+      'cros_test_max_in_shard': 50
+    },
+  },
   'skylab-shards-20': {
     'skylab': {
       'shards': 20,
@@ -744,9 +728,9 @@
       'shards': 30,
     },
   },
-  'skylab-shards-50': {
+  'skylab-shards-45': {
     'skylab': {
-      'shards': 50,
+      'shards': 45,
     },
   },
   'swarming_containment_auto': {

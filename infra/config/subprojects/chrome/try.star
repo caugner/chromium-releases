@@ -7,8 +7,8 @@
 # certain ACL restrictions. For more info, see
 # http://go/chromium-cq#internal-builders-on-the-cq.
 
-load("@chromium-luci//branches.star", "branches")
-load("@chromium-luci//try.star", "default_location_filters", "default_owner_whitelist_group_for_cq_bots", "try_")
+load("//lib/branches.star", "branches")
+load("//lib/try.star", "default_location_filters", "default_owner_whitelist_group_for_cq_bots", "try_")
 load("//project.star", "settings")
 
 def chrome_internal_verifier(
@@ -128,6 +128,10 @@ chrome_internal_verifier(
 
 chrome_internal_verifier(
     builder = "chromeos-betty-chrome",
+)
+
+chrome_internal_verifier(
+    builder = "chromeos-betty-chrome-tfc",
 )
 
 chrome_internal_verifier(
@@ -370,10 +374,6 @@ chrome_internal_verifier(
             "services/on_device_model/.+",
         ],
     ),
-)
-
-chrome_internal_verifier(
-    builder = "test-o-emulator",
 )
 
 chrome_internal_verifier(

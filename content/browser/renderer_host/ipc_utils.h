@@ -7,6 +7,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "content/common/frame.mojom.h"
+#include "content/public/browser/render_process_host.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "third_party/blink/public/mojom/frame/frame.mojom.h"
 #include "third_party/blink/public/mojom/navigation/navigation_params.mojom-forward.h"
@@ -57,18 +58,6 @@ bool VerifyBeginNavigationCommonParams(
     const RenderFrameHostImpl& current_rfh,
     blink::mojom::CommonNavigationParams* common_params,
     std::optional<blink::LocalFrameToken>& initiator_frame_token);
-
-// Verifies that the CreateNewWindowParams are valid and can be accessed by
-// `current_rfh`'s process.
-//
-// Returns true if the CreateNewWindowParams are valid.
-//
-// Terminates `current_rfh`'s process and returns false if the
-// CreateNewWindowParams are invalid.
-//
-// This function has to be called on the UI thread.
-bool VerifyCreateNewWindowParams(const RenderFrameHostImpl& current_rfh,
-                                 const mojom::CreateNewWindowParams& params);
 
 // Verify that the initiator frame identified by `initiator_frame_token` and
 // `initiator_process_id` can navigate `current_rfh`.

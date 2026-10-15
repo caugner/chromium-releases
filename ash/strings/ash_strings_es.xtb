@@ -46,7 +46,7 @@ Aquí tienes algunas cosas que puedes probar para empezar.</translation>
 <translation id="1153356358378277386">Dispositivos vinculados</translation>
 <translation id="1153918444040990015">No se ha podido conectar con los sonidos de Concentración</translation>
 <translation id="1155734730463845512">Nivel de batería actual: <ph name="BATTERY_PERCENTAGE" /> %</translation>
-<translation id="1157514002898505378">La IA generativa es experimental y el contenido puede ser incorrecto, engañoso u ofensivo. Ponte en contacto con tu administrador para informar de un problema. <ph name="LINK_TO_SERVICE_TERMS" /></translation>
+<translation id="1157514002898505378">La IA generativa es experimental y el contenido puede ser inexacto, engañoso u ofensivo. Ponte en contacto con tu administrador para informar de un problema. <ph name="LINK_TO_SERVICE_TERMS" /></translation>
 <translation id="1160215328209699296">activado y en uso</translation>
 <translation id="1163437384438183174">Quitar Mi teléfono de la estantería</translation>
 <translation id="1170753161936175256"><ph name="EVENT_SUMMARY" />, <ph name="TIME_RANGE" /></translation>
@@ -620,7 +620,7 @@ De lo contrario, el panel táctil integrado se volverá a habilitar en <ph name=
 <translation id="3068711042108640621">La estantería está en la parte izquierda</translation>
 <translation id="3077734595579995578">mayús</translation>
 <translation id="3081696990447829002">Mostrar menú</translation>
-<translation id="3087734570205094154">Abajo</translation>
+<translation id="3087734570205094154">Inferior</translation>
 <translation id="3090214513075567547">Abre el menú contextual</translation>
 <translation id="3090989381251959936">Activar o desactivar <ph name="FEATURE_NAME" />. <ph name="STATE_TEXT" /></translation>
 <translation id="3093423061078042895">Por entregar</translation>
@@ -1015,6 +1015,7 @@ Algunas funciones están limitadas para aumentar la duración de la batería.</t
 <translation id="4305817255990598646">Cambiar</translation>
 <translation id="4307713728991152670">Configurar la visualización de las fotos, el contenido multimedia y las aplicaciones recientes de tu teléfono</translation>
 <translation id="4312840429157639164">Cámara ajustada a la esquina superior derecha. Conflicto con la superficie del sistema.</translation>
+<translation id="4312935606722154789">Agrupar o desagrupar dos ventanas en paralelo</translation>
 <translation id="4316910396681052118">TODAS LAS APLICACIONES</translation>
 <translation id="4321179778687042513">ctrl</translation>
 <translation id="4322385711258710213">Ocultar todas las sugerencias del navegador Chrome</translation>
@@ -1454,7 +1455,6 @@ No hay dispositivos conectados.</translation>
 <translation id="5691772641933328258">Huella digital no reconocida</translation>
 <translation id="5693255400847650006">El micrófono se está usando</translation>
 <translation id="5699366815052349604">Asigna la ventana activa a todos los escritorios</translation>
-<translation id="5701785125601597013">Envía o responde rápidamente a mensajes de tu teléfono con Mi teléfono</translation>
 <translation id="570390244361237317">Todas las aplicaciones, desplázate con las teclas de flecha para acceder a todas las aplicaciones</translation>
 <translation id="5705197514573687092">Mostrar configuración del modo Sin distracciones. Se ha añadido un temporizador de <ph name="FOCUS_DURATION" />.</translation>
 <translation id="5707775774148071965">Tu dispositivo admite una tasa de datos mayor que tu cable. El rendimiento del dispositivo puede verse limitado.</translation>
@@ -1584,7 +1584,6 @@ No hay dispositivos conectados.</translation>
 <translation id="6095425951508823973">Añadir conexión con <ph name="PROVIDER" /></translation>
 <translation id="6099678161144790572">Editado hace menos de un mes</translation>
 <translation id="6103838137565245112">sistema</translation>
-<translation id="610395411842312282">Agrupar dos ventanas en paralelo</translation>
 <translation id="6108952804512516814">Crear con IA</translation>
 <translation id="6114505516289286752">Archivos de voz en <ph name="LANGUAGE" /> descargados</translation>
 <translation id="6119360623251949462"><ph name="CHARGING_STATE" />. <ph name="BATTERY_SAVER_STATE" /></translation>

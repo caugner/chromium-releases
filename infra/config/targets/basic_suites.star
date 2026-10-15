@@ -2,22 +2,14 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""Basic suite definitions
+# This file contains suite definitions that can be used in
+# //testing/buildbot/waterfalls.pyl and will also be usable for builders that
+# set their tests in starlark (once that is ready). The legacy_ prefix on the
+# declarations indicates the capability to be used in //testing/buildbot. Once a
+# suite is no longer needed in //testing/buildbot, targets.bundle (which does
+# not yet exist) can be used for grouping tests in a more flexible manner.
 
-Basic suites are a collection of tests that can be referenced by a builder in
-//testing/buildbot/waterfalls.pyl or by compound suites and matrix compound
-suites (defined in ./compound_suites.star and ./matrix_compound_suites.star
-respectively). Suites also define a bundle containing the same tests as the
-suite, so they can be used wherever a bundle is expected.
-
-The legacy_ prefix denotes the ability for basic suites to be referenced in
-//testing/buildbot. Once a suite is no longer referenced via //testing/buildbot,
-targets.bundle can be used for grouping tests in a more flexible manner (mixing
-test types and/or compile targets and arbitrary nesting). Named bundles are
-defined in ./bundles.star.
-"""
-
-load("@chromium-luci//targets.star", "targets")
+load("//lib/targets.star", "targets")
 
 # TODO(gbeaty) - Make the resultdb information for tests using the same binaries
 # consistent and move the information onto the binaries
@@ -94,12 +86,34 @@ targets.legacy_basic_suite(
     tests = {
         "chrome_all_tast_tests": targets.legacy_test_config(
             skylab = targets.skylab(
+                # `tast_expr` must be a non-empty string to run the tast tests. But the value of
+                # would be overridden by `tast_arrt_expr` defined in chromeos/BUILD.gn, so that we
+                # put the stub string here.
+                tast_expr = "STUB_STRING_TO_RUN_TAST_TESTS",
                 # Temporary increases the maximum retries due to the unstable cloudbots (b/377616158)
                 test_level_retries = 2,
                 # Number of shards. Might be overriden for slower boards.
                 shards = 15,
                 # Timeout including DUT privisioning.
                 timeout_sec = 14400,
+            ),
+        ),
+    },
+)
+
+targets.legacy_basic_suite(
+    name = "chromeos_chrome_all_tast_tests_tfc",
+    tests = {
+        "chrome_all_tast_tests": targets.legacy_test_config(
+            skylab = targets.skylab(
+                # TODO(fqj): Remove stub tast_expr.
+                # Currently, recipe_module/chromium_tests has some
+                # tast-specific logic relying on tast_expr to be non-empty.
+                tast_expr = "STUB_STRING_TO_RUN_TAST_TESTS",
+                timeout_sec = 14400,
+                cros_test_names_exclude_from_file = ["chromeos/tast_control_disabled_tests.txt"],
+                cros_test_tags = ["group:mainline", "dep:chrome"],
+                cros_test_tags_exclude = ["informational", "dep:no_chrome_dcheck"],
             ),
         ),
     },
@@ -112,9 +126,33 @@ targets.legacy_basic_suite(
         "chrome_criticalstaging_tast_tests": targets.legacy_test_config(
             ci_only = True,
             skylab = targets.skylab(
+                # `tast_expr` must be a non-empty string to run the tast tests. But the value of
+                # would be overridden by `tast_arrt_expr` defined in chromeos/BUILD.gn, so that we
+                # put the stub string here.
+                tast_expr = "STUB_STRING_TO_RUN_TAST_TESTS",
                 test_level_retries = 2,
                 shards = 3,
                 timeout_sec = 14400,
+            ),
+            experiment_percentage = 100,
+        ),
+    },
+)
+
+targets.legacy_basic_suite(
+    name = "chromeos_chrome_criticalstaging_tast_tests_tfc",
+    tests = {
+        "chrome_criticalstaging_tast_tests": targets.legacy_test_config(
+            ci_only = True,
+            skylab = targets.skylab(
+                # TODO(fqj): Remove stub tast_expr.
+                # Currently, recipe_module/chromium_tests has some
+                # tast-specific logic relying on tast_expr to be non-empty.
+                tast_expr = "STUB_STRING_TO_RUN_TAST_TESTS",
+                timeout_sec = 14400,
+                cros_test_names_exclude_from_file = ["chromeos/tast_control_disabled_tests.txt"],
+                cros_test_tags = ["group:mainline", "dep:chrome", "informational", "group:criticalstaging"],
+                cros_test_tags_exclude = ["dep:lacros", "dep:no_chrome_dcheck"],
             ),
             experiment_percentage = 100,
         ),
@@ -129,9 +167,31 @@ targets.legacy_basic_suite(
         "chrome_disabled_tast_tests": targets.legacy_test_config(
             ci_only = True,
             skylab = targets.skylab(
+                # `tast_expr` must be a non-empty string to run the tast tests. But the value of
+                # would be overridden by `tast_arrt_expr` defined in chromeos/BUILD.gn, so that we
+                # put the stub string here.
+                tast_expr = "STUB_STRING_TO_RUN_TAST_TESTS",
                 test_level_retries = 1,
                 shards = 2,
                 timeout_sec = 14400,
+            ),
+            experiment_percentage = 100,
+        ),
+    },
+)
+
+targets.legacy_basic_suite(
+    name = "chromeos_chrome_disabled_tast_tests_tfc",
+    tests = {
+        "chrome_disabled_tast_tests": targets.legacy_test_config(
+            ci_only = True,
+            skylab = targets.skylab(
+                # TODO(fqj): Remove stub tast_expr.
+                # Currently, recipe_module/chromium_tests has some
+                # tast-specific logic relying on tast_expr to be non-empty.
+                tast_expr = "STUB_STRING_TO_RUN_TAST_TESTS",
+                timeout_sec = 14400,
+                cros_test_names_from_file = ["chromeos/tast_control_disabled_tests.txt"],
             ),
             experiment_percentage = 100,
         ),
@@ -1226,10 +1286,8 @@ targets.legacy_basic_suite(
             ),
         ),
         "message_center_unittests": targets.legacy_test_config(),
-        "nacl_loader_unittests": targets.legacy_test_config(),
         "native_theme_unittests": targets.legacy_test_config(),
         "pdf_unittests": targets.legacy_test_config(),
-        "ppapi_unittests": targets.legacy_test_config(),
         "printing_unittests": targets.legacy_test_config(),
         "remoting_unittests": targets.legacy_test_config(),
         "snapshot_unittests": targets.legacy_test_config(),

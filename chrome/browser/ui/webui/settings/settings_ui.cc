@@ -98,6 +98,7 @@
 #include "components/autofill/core/browser/payments/payments_autofill_client.h"
 #include "components/autofill/core/browser/permissions/autofill_ai/autofill_ai_permission_utils.h"
 #include "components/autofill/core/common/autofill_features.h"
+#include "components/browsing_data/core/features.h"
 #include "components/commerce/core/commerce_feature_list.h"
 #include "components/commerce/core/feature_utils.h"
 #include "components/commerce/core/shopping_service.h"
@@ -138,12 +139,6 @@
 #include "chrome/grit/settings_shared_resources_map.h"
 #endif
 
-#if BUILDFLAG(IS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
-#include "chrome/browser/ui/webui/settings/incompatible_applications_handler_win.h"
-#include "chrome/browser/win/conflicts/incompatible_applications_updater.h"
-#include "chrome/browser/win/conflicts/token_util.h"
-#endif  // BUILDFLAG(IS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
-
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS)
 #include "chrome/browser/ui/webui/settings/languages_handler.h"
 #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS)
@@ -163,13 +158,13 @@
 #include "chrome/browser/ui/webui/ash/settings/pages/people/account_manager_ui_handler.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/grit/browser_resources.h"
+#include "chromeos/ash/components/account_manager/account_manager_facade_factory.h"
 #include "chromeos/ash/components/account_manager/account_manager_factory.h"
 #include "chromeos/ash/components/login/auth/password_visibility_utils.h"
 #include "chromeos/ash/components/phonehub/phone_hub_manager.h"
 #include "chromeos/ash/experiences/arc/arc_util.h"
 #include "chromeos/constants/chromeos_features.h"
 #include "components/account_manager_core/chromeos/account_manager.h"
-#include "components/account_manager_core/chromeos/account_manager_facade_factory.h"
 #include "components/user_manager/user.h"
 #include "ui/base/ui_base_features.h"
 #else  // !BUILDFLAG(IS_CHROMEOS)
@@ -264,7 +259,6 @@ SettingsUI::SettingsUI(content::WebUI* web_ui)
   AddSettingsPageUIHandler(std::make_unique<SecurityKeysCredentialHandler>());
   AddSettingsPageUIHandler(
       std::make_unique<SecurityKeysBioEnrollmentHandler>());
-  AddSettingsPageUIHandler(std::make_unique<SecurityKeysPhonesHandler>());
   AddSettingsPageUIHandler(std::make_unique<PasswordManagerHandler>());
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
   AddSettingsPageUIHandler(std::make_unique<PasskeysHandler>());
@@ -284,19 +278,6 @@ SettingsUI::SettingsUI(content::WebUI* web_ui)
 #if BUILDFLAG(IS_MAC)
   AddSettingsPageUIHandler(std::make_unique<MacSystemSettingsHandler>());
 #endif
-
-#if BUILDFLAG(IS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
-  bool has_incompatible_applications =
-      IncompatibleApplicationsUpdater::HasCachedApplications();
-  html_source->AddBoolean("showIncompatibleApplications",
-                          has_incompatible_applications);
-  html_source->AddBoolean("hasAdminRights", HasAdminRights());
-
-  if (has_incompatible_applications) {
-    AddSettingsPageUIHandler(
-        std::make_unique<IncompatibleApplicationsHandler>());
-  }
-#endif  // BUILDFLAG(IS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
   html_source->AddBoolean("signinAllowed", !profile->IsGuestSession() &&
                                                profile->GetPrefs()->GetBoolean(
@@ -486,11 +467,6 @@ SettingsUI::SettingsUI(content::WebUI* web_ui)
                           is_restricted_notice_enabled);
 
   html_source->AddBoolean(
-      "safetyHubAbusiveNotificationRevocationEnabled",
-      base::FeatureList::IsEnabled(
-          safe_browsing::kSafetyHubAbusiveNotificationRevocation));
-
-  html_source->AddBoolean(
       "isRelatedWebsiteSetsV2UiEnabled",
       base::FeatureList::IsEnabled(
           privacy_sandbox::kPrivacySandboxRelatedWebsiteSetsUi));
@@ -655,7 +631,7 @@ SettingsUI::SettingsUI(content::WebUI* web_ui)
   // Delete Browsing Data
   html_source->AddBoolean(
       "enableDeleteBrowsingDataRevamp",
-      base::FeatureList::IsEnabled(features::kDbdRevampDesktop));
+      base::FeatureList::IsEnabled(browsing_data::features::kDbdRevampDesktop));
 
   html_source->AddBoolean(
       "enableSupportForHomeAndWork",
@@ -680,7 +656,7 @@ void SettingsUI::InitBrowserSettingsWebUIHandlers() {
         factory->GetAccountManager(profile->GetPath().value());
     DCHECK(account_manager);
     auto* account_manager_facade =
-        ::GetAccountManagerFacade(profile->GetPath().value());
+        ash::GetAccountManagerFacade(profile->GetPath().value());
     DCHECK(account_manager_facade);
 
     web_ui()->AddMessageHandler(
@@ -748,7 +724,7 @@ void SettingsUI::TryShowHatsSurveyWithTimeout() {
             .InMilliseconds();
     hats_service->LaunchDelayedSurveyForWebContents(
         kHatsSurveyTriggerSettings, web_ui()->GetWebContents(), timeout_ms, {},
-        {}, HatsService::NavigationBehaviour::REQUIRE_SAME_ORIGIN);
+        {}, HatsService::NavigationBehavior::REQUIRE_SAME_ORIGIN);
   }
 }
 

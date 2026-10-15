@@ -3,29 +3,27 @@
 # found in the LICENSE file.
 """Definitions of builders in the chromium.fyi builder group."""
 
-load("@chromium-luci//branches.star", "branches")
-load("@chromium-luci//builder_config.star", "builder_config")
-load("@chromium-luci//builder_health_indicators.star", "health_spec")
-load("@chromium-luci//builders.star", "cpu", "os")
-load("@chromium-luci//ci.star", "ci")
-load("@chromium-luci//consoles.star", "consoles")
-load("@chromium-luci//gn_args.star", "gn_args")
-load("@chromium-luci//html.star", "linkify")
-load("@chromium-luci//targets.star", "targets")
-load("//lib/ci_constants.star", "ci_constants")
-load("//lib/siso.star", "siso")
+load("//lib/branches.star", "branches")
+load("//lib/builder_config.star", "builder_config")
+load("//lib/builder_health_indicators.star", "health_spec")
+load("//lib/builders.star", "cpu", "os", "siso")
+load("//lib/ci.star", "ci")
+load("//lib/consoles.star", "consoles")
+load("//lib/gn_args.star", "gn_args")
+load("//lib/html.star", "linkify")
+load("//lib/targets.star", "targets")
 load("//lib/xcode.star", "xcode")
 
 ci.defaults.set(
-    executable = ci_constants.DEFAULT_EXECUTABLE,
+    executable = ci.DEFAULT_EXECUTABLE,
     builder_group = "chromium.fyi",
-    pool = ci_constants.DEFAULT_POOL,
+    pool = ci.DEFAULT_POOL,
     cores = 8,
     execution_timeout = 10 * time.hour,
-    health_spec = health_spec.default(),
-    priority = ci_constants.DEFAULT_FYI_PRIORITY,
-    service_account = ci_constants.DEFAULT_SERVICE_ACCOUNT,
-    shadow_service_account = ci_constants.DEFAULT_SHADOW_SERVICE_ACCOUNT,
+    health_spec = health_spec.DEFAULT,
+    priority = ci.DEFAULT_FYI_PRIORITY,
+    service_account = ci.DEFAULT_SERVICE_ACCOUNT,
+    shadow_service_account = ci.DEFAULT_SHADOW_SERVICE_ACCOUNT,
     siso_project = siso.project.DEFAULT_TRUSTED,
     siso_remote_jobs = siso.remote_jobs.DEFAULT,
 )
@@ -219,6 +217,7 @@ ci.builder(
         configs = [
             "release_builder",
             "remoteexec",
+            "dcheck_always_on",
             "linux",
             "x64",
         ],
@@ -320,7 +319,7 @@ ci.builder(
         per_test_modifications = {
             "browser_tests": targets.mixin(
                 swarming = targets.swarming(
-                    shards = 110,
+                    shards = 140,
                 ),
             ),
             "content_browsertests": targets.mixin(
@@ -330,7 +329,7 @@ ci.builder(
             ),
             "interactive_ui_tests": targets.mixin(
                 swarming = targets.swarming(
-                    shards = 6,
+                    shards = 12,
                 ),
             ),
             "net_unittests": targets.mixin(
@@ -1526,7 +1525,7 @@ ci.builder(
 )
 
 fyi_ios_builder(
-    name = "ios-blink-dbg-fyi",
+    name = "ios-blink-rel-fyi",
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(
             config = "ios",
@@ -1541,6 +1540,7 @@ fyi_ios_builder(
             build_config = builder_config.build_config.RELEASE,
             target_bits = 64,
             target_platform = builder_config.target_platform.IOS,
+            host_platform = builder_config.host_platform.MAC,
         ),
         build_gs_bucket = "chromium-fyi-archive",
     ),
@@ -1557,7 +1557,7 @@ fyi_ios_builder(
     ),
     targets = targets.bundle(
         targets = [
-            "ios_blink_dbg_tests",
+            "ios_blink_rel_tests",
         ],
         additional_compile_targets = [
             "all",
@@ -1568,7 +1568,7 @@ fyi_ios_builder(
             "mac_beta_arm64",
             "mac_toolchain",
             "out_dir_arg",
-            "xcode_16_beta",
+            "xcode_26_beta",
             "xctest",
         ],
     ),
@@ -1579,7 +1579,58 @@ fyi_ios_builder(
         short_name = "ios-blk",
     ),
     execution_timeout = 3 * time.hour,
-    xcode = xcode.x16betabots,
+    xcode = xcode.x26betabots,
+)
+
+fyi_ios_builder(
+    name = "tvos-rel-fyi",
+    description_html = "tvOS builder for building and testing tvOS chromium.",
+    schedule = "0 */1 * * *",  # every hour
+    triggered_by = [],
+    builder_spec = builder_config.builder_spec(
+        gclient_config = builder_config.gclient_config(
+            config = "ios",
+        ),
+        chromium_config = builder_config.chromium_config(
+            config = "chromium_tvos",
+            apply_configs = [
+                "mb",
+            ],
+            # Release for now due to binary size being too large (crbug.com/1464415)
+            build_config = builder_config.build_config.RELEASE,
+            target_bits = 64,
+            target_platform = builder_config.target_platform.IOS,
+            host_platform = builder_config.host_platform.MAC,
+        ),
+        build_gs_bucket = "chromium-fyi-archive",
+    ),
+    gn_args = gn_args.config(
+        configs = [
+            "release_builder_blink",
+            "try_builder",
+            "remoteexec",
+            "ios_simulator",
+            "arm64",
+            "use_blink",
+            "tvos_platform",
+            "xctest",
+        ],
+    ),
+    targets = targets.bundle(
+        additional_compile_targets = [
+            "content_shell",
+            "content_unittests",
+        ],
+    ),
+    builderless = True,
+    cpu = cpu.ARM64,
+    console_view_entry = consoles.console_view_entry(
+        category = "iOS",
+        short_name = "tv",
+    ),
+    contact_team_email = "cobalt-appletv@google.com",
+    execution_timeout = 3 * time.hour,
+    xcode = xcode.xcode_default,
 )
 
 fyi_ios_builder(
@@ -1690,61 +1741,6 @@ fyi_ios_builder(
 )
 
 fyi_ios_builder(
-    name = "ios17-beta-simulator",
-    builder_spec = builder_config.builder_spec(
-        gclient_config = builder_config.gclient_config(config = "ios"),
-        chromium_config = builder_config.chromium_config(
-            config = "chromium",
-            apply_configs = [
-                "mb",
-                "mac_toolchain",
-            ],
-            build_config = builder_config.build_config.DEBUG,
-            target_bits = 64,
-            target_platform = builder_config.target_platform.IOS,
-        ),
-        build_gs_bucket = "chromium-fyi-archive",
-    ),
-    gn_args = gn_args.config(
-        configs = [
-            "debug_static_builder",
-            "remoteexec",
-            "ios_simulator",
-            "arm64",
-            "xctest",
-        ],
-    ),
-    targets = targets.bundle(
-        targets = [
-            "ios17_beta_simulator_tests",
-        ],
-        additional_compile_targets = [
-            "all",
-        ],
-        mixins = [
-            "expand-as-isolated-script",
-            "has_native_resultdb_integration",
-            "mac_15_arm64",
-            "mac_toolchain",
-            "out_dir_arg",
-            "xcode_16_beta",
-            "xctest",
-        ],
-    ),
-    # TODO(crbug.com/393136335): changing to MAC_BETA to validate Mac-15 prior
-    # to upgrading the rest of the waterfall. Reset to MAC_DEFAULT once the
-    # rest of the waterfall is Mac-15.
-    os = os.MAC_BETA,
-    cpu = cpu.ARM64,
-    console_view_entry = [
-        consoles.console_view_entry(
-            category = "iOS|iOS17",
-            short_name = "ios17",
-        ),
-    ],
-)
-
-fyi_ios_builder(
     name = "ios18-sdk-device",
     description_html = (
         "Validates that Chromium on iOS compiles for device using the latest iOS SDK." +
@@ -1795,7 +1791,9 @@ fyi_ios_builder(
 )
 
 fyi_ios_builder(
-    name = "ios17-sdk-simulator",
+    name = "ios26-sdk-simulator",
+    schedule = "0 1,5,9,13,17,21 * * *",
+    triggered_by = [],
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(config = "ios"),
         chromium_config = builder_config.chromium_config(
@@ -1821,7 +1819,7 @@ fyi_ios_builder(
     ),
     targets = targets.bundle(
         targets = [
-            "ios17_sdk_simulator_tests",
+            "ios26_sdk_simulator_tests",
         ],
         additional_compile_targets = [
             "all",
@@ -1832,7 +1830,7 @@ fyi_ios_builder(
             "mac_15_arm64",
             "mac_toolchain",
             "out_dir_arg",
-            "xcode_16_beta",
+            "xcode_26_beta",
             "xctest",
         ],
     ),
@@ -1840,11 +1838,11 @@ fyi_ios_builder(
     cpu = cpu.ARM64,
     console_view_entry = [
         consoles.console_view_entry(
-            category = "iOS|iOS17",
-            short_name = "sdk17",
+            category = "iOS|iOS26",
+            short_name = "sdk26",
         ),
     ],
-    xcode = xcode.x16betabots,
+    xcode = xcode.x26betabots,
 )
 
 fyi_ios_builder(
@@ -1904,6 +1902,63 @@ fyi_ios_builder(
         category = "iOS|iOS18",
         short_name = "ios18",
     ),
+)
+
+fyi_ios_builder(
+    name = "ios26-beta-simulator",
+    schedule = "0 3,7,11,15,19,23 * * *",
+    triggered_by = [],
+    builder_spec = builder_config.builder_spec(
+        gclient_config = builder_config.gclient_config(config = "ios"),
+        chromium_config = builder_config.chromium_config(
+            config = "chromium",
+            apply_configs = [
+                "mb",
+                "mac_toolchain",
+            ],
+            build_config = builder_config.build_config.DEBUG,
+            target_bits = 64,
+            target_platform = builder_config.target_platform.IOS,
+        ),
+        build_gs_bucket = "chromium-fyi-archive",
+    ),
+    gn_args = gn_args.config(
+        configs = [
+            "debug_static_builder",
+            "remoteexec",
+            "ios_simulator",
+            "arm64",
+            "xctest",
+        ],
+    ),
+    targets = targets.bundle(
+        targets = [
+            "ios26_beta_simulator_tests",
+        ],
+        additional_compile_targets = [
+            "all",
+        ],
+        mixins = [
+            "expand-as-isolated-script",
+            "has_native_resultdb_integration",
+            "mac_15_arm64",
+            "mac_toolchain",
+            "out_dir_arg",
+            "xcode_26_beta",
+            "xctest",
+        ],
+    ),
+    # TODO(crbug.com/393136335): changing to MAC_BETA to validate Mac-15 prior
+    # to upgrading the rest of the waterfall. Reset to MAC_DEFAULT once the
+    # rest of the waterfall is Mac-15.
+    os = os.MAC_BETA,
+    cpu = cpu.ARM64,
+    console_view_entry = [
+        consoles.console_view_entry(
+            category = "iOS|iOS26",
+            short_name = "ios26",
+        ),
+    ],
 )
 
 fyi_ios_builder(
@@ -2004,7 +2059,7 @@ fyi_mac_builder(
             "all",
         ],
         mixins = [
-            "mac_beta_arm64",
+            "mac_26_arm64",
         ],
         per_test_modifications = {
             "browser_tests": targets.mixin(

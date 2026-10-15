@@ -10,6 +10,12 @@
 
 namespace tabs {
 
+// Enables the debug UI used to visualize the tab strip model.
+// chrome://tab-strip-internals
+BASE_FEATURE(kDebugUITabStrip,
+             "DebugUITabStrip",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 // Splits pinned and unpinned tabs into separate TabStrips.
 // https://crbug.com/1346019
 BASE_FEATURE(kSplitTabStrip,
@@ -44,7 +50,7 @@ BASE_FEATURE(kTabSearchPositionSetting,
 
 BASE_FEATURE(kTabGroupShortcuts,
              "TabGroupShortcuts",
-             base::FEATURE_ENABLED_BY_DEFAULT);
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 bool CanShowTabSearchPositionSetting() {
   // Alternate tab search locations cannot be repositioned.

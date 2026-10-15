@@ -2,14 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""Binary declarations
-
-Binaries can be referenced by tests and define the label of the compile target
-to be built as well as various aspects that the infrastructure needs to know in
-order to run the binary.
-"""
-
-load("@chromium-luci//targets.star", "targets")
+load("//lib/targets.star", "targets")
 
 targets.binaries.console_test_launcher(
     name = "absl_hardening_tests",
@@ -1037,6 +1030,12 @@ targets.binaries.console_test_launcher(
 )
 
 targets.binaries.console_test_launcher(
+    name = "video_encode_accelerator_tests",
+    label = "//media/gpu/test:video_encode_accelerator_tests",
+    skip_usage_check = True,
+)
+
+targets.binaries.console_test_launcher(
     name = "filesystem_service_unittests",
     label = "//components/services/filesystem:filesystem_service_unittests",
 )
@@ -1569,11 +1568,6 @@ targets.binaries.console_test_launcher(
     skip_usage_check = True,
 )
 
-targets.binaries.console_test_launcher(
-    name = "nacl_loader_unittests",
-    label = "//components/nacl/loader:nacl_loader_unittests",
-)
-
 targets.binaries.generated_script(
     name = "build_rust_tests",
     label = "//build/rust/tests:build_rust_tests",
@@ -1799,11 +1793,6 @@ targets.binaries.console_test_launcher(
     label = "//tools/mac/power:power_sampler_unittests",
     # All references have been moved to starlark
     skip_usage_check = True,
-)
-
-targets.binaries.console_test_launcher(
-    name = "ppapi_unittests",
-    label = "//ppapi:ppapi_unittests",
 )
 
 targets.binaries.console_test_launcher(

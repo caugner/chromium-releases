@@ -10,8 +10,6 @@
 #include "ash/constants/ash_features.h"
 #include "ash/constants/ash_switches.h"
 #include "ash/public/cpp/login_screen_test_api.h"
-#include "ash/root_window_controller.h"
-#include "ash/shell.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/functional/bind.h"
@@ -24,6 +22,7 @@
 #include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/run_until.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/test_mock_time_task_runner.h"
 #include "base/time/time.h"
 #include "base/types/expected.h"
@@ -88,10 +87,10 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/ash/login/login_display_host.h"
 #include "chrome/browser/ui/ash/login/webui_login_view.h"
-#include "chrome/browser/ui/webui/ash/login/app_launch_splash_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/consolidated_consent_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/display_size_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/error_screen_handler.h"
+#include "chrome/browser/ui/webui/ash/login/fjord_touch_controller_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/gaia_info_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/gaia_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/gesture_navigation_screen_handler.h"
@@ -1423,6 +1422,46 @@ IN_PROC_BROWSER_TEST_F(WizardControllerUnifiedEnrollmentTest, OneFetchAtATime) {
   fetcher_factory.WaitUntilEnrollmentStateFetcherCreated();
 }
 
+class WizardControllerFjordOOBETest
+    : public WizardControllerUnifiedEnrollmentTest {
+ public:
+  void SetUp() override {
+    scoped_feature_list_.InitAndEnableFeature(features::kFjordOobeForceEnabled);
+    WizardControllerUnifiedEnrollmentTest::SetUp();
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(WizardControllerFjordOOBETest,
+                       TouchControllerScreenShowsAfterEnroll) {
+  ScopedEnrollmentStateFetcherFactory fetcher_factory(
+      auto_enrollment_controller());
+  ProgressUntilAutoEnrollmentCheckScreen();
+  fetcher_factory.WaitUntilEnrollmentStateFetcherCreated();
+
+  EXPECT_CALL(*mock_auto_enrollment_check_screen_, HideImpl());
+  EXPECT_CALL(*mock_enrollment_screen_, ShowImpl());
+  base::Value::Dict device_state;
+  device_state.Set(
+      policy::kDeviceStateMode,
+      base::Value(policy::kDeviceStateRestoreModeReEnrollmentEnforced));
+  g_browser_process->local_state()->SetDict(prefs::kServerBackedDeviceState,
+                                            std::move(device_state));
+  fetcher_factory.ReportEnrollmentState(
+      policy::AutoEnrollmentResult::kEnrollment);
+
+  CheckCurrentScreen(EnrollmentScreenView::kScreenId);
+  EXPECT_FALSE(StartupUtils::IsOobeCompleted());
+
+  // Make sure enterprise enrollment page shows up right after update screen.
+  mock_enrollment_screen_->ExitScreen(EnrollmentScreen::Result::COMPLETED);
+
+  EXPECT_TRUE(StartupUtils::IsOobeCompleted());
+  CheckCurrentScreen(FjordTouchControllerScreenView::kScreenId);
+}
+
 class WizardControllerScreenPriorityOOBETest : public OobeBaseTest {
  protected:
   WizardControllerScreenPriorityOOBETest() = default;
@@ -2304,8 +2343,6 @@ class WizardControllerRemoteActivityNotificationTest
   // WizardControllerTest:
   void SetUpInProcessBrowserTestFixture() override {
     WizardControllerTest::SetUpInProcessBrowserTestFixture();
-    feature_list_.InitAndEnableFeature(
-        remoting::features::kEnableCrdAdminRemoteAccessV2);
     login_manager_mixin_.AppendRegularUsers(1);
   }
 
@@ -2341,7 +2378,6 @@ class WizardControllerRemoteActivityNotificationTest
   }
 
  private:
-  base::test::ScopedFeatureList feature_list_;
   LoginManagerMixin login_manager_mixin_{&mixin_host_};
   LocalStateMixin local_state_mixin_{&mixin_host_, this};
 };
@@ -2389,8 +2425,6 @@ class RemoteActivityNotificationTestWhenNoLoginAccountPresentTest
   // WizardControllerTest:
   void SetUpInProcessBrowserTestFixture() override {
     WizardControllerTest::SetUpInProcessBrowserTestFixture();
-    feature_list_.InitAndEnableFeature(
-        remoting::features::kEnableCrdAdminRemoteAccessV2);
   }
 
   void SetUpOnMainThread() override {
@@ -2400,7 +2434,6 @@ class RemoteActivityNotificationTestWhenNoLoginAccountPresentTest
   PrefService* local_state() { return g_browser_process->local_state(); }
 
  protected:
-  base::test::ScopedFeatureList feature_list_;
   DeviceStateMixin device_state_{&mixin_host_,
                                  DeviceStateMixin::State::BEFORE_OOBE};
   FakeGaiaMixin gaia_mixin_{&mixin_host_};
@@ -2471,17 +2504,7 @@ IN_PROC_BROWSER_TEST_F(WizardControllerThemeSelectionTest,
   OobeScreenWaiter(ThemeSelectionScreenView::kScreenId).Wait();
 }
 
-class GaiaInfoTest : public WizardControllerTest {
- public:
-  GaiaInfoTest() {
-    feature_list_.InitAndEnableFeature(features::kOobeGaiaInfoScreen);
-  }
-
- protected:
-  base::test::ScopedFeatureList feature_list_;
-};
-
-class GaiaInfoScreenForEnterpriseEnrollmentTest : public GaiaInfoTest {
+class GaiaInfoScreenForEnterpriseEnrollmentTest : public WizardControllerTest {
  private:
   DeviceStateMixin device_state_{
       &mixin_host_, DeviceStateMixin::State::OOBE_COMPLETED_CLOUD_ENROLLED};
@@ -2494,7 +2517,7 @@ IN_PROC_BROWSER_TEST_F(GaiaInfoScreenForEnterpriseEnrollmentTest,
   OobeScreenWaiter(GaiaView::kScreenId).Wait();
 }
 
-IN_PROC_BROWSER_TEST_F(GaiaInfoTest, TransitionToGaiaInfo) {
+IN_PROC_BROWSER_TEST_F(WizardControllerTest, TransitionToGaiaInfo) {
   WaitForOobeUI();
   WizardController::default_controller()->AdvanceToScreen(
       UserCreationView::kScreenId);
@@ -2505,7 +2528,7 @@ IN_PROC_BROWSER_TEST_F(GaiaInfoTest, TransitionToGaiaInfo) {
   OobeScreenWaiter(GaiaInfoScreenView::kScreenId).Wait();
 }
 
-IN_PROC_BROWSER_TEST_F(GaiaInfoTest, TransitionFromGaiaInfo) {
+IN_PROC_BROWSER_TEST_F(WizardControllerTest, TransitionFromGaiaInfo) {
   WaitForOobeUI();
   WizardController::default_controller()->AdvanceToScreen(
       GaiaInfoScreenView::kScreenId);
@@ -2513,7 +2536,7 @@ IN_PROC_BROWSER_TEST_F(GaiaInfoTest, TransitionFromGaiaInfo) {
   OobeScreenWaiter(GaiaView::kScreenId).Wait();
 }
 
-IN_PROC_BROWSER_TEST_F(GaiaInfoTest, SkipGaiaInfoForChildAccount) {
+IN_PROC_BROWSER_TEST_F(WizardControllerTest, SkipGaiaInfoForChildAccount) {
   WaitForOobeUI();
   WizardController::default_controller()->AdvanceToScreen(
       UserCreationView::kScreenId);
@@ -2528,18 +2551,7 @@ IN_PROC_BROWSER_TEST_F(GaiaInfoTest, SkipGaiaInfoForChildAccount) {
   OobeScreenWaiter(AddChildScreenView::kScreenId).Wait();
 }
 
-// Showing the system tray on the kiosk splash screen is a source of exploits.
-// Ensure we don't.
-IN_PROC_BROWSER_TEST_F(WizardControllerTest, SystemTrayShouldBeDisabledOnKioskSplashScreen) {
-  WaitForOobeUI();
-  WizardController::default_controller()->AdvanceToScreen(
-      AppLaunchSplashScreenView::kScreenId);
-  OobeScreenWaiter(AppLaunchSplashScreenView::kScreenId).Wait();
-
-  ASSERT_FALSE(Shell::GetPrimaryRootWindowController()->IsSystemTrayVisible());
-}
-
-class WizardControllerGaiaTest : public GaiaInfoTest {
+class WizardControllerGaiaTest : public WizardControllerTest {
  protected:
   FakeGaiaMixin fake_gaia_{&mixin_host_};
 };
@@ -2583,7 +2595,7 @@ IN_PROC_BROWSER_TEST_F(WizardControllerGaiaTest,
 }
 
 class GoingBackFromGaiaScreenInChildFlowTest
-    : public GaiaInfoTest,
+    : public WizardControllerTest,
       public testing::WithParamInterface<std::tuple<bool, std::string>> {
   FakeGaiaMixin fake_gaia_{&mixin_host_};
 };

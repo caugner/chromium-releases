@@ -7,6 +7,7 @@
 #include <optional>
 #include <utility>
 
+#include "base/debug/crash_logging.h"
 #include "base/strings/to_string.h"
 #include "content/browser/bad_message.h"
 #include "content/browser/blob_storage/chrome_blob_storage_context.h"
@@ -345,22 +346,6 @@ bool VerifyBeginNavigationCommonParams(
     return false;
 
   // Verification succeeded.
-  return true;
-}
-
-bool VerifyCreateNewWindowParams(const RenderFrameHostImpl& current_rfh,
-                                 const mojom::CreateNewWindowParams& params) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  RenderProcessHost* process = current_rfh.GetProcess();
-
-  // Verify `form_submission_post_data`.
-  auto* policy = ChildProcessSecurityPolicyImpl::GetInstance();
-  if (!policy->CanReadRequestBody(process, params.form_submission_post_data)) {
-    bad_message::ReceivedBadMessage(process,
-                                    bad_message::ILLEGAL_UPLOAD_PARAMS);
-    return false;
-  }
-
   return true;
 }
 

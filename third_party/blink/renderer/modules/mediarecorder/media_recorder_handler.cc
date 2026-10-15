@@ -45,6 +45,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/modules/mediarecorder/media_recorder.h"
+#include "third_party/blink/renderer/modules/mediarecorder/video_track_recorder.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream_video_track.h"
 #include "third_party/blink/renderer/platform/bindings/exception_code.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
@@ -289,8 +290,7 @@ MediaRecorderHandler::MediaRecorderHandler(
     scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner,
     KeyFrameRequestProcessor::Configuration key_frame_config)
     : key_frame_config_(key_frame_config),
-      main_thread_task_runner_(std::move(main_thread_task_runner)),
-      media_stream_observer_(std::make_unique<MediaStreamObserver>(this)) {}
+      main_thread_task_runner_(std::move(main_thread_task_runner)) {}
 
 bool MediaRecorderHandler::CanSupportMimeType(const String& type,
                                               const String& web_codecs) {
@@ -569,7 +569,7 @@ bool MediaRecorderHandler::Start(int timeslice,
   DCHECK(!muxer_adapter_);
 
   DCHECK(!is_media_stream_observer_);
-  media_stream_->AddObserver(media_stream_observer_->AsWeakPtr());
+  media_stream_->AddObserver(this);
   is_media_stream_observer_ = true;
 
   timeslice_ = base::Milliseconds(timeslice);
@@ -715,7 +715,7 @@ void MediaRecorderHandler::Stop() {
 
   // Unregister from media stream notifications.
   if (media_stream_ && is_media_stream_observer_) {
-    media_stream_->RemoveObserver(media_stream_observer_->AsWeakPtr());
+    media_stream_->RemoveObserver(this);
   }
   is_media_stream_observer_ = false;
 
@@ -1184,7 +1184,7 @@ void MediaRecorderHandler::Trace(Visitor* visitor) const {
 }
 
 void MediaRecorderHandler::OnVideoEncodingError(
-    const media::EncoderStatus& error_status) {
+    media::EncoderStatus error_status) {
   if (recorder_) {
     recorder_->OnError(DOMExceptionCode::kEncodingError,
                        String(media::EncoderStatusCodeToString(error_status)));

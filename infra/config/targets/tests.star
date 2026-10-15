@@ -2,15 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""Test declarations
-
-Tests define a target to be built and executed on a builder. Tests can
-be referenced by a suite or bundle to include the test in the
-suite/bundle. Tests also define a bundle containing just the test
-itself, so they can be used wherever a bundle is expected.
-"""
-
-load("@chromium-luci//targets.star", "targets")
+load("//lib/targets.star", "targets")
 
 targets.tests.gtest_test(
     name = "absl_hardening_tests",
@@ -1186,6 +1178,10 @@ targets.tests.gtest_test(
 )
 
 targets.tests.gtest_test(
+    name = "video_encode_accelerator_tests",
+)
+
+targets.tests.gtest_test(
     name = "filesystem_service_unittests",
 )
 
@@ -1814,10 +1810,6 @@ targets.tests.gtest_test(
     binary = "interactive_ui_tests",
 )
 
-targets.tests.gtest_test(
-    name = "nacl_loader_unittests",
-)
-
 targets.tests.isolated_script_test(
     name = "build_rust_tests",
 )
@@ -2123,10 +2115,6 @@ targets.tests.isolated_script_test(
         "--test-list=../../third_party/blink/web_tests/TestLists/ppapi",
     ],
     binary = "blink_web_tests",
-)
-
-targets.tests.gtest_test(
-    name = "ppapi_unittests",
 )
 
 targets.tests.gtest_test(

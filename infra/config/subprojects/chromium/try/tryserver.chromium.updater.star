@@ -3,21 +3,19 @@
 # found in the LICENSE file.
 """Definitions of builders in the tryserver.chromium.updater builder group."""
 
-load("@chromium-luci//builders.star", "cpu", "os")
-load("@chromium-luci//consoles.star", "consoles")
-load("@chromium-luci//gn_args.star", "gn_args")
-load("@chromium-luci//html.star", "linkify")
-load("@chromium-luci//try.star", "try_")
-load("//lib/siso.star", "siso")
-load("//lib/try_constants.star", "try_constants")
+load("//lib/builders.star", "cpu", "os", "siso")
+load("//lib/try.star", "try_")
+load("//lib/consoles.star", "consoles")
+load("//lib/gn_args.star", "gn_args")
+load("//lib/html.star", "linkify")
 
 try_.defaults.set(
-    executable = try_constants.DEFAULT_EXECUTABLE,
+    executable = try_.DEFAULT_EXECUTABLE,
     builder_group = "tryserver.chromium.updater",
-    pool = try_constants.DEFAULT_POOL,
+    pool = try_.DEFAULT_POOL,
     builderless = True,
-    execution_timeout = try_constants.DEFAULT_EXECUTION_TIMEOUT,
-    service_account = try_constants.DEFAULT_SERVICE_ACCOUNT,
+    execution_timeout = try_.DEFAULT_EXECUTION_TIMEOUT,
+    service_account = try_.DEFAULT_SERVICE_ACCOUNT,
     siso_project = siso.project.DEFAULT_UNTRUSTED,
     siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CQ,
 )
@@ -36,7 +34,7 @@ def updater_linux_builder(*, name, **kwargs):
     return try_.builder(name = name, **kwargs)
 
 def updater_mac_builder(*, name, **kwargs):
-    kwargs.setdefault("os", os.MAC_ANY)
+    kwargs.setdefault("os", os.MAC_DEFAULT)
     return try_.builder(name = name, **kwargs)
 
 def updater_windows_builder(*, name, **kwargs):
@@ -85,14 +83,14 @@ updater_linux_builder(
 
 updater_mac_builder(
     name = "mac-updater-try-builder-dbg",
-    description_html = _UPDATER_LINK + " macOS 11 x64 debug builder.",
+    description_html = _UPDATER_LINK + " macOS 13 arm64 debug builder.",
     mirrors = [
-        "ci/mac-updater-builder-dbg",
-        "ci/mac11-x64-updater-tester-dbg",
+        "ci/mac-updater-builder-arm64-dbg",
+        "ci/mac13-arm64-updater-tester-dbg",
     ],
     gn_args = gn_args.config(
         configs = [
-            "ci/mac-updater-builder-dbg",
+            "ci/mac-updater-builder-arm64-dbg",
         ],
     ),
     cores = None,
@@ -106,10 +104,10 @@ updater_mac_builder(
 
 updater_mac_builder(
     name = "mac-updater-try-builder-rel",
-    description_html = _UPDATER_LINK + " macOS 11 x64 release builder.",
+    description_html = _UPDATER_LINK + " macOS 13 x64 release builder.",
     mirrors = [
         "ci/mac-updater-builder-rel",
-        "ci/mac11-x64-updater-tester-rel",
+        "ci/mac13-x64-updater-tester-rel",
     ],
     gn_args = gn_args.config(
         configs = [
