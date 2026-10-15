@@ -131,7 +131,7 @@
 <translation id="4633328489441962921">Браузеру Chrome не удается проверить наличие обновлений</translation>
 <translation id="4636900170638246267">Войдите на этот сайт и в Chrome.</translation>
 <translation id="4647910807533196601">Открыть последнюю вкладку в Chrome.</translation>
-<translation id="4693084815234024320">Включен режим инкогнито в Chrome</translation>
+<translation id="4693084815234024320">Chrome в режиме инкогнито</translation>
 <translation id="4713740144985377441">Чтобы загрузить файл, вернитесь в Chrome.</translation>
 <translation id="4713907610796204963">Чтобы начать работу с Chrome, изучите полезную базовую информацию.</translation>
 <translation id="4724297637870447613">Используйте Chrome где угодно</translation>
@@ -170,7 +170,7 @@
 <translation id="5554520618550346933">Chrome предупреждает, если используемый вами пароль был опубликован в интернете. При этом ваши имена пользователей и сами пароли зашифрованы и никому не видны, даже сотрудникам Google.</translation>
 <translation id="5601180634394228718">Чтобы изменить настройки использования ваших данных для улучшения работы Chrome, перейдите в раздел  <ph name="BEGIN_LINK" />Сервисы Google<ph name="END_LINK" />.</translation>
 <translation id="5639704535586432836">Откройте "Настройки &gt; Конфиденциальность &gt; Камера &gt; Chrome" и включите камеру.</translation>
-<translation id="5642200033778930880">Google Chrome не может использовать камеру в режиме Split View.</translation>
+<translation id="5642200033778930880">Google Chrome не может использовать камеру, когда открыт параллельный просмотр.</translation>
 <translation id="5661521615548540542">Google Менеджеру паролей не удается проверить все пароли. Повторите попытку позже.</translation>
 <translation id="5681291952421236520">Включите Chrome.</translation>
 <translation id="5690398455483874150">{count,plural, =1{Показано одно окно Chrome}one{Показано {count} окно Chrome}few{Показано {count} окна Chrome}many{Показано {count} окон Chrome}other{Показано {count} окна Chrome}}</translation>
@@ -193,6 +193,7 @@
 <translation id="6145223986912084844">chrome</translation>
 <translation id="6177442314419606057">Поиск в Chrome</translation>
 <translation id="6181652351336379338">Искать изображения в Chrome.</translation>
+<translation id="6187085551300363958">Совет по работе с Chrome: сохраняйте пароли</translation>
 <translation id="6200694931081795166">Чтобы сделать Chrome браузером по умолчанию:
   1. Откройте настройки устройства.
   2. Нажмите "Приложение браузера по умолчанию".
@@ -264,6 +265,7 @@
 <translation id="7599894504325210080">Развернутый раздел автозаполнения в Chrome</translation>
 <translation id="7617512710641355143">Chrome находится под управлением</translation>
 <translation id="7626032353295482388">Добро пожаловать в Chrome!</translation>
+<translation id="7641448682796883218">Совет по работе с Chrome: используйте улучшенный Безопасный просмотр</translation>
 <translation id="7642373780953416937">Chrome сообщит об автоматически обнаруженных проблемах, связанных с конфиденциальностью и безопасностью.</translation>
 <translation id="7660356333829433649">Здесь вы найдете советы по использованию всех возможностей Chrome.</translation>
 <translation id="7662994914830945754">Чтобы ваши вкладки всегда были доступны вам при работе с Chrome, выполните вход и включите синхронизацию.</translation>
@@ -300,7 +302,7 @@
 <translation id="8370517070665726704">© Google LLC, <ph name="YEAR" />. Все права защищены.</translation>
 <translation id="8371138994040262994">Откроются настройки Chrome.</translation>
 <translation id="8387459386171870978">Продолжить работу в Chrome</translation>
-<translation id="8392023217086447677">Открыто в режиме инкогнито в Chrome.</translation>
+<translation id="8392023217086447677">Открыто в Chrome инкогнито.</translation>
 <translation id="840168496893712993">Некоторые дополнения вызывают сбой Chrome. Попробуйте удалить их.</translation>
 <translation id="8413500425974960807">Совет: добавьте Chrome на панель Dock</translation>
 <translation id="8413795581997394485">Защита от сайтов, расширений и скачиваемых файлов, признанных опасными. Когда вы переходите на сайт, Chrome отправляет обфусцированную часть URL в Google через сервер обеспечения конфиденциальности, который скрывает ваш IP-адрес. Если сайт делает что-то подозрительное, передается полный URL и части контента со страницы.</translation>

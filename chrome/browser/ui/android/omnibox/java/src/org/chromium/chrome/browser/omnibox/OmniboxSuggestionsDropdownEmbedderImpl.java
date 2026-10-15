@@ -28,7 +28,6 @@ import org.chromium.chrome.browser.omnibox.suggestions.OmniboxSuggestionsDropdow
 import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.base.ViewUtils;
 import org.chromium.ui.base.WindowAndroid;
-import org.chromium.ui.display.DisplayUtil;
 
 import java.util.function.Supplier;
 
@@ -284,7 +283,8 @@ class OmniboxSuggestionsDropdownEmbedderImpl
                             - systemBars.top
                             - systemBars.bottom;
         } else {
-            windowHeight = DisplayUtil.dpToPx(mWindowAndroid.getDisplay(), mWindowHeightDp);
+            // TODO(crbug.com/446742684): Improve positioning logic calculations
+            windowHeight = mWindowAndroid.getDisplay().getDisplayHeight();
         }
 
         int paddingBottom = 0;

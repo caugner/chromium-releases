@@ -35,6 +35,7 @@
 <translation id="1249250836236328755">Gênero</translation>
 <translation id="1254593899333212300">Conexão direta à Internet</translation>
 <translation id="1272293450992660632">Os valores do PIN não correspondem.</translation>
+<translation id="1279040297980392566">Aguardando o término da verificação. Tente outra vez mais tarde</translation>
 <translation id="1280820357415527819">Pesquisando redes móveis</translation>
 <translation id="1293556467332435079">Arquivos</translation>
 <translation id="1297922636971898492">O Google Drive não está disponível no momento. O upload será reiniciado automaticamente assim que o Google Drive estiver de volta.</translation>
@@ -64,7 +65,7 @@
 <translation id="1497522201463361063">Não foi possível renomear "<ph name="FILE_NAME" />". <ph name="ERROR_MESSAGE" /></translation>
 <translation id="1499943022354839699">Inglês (EUA) com teclado Dvorak</translation>
 <translation id="1515909359182093592"><ph name="INPUT_LABEL" /> - Host</translation>
-<translation id="1521655867290435174">Planilhas Google</translation>
+<translation id="1521655867290435174">Google Planilhas</translation>
 <translation id="1547964879613821194">Inglês canadense</translation>
 <translation id="1556189134700913550">Aplicar a todas</translation>
 <translation id="1561842594491319104">Dispositivos Chrome</translation>
@@ -249,7 +250,7 @@
 <translation id="3003189754374775221">Rede <ph name="NETWORK_INDEX" /> de <ph name="NETWORK_COUNT" />, <ph name="NETWORK_NAME" />, <ph name="NETWORK_PROVIDER_NAME" />, intensidade do sinal em <ph name="SIGNAL_STRENGTH" />%, conectar</translation>
 <translation id="3003633581067744647">Mudar para a visualização de miniaturas</translation>
 <translation id="3016566519832145558">Atenção: esses arquivos são temporários e podem ser excluídos automaticamente para liberar espaço em disco.</translation>
-<translation id="3029114385395636667">Ative o Documentos Google off-line para usar o Documentos, Planilhas e Apresentações off-line.</translation>
+<translation id="3029114385395636667">Ative o Google Docs off-line para usar o Documentos, Planilhas e Apresentações off-line.</translation>
 <translation id="303198083543495566">Região geográfica</translation>
 <translation id="3044404008258011032">Para restaurar esses itens, arraste-os para uma nova pasta fora da lixeira. A pasta original "<ph name="PARENT_FOLDER_NAME" />" foi excluída.</translation>
 <translation id="3047197340186497470">Chinês (dayi)</translation>
@@ -845,7 +846,7 @@
 <translation id="7547811415869834682">Holandês</translation>
 <translation id="7551643184018910560">Fixar na estante</translation>
 <translation id="7553492409867692754">Conceder aos apps do Linux permissão para acessar arquivos na pasta <ph name="FOLDER_NAME" /></translation>
-<translation id="7555339735447658365">No momento, você está off-line. A sincronização de arquivos será retomada quando houver uma conexão com a Internet.</translation>
+<translation id="7555339735447658365">No momento, você está off-line. A sincronização de arquivos será retomada quando houver uma conexão com a internet.</translation>
 <translation id="7589661784326793847">Aguarde um segundo</translation>
 <translation id="7600126690270271294">Sérvio</translation>
 <translation id="7603724359189955920">Grades</translation>
@@ -1072,12 +1073,13 @@
 <translation id="9171921933192916600">Pessoa que ama ler</translation>
 <translation id="9172592259078059678">Guzerate (transliteração)</translation>
 <translation id="9173120999827300720">Inglês (EUA) com teclado internacional</translation>
-<translation id="9183302530794969518">Documentos Google</translation>
+<translation id="9183302530794969518">Google Docs</translation>
 <translation id="9189836632794948435">Cazaque</translation>
 <translation id="9200427192836333033"><ph name="NUMBER_OF_ITEMS" /> itens extraídos.</translation>
 <translation id="9213073329713032541">Instalação iniciada.</translation>
 <translation id="9219103736887031265">Imagens</translation>
 <translation id="9219908252191632183">Lunar</translation>
+<translation id="931652069802536959">A rede foi bloqueada por uma política</translation>
 <translation id="938470336146445890">Instale um certificado do usuário.</translation>
 <translation id="939736085109172342">Nova pasta</translation>
 <translation id="943972244133411984">Modificado por</translation>

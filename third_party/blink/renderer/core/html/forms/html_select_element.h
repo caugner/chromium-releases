@@ -339,6 +339,7 @@ class CORE_EXPORT HTMLSelectElement final
   void setSelectedContentElement(HTMLSelectedContentElement*);
 
   void DefaultEventHandler(Event&) override;
+  void ChildrenChanged(const ChildrenChange&) override;
 
   void UpdateAllSelectedcontents(HTMLOptionElement* selected_option);
 
@@ -440,6 +441,8 @@ class CORE_EXPORT HTMLSelectElement final
 
   // Helper to update the select descendants' mutation observer.
   void UpdateMutationObserver();
+
+  void DidChangeIsCanvasOrInCanvasSubtree() final;
 
   // list_items_ contains HTMLOptionElement, HTMLOptGroupElement, and
   // HTMLHRElement objects.

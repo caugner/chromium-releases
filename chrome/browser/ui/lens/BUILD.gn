@@ -21,8 +21,8 @@ source_set("lens") {
     "lens_overlay_side_panel_navigation_throttle.h",
     "lens_overlay_untrusted_ui.h",
     "lens_search_controller.h",
-    "lens_searchbox_controller.h",
     "lens_search_feature_flag_utils.h",
+    "lens_searchbox_controller.h",
     "lens_side_panel_untrusted_ui.h",
     "lens_string_utils.h",
   ]
@@ -34,6 +34,7 @@ source_set("lens") {
     "lens_keyed_service.h",
     "lens_keyed_service_factory.cc",
     "lens_keyed_service_factory.h",
+    "lens_media_link_handler.h",
     "lens_overlay_blur_layer_delegate.h",
     "lens_overlay_colors.h",
     "lens_overlay_event_handler.h",
@@ -96,6 +97,7 @@ source_set("impl") {
     "lens_composebox_controller.cc",
     "lens_composebox_handler.cc",
     "lens_help_menu_utils.cc",
+    "lens_media_link_handler.cc",
     "lens_overlay_blur_layer_delegate.cc",
     "lens_overlay_controller.cc",
     "lens_overlay_entry_point_controller.cc",
@@ -148,6 +150,7 @@ source_set("impl") {
     "//chrome/browser/ui/browser_window",
     "//chrome/browser/ui/color:color_headers",
     "//chrome/browser/ui/hats",
+    "//chrome/browser/ui/omnibox",
     "//chrome/browser/ui/search",
     "//chrome/browser/ui/user_education",
     "//chrome/browser/ui/views/bubble",
@@ -350,6 +353,7 @@ source_set("interactive_ui_tests") {
 source_set("unit_tests") {
   testonly = true
   sources = [
+    "lens_media_link_handler_unittest.cc",
     "lens_overlay_gen204_controller_unittest.cc",
     "lens_overlay_image_helper_unittest.cc",
     "lens_overlay_languages_controller_unittest.cc",

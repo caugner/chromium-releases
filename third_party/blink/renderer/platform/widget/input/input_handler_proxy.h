@@ -9,6 +9,7 @@
 
 #include "base/memory/raw_ptr.h"
 #include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "base/types/optional_ref.h"
 #include "cc/input/browser_controls_offset_tag_modifications.h"
 #include "cc/input/browser_controls_state.h"
@@ -48,6 +49,7 @@ class InputHandlerProxyMomentumScrollJankTest;
 class InputHandlerProxyForceHandlingOnMainThread;
 class TestInputHandlerProxy;
 class UnifiedScrollingInputHandlerProxyTest;
+class InputHandlerProxyEventMetricsTest;
 }  // namespace test
 
 class CompositorThreadEventQueue;
@@ -269,6 +271,7 @@ class PLATFORM_EXPORT InputHandlerProxy : public cc::InputHandlerClient,
   friend class test::InputHandlerProxyEventQueueTest;
   friend class test::InputHandlerProxyMomentumScrollJankTest;
   friend class test::InputHandlerProxyForceHandlingOnMainThread;
+  friend class test::InputHandlerProxyEventMetricsTest;
 
   void DispatchSingleInputEvent(std::unique_ptr<EventWithCallback>);
   void DispatchQueuedInputEvents(bool frame_aligned);
@@ -468,10 +471,7 @@ class PLATFORM_EXPORT InputHandlerProxy : public cc::InputHandlerClient,
   // has started, or completed.
   bool enqueue_scroll_events_ = true;
 
-  // Cached value of the (kUpdateScrollPredictorInputMapping &
-  // kRefactorCompositorThreadEventQueue) feature flag. (Feature
-  // UpdateScrollPredictorInputMapping needs RefactorCompositorThreadEventQueue
-  // to be enabled).
+  // Cached value of the kUpdateScrollPredictorInputMapping feature flag.
   const bool update_scroll_predictor_;
 
   // `cc::InputHandlerClient::ScrollEventDispatchMode::kEnqueueScrollEvents`:
@@ -493,6 +493,12 @@ class PLATFORM_EXPORT InputHandlerProxy : public cc::InputHandlerClient,
       cc::InputHandlerClient::ScrollEventDispatchMode::kEnqueueScrollEvents;
 
   double scroll_deadline_ratio_ = 0.333;
+
+  // Used to guard against re-entrant calls to DeliverInputForDeadline.
+  viz::BeginFrameId last_deadline_call_for_frame_id_;
+
+  // Timer to ensure DeliverInputForDeadline is called.
+  base::DeadlineTimer deadline_timer_;
 };
 
 }  // namespace blink

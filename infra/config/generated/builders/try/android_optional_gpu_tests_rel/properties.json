@@ -10,7 +10,7 @@
             "builder_id": {
               "bucket": "try",
               "builder": "android_optional_gpu_tests_rel",
-              "project": "chromium-m141"
+              "project": "chromium-m142"
             },
             "builder_spec": {
               "builder_group": "tryserver.chromium.android",
@@ -39,11 +39,12 @@
         {
           "bucket": "try",
           "builder": "android_optional_gpu_tests_rel",
-          "project": "chromium-m141"
+          "project": "chromium-m142"
         }
       ],
       "retry_failed_shards": false,
-      "targets_spec_directory": "src/infra/config/generated/builders/try/android_optional_gpu_tests_rel/targets"
+      "targets_spec_directory": "infra/config/generated/builders/try/android_optional_gpu_tests_rel/targets",
+      "targets_spec_directory_relative_to_source_dir": true
     }
   },
   "$build/flakiness": {

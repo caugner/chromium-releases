@@ -351,6 +351,18 @@ PasswordFormManager::~PasswordFormManager() {
   form_fetcher_->RemoveConsumer(this);
 }
 
+void PasswordFormManager::OnPasswordFilledManually() {
+  if (!base::FeatureList::IsEnabled(features::kPasswordDateLastFilled) ||
+      !parsed_submitted_form_ ||
+      !password_save_manager_->IsEqualToSavedMatch()) {
+    return;
+  }
+  password_save_manager_->UpdateDateLastFilled(*parsed_submitted_form_);
+  // Refresh data in the form fetcher so it has the updated date_last_filled
+  // when the password is saved after form submission.
+  form_fetcher_->Fetch();
+}
+
 bool PasswordFormManager::DoesManage(
     autofill::FormRendererId form_renderer_id,
     const PasswordManagerDriver* driver) const {
@@ -710,7 +722,6 @@ void PasswordFormManager::SetGenerationPopupWasShown(
 
 void PasswordFormManager::SetGenerationElement(
     FieldRendererId generation_element) {
-  generation_element_ = generation_element;
   if (votes_uploader_.has_value()) {
     votes_uploader_->set_generation_element(generation_element);
   }
@@ -757,23 +768,11 @@ void PasswordFormManager::UpdateStateOnUserInput(
   modified_field->set_value(field_value);
   mutable_observed_form()->set_fields(std::move(fields));
 
-  if (!HasGeneratedPassword()) {
-    return;
+  if (HasGeneratedPassword()) {
+    // Update the presaved password form in the case the username has changed.
+    PresaveGeneratedPasswordInternal(
+        *observed_form(), password_save_manager_->GetGeneratedPassword());
   }
-
-  SCOPED_CRASH_KEY_NUMBER("Bug40072712", "pmf_genElemId",
-                          generation_element_.value());
-
-  // Update the presaved password form. Even if generated password was not
-  // modified, the user might have modified the username.
-  std::u16string generated_password =
-      password_save_manager_->GetGeneratedPassword();
-  CHECK(!generated_password.empty());
-  if (generation_element_ == field_id) {
-    generated_password = field_value;
-    CHECK(!generated_password.empty());
-  }
-  PresaveGeneratedPasswordInternal(*observed_form(), generated_password);
 }
 
 void PasswordFormManager::SetDriver(
@@ -1209,16 +1208,10 @@ void PasswordFormManager::FillNow() {
   if (!parsed_observed_form_) {
     return;
   }
-#if !BUILDFLAG(IS_IOS)
   for (PasswordFormManagerObserver& form_parsed_observer :
        form_parsed_observers_) {
     form_parsed_observer.OnPasswordFormParsed(this);
   }
-#else
-  if (form_parsed_observer_) {
-    form_parsed_observer_->OnPasswordFormParsed(this);
-  }
-#endif
   metrics_recorder_->CacheParsingResultInFillingMode(
       *parsed_observed_form_.get());
 
@@ -1876,6 +1869,14 @@ bool HasObservedFormChanged(const FormData& form_data,
     if (lhs_field.name() != rhs_field.name()) {
       differences_bitmask |= PasswordFormMetricsRecorder::kFormFieldNames;
     }
+
+    // This needs to propagate to the form manager in order for users
+    // of the form manager cache (e.g. actor login) to have updated information
+    // about the password form.
+    if (lhs_field.is_focusable() != rhs_field.is_focusable()) {
+      differences_bitmask |=
+          PasswordFormMetricsRecorder::kFormFieldFocusability;
+    }
   }
 
   form_manager.GetMetricsRecorder()->RecordFormChangeBitmask(
@@ -1895,7 +1896,6 @@ base::flat_set<std::u16string> PasswordFormManager::GetStoredUsernames() const {
   return stored_usernames;
 }
 
-#if !BUILDFLAG(IS_IOS)
 void PasswordFormManager::AddObserver(PasswordFormManagerObserver* observer) {
   if (!form_parsed_observers_.HasObserver(observer)) {
     form_parsed_observers_.AddObserver(observer);
@@ -1906,15 +1906,5 @@ void PasswordFormManager::RemoveObserver(
     PasswordFormManagerObserver* observer) {
   form_parsed_observers_.RemoveObserver(observer);
 }
-#else
-void PasswordFormManager::SetObserver(
-    base::WeakPtr<PasswordFormManagerObserver> observer) {
-  form_parsed_observer_ = observer;
-}
-
-void PasswordFormManager::ResetObserver() {
-  form_parsed_observer_.reset();
-}
-#endif
 
 }  // namespace password_manager

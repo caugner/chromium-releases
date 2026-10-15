@@ -193,6 +193,7 @@ Prova ad attendere qualche minuto prima di cambiare account. Se cambi account or
 <translation id="6145223986912084844">chrome</translation>
 <translation id="6177442314419606057">Cerca in Chrome</translation>
 <translation id="6181652351336379338">Cerca immagini in Chrome.</translation>
+<translation id="6187085551300363958">Suggerimento per Chrome: salva le password</translation>
 <translation id="6200694931081795166">Per impostare Chrome come browser predefinito:
   1. Apri le Impostazioni.
   2. Tocca App browser predefinita.
@@ -264,6 +265,7 @@ Per altre impostazioni che utilizzano i dati per migliorare la tua esperienza co
 <translation id="7599894504325210080">Visualizzazione espansa della compilazione automatica di Chrome</translation>
 <translation id="7617512710641355143">Chrome è gestito</translation>
 <translation id="7626032353295482388">Ti diamo il benvenuto in Chrome</translation>
+<translation id="7641448682796883218">Suggerimento per Chrome: Navigazione sicura avanzata</translation>
 <translation id="7642373780953416937">Ricevi avvisi su eventuali problemi di privacy o di sicurezza rilevati automaticamente da Chrome.</translation>
 <translation id="7660356333829433649">Torna qui per altri suggerimenti utili per usare al meglio Chrome.</translation>
 <translation id="7662994914830945754">Esegui l'accesso su tutti i dispositivi su cui utilizzi Chrome e attiva la sincronizzazione per visualizzare le tue schede</translation>
@@ -330,7 +332,7 @@ I tuoi dati sono stati criptati con la tua passphrase il giorno <ph name="TIME" 
 <translation id="8874688701962049679">Suggerimenti per usare al meglio Chrome.</translation>
 <translation id="8897749957032330183">Le password vengono salvate in Gestore delle password di Google su questo dispositivo.</translation>
 <translation id="9004772704776174843">Chrome è disconnesso</translation>
-<translation id="9068336935206019333">Apri in modalità di navigazione in incognito di Chrome</translation>
+<translation id="9068336935206019333">Apri in modalità Incognito di Chrome</translation>
 <translation id="9082304295862405388">Gemini potrebbe usare la tua posizione esatta, a seconda dell'autorizzazione che hai già concesso a Chrome</translation>
 <translation id="909127538042363610">Usa la funzionalità di sicurezza più efficace di Chrome</translation>
 <translation id="9122931302567044771">Ciò significa che Chrome richiederà ogni volta il sito desktop.</translation>

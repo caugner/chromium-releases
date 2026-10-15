@@ -40,8 +40,8 @@ public class ReaderModeActionRateLimiter {
     @Nullable private static ReaderModeActionRateLimiter sInstance;
 
     public interface Observer {
-        /** Called when the ac */
-        void onWillStartSuppression();
+        /** Called when the contextual page action was just shown. */
+        default void onActionShown() {}
     }
 
     /** No-op implementation for when the feature is off. */
@@ -131,14 +131,12 @@ public class ReaderModeActionRateLimiter {
 
         showCount++;
         prefs.writeInt(ChromePreferenceKeys.READER_MODE_ACTION_SHOW_COUNT, showCount);
-
-        // If the CPA has been shown too many times, then suppress it for a window of time.
-        // Note: Will only be called once per temporary suppression.
         if (showCount >= DomDistillerFeatures.sReaderModeDistillInAppCpaShowLimit.getValue()) {
             startTemporarySuppression(prefs);
-            for (Observer obs : mObservers) {
-                obs.onWillStartSuppression();
-            }
+        }
+
+        for (Observer obs : mObservers) {
+            obs.onActionShown();
         }
     }
 

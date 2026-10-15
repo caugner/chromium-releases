@@ -102,7 +102,7 @@
 <translation id="1290331692326790741">إشارة ضعيفة</translation>
 <translation id="1290982764014248209">نقل <ph name="DRAGGED_APP" /> إلى مجلد <ph name="FOLDER_NAME" />.</translation>
 <translation id="1293264513303784526">‏جهاز USB-C (المنفذ الأيسر)</translation>
-<translation id="1293556467332435079">ملفات</translation>
+<translation id="1293556467332435079">الملفات</translation>
 <translation id="1293699935367580298">Esc</translation>
 <translation id="1294046132466831888">فتح تطبيق "استكشاف"</translation>
 <translation id="129469256578833241">الرجوع إلى الملخّص</translation>
@@ -1300,7 +1300,7 @@
 <translation id="5229343007215035173">تفعيل/إيقاف شاشة الخصوصية</translation>
 <translation id="5229860525743792999">إزالة <ph name="ITEM_LABEL" /> من المجموعة المقترَحة</translation>
 <translation id="5230516054153933099">نافذة</translation>
-<translation id="5234764350956374838">تجاهل</translation>
+<translation id="5234764350956374838">إغلاق</translation>
 <translation id="523505283826916779">إعدادات إمكانية الدخول</translation>
 <translation id="5238719049014159442">فتح/إغلاق مشغّل التطبيقات</translation>
 <translation id="5240725217819182328">الوصول سريعًا إلى صفحات أو إجراءات معيّنة ضمن التطبيقات المثبَّتة</translation>
@@ -2123,7 +2123,7 @@
         <ph name="IME" />،
         <ph name="LOCALE" /></translation>
 <translation id="7899977217122813285">يتم كتم صوت الإشعارات حتى <ph name="TIME" /> أثناء استخدام "وضع التركيز"</translation>
-<translation id="7901010467630324625">الأجهزة التي تم تسجيل الدخول إلى <ph name="EMAIL" /> عليها فقط</translation>
+<translation id="7901010467630324625">الأجهزة التي سجّلت الدخول إلى <ph name="EMAIL" /> عليها فقط</translation>
 <translation id="7901190436359881020">تبديل النوافذ</translation>
 <translation id="7901405293566323524">Phone Hub</translation>
 <translation id="7902625623987030061">المس أداة استشعار بصمات الإصبع.</translation>

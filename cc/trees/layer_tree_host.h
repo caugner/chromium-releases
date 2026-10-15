@@ -899,7 +899,6 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
   void QueueImageDecode(const DrawImage& image,
                         base::OnceCallback<void(bool)> callback,
                         bool speculative);
-  bool SpeculativeDecodeRequestInFlight() const;
   void ImageDecodesFinished(const std::vector<std::pair<int, bool>>& results);
 
   void RequestBeginMainFrameNotExpected(bool new_state);
@@ -1051,6 +1050,7 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
   void UpdateScrollOffsetFromImpl(
       const ElementId&,
       const gfx::Vector2dF& delta,
+      ScrollSourceType type,
       const std::optional<TargetSnapAreaElementIds>&);
 
   const CompositorMode compositor_mode_;

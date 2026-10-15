@@ -479,7 +479,7 @@ IN_PROC_BROWSER_TEST_P(PDFExtensionTest, CSPFrameAncestorsCanBlockEmbedding) {
   WebContents* web_contents = GetActiveWebContents();
   content::WebContentsConsoleObserver console_observer(web_contents);
   console_observer.SetPattern(
-      "*because an ancestor violates the following Content Security Policy "
+      "*violates the following Content Security Policy "
       "directive: \"frame-ancestors 'none'*");
 
   ASSERT_TRUE(ui_test_utils::NavigateToURL(
@@ -3247,6 +3247,26 @@ IN_PROC_BROWSER_TEST_P(PDFExtensionTest,
                        CrossOriginEmbedderPolicyDataUrlPdfIframe) {
   EXPECT_TRUE(LoadPdfInFirstChild(
       embedded_test_server()->GetURL("/pdf/test-coep-data-pdf-embed.html")));
+}
+
+// Test that elements appended to the PDF embedder's document body are visible.
+IN_PROC_BROWSER_TEST_P(PDFExtensionTest, AppendedChildElementsAreVisible) {
+  ASSERT_TRUE(LoadPdf(embedded_test_server()->GetURL("/pdf/test.pdf")));
+
+  static constexpr char kAppendedChildElementsAreVisibleTest[] =
+      "let div = document.createElement('div');"
+      "div.style.padding = '10px';"
+      "document.body.appendChild(div);"
+      "const rect = div.getBoundingClientRect();"
+      "!!rect && rect.width * rect.height > 0;";
+  EXPECT_TRUE(content::EvalJs(GetActiveWebContents(),
+                              kAppendedChildElementsAreVisibleTest)
+                  .ExtractBool());
+
+  // Append an additional element.
+  EXPECT_TRUE(content::EvalJs(GetActiveWebContents(),
+                              kAppendedChildElementsAreVisibleTest)
+                  .ExtractBool());
 }
 
 class PDFExtensionPrerenderTest : public PDFExtensionTest {

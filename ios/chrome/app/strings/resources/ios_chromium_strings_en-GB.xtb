@@ -4,7 +4,6 @@
 <translation id="1000436330784933699">You can open Lens here.</translation>
 <translation id="1042296835509784301">Opens the Password Manager in Chromium.</translation>
 <translation id="1047130070405668746">Select Chromium</translation>
-<translation id="1086486568852410168">Search with Google Lens</translation>
 <translation id="1091252999271033193">This means that Chromium will request the mobile site every time.</translation>
 <translation id="1115463765356382667">Complete these suggested actions below to get the most out of Chrome.</translation>
 <translation id="1185134272377778587">About Chromium</translation>
@@ -43,6 +42,7 @@
 <ph name="BEGIN_LINK" />Find out more<ph name="END_LINK" /></translation>
 <translation id="1847960401032164406">Maps in Chromium</translation>
 <translation id="1867772173333403444">4. Select Chromium</translation>
+<translation id="1965068424387304464">Chromium tip: Save passwords</translation>
 <translation id="2006345422933397527">Chromium couldn't check for updates. Try checking your Internet connection.</translation>
 <translation id="2042889939382983733">View Your Chromium History</translation>
 <translation id="2052320862053429062">Chromium periodically checks your passwords against lists that have been published online. When doing this, your passwords and usernames are encrypted, so they can’t be read by anyone, including Google.</translation>
@@ -119,6 +119,7 @@ Try waiting a few minutes before switching accounts. If you switch accounts now,
 <translation id="3816686541346279443">Chromium will offer to save your password.</translation>
 <translation id="3827545470516145620">You're getting standard security protection on this device</translation>
 <translation id="3833326979834193417">Chromium automatically runs Safety Check every day to keep you safe from data breaches, unsafe websites and more. You can find more about Safety Check in Settings.</translation>
+<translation id="3837584850181228767">Chromium tip: Enhanced Safe Browsing</translation>
 <translation id="3845223911364528001">Return to Chromium to upload your file</translation>
 <translation id="3855938650519180865">What's new in Chromium</translation>
 <translation id="3886689467633467988">Sign in to this site and Chromium to get your bookmarks and more on all your devices.</translation>
@@ -226,7 +227,7 @@ Things to consider:
 <translation id="6268381023930128611">Sign out of Chromium?</translation>
 <translation id="6301717043141881464">To easily get your saved passwords in your other apps, choose Chromium for Autofill</translation>
 <translation id="6324041800010509197">Visit the Tab Grid in Chromium</translation>
-<translation id="6325378625795868881">Use Chrome anytime that you tap links in messages and other apps.</translation>
+<translation id="6325378625795868881">Use Chrome whenever you tap links in messages and other apps.</translation>
 <translation id="6387994184698195448">Keep up with helpful Chromium tips and more.</translation>
 <translation id="6424492062988593837">Chromium just got better! A new version is available.</translation>
 <translation id="6433172051771630690">Tips on getting the most out of Chromium.</translation>
@@ -329,7 +330,7 @@ Your data was encrypted with your passphrase on <ph name="TIME" />. Enter it to 
 <translation id="9022552996538154597">Sign in to Chromium</translation>
 <translation id="9031260906956926157">Some of your Chromium data hasn't been saved in your Google Account yet.
 Try waiting a few minutes before signing out. If you sign out now, this data will be deleted.</translation>
-<translation id="9050790730841755540">Use Chrome anytime that you tap links in other apps.</translation>
+<translation id="9050790730841755540">Use Chrome whenever you tap links in other apps.</translation>
 <translation id="9059693977935746710">You won't need to remember this password. It will be saved to Password Manager for <ph name="EMAIL" /></translation>
 <translation id="9089354809943900324">Chromium is out of date</translation>
 <translation id="9105645282262300612">Chromium tip: Search what you see</translation>

@@ -195,6 +195,10 @@ public class InstalledWebappPermissionStore {
                 .remove(createPermissionSettingKey(ContentSettingsType.NOTIFICATIONS, origin))
                 .remove(createPermissionKey(ContentSettingsType.GEOLOCATION, origin))
                 .remove(createPermissionSettingKey(ContentSettingsType.GEOLOCATION, origin))
+                .remove(createPermissionKey(ContentSettingsType.GEOLOCATION_WITH_OPTIONS, origin))
+                .remove(
+                        createPermissionSettingKey(
+                                ContentSettingsType.GEOLOCATION_WITH_OPTIONS, origin))
                 .remove(createAppNameKey(origin))
                 .remove(createPackageNameKey(origin))
                 .remove(createAllDelegateAppsKey(origin))
@@ -259,6 +263,7 @@ public class InstalledWebappPermissionStore {
             case ContentSettingsType.NOTIFICATIONS:
                 return KEY_NOTIFICATION_PERMISSION_PREFIX;
             case ContentSettingsType.GEOLOCATION:
+            case ContentSettingsType.GEOLOCATION_WITH_OPTIONS:
                 return KEY_GEOLOCATION_PERMISSION_PREFIX;
             default:
                 throw new IllegalStateException("Unsupported permission type.");
@@ -270,6 +275,7 @@ public class InstalledWebappPermissionStore {
             case ContentSettingsType.NOTIFICATIONS:
                 return KEY_NOTIFICATION_PERMISSION_SETTING_PREFIX;
             case ContentSettingsType.GEOLOCATION:
+            case ContentSettingsType.GEOLOCATION_WITH_OPTIONS:
                 return KEY_GEOLOCATION_PERMISSION_SETTING_PREFIX;
             default:
                 throw new IllegalStateException("Unsupported permission type.");

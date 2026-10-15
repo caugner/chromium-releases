@@ -35,6 +35,7 @@
 <translation id="1249250836236328755">ប្រភេទ</translation>
 <translation id="1254593899333212300">ការភ្ជាប់អ៊ីនធឺណិតផ្ទាល់</translation>
 <translation id="1272293450992660632">តម្លៃ PIN មិនត្រូវគ្នាទេ។</translation>
+<translation id="1279040297980392566">កំពុង​រង់ចាំ​ឱ្យស្កេន​ចប់ សូម​ព្យាយាម​ម្ដងទៀត​នៅពេល​ក្រោយ</translation>
 <translation id="1280820357415527819">កំពុង​ស្វែងរក​បណ្ដាញ​ទូរសព្ទ​ចល័ត</translation>
 <translation id="1293556467332435079">ឯកសារ</translation>
 <translation id="1297922636971898492">Google Drive មិនមានទេឥឡូវនេះ។ ការទាញឡើងនឹងចាប់ផ្តើមឡើងវិញដោយស្វ័យប្រវត្តិនៅពេល Google Drive ត្រលប់មកវិញ។</translation>
@@ -365,7 +366,7 @@
 <translation id="3901991538546252627">កំពុងភ្ជាប់ទៅ <ph name="NAME" /></translation>
 <translation id="3906232975181435906">កំពុងដំឡើង​កម្រងព័ត៌មាន​ឧបករណ៍ចល័ត បណ្ដាញ <ph name="NETWORK_INDEX" /> នៃ <ph name="NETWORK_COUNT" />, <ph name="NETWORK_NAME" /></translation>
 <translation id="3924145049010392604">Meta</translation>
-<translation id="3943857333388298514">បិទភ្ជាប់</translation>
+<translation id="3943857333388298514">ដាក់ចូល</translation>
 <translation id="3950820424414687140">ចូល</translation>
 <translation id="3952872973865944257">សូរសព្ទ​ជាភាសា​តេលូហ្គូ</translation>
 <translation id="3958548648197196644">គីវី</translation>
@@ -1078,6 +1079,7 @@
 <translation id="9213073329713032541">បានចាប់ផ្ដើម​ការដំឡើង​ដោយជោគជ័យហើយ។</translation>
 <translation id="9219103736887031265">រូបភាព</translation>
 <translation id="9219908252191632183">ទេសភាព​ភព​ព្រះចន្ទ</translation>
+<translation id="931652069802536959">បណ្ដាញ​ត្រូវបាន​ទប់ស្កាត់​ដោយ​គោលការណ៍</translation>
 <translation id="938470336146445890">សូមតំឡើងវិញ្ញាបនប័ត្រអ្នកប្រើ។</translation>
 <translation id="939736085109172342">ថតឯកសារថ្មី</translation>
 <translation id="943972244133411984">កែសម្រួល​ដោយ</translation>

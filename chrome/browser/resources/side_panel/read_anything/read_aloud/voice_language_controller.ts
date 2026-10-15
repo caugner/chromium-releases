@@ -87,15 +87,32 @@ export class VoiceLanguageController {
         availableVoice => areVoicesEqual(availableVoice, voice));
   }
 
+  // Depending on the timing, the engine might send an onvoiceschanged message
+  // before our connection is established, so request installation after the
+  // connection is established. In the other case, the connection may happen
+  // first, but the engine is not ready for installation requests yet. In this
+  // case, wait until onvoiceschanged to install.
+  // Ideally, only one of these cases should happen, but this is a workaround
+  // for the race condition present in the Chrome extension code.
+  private onEngineMightBeReady_() {
+    // The page language may not have had any system voices, but may have voices
+    // in the engine, so try enabling and installing that language.
+    if (!this.getEnabledLangs().includes(this.getCurrentLanguage())) {
+      this.onPageLanguageChanged();
+    }
+    this.installEnabledLangs_(
+        /* onlyInstallExactGoogleLocaleMatch=*/ true,
+        /* retryIfPreviousInstallFailed= */ true);
+  }
+
   onTtsEngineInstalled() {
+    this.onEngineMightBeReady_();
     this.model_.setWaitingForNewEngine(true);
   }
 
   onVoicesChanged() {
     if (this.model_.getWaitingForNewEngine()) {
-      this.installEnabledLangs_(
-          /* onlyInstallExactGoogleLocaleMatch=*/ true,
-          /* retryIfPreviousInstallFailed= */ true);
+      this.onEngineMightBeReady_();
       this.model_.setWaitingForNewEngine(false);
       return;
     }
@@ -499,12 +516,15 @@ export class VoiceLanguageController {
 
   updateLanguageStatus(lang: string, status: string) {
     this.stopWaitingForSpeechExtension();
+    const newStatus = mojoVoicePackStatusToVoicePackStatusEnum(status);
     if (!lang.length) {
+      if (newStatus.code === VoicePackServerStatusErrorCode.NOT_REACHED) {
+        this.notificationManager_.onNoEngineConnection();
+      }
       return;
     }
 
     const lowerLang = lang.toLowerCase();
-    const newStatus = mojoVoicePackStatusToVoicePackStatusEnum(status);
     this.setServerStatus(lowerLang, newStatus);
     this.updateApplicationState_(lowerLang, newStatus);
 
@@ -567,6 +587,7 @@ export class VoiceLanguageController {
         case VoicePackServerStatusErrorCode.WRONG_ID:
         case VoicePackServerStatusErrorCode.NEED_REBOOT:
         case VoicePackServerStatusErrorCode.UNSUPPORTED_PLATFORM:
+        case VoicePackServerStatusErrorCode.NOT_REACHED:
           this.setLocalStatus(lang, VoiceClientSideStatusCode.ERROR_INSTALLING);
           break;
         case VoicePackServerStatusErrorCode.ALLOCATION:
@@ -674,7 +695,6 @@ export class VoiceLanguageController {
         language,
         isRetry ? VoiceClientSideStatusCode.SENT_INSTALL_REQUEST_ERROR_RETRY :
                   VoiceClientSideStatusCode.SENT_INSTALL_REQUEST);
-
     chrome.readingMode.sendInstallVoicePackRequest(language);
   }
 

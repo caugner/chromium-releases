@@ -62,7 +62,7 @@ namespace gpu {
 namespace {
 
 // Used as a flag to test dawn initialization failure.
-BASE_FEATURE(ForceDawnInitializeFailure, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kForceDawnInitializeFailure, base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Sets crash key in thread safe manner. This should be used for any crash keys
 // set from dawn error or device lost callbacks that may run on multiple
@@ -455,6 +455,10 @@ class DawnSharedContext : public base::RefCountedThreadSafe<DawnSharedContext>,
   wgpu::Instance GetInstance() const { return instance_->Get(); }
 
   webgpu::DawnPlatform* GetDawnPlatform() { return &platform_; }
+
+  webgpu::DawnCachingInterface* GetCachingInterface() {
+    return caching_interface_.get();
+  }
 
 #if BUILDFLAG(IS_WIN)
   Microsoft::WRL::ComPtr<ID3D11Device> GetD3D11Device() const {
@@ -1239,6 +1243,10 @@ void DawnContextProvider::SetCachingInterface(
   CHECK(dawn_shared_context_->HasOneRef());
   CHECK(!graphite_shared_context_);
   dawn_shared_context_->SetCachingInterface(std::move(caching_interface));
+}
+
+webgpu::DawnCachingInterface* DawnContextProvider::GetCachingInterface() const {
+  return dawn_shared_context_->GetCachingInterface();
 }
 
 #if BUILDFLAG(IS_WIN)

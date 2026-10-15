@@ -35,6 +35,7 @@
 <translation id="1249250836236328755">Zvrst</translation>
 <translation id="1254593899333212300">Neposredna internetna povezava</translation>
 <translation id="1272293450992660632">Vrednosti PIN se ne ujemajo.</translation>
+<translation id="1279040297980392566">Čakanje na dokončanje pregleda, poskusite znova pozneje</translation>
 <translation id="1280820357415527819">Iskanje mobilnih omrežij</translation>
 <translation id="1293556467332435079">Datoteke</translation>
 <translation id="1297922636971898492">Google Drive trenutno ni na voljo. Ko bo spet na voljo, se bo prenos samodejno začel znova.</translation>
@@ -921,7 +922,7 @@
 <translation id="8055538340801153769">Ta mapa</translation>
 <translation id="807187749540895545">Razširjanje datoteke <ph name="FILE_NAME" /> …</translation>
 <translation id="8087576439476816834">Prenos, <ph name="PROFILE_NAME" /></translation>
-<translation id="8106045200081704138">V skupni rabi z menoj</translation>
+<translation id="8106045200081704138">Deljeno z mano</translation>
 <translation id="8116072619078571545">Voda z ledom</translation>
 <translation id="8120392982188717723">Omogočanje sinhronizacije v omrežjih z omejenim prenosom podatkov</translation>
 <translation id="8124093710070495550">Težava s sinhronizacijo</translation>
@@ -1078,6 +1079,7 @@
 <translation id="9213073329713032541">Namestitev je bila uspešno začeta.</translation>
 <translation id="9219103736887031265">Slike</translation>
 <translation id="9219908252191632183">Mesečeva pokrajina</translation>
+<translation id="931652069802536959">Omrežje je blokirano s pravilnikom</translation>
 <translation id="938470336146445890">Namestite uporabniško potrdilo.</translation>
 <translation id="939736085109172342">Nova mapa</translation>
 <translation id="943972244133411984">Spremenil(-a):</translation>

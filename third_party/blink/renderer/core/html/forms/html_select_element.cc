@@ -234,7 +234,7 @@ void HTMLSelectElement::UpdateUsesMenuList() {
       uses_menu_list_ =
           FastHasAttribute(html_names::kSizeAttr) ? size_ == 1 : false;
     } else {
-      uses_menu_list_ = size_ == 1;
+      uses_menu_list_ = size_ <= 1;
     }
     return;
   }
@@ -817,6 +817,12 @@ int HTMLSelectElement::SelectedListIndex() const {
 }
 
 void HTMLSelectElement::SetSuggestedOption(HTMLOptionElement* option) {
+  if (RuntimeEnabledFeatures::CanvasDrawElementEnabled() &&
+      IsInCanvasSubtree()) {
+    // Hide suggested values when under canvas, to prevent leaking this
+    // information to javascript.
+    option = nullptr;
+  }
   if (suggested_option_ == option)
     return;
   SetAutofillState(option ? WebAutofillState::kPreviewed
@@ -824,6 +830,15 @@ void HTMLSelectElement::SetSuggestedOption(HTMLOptionElement* option) {
   suggested_option_ = option;
 
   select_type_->DidSetSuggestedOption(option);
+}
+
+void HTMLSelectElement::DidChangeIsCanvasOrInCanvasSubtree() {
+  if (RuntimeEnabledFeatures::CanvasDrawElementEnabled() &&
+      IsInCanvasSubtree()) {
+    // Hide suggested values when under canvas, to prevent leaking this
+    // information to javascript.
+    SetSuggestedOption(nullptr);
+  }
 }
 
 void HTMLSelectElement::OptionSelectionStateChanged(HTMLOptionElement* option,
@@ -1262,6 +1277,26 @@ void HTMLSelectElement::DefaultEventHandler(Event& event) {
   HTMLFormControlElementWithState::DefaultEventHandler(event);
 }
 
+void HTMLSelectElement::ChildrenChanged(const ChildrenChange& change) {
+  HTMLFormControlElementWithState::ChildrenChanged(change);
+  if (RuntimeEnabledFeatures::SelectChildrenRemovedFixEnabled()) {
+    // OptionRemoved is normally called in HTMLOptionElement::RemovedFrom, but
+    // as a direct child we call OptionRemoved here in order to avoid
+    // https://issues.chromium.org/issues/444330901
+    if (change.type == ChildrenChangeType::kAllChildrenRemoved) {
+      for (Node* node : change.removed_nodes) {
+        if (auto* option = DynamicTo<HTMLOptionElement>(node)) {
+          OptionRemoved(*option);
+        }
+      }
+    } else if (change.type == ChildrenChangeType::kElementRemoved) {
+      if (auto* option = DynamicTo<HTMLOptionElement>(change.sibling_changed)) {
+        OptionRemoved(*option);
+      }
+    }
+  }
+}
+
 HTMLOptionElement* HTMLSelectElement::LastSelectedOption() const {
   const ListItems& items = GetListItems();
   for (wtf_size_t i = items.size(); i;) {
@@ -1338,6 +1373,12 @@ void HTMLSelectElement::SelectOptionByAccessKey(HTMLOptionElement* option) {
     SelectOption(option, flags);
   }
   option->SetDirty(true);
+
+  // Whether the option was selected or de-selected, we need to set it as the
+  // active descendant by calling SetListBoxActiveSelection here. Otherwise,
+  // screen readers will unexpectedly move their cursor to another option.
+  select_type_->SetListBoxActiveSelection(option);
+
   select_type_->ListBoxOnChange();
   select_type_->ScrollToSelection();
 }
@@ -1583,6 +1624,7 @@ void HTMLSelectElement::ChangeRendering() {
   if (UsesMenuList() != old_uses_menu_list) {
     select_type_->WillBeDestroyed();
     select_type_ = SelectType::Create(*this);
+    PseudoStateChanged(CSSSelector::kPseudoListBox);
   }
   if (!InActiveDocument())
     return;

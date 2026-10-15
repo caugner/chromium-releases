@@ -13,6 +13,7 @@
 #include "base/strings/strcat.h"
 #include "base/time/time.h"
 #include "components/variations/net/variations_http_headers.h"
+#include "content/browser/devtools/devtools_agent_host_impl.h"
 #include "content/browser/devtools/devtools_instrumentation.h"
 #include "content/browser/devtools/network_service_devtools_observer.h"
 #include "content/browser/loader/navigation_url_loader_impl.h"
@@ -38,22 +39,29 @@
 #include "content/browser/preloading/proxy_lookup_client_impl.h"
 #include "content/browser/preloading/speculation_rules/speculation_rules_tags.h"
 #include "content/browser/renderer_host/frame_tree_node.h"
+#include "content/browser/renderer_host/navigation_controller_impl.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
-#include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/client_hints.h"
+#include "content/public/browser/frame_accept_header.h"
 #include "content/public/browser/global_routing_id.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/prefetch_request_status_listener.h"
 #include "content/public/browser/preloading.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_delegate.h"
+#include "content/public/common/content_features.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_request_headers.h"
+#include "net/http/http_request_info.h"
 #include "net/url_request/redirect_util.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
 #include "services/network/public/cpp/client_hints.h"
 #include "services/network/public/cpp/devtools_observer_util.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "third_party/blink/public/common/client_hints/client_hints.h"
 #include "third_party/blink/public/common/navigation/preloading_headers.h"
+#include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -231,115 +239,42 @@ GetPrefetchResponseCompletedCallbackForTesting() {
   return *prefetch_response_completed_callback_for_testing;
 }
 
+void AddAwAdditionalHeaders(net::HttpRequestHeaders& request_headers,
+                            const net::HttpRequestHeaders& additional_headers) {
+  // Ignore "User-Agent" override by `additional_headers` if UA override fix are
+  // enabled.
+  // TODO(crbug.com/383779480): Add tests.
+  if (base::FeatureList::IsEnabled(
+          features::kPreloadingRespectUserAgentOverride)) {
+    net::HttpRequestHeaders additional_headers_without_ua = additional_headers;
+    additional_headers_without_ua.RemoveHeader(
+        net::HttpRequestHeaders::kUserAgent);
+    request_headers.MergeFrom(additional_headers_without_ua);
+  } else {
+    request_headers.MergeFrom(additional_headers);
+  }
+}
+
 }  // namespace
 
-PrefetchContainer::PrefetchContainer(
-    RenderFrameHostImpl& referring_render_frame_host,
-    const blink::DocumentToken& referring_document_token,
-    const GURL& url,
-    const PrefetchType& prefetch_type,
-    const blink::mojom::Referrer& referrer,
-    std::optional<SpeculationRulesTags> speculation_rules_tags,
-    std::optional<net::HttpNoVarySearchData> no_vary_search_hint,
-    std::optional<PrefetchPriority> priority,
-    base::WeakPtr<PrefetchDocumentManager> prefetch_document_manager,
-    scoped_refptr<PreloadPipelineInfo> preload_pipeline_info,
-    base::WeakPtr<PreloadingAttempt> attempt)
-    : PrefetchContainer(std::make_unique<PrefetchRequest>(
-          prefetch_type,
-          PrefetchKey(referring_document_token, url),
-          std::move(no_vary_search_hint),
-          std::move(priority),
-          std::move(preload_pipeline_info),
-          std::move(attempt),
-          WebContentsImpl::FromRenderFrameHostImpl(&referring_render_frame_host)
-              ->GetOrCreateWebPreferences()
-              .javascript_enabled,
-          referrer,
-          referring_render_frame_host.GetLastCommittedOrigin(),
-          referring_render_frame_host.GetBrowserContext()->GetWeakPtr(),
-          std::move(speculation_rules_tags),
-          /*Must be empty: additional_headers=*/net::HttpRequestHeaders(),
-          PrefetchContainerDefaultTtlInPrefetchService(),
-          /*holdback_status_override=*/std::nullopt,
-          /*should_append_variations_header=*/true,
-          /*should_disable_block_until_head_timeout=*/false,
-          PrefetchRendererInitiatorInfo(
-              referring_render_frame_host,
-              std::move(prefetch_document_manager)))) {}
+// static
+std::unique_ptr<PrefetchContainer> PrefetchContainer::Create(
+    base::PassKey<PrefetchService>,
+    std::unique_ptr<const PrefetchRequest> request) {
+  return std::make_unique<PrefetchContainer>(base::PassKey<PrefetchContainer>(),
+                                             std::move(request));
+}
+
+// static
+std::unique_ptr<PrefetchContainer> PrefetchContainer::CreateForTesting(
+    std::unique_ptr<const PrefetchRequest> request) {
+  return std::make_unique<PrefetchContainer>(base::PassKey<PrefetchContainer>(),
+                                             std::move(request));
+}
 
 PrefetchContainer::PrefetchContainer(
-    WebContents& referring_web_contents,
-    const GURL& url,
-    const PrefetchType& prefetch_type,
-    const std::string& embedder_histogram_suffix,
-    const blink::mojom::Referrer& referrer,
-    const std::optional<url::Origin>& referring_origin,
-    std::optional<net::HttpNoVarySearchData> no_vary_search_hint,
-    std::optional<PrefetchPriority> priority,
-    scoped_refptr<PreloadPipelineInfo> preload_pipeline_info,
-    base::WeakPtr<PreloadingAttempt> attempt,
-    std::optional<PreloadingHoldbackStatus> holdback_status_override,
-    std::optional<base::TimeDelta> ttl)
-    : PrefetchContainer(std::make_unique<PrefetchRequest>(
-          prefetch_type,
-          PrefetchKey(std::optional<blink::DocumentToken>(std::nullopt), url),
-          std::move(no_vary_search_hint),
-          std::move(priority),
-          std::move(preload_pipeline_info),
-          std::move(attempt),
-          referring_web_contents.GetOrCreateWebPreferences().javascript_enabled,
-          referrer,
-          referring_origin,
-          referring_web_contents.GetBrowserContext()->GetWeakPtr(),
-          /*speculation_rules_tags=*/std::nullopt,
-          /*Must be empty: additional_headers=*/net::HttpRequestHeaders(),
-          ttl.has_value() ? ttl.value()
-                          : PrefetchContainerDefaultTtlInPrefetchService(),
-          std::move(holdback_status_override),
-          /*should_append_variations_header=*/true,
-          /*should_disable_block_until_head_timeout=*/false,
-          PrefetchBrowserInitiatorInfo(embedder_histogram_suffix,
-                                       /*request_status_listener=*/nullptr))) {}
-
-PrefetchContainer::PrefetchContainer(
-    BrowserContext* browser_context,
-    const GURL& url,
-    const PrefetchType& prefetch_type,
-    const std::string& embedder_histogram_suffix,
-    const blink::mojom::Referrer& referrer,
-    bool javascript_enabled,
-    const std::optional<url::Origin>& referring_origin,
-    std::optional<net::HttpNoVarySearchData> no_vary_search_hint,
-    std::optional<PrefetchPriority> priority,
-    base::WeakPtr<PreloadingAttempt> attempt,
-    const net::HttpRequestHeaders& additional_headers,
-    std::unique_ptr<PrefetchRequestStatusListener> request_status_listener,
-    base::TimeDelta ttl,
-    bool should_append_variations_header,
-    bool should_disable_block_until_head_timeout)
-    : PrefetchContainer(std::make_unique<PrefetchRequest>(
-          prefetch_type,
-          PrefetchKey(std::optional<blink::DocumentToken>(std::nullopt), url),
-          std::move(no_vary_search_hint),
-          std::move(priority),
-          PreloadPipelineInfo::Create(
-              /*planned_max_preloading_type=*/PreloadingType::kPrefetch),
-          std::move(attempt),
-          javascript_enabled,
-          referrer,
-          referring_origin,
-          browser_context->GetWeakPtr(),
-          /*speculation_rules_tags=*/std::nullopt,
-          additional_headers,
-          ttl,
-          /*holdback_status_override=*/std::nullopt,
-          should_append_variations_header,
-          should_disable_block_until_head_timeout,
-          PrefetchBrowserInitiatorInfo(embedder_histogram_suffix,
-                                       std::move(request_status_listener)))) {}
-
-PrefetchContainer::PrefetchContainer(std::unique_ptr<PrefetchRequest> request)
+    base::PassKey<PrefetchContainer>,
+    std::unique_ptr<const PrefetchRequest> request)
     : request_(std::move(request)),
       referrer_(request_->initial_referrer()),
       request_id_(base::UnguessableToken::Create().ToString()) {
@@ -776,6 +711,7 @@ void PrefetchContainer::AddRedirectHop(const net::RedirectInfo& redirect_info) {
   // redirects; see |NavigationRequest::OnRedirectChecksComplete| (including
   // some which are added by throttles). These aren't yet supported for
   // prefetch, including browsing topics and client hints.
+  // TODO(crbug.com/441612842): Support User-Agent overrides.
   net::HttpRequestHeaders updated_headers;
   std::vector<std::string> headers_to_remove = {variations::kClientDataHeader};
   updated_headers.SetHeader(blink::kSecPurposeHeaderName,
@@ -885,9 +821,9 @@ void PrefetchContainer::PauseAllCookieListeners() {
   // TODO(crbug.com/377440445): Consider whether we actually need to
   // pause/resume all single prefetch's cookie listener during each single
   // prefetch's isolated cookie copy.
-  for (const auto& single_prefetch : redirect_chain_) {
-    if (single_prefetch->cookie_listener_) {
-      single_prefetch->cookie_listener_->PauseListening();
+  for (const auto& single_redirect_hop : redirect_chain_) {
+    if (single_redirect_hop->cookie_listener_) {
+      single_redirect_hop->cookie_listener_->PauseListening();
     }
   }
 }
@@ -896,9 +832,9 @@ void PrefetchContainer::ResumeAllCookieListeners() {
   // TODO(crbug.com/377440445): Consider whether we actually need to
   // pause/resume all single prefetch's cookie listener during each single
   // prefetch's isolated cookie copy.
-  for (const auto& single_prefetch : redirect_chain_) {
-    if (single_prefetch->cookie_listener_) {
-      single_prefetch->cookie_listener_->ResumeListening();
+  for (const auto& single_redirect_hop : redirect_chain_) {
+    if (single_redirect_hop->cookie_listener_) {
+      single_redirect_hop->cookie_listener_->ResumeListening();
     }
   }
 }
@@ -1262,30 +1198,6 @@ void PrefetchContainer::OnPrefetchStarted() {
   prefetch_container_metrics_.time_prefetch_started = base::TimeTicks::Now();
 }
 
-bool PrefetchContainer::HasSameReferringURLForMetrics(
-    const PrefetchContainer& other) const {
-  if (auto* renderer_initiator_info = request().GetRendererInitiatorInfo()) {
-    if (auto* other_renderer_initiator_info =
-            other.request().GetRendererInitiatorInfo()) {
-      return renderer_initiator_info->url_hash() ==
-             other_renderer_initiator_info->url_hash();
-    }
-  }
-  return false;
-}
-
-bool PrefetchContainer::HasSameReferringRenderFrameHostIdForMetrics(
-    const PrefetchContainer& other) const {
-  if (auto* renderer_initiator_info = request().GetRendererInitiatorInfo()) {
-    if (auto* other_renderer_initiator_info =
-            other.request().GetRendererInitiatorInfo()) {
-      return renderer_initiator_info->GetRenderFrameHostId() ==
-             other_renderer_initiator_info->GetRenderFrameHostId();
-    }
-  }
-  return false;
-}
-
 GURL PrefetchContainer::GetCurrentURL() const {
   return GetCurrentSingleRedirectHopToPrefetch().url_;
 }
@@ -1321,8 +1233,7 @@ bool PrefetchContainer::IsProxyRequiredForURL(const GURL& url) const {
          request().prefetch_type().IsProxyRequiredWhenCrossOrigin();
 }
 
-void PrefetchContainer::MakeResourceRequest(
-    const net::HttpRequestHeaders& additional_headers) {
+void PrefetchContainer::MakeResourceRequest() {
   // |AddRedirectHop| updates this request later on. Anything here that should
   // be changed on redirect should happen there.
 
@@ -1402,8 +1313,14 @@ void PrefetchContainer::MakeResourceRequest(
   // not be visible outside of the network context.
   resource_request->load_flags = net::LOAD_PREFETCH;
 
-  resource_request->headers.MergeFrom(request().additional_headers());
-  resource_request->headers.MergeFrom(additional_headers);
+  AddAwAdditionalHeaders(resource_request->headers,
+                         request().additional_headers());
+
+  CHECK(request().browser_context());
+  resource_request->headers.SetHeader(
+      net::HttpRequestHeaders::kAccept,
+      FrameAcceptHeaderValue(/*allow_sxg_responses=*/true,
+                             request().browser_context()));
   if (!base::FeatureList::IsEnabled(
           blink::features::kRemovePurposeHeaderForPrefetch)) {
     resource_request->headers.SetHeader(blink::kPurposeHeaderName,
@@ -1431,6 +1348,9 @@ void PrefetchContainer::MakeResourceRequest(
 
   resource_request->devtools_request_id = RequestId();
 
+  // TODO(crbug.com/444065296): These are an initial guess. Validate them
+  // against the actual navigation's header.
+  MaybeApplyOverrideForUserAgentHeader(*resource_request);
   AddClientHintsHeaders(origin, &resource_request->headers);
   if (request().should_append_variations_header()) {
     AddXClientDataHeader(*resource_request.get());
@@ -1473,6 +1393,62 @@ PrefetchContainer::GetNoVarySearchHint() const {
   return request().no_vary_search_hint();
 }
 
+bool PrefetchContainer::ShouldApplyUserAgentOverride(
+    const GURL& request_url) const {
+  if (!base::FeatureList::IsEnabled(
+          features::kPreloadingRespectUserAgentOverride)) {
+    return false;
+  }
+
+  WebContents* referring_web_contents =
+      request().referring_web_contents().get();
+  if (!referring_web_contents) {
+    return false;
+  }
+  // The empty `ua_string_override` means no registered UA overrides.
+  if (const blink::UserAgentOverride& ua_override =
+          referring_web_contents->GetUserAgentOverride();
+      ua_override.ua_string_override.empty()) {
+    return false;
+  }
+  raw_ptr<WebContentsDelegate> delegate = referring_web_contents->GetDelegate();
+  NavigationController::UserAgentOverrideOption option =
+      delegate ? delegate->ShouldOverrideUserAgentForPrerender2(request_url)
+               : NavigationController::UA_OVERRIDE_INHERIT;
+  // Use the primary main frame of initiator's WebContents to guess if we should
+  // apply UA overrides in this prefetch request. Note that this decision is
+  // independent with that of policy checking on ClientHints headers. This is an
+  // estimation, i.e., can lead to wrong choices in some cases (e.g., where the
+  // prefetched result is used in prerender for another WebContents).
+  // TODO(crbug.com/444065296): Update this comment after the header comparison
+  // between prefetch and prerender is implemented.
+  auto* render_frame_host = referring_web_contents->GetPrimaryMainFrame();
+  CHECK(render_frame_host);
+  auto& nav_controller = static_cast<NavigationControllerImpl&>(
+      render_frame_host->GetController());
+  return nav_controller.ShouldOverrideUserAgentInNextNavigation(option);
+}
+
+void PrefetchContainer::MaybeApplyOverrideForUserAgentHeader(
+    network::ResourceRequest& resource_request) {
+  if (!ShouldApplyUserAgentOverride(resource_request.url)) {
+    return;
+  }
+  WebContents* referring_web_contents =
+      request_->referring_web_contents().get();
+  if (!referring_web_contents) {
+    return;
+  }
+  // TODO(crbug.com/444065296): This is an initial guess, because e.g.
+  // `referring_web_contents` might be different from the navigation target's
+  // WebContents. Validate this against the actual navigation's header.
+  const blink::UserAgentOverride& ua_override =
+      referring_web_contents->GetUserAgentOverride();
+  CHECK(!ua_override.ua_string_override.empty());
+  resource_request.headers.SetHeader(net::HttpRequestHeaders::kUserAgent,
+                                     ua_override.ua_string_override);
+}
+
 void PrefetchContainer::AddClientHintsHeaders(
     const url::Origin& origin,
     net::HttpRequestHeaders* request_headers) {
@@ -1488,18 +1464,61 @@ void PrefetchContainer::AddClientHintsHeaders(
     return;
   }
 
-  // TODO(crbug.com/41497015): Consider supporting UA override mode here
+  auto* referring_ftn = base::FeatureList::IsEnabled(
+                            features::kPrefetchDevtoolsUserAgentOverride) &&
+                                request().referring_web_contents()
+                            ? FrameTreeNode::From(RenderFrameHostImpl::FromID(
+                                  request()
+                                      .referring_web_contents()
+                                      ->GetPrimaryMainFrame()
+                                      ->GetGlobalId()))
+                            : nullptr;
+
+  // TODO(crbug.com/41497015): Consider supporting UA override mode here.
   const bool is_ua_override_on = false;
   net::HttpRequestHeaders client_hints_headers;
   if (request().is_javascript_enabled()) {
+    // Add Client Hints headers
+    //
     // Historically, `AddClientHintsHeadersToPrefetchNavigation` added
     // Client Hints headers iff `request().is_javascript_enabled()`, so the `if`
     // block here is to persist the behavior.
     // TODO(crbug.com/394716357): Revisit if we really want to allow prefetch
     // for non-Javascript enabled profile/origins.
+    //
+    // The request headers added by `referring_ftn` is the initial guess for the
+    // request headers that will be used in the navigations served by this
+    // prefetch, and can be different from the navigation target's
+    // `FrameTreeNode` (crbug.com/444065296).
+    // TODO(crbug.com/444065296): Validate the Client Hint headers added here
+    // using `referring_ftn` against the navigation request's headers.
     AddClientHintsHeadersToPrefetchNavigation(
         origin, &client_hints_headers, request().browser_context(),
-        client_hints_delegate, is_ua_override_on);
+        client_hints_delegate, is_ua_override_on, referring_ftn);
+
+    // This is an initial guess (crbug.com/444065296), e.g. ideally, the
+    // DevTools UA overrides of the navigation target FrameTreeNode should be
+    // used, but this is not available at the time of prefetch, so we use the
+    // prefetch initiator's FrameTreeNode instead as an initial guess.
+    // TODO(crbug.com/444065296): Validate the header against the actual
+    // navigation's request header.
+    //
+    // For now, we only apply a part of
+    // `devtools_instrumentation::ApplyNetworkRequestOverrides()` which is
+    // applied to navigational request in
+    // `NavigationRequest::OnStartChecksComplete()`.
+    if (base::FeatureList::IsEnabled(
+            features::kPrefetchDevtoolsUserAgentOverride) &&
+        referring_ftn && RenderFrameDevToolsAgentHost::GetFor(referring_ftn)) {
+      // Add/override `User-Agent` headers for DevTools emulation mode  by
+      // `referring_ftn`'s devtools emulation mode.
+      // TODO(crbug.com/422193319): This part only addresses devtools emulation
+      // mode UA override. There are other types of UA overrides, which are at
+      // WebContents level.
+      devtools_instrumentation::ApplyEmulationOverrides(
+          RenderFrameDevToolsAgentHost::GetFor(referring_ftn),
+          &client_hints_headers);
+    }
   }
 
   // Merge in the client hints which are suitable to include given this is a
@@ -1671,13 +1690,9 @@ void PrefetchContainer::OnUnregisterCandidate(
   }
 }
 
-void PrefetchContainer::MigrateNewlyAdded(
-    std::unique_ptr<PrefetchContainer> added) {
-  // `inherited_preload_pipeline_infos_` increases only if it is managed under
-  // `PrefetchService`.
-  CHECK(added->inherited_preload_pipeline_infos_.empty());
-
-  // Propagate eligibility (and status) to `added`.
+void PrefetchContainer::MergeNewPrefetchRequest(
+    std::unique_ptr<const PrefetchRequest> prefetch_request) {
+  // Propagate eligibility (and status) to `prefetch_request`.
   //
   // Assume we don't. (*) case is problematic.
   //
@@ -1685,7 +1700,7 @@ void PrefetchContainer::MigrateNewlyAdded(
   //   the following `OnEligibilityCheckComplete()` and
   //   `SetPrefetchStatusWithoutUpdatingTriggeringOutcome()`.
   // - If eligibility is got and ineligible, this `PrefetchContainer` is
-  //   `kNotServed` and `MigrateNewlyAdded()` is not called.
+  //   `kNotServed` and `MergeNewPrefetchRequest()` is not called.
   // - If eligibility is got and `kEligible`:
   //   - If status is not got, status will be propagated by the following
   //     `SetPrefetchStatusWithoutUpdatingTriggeringOutcome()`.
@@ -1698,7 +1713,7 @@ void PrefetchContainer::MigrateNewlyAdded(
   //     `kPrefetchResponseUsed` will be propagated at the prefetch matching
   //     end.
   //   - If status is got and failure, this `PrefetchContainer` is `kNotServed`
-  //     and `MigrateNewlyAdded()` is not called.
+  //     and `MergeNewPrefetchRequest()` is not called.
   //
   // In (*), `PrerenderHost` have to cancel prerender with eligibility
   // `kUnspecified` and status failure. It's relatively complicated condition.
@@ -1707,7 +1722,7 @@ void PrefetchContainer::MigrateNewlyAdded(
   //
   // To make things simple, we propagate both eligibility and status.
   scoped_refptr<PreloadPipelineInfoImpl> added_preload_pipeline_info =
-      base::WrapRefCounted(&added->request().preload_pipeline_info());
+      base::WrapRefCounted(&prefetch_request->preload_pipeline_info());
 
   added_preload_pipeline_info->SetPrefetchEligibility(
       request().preload_pipeline_info().prefetch_eligibility());
@@ -1719,7 +1734,8 @@ void PrefetchContainer::MigrateNewlyAdded(
   inherited_preload_pipeline_infos_.push_back(
       std::move(added_preload_pipeline_info));
 
-  is_likely_ahead_of_prerender_ |= added->is_likely_ahead_of_prerender_;
+  is_likely_ahead_of_prerender_ |= CalculateIsLikelyAheadOfPrerender(
+      prefetch_request->preload_pipeline_info());
 }
 
 void PrefetchContainer::NotifyPrefetchRequestWillBeSent(

@@ -177,7 +177,7 @@
 <translation id="5690427481109656848">Google LLC</translation>
 <translation id="5709557627224531708">‏הגדרת Chrome כדפדפן ברירת המחדל</translation>
 <translation id="571296537125272375">‏Chrome לא יכול לחפש עדכונים</translation>
-<translation id="5716154293141027663">‏Chrome ייפתח בכל פעם שתתבצע לחיצה על קישור באפליקציות אחרות</translation>
+<translation id="5716154293141027663">‏Chrome ייפתח בכל פעם שתלחץ על קישור באפליקציות אחרות</translation>
 <translation id="5752489513673657785">‏פיד מותאם אישית שנוצר במיוחד בשבילך על ידי Google</translation>
 <translation id="5772407442571703917">‏ניתן להוריד את Chrome כאן.</translation>
 <translation id="5777468213129569553">‏פתיחת Chrome</translation>
@@ -193,6 +193,7 @@
 <translation id="6145223986912084844">chrome</translation>
 <translation id="6177442314419606057">‏חיפוש ב-Chrome</translation>
 <translation id="6181652351336379338">‏חיפוש רכיבים חזותיים ב-Chrome.</translation>
+<translation id="6187085551300363958">‏טיפ ל-Chrome: שמירת סיסמאות</translation>
 <translation id="6200694931081795166">‏כדי להגדיר את Chrome כדפדפן ברירת המחדל:
   1. פותחים את ההגדרות
   2. לוחצים על אפליקציית הדפדפן שמוגדרת כברירת מחדל
@@ -264,6 +265,7 @@
 <translation id="7599894504325210080">‏תצוגה מורחבת של המילוי האוטומטי ב-Chrome</translation>
 <translation id="7617512710641355143">‏‫Chrome מנוהל</translation>
 <translation id="7626032353295482388">‏ברוך בואך אל Chrome</translation>
+<translation id="7641448682796883218">‏טיפ ל-Chrome: הגרסה המשופרת של הגלישה הבטוחה</translation>
 <translation id="7642373780953416937">‏אפשר לקבל התראות לגבי כל בעיה בפרטיות או באבטחה ש-Chromium מזהה באופן אוטומטי.</translation>
 <translation id="7660356333829433649">‏כדאי לחזור לכאן כדי לקבל עוד טיפים שימושיים שיעזרו לך להפיק את המירב מ-Chrome.</translation>
 <translation id="7662994914830945754">‏כדי לראות את הכרטיסיות שלך מכל מקום שבו פתחת את Chrome יש להיכנס לחשבון ולהפעיל את הסנכרון</translation>

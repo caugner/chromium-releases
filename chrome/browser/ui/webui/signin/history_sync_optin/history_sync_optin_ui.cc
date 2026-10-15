@@ -18,6 +18,7 @@
 #include "chrome/grit/signin_history_sync_optin_resources_map.h"
 #include "chrome/grit/signin_resources.h"
 #include "components/signin/public/base/signin_switches.h"
+#include "components/sync/base/features.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
@@ -58,7 +59,8 @@ history_sync_optin::mojom::LaunchContext HistorySyncOptinLaunchContextToMojom(
 
 bool HistorySyncOptinUIConfig::IsWebUIEnabled(
     content::BrowserContext* browser_context) {
-  return base::FeatureList::IsEnabled(switches::kEnableHistorySyncOptin);
+  return base::FeatureList::IsEnabled(
+      syncer::kReplaceSyncPromosWithSignInPromos);
 }
 
 // static
@@ -125,12 +127,13 @@ void HistorySyncOptinUI::BindInterface(
 
 void HistorySyncOptinUI::Initialize(
     Browser* browser,
-    base::OnceClosure history_optin_completed_closure) {
+    HistorySyncOptinHelper::FlowCompletedCallback
+        history_optin_completed_callback) {
   // `browser` maybe null in the case of a window screen.
   // It must be set when the modal dialog is used.
   initialize_handler_callback_ = base::BindOnce(
       &HistorySyncOptinUI::OnMojoHandlersReady, weak_ptr_factory_.GetWeakPtr(),
-      browser, std::move(history_optin_completed_closure));
+      browser, std::move(history_optin_completed_callback));
 }
 
 void HistorySyncOptinUI::CreateHistorySyncOptinHandler(
@@ -145,11 +148,12 @@ void HistorySyncOptinUI::CreateHistorySyncOptinHandler(
 
 void HistorySyncOptinUI::OnMojoHandlersReady(
     Browser* browser,
-    base::OnceClosure history_optin_completed_closure,
+    HistorySyncOptinHelper::FlowCompletedCallback
+        history_optin_completed_callback,
     mojo::PendingRemote<history_sync_optin::mojom::Page> page,
     mojo::PendingReceiver<history_sync_optin::mojom::PageHandler> receiver) {
   CHECK(!page_handler_);
   page_handler_ = std::make_unique<HistorySyncOptinHandler>(
       std::move(receiver), std::move(page), browser, profile_,
-      std::move(history_optin_completed_closure));
+      std::move(history_optin_completed_callback));
 }

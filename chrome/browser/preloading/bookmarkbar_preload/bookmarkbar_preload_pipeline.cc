@@ -69,19 +69,29 @@ void BookmarkBarPreloadPipeline::StartPrefetch(
       std::move(same_url_matcher),
       web_contents.GetPrimaryMainFrame()->GetPageUkmSourceId());
 
+  bool is_search_url = IsSearchUrl(web_contents, url_);
+  base::UmaHistogramBoolean(
+      "Navigation.Prefetch.IsPrefetchingSRPUrl.Embedder_BookmarkBar",
+      is_search_url);
+
+  if (is_search_url) {
+    attempt->SetEligibility(ToPreloadingEligibility(
+        ChromePreloadingEligibility::KDisallowSearchUrl));
+    return;
+  }
+
   prefetch_handle_ = web_contents.StartPrefetch(
       url_, /*use_prefetch_proxy=*/false, kBookmarkBarMetricSuffix,
       blink::mojom::Referrer(), /*referring_origin=*/std::nullopt,
       /*no_vary_search_hint=*/std::nullopt, /*priority=*/std::nullopt,
       pipeline_info_, attempt->GetWeakPtr(),
-      /*holdback_status_override=*/std::nullopt, /*ttl=*/std::nullopt);
+      /*holdback_status_override=*/
+      content::PreloadingHoldbackStatus::kUnspecified, /*ttl=*/std::nullopt);
 }
 
 void BookmarkBarPreloadPipeline::StartPrerender(
     content::WebContents& web_contents,
     content::PreloadingPredictor predictor) {
-  CHECK(!base::FeatureList::IsEnabled(features::kBookmarkTriggerForPrefetch) ||
-        prefetch_handle_);
   if (base::FeatureList::IsEnabled(
           features::kBookmarkTriggerForPrerender2KillSwitch)) {
     return;
@@ -113,6 +123,8 @@ void BookmarkBarPreloadPipeline::StartPrerender(
         ChromePreloadingEligibility::KDisallowSearchUrl));
     return;
   }
+  CHECK(!base::FeatureList::IsEnabled(features::kBookmarkTriggerForPrefetch) ||
+        prefetch_handle_);
 
   // BookmarkBar only allows https protocol.
   if (!url_.SchemeIs("https")) {

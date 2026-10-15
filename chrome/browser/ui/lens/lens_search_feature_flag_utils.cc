@@ -68,7 +68,7 @@ bool IsAimM3Enabled(Profile* profile) {
 
 bool ShouldShowLensOverlayEduActionChip(Profile* profile) {
   LensKeyedService* service = LensKeyedServiceFactory::GetForProfile(
-      profile, /*create_if_necessary=*/false);
+      profile, /*create_if_necessary=*/true);
   if (service == nullptr) {
     return false;
   }

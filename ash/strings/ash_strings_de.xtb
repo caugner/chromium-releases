@@ -303,7 +303,7 @@ Hier sind ein paar Dinge, die du tun kannst, um loszulegen.</translation>
 <translation id="1967970931040389207">Hotspot aktivieren</translation>
 <translation id="1969011864782743497"><ph name="DEVICE_NAME" /> (USB)</translation>
 <translation id="1971815855639997522">Desktop und Fenster wurden entfernt. Wenn du die Aktion rückgängig machen möchtest, drücke Steuerung + Z.</translation>
-<translation id="1972950159383891558">Hallo <ph name="USERNAME" /></translation>
+<translation id="1972950159383891558">Hallo <ph name="USERNAME" />,</translation>
 <translation id="1977686871076551563">Farbumkehrmodus aktiviert. Drücke noch einmal <ph name="ACCELERATOR" />, um ihn zu deaktivieren.</translation>
 <translation id="1978498689038657292">Texteingabe</translation>
 <translation id="1980808257969311265"><ph name="EVENT_SUMMARY" /> beitreten</translation>
@@ -329,7 +329,7 @@ Hier sind ein paar Dinge, die du tun kannst, um loszulegen.</translation>
 <translation id="2067602449040652523">Tastaturhelligkeit</translation>
 <translation id="2075520525463668108"><ph name="CAPTURE_MEDIUM" /> ein-/ausschalten. <ph name="CAPTURE_MEDIUM" /> ist <ph name="CAPTURE_STATE" />.</translation>
 <translation id="2079545284768500474">Rückgängig</translation>
-<translation id="2083190527011054446">Gute Nacht <ph name="GIVEN_NAME" />,</translation>
+<translation id="2083190527011054446">Hallo <ph name="GIVEN_NAME" />,</translation>
 <translation id="2086334242442703436">Emoji-Auswahl öffnen</translation>
 <translation id="2088116547584365419">Spiele</translation>
 <translation id="2093792000875799555">Neuigkeiten zu Steam for Chromebook</translation>
@@ -2073,7 +2073,7 @@ Halte zum Herunterfahren des Geräts die Ein-/Aus-Taste noch einmal gedrückt.</
 <translation id="7727952505535211425">Website in Adressleiste auf neuem Tab öffnen</translation>
 <translation id="7728657226117099693">Feststelltaste deaktivieren</translation>
 <translation id="7742327441377685481">Keine Benachrichtigungen</translation>
-<translation id="7748275671948949022">Launcher-Schaltfläche in der Ablage hervorheben</translation>
+<translation id="7748275671948949022">Launcher-Button in der Ablage hervorheben</translation>
 <translation id="7749443890790263709">Maximale Anzahl von Arbeitsbereichen erreicht.</translation>
 <translation id="7749958366403230681">ExpressKey 4</translation>
 <translation id="7751260505918304024">Alle anzeigen</translation>
@@ -2309,7 +2309,7 @@ Halte zum Herunterfahren des Geräts die Ein-/Aus-Taste noch einmal gedrückt.</
 <translation id="851458219935658693">Fenster des aktuellen Desktops werden angezeigt, Optionsfeld ausgewählt</translation>
 <translation id="851660987304951246">Mit „Erstelle einen Überblick für mich“ kannst du Inhalte schnell zusammenfassen lassen oder Fragen stellen</translation>
 <translation id="8517041960877371778">Dein <ph name="DEVICE_TYPE" /> wird möglicherweise nicht aufgeladen, wenn es eingeschaltet ist.</translation>
-<translation id="8519329096920173967">Mit Google Lens auf dem Bildschirm suchen</translation>
+<translation id="8519329096920173967">Mit Google Lens anhand von Bildschirminhalt suchen</translation>
 <translation id="8535393432370007982">Sortierung nach Farbe rückgängig machen</translation>
 <translation id="8536886494750559755">Quick Share-Einstellungen anzeigen. Für alle <ph name="TIME_REMAINING" /> lang sichtbar.</translation>
 <translation id="8539803091108018926">Text in Zwischenablage kopiert</translation>
@@ -2452,7 +2452,7 @@ Halte zum Herunterfahren des Geräts die Ein-/Aus-Taste noch einmal gedrückt.</
 <translation id="8983038754672563810">HSPA</translation>
 <translation id="8990809378771970590"><ph name="IME_NAME" /> aktiv</translation>
 <translation id="8991648557324317894">Drücke zum Deaktivieren „fn“ + „Schnelles Einfügen“ oder die Umschalttaste.</translation>
-<translation id="899350903320462459">Wenn du die Benachrichtigungsaktion ausführen möchtest, entsperre das Gerät als <ph name="LOGIN_ID" /></translation>
+<translation id="899350903320462459">Wenn du die Benachrichtigungsaktion ausführen möchtest, entsperre das Gerät als <ph name="LOGIN_ID" />.</translation>
 <translation id="8993733019280019776">Sprichst du gerade? Dein Mikrofon ist deaktiviert. Wähle es aus, um es zu aktivieren.</translation>
 <translation id="9000771174482730261">SPEICHERPLATZ VERWALTEN</translation>
 <translation id="9003374957546315126">Emojis und mehr</translation>

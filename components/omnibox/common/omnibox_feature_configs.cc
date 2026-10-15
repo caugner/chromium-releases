@@ -77,6 +77,8 @@ AiMode::AiMode() {
 
 AiModeOmniboxEntryPoint::AiModeOmniboxEntryPoint() {
   enabled = base::FeatureList::IsEnabled(omnibox::kAiModeOmniboxEntryPoint);
+  enabledEnUs =
+      base::FeatureList::IsEnabled(omnibox::kAiModeOmniboxEntryPointEnUs);
 
   hide_aim_hint_text =
       base::FeatureParam<bool>(&omnibox::kAiModeOmniboxEntryPoint,
@@ -85,12 +87,27 @@ AiModeOmniboxEntryPoint::AiModeOmniboxEntryPoint() {
 
   hide_aim_hint_text_on_ntp_open =
       base::FeatureParam<bool>(&omnibox::kAiModeOmniboxEntryPoint,
-                              "HideAimHintTextOnNtpOpen", false)
+                              "HideAimHintTextOnNtpOpen", true)
           .Get();
 
   hide_other_page_actions_on_ntp =
       base::FeatureParam<bool>(&omnibox::kAiModeOmniboxEntryPoint,
                                "HideOtherPageActionsOnNtp", true)
+          .Get();
+
+  aim_hint_impression_limit_daily =
+      base::FeatureParam<int>(&omnibox::kAiModeOmniboxEntryPoint,
+                              "AimHintImpressionLimitDaily", 1)
+          .Get();
+
+  aim_hint_impression_limit_total =
+      base::FeatureParam<int>(&omnibox::kAiModeOmniboxEntryPoint,
+                              "AimHintImpressionLimitTotal", 5)
+          .Get();
+
+  enable_hint_impression_limits =
+      base::FeatureParam<bool>(&omnibox::kAiModeOmniboxEntryPoint,
+                               "EnableHintImpressionLimits", false)
           .Get();
 }
 

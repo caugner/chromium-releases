@@ -98,33 +98,12 @@ void AppendLogsQueryParam(
   }
 }
 
-GURL AppendOrReplaceQueryParametersForLensRequest(const GURL& url,
-                                                  lens::EntryPoint ep) {
-  GURL modified_url(url);
-  for (auto const& param : GetLensQueryParametersMap(ep)) {
-    modified_url = net::AppendOrReplaceQueryParameter(modified_url, param.first,
-                                                      param.second);
-  }
-
-  return modified_url;
-}
-
 std::string GetQueryParametersForLensRequest(lens::EntryPoint ep) {
   std::string query_string;
   for (auto const& param : GetLensQueryParametersMap(ep)) {
     AppendQueryParam(&query_string, param.first.c_str(), param.second.c_str());
   }
   return query_string;
-}
-
-bool IsValidLensResultUrl(const GURL& url) {
-  if (url.is_empty()) {
-    return false;
-  }
-
-  std::string payload;
-  // Make sure the payload is present
-  return net::GetValueForKeyInQuery(url, kPayloadQueryParameter, &payload);
 }
 
 bool IsLensMWebResult(const GURL& url) {
@@ -172,6 +151,22 @@ std::string VitQueryParamValueForMimeType(MimeType mime_type) {
       NOTREACHED() << "Unsupported option in page content upload";
   }
   return vitValue;
+}
+
+std::string VitQueryParamValueForMediaType(
+    LensOverlayRequestId_MediaType media_type) {
+  switch (media_type) {
+    case LensOverlayRequestId::MEDIA_TYPE_DEFAULT_IMAGE:
+      return kImageVisualInputTypeQueryParameterValue;
+    case LensOverlayRequestId::MEDIA_TYPE_WEBPAGE:
+    case LensOverlayRequestId::MEDIA_TYPE_WEBPAGE_AND_IMAGE:
+      return kWebpageVisualInputTypeQueryParameterValue;
+    case LensOverlayRequestId::MEDIA_TYPE_PDF:
+    case LensOverlayRequestId::MEDIA_TYPE_PDF_AND_IMAGE:
+      return kPdfVisualInputTypeQueryParameterValue;
+    default:
+      return "";
+  }
 }
 
 std::map<std::string, std::string> GetParametersMapWithoutQuery(

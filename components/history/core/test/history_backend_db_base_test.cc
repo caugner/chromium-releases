@@ -19,6 +19,7 @@
 #include "components/history/core/browser/in_memory_history_backend.h"
 #include "components/history/core/test/database_test_utils.h"
 #include "components/history/core/test/test_history_database.h"
+#include "sql/test/test_helpers.h"
 #include "url/gurl.h"
 
 namespace history {
@@ -84,24 +85,14 @@ void HistoryBackendDBBaseTest::TearDown() {
   base::RunLoop().RunUntilIdle();
 }
 
-void HistoryBackendDBBaseTest::CreateBackendAndDatabase() {
+bool HistoryBackendDBBaseTest::CreateBackendAndDatabase() {
   backend_ = base::MakeRefCounted<HistoryBackend>(
       std::make_unique<BackendDelegate>(this), nullptr,
       base::SingleThreadTaskRunner::GetCurrentDefault());
   backend_->Init(false,
                  TestHistoryDatabaseParamsForPath(history_dir_));
   db_ = backend_->db_.get();
-  DCHECK(in_mem_backend_) << "Mem backend should have been set by "
-      "HistoryBackend::Init";
-}
-
-void HistoryBackendDBBaseTest::CreateBackendAndDatabaseAllowFail() {
-  backend_ = base::MakeRefCounted<HistoryBackend>(
-      std::make_unique<BackendDelegate>(this), nullptr,
-      base::SingleThreadTaskRunner::GetCurrentDefault());
-  backend_->Init(false,
-                 TestHistoryDatabaseParamsForPath(history_dir_));
-  db_ = backend_->db_.get();
+  return in_mem_backend_ != nullptr;
 }
 
 void HistoryBackendDBBaseTest::CreateDBVersion(int version) {
@@ -113,11 +104,33 @@ void HistoryBackendDBBaseTest::CreateDBVersion(int version) {
       ExecuteSQLScript(data_path, history_dir_.Append(kHistoryFilename)));
 }
 
+int HistoryBackendDBBaseTest::GetDatabaseVersion() const {
+  sql::Database db(sql::test::kTestTag);
+  CHECK(db.Open(history_dir_.Append(kHistoryFilename)));
+  return sql::InitializedMetaTable(db).GetVersionNumber();
+}
+
+bool HistoryBackendDBBaseTest::SetDatabaseVersion(int version) const {
+  sql::Database db(sql::test::kTestTag);
+  CHECK(db.Open(history_dir_.Append(kHistoryFilename)));
+  return sql::InitializedMetaTable(db).SetVersionNumber(version);
+}
+
 void HistoryBackendDBBaseTest::DeleteBackend() {
   if (backend_) {
+    // The backend is ref-counted and won't be deleted right away if a database
+    // error queued a `KillHistoryDatabase` task (which holds a reference on the
+    // backend). Thus, releasing the backend pointer isn't enough here, we need
+    // to explicitly wait for the object to be deleted.
+    base::RunLoop loop;
+    backend_->SetOnBackendDestroyTask(
+        base::SingleThreadTaskRunner::GetCurrentDefault(), loop.QuitClosure());
+
     backend_->Closing();
     db_ = nullptr;
     backend_ = nullptr;
+
+    loop.Run();
   }
 }
 

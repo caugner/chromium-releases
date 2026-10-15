@@ -47,7 +47,6 @@ constexpr std::string_view kGoogleSessionTerminationHeader =
 constexpr std::string_view kGoogleSessionTerminationSessionIdKey = "session_id";
 
 BASE_FEATURE(kUseDeviceBoundSessionsStorageMaskForDeletion,
-             "UseDeviceBoundSessionsStorageMaskForDeletion",
              base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Determines the precedence order of
@@ -170,7 +169,6 @@ bool IsSessionInitializationEnabled(const PrefService* profile_prefs,
 }  // namespace
 
 BASE_FEATURE(kEnableBoundSessionCredentialsWsbetaBypass,
-             "EnableBoundSessionCredentialsWsbetaBypass",
 #if BUILDFLAG(IS_WIN)
              base::FEATURE_ENABLED_BY_DEFAULT
 #else
@@ -179,7 +177,6 @@ BASE_FEATURE(kEnableBoundSessionCredentialsWsbetaBypass,
 );
 
 BASE_FEATURE(kEnableBoundSessionCredentialsContinuity,
-             "EnableBoundSessionCredentialsContinuity",
 #if BUILDFLAG(IS_WIN)
              base::FEATURE_ENABLED_BY_DEFAULT
 #else

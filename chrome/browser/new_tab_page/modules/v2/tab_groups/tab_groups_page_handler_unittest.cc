@@ -123,7 +123,7 @@ class MockTabGroupSyncService : public TabGroupSyncService {
   MOCK_METHOD(std::vector<LocalTabGroupID>, GetDeletedGroupIds, (), (const));
   MOCK_METHOD(std::optional<std::u16string>,
               GetTitleForPreviouslyExistingSharedTabGroup,
-              (const CollaborationId&),
+              (const syncer::CollaborationId&),
               (const));
 
   MOCK_METHOD(std::optional<LocalTabGroupID>,
@@ -207,7 +207,7 @@ class MockDeviceInfoTracker : public syncer::DeviceInfoTracker {
               (const));
   MOCK_METHOD(void, AddObserver, (Observer * observer));
   MOCK_METHOD(void, RemoveObserver, (Observer * observer));
-  MOCK_METHOD((std::map<syncer::DeviceInfo::FormFactor, int>),
+  MOCK_METHOD((absl::flat_hash_map<syncer::DeviceInfo::FormFactor, int>),
               CountActiveDevicesByType,
               (),
               (const));
@@ -325,7 +325,7 @@ class TabGroupsPageHandlerTest : public ChromeRenderViewHostTestHarness {
     tab_groups::SavedTabGroup group1(u"Third Group",
                                      tab_groups::TabGroupColorId::kGrey,
                                      std::move(tabs1), 0);
-    group1.SetCollaborationId(tab_groups::CollaborationId("collaboration_id"));
+    group1.SetCollaborationId(syncer::CollaborationId("collaboration_id"));
     groups.emplace_back(group1);
     groups.back().SetUpdateTime(base::Time::Now() -
                                 base::Days(8));  // Used 1 week ago
@@ -338,7 +338,7 @@ class TabGroupsPageHandlerTest : public ChromeRenderViewHostTestHarness {
     tab_groups::SavedTabGroup group2(u"Second Group",
                                      tab_groups::TabGroupColorId::kGreen,
                                      std::move(tabs2), 1);
-    group2.SetCollaborationId(tab_groups::CollaborationId("collaboration_id"));
+    group2.SetCollaborationId(syncer::CollaborationId("collaboration_id"));
     groups.emplace_back(group2);
     groups.back().SetUpdateTime(base::Time::Now() -
                                 base::Hours(25));  // Used 1 day ago
@@ -393,7 +393,7 @@ class TabGroupsPageHandlerTest : public ChromeRenderViewHostTestHarness {
         /*sharing_info=*/std::nullopt, /*paask_info=*/std::nullopt,
         "fcm_registration_token", /*interested_data_types=*/
         Difference(syncer::ProtocolTypes(), syncer::CommitOnlyTypes()),
-        /*floating_workspace_last_signin_timestamp=*/std::nullopt);
+        /*auto_sign_out_last_signin_timestamp=*/std::nullopt);
   }
 
   tab_groups::MockTabGroupSyncService* service() { return mock_service_; }

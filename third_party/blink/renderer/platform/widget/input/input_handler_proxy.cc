@@ -54,6 +54,10 @@ using ScrollThread = cc::InputHandler::ScrollThread;
 
 namespace blink {
 namespace {
+// TODO(crbug.com/355578906): Assume 20px buffer for now. The main thread
+// counterpart is AdjustPointerEvent (see kStylusWritableAdjustmentSizeDip). The
+// buffer math on the main and cc thread(s) need to match.
+constexpr unsigned int kStylusWritingHitTestRadius = 20;
 
 using ::perfetto::protos::pbzero::ChromeLatencyInfo2;
 using ::perfetto::protos::pbzero::TrackEvent;
@@ -153,12 +157,14 @@ cc::SnapFlingController::GestureScrollType GestureScrollEventType(
 }
 
 cc::SnapFlingController::GestureScrollUpdateInfo GetGestureScrollUpdateInfo(
-    const WebGestureEvent& event) {
+    const WebGestureEvent& event,
+    bool is_overscroll) {
   cc::SnapFlingController::GestureScrollUpdateInfo info;
   info.delta = gfx::Vector2dF(-event.data.scroll_update.delta_x,
                               -event.data.scroll_update.delta_y);
   info.is_in_inertial_phase = event.data.scroll_update.inertial_phase ==
                               WebGestureEvent::InertialPhaseState::kMomentum;
+  info.is_overscroll = is_overscroll;
   info.event_time = event.TimeStamp();
   return info;
 }
@@ -236,7 +242,9 @@ bool ShouldNotDispatchLateInputEvent(
   // There is just potentially increased latency for the remainder of the
   // scroll.
   if (mode != cc::InputHandlerClient::ScrollEventDispatchMode::
-                  kDispatchScrollEventsUntilDeadline) {
+                  kDispatchScrollEventsUntilDeadline &&
+      mode != cc::InputHandlerClient::ScrollEventDispatchMode::
+                  kUseScrollPredictorForDeadline) {
     return false;
   }
   auto frame_time_delta = tick_clock->NowTicks() - args.frame_time;
@@ -273,11 +281,8 @@ InputHandlerProxy::InputHandlerProxy(cc::InputHandler& input_handler,
       tick_clock_(base::DefaultTickClock::GetInstance()),
       snap_fling_controller_(std::make_unique<cc::SnapFlingController>(this)),
       cursor_control_handler_(std::make_unique<CursorControlHandler>()),
-      update_scroll_predictor_(
-          base::FeatureList::IsEnabled(
-              input::features::kUpdateScrollPredictorInputMapping) &&
-          base::FeatureList::IsEnabled(
-              features::kRefactorCompositorThreadEventQueue)) {
+      update_scroll_predictor_(base::FeatureList::IsEnabled(
+          input::features::kUpdateScrollPredictorInputMapping)) {
   DCHECK(client);
   input_handler_->BindToClient(this);
 
@@ -644,12 +649,9 @@ bool InputHandlerProxy::HasQueuedEventsReadyForDispatch(
     return false;
   }
 
-  if (base::FeatureList::IsEnabled(
-          features::kRefactorCompositorThreadEventQueue)) {
-    // Don't dispatch events that are for a future frame.
-    if (compositor_event_queue_->PeekTimestamp() > sample_time) {
-      return false;
-    }
+  // Don't dispatch events that are for a future frame.
+  if (compositor_event_queue_->PeekTimestamp() > sample_time) {
+    return false;
   }
 
   return true;
@@ -659,10 +661,7 @@ void InputHandlerProxy::DispatchQueuedInputEvents(bool frame_aligned) {
   //  Coalesce all events in the queue before dispatching.
   auto sample_time = base::TimeTicks::Max();
 
-  if (base::FeatureList::IsEnabled(
-          features::kRefactorCompositorThreadEventQueue)) {
-    compositor_event_queue_->CoalesceEvents(sample_time);
-  }
+  compositor_event_queue_->CoalesceEvents(sample_time);
   while (HasQueuedEventsReadyForDispatch(frame_aligned, sample_time)) {
     DispatchSingleInputEvent(compositor_event_queue_->Pop());
   }
@@ -858,6 +857,12 @@ InputHandlerProxy::RouteToTypeSpecificHandler(
           event_with_callback->latency_info().trace_id());
 
     case WebInputEvent::Type::kGestureScrollEnd:
+      if (scoped_event_monitor) {
+        // Always save scroll end metrics to ensure
+        // `ScrollJankDroppedFrameReporter` emits per-scroll metrics at the end
+        // of a scroll.
+        scoped_event_monitor->SetSaveMetrics();
+      }
       return HandleGestureScrollEnd(static_cast<const WebGestureEvent&>(event));
 
     case WebInputEvent::Type::kGesturePinchBegin: {
@@ -1235,8 +1240,11 @@ InputHandlerProxy::HandleGestureScrollUpdate(
       "input", "DeltaUnits", TRACE_EVENT_SCOPE_THREAD, "unit",
       static_cast<int>(gesture_event.data.scroll_update.delta_units));
 
+  bool is_overscroll =
+      (elastic_overscroll_controller_ &&
+       !elastic_overscroll_controller_->StretchAmount().IsZero());
   if (snap_fling_controller_->HandleGestureScrollUpdate(
-          GetGestureScrollUpdateInfo(gesture_event))) {
+          GetGestureScrollUpdateInfo(gesture_event, is_overscroll))) {
     handling_gesture_on_impl_thread_ = false;
     return DROP_EVENT;
   }
@@ -1329,6 +1337,16 @@ InputHandlerProxy::EventDisposition InputHandlerProxy::HitTestTouchEvent(
                static_cast<bool>(allowed_touch_action));
   *is_touching_scrolling_layer = false;
   EventDisposition result = DROP_EVENT;
+
+  // Note that the radius is mostly relevant in stylus handwriting scenarios.
+  // For actions like swipe, we use the center point of the touch and ignore
+  // nearby scrollers.
+  const unsigned int hit_test_radius =
+      (touch_event.touches_length == 1 &&
+       (touch_event.touches[0].pointer_type ==
+        WebPointerProperties::PointerType::kPen))
+          ? kStylusWritingHitTestRadius
+          : 0;
   for (size_t i = 0; i < touch_event.touches_length; ++i) {
     if (touch_event.touch_start_or_first_touch_move)
       DCHECK(allowed_touch_action);
@@ -1341,11 +1359,18 @@ InputHandlerProxy::EventDisposition InputHandlerProxy::HitTestTouchEvent(
     }
 
     cc::TouchAction touch_action = cc::TouchAction::kAuto;
+    const gfx::Point point(touch_event.touches[i].PositionInWidget().x(),
+                           touch_event.touches[i].PositionInWidget().y());
+    // TODO(crbug.com/355578906): This is just some rough math for now. The main
+    // thread counterpart is AdjustPointerEvent. The buffer math on the main and
+    // cc thread(s) need to match.
+    const gfx::Rect viewport_touch_rect(
+        point.x() - hit_test_radius, point.y() - hit_test_radius,
+        std::max(unsigned(1), hit_test_radius * 2),
+        std::max(unsigned(1), hit_test_radius * 2));
     cc::InputHandler::TouchStartOrMoveEventListenerType event_listener_type =
         input_handler_->EventListenerTypeForTouchStartOrMoveAt(
-            gfx::Point(touch_event.touches[i].PositionInWidget().x(),
-                       touch_event.touches[i].PositionInWidget().y()),
-            &touch_action);
+            viewport_touch_rect, &touch_action);
     if (allowed_touch_action && touch_action != cc::TouchAction::kAuto) {
       TRACE_EVENT_INSTANT1("input", "Adding TouchAction",
                            TRACE_EVENT_SCOPE_THREAD, "TouchAction",
@@ -1615,12 +1640,28 @@ void InputHandlerProxy::UpdateRootLayerStateForSynchronousInputHandler(
 
 void InputHandlerProxy::DeliverInputForBeginFrame(
     const viz::BeginFrameArgs& args) {
+  if (scroll_event_dispatch_mode_ ==
+      cc::InputHandlerClient::ScrollEventDispatchMode::
+          kUseScrollPredictorForDeadline) {
+    deadline_timer_.Stop();
+
+    // Assume that the scheduler might delay the task execution by ~25%.
+    const float slack_coefficient = 0.25;
+    auto deadline = args.frame_time + args.interval * scroll_deadline_ratio_ *
+                                          (1 - slack_coefficient);
+
+    deadline_timer_.Start(
+        FROM_HERE, deadline,
+        base::BindOnce(&InputHandlerProxy::DeliverInputForDeadline,
+                       base::Unretained(this)),
+        base::subtle::DelayPolicy::kPrecise);
+  }
   current_begin_frame_args_ = args;
   enqueue_scroll_events_ = !compositor_event_queue_->empty();
   // TODO(jonross): This occurs for more than just `BeginFrameArgs::MISSED`.
   // We likely need to cap the number of consecutive times duing which this
-  // occurs. As we could have a slow device that just consistently starts frame
-  // production after the deadline.
+  // occurs. As we could have a slow device that just consistently starts
+  // frame production after the deadline.
   if (enqueue_scroll_events_ &&
       args.type == viz::BeginFrameArgs::BeginFrameArgsType::MISSED &&
       ShouldNotDispatchLateInputEvent(scroll_event_dispatch_mode_,
@@ -1630,13 +1671,15 @@ void InputHandlerProxy::DeliverInputForBeginFrame(
     return;
   }
 
-  if (!scroll_predictor_)
+  if (!scroll_predictor_) {
     DispatchQueuedInputEvents(true /* frame_aligned */);
+  }
 
-  base::TimeTicks sample_time = update_scroll_predictor_
-                                    ? args.frame_time + ui::kResampleLatency
-                                    : base::TimeTicks::Max();
-
+  base::TimeTicks sample_time = base::TimeTicks::Max();
+  if (update_scroll_predictor_ && scroll_predictor_) {
+    base::TimeDelta latency = scroll_predictor_->ResampleLatency(args.interval);
+    sample_time = args.frame_time + latency;
+  }
   // Determine if we should attempt to generate a synthetic scroll event. This
   // is done in two main scenarios:
   // 1. The queue is empty and kUseScrollPredictorForEmptyQueue mode is enabled.
@@ -1699,12 +1742,9 @@ void InputHandlerProxy::GenerateSyntheticScrollPredictionFromFutureEvent(
 void InputHandlerProxy::ProcessQueuedEventsUpToSampleTime(
     const viz::BeginFrameArgs& args,
     base::TimeTicks sample_time) {
-  if (base::FeatureList::IsEnabled(
-          features::kRefactorCompositorThreadEventQueue)) {
-    // Coalesce scroll and pinch events in the |compositor_event_queue_| till
-    // sample_time.
-    compositor_event_queue_->CoalesceEvents(sample_time);
-  }
+  // Coalesce scroll and pinch events in the |compositor_event_queue_| till
+  // sample_time.
+  compositor_event_queue_->CoalesceEvents(sample_time);
 
   while (HasQueuedEventsReadyForDispatch(true /*frame_aligned*/, sample_time)) {
     auto event_with_callback = compositor_event_queue_->Pop();
@@ -1729,7 +1769,15 @@ void InputHandlerProxy::DeliverInputForHighLatencyMode() {
 }
 
 void InputHandlerProxy::DeliverInputForDeadline() {
-  if (scroll_event_dispatch_mode_ !=
+  if (last_deadline_call_for_frame_id_ == current_begin_frame_args_.frame_id) {
+    return;
+  }
+  last_deadline_call_for_frame_id_ = current_begin_frame_args_.frame_id;
+
+  if (ShouldNotDispatchLateInputEvent(scroll_event_dispatch_mode_,
+                                      scroll_deadline_ratio_,
+                                      current_begin_frame_args_, tick_clock_) ||
+      scroll_event_dispatch_mode_ !=
           cc::InputHandlerClient::ScrollEventDispatchMode::
               kUseScrollPredictorForDeadline ||
       enqueue_scroll_events_) {
@@ -1747,8 +1795,7 @@ void InputHandlerProxy::DidFinishImplFrame() {
 }
 
 bool InputHandlerProxy::HasQueuedInput() const {
-  return HasQueuedEventsReadyForDispatch(/*frame_aligned=*/true,
-                                         base::TimeTicks::Max());
+  return HasQueuedEventsReadyForDispatch(/*frame_aligned=*/true);
 }
 
 void InputHandlerProxy::SetScrollEventDispatchMode(
@@ -1983,8 +2030,7 @@ void InputHandlerProxy::SetDeferBeginMainFrame(
 void InputHandlerProxy::RequestCallbackAfterEventQueueFlushed(
     base::OnceClosure callback) {
   CHECK(queue_flushed_callback_.is_null());
-  if (HasQueuedEventsReadyForDispatch(
-          /*frame_aligned*/ true, /* sample_time */ base::TimeTicks::Max())) {
+  if (HasQueuedEventsReadyForDispatch(/*frame_aligned*/ true)) {
     queue_flushed_callback_ = std::move(callback);
   } else {
     std::move(callback).Run();

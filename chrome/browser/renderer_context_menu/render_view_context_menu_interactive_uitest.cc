@@ -12,6 +12,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/bind.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
@@ -22,6 +23,7 @@
 #include "chrome/browser/renderer_context_menu/render_view_context_menu.h"
 #include "chrome/browser/renderer_context_menu/render_view_context_menu_browsertest_util.h"
 #include "chrome/browser/renderer_context_menu/render_view_context_menu_test_util.h"
+#include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/startup/startup_types.h"
 #include "chrome/browser/ui/tab_contents/chrome_web_contents_view_delegate.h"
@@ -40,6 +42,7 @@
 #include "components/custom_handlers/protocol_handler_registry.h"
 #include "components/privacy_sandbox/privacy_sandbox_attestations/privacy_sandbox_attestations.h"
 #include "components/privacy_sandbox/privacy_sandbox_attestations/scoped_privacy_sandbox_attestations.h"
+#include "components/signin/public/identity_manager/identity_test_utils.h"
 #include "content/public/browser/context_menu_params.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
@@ -65,6 +68,11 @@
 #include "url/gurl.h"
 #include "url/origin.h"
 
+#if BUILDFLAG(ENABLE_GLIC)
+#include "chrome/browser/glic/host/glic_features.mojom.h"
+#include "chrome/browser/glic/test_support/interactive_glic_test.h"
+#endif  // BUILDFLAG(ENABLE_GLIC)
+
 using testing::AllOf;
 using testing::AnyOfArray;
 using testing::Contains;
@@ -74,6 +82,10 @@ using testing::Le;
 using testing::Not;
 
 namespace {
+
+#if BUILDFLAG(ENABLE_GLIC)
+constexpr char kDocumentWithImage[] = "/test_visual.html";
+#endif  // BUILDFLAG(ENABLE_GLIC)
 
 class ContextMenuUiTest : public InteractiveBrowserTest {
  public:
@@ -1147,5 +1159,122 @@ IN_PROC_BROWSER_TEST_F(ContextMenuFencedFrameTestNoTestingConfig,
   response.WaitForRequest();
   EXPECT_EQ(response.http_request()->content, kBeaconMessage);
 }
+
+#if BUILDFLAG(ENABLE_GLIC)
+
+// TODO(b:448604727): State observation is currently unsupported with multi-
+// instance, so we will poll.
+DEFINE_LOCAL_STATE_IDENTIFIER_VALUE(
+    ui::test::PollingStateObserver<glic::mojom::WebUiState>,
+    kPollingWebUiState);
+
+class GlicInteractiveContextMenuTest
+    : public glic::test::InteractiveGlicTest,
+      public ::testing::WithParamInterface<bool> {
+ public:
+  GlicInteractiveContextMenuTest() {
+    if (UseMultiInstance()) {
+      scoped_feature_list_.InitWithFeatures(
+          /*enabled_features=*/{features::kGlic, features::kTabstripComboButton,
+                                features::kGlicShareImage,
+                                features::kGlicMultiInstance,
+                                glic::mojom::features::kGlicMultiTab},
+          /*disabled_features=*/{features::kGlicWarming,
+                                 features::kGlicFreWarming});
+    } else {
+      scoped_feature_list_.InitWithFeatures(
+          /*enabled_features=*/{features::kGlic, features::kTabstripComboButton,
+                                features::kGlicShareImage},
+          /*disabled_features=*/{features::kGlicWarming,
+                                 features::kGlicFreWarming});
+    }
+  }
+  ~GlicInteractiveContextMenuTest() override = default;
+
+  void SetUpOnMainThread() override {
+    glic::test::InteractiveGlicTest::SetUpOnMainThread();
+    ASSERT_TRUE(embedded_https_test_server().Start());
+    host_resolver()->AddRule("*", "127.0.0.1");
+    signin::IdentityManager* identity_manager =
+        IdentityManagerFactory::GetForProfile(browser()->profile());
+    signin::MakePrimaryAccountAvailable(identity_manager, "foo@google.com",
+                                        signin::ConsentLevel::kSignin);
+    signin::SetRefreshTokenForPrimaryAccount(identity_manager);
+  }
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(::switches::kGlicDev);
+  }
+
+  bool UseMultiInstance() const { return GetParam(); }
+
+  auto PollForAndInstrumentGlic() {
+    return Steps(
+        UninstrumentWebContents(glic::test::kGlicContentsElementId, false),
+        UninstrumentWebContents(glic::test::kGlicHostElementId, false),
+        InAnyContext(
+            Steps(InstrumentNonTabWebView(glic::test::kGlicHostElementId,
+                                          kGlicViewElementId),
+                  InstrumentInnerWebContents(glic::test::kGlicContentsElementId,
+                                             glic::test::kGlicHostElementId, 0),
+                  WaitForWebContentsReady(glic::test::kGlicContentsElementId))),
+        PollState(
+            kPollingWebUiState,
+            [this]() -> glic::mojom::WebUiState {
+              if (glic::GlicInstance* instance =
+                      glic_service()->GetInstanceForActiveTab(browser())) {
+                return instance->host().GetPrimaryWebUiState();
+              }
+              return glic::mojom::WebUiState::kUnavailable;
+            }),
+        WaitForState(kPollingWebUiState, glic::mojom::WebUiState::kReady));
+  }
+
+  auto CheckHistograms() {
+    return Do([this]() {
+      histogram_tester_.ExpectUniqueSample(
+          "Glic.TabContext.ShareImageResult",
+          static_cast<int>(glic::ShareImageResult::kSuccess), 1);
+      EXPECT_THAT(
+          histogram_tester_.GetAllSamples("Glic.TabContext.ShareImageDuration"),
+          testing::SizeIs(1));
+    });
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+  base::HistogramTester histogram_tester_;
+};
+
+IN_PROC_BROWSER_TEST_P(GlicInteractiveContextMenuTest, GlicShareImage) {
+  DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kActiveTab);
+
+  const GURL url = embedded_test_server()->GetURL(kDocumentWithImage);
+  const DeepQuery kPathToImg{
+      "img",
+  };
+  RunTestSequence(
+      InstrumentTab(kActiveTab), NavigateWebContents(kActiveTab, url),
+      MoveMouseTo(kActiveTab, kPathToImg),
+      MayInvolveNativeContextMenu(
+          ClickMouse(ui_controls::RIGHT),
+          SelectMenuItem(RenderViewContextMenu::kGlicShareImageMenuItem)),
+      PollForAndInstrumentGlic(),
+      WaitForJsResult(
+          glic::test::kGlicContentsElementId,
+          "() => { "
+          "  let c = document.querySelector('#additionalContextResult');"
+          "  return !!c && c.children.length === 4 && "
+          "      c.children[1].innerText.startsWith('MIME Type: image/png');"
+          "}"),
+      CheckHistograms());
+}
+
+INSTANTIATE_TEST_SUITE_P(MultiInstance,
+                         GlicInteractiveContextMenuTest,
+                         // This parameter toggles multi-instance mode.
+                         testing::Bool());
+
+#endif  // BUILDFLAG(ENABLE_GLIC)
 
 }  // namespace

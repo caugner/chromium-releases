@@ -8,6 +8,7 @@
 
 #include "base/functional/bind.h"
 #include "base/functional/callback_forward.h"
+#include "base/functional/callback_helpers.h"
 #include "base/strings/string_util.h"
 #include "chrome/browser/profiles/keep_alive/profile_keep_alive_types.h"
 #include "chrome/browser/profiles/profile.h"
@@ -32,8 +33,10 @@
 #include "components/signin/public/identity_manager/account_info.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/tribool.h"
+#include "components/sync/base/features.h"
 #include "content/public/browser/context_menu_params.h"
 #include "content/public/browser/render_frame_host.h"
+#include "net/base/url_util.h"
 #include "ui/base/window_open_disposition.h"
 
 namespace {
@@ -59,6 +62,20 @@ GURL GetHistorySyncOptinURL() {
       GURL(chrome::kChromeUIHistorySyncOptinURL),
       HistorySyncOptinLaunchContext::kWindow);
 }
+
+void OnManagementUserChoice(signin::SigninChoiceCallback callback,
+                            signin::SigninChoice choice) {
+  std::move(callback).Run(choice);
+  if (choice != signin::SIGNIN_CHOICE_CANCEL) {
+    return;
+  }
+  // Depending on where the flow started:
+  // - from main view: returns to the main view,
+  // - from FRE: opens a signed out browser,
+  // - from profile menu: closes the picker.
+  ProfilePicker::CancelSignedInFlow();
+}
+
 }  //  namespace
 
 ProfilePickerPostSignInAdapter::ProfilePickerPostSignInAdapter(
@@ -107,17 +124,22 @@ void ProfilePickerPostSignInAdapter::Init(
       << "A profile with a valid account must be passed in.";
   email_ = account_info.email;
 
-  if (base::FeatureList::IsEnabled(switches::kEnableHistorySyncOptin)) {
-    history_sync_optin_helper_ = std::make_unique<HistorySyncOptinHelper>(
-        identity_manager, profile_, account_info, /*delegate=*/this);
+  on_post_signin_in_finished_callback_ =
+      HistorySyncOptinHelper::FlowCompletedCallback(
+          base::IgnoreArgs<HistorySyncOptinHelper::ScreenChoiceResult>(
+              base::BindOnce(
+                  &ProfilePickerPostSignInAdapter::FinishAndOpenBrowser,
+                  weak_ptr_factory_.GetWeakPtr(), PostHostClearedCallback())));
 
+  if (base::FeatureList::IsEnabled(
+          syncer::kReplaceSyncPromosWithSignInPromos)) {
+    history_sync_optin_helper_ = HistorySyncOptinHelper::Create(
+        identity_manager, profile_, account_info, /*delegate=*/this,
+        HistorySyncOptinHelper::LaunchContext::kInProfilePicker,
+        signin_access_point_);
     history_sync_optin_helper_->StartHistorySyncOptinFlow();
     return;
   }
-
-  base::OnceClosure sync_consent_completed_closure =
-      base::BindOnce(&ProfilePickerPostSignInAdapter::FinishAndOpenBrowser,
-                     weak_ptr_factory_.GetWeakPtr(), PostHostClearedCallback());
 
   // TurnSyncOnHelper deletes itself once done.
   new TurnSyncOnHelper(
@@ -127,12 +149,28 @@ void ProfilePickerPostSignInAdapter::Init(
       TurnSyncOnHelper::SigninAbortedMode::KEEP_ACCOUNT,
       std::make_unique<ProfilePickerTurnSyncOnDelegate>(
           weak_ptr_factory_.GetWeakPtr(), profile_),
-      std::move(sync_consent_completed_closure));
+      base::BindOnce(&ProfilePickerPostSignInAdapter::FinishAndOpenBrowser,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     PostHostClearedCallback()));
 }
 
-void ProfilePickerPostSignInAdapter::ShowHistorySyncOptinScreen() {
+void ProfilePickerPostSignInAdapter::ShowHistorySyncOptinScreen(
+    Profile*,
+    HistorySyncOptinHelper::FlowCompletedCallback
+        history_optin_completed_callback) {
+  CHECK(history_optin_completed_callback.value());
+  CHECK(on_post_signin_in_finished_callback_.value());
+  on_post_signin_in_finished_callback_ =
+      CombineCallbacks<HistorySyncOptinHelper::FlowCompletedCallback,
+                       HistorySyncOptinHelper::ScreenChoiceResult>(
+          std::move(on_post_signin_in_finished_callback_),
+          std::move(history_optin_completed_callback));
+
   // Finishes the sign-in process by moving to the history sync optin screen.
   CHECK(IsInitialized());
+  if (!step_switch_callback_->is_null()) {
+    std::move(step_switch_callback_.value()).Run(true);
+  }
   host_->ShowScreen(
       contents(), GetHistorySyncOptinURL(),
       /*navigation_finished_closure=*/
@@ -141,6 +179,20 @@ void ProfilePickerPostSignInAdapter::ShowHistorySyncOptinScreen() {
           // Unretained is enough as the callback is
           // called by the owner of this instance.
           base::Unretained(this)));
+}
+
+void ProfilePickerPostSignInAdapter::ShowAccountManagementScreen(
+    signin::SigninChoiceCallback on_account_management_screen_closed) {
+  SwitchToManagedUserProfileNotice(
+      ManagedUserProfileNoticeUI::ScreenType::kProfilePicker,
+      base::BindOnce(&OnManagementUserChoice,
+                     std::move(on_account_management_screen_closed)));
+}
+
+void ProfilePickerPostSignInAdapter::FinishFlowWithoutHistorySyncOptin() {
+  CHECK(!on_post_signin_in_finished_callback_.value().is_null());
+  std::move(on_post_signin_in_finished_callback_.value())
+      .Run(HistorySyncOptinHelper::ScreenChoiceResult::kScreenSkipped);
 }
 
 void ProfilePickerPostSignInAdapter::Cancel() {}
@@ -201,10 +253,13 @@ void ProfilePickerPostSignInAdapter::SwitchToProfileSwitch(
   // The sign-in flow is finished, no profile window should be shown in the end.
   Cancel();
 
-  switch_profile_path_ = profile_path;
-  host_->ShowScreenInPickerContents(
-      GURL(chrome::kChromeUIProfilePickerUrl).Resolve("profile-switch"),
-      base::OnceClosure());
+  GURL profile_switch_url(chrome::kChromeUIProfilePickerUrl);
+  profile_switch_url = profile_switch_url.Resolve("profile-switch");
+  // Appends the `profile_path` to be retrieved in the web page.
+  profile_switch_url = net::AppendQueryParameter(
+      profile_switch_url, "profileSwitchPath", base::ToString(profile_path));
+
+  host_->ShowScreenInPickerContents(profile_switch_url, base::OnceClosure());
 }
 
 void ProfilePickerPostSignInAdapter::ResetHostAndShowErrorDialog(
@@ -269,12 +324,9 @@ void ProfilePickerPostSignInAdapter::SwitchToHistorySyncOptinFinished() {
   // Initialize the WebUI page once we know it's committed.
   HistorySyncOptinUI* history_sync_optin_ui =
       static_cast<HistorySyncOptinUI*>(contents()->GetWebUI()->GetController());
-
+  CHECK(!on_post_signin_in_finished_callback_->is_null());
   history_sync_optin_ui->Initialize(
-      /*browser=*/nullptr,
-      base::BindOnce(&ProfilePickerPostSignInAdapter::FinishAndOpenBrowser,
-                     weak_ptr_factory_.GetWeakPtr(),
-                     PostHostClearedCallback()));
+      /*browser=*/nullptr, std::move(on_post_signin_in_finished_callback_));
 }
 
 void ProfilePickerPostSignInAdapter::SwitchToManagedUserProfileNoticeFinished(

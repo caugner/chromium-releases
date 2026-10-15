@@ -76,7 +76,7 @@
 #include "ash/wm/splitview/split_view_utils.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller_test_api.h"
-#include "ash/wm/test/test_non_client_frame_view_ash.h"
+#include "ash/wm/test/test_frame_view_ash.h"
 #include "ash/wm/toplevel_window_event_handler.h"
 #include "ash/wm/window_cycle/window_cycle_controller.h"
 #include "ash/wm/window_cycle/window_cycle_item_view.h"
@@ -239,7 +239,7 @@ void ActivateWindowInOverviewGroupItem(
 
 // Gets a point to drag `window` by the header.
 gfx::Point GetDragPoint(aura::Window* window) {
-  auto* frame = NonClientFrameViewAsh::Get(window);
+  auto* frame = FrameViewAsh::Get(window);
   views::test::RunScheduledLayout(frame);
   return frame->GetHeaderView()->GetBoundsInScreen().CenterPoint();
 }
@@ -356,8 +356,8 @@ class SnapGroupTestBase : public OverviewTestBase {
     std::unique_ptr<aura::Window> window =
         CreateAppWindow(gfx::Rect(800, 600), chromeos::AppType::SYSTEM_APP,
                         kShellWindowId_Invalid, new TestWidgetDelegateAsh);
-    auto* custom_frame = static_cast<TestNonClientFrameViewAsh*>(
-        NonClientFrameViewAsh::Get(window.get()));
+    auto* custom_frame =
+        static_cast<TestFrameViewAsh*>(FrameViewAsh::Get(window.get()));
     custom_frame->SetMinimumSize(min_size);
     return window;
   }
@@ -3573,7 +3573,7 @@ TEST_F(SnapGroupTest, NoCrashWhenReSnappingSecondaryToPrimaryWithTransient) {
   // Create a bubble widget that's anchored to `w1`.
   auto bubble_delegate1 = std::make_unique<views::BubbleDialogDelegateView>(
       views::BubbleDialogDelegateView::CreatePassKey(),
-      NonClientFrameViewAsh::Get(w1.get()), views::BubbleBorder::TOP_RIGHT);
+      FrameViewAsh::Get(w1.get()), views::BubbleBorder::TOP_RIGHT);
   // The line below is essential to make sure that the bubble doesn't get closed
   // when entering overview.
   bubble_delegate1->set_close_on_deactivate(false);
@@ -3621,6 +3621,37 @@ TEST_F(SnapGroupTest, Shutdown) {
   // Let shutdown process delete windows.
   ASSERT_TRUE(w1.release());
   ASSERT_TRUE(w2.release());
+}
+
+// Regression test for crbug.com/452678875.
+// Tests that closing one window in a snap group and immediately creating a new
+// window does not cause a crash. This scenario can trigger a race condition
+// where the divider is being torn down and recreated immediately, while the
+// window that is being destroyed is still observed, leading to a CHECK failure
+// in `SplitViewDivider::CreateDividerWidget`.
+TEST_F(SnapGroupTest, NoCrashDuringSnapGroupShutdown) {
+  std::unique_ptr<aura::Window> w1 = CreateAppWindow();
+  std::unique_ptr<aura::Window> w2 = CreateAppWindow();
+
+  TRACE_CALL(SnapWindowsSideBySide(kGrouped, w1.get(), w2.get()));
+  EXPECT_TRUE(
+      SnapGroupController::Get()->AreWindowsInSnapGroup(w1.get(), w2.get()));
+
+  auto* snap_group =
+      SnapGroupController::Get()->GetSnapGroupForGivenWindow(w1.get());
+  SplitViewDivider* divider = snap_group->snap_group_divider();
+  EXPECT_EQ(2u, divider->observed_windows().size());
+
+  auto* desk_container = desks_util::GetActiveDeskContainerForRoot(
+      Shell::Get()->GetPrimaryRootWindow());
+  EXPECT_THAT(desk_container->children(),
+              ElementsAre(w1.get(), w2.get(), divider->GetDividerWindow()));
+
+  views::Widget::GetWidgetForNativeView(divider->GetDividerWindow())
+      ->CloseNow();
+  wm::ActivateWindow(w1.get());
+  EXPECT_THAT(desk_container->children(), ElementsAre(w2.get(), w1.get()));
+  w1.reset();
 }
 
 // -----------------------------------------------------------------------------

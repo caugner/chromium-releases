@@ -493,7 +493,7 @@ void SetBlockThirdPartyCookies(Profile* profile, bool value) {
                 : content_settings::CookieControlsMode::kOff));
 }
 
-testing::AssertionResult SimulateBtmBounce(Browser* browser,
+testing::AssertionResult SimulateBtmBounce(BrowserWindowInterface* browser,
                                            const GURL& initial_url,
                                            const GURL& bounce_url,
                                            const GURL& final_url) {
