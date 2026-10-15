@@ -42,7 +42,6 @@
 #include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_math.h"
-#include "base/ranges/algorithm.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/trace_event.h"
@@ -268,8 +267,7 @@ static bool CharacterIsValidForGLES(unsigned char c) {
 }
 
 static bool StringIsValidForGLES(const std::string& str) {
-  return str.length() == 0 ||
-         base::ranges::all_of(str, CharacterIsValidForGLES);
+  return str.length() == 0 || std::ranges::all_of(str, CharacterIsValidForGLES);
 }
 
 DisallowedFeatures::DisallowedFeatures() = default;
@@ -3272,6 +3270,13 @@ gpu::ContextResult GLES2DecoderImpl::Initialize(
                     "glClearWorkaroundInit failed";
       return gpu::ContextResult::kFatalFailure;
     }
+  }
+
+  if (feature_info_->context_type() == CONTEXT_TYPE_WEBGL2) {
+    // If WebGL 2, the PRIMITIVE_RESTART_FIXED_INDEX should be always enabled.
+    // See the section <Primitive Restart is Always Enabled> in WebGL 2 spec:
+    // https://www.khronos.org/registry/webgl/specs/latest/2.0/#4.1.4
+    DoEnable(GL_PRIMITIVE_RESTART_FIXED_INDEX);
   }
 
   if (group_->gpu_preferences().enable_gpu_driver_debug_logging &&
