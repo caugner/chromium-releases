@@ -49,6 +49,8 @@ public class EdgeToEdgeUtils {
             "Android.EdgeToEdge.IneligibilityReason";
     private static final String PARAM_SAFE_AREA_CONSTRAINT_SCROLLABLE_WHEN_STACKING =
             "scrollable_when_stacking";
+    private static final String MISSING_NAVBAR_INSETS_HISTOGRAM =
+            "Android.EdgeToEdge.MissingNavbarInsets2";
 
     /** The reason of why the current session is not eligible for edge to edge. */
     @IntDef({
@@ -65,6 +67,32 @@ public class EdgeToEdgeUtils {
         int NAVIGATION_MODE = 2;
         int DEVICE_TYPE = 3;
         int NUM_TYPES = 4;
+    }
+
+
+    /**
+     * The reason of why the navigation bar insets are missing.
+     */
+    // These values are persisted to logs. Entries should not be renumbered and
+    // numeric values should never be reused.
+    @IntDef({
+        MissingNavbarInsetsReason.OTHER,
+        MissingNavbarInsetsReason.IN_MULTI_WINDOW,
+        MissingNavbarInsetsReason.IN_DESKTOP_WINDOW,
+        MissingNavbarInsetsReason.IN_FULLSCREEN,
+        MissingNavbarInsetsReason.ACTIVITY_NOT_VISIBLE,
+        MissingNavbarInsetsReason.SYSTEM_BAR_INSETS_EMPTY,
+        MissingNavbarInsetsReason.NUM_ENTRIES
+    })
+    public @interface MissingNavbarInsetsReason {
+        int OTHER = 0;
+        int IN_MULTI_WINDOW = 1;
+        int IN_DESKTOP_WINDOW = 2;
+        int IN_FULLSCREEN = 3;
+        int ACTIVITY_NOT_VISIBLE = 4;
+        int SYSTEM_BAR_INSETS_EMPTY = 5;
+
+        int NUM_ENTRIES = 5;
     }
 
     /**
@@ -142,7 +170,7 @@ public class EdgeToEdgeUtils {
                 && ChromeFeatureList.getFieldTrialParamByFeatureAsBoolean(
                         ChromeFeatureList.EDGE_TO_EDGE_SAFE_AREA_CONSTRAINT,
                         PARAM_SAFE_AREA_CONSTRAINT_SCROLLABLE_WHEN_STACKING,
-                        false);
+                        true);
     }
 
     /**
@@ -193,6 +221,17 @@ public class EdgeToEdgeUtils {
     }
 
     /**
+     * Record if the current activity is missing the navigation bar.
+     *
+     * @param reason The reason of why the navigation bar is missing.
+     */
+    public static void recordIfMissingNavigationBar(@MissingNavbarInsetsReason int reason) {
+        RecordHistogram.recordEnumeratedHistogram(
+                    MISSING_NAVBAR_INSETS_HISTOGRAM, reason,
+                    MissingNavbarInsetsReason.NUM_ENTRIES);
+    }
+
+    /**
      * @param isPageOptedIntoEdgeToEdge Whether the page has opted into edge-to-edge.
      * @param layoutType The active layout type being shown.
      * @param bottomInset The bottom inset representing the height of the bottom OS navbar.
@@ -230,7 +269,7 @@ public class EdgeToEdgeUtils {
     /**
      * @return whether the page is opted into edge-to-edge based on the given Tab
      */
-    public static boolean isPageOptedIntoEdgeToEdge(Tab tab) {
+    public static boolean isPageOptedIntoEdgeToEdge(@Nullable Tab tab) {
         if (tab == null || tab.isNativePage()) {
             return isNativeTabDrawingToEdge(tab);
         }
@@ -248,7 +287,7 @@ public class EdgeToEdgeUtils {
      *     viewport-fit value.
      */
     static boolean isPageOptedIntoEdgeToEdge(
-            Tab tab, @WebContentsObserver.ViewportFitType int value) {
+            @Nullable Tab tab, @WebContentsObserver.ViewportFitType int value) {
         if (tab == null || tab.isNativePage()) {
             return isNativeTabDrawingToEdge(tab);
         }
@@ -265,7 +304,7 @@ public class EdgeToEdgeUtils {
     }
 
     /** Return whether there's any safe area constraint found for the given tab. */
-    static boolean hasSafeAreaConstraintForTab(Tab tab) {
+    static boolean hasSafeAreaConstraintForTab(@Nullable Tab tab) {
         if (tab == null || !isSafeAreaConstraintEnabled()) return false;
 
         SafeAreaInsetsTracker safeAreaInsetsTracker =
@@ -274,7 +313,7 @@ public class EdgeToEdgeUtils {
     }
 
     /** Whether a native tab will be drawn edge to to edge. */
-    static boolean isNativeTabDrawingToEdge(Tab activeTab) {
+    static boolean isNativeTabDrawingToEdge(@Nullable Tab activeTab) {
         if (!isDrawKeyNativePageToEdgeEnabled()) return false;
 
         // TODO(crbug.com/339025702): Check if we are in tab switcher when activeTab is null.

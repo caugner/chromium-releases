@@ -13,6 +13,7 @@
 #include "base/check.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
+#include "base/i18n/rtl.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_functions.h"
@@ -78,7 +79,7 @@
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/intent_picker_tab_helper.h"
-#include "chrome/browser/ui/lens/lens_overlay_controller.h"
+#include "chrome/browser/ui/lens/lens_search_controller.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/passwords/manage_passwords_ui_controller.h"
 #include "chrome/browser/ui/qrcode_generator/qrcode_generator_bubble_controller.h"
@@ -90,16 +91,20 @@
 #include "chrome/browser/ui/status_bubble.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/tab_dialogs.h"
+#include "chrome/browser/ui/tabs/features.h"
 #include "chrome/browser/ui/tabs/organization/tab_organization_service.h"
 #include "chrome/browser/ui/tabs/organization/tab_organization_service_factory.h"
 #include "chrome/browser/ui/tabs/organization/tab_organization_session.h"
 #include "chrome/browser/ui/tabs/saved_tab_groups/saved_tab_group_utils.h"
+#include "chrome/browser/ui/tabs/split_tab_visual_data.h"
 #include "chrome/browser/ui/tabs/tab_enums.h"
 #include "chrome/browser/ui/tabs/tab_group.h"
 #include "chrome/browser/ui/tabs/tab_group_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_user_gesture_details.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/user_education/browser_user_education_interface.h"
+#include "chrome/browser/ui/views/side_panel/side_panel_entry.h"
+#include "chrome/browser/ui/views/side_panel/side_panel_ui.h"
 #include "chrome/browser/ui/web_applications/app_browser_controller.h"
 #include "chrome/browser/ui/web_applications/web_app_launch_utils.h"
 #include "chrome/browser/ui/web_applications/web_app_tabbed_utils.h"
@@ -1224,6 +1229,17 @@ void MoveTabsToExistingWindow(Browser* source,
   target->window()->Show();
 }
 
+void MoveGroupToExistingWindow(Browser* source,
+                               Browser* target,
+                               tab_groups::TabGroupId group) {
+  CHECK(source->tab_strip_model()->group_model()->ContainsTabGroup(group));
+  std::unique_ptr<DetachedTabGroup> detached_group =
+      source->tab_strip_model()->DetachTabGroupForInsertion(group);
+  target->tab_strip_model()->InsertDetachedTabGroupAt(std::move(detached_group),
+                                                      0);
+  target->window()->Show();
+}
+
 void PinTab(Browser* browser) {
   browser->tab_strip_model()->ExecuteContextMenuCommand(
       browser->tab_strip_model()->active_index(),
@@ -1236,11 +1252,114 @@ void GroupTab(Browser* browser) {
       TabStripModel::ContextMenuCommand::CommandToggleGrouped);
 }
 
+void NewSplitTab(Browser* browser) {
+  TabStripModel* const tab_strip_model = browser->tab_strip_model();
+  const int active_index = tab_strip_model->active_index();
+  tab_strip_model->delegate()->AddTabAt(
+      GURL(chrome::kChromeUISplitViewNewTabPageURL), active_index + 1, true,
+      tab_strip_model->GetTabGroupForTab(active_index));
+  tab_strip_model->AddToNewSplit({active_index},
+                                 split_tabs::SplitTabLayout::kVertical);
+}
+
+void AddNewTabToGroup(Browser* browser) {
+  if (!browser->tab_strip_model()->SupportsTabGroups()) {
+    return;
+  }
+
+  int index = browser->tab_strip_model()->active_index();
+  std::optional<tab_groups::TabGroupId> group_id =
+      browser->tab_strip_model()->GetTabGroupForTab(index);
+  if (!group_id) {
+    return;
+  }
+
+  AddTabAt(browser, GURL(), -1, true, group_id);
+}
+
 void CreateNewTabGroup(Browser* browser) {
   NewTab(browser);
   browser->tab_strip_model()->ExecuteContextMenuCommand(
       browser->tab_strip_model()->active_index(),
       TabStripModel::ContextMenuCommand::CommandAddToNewGroupFromMenuItem);
+}
+
+void CloseTabGroup(Browser* browser) {
+  const int index = browser->tab_strip_model()->active_index();
+  std::optional<tab_groups::TabGroupId> group_id =
+      browser->tab_strip_model()->GetTabGroupForTab(index);
+  if (!group_id) {
+    return;
+  }
+
+  const int num_tabs_in_group = browser->tab_strip_model()
+                                    ->group_model()
+                                    ->GetTabGroup(group_id.value())
+                                    ->tab_count();
+  if (num_tabs_in_group == browser->tab_strip_model()->count()) {
+    // If the group about to be closed has all of the tabs in the browser, add a
+    // new tab outside the group to prevent the browser from closing.
+    browser->tab_strip_model()->delegate()->AddTabAt(GURL(), -1, true);
+  }
+
+  browser->tab_strip_model()->CloseAllTabsInGroup(group_id.value());
+}
+
+void FocusNextTabGroup(Browser* browser) {
+  TabStripModel* tab_strip_model = browser->tab_strip_model();
+  if (!tab_strip_model->SupportsTabGroups()) {
+    return;
+  }
+
+  int current_index = tab_strip_model->active_index();
+  std::optional<tab_groups::TabGroupId> current_group_id =
+      tab_strip_model->GetTabGroupForTab(current_index);
+
+  // Find the next tab group and focus its first tab.
+  int count = tab_strip_model->GetTabCount();
+  for (int i = 1; i < count; ++i) {
+    int new_index = (current_index + i) % count;
+    std::optional<tab_groups::TabGroupId> new_group_id =
+        tab_strip_model->GetTabGroupForTab(new_index);
+    if (new_group_id && new_group_id != current_group_id) {
+      tab_strip_model->ActivateTabAt(
+          new_index, TabStripUserGestureDetails(
+                         TabStripUserGestureDetails::GestureType::kKeyboard));
+      return;
+    }
+  }
+}
+
+void FocusPreviousTabGroup(Browser* browser) {
+  TabStripModel* tab_strip_model = browser->tab_strip_model();
+  if (!tab_strip_model->SupportsTabGroups()) {
+    return;
+  }
+
+  int current_index = tab_strip_model->active_index();
+  std::optional<tab_groups::TabGroupId> current_group_id =
+      tab_strip_model->GetTabGroupForTab(current_index);
+
+  // Find the next tab group and focus its first tab.
+  int count = tab_strip_model->GetTabCount();
+  for (int i = 1; i < count; ++i) {
+    int offset = count - i;
+    int new_index = (current_index + offset) % count;
+    std::optional<tab_groups::TabGroupId> new_group_id =
+        tab_strip_model->GetTabGroupForTab(new_index);
+    if (new_group_id && new_group_id != current_group_id) {
+      std::optional<int> first_tab_of_group =
+          tab_strip_model->group_model()
+              ->GetTabGroup(new_group_id.value())
+              ->GetFirstTab();
+      CHECK(first_tab_of_group);
+      tab_strip_model->ActivateTabAt(
+          first_tab_of_group.value(),
+          TabStripUserGestureDetails(
+              TabStripUserGestureDetails::GestureType::kKeyboard));
+      return;
+    }
+  }
 }
 
 void MuteSite(Browser* browser) {
@@ -1338,15 +1457,6 @@ void BookmarkCurrentTab(Browser* browser) {
     return;
   }
   bool was_bookmarked_by_user = bookmarks::IsBookmarkedByUser(model, url);
-#if !BUILDFLAG(IS_ANDROID)
-  PrefService* prefs = browser->profile()->GetPrefs();
-  if (!prefs->GetBoolean(
-          bookmarks::prefs::kAddedBookmarkSincePowerBookmarksLaunch)) {
-    bookmarks::AddIfNotBookmarked(model, url, title, model->other_node());
-    prefs->SetBoolean(bookmarks::prefs::kAddedBookmarkSincePowerBookmarksLaunch,
-                      true);
-  }
-#endif
   bookmarks::AddIfNotBookmarked(model, url, title);
   bool is_bookmarked_by_user = bookmarks::IsBookmarkedByUser(model, url);
   // Make sure the model actually added a bookmark before showing the star. A
@@ -1362,9 +1472,9 @@ void BookmarkCurrentTab(Browser* browser) {
   }
 }
 
-void BookmarkCurrentTabInFolder(Browser* browser, int64_t folder_id) {
-  BookmarkModel* const model =
-      BookmarkModelFactory::GetForBrowserContext(browser->profile());
+void BookmarkCurrentTabInFolder(Browser* browser,
+                                BookmarkModel* model,
+                                int64_t folder_id) {
   GURL url;
   std::u16string title;
   if (!BookmarkCurrentTabHelper(browser, model, &url, &title)) {
@@ -2234,10 +2344,10 @@ void ExecLensOverlay(Browser* browser) {
       browser->tab_strip_model()->GetActiveWebContents();
   CHECK(web_contents);
 
-  LensOverlayController* const controller =
-      LensOverlayController::GetController(web_contents);
+  LensSearchController* const controller =
+      LensSearchController::FromTabWebContents(web_contents);
   CHECK(controller);
-  controller->ShowUI(lens::LensOverlayInvocationSource::kAppMenu);
+  controller->OpenLensOverlay(lens::LensOverlayInvocationSource::kAppMenu);
   browser->window()->NotifyNewBadgeFeatureUsed(lens::features::kLensOverlay);
 }
 

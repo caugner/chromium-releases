@@ -10,6 +10,7 @@
 #include "media/fuchsia/video/fuchsia_video_decoder.h"
 
 #include <fuchsia/sysmem/cpp/fidl.h>
+#include <inttypes.h>
 #include <lib/zx/eventpair.h>
 #include <vulkan/vulkan.h>
 
@@ -691,16 +692,7 @@ void FuchsiaVideoDecoder::OnStreamProcessorError() {
 }
 
 void FuchsiaVideoDecoder::CallNextDecodeCallback() {
-  if (decode_callbacks_.empty()) {
-    // Besides the potential possibilities of unexpected calling this function
-    // more times than expected, triggering this condition may also mean that we
-    // executed the callback too early and ignored some of the frames.
-    // The root cause is still being investigated, and will be fixed later.
-    // TODO(crbug.com/423634129): Remove this log once the root cause is fixed.
-    LOG(WARNING)
-        << "Called CallNextDecodeCallback more times than expected.";
-    return;
-  }
+  DCHECK(!decode_callbacks_.empty());
   auto cb = std::move(decode_callbacks_.front());
   decode_callbacks_.pop_front();
 

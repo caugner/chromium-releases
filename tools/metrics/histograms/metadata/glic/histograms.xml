@@ -26,10 +26,20 @@ chromium-metrics-reviews@google.com.
     enum="ActInFocusedTabErrorReason" expires_after="2026-01-15">
   <owner>carlosk@chromium.org</owner>
   <owner>harringtond@chromium.org</owner>
-  <owner>chasej@chromium.org</owner>
+  <owner>bokan@chromium.org</owner>
   <summary>
     Recorded whenever the glic web client receives an error reason from the
     browser when attempting to act.
+  </summary>
+</histogram>
+
+<histogram name="Glic.Api.FetchZeroStateSuggestionsLatency" units="ms"
+    expires_after="2026-01-15">
+  <owner>sophiechang@chromium.org</owner>
+  <owner>jeffreycohen@google.com</owner>
+  <summary>
+    Records the latency of fetching zero state suggestions whenever the glic web
+    client requests zero state suggestions from Chrome.
   </summary>
 </histogram>
 
@@ -58,12 +68,14 @@ chromium-metrics-reviews@google.com.
     <variant name="AttachPanel"/>
     <variant name="CaptureScreenshot"/>
     <variant name="ClosePanel"/>
+    <variant name="ClosePanelAndShutdown"/>
     <variant name="CreateTab"/>
     <variant name="DetachPanel"/>
     <variant name="EnableDragResize"/>
     <variant name="GetContextFromFocusedTab"/>
     <variant name="GetOsMicrophonePermissionStatus"/>
     <variant name="GetUserProfileInfo"/>
+    <variant name="GetZeroStateSuggestionsForFocusedTab"/>
     <variant name="OnResponseRated"/>
     <variant name="OnResponseStarted"/>
     <variant name="OnResponseStopped"/>
@@ -83,6 +95,7 @@ chromium-metrics-reviews@google.com.
     <variant name="SetTabContextPermissionState"/>
     <variant name="SetWindowDraggableAreas"/>
     <variant name="ShowProfilePicker"/>
+    <variant name="StopActorTask"/>
     <variant name="WebClientCreated"/>
     <variant name="WebClientInitialized"/>
   </token>
@@ -135,6 +148,20 @@ chromium-metrics-reviews@google.com.
     fre has been completed and glic is enabled and pinned to the tabstrip. The
     entry point is not shown if fre is completed and glic is either disabled or
     unpinned from the tabstrip.
+  </summary>
+</histogram>
+
+<histogram name="Glic.Focus.Settings.Shortcut.Customized" enum="BooleanEnabled"
+    expires_after="2026-01-15">
+  <owner>bryantchandler@chromium.org</owner>
+  <owner>iwells@google.com</owner>
+  <summary>
+    After the user modifies the glic focus shortcut, logs a boolean that
+    reflects whether a shortcut is set.
+
+    Note: When setting a shortcut, 'disabled' will always be logged, then
+    'enabled'. This is because the edit process first clears the existing value.
+    If the shortcut is cleared, only a single 'disabled' log entry is generated.
   </summary>
 </histogram>
 
@@ -194,6 +221,18 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
+<histogram name="Glic.PageContextFetcher.GetContextEligibility" units="ms"
+    expires_after="2026-01-15">
+  <owner>carlosk@chromium.org</owner>
+  <owner>harringtond@chromium.org</owner>
+  <owner>erikchen@chromium.org</owner>
+  <owner>sophiechang@chromium.org</owner>
+  <summary>
+    Recorded when a page context gets context eligibility. Measure the time from
+    start.
+  </summary>
+</histogram>
+
 <histogram name="Glic.PageContextFetcher.GetEncodedScreenshot" units="ms"
     expires_after="2026-01-15">
   <owner>carlosk@chromium.org</owner>
@@ -223,6 +262,18 @@ chromium-metrics-reviews@google.com.
   <summary>
     Recorded when a page context gets screenshot (pre-encoding and scaling).
     Measure the time from start.
+  </summary>
+</histogram>
+
+<histogram name="Glic.PageContextFetcher.PageContextEligible"
+    enum="BooleanEligible" expires_after="2026-01-15">
+  <owner>carlosk@chromium.org</owner>
+  <owner>harringtond@chromium.org</owner>
+  <owner>erikchen@chromium.org</owner>
+  <owner>sophiechang@chromium.org</owner>
+  <summary>
+    Recorded when a page context gets context eligibility and records whether
+    the page is eligible.
   </summary>
 </histogram>
 
@@ -305,6 +356,46 @@ chromium-metrics-reviews@google.com.
   <summary>
     Records the width of the glic panel in DIPS. Recorded every 3 minutes while
     the panel is open.
+  </summary>
+</histogram>
+
+<histogram name="Glic.PanelWebUi.UserResizeEnded.Height" units="DIPs"
+    expires_after="2026-01-15">
+  <owner>fsenra@google.com</owner>
+  <owner>iwells@google.com</owner>
+  <summary>
+    Records the height of the Glic panel in DIP when the user stops resizing the
+    panel.
+  </summary>
+</histogram>
+
+<histogram name="Glic.PanelWebUi.UserResizeEnded.Width" units="DIPs"
+    expires_after="2026-01-15">
+  <owner>fsenra@google.com</owner>
+  <owner>iwells@google.com</owner>
+  <summary>
+    Records the width of the Glic panel in DIP when the user stops resizing the
+    panel.
+  </summary>
+</histogram>
+
+<histogram name="Glic.PanelWebUi.UserResizeStarted.Height" units="DIPs"
+    expires_after="2026-01-15">
+  <owner>fsenra@google.com</owner>
+  <owner>iwells@google.com</owner>
+  <summary>
+    Records the height of the Glic panel in DIP when the user starts resizing
+    the panel.
+  </summary>
+</histogram>
+
+<histogram name="Glic.PanelWebUi.UserResizeStarted.Width" units="DIPs"
+    expires_after="2026-01-15">
+  <owner>fsenra@google.com</owner>
+  <owner>iwells@google.com</owner>
+  <summary>
+    Records the width of the Glic panel in DIP when the user starts resizing the
+    panel.
   </summary>
 </histogram>
 
@@ -524,6 +615,16 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
+<histogram name="Glic.ShouldPreload" enum="Boolean" expires_after="2026-01-15">
+  <owner>dullweber@chromium.org</owner>
+  <owner>vollick@chromium.org</owner>
+  <summary>
+    Record whether the current profile is eligible to preload glic. Recorded
+    each time we try to preload if the user has glic enabled and went through
+    the FRE.
+  </summary>
+</histogram>
+
 <histogram name="Glic.TabContext.PdfContentsRequested" enum="PdfRequestStates"
     expires_after="2026-01-15">
   <owner>carlosk@chromium.org</owner>
@@ -533,6 +634,17 @@ chromium-metrics-reviews@google.com.
     the focused tab. Records an enum sample that answers a) is the main document
     a PDF (based on its MIME type) and b) were PDF contents actually found
     within the web page (only if Chrome's PDF plugin is actually active).
+  </summary>
+</histogram>
+
+<histogram name="Glic.TieredRolloutEnablementStatus"
+    enum="GlicTieredRolloutEnablementStatus" expires_after="2026-01-15">
+  <owner>sophiechang@chromium.org</owner>
+  <owner>dewittj@chromium.org</owner>
+  <summary>
+    Records whether the Glic-eligible profiles are enabled for tiered rollout.
+    Emitted in every UMA record from the current session (at the time the record
+    is finalized), but only if there is at least one Glic-eligible profile.
   </summary>
 </histogram>
 

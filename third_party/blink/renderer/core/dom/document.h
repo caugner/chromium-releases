@@ -35,6 +35,7 @@
 
 #include "base/check_op.h"
 #include "base/containers/enum_set.h"
+#include "base/containers/lru_cache.h"
 #include "base/dcheck_is_on.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_refptr.h"
@@ -81,7 +82,7 @@
 #include "third_party/blink/renderer/core/editing/forward.h"
 #include "third_party/blink/renderer/core/html/forms/listed_element.h"
 #include "third_party/blink/renderer/core/html/parser/parser_synchronization_policy.h"
-#include "third_party/blink/renderer/core/layout/geometry/physical_offset.h"
+#include "third_party/blink/renderer/platform/geometry/physical_offset.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_linked_hash_set.h"
@@ -204,6 +205,7 @@ class HTMLMetaElement;
 class HitTestRequest;
 class HttpRefreshScheduler;
 class IntersectionObserverController;
+class ImportNodeOptions;
 class LayoutUpgrade;
 class LayoutView;
 class LazyLoadImageObserver;
@@ -300,21 +302,6 @@ enum class DocumentClass {
 
 using DocumentClassFlags = base::
     EnumSet<DocumentClass, DocumentClass::kMinValue, DocumentClass::kMaxValue>;
-
-// A map of IDL attribute name to Element list value, for one particular
-// element. For example,
-//   el1.ariaActiveDescendant = el2
-// would add the following pair to the ExplicitlySetAttrElementMap for el1:
-//   ("ariaActiveDescendant", el2)
-// This represents 'explicitly set attr-element' in the HTML specification.
-// https://whatpr.org/html/3917/common-dom-interfaces.html#reflecting-content-attributes-in-idl-attributes:element-2
-// Note that in the interest of simplicitly, attributes that reflect a single
-// element reference are implemented using the same ExplicitlySetAttrElementsMap
-// storage, but only store a single element vector which is DCHECKED at the
-// calling site.
-using ExplicitlySetAttrElementsMap =
-    GCedHeapHashMap<QualifiedName,
-                    Member<GCedHeapLinkedHashSet<WeakMember<Element>>>>;
 
 // A map of IDL attribute name to Element FrozenArray value, for one particular
 // element.
@@ -488,7 +475,18 @@ class CORE_EXPORT Document : public ContainerNode,
   Attr* createAttributeNS(const AtomicString& namespace_uri,
                           const AtomicString& qualified_name,
                           ExceptionState&);
+
+  Node* importNode(Node* imported_node,
+                   ImportNodeOptions* options,
+                   ExceptionState&);
   Node* importNode(Node* imported_node, bool deep, ExceptionState&);
+
+  Node* importNode(Node* imported_node,
+                   bool deep,
+                   CustomElementRegistry*,
+                   ExceptionState&);
+
+  CustomElementRegistry* customElementRegistry() const override;
 
   // Creates an element without custom element processing.
   Element* CreateRawElement(const QualifiedName&,
@@ -1081,15 +1079,6 @@ class CORE_EXPORT Document : public ContainerNode,
   const UserActionElementSet& UserActionElements() const {
     return user_action_elements_;
   }
-
-  ExplicitlySetAttrElementsMap* GetExplicitlySetAttrElementsMap(const Element*);
-  void MoveElementExplicitlySetAttrElementsMapToNewDocument(
-      const Element*,
-      Document& new_document);
-  inline bool HasExplicitlySetAttrElements() const {
-    return !element_explicitly_set_attr_elements_map_.empty();
-  }
-  bool HasExplicitlySetAttrElements(const Element* element) const;
 
   CachedAttrAssociatedElementsMap* GetCachedAttrAssociatedElementsMap(Element*);
   void MoveElementCachedAttrAssociatedElementsMapToNewDocument(
@@ -1694,10 +1683,7 @@ class CORE_EXPORT Document : public ContainerNode,
     return all_open_dialogs_;
   }
 
-  void SetKeyboardInterestTargetElement(Element*);
-  Member<Element> KeyboardInterestTargetElement() const {
-    return keyboard_interest_target_element_;
-  }
+  HeapLinkedHashSet<Member<Element>>& CurrentInterestTargetElements();
 
   // https://crbug.com/1453291
   // The DOM Parts API:
@@ -2242,6 +2228,7 @@ class CORE_EXPORT Document : public ContainerNode,
 
  private:
   friend class DocumentTest;
+  friend class DocumentURLCacheTest;
   friend class IgnoreDestructiveWriteCountIncrementer;
   friend class ThrowOnDynamicMarkupInsertionCountIncrementer;
   friend class IgnoreOpensDuringUnloadCountIncrementer;
@@ -2311,6 +2298,43 @@ class CORE_EXPORT Document : public ContainerNode,
    private:
     HeapVector<Member<HTMLFormElement>> list_;
     bool dirty_ = false;
+  };
+
+  class CORE_EXPORT URLCache {
+   public:
+    URLCache();
+    ~URLCache();
+
+    URLCache(const URLCache&) = delete;
+    URLCache& operator=(const URLCache&) = delete;
+
+    KURL Get(const KURL& base, const String& relative);
+    void Put(const KURL& base, const String& relative, KURL url);
+
+    // If the document's base URL is changed, we remove entries corresponding to
+    // the previous base URL, as we're unlikely to reuse those entries.
+    void RemoveOldEntries(const KURL& base);
+
+    size_t CacheSizeForTesting() { return cache_.size(); }
+
+   private:
+    // The relative URL is not stored as an AtomicString (which is what
+    // getAttribute() returns), as some callers are not guaranteed to always
+    // pass an AtomicString. However, when the underlying StringImpl originated
+    // from an AtomicString, we use the same fastpath for hashing as
+    // AtomicString.
+    struct KeyHash {
+      std::size_t operator()(const std::pair<KURL, String>& key) const;
+    };
+
+    // The cache's key is made up of the base KURL and relative URL String, and
+    // the value is the resolved KURL.
+    // The base URL is stored as part of the cache key to allow reusing results
+    // from PreloadRequest::CompleteURL() calling CompleteURLWithOverride() with
+    // a different base URL than the Document's current base URL without
+    // updating it.
+    base::HashingLRUCache<std::pair<KURL, String>, KURL, URLCache::KeyHash>
+        cache_;
   };
 
   friend class AXContext;
@@ -2548,6 +2572,10 @@ class CORE_EXPORT Document : public ContainerNode,
   KURL base_url_;  // Node.baseURI: The URL to use when resolving relative URLs.
   KURL base_url_override_;  // An alternative base URL that takes precedence
                             // over base_url_ (but not base_element_url_).
+
+  // The URL cache is mutable because the changes that are made to it during
+  // CompleteURLWithOverride() are not observable by callers.
+  mutable URLCache url_cache_;
 
   // Indicates whether all the conditions are met to trigger recording of counts
   // for cases where sandboxed srcdoc documents use their base url to resolve
@@ -2817,10 +2845,12 @@ class CORE_EXPORT Document : public ContainerNode,
   // The ordered list of currently-open dialogs, in order they were opened.
   HeapLinkedHashSet<Member<HTMLDialogElement>> all_open_dialogs_;
 
-  // If there was a keyboard-activated element with the `interesttarget`
-  // attribute, it will be stored here, so that when other elements are shown
-  // interest, this element can first "lose interest".
-  Member<Element> keyboard_interest_target_element_;
+  // The current list of elements in the document that have interest (in the
+  // `interesttarget` sense). This is used to "lose" interest if the keyboard
+  // activation key (ESC) or other actions should cause a loss of interest.
+  // This collection holds the *invokers* (the elements with `interesttarget`)
+  // and not the *targets* of those invokers.
+  HeapLinkedHashSet<Member<Element>> current_interest_target_elements_;
 
   Member<DocumentPartRoot> document_part_root_;
 
@@ -2955,8 +2985,6 @@ class CORE_EXPORT Document : public ContainerNode,
 
   Member<FragmentDirective> fragment_directive_;
 
-  HeapHashMap<WeakMember<const Element>, Member<ExplicitlySetAttrElementsMap>>
-      element_explicitly_set_attr_elements_map_;
   HeapHashMap<WeakMember<Element>, Member<CachedAttrAssociatedElementsMap>>
       element_cached_attr_associated_elements_map_;
 

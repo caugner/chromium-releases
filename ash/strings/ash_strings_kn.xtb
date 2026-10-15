@@ -1440,6 +1440,7 @@
 <translation id="5672890847723042801">ಸೌಲಭ್ಯಗಳು</translation>
 <translation id="5673434351075758678">ನಿಮ್ಮ ಸೆಟ್ಟಿಂಗ್‌ಗಳನ್ನು ಸಿಂಕ್ ಮಾಡಿದ ಬಳಿಕ "<ph name="FROM_LOCALE" />" ನಿಂದ "<ph name="TO_LOCALE" />" ಗೆ.</translation>
 <translation id="5675363643668471212">ಶೆಲ್ಫ್ ಐಟಂ</translation>
+<translation id="5677022547882470786">ಹುಡುಕಲು ಪ್ರದೇಶವನ್ನು ಆಯ್ಕೆ ಮಾಡಲು ಸ್ಪೇಸ್ ಅನ್ನು ಡ್ರ್ಯಾಗ್ ಮಾಡಿ ಅಥವಾ ಒತ್ತಿರಿ</translation>
 <translation id="5677928146339483299">ನಿರ್ಬಂಧಿಸಲಾಗಿದೆ</translation>
 <translation id="5678564054339031017">ಮುಂದಿನ ವಾರ ತೋರಿಸಿ</translation>
 <translation id="5679050765726761783">ಕಡಿಮೆ-ಪವರ್ ಅಡಾಪ್ಟರ್ ಅನ್ನು ಕನೆಕ್ಟ್ ಮಾಡಲಾಗಿದೆ</translation>
@@ -2178,7 +2179,7 @@
 <translation id="8048123526339889627">ಬ್ಲೂಟೂತ್‌‌ ಸೆಟ್ಟಿಂಗ್‌ಗಳು</translation>
 <translation id="8049189770492311300">ಟೈಮರ್</translation>
 <translation id="8051716679295756675"><ph name="DESK_TEMPLATE_NAME" /> ಹೆಸರಿನ ಟೆಂಪ್ಲೇಟ್ ಈಗಾಗಲೇ ಅಸ್ತಿತ್ವದಲ್ಲಿದೆ</translation>
-<translation id="8052898407431791827">ಕ್ಲಿಪ್‌ಬೋರ್ಡ್‌ಗೆ ನಕಲಿಸಲಾಗಿದೆ</translation>
+<translation id="8052898407431791827">ಕ್ಲಿಪ್‌ಬೋರ್ಡ್‌ಗೆ ಕಾಪಿ ಮಾಡಲಾಗಿದೆ</translation>
 <translation id="8054466585765276473">ಬ್ಯಾಟರಿ ಸಮಯವನ್ನು ಲೆಕ್ಕಾಚಾರ ಮಾಡಲಾಗುತ್ತಿದೆ.</translation>
 <translation id="8076492880354921740">ಟ್ಯಾಬ್‌ಗಳು</translation>
 <translation id="8079538659226626406">ಸ್ಕ್ರೀನ್‌‌ ಹಂಚಿಕೊಳ್ಳುವಿಕೆ</translation>
@@ -2432,6 +2433,7 @@
 <translation id="8934418770423095813">Google Doc ರಚಿಸಿ</translation>
 <translation id="8934926665751933910">{NUM_FILES,plural, =1{1 ಫೈಲ್}one{# ಫೈಲ್‌ಗಳು}other{# ಫೈಲ್‌ಗಳು}}</translation>
 <translation id="8936501819958976551">ನಿಷ್ಕ್ರಿಯಗೊಳಿಸಲಾಗಿದೆ</translation>
+<translation id="8937312474322077653">ಸ್ಕ್ರೀನ್ ಕ್ಯಾಪ್ಚರ್‌ನಲ್ಲಿ, <ph name="SOURCE" /> <ph name="TYPE" /> ಗೆ ಸೆಟ್ ಮಾಡಲಾಗಿದೆ. ಕ್ಯಾಪ್ಚರ್ ಮಾಡುವಿಕೆಯ ಪ್ರಕಾರವನ್ನು ಆಯ್ಕೆ ಮಾಡಲು ಟ್ಯಾಬ್ ಒತ್ತಿರಿ. ಪ್ರದೇಶವನ್ನು ಆಯ್ಕೆ ಮಾಡಲು ಸ್ಪೇಸ್ ಒತ್ತಿರಿ. ಕ್ಯಾಪ್ಚರ್ ಮಾಡಲು ಎಂಟರ್ ಒತ್ತಿರಿ.</translation>
 <translation id="8938800817013097409">USB-C ಸಾಧನ (ಹಿಂಭಾಗದಲ್ಲಿನ ಬಲ ಪೋರ್ಟ್‌)</translation>
 <translation id="8939855324412367560">ಇನ್‌ಪುಟ್ ಆಡಿಯೋ "<ph name="INPUT_DEVICE_NAME" />" ಮತ್ತು ಔಟ್‌ಪುಟ್ ಆಡಿಯೋ "<ph name="OUTPUT_DEVICE_NAME" />" ಆಗಿದೆ. ಬದಲಾಯಿಸಲು ಸೆಟ್ಟಿಂಗ್‌ಗಳಿಗೆ ಹೋಗಿ.</translation>
 <translation id="8940956008527784070">ಬ್ಯಾಟರಿ ಕಡಿಮೆ (<ph name="PERCENTAGE" />%)</translation>

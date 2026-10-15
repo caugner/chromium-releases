@@ -147,6 +147,7 @@ import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.history.BrowsingHistoryBridge;
 import org.chromium.chrome.browser.history.HistoryItem;
 import org.chromium.chrome.browser.history.TestBrowsingHistoryObserver;
+import org.chromium.chrome.browser.lifecycle.InflationObserver;
 import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
 import org.chromium.chrome.browser.page_load_metrics.PageLoadMetrics;
 import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
@@ -169,8 +170,9 @@ import org.chromium.chrome.browser.ui.theme.BrandedColorScheme;
 import org.chromium.chrome.test.AutomotiveContextWrapperTestRule;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.R;
+import org.chromium.chrome.test.transit.ChromeTransitTestRules;
+import org.chromium.chrome.test.transit.FreshCtaTransitTestRule;
 import org.chromium.chrome.test.util.ActivityTestUtils;
 import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.chrome.test.util.browser.contextmenu.ContextMenuUtils;
@@ -244,8 +246,8 @@ public class CustomTabActivityTest {
     public CustomTabActivityTestRule mCustomTabActivityTestRule = new CustomTabActivityTestRule();
 
     @Rule
-    public ChromeTabbedActivityTestRule mChromeTabbedActivityTestRule =
-            new ChromeTabbedActivityTestRule();
+    public FreshCtaTransitTestRule mChromeTabbedActivityTestRule =
+            ChromeTransitTestRules.freshChromeTabbedActivityRule();
 
     @Rule
     public AutomotiveContextWrapperTestRule mAutomotiveRule =
@@ -1139,53 +1141,6 @@ public class CustomTabActivityTest {
         checkPageLoadMetrics(false);
     }
 
-    private static void assertSuffixedHistogramTotalCount(long expected, String histogramPrefix) {
-        for (String suffix : new String[] {".ZoomedIn", ".ZoomedOut"}) {
-            assertEquals(
-                    expected,
-                    RecordHistogram.getHistogramTotalCountForTesting(histogramPrefix + suffix));
-        }
-    }
-
-    /**
-     * Tests that one navigation in a custom tab records the histograms reflecting time from intent
-     * to first navigation start/commit.
-     */
-    @Test
-    @SmallTest
-    public void testNavigationHistogramsRecorded() throws Exception {
-        String startHistogramPrefix = "CustomTabs.IntentToFirstNavigationStartTime";
-        String commitHistogramPrefix = "CustomTabs.IntentToFirstCommitNavigationTime3";
-        assertSuffixedHistogramTotalCount(0, startHistogramPrefix);
-        assertSuffixedHistogramTotalCount(0, commitHistogramPrefix);
-
-        final Semaphore semaphore = new Semaphore(0);
-        CustomTabsSession session =
-                CustomTabsTestUtils.bindWithCallback(
-                                new CustomTabsCallback() {
-                                    @Override
-                                    public void onNavigationEvent(
-                                            int navigationEvent, Bundle extras) {
-                                        if (navigationEvent
-                                                == CustomTabsCallback.NAVIGATION_FINISHED) {
-                                            semaphore.release();
-                                        }
-                                    }
-                                })
-                        .session;
-        Intent intent = new CustomTabsIntent.Builder(session).build().intent;
-        intent.setData(Uri.parse(mTestPage));
-        intent.setComponent(
-                new ComponentName(
-                        ApplicationProvider.getApplicationContext(), ChromeLauncherActivity.class));
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        mCustomTabActivityTestRule.startCustomTabActivityWithIntent(intent);
-        Assert.assertTrue(semaphore.tryAcquire(TIMEOUT_PAGE_LOAD_SECONDS, TimeUnit.SECONDS));
-
-        assertSuffixedHistogramTotalCount(1, startHistogramPrefix);
-        assertSuffixedHistogramTotalCount(1, commitHistogramPrefix);
-    }
-
     /** Tests that TITLE_ONLY state works as expected with a title getting set onload. */
     @Test
     @SmallTest
@@ -1269,6 +1224,8 @@ public class CustomTabActivityTest {
                 HistogramWatcher.newBuilder()
                         .expectAnyRecord("PageLoad.PaintTiming.NavigationToFirstPaint")
                         .expectAnyRecord("PageLoad.PaintTiming.NavigationToFirstContentfulPaint")
+                        .expectNoRecords(
+                                "PageLoad.PaintTiming.NavigationToFirstContentfulPaint.Background")
                         .build();
         CustomTabsConnection connection = CustomTabsTestUtils.warmUpAndWait();
         Context context = ApplicationProvider.getApplicationContext();
@@ -1298,6 +1255,55 @@ public class CustomTabActivityTest {
         assertEquals(1, history.size());
         assertEquals(mTestPage, history.get(0).getUrl().getSpec());
         histograms.pollInstrumentationThreadUntilSatisfied();
+    }
+
+    /** Tests that we don't leak the tab when finishing early. */
+    @Test
+    @SmallTest
+    @EnableFeatures({ChromeFeatureList.CCT_EARLY_NAV})
+    public void testEarlyFinish() throws Exception {
+        CallbackHelper helper = new CallbackHelper();
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> {
+                    ApplicationStatus.registerStateListenerForAllActivities(
+                            new ActivityStateListener() {
+                                @Override
+                                public void onActivityStateChange(
+                                        Activity activity, @ActivityState int state) {
+                                    if (!(activity instanceof CustomTabActivity)) return;
+                                    if (state == ActivityState.CREATED) {
+                                        ((CustomTabActivity) activity)
+                                                .getLifecycleDispatcher()
+                                                .register(
+                                                        new InflationObserver() {
+                                                            @Override
+                                                            public void onPreInflationStartup() {
+                                                                activity.finish();
+                                                            }
+
+                                                            @Override
+                                                            public void onPostInflationStartup() {}
+                                                        });
+                                    }
+                                    if (state == ActivityState.DESTROYED) {
+                                        Assert.assertTrue(
+                                                ((CustomTabActivity) activity)
+                                                        .getActivityTab()
+                                                        .isDestroyed());
+                                        helper.notifyCalled();
+                                    }
+                                }
+                            });
+                });
+
+        CustomTabsConnection connection = CustomTabsTestUtils.warmUpAndWait();
+        Context context = ApplicationProvider.getApplicationContext();
+        Intent intent = CustomTabsIntentTestUtils.createMinimalCustomTabIntent(context, mTestPage);
+        final var token = SessionHolder.getSessionHolderFromIntent(intent);
+        Assert.assertTrue(connection.newSession(token.getSessionAsCustomTab()));
+        mCustomTabActivityTestRule.launchActivity(intent);
+
+        helper.waitForNext();
     }
 
     /** Tests that calling warmup() is optional without prerendering. */
@@ -2361,7 +2367,7 @@ public class CustomTabActivityTest {
         intent.setPackage(packageName);
         intent.putExtra(EXTRA_INITIAL_ACTIVITY_WIDTH_PX, 300);
         intent.putExtra(EXTRA_ACTIVITY_SIDE_SHEET_BREAKPOINT_DP, 600);
-        mChromeTabbedActivityTestRule.startMainActivityOnBlankPage();
+        mChromeTabbedActivityTestRule.startOnBlankPage();
 
         CustomTabActivity resultActivity =
                 ApplicationTestUtils.waitForActivityWithClass(
@@ -2882,7 +2888,7 @@ public class CustomTabActivityTest {
 
         openAppMenuAndAssertMenuShown();
         Assert.assertNull(
-                "Share option should be hidden.", activity.findViewById(R.id.share_row_menu_id));
+                "Share option should be hidden.", activity.findViewById(R.id.share_menu_id));
     }
 
     @Test

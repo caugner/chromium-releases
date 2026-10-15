@@ -250,7 +250,7 @@ FileTransferAnalysisDelegate::Create(
 }
 
 // static
-void FileTransferAnalysisDelegate::SetFactorForTesting(
+void FileTransferAnalysisDelegate::SetFactoryForTesting(
     FileTransferAnalysisDelegateFactory factory) {
   GetFactoryStorage() = factory;
 }
@@ -455,6 +455,12 @@ const GURL& FileTransferAnalysisDelegate::tab_url() const {
 
 ContentAnalysisRequest::Reason FileTransferAnalysisDelegate::reason() const {
   return ContentAnalysisRequest::UNKNOWN;
+}
+
+google::protobuf::RepeatedPtrField<::safe_browsing::ReferrerChainEntry>
+FileTransferAnalysisDelegate::referrer_chain() const {
+  return google::protobuf::RepeatedPtrField<
+      ::safe_browsing::ReferrerChainEntry>();
 }
 
 void FileTransferAnalysisDelegate::OnGotFileURLs(

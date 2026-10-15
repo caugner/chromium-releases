@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/views/tabs/recent_activity_bubble_dialog_view.h"
 
+#include "base/strings/utf_string_conversions.h"
 #include "base/task/thread_pool.h"
 #include "build/build_config.h"
 #include "chrome/browser/data_sharing/data_sharing_service_factory.h"
@@ -323,27 +324,29 @@ IN_PROC_BROWSER_TEST_F(RecentActivityBubbleDialogViewBrowserTest,
   EXPECT_EQ(bubble->GetWindowTitle(), u"Recent activity");
 #endif
 
-  EXPECT_EQ(bubble->GetRowForTesting(0)->activity_text(), u"You changed a tab");
-  EXPECT_EQ(bubble->GetRowForTesting(0)->metadata_text(),
+  EXPECT_EQ(bubble->GetRowForTesting(0)->GetAccessibleName(),
+            u"You changed a tab");
+  EXPECT_EQ(bubble->GetRowForTesting(0)->GetAccessibleDescription(),
             u"airbnb.com \u2022 5h ago");
 
-  EXPECT_EQ(bubble->GetRowForTesting(1)->activity_text(),
+  EXPECT_EQ(bubble->GetRowForTesting(1)->GetAccessibleName(),
             u"Shirley changed a tab");
-  EXPECT_EQ(bubble->GetRowForTesting(1)->metadata_text(),
+  EXPECT_EQ(bubble->GetRowForTesting(1)->GetAccessibleDescription(),
             u"hotels.com \u2022 4h ago");
 
-  EXPECT_EQ(bubble->GetRowForTesting(2)->activity_text(),
+  EXPECT_EQ(bubble->GetRowForTesting(2)->GetAccessibleName(),
             u"Elisa removed a tab");
-  EXPECT_EQ(bubble->GetRowForTesting(2)->metadata_text(),
+  EXPECT_EQ(bubble->GetRowForTesting(2)->GetAccessibleDescription(),
             u"expedia.com \u2022 6h ago");
 
-  EXPECT_EQ(bubble->GetRowForTesting(3)->activity_text(),
+  EXPECT_EQ(bubble->GetRowForTesting(3)->GetAccessibleName(),
             u"Shirley joined the group");
-  EXPECT_EQ(bubble->GetRowForTesting(3)->metadata_text(),
+  EXPECT_EQ(bubble->GetRowForTesting(3)->GetAccessibleDescription(),
             u"shirleys-email \u2022 8h ago");
 
-  EXPECT_EQ(bubble->GetRowForTesting(4)->activity_text(), u"Elisa added a tab");
-  EXPECT_EQ(bubble->GetRowForTesting(4)->metadata_text(),
+  EXPECT_EQ(bubble->GetRowForTesting(4)->GetAccessibleName(),
+            u"Elisa added a tab");
+  EXPECT_EQ(bubble->GetRowForTesting(4)->GetAccessibleDescription(),
             u"expedia.com \u2022 2d ago");
 }
 
@@ -650,12 +653,6 @@ IN_PROC_BROWSER_TEST_F(RecentActivityBubbleDialogViewActionBrowserTest,
   EXPECT_TRUE(bubble);
 
   bubble->GetRowForTesting(0)->ManageSharing();
-
-  auto sharing_bubble =
-      DataSharingBubbleController::GetOrCreateForBrowser(browser())
-          ->BubbleViewForTesting();
-
-  EXPECT_TRUE(sharing_bubble.get());
 }
 
 }  // namespace tab_groups

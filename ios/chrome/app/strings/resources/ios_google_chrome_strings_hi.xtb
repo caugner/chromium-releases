@@ -123,6 +123,7 @@
 <translation id="3984746313391923992">आपके संगठन के लिए यह ज़रूरी है कि आप Chrome से साइन आउट रहें.</translation>
 <translation id="3988789688219830639">Google Chrome के पास आपकी फ़ोटो या वीडियो का एक्सेस नहीं है. iOS सेटिंग &gt; निजता &gt; फ़ोटो में जाकर एक्सेस चालू करें.</translation>
 <translation id="4064699917955374540">अपने Google खाते में Chrome डेटा का इस्तेमाल करने और उसे सेव करने के लिए, अपनी पहचान की पुष्टि करें.</translation>
+<translation id="411154422556990518">कीमत ट्रैक करने से जुड़े अपडेट और Chrome से जुड़ी सलाह पाएं.</translation>
 <translation id="417201473131094001">यह सुविधा Chrome के कैनरी वर्शन पर काम नहीं करती</translation>
 <translation id="424864128008805179">Chrome से साइन आउट करें?</translation>
 <translation id="4430797724889237570">Gmail, Maps, YouTube, और अन्य ऐप्लिकेशन के लिंक, Chrome में खोलें</translation>
@@ -133,6 +134,7 @@
 <translation id="4636900170638246267">इस साइट और Chrome में साइन इन करें.</translation>
 <translation id="4647910807533196601">Chrome में, पिछली बार खोला गया मेरा टैब खोलें.</translation>
 <translation id="4693084815234024320">Chrome का गुप्त मोड खुला है</translation>
+<translation id="4713907610796204963">Chrome के बारे में बुनियादी जानकारी पाएं, ताकि आप इसका इस्तेमाल करना शुरू कर सकें</translation>
 <translation id="4724297637870447613">Chrome का सभी जगह इस्तेमाल करें</translation>
 <translation id="4738647308035481133">Google Chrome पेज</translation>
 <translation id="4742795653798179840">Chrome का डेटा मिटाया गया</translation>
@@ -228,7 +230,6 @@
 Chrome के अनुभव को बेहतर बनाने के लिए, डेटा का इस्तेमाल करने वाली अन्य सेटिंग के लिए, <ph name="BEGIN_LINK" />Google की सेवाएं<ph name="END_LINK" /> पर जाएं.</translation>
 <translation id="6922332667202044570">Chrome से ब्राउज़िंग डेटा मिटाएं.</translation>
 <translation id="6924922227983877439">लिंक, डिफ़ॉल्ट रूप से Chrome में खोलें</translation>
-<translation id="6931601805528922498">साइन इन करने पर, Chrome में आपका खाता जोड़ दिया जाता है, ताकि आप काम से जुड़ी ब्राउज़िंग आसानी से कर पाएं.</translation>
 <translation id="6975725306479268850">AutoFill के लिए Chrome चुनें</translation>
 <translation id="7056826488869329999">इससे Chrome में सुरक्षा जांच की सुविधा खुलती है और चालू होती है.</translation>
 <translation id="7061455974939528301">Chrome आइकॉन को दबाकर रखें और "Edit home screen" पर क्लिक करें</translation>
@@ -240,7 +241,6 @@ Chrome के अनुभव को बेहतर बनाने के ल�
 <translation id="7175129790242719365">Chrome से जुड़ी सलाह: Chrome में साइन इन करें</translation>
 <translation id="7187993566681480880">यह सुविधा Chrome पर आपको सुरक्षित रखती है. साथ ही, अगर आप साइन इन हैं, तो Google के अन्य ऐप्लिकेशन में भी आपकी सुरक्षा को बेहतर बनाने के लिए इसका इस्तेमाल किया जा सकता है.</translation>
 <translation id="7200524487407690471">Chrome हर दिन अपने-आप सुरक्षा जांच करता है, ताकि आपको डेटा के गलत इस्तेमाल, नुकसान पहुंचाने वाली वेबसाइटों वगैरह से सुरक्षित रखा जा सके. 'सेटिंग' में जाकर, सुरक्षा जांच के बारे में ज़्यादा जानें.</translation>
-<translation id="7203324561587388418">कॉन्टेंट और Chrome से जुड़ी काम की सलाह पाएं.</translation>
 <translation id="72119412072970160">Google पासवर्ड मैनेजर में सेव किए गए पासवर्ड का इस्तेमाल, iPad में मौजूद दूसरे ऐप्लिकेशन के लिए किया जा सकता है.</translation>
 <translation id="7214019116829172458">Chrome का गुप्त टैब खोलें</translation>
 <translation id="722167379782941918">Chrome का सुझाव है कि बेहतर सुरक्षा मोड का इस्तेमाल करें</translation>
@@ -253,6 +253,7 @@ Chrome के अनुभव को बेहतर बनाने के ल�
 <translation id="7299681342915173313">अब ईमेल, दस्तावेज़ों, और अन्य ऐप्लिकेशन में मिले लिंक पर टैप करके, कभी भी Chrome का इस्तेमाल किया जा सकता है.</translation>
 <translation id="7344094882820374540">खतरनाक साइटों से सुरक्षित रखने वाली Chrome की बेहतरीन सुविधा पाएं</translation>
 <translation id="7349129508108954623">Chrome को Google Maps का इस्तेमाल करने की अनुमति दें, ताकि वह आपको उन रास्तों और जगहों की जानकारी दे सके जिनका पता लगाया गया है.</translation>
+<translation id="7371674917547846460">Chrome से जुड़ी काम की सलाह और अन्य जानकारी पाएं.</translation>
 <translation id="7394108421562933108">Chrome में Maps</translation>
 <translation id="7400722733683201933">Google Chrome के बारे में जानकारी</translation>
 <translation id="7466693328838535498">Search विजेट बॉक्स में, 'Chrome' शब्द लिखें</translation>
@@ -263,6 +264,7 @@ Chrome के अनुभव को बेहतर बनाने के ल�
 <translation id="7581063337314642333">Chrome में टैब ग्रिड पर जाएं</translation>
 <translation id="7599894504325210080">Chrome की ऑटोमैटिक भरने की सुविधा का बड़ा किया गया व्यू</translation>
 <translation id="7617512710641355143">Chrome को मैनेज किया जा रहा है</translation>
+<translation id="7626032353295482388">Chrome में आपका स्वागत है</translation>
 <translation id="7642373780953416937">निजता या सुरक्षा से जुड़ी हर उस समस्या के बारे में सूचनाएं पाएं जिसके बारे में Chrome अपने-आप पता लगाता है.</translation>
 <translation id="7660356333829433649">यहां वापस आएं और Chrome का ज़्यादा से ज़्यादा फ़ायदा पाने के लिए, ज़्यादा उपयोगी सुझाव पाएं.</translation>
 <translation id="7662994914830945754">जिन डिवाइसों पर Chrome का इस्तेमाल किया जाता है उन सभी पर खोले गए टैब देखने के लिए, सभी डिवाइस पर साइन इन करें और सिंक करने की सुविधा चालू करें</translation>
@@ -276,6 +278,7 @@ Chrome के अनुभव को बेहतर बनाने के ल�
 <translation id="778855399387580014">नए Chrome टैब में खोज शुरू करें.</translation>
 <translation id="7792140019572081272">Chrome, Face ID की मदद से आपकी संवेदनशील जानकारी को सुरक्षित रखता है.</translation>
 <translation id="7855730255114109580">Google Chrome अप टू डेट है</translation>
+<translation id="787226752901403048">टैब ग्रुप शेयर करने और उनमें शामिल होने के लिए, Chrome में साइन इन करें और आइडिया पर मिलकर काम करें</translation>
 <translation id="7897703007638178753">Chrome में हाल ही के टैब देखें</translation>
 <translation id="7948283758957877064">Chrome में नया क्या है</translation>
 <translation id="8000174216052461231">Chrome की सलाह: Chrome की बेहतरीन सुरक्षा सुविधा पाएं</translation>

@@ -123,6 +123,7 @@ Warte einige Minuten, bevor du dich abmeldest. Wenn du dich jetzt abmeldest, wer
 <translation id="3984746313391923992">Deine Organisation verlangt, dass du aus Chrome abgemeldet bleibst.</translation>
 <translation id="3988789688219830639">Chrome hat keinen Zugriff auf deine Fotos und Videos. Aktiviere den Zugriff unter "iOS-Einstellungen &gt; Datenschutz &gt; Fotos".</translation>
 <translation id="4064699917955374540">Bestätige deine Identität, um Chrome-Daten in deinem Google-Konto zu verwenden und zu speichern.</translation>
+<translation id="411154422556990518">Lass dich über Neuigkeiten zum Preis-Tracking und Chrome-Tipps informieren.</translation>
 <translation id="417201473131094001">Wird von Chrome Canary nicht unterstützt</translation>
 <translation id="424864128008805179">Von Chrome abmelden?</translation>
 <translation id="4430797724889237570">Links aus Gmail, Maps, YouTube und anderen Apps in Chrome öffnen</translation>
@@ -133,6 +134,7 @@ Warte einige Minuten, bevor du dich abmeldest. Wenn du dich jetzt abmeldest, wer
 <translation id="4636900170638246267">Melde dich bei dieser Website und in Chrome an.</translation>
 <translation id="4647910807533196601">Aktuellen Tab in Chrome öffnen.</translation>
 <translation id="4693084815234024320">Chrome befindet sich im Inkognitomodus</translation>
+<translation id="4713907610796204963">Hier erfährst du mehr über hilfreiche Chrome-Grundlagen für den Einstieg</translation>
 <translation id="4724297637870447613">Chrome überall nutzen</translation>
 <translation id="4738647308035481133">Google Chrome-Seite</translation>
 <translation id="4742795653798179840">Chrome-Daten gelöscht</translation>
@@ -228,7 +230,6 @@ Wenn du diese Einstellung ändern möchtest, <ph name="BEGIN_LINK" />lösche die
 Weitere Einstellungen, bei denen Daten zur Verbesserung von Chrome verwendet werden, findest du in den <ph name="BEGIN_LINK" />Google-Diensten<ph name="END_LINK" />.</translation>
 <translation id="6922332667202044570">Browserdaten in Chrome löschen.</translation>
 <translation id="6924922227983877439">Links standardmäßig in Chrome öffnen</translation>
-<translation id="6931601805528922498">Wenn du dich anmeldest, wird dein Konto Chrome hinzugefügt, damit du zu beruflichen Zwecken surfen kannst.</translation>
 <translation id="6975725306479268850">Chrome für Autofill auswählen</translation>
 <translation id="7056826488869329999">Dadurch wird der Sicherheitscheck in Chrome geöffnet und ausgeführt.</translation>
 <translation id="7061455974939528301">Halte das Chrome-Symbol gedrückt und klicke auf „Startbildschirm bearbeiten“</translation>
@@ -240,7 +241,6 @@ Weitere Einstellungen, bei denen Daten zur Verbesserung von Chrome verwendet wer
 <translation id="7175129790242719365">Chrome-Tipp: In Chrome anmelden</translation>
 <translation id="7187993566681480880">Schützt dich in Chrome und erhöht möglicherweise die Sicherheit in anderen Google-Apps, wenn du angemeldet bist.</translation>
 <translation id="7200524487407690471">Chrome führt jeden Tag automatisch einen Sicherheitscheck durch, um dich unter anderem vor Datenpannen und unsicheren Websites zu schützen. Weitere Informationen zum Sicherheitscheck findest du in den Einstellungen.</translation>
-<translation id="7203324561587388418">Bleib mit Inhalten und hilfreichen Chrome-Tipps auf dem Laufenden.</translation>
 <translation id="72119412072970160">Du kannst die im Google Passwortmanager gespeicherten Passwörter in anderen Apps auf deinem iPad verwenden.</translation>
 <translation id="7214019116829172458">Chrome-Inkognitotab öffnen</translation>
 <translation id="722167379782941918">Chrome empfiehlt den erweiterten Schutz</translation>
@@ -253,6 +253,7 @@ Weitere Einstellungen, bei denen Daten zur Verbesserung von Chrome verwendet wer
 <translation id="7299681342915173313">Du kannst jetzt Chrome jederzeit nutzen, wenn du in E‑Mails, Dokumenten und anderen Apps auf Links tippst.</translation>
 <translation id="7344094882820374540">Nutze den stärksten Chrome-Schutz vor gefährlichen Websites</translation>
 <translation id="7349129508108954623">Erlaube Chrome, über Google Maps Wegbeschreibungen und lokale Informationen zu erkannten Adressen bereitzustellen.</translation>
+<translation id="7371674917547846460">Lass dich über hilfreiche Chrome-Tipps und mehr informieren.</translation>
 <translation id="7394108421562933108">Maps in Chrome</translation>
 <translation id="7400722733683201933">Über Google Chrome</translation>
 <translation id="7466693328838535498">Gib „Chrome“ in das Feld „Such-Widget“ ein</translation>
@@ -263,6 +264,7 @@ Weitere Einstellungen, bei denen Daten zur Verbesserung von Chrome verwendet wer
 <translation id="7581063337314642333">Tab-Raster in Chrome aufrufen</translation>
 <translation id="7599894504325210080">Autofill-Ansicht in Chrome erweitert</translation>
 <translation id="7617512710641355143">Chrome wird verwaltet</translation>
+<translation id="7626032353295482388">Willkommen bei Chrome</translation>
 <translation id="7642373780953416937">Du erhältst Benachrichtigungen bei Problemen mit dem Datenschutz oder der Sicherheit, die Chrome automatisch für dich erkennt.</translation>
 <translation id="7660356333829433649">Schaue später noch einmal hier vorbei, um weitere nützliche Tipps zu erhalten, wie du Chrome optimal nutzen kannst.</translation>
 <translation id="7662994914830945754">Melde dich an und aktiviere die Synchronisierung, um deine Tabs überall dort aufzurufen, wo du Chrome verwendest</translation>
@@ -276,6 +278,7 @@ Weitere Einstellungen, bei denen Daten zur Verbesserung von Chrome verwendet wer
 <translation id="778855399387580014">Eine Suche in einem neuen Chrome-Tab starten.</translation>
 <translation id="7792140019572081272">Chrome trägt mit Face ID dazu bei, deine sensiblen Daten zu schützen.</translation>
 <translation id="7855730255114109580">Google Chrome ist auf dem neuesten Stand.</translation>
+<translation id="787226752901403048">Melde dich in Chrome an, um Tabgruppen zu teilen, ihnen beizutreten und gemeinsam an Ideen zu arbeiten</translation>
 <translation id="7897703007638178753">Zuletzt geöffnete Chrome-Tabs ansehen</translation>
 <translation id="7948283758957877064">Jetzt neu bei Chrome</translation>
 <translation id="8000174216052461231">Chrome-Tipp: Den stärksten Chrome-Schutz nutzen</translation>
@@ -309,7 +312,7 @@ Nur Personen, die deine Passphrase kennen, können deine verschlüsselten Daten 
 
 Deine Daten wurden am <ph name="TIME" /> mit deiner Passphrase verschlüsselt. Gib sie ein, um Chrome-Daten in deinem Google-Konto zu verwenden und zu speichern.</translation>
 <translation id="8540666473246803645">Google Chrome</translation>
-<translation id="8544583291890527417">Benachrichtigungen bei Problemen mit dem Datenschutz und der Sicherheit, die Chrome für dich erkennt.</translation>
+<translation id="8544583291890527417">Benachrichtigungen bei von Chrome erkannten Problemen mit dem Datenschutz und der Sicherheit.</translation>
 <translation id="8558480467877843976">Du kannst jetzt Chrome jederzeit nutzen, wenn du surfst oder auf Links in Nachrichten, Dokumenten und anderen Apps tippst.</translation>
 <translation id="8603022514504485810">Der Google Passwortmanager konnte nicht alle Passwörter prüfen. Versuche es morgen noch einmal oder <ph name="BEGIN_LINK" />prüfe die Passwörter in deinem Google-Konto<ph name="END_LINK" />.</translation>
 <translation id="8630122478628016441">Aktiviere die Option „Inkognitotabs sperren, wenn Chrome geschlossen wird“.</translation>

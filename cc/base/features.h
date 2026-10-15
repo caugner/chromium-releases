@@ -17,6 +17,10 @@ namespace features {
 CC_BASE_EXPORT BASE_DECLARE_FEATURE(kAlignSurfaceLayerImplToPixelGrid);
 CC_BASE_EXPORT BASE_DECLARE_FEATURE(kSynchronizedScrolling);
 
+// Enables partial raster in ZeroCopyRasterBufferProvider when used with the GPU
+// compositor.
+CC_BASE_EXPORT BASE_DECLARE_FEATURE(kZeroCopyRBPPartialRasterWithGpuCompositor);
+
 // Sets raster tree priority to NEW_CONTENT_TAKES_PRIORITY when performing a
 // unified scroll with main-thread repaint reasons.
 CC_BASE_EXPORT BASE_DECLARE_FEATURE(kMainRepaintScrollPrefersNewContent);
@@ -268,6 +272,17 @@ CC_BASE_EXPORT extern const base::FeatureParam<int>
 // layer trees by default; the caller can explicitly opt into enabled or
 // disabled if need be to override this.
 CC_BASE_EXPORT BASE_DECLARE_FEATURE(kUseLayerListsByDefault);
+
+// When enabled, the default programmatic scroll animation curve can be
+// overridden with extra params.
+CC_BASE_EXPORT BASE_DECLARE_FEATURE(kProgrammaticScrollAnimationOverride);
+// Extra params to override the programmatic scroll animation.
+CC_BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(double, kCubicBezierX1);
+CC_BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(double, kCubicBezierY1);
+CC_BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(double, kCubicBezierX2);
+CC_BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(double, kCubicBezierY2);
+CC_BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(base::TimeDelta,
+                                          kMaxAnimtionDuration);
 
 }  // namespace features
 

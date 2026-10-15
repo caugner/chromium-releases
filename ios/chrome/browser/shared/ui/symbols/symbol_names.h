@@ -189,6 +189,7 @@ extern NSString* const kCheckmarkSealFillSymbol;
 extern NSString* const kWifiSymbol;
 extern NSString* const kBookmarksSymbol;
 extern NSString* const kSyncErrorSymbol;
+extern NSString* const kSyncPasswordErrorSymbol;
 extern NSString* const kMenuSymbol;
 extern NSString* const kSortSymbol;
 extern NSString* const kExpandSymbol;
@@ -274,6 +275,7 @@ extern NSString* const kRectangleGroupBubble;
 extern NSString* const kHomeSymbol;
 extern NSString* const kWorkSymbol;
 extern NSString* const kShieldedEnvelope;
+extern NSString* const kReaderModeSymbol;
 
 // Names of the default symbol being non-monochrome by default. When using them,
 // you probably want to set their color to monochrome.

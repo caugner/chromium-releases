@@ -212,6 +212,19 @@ class SharedTabGroupDataSyncBridge : public syncer::DataTypeSyncBridge {
   std::optional<syncer::ModelError> ResolveTabsMissingGroups(
       syncer::MetadataChangeList& metadata_change_list);
 
+  // Converts a `group` to a `SharedTabGroupDataSpecifics` proto. The returned
+  // specifics also contains unsupported fields that are stored in sync
+  // metadata.
+  sync_pb::SharedTabGroupDataSpecifics SharedTabGroupToSpecifics(
+      const SavedTabGroup& group) const;
+
+  // Converts a `tab` to a `SharedTabGroupDataSpecifics` proto. The returned
+  // specifics also contains unsupported fields that are stored in sync
+  // metadata.
+  sync_pb::SharedTabGroupDataSpecifics SharedTabGroupTabToSpecifics(
+      const SavedTabGroupTab& tab,
+      sync_pb::UniquePosition unique_position) const;
+
   SEQUENCE_CHECKER(sequence_checker_);
 
   // In charge of actually persisting changes to disk, or loading previous data.

@@ -5,10 +5,19 @@
 #ifndef CHROME_BROWSER_UI_LENS_LENS_SEARCH_CONTROLLER_H_
 #define CHROME_BROWSER_UI_LENS_LENS_SEARCH_CONTROLLER_H_
 
+#include <memory>
+
 #include "base/memory/raw_ptr.h"
-#include "components/tab_collections/public/tab_interface.h"
+#include "base/memory/weak_ptr.h"
+#include "components/lens/lens_overlay_invocation_source.h"
+#include "components/optimization_guide/content/browser/page_context_eligibility.h"
+#include "components/tabs/public/tab_interface.h"
 
 class LensOverlayController;
+
+namespace lens {
+class LensOverlaySidePanelCoordinator;
+}  // namespace lens
 
 namespace variations {
 class VariationsClient;
@@ -40,28 +49,88 @@ class LensSearchController {
                   syncer::SyncService* sync_service,
                   ThemeService* theme_service);
 
+  // A simple utility that gets the the LensSearchController TabFeature set by
+  // the embedding tab of a lens WebUI hosted in `webui_web_contents`.
+  // May return nullptr if no LensSearchController TabFeature is associated
+  // with `webui_web_contents`.
+  static LensSearchController* FromWebUIWebContents(
+      content::WebContents* webui_web_contents);
+
+  // A simple utility that gets the the LensSearchController TabFeature set by
+  // the instances of WebContents associated with a tab.
+  // May return nullptr if no LensSearchController TabFeature is associated
+  // with `tab_web_contents`.
+  static LensSearchController* FromTabWebContents(
+      content::WebContents* tab_web_contents);
+
+  // This is an entry point for showing the overlay UI. This has no effect if
+  // the overlay is not currently `kOff`.  This has no effect if the tab is not
+  // in the foreground. If the overlay is successfully invoked, then the value
+  // of `invocation_source` will be recorded in the relevant metrics. Virtual
+  // for testing.
+  virtual void OpenLensOverlay(
+      lens::LensOverlayInvocationSource invocation_source);
+
+  // Returns the tab interface that owns this controller.
+  tabs::TabInterface* GetTabInterface();
+
   // Returns the LensOverlayController.
   LensOverlayController* lens_overlay_controller();
+
+  // Returns the LensOverlaySidePanelCoordinator.
+  lens::LensOverlaySidePanelCoordinator* lens_overlay_side_panel_coordinator();
+
+  optimization_guide::PageContextEligibility* page_context_eligibility();
+
+  // Testing function for setting the page context eligibility API for this
+  // controller.
+  void set_page_context_eligibility_for_testing(
+      optimization_guide::PageContextEligibility* page_context_eligibility) {
+    page_context_eligibility_ = page_context_eligibility;
+  }
 
  protected:
   // Override these methods to stub out individual feature controllers for
   // testing.
   virtual std::unique_ptr<LensOverlayController> CreateLensOverlayController(
       tabs::TabInterface* tab,
+      LensSearchController* lens_search_controller,
       variations::VariationsClient* variations_client,
       signin::IdentityManager* identity_manager,
       PrefService* pref_service,
       syncer::SyncService* sync_service,
       ThemeService* theme_service);
 
+  // Override these methods to be able to track calls made to the side panel
+  // coordinator.
+  virtual std::unique_ptr<lens::LensOverlaySidePanelCoordinator>
+  CreateLensOverlaySidePanelCoordinator();
+
+  // Override these methods to be able to track calls made to the page context
+  // eligibility API.
+  virtual void CreatePageContextEligibilityAPI();
+
  private:
+  void OnPageContextEligibilityAPILoaded(
+      optimization_guide::PageContextEligibility* page_context_eligibility);
+
   // Whether the LensSearchController has been initialized.
   bool initialized_ = false;
 
+  // The overlay controller for the Lens Search feature on this tab.
   std::unique_ptr<LensOverlayController> lens_overlay_controller_;
+
+  // The side panel coordinator for the Lens Search feature on this tab.
+  std::unique_ptr<lens::LensOverlaySidePanelCoordinator>
+      lens_overlay_side_panel_coordinator_;
+
+  // The page context eligibility API if it has been fetched. Can be nullptr.
+  raw_ptr<optimization_guide::PageContextEligibility> page_context_eligibility_;
 
   // Owns this class.
   raw_ptr<tabs::TabInterface> tab_;
+
+  base::WeakPtrFactory<LensSearchController> weak_ptr_factory_{this};
 };
 
 #endif  // CHROME_BROWSER_UI_LENS_LENS_SEARCH_CONTROLLER_H_

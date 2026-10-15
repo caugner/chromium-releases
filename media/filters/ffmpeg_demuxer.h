@@ -26,6 +26,7 @@
 #include <stdint.h>
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -171,6 +172,7 @@ class MEDIA_EXPORT FFmpegDemuxerStream : public DemuxerStream {
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
   raw_ptr<AVStream> stream_;
   base::TimeDelta start_time_;
+  std::optional<base::TimeDelta> initial_start_padding_;
   std::unique_ptr<AudioDecoderConfig> audio_config_;
   std::unique_ptr<VideoDecoderConfig> video_config_;
   raw_ptr<MediaLog> media_log_;

@@ -1440,6 +1440,7 @@ Keine Geräte verbunden.</translation>
 <translation id="5672890847723042801">Dienstprogramme</translation>
 <translation id="5673434351075758678">Nach der Synchronisierung der Einstellungen von "<ph name="FROM_LOCALE" />" zu "<ph name="TO_LOCALE" />" geändert.</translation>
 <translation id="5675363643668471212">Ablageartikel</translation>
+<translation id="5677022547882470786">Durch Ziehen oder Drücken der Leertaste Bereich zum Suchen auswählen</translation>
 <translation id="5677928146339483299">Blockiert</translation>
 <translation id="5678564054339031017">Nächste Woche anzeigen</translation>
 <translation id="5679050765726761783">Leistungsschwaches Netzteil angeschlossen</translation>
@@ -1939,7 +1940,7 @@ Neuinstallation</translation>
 <translation id="7340731148882810149">Menü „Automatische Klicks“</translation>
 <translation id="7346909386216857016">Ok</translation>
 <translation id="7348093485538360975">Bildschirmtastatur</translation>
-<translation id="7352651011704765696">Ein Problem ist aufgetreten.</translation>
+<translation id="7352651011704765696">Ein Problem ist aufgetreten</translation>
 <translation id="735745346212279324">VPN-Verbindung getrennt</translation>
 <translation id="7360036564632145207">Möglicherweise kannst du die Leistung optimieren, indem du die Einstellungen für den Schutz vor Datenzugriff durch Peripheriegeräte änderst</translation>
 <translation id="736045644501761622">Hintergrund und Stil festlegen</translation>
@@ -2432,6 +2433,7 @@ Halte zum Herunterfahren des Geräts die Ein-/Aus-Taste noch einmal gedrückt.</
 <translation id="8934418770423095813">Google-Dokument erstellen</translation>
 <translation id="8934926665751933910">{NUM_FILES,plural, =1{1 Datei}other{# Dateien}}</translation>
 <translation id="8936501819958976551">deaktiviert</translation>
+<translation id="8937312474322077653">Lege bei der Bildschirmaufnahme Folgendes fest: <ph name="SOURCE" /> <ph name="TYPE" />. Drücke die Tabulatortaste, um die Art der Aufnahme auszuwählen. Drücke die Leertaste, um den Bereich auszuwählen. Drücke die Eingabetaste, um die Aufnahme zu erstellen.</translation>
 <translation id="8938800817013097409">USB-C-Gerät (rechter Port hinten)</translation>
 <translation id="8939855324412367560">Die Audioeingabe ist „<ph name="INPUT_DEVICE_NAME" />“ und die Audioausgabe ist „<ph name="OUTPUT_DEVICE_NAME" />“. Du kannst dies in den Einstellungen ändern.</translation>
 <translation id="8940956008527784070">Niedriger Akkustand (<ph name="PERCENTAGE" /> %)</translation>

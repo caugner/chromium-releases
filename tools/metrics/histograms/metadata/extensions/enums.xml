@@ -2816,6 +2816,9 @@ Called by update_extension_histograms.py.-->
   <int value="1931" label="AUTOFILLPRIVATE_GETPAYOVERTIMEISSUERLIST"/>
   <int value="1932" label="AUTOFILLPRIVATE_SETAUTOFILLAIOPTINSTATUS"/>
   <int value="1933" label="AUTOFILLPRIVATE_GETAUTOFILLAIOPTINSTATUS"/>
+  <int value="1934" label="EXPERIMENTALACTOR_STARTTASK"/>
+  <int value="1935" label="EXPERIMENTALACTOR_EXECUTEACTION"/>
+  <int value="1936" label="EXPERIMENTALACTOR_STOPTASK"/>
 </enum>
 
 <!-- LINT.ThenChange(//extensions/browser/extension_function_histogram_value.h:HistogramValue) -->
@@ -3202,6 +3205,7 @@ Called by update_extension_permission.py.-->
   <int value="259" label="kAILanguageModelOriginTrial"/>
   <int value="260" label="kExperimentalAiData"/>
   <int value="261" label="kOmniboxDirectInput"/>
+  <int value="262" label="kExperimentalActor"/>
 </enum>
 
 <enum name="ExtensionPolicyReinstallReason">
@@ -3348,6 +3352,15 @@ Called by update_extension_permission.py.-->
   <int value="0" label="Offstore"/>
   <int value="1" label="Chrome Web Store"/>
 </enum>
+
+<!-- LINT.IfChange(LoadExtensionFlag) -->
+
+<enum name="LoadExtensionFlag">
+  <int value="0" label="LoadExtension"/>
+  <int value="1" label="DisableExtensionsExcept"/>
+</enum>
+
+<!-- LINT.ThenChange(/chrome/browser/extensions/extension_service.h:LoadExtensionFlag) -->
 
 <enum name="LoadRulesetResult">
   <int value="0" label="Load succeeded"/>

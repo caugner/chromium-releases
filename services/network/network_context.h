@@ -35,6 +35,7 @@
 #include "mojo/public/cpp/bindings/remote_set.h"
 #include "mojo/public/cpp/bindings/unique_receiver_set.h"
 #include "net/base/network_isolation_key.h"
+#include "net/base/reconnect_notifier.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cert/cert_verify_result.h"
 #include "net/cookies/cookie_setting_override.h"
@@ -65,6 +66,7 @@
 #include "services/network/public/mojom/network_service.mojom-forward.h"
 #include "services/network/public/mojom/proxy_lookup_client.mojom.h"
 #include "services/network/public/mojom/proxy_resolving_socket.mojom.h"
+#include "services/network/public/mojom/reconnect_event_observer.mojom.h"
 #include "services/network/public/mojom/restricted_cookie_manager.mojom.h"
 #include "services/network/public/mojom/restricted_udp_socket.mojom.h"
 #include "services/network/public/mojom/tcp_socket.mojom.h"
@@ -453,8 +455,10 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
       const GURL& url,
       mojom::CredentialsMode credentials_mode,
       const net::NetworkAnonymizationKey& network_anonymization_key,
-      const net::MutableNetworkTrafficAnnotationTag& traffic_annotation)
-      override;
+      const net::MutableNetworkTrafficAnnotationTag& traffic_annotation,
+      const std::optional<net::ConnectionKeepAliveConfig>& keepalive_config,
+      mojo::PendingRemote<mojom::ReconnectEventObserver>
+          reconnect_event_observer) override;
 #if BUILDFLAG(IS_P2P_ENABLED)
   void CreateP2PSocketManager(
       const net::NetworkAnonymizationKey& network_anonymization_key,
@@ -638,6 +642,10 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
 
   const net::HttpAuthPreferences* GetHttpAuthPreferences() const;
 
+  // Remove the `observer` from `connection_change_observers_`.
+  void RemoveConnectionChangeObserver(
+      const net::ConnectionChangeNotifier::Observer* observer);
+
   size_t NumOpenWebTransports() const;
 
   size_t num_url_loader_factories_for_testing() const {
@@ -794,20 +802,6 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
 
   void OnVerifyCertComplete(uint64_t cert_verify_id, int result);
 
-#if BUILDFLAG(IS_CT_SUPPORTED)
-  // Checks the Certificate Transparency policy compliance for a given
-  // certificate and SCTs in `cert_verify_result`, and updates
-  // `cert_verify_result.cert_status` and
-  // `cert_verify_result.policy_compliance`. Returns net::OK or
-  // net::ERR_CERTIFICATE_TRANSPARENCY_REQUIRED.
-  // TODO(crbug.com/41380502): This code is more-or-less duplicated in
-  // SSLClientSocket and QUIC. Fold this into some CertVerifier-shaped class
-  // in //net.
-  int CheckCTRequirements(net::CertVerifyResult& cert_verify_result,
-                          const net::HostPortPair& host_port_pair,
-                          CTVerificationMode ct_verification_mode);
-#endif  // BUILDFLAG(IS_CT_SUPPORTED)
-
 #if BUILDFLAG(IS_DIRECTORY_TRANSFER_REQUIRED)
   void EnsureMounted(network::TransferableDirectory* directory);
 #endif  // BUILDFLAG(IS_DIRECTORY_TRANSFER_REQUIRED)
@@ -950,7 +944,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
   raw_ptr<net::StaticHttpUserAgentSettings> user_agent_settings_ = nullptr;
 
 #if BUILDFLAG(IS_CT_SUPPORTED)
-  std::unique_ptr<certificate_transparency::ChromeRequireCTDelegate>
+  scoped_refptr<certificate_transparency::ChromeRequireCTDelegate>
       require_ct_delegate_;
 
   std::unique_ptr<SCTAuditingHandler> sct_auditing_handler_;
@@ -981,9 +975,6 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
     VerifyCertCallback callback;
     scoped_refptr<net::X509Certificate> certificate;
     net::HostPortPair host_port;
-    std::string ocsp_result;
-    std::string sct_list;
-    CTVerificationMode ct_verification_mode;
   };
   std::map<uint64_t, std::unique_ptr<PendingCertVerify>>
       cert_verifier_requests_;
@@ -1046,6 +1037,13 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
   std::set<std::unique_ptr<PrefetchMatchingURLLoaderFactory>,
            base::UniquePtrComparator>
       url_loader_factories_;
+
+  // Keep track of the existing `ConnectionChangeNotifiers`. These will be later
+  // passed on to the corresponding session pools so that we can notify the
+  // observers about reconnect events.
+  std::set<std::unique_ptr<net::ConnectionChangeNotifier::Observer>,
+           base::UniquePtrComparator>
+      connection_change_observers_;
 
   std::unique_ptr<url_matcher::URLMatcher> url_matcher_;
 

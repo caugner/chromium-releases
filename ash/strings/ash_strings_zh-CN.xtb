@@ -1438,6 +1438,7 @@
 <translation id="5672890847723042801">实用程序</translation>
 <translation id="5673434351075758678">当系统同步完您的设置后，“<ph name="FROM_LOCALE" />”即会改为“<ph name="TO_LOCALE" />”。</translation>
 <translation id="5675363643668471212">任务栏中的项目</translation>
+<translation id="5677022547882470786">拖动或按空格键可选择要搜索的区域</translation>
 <translation id="5677928146339483299">已阻止</translation>
 <translation id="5678564054339031017">显示下一周的活动</translation>
 <translation id="5679050765726761783">已连接低功耗适配器</translation>
@@ -2430,6 +2431,7 @@
 <translation id="8934418770423095813">创建 Google 文档</translation>
 <translation id="8934926665751933910">{NUM_FILES,plural, =1{1 个文件}other{# 个文件}}</translation>
 <translation id="8936501819958976551">已停用</translation>
+<translation id="8937312474322077653">在屏幕截取中，将其设置为<ph name="SOURCE" /><ph name="TYPE" />。按 Tab 键可选择截取类型。按空格键可选择区域。按 Enter 键可截取。</translation>
 <translation id="8938800817013097409">USB-C 设备（背面右侧端口）</translation>
 <translation id="8939855324412367560">音频输入设备为“<ph name="INPUT_DEVICE_NAME" />”，音频输出设备为“<ph name="OUTPUT_DEVICE_NAME" />”。如需更改，请前往“设置”。</translation>
 <translation id="8940956008527784070">电池电量不足 (<ph name="PERCENTAGE" />%)</translation>

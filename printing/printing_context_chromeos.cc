@@ -16,6 +16,7 @@
 
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/notreached.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -172,6 +173,23 @@ void SetPrintableArea(PrintSettings* settings,
   }
 }
 
+std::string PrintScalingTypeToIPPString(mojom::PrintScalingType print_scaling) {
+  switch (print_scaling) {
+    case mojom::PrintScalingType::kAuto:
+      return "auto";
+    case mojom::PrintScalingType::kAutoFit:
+      return "auto-fit";
+    case mojom::PrintScalingType::kFill:
+      return "fill";
+    case mojom::PrintScalingType::kFit:
+      return "fit";
+    case mojom::PrintScalingType::kNone:
+      return "none";
+    default:
+      NOTREACHED();
+  }
+}
+
 }  // namespace
 
 ScopedIppPtr SettingsToIPPOptions(const PrintSettings& settings,
@@ -244,6 +262,14 @@ ScopedIppPtr SettingsToIPPOptions(const PrintSettings& settings,
                      settings.dpi_horizontal(), settings.dpi_vertical());
   }
 
+  // print scaling
+  if (settings.print_scaling() !=
+      mojom::PrintScalingType::kUnknownPrintScalingType) {
+    ippAddString(options, IPP_TAG_JOB, IPP_TAG_KEYWORD, kIppPrintScaling,
+                 nullptr,
+                 PrintScalingTypeToIPPString(settings.print_scaling()).c_str());
+  }
+
   std::map<std::string, std::vector<int>> multival;
   std::string media_source;
   for (const auto& setting : settings.advanced_settings()) {
@@ -304,33 +330,34 @@ ScopedIppPtr SettingsToIPPOptions(const PrintSettings& settings,
 // static
 std::unique_ptr<PrintingContext> PrintingContext::CreateImpl(
     Delegate* delegate,
-    ProcessBehavior process_behavior) {
-  return std::make_unique<PrintingContextChromeos>(delegate, process_behavior);
+    OutOfProcessBehavior out_of_process_behavior) {
+  return std::make_unique<PrintingContextChromeos>(delegate,
+                                                   out_of_process_behavior);
 }
 
 // static
 std::unique_ptr<PrintingContextChromeos>
 PrintingContextChromeos::CreateForTesting(
     Delegate* delegate,
-    ProcessBehavior process_behavior,
+    OutOfProcessBehavior out_of_process_behavior,
     std::unique_ptr<CupsConnection> connection) {
   // Private ctor.
   return base::WrapUnique(new PrintingContextChromeos(
-      delegate, process_behavior, std::move(connection)));
+      delegate, out_of_process_behavior, std::move(connection)));
 }
 
 PrintingContextChromeos::PrintingContextChromeos(
     Delegate* delegate,
-    ProcessBehavior process_behavior)
-    : PrintingContext(delegate, process_behavior),
+    OutOfProcessBehavior out_of_process_behavior)
+    : PrintingContext(delegate, out_of_process_behavior),
       connection_(CupsConnection::Create()),
       ipp_options_(WrapIpp(nullptr)) {}
 
 PrintingContextChromeos::PrintingContextChromeos(
     Delegate* delegate,
-    ProcessBehavior process_behavior,
+    OutOfProcessBehavior out_of_process_behavior,
     std::unique_ptr<CupsConnection> connection)
-    : PrintingContext(delegate, process_behavior),
+    : PrintingContext(delegate, out_of_process_behavior),
       connection_(std::move(connection)),
       ipp_options_(WrapIpp(nullptr)) {}
 
@@ -470,8 +497,17 @@ mojom::ResultCode PrintingContextChromeos::NewDocument(
   DCHECK(!in_print_job_);
   in_print_job_ = true;
 
+  // In case of out-of-process printing, code execution reaches the NewDocument
+  // function twice. First time the browser process ends here with a skip.
+  // The flow is later picked up by the print backend service process, where
+  // a new instance of the printing context is created and the flow goes through
+  // here without a skip.
+  //
+  // Other OS-es might do more than a quick skip, because of a potential need
+  // to handle OS-based printing dialogs.
 #if BUILDFLAG(ENABLE_OOP_PRINTING)
-  if (process_behavior() == ProcessBehavior::kOopEnabledSkipSystemCalls) {
+  if (out_of_process_behavior() ==
+      OutOfProcessBehavior::kEnabledSkipSystemCalls) {
     return mojom::ResultCode::kSuccess;
   }
 #endif

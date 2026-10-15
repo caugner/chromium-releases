@@ -174,6 +174,11 @@ export class SettingsBasicPageElement extends SettingsBasicPageElementBase {
         computed: 'computeAiPageTitle_(enableAiSettingsPageRefresh_)',
       },
 
+      showAiPageAiFeatureSection_: {
+        type: Boolean,
+        value: () => loadTimeData.getBoolean('showAiPageAiFeatureSection'),
+      },
+
       // <if expr="enable_glic">
       showGlicSection_: {
         type: Boolean,
@@ -190,23 +195,24 @@ export class SettingsBasicPageElement extends SettingsBasicPageElementBase {
   }
 
   // <if expr="not chromeos_ash">
-  languages?: LanguagesModel;
-  languageHelper: LanguageHelper;
+  declare languages?: LanguagesModel;
+  declare languageHelper: LanguageHelper;
   // </if>
-  pageVisibility: PageVisibility;
-  inSearchMode: boolean;
-  private showResetProfileBanner_: boolean;
+  declare pageVisibility: PageVisibility;
+  declare inSearchMode: boolean;
+  declare private showResetProfileBanner_: boolean;
 
-  private currentRoute_: Route;
-  private advancedTogglingInProgress_: boolean;
-  private showBatterySettings_: boolean;
-  private showAdvancedFeaturesMainControl_: boolean;
-  private enableAiSettingsPageRefresh_: boolean;
-  private aiPageTitle_: string;
+  declare private currentRoute_: Route;
+  declare private advancedTogglingInProgress_: boolean;
+  declare private showBatterySettings_: boolean;
+  declare private showAdvancedFeaturesMainControl_: boolean;
+  declare private enableAiSettingsPageRefresh_: boolean;
+  declare private aiPageTitle_: string;
+  declare private showAiPageAiFeatureSection_: boolean;
   // <if expr="enable_glic">
-  private showGlicSection_: boolean;
+  declare private showGlicSection_: boolean;
   // </if>
-  private showPrivacyGuidePromo_: boolean;
+  declare private showPrivacyGuidePromo_: boolean;
   private privacyGuidePromoWasShown_: boolean;
   private privacyGuideBrowserProxy_: PrivacyGuideBrowserProxy =
       PrivacyGuideBrowserProxyImpl.getInstance();

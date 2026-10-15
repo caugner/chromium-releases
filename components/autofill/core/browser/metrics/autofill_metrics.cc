@@ -563,10 +563,17 @@ void AutofillMetrics::LogEditedAutofilledFieldAtSubmission(
       GetFieldTypeUserEditStatusMetric(field.Type().GetStorableType(),
                                        editing_metric));
 
-  // Record the metric for FormsAI specific fields.
+  // Record the metric for Autofill AI specific fields.
   if (field.filling_product() == FillingProduct::kAutofillAi) {
     base::UmaHistogramEnumeration(
-        "Autofill.FormsAI.EditedAutofilledFieldAtSubmission", editing_metric);
+        "Autofill.Ai.EditedAutofilledFieldAtSubmission", editing_metric);
+    if (std::optional<FieldType> ai_type =
+            field.GetAutofillAiServerTypePredictions()) {
+      // Record the type specific UMA statistics.
+      base::UmaHistogramSparse(
+          "Autofill.Ai.EditedAutofilledFieldAtSubmission.ByFieldType",
+          GetFieldTypeUserEditStatusMetric(*ai_type, editing_metric));
+    }
   }
 
   // Record the UMA statistics spliced by the autocomplete attribute value.
@@ -1396,8 +1403,10 @@ void AutofillMetrics::LogImageFetchResult(bool succeeded) {
 }
 
 // static
-void AutofillMetrics::LogImageFetcherRequestLatency(base::TimeDelta duration) {
-  base::UmaHistogramLongTimes("Autofill.ImageFetcher.RequestLatency", duration);
+void AutofillMetrics::LogImageFetchOverallResult(bool succeeded) {
+  base::UmaHistogramBoolean(
+      "Autofill.ImageFetcher.CreditCardArt.OverallResultOnBrowserStart",
+      succeeded);
 }
 
 // static

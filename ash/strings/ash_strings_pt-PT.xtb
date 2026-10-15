@@ -1440,6 +1440,7 @@ Nenhum dispositivo ligado.</translation>
 <translation id="5672890847723042801">Utilitários</translation>
 <translation id="5673434351075758678">De "<ph name="FROM_LOCALE" />" para "<ph name="TO_LOCALE" />" após a sincronização das suas definições.</translation>
 <translation id="5675363643668471212">Item de prateleira</translation>
+<translation id="5677022547882470786">Arrastar ou premir a barra de espaço para selecionar uma área a pesquisar</translation>
 <translation id="5677928146339483299">Bloqueado</translation>
 <translation id="5678564054339031017">Mostrar semana seguinte</translation>
 <translation id="5679050765726761783">Transformador de baixo consumo ligado</translation>
@@ -2432,6 +2433,7 @@ Para encerrar o dispositivo, prima sem soltar o botão ligar/desligar novamente 
 <translation id="8934418770423095813">Criar Documento do Google Docs</translation>
 <translation id="8934926665751933910">{NUM_FILES,plural, =1{1 ficheiro}other{# ficheiros}}</translation>
 <translation id="8936501819958976551">desativada</translation>
+<translation id="8937312474322077653">Na captura de ecrã, defina como <ph name="TYPE" /> <ph name="SOURCE" />. Prima Tab para escolher o tipo de captura. Prima a barra de espaço para selecionar a região. Prima Enter para capturar.</translation>
 <translation id="8938800817013097409">Dispositivo USB-C (porta traseira direita)</translation>
 <translation id="8939855324412367560">A entrada de áudio é "<ph name="INPUT_DEVICE_NAME" />" e a saída de áudio é "<ph name="OUTPUT_DEVICE_NAME" />". Aceda às Definições para fazer alterações.</translation>
 <translation id="8940956008527784070">Bateria fraca (<ph name="PERCENTAGE" />%)</translation>

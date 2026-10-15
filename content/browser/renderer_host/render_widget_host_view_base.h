@@ -49,6 +49,7 @@
 #include "ui/base/ime/text_input_type.h"
 #include "ui/display/display.h"
 #include "ui/display/screen_infos.h"
+#include "ui/events/blink/did_overscroll_params.h"
 #include "ui/events/event_constants.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_widget_types.h"
@@ -79,8 +80,6 @@ class TouchSelectionControllerInputObserver;
 class WebContentsAccessibility;
 class DelegatedFrameHost;
 class SyntheticGestureTarget;
-
-using CopyOutputIpcPriority = viz::CopyOutputRequest::IpcPriority;
 
 // Basic implementation shared by concrete RenderWidgetHostView subclasses.
 class CONTENT_EXPORT RenderWidgetHostViewBase
@@ -156,6 +155,8 @@ class CONTENT_EXPORT RenderWidgetHostViewBase
   float GetDeviceScaleFactor() const final;
   bool IsPointerLocked() override;
 
+  virtual void DidOverscroll(const ui::DidOverscrollParams& params) {}
+
   // Identical to `CopyFromSurface()`, except that this method issues the
   // `viz::CopyOutputRequest` against the exact `viz::Surface` currently
   // embedded by this View, while `CopyFromSurface()` may return a copy of any
@@ -172,11 +173,11 @@ class CONTENT_EXPORT RenderWidgetHostViewBase
       base::OnceCallback<void(const SkBitmap&)> callback);
 
 #if BUILDFLAG(IS_ANDROID)
-  virtual void CopyFromExactSurfaceWithIpcPriority(
+  virtual void CopyFromExactSurfaceWithIpcDelay(
       const gfx::Rect& src_rect,
       const gfx::Size& output_size,
       base::OnceCallback<void(const SkBitmap&)> callback,
-      CopyOutputIpcPriority ipc_priority);
+      base::TimeDelta ipc_delay);
 #endif
 
   // For HiDPI capture mode, allow applying a render scale multiplier

@@ -124,9 +124,10 @@ namespace extensions {
 
 namespace {
 
+// A feature flag for the crash issue in crbug.com/389971360.
 BASE_FEATURE(kSpeculativeFixForServiceWorkerDataInDidStartServiceWorkerContext,
              "SpeculativeFixForServiceWorkerDataInDidStartServiceWorkerContext",
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 static const char kOnSuspendEvent[] = "runtime.onSuspend";
 static const char kOnSuspendCanceledEvent[] = "runtime.onSuspendCanceled";
@@ -987,6 +988,7 @@ void Dispatcher::OnEventDispatcherRequest(
 void Dispatcher::ActivateExtension(const ExtensionId& extension_id) {
   TRACE_RENDERER_EXTENSION_EVENT("Dispatcher::ActivateExtension", extension_id);
 
+  DCHECK(!extension_id.empty());
   const Extension* extension =
       RendererExtensionRegistry::Get()->GetByID(extension_id);
   if (!extension) {
@@ -1092,6 +1094,7 @@ void Dispatcher::UnloadExtension(const ExtensionId& extension_id) {
 
   // An extension should be in the registry if we are unloading it. Otherwise we
   // might be doing something out of the expected order.
+  DCHECK(!extension_id.empty());
   CHECK(RendererExtensionRegistry::Get()->Remove(extension_id));
 
   unloaded_extensions_.insert(extension_id);
@@ -1145,6 +1148,7 @@ void Dispatcher::SuspendExtension(
     mojom::Renderer::SuspendExtensionCallback callback) {
   TRACE_RENDERER_EXTENSION_EVENT("Dispatcher::SuspendExtension", extension_id);
 
+  DCHECK(!extension_id.empty());
   // Dispatch the suspend event. This doesn't go through the standard event
   // dispatch machinery because it requires special handling. We need to let
   // the browser know when we are starting and stopping the event dispatch, so
@@ -1156,6 +1160,7 @@ void Dispatcher::SuspendExtension(
 }
 
 void Dispatcher::CancelSuspendExtension(const ExtensionId& extension_id) {
+  DCHECK(!extension_id.empty());
   DispatchEventHelper(GenerateHostIdFromExtensionId(extension_id),
                       kOnSuspendCanceledEvent, base::Value::List(), nullptr);
 }
@@ -1174,6 +1179,9 @@ void Dispatcher::SetWebViewPartitionID(const std::string& partition_id) {
 
 void Dispatcher::SetScriptingAllowlist(
     const std::vector<ExtensionId>& extension_ids) {
+  DCHECK(std::all_of(
+      extension_ids.begin(), extension_ids.end(),
+      [](const ExtensionId& extension_id) { return !extension_id.empty(); }));
   ExtensionsClient::Get()->SetScriptingAllowlist(extension_ids);
 }
 
@@ -1207,6 +1215,7 @@ void Dispatcher::UpdateUserScriptWorlds(
 void Dispatcher::ClearUserScriptWorldConfig(
     const ExtensionId& extension_id,
     const std::optional<std::string>& world_id) {
+  DCHECK(!extension_id.empty());
   IsolatedWorldManager::GetInstance().ClearUserScriptWorldProperties(
       extension_id, world_id);
 }
@@ -1227,6 +1236,7 @@ void Dispatcher::UpdateTabSpecificPermissions(const ExtensionId& extension_id,
                                               URLPatternSet new_hosts,
                                               int tab_id,
                                               bool update_origin_allowlist) {
+  DCHECK(!extension_id.empty());
   const Extension* extension =
       RendererExtensionRegistry::Get()->GetByID(extension_id);
   if (!extension)
@@ -1253,6 +1263,7 @@ void Dispatcher::ClearTabSpecificPermissions(
     int tab_id,
     bool update_origin_allowlist) {
   for (const ExtensionId& id : extension_ids) {
+    DCHECK(!id.empty());
     const Extension* extension = RendererExtensionRegistry::Get()->GetByID(id);
     if (extension) {
       extension->permissions_data()->ClearTabSpecificPermissions(tab_id);
@@ -1315,6 +1326,7 @@ void Dispatcher::SetDeveloperMode(bool current_developer_mode) {
 
 void Dispatcher::SetUserScriptsAllowed(const ExtensionId& extension_id,
                                        bool enabled) {
+  DCHECK(!extension_id.empty());
   SetCurrentUserScriptAllowedState(kRendererProfileId, extension_id, enabled);
   const Extension* extension =
       RendererExtensionRegistry::Get()->GetByID(extension_id);
@@ -1344,6 +1356,7 @@ void Dispatcher::UpdatePermissions(const ExtensionId& extension_id,
                                    URLPatternSet policy_blocked_hosts,
                                    URLPatternSet policy_allowed_hosts,
                                    bool uses_default_policy_host_restrictions) {
+  DCHECK(!extension_id.empty());
   const Extension* extension =
       RendererExtensionRegistry::Get()->GetByID(extension_id);
   if (!extension)

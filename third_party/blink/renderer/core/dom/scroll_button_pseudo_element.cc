@@ -63,6 +63,52 @@ void ScrollButtonPseudoElement::Trace(Visitor* v) const {
   PseudoElement::Trace(v);
 }
 
+void ScrollButtonPseudoElement::HandleButtonActivation() {
+  Element& scrolling_element = UltimateOriginatingElement();
+  LayoutBox* scroller = scrolling_element.GetLayoutBox();
+  PaintLayerScrollableArea* scrollable_area =
+      scroller->IsDocumentElement() ? scroller->GetFrameView()->LayoutViewport()
+                                    : scroller->GetScrollableArea();
+  CHECK(scrollable_area);
+
+  LogicalToPhysical<bool> mapping(
+      scrolling_element.GetComputedStyle()->GetWritingDirection(),
+      GetPseudoId() == kPseudoIdScrollButtonInlineStart,
+      GetPseudoId() == kPseudoIdScrollButtonInlineEnd,
+      GetPseudoId() == kPseudoIdScrollButtonBlockStart,
+      GetPseudoId() == kPseudoIdScrollButtonBlockEnd);
+  gfx::Vector2dF displacement;
+  if (mapping.Top()) {
+    displacement.set_y(-scrollable_area->ScrollStep(
+        ui::ScrollGranularity::kScrollByPage, kVerticalScrollbar));
+  } else if (mapping.Bottom()) {
+    displacement.set_y(scrollable_area->ScrollStep(
+        ui::ScrollGranularity::kScrollByPage, kVerticalScrollbar));
+  } else if (mapping.Left()) {
+    displacement.set_x(-scrollable_area->ScrollStep(
+        ui::ScrollGranularity::kScrollByPage, kHorizontalScrollbar));
+  } else if (mapping.Right()) {
+    displacement.set_x(scrollable_area->ScrollStep(
+        ui::ScrollGranularity::kScrollByPage, kHorizontalScrollbar));
+  }
+  if (!displacement.IsZero()) {
+    gfx::PointF current_position = scrollable_area->ScrollPosition();
+    std::unique_ptr<cc::SnapSelectionStrategy> strategy =
+        cc::SnapSelectionStrategy::CreateForEndAndDirection(
+            current_position, displacement,
+            RuntimeEnabledFeatures::FractionalScrollOffsetsEnabled());
+    gfx::PointF new_position =
+        scrollable_area->GetSnapPositionAndSetTarget(*strategy).value_or(
+            current_position + displacement);
+    scrollable_area->ScrollToAbsolutePosition(
+        new_position, mojom::blink::ScrollBehavior::kAuto);
+  }
+  GetDocument().SetFocusedElement(this,
+                                  FocusParams(SelectionBehaviorOnFocus::kNone,
+                                              mojom::blink::FocusType::kNone,
+                                              /*capabilities=*/nullptr));
+}
+
 void ScrollButtonPseudoElement::DefaultEventHandler(Event& event) {
   bool is_click =
       event.IsMouseEvent() && event.type() == event_type_names::kClick;
@@ -71,52 +117,10 @@ void ScrollButtonPseudoElement::DefaultEventHandler(Event& event) {
   bool is_enter_or_space =
       is_key_down && (To<KeyboardEvent>(event).keyCode() == VKEY_RETURN ||
                       To<KeyboardEvent>(event).keyCode() == VKEY_SPACE);
-
-  Element& scrolling_element = UltimateOriginatingElement();
-  auto* scroller = DynamicTo<LayoutBox>(scrolling_element.GetLayoutObject());
-
-  bool should_intercept = scroller && scroller->IsScrollContainer() &&
-                          event.target() == this &&
-                          (is_click || is_enter_or_space);
+  bool should_intercept =
+      event.target() == this && (is_click || is_enter_or_space);
   if (should_intercept) {
-    PaintLayerScrollableArea* scrollable_area = scroller->GetScrollableArea();
-
-    LogicalToPhysical<bool> mapping(
-        scrolling_element.GetComputedStyle()->GetWritingDirection(),
-        GetPseudoId() == kPseudoIdScrollButtonInlineStart,
-        GetPseudoId() == kPseudoIdScrollButtonInlineEnd,
-        GetPseudoId() == kPseudoIdScrollButtonBlockStart,
-        GetPseudoId() == kPseudoIdScrollButtonBlockEnd);
-    gfx::Vector2dF displacement;
-    if (mapping.Top()) {
-      displacement.set_y(-scrollable_area->ScrollStep(
-          ui::ScrollGranularity::kScrollByPage, kVerticalScrollbar));
-    } else if (mapping.Bottom()) {
-      displacement.set_y(scrollable_area->ScrollStep(
-          ui::ScrollGranularity::kScrollByPage, kVerticalScrollbar));
-    } else if (mapping.Left()) {
-      displacement.set_x(-scrollable_area->ScrollStep(
-          ui::ScrollGranularity::kScrollByPage, kHorizontalScrollbar));
-    } else if (mapping.Right()) {
-      displacement.set_x(scrollable_area->ScrollStep(
-          ui::ScrollGranularity::kScrollByPage, kHorizontalScrollbar));
-    }
-    if (!displacement.IsZero()) {
-      gfx::PointF current_position = scrollable_area->ScrollPosition();
-      std::unique_ptr<cc::SnapSelectionStrategy> strategy =
-          cc::SnapSelectionStrategy::CreateForEndAndDirection(
-              current_position, displacement,
-              RuntimeEnabledFeatures::FractionalScrollOffsetsEnabled());
-      gfx::PointF new_position =
-          scrollable_area->GetSnapPositionAndSetTarget(*strategy).value_or(
-              current_position + displacement);
-      scrollable_area->ScrollToAbsolutePosition(
-          new_position, mojom::blink::ScrollBehavior::kAuto);
-    }
-    GetDocument().SetFocusedElement(this,
-                                    FocusParams(SelectionBehaviorOnFocus::kNone,
-                                                mojom::blink::FocusType::kNone,
-                                                /*capabilities=*/nullptr));
+    HandleButtonActivation();
     event.SetDefaultHandled();
   }
   PseudoElement::DefaultEventHandler(event);
@@ -130,10 +134,14 @@ bool ScrollButtonPseudoElement::UpdateSnapshotInternal() {
   }
   LayoutBox* scroller =
       DynamicTo<LayoutBox>(UltimateOriginatingElement().GetLayoutObject());
-  if (!scroller || !scroller->IsScrollContainer()) {
+  if (!scroller ||
+      (!scroller->IsScrollContainer() && !scroller->IsDocumentElement())) {
     return true;
   }
-  ScrollableArea* scrollable_area = scroller->GetScrollableArea();
+  ScrollableArea* scrollable_area =
+      scroller->IsDocumentElement() ? scroller->GetFrameView()->LayoutViewport()
+                                    : scroller->GetScrollableArea();
+  CHECK(scrollable_area);
   // Scrolls are rounded to the nearest offset pixel in
   // ScrollableArea::SetScrollOffset. We apply the same offsets in the
   // calculations here to ensure that the snap limit agrees between them.

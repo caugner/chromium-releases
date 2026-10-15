@@ -31,6 +31,10 @@ void ContentAnalysisInfo::InitializeRequest(
     if (reason() != ContentAnalysisRequest::UNKNOWN) {
       request->set_reason(reason());
     }
+
+    if (base::FeatureList::IsEnabled(safe_browsing::kEnhancedFieldsForSecOps)) {
+      request->set_referrer_chain(referrer_chain());
+    }
   }
 
   request->set_user_action_requests_count(user_action_requests_count());
@@ -41,13 +45,6 @@ void ContentAnalysisInfo::InitializeRequest(
 
   for (const auto& tag : settings().tags) {
     request->add_tag(tag.first);
-  }
-
-  if (base::FeatureList::IsEnabled(safe_browsing::kLocalIpAddressInEvents)) {
-    for (const auto& ip_address :
-         enterprise_connectors::GetLocalIpAddresses()) {
-      request->add_local_ips(ip_address);
-    }
   }
 
   request->set_blocking(settings().block_until_verdict !=

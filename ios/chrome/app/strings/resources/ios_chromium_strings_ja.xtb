@@ -47,7 +47,6 @@
 <translation id="2042889939382983733">Chromium 履歴を表示する</translation>
 <translation id="2052320862053429062">Chromium では、定期的にパスワードをオンライン上の公開リストと照合し、確認しています。その際、パスワードとユーザー名は Google を含め誰も読み取ることができないよう暗号化されます。</translation>
 <translation id="2059365270911640413">Chromium の設定を完了しましょう</translation>
-<translation id="2147210759439165826">最新のコンテンツや Chromium の役立つヒントをチェックできます。</translation>
 <translation id="2168108852149185974">アドオンが原因で Chromium がクラッシュしました。次をアンインストールしてください:</translation>
 <translation id="2168593389981132306">Chromium の品質を向上</translation>
 <translation id="2178608107313874732">現在 Chromium ではカメラを使用できません</translation>
@@ -156,8 +155,8 @@ Chromium を使いやすくするためにデータを使用するその他の�
 <translation id="4790638144988730920">Google アカウントの Chromium データを引き続き使用してください。</translation>
 <translation id="4828317641996116749">Chromium ですべてのパスワードを確認できませんでした。しばらくしてからもう一度お試しください。</translation>
 <translation id="4856138222358683580">Chromium アクション</translation>
-<translation id="4863800915967098115">ログインすると、仕事関連のブラウジングに使うアカウントが Chromium に追加されます。</translation>
 <translation id="4904452304169763785">Chromium で検出されたプライバシーやセキュリティの問題についてのアラートです。</translation>
+<translation id="4908570938463711775">Chromium のご利用開始に役立つ基本的な使い方を紹介します</translation>
 <translation id="4962295957157529683">開いている別の Chromium ウィンドウでの作業を終了してください。</translation>
 <translation id="4985291216379576555">オフラインのため Chromium でアップデートを確認できません</translation>
 <translation id="4996471330284142407">シンプル、安全で、さらに高速になった Chromium をご活用ください。</translation>
@@ -198,6 +197,7 @@ Chromium を使いやすくするためにデータを使用するその他の�
 <translation id="5688047395118852662">このカードでは、Chromium を最大限に活用するためのヒントを紹介しています。</translation>
 <translation id="5700709190537129682">Chromium でパスワードを確認できません</translation>
 <translation id="584550191241316896">Chromium にログインしています</translation>
+<translation id="5862307444128926510">Chromium へようこそ</translation>
 <translation id="5889847953983052353">オンにした場合:
 <ph name="BEGIN_INDENT" />  • 同じように Chromium を使用する他のユーザーの利便性向上に役立てられます。<ph name="END_INDENT" />
 
@@ -211,6 +211,7 @@ Chromium を使いやすくするためにデータを使用するその他の�
 <translation id="593808800391107017">Chromium で自動的に検出されたプライバシーとセキュリティの問題がある場合は、アラートが表示されます。</translation>
 <translation id="5951593919357934226">Chromium を最大限に活用しましょう。</translation>
 <translation id="5985254578475526217">Chromium から通知を受け取るには、iOS の [設定] で通知をオンにしてください。</translation>
+<translation id="6041226255405329731">Chromium にログインして、タブグループの共有や参加、アイデアの出し合いなどを行うことができます</translation>
 <translation id="6104024151682120539">Chromium で開く</translation>
 <translation id="61109258320235597">Google アカウントで Chromium データを使用して保存するには、パスフレーズを入力してください。</translation>
 <translation id="6132149203299792222">Google アカウントでログインすると、パスワードやブックマークなどを同期できます。</translation>
@@ -223,6 +224,7 @@ Chromium を使いやすくするためにデータを使用するその他の�
 <translation id="6301717043141881464">保存したパスワードを他のアプリで簡単に使用できるようするには、Chromium の自動入力を選択します</translation>
 <translation id="6324041800010509197">Chromium でタブグリッドにアクセス</translation>
 <translation id="6325378625795868881">メッセージや他のアプリのリンクをタップしたときに、常に Chromium で開くよう設定できます。</translation>
+<translation id="6387994184698195448">Chromium の役立つヒントなどをチェックできます。</translation>
 <translation id="6424492062988593837">Chromium のアップデートが見つかりました。新しいバージョンが利用可能です。</translation>
 <translation id="6433172051771630690">Chromium を最大限に活用するためのヒント。</translation>
 <translation id="65045991564554105">Chromium ブックマークを表示する</translation>
@@ -317,6 +319,7 @@ Chromium を使いやすくするためにデータを使用するその他の�
 <translation id="8860548555286245440">シークレット モードの Chromium で URL を開く</translation>
 <translation id="8880024619507699923">組織が、Chromium を使用するにはログインすることを求めています。<ph name="BEGIN_LINK" />詳細<ph name="END_LINK" /></translation>
 <translation id="8900052431807804054">Chromium の最高水準のセキュリティ機能で保護</translation>
+<translation id="8925569192291721236">価格トラッキングの更新や Chromium のヒントをチェックできます。</translation>
 <translation id="8950326149985259075">{THRESHOLD,plural, =1{Chromium を {THRESHOLD} 分間使用しなかった場合に行われます。}other{Chromium を {THRESHOLD} 分間使用しなかった場合に行われます。}}</translation>
 <translation id="8963279154877372067">Chromium の通知設定で値下げアラートの受信を許可する</translation>
 <translation id="8975812008711371178">Chromium で音声検索する</translation>

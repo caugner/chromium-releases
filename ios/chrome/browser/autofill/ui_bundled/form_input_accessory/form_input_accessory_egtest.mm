@@ -10,11 +10,15 @@
 #import "base/strings/sys_string_conversions.h"
 #import "base/test/ios/wait_util.h"
 #import "base/time/time.h"
+#import "components/autofill/core/browser/field_types.h"
 #import "components/autofill/core/browser/test_utils/autofill_test_utils.h"
 #import "components/autofill/core/common/autofill_features.h"
 #import "components/autofill/ios/common/features.h"
+#import "components/feature_engagement/public/feature_constants.h"
 #import "components/password_manager/core/browser/features/password_features.h"
+#import "components/password_manager/core/browser/password_ui_utils.h"
 #import "components/password_manager/core/common/password_manager_features.h"
+#import "components/strings/grit/components_strings.h"
 #import "components/sync/service/sync_prefs.h"
 #import "ios/chrome/browser/autofill/ui_bundled/autofill_app_interface.h"
 #import "ios/chrome/browser/autofill/ui_bundled/form_input_accessory/form_input_accessory_app_interface.h"
@@ -59,9 +63,19 @@ constexpr char kFormZip[] = "form_zip";
 constexpr NSString* kExampleUsername = @"user";
 
 // Matcher for the autofill password suggestion chip in the keyboard accessory.
-id<GREYMatcher> KeyboardAccessoryPasswordSuggestion() {
+id<GREYMatcher> KeyboardAccessoryPasswordSuggestion(
+    net::EmbeddedTestServer* test_server) {
   if ([AutofillAppInterface isKeyboardAccessoryUpgradeEnabled]) {
-    return grey_allOf(grey_text(kExampleUsername),
+    NSString* chip_text = kExampleUsername;
+    if ([ChromeEarlGrey isIPadIdiom]) {
+      // On iPad, the suggestion text is an attributed string containing the
+      // signon realm on the 2nd line.
+      NSString* realm =
+          base::SysUTF8ToNSString(password_manager::GetShownOrigin(
+              url::Origin::Create(test_server->base_url())));
+      chip_text = [NSString stringWithFormat:@"%@\n%@", chip_text, realm];
+    }
+    return grey_allOf(grey_text(chip_text),
                       grey_ancestor(grey_accessibilityID(
                           kFormInputAccessoryViewAccessibilityID)),
                       nil);
@@ -69,6 +83,42 @@ id<GREYMatcher> KeyboardAccessoryPasswordSuggestion() {
 
   return grey_accessibilityLabel(
       [NSString stringWithFormat:@"%@ ••••••••", kExampleUsername]);
+}
+
+// Matcher for the credit card suggestion chip.
+id<GREYMatcher> KeyboardAccessoryCreditCardSuggestion() {
+  autofill::CreditCard card = autofill::test::GetCreditCard();
+
+  NSString* username = base::SysUTF16ToNSString(card.GetInfo(
+      autofill::CREDIT_CARD_NAME_FULL, l10n_util::GetLocaleOverride()));
+  if ([AutofillAppInterface isKeyboardAccessoryUpgradeEnabled] &&
+      [ChromeEarlGrey isIPadIdiom]) {
+    // On iPad, the suggestion text is an attributed string containing the
+    // obfuscated credit card on the 2nd line.
+    NSString* network = base::SysUTF16ToNSString(
+        card.NetworkAndLastFourDigits(/*obfuscation_length=*/2));
+    return grey_text([NSString stringWithFormat:@"%@\n%@", username, network]);
+  } else {
+    return grey_text(username);
+  }
+}
+
+// Matcher for the address suggestion chip.
+id<GREYMatcher> KeyboardAccessoryAddressSuggestion(
+    autofill::FieldType field_type) {
+  autofill::AutofillProfile profile = autofill::test::GetFullProfile();
+  NSString* value = base::SysUTF16ToNSString(profile.GetRawInfo(field_type));
+  if ([AutofillAppInterface isKeyboardAccessoryUpgradeEnabled] &&
+      [ChromeEarlGrey isIPadIdiom]) {
+    // On iPad, the suggestion text is an attributed string containing the
+    // street address on the 2nd line.
+    NSString* street_address = base::SysUTF16ToNSString(
+        profile.GetRawInfo(autofill::ADDRESS_HOME_LINE1));
+    return grey_text(
+        [NSString stringWithFormat:@"%@\n%@", value, street_address]);
+  } else {
+    return grey_text(value);
+  }
 }
 
 // Verifies that the number of accepted address suggestions recorded for the
@@ -190,13 +240,11 @@ void SlowlyTypeText(NSString* text) {
   AppLaunchConfiguration config;
   config.features_disabled.push_back(
       autofill::features::test::kAutofillServerCommunication);
-  if ([self isRunningTest:@selector(testOpenExpandedManualFillView)] ||
-      [self isRunningTest:@selector
-            (testManualFillButtonTitleIsHiddenInCompactMode)]) {
-    config.features_enabled.push_back(kIOSKeyboardAccessoryUpgradeForIPad);
-  }
+  config.features_enabled.push_back(kIOSKeyboardAccessoryUpgradeForIPad);
   if ([self isRunningTest:@selector(testFillXframeCreditCardForm)] ||
-      [self isRunningTest:@selector(testFillXframeCreditCardFormThrottled)]) {
+      [self isRunningTest:@selector(testFillXframeCreditCardFormThrottled)] ||
+      [self isRunningTest:@selector
+            (testFillXframeCreditCardForm_WithPaymentSheetFix)]) {
     config.features_enabled.push_back(
         autofill::features::kAutofillAcrossIframesIos);
   }
@@ -210,6 +258,12 @@ void SlowlyTypeText(NSString* text) {
             (testFillCreditCardFieldsOnForm_WithUserEditedFix_NotUserEdited)]) {
     config.features_enabled.push_back(
         kAutofillCorrectUserEditedBitInParsedField);
+  }
+  if ([self isRunningTest:@selector(testAddressHomeAndWorkIPH)]) {
+    config.features_enabled.push_back(
+        autofill::features::kAutofillEnableSupportForHomeAndWork);
+    config.iph_feature_enabled =
+        feature_engagement::kIPHAutofillHomeWorkProfileSuggestionFeature.name;
   }
   return config;
 }
@@ -282,7 +336,7 @@ void SlowlyTypeText(NSString* text) {
 // Verifies that the field with the `id_attr` attribute in the frame with the
 // `frameId` attribute is filled with `value`. `id_attr` correspond to the HTML
 // element id attribute. Verifies the main frame when `frameId` is empty.
-// Verfies child frames of the main frame when `frameId` is not empty.
+// Verifies child frames of the main frame when `frameId` is not empty.
 - (void)verifyFieldWithIdHasBeenFilled:(std::string)id_attr
                               iframeId:(std::string)frameId
                                  value:(NSString*)value {
@@ -392,7 +446,8 @@ id<GREYMatcher> PaymentsBottomSheetUseKeyboardButton() {
   [[EarlGrey selectElementWithMatcher:chrome_test_util::WebViewMatcher()]
       performAction:chrome_test_util::TapWebElementWithId(kFormPassword)];
 
-  id<GREYMatcher> user_chip = KeyboardAccessoryPasswordSuggestion();
+  id<GREYMatcher> user_chip =
+      KeyboardAccessoryPasswordSuggestion(self.testServer);
 
   [ChromeEarlGrey waitForUIElementToAppearWithMatcher:user_chip];
 
@@ -430,7 +485,8 @@ id<GREYMatcher> PaymentsBottomSheetUseKeyboardButton() {
       performAction:chrome_test_util::TapWebElementWithId(
                         kSigninUffFormUsername)];
 
-  id<GREYMatcher> user_chip = KeyboardAccessoryPasswordSuggestion();
+  id<GREYMatcher> user_chip =
+      KeyboardAccessoryPasswordSuggestion(self.testServer);
 
   [ChromeEarlGrey waitForUIElementToAppearWithMatcher:user_chip];
 
@@ -463,7 +519,8 @@ id<GREYMatcher> PaymentsBottomSheetUseKeyboardButton() {
       performAction:chrome_test_util::TapWebElementWithId(
                         kSigninUffFormPassword)];
 
-  id<GREYMatcher> user_chip = KeyboardAccessoryPasswordSuggestion();
+  id<GREYMatcher> user_chip =
+      KeyboardAccessoryPasswordSuggestion(self.testServer);
 
   [ChromeEarlGrey waitForUIElementToAppearWithMatcher:user_chip];
 
@@ -499,8 +556,6 @@ id<GREYMatcher> PaymentsBottomSheetUseKeyboardButton() {
   [[EarlGrey selectElementWithMatcher:useKeyboardButton]
       performAction:grey_tap()];
 
-  autofill::CreditCard card = autofill::test::GetCreditCard();
-
   // Wait for the keyboard accessory to appear.
   [ChromeEarlGrey waitForUIElementToAppearWithMatcher:
                       manual_fill::FormSuggestionViewMatcher()];
@@ -510,12 +565,11 @@ id<GREYMatcher> PaymentsBottomSheetUseKeyboardButton() {
   [[EarlGrey selectElementWithMatcher:manual_fill::FormSuggestionViewMatcher()]
       performAction:grey_scrollToContentEdge(kGREYContentEdgeRight)];
 
-  id<GREYMatcher> cc_chip = grey_text(base::SysUTF16ToNSString(card.GetInfo(
-      autofill::CREDIT_CARD_NAME_FULL, l10n_util::GetLocaleOverride())));
+  id<GREYMatcher> cc_chip = KeyboardAccessoryCreditCardSuggestion();
   [[EarlGrey selectElementWithMatcher:cc_chip] performAction:grey_tap()];
 
   // Verify that the page is filled properly.
-  [self verifyCreditCardInfosHaveBeenFilled:card];
+  [self verifyCreditCardInfosHaveBeenFilled:autofill::test::GetCreditCard()];
 
   // Verify that the acceptance of the card suggestion at index 1 was correctly
   // recorded.
@@ -608,11 +662,8 @@ id<GREYMatcher> PaymentsBottomSheetUseKeyboardButton() {
   [[EarlGrey selectElementWithMatcher:useKeyboardButton]
       performAction:grey_tap()];
 
-  autofill::CreditCard card = autofill::test::GetCreditCard();
-
   // Tap on the credit card chip.
-  id<GREYMatcher> cc_chip = grey_text(base::SysUTF16ToNSString(card.GetInfo(
-      autofill::CREDIT_CARD_NAME_FULL, l10n_util::GetLocaleOverride())));
+  id<GREYMatcher> cc_chip = KeyboardAccessoryCreditCardSuggestion();
   [ChromeEarlGrey waitForUIElementToAppearWithMatcher:cc_chip];
   [[EarlGrey selectElementWithMatcher:cc_chip] performAction:grey_tap()];
 
@@ -628,6 +679,8 @@ id<GREYMatcher> PaymentsBottomSheetUseKeyboardButton() {
           std::make_tuple(autofill::CREDIT_CARD_EXP_4_DIGIT_YEAR,
                           "cc-exp-frame", kFormCardExpirationYear),
   };
+
+  autofill::CreditCard card = autofill::test::GetCreditCard();
   for (const auto& [field_type, frame_id_attr, field_id_attr] :
        fields_to_verify) {
     NSString* value =
@@ -659,11 +712,8 @@ id<GREYMatcher> PaymentsBottomSheetUseKeyboardButton() {
   [[EarlGrey selectElementWithMatcher:chrome_test_util::WebViewMatcher()]
       performAction:chrome_test_util::TapWebElementWithId(kFormCardName)];
 
-  autofill::CreditCard card = autofill::test::GetCreditCard();
-
   // Tap on the credit card chip.
-  id<GREYMatcher> cc_chip = grey_text(base::SysUTF16ToNSString(card.GetInfo(
-      autofill::CREDIT_CARD_NAME_FULL, l10n_util::GetLocaleOverride())));
+  id<GREYMatcher> cc_chip = KeyboardAccessoryCreditCardSuggestion();
   [ChromeEarlGrey waitForUIElementToAppearWithMatcher:cc_chip];
   [[EarlGrey selectElementWithMatcher:cc_chip] performAction:grey_tap()];
 
@@ -676,6 +726,7 @@ id<GREYMatcher> PaymentsBottomSheetUseKeyboardButton() {
 
   // Verify that the cardholder name field on the main frame was filled which
   // doesn't require the frame tree.
+  autofill::CreditCard card = autofill::test::GetCreditCard();
   [self verifyFieldWithIdHasBeenFilled:kFormCardName
                               iframeId:""
                                  value:base::SysUTF16ToNSString(card.GetInfo(
@@ -704,6 +755,87 @@ id<GREYMatcher> PaymentsBottomSheetUseKeyboardButton() {
   [AutofillAppInterface clearMockReauthenticationModule];
 }
 
+// Tests that the bottom sheet cohabitates well with other non-credit card forms
+// when the fix for the payment sheet across iframes is enabled. This makes sure
+// that crbug.com/417449733 doesn't occur.
+- (void)testFillXframeCreditCardForm_WithPaymentSheetFix {
+  // Mock reauth so it allows filling sensitive information without the need for
+  // real authentication.
+  [AutofillAppInterface setUpMockReauthenticationModule];
+  [AutofillAppInterface mockReauthenticationModuleCanAttempt:YES];
+  [AutofillAppInterface mockReauthenticationModuleExpectedResult:
+                            ReauthenticationResult::kSuccess];
+
+  // Load the xframe payment page.
+  [self loadXframePaymentPage];
+
+  // Give time for the page to settle even if at this point we could read
+  // content in the DOM. This is to prevent flakes.
+  base::test::ios::SpinRunLoopWithMinDelay(base::Seconds(1));
+
+  // Tap on the first address field and verify that the keyboard pops up and
+  // offers address suggestions. name_address
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::WebViewMatcher()]
+      performAction:chrome_test_util::TapWebElementWithId("name_address")];
+  id<GREYMatcher> name_chip =
+      KeyboardAccessoryAddressSuggestion(autofill::NAME_FULL);
+  [ChromeEarlGrey waitForUIElementToAppearWithMatcher:name_chip];
+
+  // Tap on another address field, below the first address field, and verify
+  // that the keyboard pops up and offers address suggestions.
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::WebViewMatcher()]
+      performAction:chrome_test_util::TapWebElementWithId("city")];
+  id<GREYMatcher> address_chip =
+      KeyboardAccessoryAddressSuggestion(autofill::ADDRESS_HOME_CITY);
+  [ChromeEarlGrey waitForUIElementToAppearWithMatcher:address_chip];
+
+  // Verify that the payment bottom sheet is still displayed when tapping on
+  // credit card fields.
+
+  // Tap a credit card field to open the bottom sheet.
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::WebViewMatcher()]
+      performAction:chrome_test_util::TapWebElementWithId(kFormCardName)];
+  id<GREYMatcher> useKeyboardButton = PaymentsBottomSheetUseKeyboardButton();
+  [ChromeEarlGrey waitForUIElementToAppearWithMatcher:useKeyboardButton];
+
+  // Dismiss the bottom sheet and open the keyboard.
+  [[EarlGrey selectElementWithMatcher:useKeyboardButton]
+      performAction:grey_tap()];
+
+  // Verify that filling the payment form still works correctly.
+
+  // Tap on the credit card chip.
+  id<GREYMatcher> cc_chip = KeyboardAccessoryCreditCardSuggestion();
+  [ChromeEarlGrey waitForUIElementToAppearWithMatcher:cc_chip];
+  [[EarlGrey selectElementWithMatcher:cc_chip] performAction:grey_tap()];
+
+  // Verify that the credit card fields were filled correctly across frames.
+  std::string locale = l10n_util::GetLocaleOverride();
+  std::vector<std::tuple<autofill::FieldType, std::string, std::string>>
+      fields_to_verify = {
+          std::make_tuple(autofill::CREDIT_CARD_NAME_FULL, "", kFormCardName),
+          std::make_tuple(autofill::CREDIT_CARD_NUMBER, "cc-number-frame",
+                          kFormCardNumber),
+          std::make_tuple(autofill::CREDIT_CARD_EXP_MONTH, "cc-exp-frame",
+                          kFormCardExpirationMonth),
+          std::make_tuple(autofill::CREDIT_CARD_EXP_4_DIGIT_YEAR,
+                          "cc-exp-frame", kFormCardExpirationYear),
+  };
+
+  autofill::CreditCard card = autofill::test::GetCreditCard();
+  for (const auto& [field_type, frame_id_attr, field_id_attr] :
+       fields_to_verify) {
+    NSString* value =
+        base::SysUTF16ToNSString(card.GetInfo(field_type, locale));
+    [self verifyFieldWithIdHasBeenFilled:field_id_attr
+                                iframeId:frame_id_attr
+                                   value:value];
+  }
+
+  // Cleanup.
+  [AutofillAppInterface clearMockReauthenticationModule];
+}
+
 // Tests that tapping on an address related field opens the keyboard
 // accessory with the proper suggestion visible and that tapping on that
 // suggestion properly fills the related fields on the form.
@@ -713,22 +845,38 @@ id<GREYMatcher> PaymentsBottomSheetUseKeyboardButton() {
   [[EarlGrey selectElementWithMatcher:chrome_test_util::WebViewMatcher()]
       performAction:chrome_test_util::TapWebElementWithId(kFormZip)];
 
-  autofill::AutofillProfile profile = autofill::test::GetFullProfile();
-
-  id<GREYMatcher> address_chip = grey_text(
-      base::SysUTF16ToNSString(profile.GetRawInfo(autofill::ADDRESS_HOME_ZIP)));
+  id<GREYMatcher> address_chip =
+      KeyboardAccessoryAddressSuggestion(autofill::ADDRESS_HOME_ZIP);
 
   [ChromeEarlGrey waitForUIElementToAppearWithMatcher:address_chip];
 
   [[EarlGrey selectElementWithMatcher:address_chip] performAction:grey_tap()];
 
   // Verify that the page is filled properly.
-  [self verifyAddressInfosHaveBeenFilled:profile];
+  [self verifyAddressInfosHaveBeenFilled:autofill::test::GetFullProfile()];
 
   // Verify that the acceptance of the address suggestion at index 0 was
   // correctly recorded.
   CheckAddressAutofillSuggestionAcceptedIndexMetricsCount(
       /*suggestion_index=*/0);
+}
+
+// Tests the IPH feature for a Home and Work account profile.
+- (void)testAddressHomeAndWorkIPH {
+  // Delete the profile that is added on `-setUp`.
+  [AutofillAppInterface clearProfilesStore];
+  // Store one address.
+  [AutofillAppInterface saveExampleHomeWorkAccountProfile];
+
+  [self loadAddressPage];
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::WebViewMatcher()]
+      performAction:chrome_test_util::TapWebElementWithId(kFormZip)];
+
+  id<GREYMatcher> iph_chip = grey_text(l10n_util::GetNSString(
+      IDS_AUTOFILL_IPH_HOME_AND_WORK_ACCOUNT_PROFILE_SUGGESTION));
+
+  // Ensure the Home and Work suggestion IPH appears.
+  [ChromeEarlGrey waitForUIElementToAppearWithMatcher:iph_chip];
 }
 
 // Tests that the manual fill button opens the expanded manual fill view.

@@ -23,6 +23,8 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.graphics.Insets;
+import androidx.core.view.WindowInsetsCompat;
 
 import org.chromium.base.BuildInfo;
 import org.chromium.base.Callback;
@@ -94,6 +96,8 @@ import org.chromium.chrome.browser.messages.MessageContainerCoordinator;
 import org.chromium.chrome.browser.messages.MessageContainerObserver;
 import org.chromium.chrome.browser.messages.MessagesResourceMapperInitializer;
 import org.chromium.chrome.browser.metrics.UmaSessionStats;
+import org.chromium.chrome.browser.multiwindow.MultiInstanceManager;
+import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
 import org.chromium.chrome.browser.omnibox.OmniboxFocusReason;
 import org.chromium.chrome.browser.omnibox.geo.GeolocationHeader;
 import org.chromium.chrome.browser.omnibox.suggestions.action.OmniboxActionDelegateImpl;
@@ -140,9 +144,11 @@ import org.chromium.chrome.browser.ui.appmenu.AppMenuCoordinatorFactory;
 import org.chromium.chrome.browser.ui.appmenu.AppMenuDelegate;
 import org.chromium.chrome.browser.ui.appmenu.AppMenuHandler;
 import org.chromium.chrome.browser.ui.appmenu.AppMenuObserver;
+import org.chromium.chrome.browser.ui.desktop_windowing.AppHeaderUtils;
 import org.chromium.chrome.browser.ui.edge_to_edge.EdgeToEdgeController;
 import org.chromium.chrome.browser.ui.edge_to_edge.EdgeToEdgeControllerFactory;
 import org.chromium.chrome.browser.ui.edge_to_edge.EdgeToEdgeUtils;
+import org.chromium.chrome.browser.ui.edge_to_edge.EdgeToEdgeUtils.MissingNavbarInsetsReason;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.ui.native_page.NativePage;
 import org.chromium.chrome.browser.ui.system.StatusBarColorController;
@@ -204,6 +210,7 @@ public class RootUiCoordinator
                 AppMenuBlocker,
                 ContextualSearchTabPromotionDelegate,
                 WindowFocusChangedObserver {
+
     protected final UnownedUserDataSupplier<TabObscuringHandler> mTabObscuringHandlerSupplier =
             new TabObscuringHandlerSupplier();
 
@@ -488,6 +495,7 @@ public class RootUiCoordinator
         mTabSwitcherSupplier = tabSwitcherSupplier;
         mIncognitoTabSwitcherSupplier = incognitoTabSwitcherSupplier;
         mIntentMetadataOneshotSupplier = intentMetadataOneshotSupplier;
+        mOverviewColorSupplier = overviewColorSupplier;
 
         boolean isTablet = DeviceFormFactor.isNonMultiDisplayContextOnTablet(activity);
         mTopUiThemeColorProvider =
@@ -497,7 +505,8 @@ public class RootUiCoordinator
                         activityThemeColorSupplier,
                         isTablet,
                         shouldAllowThemingInNightMode(),
-                        shouldAllowBrightThemeColors());
+                        shouldAllowBrightThemeColors(),
+                        shouldAllowThemingOnTablets());
 
         mStatusBarColorController =
                 new StatusBarColorController(
@@ -510,7 +519,8 @@ public class RootUiCoordinator
                         mActivityTabProvider,
                         mTopUiThemeColorProvider,
                         edgeToEdgeManager.getEdgeToEdgeSystemBarColorHelper(),
-                        mDesktopWindowStateManagerSupplier);
+                        mDesktopWindowStateManagerSupplier,
+                        mOverviewColorSupplier);
         mEphemeralTabCoordinatorSupplier = ephemeralTabCoordinatorSupplier;
 
         mPageZoomCoordinator =
@@ -536,7 +546,6 @@ public class RootUiCoordinator
                         new Handler());
         mExpandedBottomSheetHelper =
                 new ExpandedSheetHelperImpl(mModalDialogManagerSupplier, getTabObscuringHandler());
-        mOverviewColorSupplier = overviewColorSupplier;
         mEdgeToEdgeManager = edgeToEdgeManager;
         mBottomControlsStacker =
                 new BottomControlsStacker(mBrowserControlsManager, mActivity, mWindowAndroid);
@@ -910,9 +919,7 @@ public class RootUiCoordinator
                 contextualSearchManager.addObserver(mReadAloudContextualSearchObserver);
             }
         }
-        if (BuildInfo.getInstance().isAutomotive
-                && ChromeFeatureList.isEnabled(
-                        ChromeFeatureList.AUTOMOTIVE_FULLSCREEN_TOOLBAR_IMPROVEMENTS)) {
+        if (BuildInfo.getInstance().isAutomotive) {
             mAutomotiveBackButtonToolbarCoordinator =
                     new AutomotiveBackButtonToolbarCoordinator(
                             mActivity,
@@ -1147,8 +1154,8 @@ public class RootUiCoordinator
 
     /**
      * @return Whether the {@link MerchantTrustSignalsCoordinator} should be initialized in the
-     * context of this coordinator's UI.
-     **/
+     *     context of this coordinator's UI.
+     */
     protected boolean shouldInitializeMerchantTrustSignals() {
         return false;
     }
@@ -1484,7 +1491,9 @@ public class RootUiCoordinator
                             mBackPressManager,
                             mOverviewColorSupplier,
                             mReadAloudControllerSupplier,
-                            getDesktopWindowStateManager());
+                            getDesktopWindowStateManager(),
+                            getMultiInstanceManager(),
+                            mTabBookmarkerSupplier);
             if (!mSupportsAppMenuSupplier.getAsBoolean()) {
                 mToolbarManager.getToolbar().disableMenuButton();
             }
@@ -1709,6 +1718,14 @@ public class RootUiCoordinator
     }
 
     /**
+     * Whether the top toolbar theme color provider should allow using a web page theme on large
+     * form-factors.
+     */
+    protected boolean shouldAllowThemingOnTablets() {
+        return false;
+    }
+
+    /**
      * Initialize the {@link BottomSheetController}. The view for this component is not created
      * until content is requested in the sheet.
      */
@@ -1804,7 +1821,44 @@ public class RootUiCoordinator
                             mFullscreenManager);
             mEdgeToEdgeControllerSupplier.set(mEdgeToEdgeController);
             mEdgeToEdgeBottomChin = createEdgeToEdgeBottomChin();
+
+            recordIfMissingNavigationBar();
         }
+    }
+
+    private void recordIfMissingNavigationBar() {
+        var rootInsets = mActivity.getWindow().getDecorView().getRootWindowInsets();
+        assert rootInsets != null;
+
+        var rootInsetsCompat = WindowInsetsCompat.toWindowInsetsCompat(rootInsets);
+        Insets navigationBarInsets =
+                rootInsetsCompat.getInsets(WindowInsetsCompat.Type.navigationBars());
+        if (!navigationBarInsets.equals(Insets.NONE)) {
+            return;
+        }
+
+        @MissingNavbarInsetsReason int reason;
+        if (AppHeaderUtils.isAppInDesktopWindow(getDesktopWindowStateManager())) {
+            reason = MissingNavbarInsetsReason.IN_DESKTOP_WINDOW;
+        } else if (MultiWindowUtils.getInstance().isInMultiWindowMode(mActivity)) {
+            reason = MissingNavbarInsetsReason.IN_MULTI_WINDOW;
+        } else if (mFullscreenManager.getPersistentFullscreenMode()) {
+            // Fullscreen mode can lead to empty system bar insets. Being in fullscreen mode during
+            // activity recreation should be rare.
+            reason = MissingNavbarInsetsReason.IN_FULLSCREEN;
+        } else if (!MultiWindowUtils.isActivityVisible(mActivity)) {
+            // When activity is not visible (during theme recreation) we could get empty system bar
+            // insets.
+            reason = MissingNavbarInsetsReason.ACTIVITY_NOT_VISIBLE;
+        } else if (rootInsetsCompat
+                .getInsets(WindowInsetsCompat.Type.systemBars())
+                .equals(Insets.NONE)) {
+            reason = MissingNavbarInsetsReason.SYSTEM_BAR_INSETS_EMPTY;
+        } else {
+            reason = MissingNavbarInsetsReason.OTHER;
+        }
+
+        EdgeToEdgeUtils.recordIfMissingNavigationBar(reason);
     }
 
     /** Create a bottom chin for Edge-to-Edge. */
@@ -2051,5 +2105,9 @@ public class RootUiCoordinator
     /** Returns a supplier of the share delegate. */
     public Supplier<ShareDelegate> getShareDelegateSupplier() {
         return mShareDelegateSupplier;
+    }
+
+    public @Nullable MultiInstanceManager getMultiInstanceManager() {
+        return null;
     }
 }

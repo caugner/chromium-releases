@@ -298,6 +298,9 @@ class VIZ_SERVICE_EXPORT FrameSinkManagerImpl
   void OnFrameSinkDeviceScaleFactorChanged(const FrameSinkId& frame_sink_id,
                                            float device_scale_factor);
 
+  void OnFrameSinkMobileOptimizedChanged(const FrameSinkId& frame_sink_id,
+                                         bool is_mobile_optimized);
+
   void AddObserver(FrameSinkObserver* obs);
   void RemoveObserver(FrameSinkObserver* obs);
 
@@ -309,9 +312,12 @@ class VIZ_SERVICE_EXPORT FrameSinkManagerImpl
   // oldest embedding. To be called by non-root CompositorFrameSinks only.
   FrameSinkId GetOldestParentByChildFrameId(
       const FrameSinkId& child_frame_sink_id) const;
+  int GetNumParents(const FrameSinkId& frame_sink_id) const;
   // Returns the oldest RootCompositorFrameSink's FrameSinkId associated with
   // `child_frame_sink_id`, since all frame production/input processing uses
   // the oldest embedding.
+  // In case `child_frame_sink_id` is not attached to a RootCompositorFrameSink
+  // FrameSink(0,0) is returned.
   FrameSinkId GetOldestRootCompositorFrameSinkId(
       const FrameSinkId& child_frame_sink_id) const;
 
