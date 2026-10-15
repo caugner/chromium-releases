@@ -14,6 +14,7 @@
 #include "components/actor/core/task_id.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "third_party/abseil-cpp/absl/container/flat_hash_map.h"
+#include "third_party/abseil-cpp/absl/container/flat_hash_set.h"
 
 namespace actor {
 class ActorKeyedService;
@@ -60,6 +61,10 @@ class GlicActorTaskIconManager : public KeyedService {
   static bool IsActiveUniversalCartTask(actor::ActorTask::State state,
                                         glic::mojom::FeatureMode feature_mode);
 
+  // Returns true if the task is an active password change task.
+  static bool IsActivePasswordChangeTask(actor::ActorTask::State state,
+                                         glic::mojom::FeatureMode feature_mode);
+
   // Register for this callback to get task nudge state change notifications.
   using TaskNudgeChangeCallback = base::RepeatingCallback<void(
       bool show_bubble,
@@ -68,10 +73,10 @@ class GlicActorTaskIconManager : public KeyedService {
       TaskNudgeChangeCallback callback);
 
   // Register for this callback to get task state change notifications for the
-  // bubble.
+  // bubble. Virtual for testing.
   using TaskListBubbleChangeCallback =
       base::RepeatingCallback<void(bool is_start_notification)>;
-  base::CallbackListSubscription RegisterTaskListBubbleStateChange(
+  virtual base::CallbackListSubscription RegisterTaskListBubbleStateChange(
       TaskListBubbleChangeCallback callback);
 
   actor::ui::ActorTaskNudgeState GetCurrentActorTaskNudgeState() const;
@@ -80,6 +85,9 @@ class GlicActorTaskIconManager : public KeyedService {
   const absl::flat_hash_map<actor::TaskId, bool>& actor_task_list_bubble_rows()
       const {
     return actor_task_list_bubble_rows_;
+  }
+  const absl::flat_hash_set<actor::TaskId>& tasks_notified_of_start() const {
+    return tasks_notified_of_start_;
   }
 
   // Callback to process a row in the task list bubble when it is clicked.
@@ -124,12 +132,15 @@ class GlicActorTaskIconManager : public KeyedService {
   raw_ptr<Profile> profile_;
   raw_ptr<actor::ActorKeyedService> actor_service_;
 
-  // Map of tasks needing notifications. `requires_proccessing` tracks if this
+  // Map of tasks needing notifications. `requires_processing` tracks if this
   // row requires processing. A row is only processed when it has been clicked
   // on by the user. If the row does not need user attention it will not require
   // processing.
   absl::flat_hash_map<actor::TaskId, /* requires_processing */ bool>
       actor_task_list_bubble_rows_;
+
+  // Set of task IDs that have already triggered a start notification.
+  absl::flat_hash_set<actor::TaskId> tasks_notified_of_start_;
 };
 
 }  // namespace glic

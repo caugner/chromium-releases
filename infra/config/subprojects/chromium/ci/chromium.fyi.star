@@ -142,7 +142,6 @@ ci.builder(
         ],
     ),
     os = os.LINUX_DEFAULT,
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "viz",
     ),
@@ -197,7 +196,6 @@ ci.builder(
         ],
     ),
     os = os.LINUX_DEFAULT,
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "site_isolation",
     ),
@@ -230,7 +228,6 @@ ci.builder(
         ],
     ),
     os = os.LINUX_DEFAULT,
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "network|traffic|annotations",
         short_name = "lnx",
@@ -274,7 +271,6 @@ ci.builder(
     ),
     builderless = True,
     os = os.LINUX_DEFAULT,
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "release",
         short_name = "rel",
@@ -338,7 +334,6 @@ ci.builder(
         },
     ),
     os = os.LINUX_DEFAULT,
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux|blink",
         short_name = "BIr",
@@ -383,7 +378,6 @@ ci.builder(
         ],
     ),
     os = os.LINUX_DEFAULT,
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux",
         short_name = "se",
@@ -423,7 +417,6 @@ ci.builder(
         ],
     ),
     os = os.LINUX_DEFAULT,
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux|blink",
         short_name = "VF",
@@ -462,7 +455,6 @@ ci.builder(
         ],
     ),
     os = os.LINUX_DEFAULT,
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux",
     ),
@@ -495,7 +487,6 @@ ci.thin_tester(
             "mac_default_arm64",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "mac",
     ),
@@ -540,7 +531,6 @@ ci.builder(
     ),
     builderless = True,
     os = os.LINUX_DEFAULT,
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "mulitscreen",
     ),
@@ -709,7 +699,6 @@ ci.builder(
     ),
     builderless = True,
     os = os.LINUX_DEFAULT,
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "android",
     ),
@@ -748,7 +737,6 @@ ci.builder(
         ],
     ),
     os = os.LINUX_DEFAULT,
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux",
     ),
@@ -957,7 +945,6 @@ ci.builder(
         },
     ),
     os = os.LINUX_DEFAULT,
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux",
     ),
@@ -1013,7 +1000,6 @@ ci.builder(
         },
     ),
     os = os.LINUX_DEFAULT,
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux|blink",
         short_name = "trace",
@@ -1108,7 +1094,6 @@ ci.builder(
         ],
     ),
     os = os.LINUX_DEFAULT,
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux",
         short_name = "hdls",
@@ -1363,7 +1348,6 @@ ci.builder(
         os_type = targets.os_type.LINUX,
     ),
     os = os.LINUX_DEFAULT,
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux|arm64",
         short_name = "rel",
@@ -1448,7 +1432,6 @@ ci.builder(
         os_type = targets.os_type.LINUX,
     ),
     os = os.LINUX_DEFAULT,
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux|arm64",
         short_name = "wl",
@@ -1489,7 +1472,6 @@ ci.builder(
         use_swarming = False,
     ),
     os = os.LINUX_DEFAULT,
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "perfetto",
         short_name = "lnx",
@@ -1582,7 +1564,7 @@ fyi_ios_builder(
         mixins = [
             "expand-as-isolated-script",
             "has_native_resultdb_integration",
-            "mac_beta_arm64",
+            "mac_default_arm64",
             "mac_toolchain",
             "out_dir_arg",
             "xcode_26_main",
@@ -2079,6 +2061,8 @@ fyi_mac_builder(
     ),
     builderless = True,
     cores = None,
+    # TODO(crbug.com/543006750): Revert to MAC_DEFAULT after arm migration.
+    os = os.MAC_15,
     console_view_entry = consoles.console_view_entry(
         category = "deterministic|mac",
         short_name = "rel",
@@ -2099,7 +2083,8 @@ fyi_mac_builder(
     ),
     builderless = True,
     cores = None,
-    os = os.MAC_DEFAULT,
+    # TODO(crbug.com/543006750): Revert to MAC_DEFAULT after arm migration.
+    os = os.MAC_15,
     console_view_entry = consoles.console_view_entry(
         category = "deterministic|mac",
         short_name = "dbg",
@@ -2451,6 +2436,8 @@ fyi_mac_builder(
     ),
     builderless = True,
     cores = None,
+    # TODO(crbug.com/543006750): Revert to MAC_DEFAULT after arm migration.
+    os = os.MAC_15,
     console_view_entry = [
         consoles.console_view_entry(
             category = "treesinviz",
@@ -2597,7 +2584,6 @@ ci.builder(
         },
     ),
     os = os.LINUX_DEFAULT,
-    ssd = None,
     console_view_entry = [
         consoles.console_view_entry(
             category = "treesinviz",
@@ -2751,7 +2737,6 @@ ci.builder(
         },
     ),
     os = os.LINUX_DEFAULT,
-    ssd = None,
     console_view_entry = [
         consoles.console_view_entry(
             category = "treesinviz",
@@ -2855,7 +2840,10 @@ ci.builder(
     builder_spec = builder_config.copy_from("ci/Linux Builder"),
     gn_args = "ci/Linux Builder",
     targets = targets.bundle(
-        targets = ["webdriver_bidi_unittests"],
+        targets = [
+            "webdriver_bidi_e2e_tests",
+            "webdriver_bidi_unittests",
+        ],
         mixins = [
             "linux-jammy",
         ],
@@ -2864,4 +2852,144 @@ ci.builder(
         category = "webdriver",
     ),
     contact_team_email = "chrome-devtools@google.com",
+)
+
+ci.builder(
+    name = "win-separate-renderer-fyi-rel",
+    description_html = "Windows Release build and test with enable_separate_renderer_binary=true.",
+    schedule = "with 6h interval",
+    triggered_by = [],
+    builder_spec = builder_config.copy_from("ci/Win x64 Builder"),
+    gn_args = gn_args.config(
+        configs = [
+            "ci/Win x64 Builder",
+            "no_symbols",
+            "separate_renderer",
+        ],
+    ),
+    targets = targets.bundle(
+        targets = [
+            "chromium_win10_gtests",
+        ],
+        additional_compile_targets = [
+            "chrome",
+        ],
+        mixins = [
+            "win10",
+        ],
+        per_test_modifications = {
+            "browser_tests": targets.mixin(
+                swarming = targets.swarming(
+                    shards = 55,
+                ),
+            ),
+            "browser_tests_no_field_trial": targets.remove(
+                reason = "Disabled to reduce FYI bot capacity load.",
+            ),
+            "components_browsertests_no_field_trial": targets.remove(
+                reason = "Disabled to reduce FYI bot capacity load.",
+            ),
+            "interactive_ui_tests": targets.mixin(
+                swarming = targets.swarming(
+                    shards = 9,
+                ),
+            ),
+            "interactive_ui_tests_no_field_trial": targets.remove(
+                reason = "Disabled to reduce FYI bot capacity load.",
+            ),
+            "sync_integration_tests_no_field_trial": targets.remove(
+                reason = "Disabled to reduce FYI bot capacity load.",
+            ),
+        },
+    ),
+    os = os.WINDOWS_DEFAULT,
+    console_view_entry = consoles.console_view_entry(
+        category = "win|separate-renderer",
+        short_name = "tst",
+    ),
+    contact_team_email = "toyoshim@chromium.org",
+)
+
+ci.builder(
+    name = "linux-separate-renderer-fyi-rel",
+    description_html = "Linux Release build and test with enable_separate_renderer_binary=true.",
+    schedule = "triggered",
+    triggered_by = [],
+    builder_spec = builder_config.copy_from("ci/Linux Builder"),
+    gn_args = gn_args.config(
+        configs = [
+            "ci/Linux Builder",
+            "no_symbols",
+            "separate_renderer",
+        ],
+    ),
+    targets = targets.bundle(
+        targets = [
+            "chromium_linux_gtests",
+        ],
+        additional_compile_targets = [
+            "chrome",
+        ],
+        per_test_modifications = {
+            "browser_tests": targets.mixin(
+                swarming = targets.swarming(
+                    shards = 28,
+                ),
+            ),
+            "interactive_ui_tests": targets.mixin(
+                swarming = targets.swarming(
+                    shards = 6,
+                ),
+            ),
+        },
+    ),
+    os = os.LINUX_DEFAULT,
+    console_view_entry = consoles.console_view_entry(
+        category = "linux|separate-renderer",
+        short_name = "tst",
+    ),
+    contact_team_email = "toyoshim@chromium.org",
+)
+
+fyi_mac_builder(
+    name = "mac-separate-renderer-fyi-rel",
+    description_html = "Mac Release build and test with enable_separate_renderer_binary=true.",
+    schedule = "triggered",
+    triggered_by = [],
+    builder_spec = builder_config.copy_from("ci/Mac Builder"),
+    gn_args = gn_args.config(
+        configs = [
+            "ci/Mac Builder",
+            "no_symbols",
+            "separate_renderer",
+        ],
+    ),
+    targets = targets.bundle(
+        targets = [
+            "chromium_mac_gtests",
+        ],
+        additional_compile_targets = [
+            "chrome",
+        ],
+        per_test_modifications = {
+            "browser_tests": targets.mixin(
+                swarming = targets.swarming(
+                    shards = 40,
+                ),
+            ),
+            "interactive_ui_tests": targets.mixin(
+                swarming = targets.swarming(
+                    shards = 8,
+                ),
+            ),
+        },
+    ),
+    builderless = True,
+    cores = None,
+    cpu = cpu.ARM64,
+    console_view_entry = consoles.console_view_entry(
+        category = "mac|separate-renderer",
+        short_name = "tst",
+    ),
+    contact_team_email = "toyoshim@chromium.org",
 )

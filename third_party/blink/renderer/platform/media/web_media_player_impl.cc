@@ -690,7 +690,6 @@ void WebMediaPlayerImpl::Shutdown() {
   memory_usage_reporting_timer_.Stop();
   background_pause_timer_.Stop();
   update_background_status_cb_.Cancel();
-  have_enough_after_lazy_load_cb_.Cancel();
   media_log_->OnWebMediaPlayerDestroyed();
 
   demuxer_manager_->StopAndResetClient();
@@ -710,6 +709,13 @@ void WebMediaPlayerImpl::Shutdown() {
   if (observer_)
     observer_->SetClient(nullptr);
 
+  // Explicitly reset `pipeline_controller_` to guarantee its destruction
+  // before DestructionHelper runs on `media_task_runner_`.
+  // This prevents possible dangling ptr's if `compositor` is destroyed
+  // before `pipeline_controller_`, which holds a VideoRendererSink
+  // in MediaFoundationRendererClient.
+  pipeline_controller_.reset();
+
   client_ = nullptr;
   encrypted_client_ = nullptr;
   frame_ = nullptr;
@@ -719,6 +725,7 @@ void WebMediaPlayerImpl::Shutdown() {
 
   // Handle destruction of things that need to be destructed after the pipeline
   // completes stopping on the media thread.
+  // TODO(crbug.com/482958590): This may not be necessary anymore.
   PostCrossThreadTask(
       *media_task_runner_, FROM_HERE,
       CrossThreadBindOnce(
@@ -1338,6 +1345,12 @@ bool WebMediaPlayerImpl::HasAudio() const {
   return pipeline_metadata_.has_audio;
 }
 
+bool WebMediaPlayerImpl::IsHDR() const {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
+
+  return pipeline_metadata_.video_decoder_config.color_space_info().IsHDR();
+}
+
 void WebMediaPlayerImpl::EnabledAudioTracksChanged(
     std::optional<WebMediaPlayer::TrackId> enabled_track_id) {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
@@ -1370,11 +1383,6 @@ gfx::Size WebMediaPlayerImpl::VisibleSize() const {
     return gfx::Size();
 
   return video_frame->visible_rect().size();
-}
-
-media::VideoTransformation WebMediaPlayerImpl::GetVideoTransformation() const {
-  DCHECK(main_task_runner_->BelongsToCurrentThread());
-  return pipeline_metadata_.video_decoder_config.video_transformation();
 }
 
 media::VideoSpatialFormat WebMediaPlayerImpl::GetSpatialFormat() const {
@@ -1932,9 +1940,9 @@ void WebMediaPlayerImpl::OnPipelineSuspended() {
       // connection, briefly (250ms chosen arbitrarily) delay signaling "have
       // enough" to the MultiBufferDataSource.
       //
-      // Unretained() is safe here since `have_enough_after_lazy_load_cb_` is
-      // cancelled in Shutdown() before `demuxer_manager_` is destroyed via
-      // DestructionHelper.
+      // Unretained() is safe here since the base::CancelableOnceClosure will
+      // cancel upon destruction of this class and `demuxer_manager_` is
+      // gauranteeed to outlive us as a result of the DestructionHelper.
       have_enough_after_lazy_load_cb_.Reset(
           BindOnce(&media::DemuxerManager::StopPreloading,
                    Unretained(demuxer_manager_.get())));
@@ -3452,7 +3460,7 @@ void WebMediaPlayerImpl::FinishMemoryUsageReport(int64_t demuxer_memory_usage) {
 
   const auto stats = GetPipelineStatistics();
   const int64_t data_source_memory_usage =
-      demuxer_manager_ ? demuxer_manager_->GetDataSourceMemoryUsage() : 0;
+      demuxer_manager_->GetDataSourceMemoryUsage();
 
   // If we have video and no video memory usage and we've rendered the first
   // frame, assume the VideoFrameCompositor is holding onto the last frame after
@@ -3756,7 +3764,15 @@ bool WebMediaPlayerImpl::ShouldPausePlaybackWhenHidden() const {
     return true;
   }
 
-  const bool preserve_audio = HasUnmutedAudio() || audio_source_provider_->IsAudioBeingCaptured();
+  const bool is_background_suspend_enabled = IsBackgroundSuspendEnabled(this);
+  const bool is_muted_background_audio_paused =
+      (!HasVideo() || is_background_suspend_enabled) &&
+      base::FeatureList::IsEnabled(media::kPauseMutedBackgroundAudio) &&
+      volume_ == 0.;
+  const bool preserve_audio =
+      (HasUnmutedAudio() && !is_muted_background_audio_paused) ||
+      audio_source_provider_->IsAudioBeingCaptured();
+
   // Audio only stream is allowed to play when in background.
   if (!HasVideo() && preserve_audio)
     return false;
@@ -3775,7 +3791,7 @@ bool WebMediaPlayerImpl::ShouldPausePlaybackWhenHidden() const {
 
   // If suspending background video, pause any video that's not unlocked to play
   // in the background.
-  if (IsBackgroundSuspendEnabled(this)) {
+  if (is_background_suspend_enabled) {
     return !preserve_audio || (IsResumeBackgroundVideosEnabled() &&
                                !allow_background_video_playback_);
   }
@@ -4135,11 +4151,6 @@ bool WebMediaPlayerImpl::HasUnmutedAudio() const {
   // not apply if a media was audible so the system states do not flicker
   // depending on whether the user muted the player.
   const bool has_been_audible = !client_->WasAlwaysMuted();
-
-  if (base::FeatureList::IsEnabled(
-          media::kPauseMutedBackgroundAudio)) {
-    return HasAudio() && has_been_audible && volume_ > 0.;
-  }
   return HasAudio() && has_been_audible;
 }
 

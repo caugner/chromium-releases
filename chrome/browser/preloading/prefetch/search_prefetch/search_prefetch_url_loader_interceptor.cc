@@ -66,15 +66,10 @@ SearchPrefetchURLLoaderInterceptor::SearchPrefetchURLLoaderInterceptor(
     content::FrameTreeNodeId frame_tree_node_id,
     int64_t navigation_id,
     scoped_refptr<base::SequencedTaskRunner> navigation_response_task_runner)
-    : frame_tree_node_id_(frame_tree_node_id) {
-#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
-  navigation_id_ = navigation_id;
-  navigation_response_task_runner_ = navigation_response_task_runner;
-#else
-  std::ignore = navigation_id;
-  std::ignore = navigation_response_task_runner;
-#endif
-}
+    : frame_tree_node_id_(frame_tree_node_id),
+      navigation_id_(navigation_id),
+      navigation_response_task_runner_(
+          std::move(navigation_response_task_runner)) {}
 
 SearchPrefetchURLLoaderInterceptor::~SearchPrefetchURLLoaderInterceptor() =
     default;
@@ -83,7 +78,8 @@ SearchPrefetchURLLoaderInterceptor::~SearchPrefetchURLLoaderInterceptor() =
 SearchPrefetchURLLoader::RequestHandler
 SearchPrefetchURLLoaderInterceptor::MaybeCreateLoaderForRequest(
     const network::ResourceRequest& tentative_resource_request,
-    content::FrameTreeNodeId frame_tree_node_id) {
+    content::FrameTreeNodeId frame_tree_node_id,
+    int64_t navigation_id) {
   // Do not intercept non-main frame navigations.
   if (!tentative_resource_request.is_outermost_main_frame) {
     // Use the is_outermost_main_frame flag instead of obtaining the
@@ -119,13 +115,29 @@ SearchPrefetchURLLoaderInterceptor::MaybeCreateLoaderForRequest(
   }
 
   if (is_prerender_main_frame_navigation) {
-    return service->MaybeCreateResponseReader(tentative_resource_request);
+    auto handler =
+        service->MaybeCreateResponseReader(tentative_resource_request);
+    if (handler) {
+      if (IsSearchPrefetchPreloadServingMetricsEnabled()) {
+        // This navigation id is used for recording navigation served by search
+        // prefetch in UMA. It is added here to avoid recording navigation
+        // served from the disk cache handler below.
+        service->AddServingNavigationId(navigation_id);
+      }
+    }
+    return handler;
   }
 
   DCHECK(is_primary_main_frame_navigation);
   auto handler =
       service->TakePrefetchResponseFromMemoryCache(tentative_resource_request);
   if (handler) {
+    if (IsSearchPrefetchPreloadServingMetricsEnabled()) {
+      // This navigation id is used for recording navigation served by search
+      // prefetch in UMA. It is added here to avoid recording navigation served
+      // from the disk cache handler below.
+      service->AddServingNavigationId(navigation_id);
+    }
     return handler;
   }
   if (IsNoVarySearchDiskCacheEnabled() &&
@@ -139,19 +151,23 @@ SearchPrefetchURLLoaderInterceptor::MaybeCreateLoaderForRequest(
   return {};
 }
 
+// static
 SearchPrefetchURLLoader::RequestHandler
 SearchPrefetchURLLoaderInterceptor::MaybeProxyRequestHandler(
-    content::BrowserContext* browser_context,
+    content::FrameTreeNodeId frame_tree_node_id,
+    int64_t navigation_id,
+    scoped_refptr<base::SequencedTaskRunner> navigation_response_task_runner,
     SearchPrefetchURLLoader::RequestHandler prefetched_loader_handler) {
   network::URLLoaderFactoryBuilder factory_builder;
   TRACE_EVENT("loading",
               "SearchPrefetchURLLoaderInterceptor::MaybeProxyRequestHandler");
 #if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
   content::WebContents* web_contents =
-      content::WebContents::FromFrameTreeNodeId(frame_tree_node_id_);
+      content::WebContents::FromFrameTreeNodeId(frame_tree_node_id);
   CHECK(web_contents);
   content::RenderFrameHost* render_frame_host =
       web_contents->GetPrimaryMainFrame();
+  content::BrowserContext* browser_context = web_contents->GetBrowserContext();
 
   auto* web_request_api =
       extensions::BrowserContextKeyedAPIFactory<extensions::WebRequestAPI>::Get(
@@ -161,8 +177,8 @@ SearchPrefetchURLLoaderInterceptor::MaybeProxyRequestHandler(
         browser_context, render_frame_host,
         render_frame_host->GetProcess()->GetDeprecatedID(),
         content::ContentBrowserClient::URLLoaderFactoryType::kNavigation,
-        navigation_id_, ukm::kInvalidSourceIdObj, factory_builder,
-        /*header_client=*/nullptr, navigation_response_task_runner_,
+        navigation_id, ukm::kInvalidSourceIdObj, factory_builder,
+        /*header_client=*/nullptr, std::move(navigation_response_task_runner),
         /*request_initiator=*/url::Origin());
   }
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS_CORE)
@@ -184,11 +200,12 @@ void SearchPrefetchURLLoaderInterceptor::MaybeCreateLoader(
 
   SearchPrefetchURLLoader::RequestHandler prefetched_loader_handler =
       MaybeCreateLoaderForRequest(tentative_resource_request,
-                                  frame_tree_node_id_);
+                                  frame_tree_node_id_, navigation_id_);
 
   if (prefetched_loader_handler) {
     prefetched_loader_handler = MaybeProxyRequestHandler(
-        browser_context, std::move(prefetched_loader_handler));
+        frame_tree_node_id_, navigation_id_, navigation_response_task_runner_,
+        std::move(prefetched_loader_handler));
   }
 
   std::move(callback).Run(std::move(prefetched_loader_handler));

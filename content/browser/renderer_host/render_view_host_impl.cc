@@ -29,7 +29,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/supports_user_data.h"
 #include "base/system/sys_info.h"
-#include "base/task/bind_post_task.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/typed_macros.h"
@@ -90,6 +89,7 @@
 #include "third_party/blink/public/common/web_preferences/web_preferences.h"
 #include "third_party/blink/public/mojom/page/prerender_page_param.mojom.h"
 #include "third_party/perfetto/include/perfetto/tracing/traced_value.h"
+#include "third_party/perfetto/include/perfetto/tracing/track.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/device_form_factor.h"
@@ -323,7 +323,7 @@ RenderViewHostImpl::RenderViewHostImpl(
   TRACE_EVENT("navigation", "RenderViewHostImpl::RenderViewHostImpl",
               ChromeTrackEvent::kRenderViewHost, *this);
   TRACE_EVENT_BEGIN("navigation.debug", "RenderViewHost",
-                    perfetto::Track::FromPointer(this),
+                    perfetto::NamedTrack::FromPointer("RenderViewHost", this),
                     "render_view_host_when_created", this);
 
   CHECK(delegate_, base::NotFatalUntil::M152);
@@ -385,7 +385,8 @@ RenderViewHostImpl::~RenderViewHostImpl() {
     frame_tree_->UnregisterRenderViewHost(render_view_host_map_id_, this);
 
   // Corresponds to the TRACE_EVENT_BEGIN in RenderViewHostImpl's constructor.
-  TRACE_EVENT_END("navigation.debug", perfetto::Track::FromPointer(this));
+  TRACE_EVENT_END("navigation.debug",
+                  perfetto::NamedTrack::FromPointer("RenderViewHost", this));
 }
 
 RenderViewHostDelegate* RenderViewHostImpl::GetDelegate() {
@@ -502,7 +503,7 @@ bool RenderViewHostImpl::CreateRenderView(
     }
 
     // Populate the sandbox origin token if available.
-    if (auto token = main_rfh->TakeSandboxOriginToken()) {
+    if (auto token = main_rfh->GetPage().TakeSandboxOriginTokenForPopup()) {
       local_frame_params->sandbox_origin_token = *token;
     }
 
@@ -665,13 +666,9 @@ void RenderViewHostImpl::PrepareToLeaveBackForwardCache(
     base::OnceClosure done_cb) {
   // We wrap `done_cb` in a default invoke because if this RenderViewHostImpl
   // disappears we still need to call `done_cb` otherwise the navigation
-  // will be blocked indefinitely. We also post a task so that if `done_cb` is
-  // invoked from the destructor of this RenderViewHostImpl (e.g., on an unload
-  // timeout or during shutdown), the BackForwardCache restore does not commit
-  // synchronously in the middle of ~RenderFrameHostImpl / ~RenderViewHostImpl.
+  // will be blocked indefinitely.
   page_lifecycle_state_manager_->SetIsLeavingBackForwardCache(
-      mojo::WrapCallbackWithDefaultInvokeIfNotRun(
-          base::BindPostTaskToCurrentDefault(std::move(done_cb))));
+      mojo::WrapCallbackWithDefaultInvokeIfNotRun(std::move(done_cb)));
 }
 
 void RenderViewHostImpl::LeaveBackForwardCache(

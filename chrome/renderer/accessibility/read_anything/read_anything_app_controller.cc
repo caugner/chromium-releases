@@ -564,9 +564,7 @@ void ReadAnythingAppController::OnStringAttributeChanged(
     ax::mojom::StringAttribute attr,
     const std::string& old_value,
     const std::string& new_value) {
-  // Return early when the images flag is disabled to avoid potential crashes.
-  if (!features::IsReadAnythingImagesViaAlgorithmEnabled() ||
-      attr != ax::mojom::StringAttribute::kUrl) {
+  if (attr != ax::mojom::StringAttribute::kUrl) {
     return;
   }
 
@@ -712,8 +710,21 @@ void ReadAnythingAppController::ProcessModelUpdates() {
   }
 
   if (IsReadabilityEnabled() && model_.requires_readability_distillation()) {
-    PrepareForNewContentDistillation();
-    page_handler_->RequestReadabilityDistillation();
+    // Readability distillation is triggered immediately when the active tree
+    // changes. Subsequent page events like kLoadComplete also
+    // request distillation (primarily to handle same-document or SPA
+    // navigations where the active AXTree ID remains the same).
+    //
+    // Check if the distillation request can be safely filtered out to avoid
+    // re-distilling a page that has already successfully loaded.
+    model_.ResetDistillationCompleteIfNeeded();
+    if (model_.readability_distillation_complete_for_current_tree()) {
+      // Clear the distillation flag as no further distillation is needed.
+      model_.set_requires_readability_distillation(false);
+    } else {
+      PrepareForNewContentDistillation();
+      page_handler_->RequestReadabilityDistillation();
+    }
   }
 
   if (model_.redraw_required()) {
@@ -877,6 +888,12 @@ void ReadAnythingAppController::OnActiveAXTreeIDChanged(
   ExecuteJavaScript("chrome.readingMode.showLoading();");
 
   if (model_.is_readability_next_distillation_method()) {
+    if (features::IsReadAnythingDistillerRefactorEnabled()) {
+      SetDistillationState(read_anything::mojom::ReadAnythingDistillationState::
+                               kDistillationInProgress);
+
+      page_handler_->RequestReadabilityDistillation();
+    }
     return;
   }
   DistillNewTree();
@@ -890,6 +907,7 @@ void ReadAnythingAppController::PrepareForNewContentDistillation() {
   active_tree_changed_start_time_ = base::TimeTicks::Now();
 
   model_.set_requires_readability_distillation(false);
+  model_.set_readability_distillation_complete_for_current_tree(false);
 
   // TODO: crbug.com/526701545: Show Loading screen when re-distilling.
 
@@ -908,11 +926,14 @@ ReadAnythingAppController::GetInitialDistillationMethod(bool is_pdf) const {
   if (forced_distillation_method_for_testing_) {
     return *forced_distillation_method_for_testing_;
   }
-  // If |is_pdf| = true, or if phrase highlighting is enabled, override
-  // IsReadAnythingWithReadabilityEnabled flag and return kScreen2x.
+
+  // If |is_pdf| = true, or if phrase highlighting is enabled, or if the current
+  // page is a Google Doc, override IsReadAnythingWithReadabilityEnabled flag
+  // and return kScreen2x.
   // TODO: crbug.com/444029483- Update the phrase highlighting implementation
   // so that it works with Readability.
-  return is_pdf || !features::IsReadAnythingWithReadabilityEnabled() ||
+  return is_pdf || IsGoogleDocs() ||
+                 !features::IsReadAnythingWithReadabilityEnabled() ||
                  features::IsReadAnythingReadAloudPhraseHighlightingEnabled()
              ? ReadAnythingAppModel::DistillationMethod::kScreen2x
              : ReadAnythingAppModel::DistillationMethod::kReadability;
@@ -1435,8 +1456,6 @@ gin::ObjectTemplateBuilder ReadAnythingAppController::GetObjectTemplateBuilder(
       .SetProperty("fontSize", &ReadAnythingAppController::FontSize)
       .SetProperty("linksEnabled", &ReadAnythingAppController::LinksEnabled)
       .SetProperty("imagesEnabled", &ReadAnythingAppController::ImagesEnabled)
-      .SetProperty("imagesFeatureEnabled",
-                   &ReadAnythingAppController::ImagesFeatureEnabled)
       .SetProperty("letterSpacing", &ReadAnythingAppController::LetterSpacing)
       .SetProperty("lineSpacing", &ReadAnythingAppController::LineSpacing)
       .SetProperty("standardLineSpacing",
@@ -1531,6 +1550,9 @@ gin::ObjectTemplateBuilder ReadAnythingAppController::GetObjectTemplateBuilder(
       .SetProperty(
           "isReadAnythingTranslateEntryPointEnabled",
           &ReadAnythingAppController::IsReadAnythingTranslateEntryPointEnabled)
+      .SetProperty("isReadAnythingReadAloudExperimentalPlaybackUiEnabled",
+                   &ReadAnythingAppController::
+                       IsReadAnythingReadAloudExperimentalPlaybackUiEnabled)
       .SetProperty("isReadabilityEnabled",
                    &ReadAnythingAppController::IsReadabilityEnabled)
       .SetProperty("isReadabilitySelectTextEnabled",
@@ -1539,7 +1561,6 @@ gin::ObjectTemplateBuilder ReadAnythingAppController::GetObjectTemplateBuilder(
                    &ReadAnythingAppController::GetDistillationMethod)
       .SetProperty("isLineFocusEnabled",
                    &ReadAnythingAppController::IsLineFocusEnabled)
-      .SetProperty("isChromeOsAsh", &ReadAnythingAppController::IsChromeOsAsh)
       .SetProperty("baseLanguageForSpeech",
                    &ReadAnythingAppController::GetLanguageCodeForSpeech)
       .SetProperty("requiresDistillation",
@@ -1587,6 +1608,10 @@ gin::ObjectTemplateBuilder ReadAnythingAppController::GetObjectTemplateBuilder(
                  &ReadAnythingAppController::OnLinksEnabledToggled)
       .SetMethod("onTranslationRequested",
                  &ReadAnythingAppController::OnTranslationRequested)
+      .SetMethod("requestShouldShowLineFocusNewBadge",
+                 &ReadAnythingAppController::RequestShouldShowLineFocusNewBadge)
+      .SetMethod("onLineFocusFeatureUsed",
+                 &ReadAnythingAppController::OnLineFocusFeatureUsed)
       .SetMethod("onImagesEnabledToggled",
                  &ReadAnythingAppController::OnImagesEnabledToggled)
       .SetMethod("onScroll", &ReadAnythingAppController::OnScroll)
@@ -1754,10 +1779,6 @@ bool ReadAnythingAppController::LinksEnabled() const {
 
 bool ReadAnythingAppController::ImagesEnabled() const {
   return model_.images_enabled();
-}
-
-bool ReadAnythingAppController::ImagesFeatureEnabled() const {
-  return features::IsReadAnythingImagesViaAlgorithmEnabled();
 }
 
 bool ReadAnythingAppController::IsPhraseHighlightingEnabled() const {
@@ -2224,7 +2245,21 @@ bool ReadAnythingAppController::ShouldBold(ui::AXNodeID ax_node_id) const {
   bool is_bold = ax_node->HasTextStyle(ax::mojom::TextStyle::kBold);
   bool is_italic = ax_node->HasTextStyle(ax::mojom::TextStyle::kItalic);
   bool is_underline = ax_node->HasTextStyle(ax::mojom::TextStyle::kUnderline);
-  return is_bold || is_italic || is_underline;
+  if (is_bold || is_italic || is_underline) {
+    return true;
+  }
+
+  if (!features::IsPdfAccessibilityHeuristicEnhancementsEnabled() ||
+      !model_.is_pdf()) {
+    return false;
+  }
+
+  // TextStyle::kBold is only marked true on PDFs for font weights >= 700.
+  // Return true for ShouldBold if the font weight is at least semi-bold.
+  static constexpr int kSemiBoldFontWeight = 600;
+  float font_weight =
+      ax_node->GetFloatAttribute(ax::mojom::FloatAttribute::kFontWeight);
+  return font_weight >= kSemiBoldFontWeight;
 }
 
 bool ReadAnythingAppController::IsOverline(ui::AXNodeID ax_node_id) const {
@@ -2257,6 +2292,11 @@ bool ReadAnythingAppController::IsReadAnythingImprovedUiEnabled() const {
   return features::IsReadAnythingImprovedUiEnabled();
 }
 
+bool ReadAnythingAppController::
+    IsReadAnythingReadAloudExperimentalPlaybackUiEnabled() const {
+  return features::IsReadAnythingReadAloudExperimentalPlaybackUiEnabled();
+}
+
 bool ReadAnythingAppController::IsReadAnythingTranslateEntryPointEnabled()
     const {
   return features::IsReadAnythingTranslateEntryPointEnabled();
@@ -2277,12 +2317,21 @@ bool ReadAnythingAppController::IsLineFocusEnabled() const {
   return features::IsReadAnythingLineFocusEnabled();
 }
 
-bool ReadAnythingAppController::IsChromeOsAsh() const {
-#if BUILDFLAG(IS_CHROMEOS)
-  return true;
-#else
-  return false;
-#endif
+void ReadAnythingAppController::RequestShouldShowLineFocusNewBadge() {
+  page_handler_->ShouldShowLineFocusNewBadge(base::BindOnce(
+      &ReadAnythingAppController::OnShouldShowLineFocusNewBadgeResponse,
+      weak_ptr_factory_.GetWeakPtr()));
+}
+
+void ReadAnythingAppController::OnShouldShowLineFocusNewBadgeResponse(
+    bool show) {
+  ExecuteJavaScript(
+      "chrome.readingMode.onShouldShowLineFocusNewBadgeResponse(" +
+      base::ToString(show) + ")");
+}
+
+void ReadAnythingAppController::OnLineFocusFeatureUsed() {
+  page_handler_->OnLineFocusFeatureUsed();
 }
 
 bool ReadAnythingAppController::IsGoogleDocs() const {
@@ -2316,12 +2365,10 @@ std::vector<std::string> ReadAnythingAppController::GetAllFonts() const {
 }
 
 void ReadAnythingAppController::RequestImageData(ui::AXNodeID node_id) const {
-  if (features::IsReadAnythingImagesViaAlgorithmEnabled()) {
-    DUMP_WILL_BE_CHECK(model_.GetAXNode(node_id));
-    auto target_tree_id = model_.active_tree_id();
-    CHECK_NE(target_tree_id, ui::AXTreeIDUnknown());
-    page_handler_->OnImageDataRequested(target_tree_id, node_id);
-  }
+  DUMP_WILL_BE_CHECK(model_.GetAXNode(node_id));
+  auto target_tree_id = model_.active_tree_id();
+  CHECK_NE(target_tree_id, ui::AXTreeIDUnknown());
+  page_handler_->OnImageDataRequested(target_tree_id, node_id);
 }
 
 void ReadAnythingAppController::OnImageDataDownloaded(
@@ -3335,6 +3382,22 @@ void ReadAnythingAppController::UpdateContent(const std::string& title,
     DistillNewTree();
     return;
   }
+
+  // If speech is playing, don't redraw and disrupt speech. The app will
+  // re-distill once speech pauses.
+  // TODO(b/550352614): Refactor this to use IsUpdateProcessingPaused() and set
+  // the state to kDistillationWithContent, bringing Readability into parity
+  // with Screen2x distillation PostProcessing. This needs to have it's own test
+  // to check that the state is set correctly and the pending distillations are
+  // executed.
+  if (features::IsReadAnythingImprovedUiEnabled() &&
+      read_aloud_model_.speech_playing()) {
+    model_.set_requires_readability_distillation(true);
+    VLOG(1) << "Distillation terminated because speech is playing";
+    return;
+  }
+
+  model_.set_readability_distillation_complete_for_current_tree(true);
 
   // Set both active and target distillation to readability since distillation
   // was successful.

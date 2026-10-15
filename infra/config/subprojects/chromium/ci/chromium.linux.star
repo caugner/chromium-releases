@@ -92,7 +92,6 @@ ci.builder(
             "chromium_linux_cast_receiver",
         ],
     ),
-    ssd = None,
     tree_closing = True,
     console_view_entry = consoles.console_view_entry(
         category = "cast",
@@ -137,7 +136,6 @@ ci.builder(
             "chromium_linux_cast_receiver",
         ],
     ),
-    ssd = None,
     tree_closing = True,
     console_view_entry = consoles.console_view_entry(
         category = "cast",
@@ -181,7 +179,6 @@ ci.builder(
             "chromium_linux_cast_receiver_gtests",
         ],
     ),
-    ssd = None,
     tree_closing = True,
     console_view_entry = consoles.console_view_entry(
         category = "cast",
@@ -225,7 +222,6 @@ ci.builder(
             "chromium_linux_cast_receiver_gtests",
         ],
     ),
-    ssd = None,
     tree_closing = True,
     console_view_entry = consoles.console_view_entry(
         category = "cast",
@@ -317,7 +313,6 @@ ci.builder(
             "linux-jammy",
         ],
     ),
-    ssd = None,
     gardener_rotations = args.ignore_default(None),
     tree_closing = False,
     console_view_entry = consoles.console_view_entry(
@@ -374,7 +369,6 @@ ci.builder(
             "isolate_profile_data",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "release",
         short_name = "bld",
@@ -417,7 +411,6 @@ ci.builder(
             "all",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "debug|builder",
         short_name = "64",
@@ -527,7 +520,6 @@ ci.thin_tester(
         browser_config = targets.browser_config.DEBUG,
         os_type = targets.os_type.LINUX,
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "arm64",
         short_name = "dbg",
@@ -570,7 +562,6 @@ ci.builder(
     targets = targets.bundle(
         additional_compile_targets = "chrome",
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "release",
         short_name = "bld-wl",
@@ -633,7 +624,6 @@ ci.thin_tester(
             ),
         },
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux",
         short_name = "no-webui",
@@ -689,12 +679,36 @@ ci.thin_tester(
                 ],
             ),
             "browser_tests": targets.mixin(
+                args = [
+                    # TODO(crbug.com/542347163): Re-enable when the runtime regression is fixed.
+                    "--disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup",
+                ],
                 swarming = targets.swarming(
+                    # Move to faster machine types to reduce capacity impact.
+                    # TODO(crbug.com/541675870): Can remove this if/when
+                    # everything's been migrated.
+                    optional_dimensions = {
+                        30: {
+                            "cpu": "x86-64-e4",
+                        },
+                    },
                     shards = 20,
                 ),
             ),
             "content_browsertests": targets.mixin(
                 ci_only = True,
+            ),
+            "interactive_ui_tests": targets.mixin(
+                args = [
+                    # TODO(crbug.com/542347163): Re-enable when the runtime regression is fixed.
+                    "--disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup",
+                ],
+            ),
+            "sync_integration_tests": targets.mixin(
+                args = [
+                    # TODO(crbug.com/542347163): Re-enable when the runtime regression is fixed.
+                    "--disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup",
+                ],
             ),
             "not_site_per_process_blink_web_tests": targets.mixin(
                 args = [
@@ -715,7 +729,6 @@ ci.thin_tester(
             ),
         },
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "release",
         short_name = "tst",
@@ -767,6 +780,10 @@ ci.thin_tester(
                 ),
             ),
             "browser_tests": targets.mixin(
+                args = [
+                    # TODO(crbug.com/542347163): Re-enable when the runtime regression is fixed.
+                    "--disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup",
+                ],
                 # crbug.com/1066161
                 # crbug.com/1459645
                 # crbug.com/1508286
@@ -795,6 +812,8 @@ ci.thin_tester(
             "interactive_ui_tests": targets.mixin(
                 args = [
                     "--test-launcher-filter-file=../../testing/buildbot/filters/ozone-linux.interactive_ui_tests.filter",
+                    # TODO(crbug.com/542347163): Re-enable when the runtime regression is fixed.
+                    "--disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup",
                 ],
                 # Slow on certain debug builders, see crbug.com/1513713.
                 swarming = targets.swarming(
@@ -822,6 +841,10 @@ ci.thin_tester(
                 ),
             ),
             "sync_integration_tests": targets.mixin(
+                args = [
+                    # TODO(crbug.com/542347163): Re-enable when the runtime regression is fixed.
+                    "--disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup",
+                ],
                 swarming = targets.swarming(
                     shards = 16,
                 ),
@@ -848,7 +871,6 @@ ci.thin_tester(
             ),
         },
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "debug|tester",
         short_name = "64",
@@ -953,7 +975,6 @@ ci.thin_tester(
             ),
         },
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "release",
         short_name = "tst-wl",
@@ -1041,7 +1062,6 @@ ci.thin_tester(
             ),
         },
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "release",
         short_name = "tst-mt",
@@ -1085,7 +1105,6 @@ ci.builder(
             "linux-jammy",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "release",
         short_name = "nsl",
@@ -1183,7 +1202,6 @@ ci.builder(
             ),
         },
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "OriginIsolation",
         short_name = "oi",
@@ -1235,7 +1253,6 @@ ci.builder(
             ),
         },
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "bfcache",
         short_name = "bfc",
@@ -1276,7 +1293,6 @@ ci.builder(
             "all",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "release",
         short_name = "trc",
@@ -1318,7 +1334,6 @@ ci.builder(
             "empty_main",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "release",
         short_name = "gcc",
@@ -1351,7 +1366,6 @@ ci.builder(
             "all",
         ],
     ),
-    ssd = None,
     gardener_rotations = args.ignore_default(None),
     tree_closing = False,
     console_view_entry = consoles.console_view_entry(
@@ -1406,7 +1420,6 @@ ci.builder(
             "v4l2_unittest",
         ],
     ),
-    ssd = None,
     tree_closing = False,
     console_view_entry = consoles.console_view_entry(
         category = "linux",

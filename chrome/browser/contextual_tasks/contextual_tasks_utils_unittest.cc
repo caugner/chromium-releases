@@ -26,13 +26,6 @@ namespace contextual_tasks {
 
 namespace {
 
-// Fake class to stub the layout of BrowserActions so we can inspect
-// and set root_action_item_ in testing without triggering full
-// BrowserActions initialization.
-struct FakeBrowserActions {
-  raw_ptr<actions::ActionItem> root_action_item = nullptr;
-};
-
 class ContextualTasksUtilsTest : public testing::Test {
  public:
   void SetUp() override {
@@ -42,20 +35,29 @@ class ContextualTasksUtilsTest : public testing::Test {
 
     ON_CALL(*browser_window_, GetProfile())
         .WillByDefault(testing::Return(profile_.get()));
+
+    browser_actions_ = std::make_unique<BrowserActions>(browser_window_.get());
   }
 
   void TearDown() override {
+    if (browser_actions_) {
+      browser_actions_->set_root_action_item_for_testing(nullptr);
+    }
+    browser_actions_.reset();
     actions::ActionIdMap::ResetMapsForTesting();
     actions::ActionManager::Get().ResetForTesting();
     actions::ActionIdMap::ResetMapsForTesting();
     browser_window_.reset();
     profile_.reset();
+    root_action_.reset();
   }
 
  protected:
   content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<TestingProfile> profile_;
   std::unique_ptr<testing::NiceMock<MockBrowserWindowInterface>> browser_window_;
+  std::unique_ptr<BrowserActions> browser_actions_;
+  std::unique_ptr<actions::ActionItem> root_action_;
 };
 
 TEST_F(ContextualTasksUtilsTest, UpdatePinButtonVisibilityState_NullWindow) {
@@ -64,46 +66,33 @@ TEST_F(ContextualTasksUtilsTest, UpdatePinButtonVisibilityState_NullWindow) {
 }
 
 TEST_F(ContextualTasksUtilsTest, UpdatePinButtonVisibilityState_NullActions) {
-  ON_CALL(*browser_window_, GetActions()).WillByDefault(testing::Return(nullptr));
   UpdatePinButtonVisibilityState(browser_window_.get(), true);
 }
 
 TEST_F(ContextualTasksUtilsTest, UpdatePinButtonVisibilityState_NullRootActionItem) {
-  FakeBrowserActions fake_actions;
-  fake_actions.root_action_item = nullptr;
-  ON_CALL(*browser_window_, GetActions())
-      .WillByDefault(testing::Return(reinterpret_cast<BrowserActions*>(&fake_actions)));
-
+  // browser_actions_ already has a null root_action_item_ initially.
   UpdatePinButtonVisibilityState(browser_window_.get(), true);
 }
 
 TEST_F(ContextualTasksUtilsTest, UpdatePinButtonVisibilityState_ActionNotFound) {
   // Root action item with no children (no contextual tasks action item).
-  std::unique_ptr<actions::ActionItem> root_action =
-      actions::ActionItem::Builder().Build();
+  root_action_ = actions::ActionItem::Builder().Build();
 
-  FakeBrowserActions fake_actions;
-  fake_actions.root_action_item = root_action.get();
-  ON_CALL(*browser_window_, GetActions())
-      .WillByDefault(testing::Return(reinterpret_cast<BrowserActions*>(&fake_actions)));
+  browser_actions_->set_root_action_item_for_testing(root_action_.get());
 
   UpdatePinButtonVisibilityState(browser_window_.get(), true);
 }
 
 TEST_F(ContextualTasksUtilsTest, UpdatePinButtonVisibilityState_Eligible_Pinned) {
-  std::unique_ptr<actions::ActionItem> root_action =
-      actions::ActionItem::Builder().Build();
-  actions::ActionItem* action_item = root_action->AddChild(
+  root_action_ = actions::ActionItem::Builder().Build();
+  actions::ActionItem* action_item = root_action_->AddChild(
       actions::ActionItem::Builder()
           .SetActionId(kActionSidePanelShowContextualTasks)
           .SetVisible(false)
           .SetEnabled(true)
           .Build());
 
-  FakeBrowserActions fake_actions;
-  fake_actions.root_action_item = root_action.get();
-  ON_CALL(*browser_window_, GetActions())
-      .WillByDefault(testing::Return(reinterpret_cast<BrowserActions*>(&fake_actions)));
+  browser_actions_->set_root_action_item_for_testing(root_action_.get());
 
   auto* model = PinnedToolbarActionsModel::Get(profile_.get());
   model->UpdatePinnedState(kActionSidePanelShowContextualTasks, true);
@@ -116,19 +105,15 @@ TEST_F(ContextualTasksUtilsTest, UpdatePinButtonVisibilityState_Eligible_Pinned)
 }
 
 TEST_F(ContextualTasksUtilsTest, UpdatePinButtonVisibilityState_Ineligible_Pinned) {
-  std::unique_ptr<actions::ActionItem> root_action =
-      actions::ActionItem::Builder().Build();
-  actions::ActionItem* action_item = root_action->AddChild(
+  root_action_ = actions::ActionItem::Builder().Build();
+  actions::ActionItem* action_item = root_action_->AddChild(
       actions::ActionItem::Builder()
           .SetActionId(kActionSidePanelShowContextualTasks)
           .SetVisible(true)
           .SetEnabled(true)
           .Build());
 
-  FakeBrowserActions fake_actions;
-  fake_actions.root_action_item = root_action.get();
-  ON_CALL(*browser_window_, GetActions())
-      .WillByDefault(testing::Return(reinterpret_cast<BrowserActions*>(&fake_actions)));
+  browser_actions_->set_root_action_item_for_testing(root_action_.get());
 
   auto* model = PinnedToolbarActionsModel::Get(profile_.get());
   model->UpdatePinnedState(kActionSidePanelShowContextualTasks, true);
@@ -141,19 +126,15 @@ TEST_F(ContextualTasksUtilsTest, UpdatePinButtonVisibilityState_Ineligible_Pinne
 }
 
 TEST_F(ContextualTasksUtilsTest, UpdatePinButtonVisibilityState_Ineligible_Unpinned) {
-  std::unique_ptr<actions::ActionItem> root_action =
-      actions::ActionItem::Builder().Build();
-  actions::ActionItem* action_item = root_action->AddChild(
+  root_action_ = actions::ActionItem::Builder().Build();
+  actions::ActionItem* action_item = root_action_->AddChild(
       actions::ActionItem::Builder()
           .SetActionId(kActionSidePanelShowContextualTasks)
           .SetVisible(true)
           .SetEnabled(true)
           .Build());
 
-  FakeBrowserActions fake_actions;
-  fake_actions.root_action_item = root_action.get();
-  ON_CALL(*browser_window_, GetActions())
-      .WillByDefault(testing::Return(reinterpret_cast<BrowserActions*>(&fake_actions)));
+  browser_actions_->set_root_action_item_for_testing(root_action_.get());
 
   auto* model = PinnedToolbarActionsModel::Get(profile_.get());
   ASSERT_FALSE(model->Contains(kActionSidePanelShowContextualTasks));
@@ -166,19 +147,15 @@ TEST_F(ContextualTasksUtilsTest, UpdatePinButtonVisibilityState_Ineligible_Unpin
 }
 
 TEST_F(ContextualTasksUtilsTest, UpdatePinButtonVisibilityState_Ineligible_Pinned_IncognitoProfile) {
-  std::unique_ptr<actions::ActionItem> root_action =
-      actions::ActionItem::Builder().Build();
-  actions::ActionItem* action_item = root_action->AddChild(
+  root_action_ = actions::ActionItem::Builder().Build();
+  actions::ActionItem* action_item = root_action_->AddChild(
       actions::ActionItem::Builder()
           .SetActionId(kActionSidePanelShowContextualTasks)
           .SetVisible(true)
           .SetEnabled(true)
           .Build());
 
-  FakeBrowserActions fake_actions;
-  fake_actions.root_action_item = root_action.get();
-  ON_CALL(*browser_window_, GetActions())
-      .WillByDefault(testing::Return(reinterpret_cast<BrowserActions*>(&fake_actions)));
+  browser_actions_->set_root_action_item_for_testing(root_action_.get());
 
   // Setup original profile and OTR profile
   Profile* otr_profile = profile_->GetPrimaryOTRProfile(true);
@@ -302,6 +279,29 @@ TEST_F(ContextualTasksUtilsTest,
   feature_list.InitAndEnableFeature(kContextualTasksForceEntryPointEligibility);
   EXPECT_TRUE(IsTabSharingEligible(nullptr));
   EXPECT_TRUE(IsTabSharingEligible(profile_.get()));
+}
+
+TEST_F(ContextualTasksUtilsTest, ShouldUseDarkMode_NullProfile) {
+  EXPECT_FALSE(ShouldUseDarkMode(nullptr));
+  EXPECT_FALSE(ShouldUseDarkMode(nullptr, GURL()));
+}
+
+TEST_F(ContextualTasksUtilsTest, ShouldUseDarkMode_UrlParamOverridesProfile) {
+  GURL dark_url("https://example.com/search?cs=1");
+  GURL light_url("https://example.com/search?cs=0");
+
+  EXPECT_TRUE(ShouldUseDarkMode(profile_.get(), dark_url));
+  EXPECT_FALSE(ShouldUseDarkMode(profile_.get(), light_url));
+
+  Profile* otr_profile = profile_->GetPrimaryOTRProfile(true);
+  EXPECT_TRUE(ShouldUseDarkMode(otr_profile, dark_url));
+  EXPECT_FALSE(ShouldUseDarkMode(otr_profile, light_url));
+}
+
+TEST_F(ContextualTasksUtilsTest, ShouldUseDarkMode_IncognitoProfile) {
+  Profile* otr_profile = profile_->GetPrimaryOTRProfile(true);
+  EXPECT_TRUE(ShouldUseDarkMode(otr_profile));
+  EXPECT_TRUE(ShouldUseDarkMode(otr_profile, GURL("https://example.com")));
 }
 
 }  // namespace

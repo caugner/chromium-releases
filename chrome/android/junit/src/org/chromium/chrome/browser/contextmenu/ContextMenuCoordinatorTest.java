@@ -106,8 +106,7 @@ public class ContextMenuCoordinatorTest {
                         mActivity,
                         TOP_CONTENT_OFFSET_PX,
                         mNativeDelegate,
-                        /* isCustomItemPresent= */ false,
-                        /* leftSideUiWidthSupplier= */ () -> 0);
+                        /* isCustomItemPresent= */ false);
         Profile.setProfileFromWebContentsForTesting(mProfile);
         ContextMenuHeaderCoordinator.setDisableForTesting(true);
         ContextMenuDialog.setForceEmptyForTesting(true);
@@ -356,7 +355,6 @@ public class ContextMenuCoordinatorTest {
                 ContextMenuUtils.isPopupSupported(mActivity),
                 0,
                 0,
-                null,
                 null,
                 webContentView,
                 new Rect(0, 0, 0, 0),

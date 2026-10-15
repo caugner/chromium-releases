@@ -6,8 +6,15 @@
 #define CHROME_BROWSER_GLIC_SERVICE_METRICS_METRICS_TYPES_H_
 
 #include <string>
+#include <string_view>
 
+#include "chrome/browser/glic/glic_enums.h"
 #include "chrome/browser/glic/host/glic.mojom.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
+
+namespace tabs {
+class TabInterface;
+}
 
 namespace glic {
 
@@ -184,7 +191,11 @@ enum class ResponseSegmentation {
   kTabContextMenuAttachedAudio = 166,
   kTabContextMenuDetachedText = 167,
   kTabContextMenuDetachedAudio = 168,
-  kMaxValue = kTabContextMenuDetachedAudio,
+  kWebContinuityAttachedText = 169,
+  kWebContinuityAttachedAudio = 170,
+  kWebContinuityDetachedText = 171,
+  kWebContinuityDetachedAudio = 172,
+  kMaxValue = kWebContinuityDetachedAudio,
 };
 // LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:GlicResponseSegmentation)
 
@@ -342,6 +353,16 @@ enum class SkillBuilderEvent {
 };
 // LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:SkillBuilderEvent)
 
+// LINT.IfChange(GlicOnboardingFunnelStep)
+enum class OnboardingFunnelStep {
+  kNewUserOpen = 0,
+  kFreOptInShown = 1,
+  kFreOptInAccepted = 2,
+  kFirstPromptSubmitted = 3,
+  kMaxValue = kFirstPromptSubmitted,
+};
+// LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:GlicOnboardingFunnelStep)
+
 std::string GetDaisyChainSourceString(DaisyChainSource source);
 
 ResponseSegmentation GetResponseSegmentation(bool attached,
@@ -349,6 +370,9 @@ ResponseSegmentation GetResponseSegmentation(bool attached,
                                              mojom::InvocationSource source);
 
 std::string GetInvocationSourceString(mojom::InvocationSource source);
+std::string_view GetEmbedderTypeString(EmbedderType type);
+
+ukm::SourceId GetUkmSourceIdForTab(tabs::TabInterface* tab);
 }  // namespace glic
 
 #endif  // CHROME_BROWSER_GLIC_SERVICE_METRICS_METRICS_TYPES_H_

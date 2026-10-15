@@ -634,6 +634,57 @@ TEST_F(OmniboxEditModelTest,
             state.autocomplete_input.canonicalized_url());
 }
 
+TEST_F(OmniboxEditModelTest, SpaceInMiddleWithoutKeywordSelectionDoesNotCrash) {
+  // Populate the TemplateURLService with a keyword search engine.
+  TemplateURLData data;
+  data.SetShortName(u"bing");
+  data.SetKeyword(u"bing.com");
+  data.SetURL("https://bing.com?q={searchTerms}");
+  data.is_active = TemplateURLData::ActiveStatus::kTrue;
+  TemplateURL* turl = controller()->client()->GetTemplateURLService()->Add(
+      std::make_unique<TemplateURL>(data));
+  ASSERT_TRUE(turl);
+
+  // Inserting a space after '/' in "bing.com/something" should not be accepted
+  // as a keyword because "bing.com/" is a URL path component, not the keyword
+  // "bing.com".
+  EXPECT_FALSE(model()->ShouldAcceptKeywordAfterInsertingSpaceInMiddle(
+      u"bing.com/something", u"bing.com/ something", 10));
+  // In contrast, inserting a space after the exact keyword "bing.com" should be
+  // accepted.
+  EXPECT_TRUE(model()->ShouldAcceptKeywordAfterInsertingSpaceInMiddle(
+      u"bing.comsomething", u"bing.com something", 9));
+
+  // Inserting a space after '/' in "bing.com/something" creates "bing.com/
+  // something".
+  std::u16string old_text = u"bing.com/something";
+  std::u16string new_text = u"bing.com/ something";
+  OmniboxView::StateChanges state_changes{&old_text,
+                                          &new_text,
+                                          gfx::Range(10, 10),
+                                          /*selection_differs=*/true,
+                                          /*text_differs=*/true,
+                                          /*keyword_differs=*/false,
+                                          /*just_deleted_text=*/false};
+
+  model()->OnAfterPossibleChange(state_changes,
+                                 /*allow_keyword_ui_change=*/true);
+  EXPECT_FALSE(model()->is_keyword_selected());
+
+  // Backspacing the space should also not crash.
+  OmniboxView::StateChanges backspace_changes{&new_text,
+                                              &old_text,
+                                              gfx::Range(9, 9),
+                                              /*selection_differs=*/true,
+                                              /*text_differs=*/true,
+                                              /*keyword_differs=*/false,
+                                              /*just_deleted_text=*/true};
+
+  model()->OnAfterPossibleChange(backspace_changes,
+                                 /*allow_keyword_ui_change=*/true);
+  EXPECT_FALSE(model()->is_keyword_selected());
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Popup-related tests
 
@@ -2453,6 +2504,36 @@ TEST_F(OmniboxEditModelTest, OpenComposeboxForAskG) {
             OmniboxPopupState::kAim);
 
   model()->OpenComposeboxForAskG();
+
+  EXPECT_EQ(controller()->popup_state_manager()->popup_state(),
+            OmniboxPopupState::kAim);
+}
+
+TEST_F(OmniboxEditModelTest, OpenMatchWithActionPreservesPopupState) {
+  class TestAimAction : public OmniboxAction {
+   public:
+    TestAimAction()
+        : OmniboxAction(OmniboxAction::LabelStrings(), GURL()) {}
+    void Execute(ExecutionContext& context) const override {
+      context.client_->OpenComposeboxForAskG();
+    }
+
+   protected:
+    ~TestAimAction() override = default;
+  };
+
+  AutocompleteMatch match(
+      controller()->autocomplete_controller()->search_provider(), 1000, false,
+      AutocompleteMatchType::SEARCH_SUGGEST);
+  match.takeover_action = base::MakeRefCounted<TestAimAction>();
+
+  EXPECT_NE(controller()->popup_state_manager()->popup_state(),
+            OmniboxPopupState::kAim);
+
+  model()->OnSetFocus(false);
+  model()->OpenMatchForTesting(
+      match, WindowOpenDisposition::CURRENT_TAB, GURL(), std::u16string(),
+      /*index=*/0, base::TimeTicks::Now());
 
   EXPECT_EQ(controller()->popup_state_manager()->popup_state(),
             OmniboxPopupState::kAim);

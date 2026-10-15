@@ -31,7 +31,6 @@
 <translation id="1321110954513621549">İzin veriliyor • Yaklaşık</translation>
 <translation id="1323433172918577554">Daha Fazla Göster</translation>
 <translation id="1333965224356556482">Sitelerin konumumu görmesine izin verme</translation>
-<translation id="1343356790768851700">Bu site, nelerden hoşlandığınızı belirleyip diğer sitelere reklam önerir</translation>
 <translation id="1369915414381695676"><ph name="SITE_NAME" /> sitesi eklendi</translation>
 <translation id="1371239764779356792">Bir sitenin cihazınıza veri kaydetmesine izin verin</translation>
 <translation id="1383876407941801731">Ara</translation>
@@ -429,7 +428,6 @@
 <translation id="5317780077021120954">Kaydet</translation>
 <translation id="5335288049665977812">Sitelerin JavaScript çalıştırmasına izin ver (önerilir)</translation>
 <translation id="534295439873310000">NFC cihazları</translation>
-<translation id="5344522958567249764">Reklam gizliliğini yönet</translation>
 <translation id="5373874281522292782">Sekme gruplarınız kaydedilir</translation>
 <translation id="5394307150471348411">{DETAIL_COUNT,plural, =1{(+ 1 tane daha)}other{(+ # tane daha)}}</translation>
 <translation id="5403592356182871684">Adlar</translation>
@@ -460,7 +458,7 @@
 <translation id="571222594670061844">Siteler, kimlik hizmetlerinden gelen oturum açma istemlerini gösterebilir</translation>
 <translation id="5740126560802162366">Siteler, cihazınıza veri kaydedebilir</translation>
 <translation id="5743425052258407233">Tüm cihazlarınızda geçmişinizi görüntüleyin, böylece kaldığınız yerden kolayca devam edebilirsiniz</translation>
-<translation id="5749158352074143502">Bu sekmeyle devam edin</translation>
+<translation id="5749158352074143502">Bu sekmeyle devam et</translation>
 <translation id="5750869797196646528">El takibi</translation>
 <translation id="5753570386948603678">Geçmişten sil</translation>
 <translation id="5771720122942595109"><ph name="PERMISSION_1" /> engellendi</translation>
@@ -514,7 +512,6 @@
 <translation id="6181444274883918285">Site istisnası ekle</translation>
 <translation id="6194967801833346599">{DAYS,plural, =1{Chrome yarın çerezleri tekrar engelleyecek}other{Çerezlerin tekrar engellenmesine # gün kaldı}}</translation>
 <translation id="6196640612572343990">Üçüncü taraf çerezlerini engelle</translation>
-<translation id="6205314730813004066">Reklam gizliliği</translation>
 <translation id="6207207788774442484">Verileri sil ve izinleri sıfırla</translation>
 <translation id="6211409961905616543">Siteler hareket ve ışık sensörlerini kullanabilir</translation>
 <translation id="6218508144653756827">Fuşya tema</translation>
@@ -585,7 +582,6 @@
 <translation id="6992014788289743568">Şifrelerinizi kontrol ederek güvenliğinizi artırın ve verilerinizin güvenliğini sağlayın</translation>
 <translation id="6992289844737586249">Sitelerin, mikrofonunuzu kullanmasına izin verilmeden önce size sorulsun (önerilen)</translation>
 <translation id="7000754031042624318">Android ayarlarından kapatıldı</translation>
-<translation id="702275896380648118">Bu site, nelerden hoşlandığınızı belirleyip diğer sitelere reklam önerir. Ayrıca, size daha alakalı reklamlar göstermek için Chrome'dan reklam konularınızı da öğrenir.</translation>
 <translation id="7036823721811529709">Arka planda dinleyin</translation>
 <translation id="7044081119134178347">Şu anda kameraya izin veriliyor</translation>
 <translation id="7053983685419859001">Engelle</translation>
@@ -606,7 +602,7 @@
 <translation id="7250468141469952378"><ph name="ITEM_COUNT" /> öğe seçildi</translation>
 <translation id="7260727271532453612"><ph name="PERMISSION_1" /> ve <ph name="PERMISSION_2" /> için izin verildi</translation>
 <translation id="7276071417425470385">Bu düğme açıkken siteler sanal gerçeklik cihazlarını kullanmak isteyebilir. Düğme kapalıyken siteler sanal gerçeklik cihazlarını kullanamaz.</translation>
-<translation id="7279851812866769760">Kişilerin bilgilerini paylaşın</translation>
+<translation id="7279851812866769760">Kişi bilgilerini paylaş</translation>
 <translation id="7282197670900591579">Limon sarısı tema</translation>
 <translation id="728412880473384942">Siteler daha hızlı ancak daha az güvenli olur</translation>
 <translation id="7352902948037373520"><ph name="BEGIN_LINK1" />Android ayarları<ph name="END_LINK1" /> bölümünde yönetin.
@@ -729,10 +725,9 @@ Gelişmiş Koruma, şu Chrome ayarlarını kontrol eder:</translation>
 <translation id="8514955299594277296">Sitelerin cihazıma veri kaydetmesine izin verme (önerilmez)</translation>
 <translation id="851751545965956758">Sitelerin cihazlara bağlanmasını engelle</translation>
 <translation id="8525306231823319788">Tam ekran</translation>
-<translation id="8541410041357371550">Bu site, size daha alakalı reklamlar göstermek için Chrome'dan reklam konularınızı öğrenir</translation>
 <translation id="854876774113449365">Ziyaret ettiğiniz siteler, diğer sitelerdeki resim, reklam ve metin gibi içerikleri yerleştirebilir. Bu diğer siteler, sitede gezinirken hakkınızda kaydettikleri bilgileri kullanmak için izin isteyebilir. <ph name="BEGIN_LINK" />Yerleştirilmiş içerik hakkında daha fazla bilgi edinin<ph name="END_LINK" />.</translation>
 <translation id="8549127125482561383">İstekler nasıl gösterilsin?</translation>
-<translation id="8558480467877843976">Artık mesajlardaki, belgelerdeki ve diğer uygulamalardaki bağlantılara göz attığınızda veya dokunduğunuzda Chrome'u kullanabilirsiniz.</translation>
+<translation id="8558480467877843976">Artık mesajlardaki, dokümanlardaki ve diğer uygulamalardaki bağlantılara göz attığınızda veya dokunduğunuzda Chrome'u kullanabilirsiniz.</translation>
 <translation id="857943718398505171">İzin verildi (önerilir)</translation>
 <translation id="8593422116412089302">Bu düğme açıkken siteler hakkınızda kaydettikleri bilgileri kullanmak isteyebilir. Düğme kapalıyken siteler hakkınızda kaydettikleri bilgileri kullanmak isteyemez.</translation>
 <translation id="8609465669617005112">Yukarı taşı</translation>
@@ -788,7 +783,7 @@ Gelişmiş Koruma, şu Chrome ayarlarını kontrol eder:</translation>
 <translation id="9156722768168878035">Chrome'un son sekmelerinizi cihazınızın uygulama listesinde ve arama sonuçlarında göstermesine izin verin. Bu özelliği Chrome ayarlarından istediğiniz zaman kapatabilirsiniz.</translation>
 <translation id="9162462602695099906">Bu sayfa tehlikeli</translation>
 <translation id="9182556968660520230">Sitelerin korumalı içeriği oynatmasına izin verme</translation>
-<translation id="927148002081263046">Kişi bilgilerini paylaşın</translation>
+<translation id="927148002081263046">Kişi bilgisini paylaş</translation>
 <translation id="947156494302904893">Ziyaret ettiğiniz siteler, bot olmadığınızı ve gerçek bir kişi olduğunuzu doğrulayabilir</translation>
 <translation id="959682366969460160">Organize çalışın</translation>
 <translation id="960590623979248167">Köprüleri göster</translation>

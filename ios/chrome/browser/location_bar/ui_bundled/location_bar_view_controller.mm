@@ -182,6 +182,7 @@ const CGFloat kGeminiLiveCircleSize = 20.0;
 @implementation LocationBarViewController {
   BOOL _isNTP;
   BOOL _active;
+  BOOL _textOnly;
   // Stores a snapshot of the fakebox buttons that is overlaid on the Location
   // Bar and anchored to the trailing edge during focus transitions (when it is
   // faded out) and defocus transitions (when it is faded in).
@@ -209,14 +210,23 @@ const CGFloat kGeminiLiveCircleSize = 20.0;
 
 #pragma mark - public
 
-- (instancetype)init {
-  self = [super init];
+- (instancetype)initWithTextOnly:(BOOL)textOnly {
+  self = [super initWithNibName:nil bundle:nil];
   if (self) {
-    _locationBarSteadyView = [[LocationBarSteadyView alloc] init];
+    _textOnly = textOnly;
+    _locationBarSteadyView =
+        [[LocationBarSteadyView alloc] initWithTextOnly:textOnly];
+    if (!_textOnly && IsGlassToolbarEnabled()) {
+      _steadyViewLayoutGuide = [[UILayoutGuide alloc] init];
+    }
     _fullscreenProgress = 1.0;
     _customLeadingViewType = CustomLeadingViewType::kNone;
   }
   return self;
+}
+
+- (instancetype)init {
+  return [self initWithTextOnly:NO];
 }
 
 - (void)setEditView:(UIView<TextFieldViewContaining>*)editView {
@@ -392,6 +402,11 @@ const CGFloat kGeminiLiveCircleSize = 20.0;
   [self.view addSubview:self.locationBarSteadyView];
   self.locationBarSteadyView.translatesAutoresizingMaskIntoConstraints = NO;
   AddSameConstraints(self.locationBarSteadyView, self.view);
+
+  if (self.steadyViewLayoutGuide) {
+    [self.view addLayoutGuide:self.steadyViewLayoutGuide];
+    AddSameConstraints(self.steadyViewLayoutGuide, self.locationBarSteadyView);
+  }
 
   if (IsGeminiLiveEnabled()) {
     // Use the Gemini Live symbol.
@@ -881,13 +896,6 @@ const CGFloat kGeminiLiveCircleSize = 20.0;
 }
 
 - (void)setTrailingButtonState:(TrailingButtonState)state {
-  // This is dirty, but this is experiment-only and will be removed in one
-  // milestone.
-  if (base::FeatureList::IsEnabled(kDisableShareButton) &&
-      state == kShareButton) {
-    state = kNoButton;
-  }
-
   if (IsChromeNextIaEnabled() && !IsChromeNextIaShareIconVisible() &&
       state == kShareButton) {
     state = kNoButton;
@@ -1004,8 +1012,7 @@ const CGFloat kGeminiLiveCircleSize = 20.0;
   NSMutableArray<UIMenuElement*>* menuElements = [[NSMutableArray alloc] init];
   __weak __typeof__(self) weakSelf = self;
 
-  if ((base::FeatureList::IsEnabled(kShareInOmniboxLongPress) ||
-       (IsChromeNextIaEnabled() && !IsChromeNextIaShareIconVisible())) &&
+  if (IsChromeNextIaEnabled() && !IsChromeNextIaShareIconVisible() &&
       self.shareButtonEnabled) {
     base::UmaHistogramEnumeration("Mobile.ShareThisPage.Shown",
                                   ShareThisPageLocation::kOmniboxLongPress);
@@ -1374,9 +1381,12 @@ const CGFloat kGeminiLiveCircleSize = 20.0;
   }
   if (IsDirectBWGEntryPoint()) {
     [self.geminiHandler
-        startGeminiFlowWithStartupState:
+        startGeminiEntryFlowWithStartupState:
             [[GeminiStartupState alloc]
-                initWithEntryPoint:gemini::EntryPoint::DirectOmniboxBadge]];
+                initWithEntryPoint:gemini::EntryPoint::DirectOmniboxBadge]
+                          baseViewController:self
+                    showSnackbarOnCompletion:YES
+                                  completion:nil];
   } else {
     RecordAIHubIconTapped();
     [self.pageActionMenuHandler showPageActionMenu];

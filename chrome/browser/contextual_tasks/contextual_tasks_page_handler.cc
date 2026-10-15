@@ -19,6 +19,7 @@
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_utils.h"
+#include "chrome/browser/contextual_tasks/smart_tab_sharing_metrics.h"
 #include "chrome/browser/feedback/public/feedback_source.h"
 #include "chrome/browser/feedback/show_feedback_page.h"
 #include "chrome/browser/global_features.h"
@@ -28,7 +29,6 @@
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #if !BUILDFLAG(IS_ANDROID)
 #include "chrome/browser/ui/actions/chrome_action_id.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model.h"
 #include "chrome/browser/ui/user_education/browser_user_education_interface.h"
@@ -722,7 +722,16 @@ void ContextualTasksPageHandler::OnReceivedUpdatedThreadContextLibrary(
   std::vector<contextual_tasks::UrlResource> committed_context =
       contextual_tasks::ConvertAiModeContextToUrlResources(message,
                                                            submitted_context);
-  if (handle && !committed_context.empty()) {
+  bool is_history_loading = web_ui_controller_->is_history_thread_loading();
+  if (is_history_loading) {
+    web_ui_controller_->set_is_history_thread_loading(false);
+  }
+
+  if (committed_context.empty()) {
+    return;
+  }
+
+  if (handle) {
     // Now that we have extracted the submitted contexts and are ready to update
     // the context in the ContextualTask, we can clear out the submitted context
     // from the ContextualSearchSessionHandle.
@@ -735,8 +744,7 @@ void ContextualTasksPageHandler::OnReceivedUpdatedThreadContextLibrary(
   // Populate restored tabs in the composebox.
   if (contextual_tasks_service_ &&
       base::FeatureList::IsEnabled(omnibox::kContextManagementInComposebox) &&
-      web_ui_controller_->is_history_thread_loading()) {
-    web_ui_controller_->set_is_history_thread_loading(false);
+      is_history_loading) {
     contextual_tasks_service_->GetContextForTask(
         *task_id, {},
         std::make_unique<contextual_tasks::ContextDecorationParams>(),
@@ -752,12 +760,19 @@ void ContextualTasksPageHandler::OnReceivedUpdatedThreadContextLibrary(
                 for (const auto& item : context_items) {
                   if (item->is_tab() && item->get_tab()->has_chrome_tab_data) {
                     auto tab_info = searchbox::mojom::TabInfo::New();
-                    tab_info->tab_id = item->get_tab()->tab_id;
                     tab_info->url = item->get_tab()->url;
                     tab_info->title = item->get_tab()->title;
-                    tab_info->tab_id =
+                    int32_t handle =
                         tabs::SessionMappedTabHandleFactory::GetInstance()
                             .GetHandleForSessionId(item->get_tab()->tab_id);
+                    if (handle != tabs::TabHandle::NullValue) {
+                      tab_info->tab_id = handle;
+                    } else if (SessionID::IsValidValue(
+                                   item->get_tab()->tab_id)) {
+                      tab_info->tab_id = item->get_tab()->tab_id;
+                    } else {
+                      tab_info->tab_id = tabs::TabHandle::NullValue;
+                    }
                     tabs.push_back(std::move(tab_info));
                   }
                 }
@@ -877,6 +892,10 @@ void ContextualTasksPageHandler::OnContextMenuOpened() {
 void ContextualTasksPageHandler::NotifySmartTabSharingTryItIphResult(
     bool accepted) {
 #if !BUILDFLAG(IS_ANDROID)
+  contextual_tasks::LogPromoInteraction(
+      accepted ? contextual_tasks::SmartTabSharingPromoAction::kPromoAccepted
+               : contextual_tasks::SmartTabSharingPromoAction::kPromoDismissed);
+
   auto* tracker = feature_engagement::TrackerFactory::GetForBrowserContext(
       web_ui_controller_->GetProfile());
   if (tracker) {
@@ -1006,12 +1025,22 @@ void ContextualTasksPageHandler::MaybeTriggerPinningPromo() {
 #endif
 }
 
-void ContextualTasksPageHandler::ShowPageInfoBubble() {
+void ContextualTasksPageHandler::ShowPageInfoBubble(
+    bool is_pointer_interaction) {
   if (!contextual_tasks::IsContextualTasksSidePanelRearchitectureEnabled()) {
     return;
   }
   if (panel_controller_) {
-    panel_controller_->ShowPageInfoBubble();
+    panel_controller_->ShowPageInfoBubble(is_pointer_interaction);
+  }
+}
+
+void ContextualTasksPageHandler::OnLogoPointerDown() {
+  if (!contextual_tasks::IsContextualTasksSidePanelRearchitectureEnabled()) {
+    return;
+  }
+  if (panel_controller_) {
+    panel_controller_->OnLogoPointerDown();
   }
 }
 

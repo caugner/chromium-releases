@@ -531,7 +531,7 @@ const gfx::VectorIcon& AutocompleteMatch::GetVectorIcon(
   if (suggest_template.has_value() && suggest_template->has_type_icon()) {
     // Update this assertion and the switch below whenever values are added.
     static_assert(omnibox::SuggestTemplateInfo::IconType_MAX ==
-                  omnibox::SuggestTemplateInfo::INK_PEN);
+                  omnibox::SuggestTemplateInfo::BOLT);
     switch (suggest_template->type_icon()) {
       case omnibox::SuggestTemplateInfo::ICON_TYPE_UNSPECIFIED:
         // When not specified, fall back on regular match icon logic below.
@@ -565,6 +565,9 @@ const gfx::VectorIcon& AutocompleteMatch::GetVectorIcon(
       case omnibox::SuggestTemplateInfo::ATTACH_FILE:
       case omnibox::SuggestTemplateInfo::SCHOOL:
       case omnibox::SuggestTemplateInfo::INK_PEN:
+      case omnibox::SuggestTemplateInfo::TAB:
+      case omnibox::SuggestTemplateInfo::PHOTO_SPARK:
+      case omnibox::SuggestTemplateInfo::BOLT:
       default:
         // Out of range value defaults to search loupe.
         return features::IsRoundedIconsEnabled()
@@ -1425,6 +1428,9 @@ std::u16string AutocompleteMatch::GetKeywordPlaceholder(
   }
   if (!history_embeddings::GetFeatureParameters().omnibox_scoped) {
     return std::u16string();
+  }
+  if (template_url->CreatedByEnterpriseSearchAggregatorPolicy()) {
+    return l10n_util::GetStringUTF16(IDS_OMNIBOX_GEMINI_SCOPE_PLACEHOLDER_TEXT);
   }
   int message_id;
   switch (template_url->starter_pack_id()) {

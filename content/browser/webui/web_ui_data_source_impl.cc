@@ -7,7 +7,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <iterator>
 #include <memory>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -180,18 +182,6 @@ class WebUIDataSourceImpl::InternalDataSource : public URLDataSource {
   std::string GetCrossOriginResourcePolicy() override {
     return parent_->corp_value_;
   }
-  std::string GetAccessControlAllowOriginForOrigin(
-      const std::string& origin) override {
-    if (parent_->access_control_allow_all_origins_) {
-      return "*";
-    }
-    url::Origin parsed_origin = url::Origin::Create(GURL(origin));
-    if (!parsed_origin.opaque() &&
-        parent_->access_control_allow_origins_.contains(parsed_origin)) {
-      return origin;
-    }
-    return URLDataSource::GetAccessControlAllowOriginForOrigin(origin);
-  }
   bool ShouldDenyXFrameOptions() override {
     return parent_->deny_xframe_options_;
   }
@@ -301,21 +291,40 @@ void WebUIDataSourceImpl::UseStringsJs() {
 void WebUIDataSourceImpl::AddResourcePath(std::string_view path,
                                           int resource_id) {
   CHECK(!resources_frozen_);
-  path_to_idr_map_[std::string(path)] = resource_id;
+  path_to_idr_map_.insert_or_assign(std::string(path), resource_id);
 }
 
 void WebUIDataSourceImpl::AddResourcePaths(
     base::span<const webui::ResourcePath> paths) {
   CHECK(!resources_frozen_);
-  for (const auto& resource : paths) {
-    AddResourcePath(resource.path, resource.id);
+  if (paths.empty()) {
+    return;
+  }
+
+  using ResourceMap = base::flat_map<std::string, int>;
+  ResourceMap::container_type entries;
+  auto existing = std::move(path_to_idr_map_).extract();
+  // Leave room for the common SetDefaultResource() call after a bulk add.
+  entries.reserve(existing.size() + paths.size() + 1);
+
+  // A flat_map keeps the first of a set of duplicate keys. Adding the new
+  // batch in reverse, ahead of the existing entries, therefore preserves
+  // AddResourcePath()'s last-write-wins behavior.
+  for (const auto& resource : std::views::reverse(paths)) {
+    entries.emplace_back(resource.path, resource.id);
+  }
+  entries.insert(entries.end(), std::make_move_iterator(existing.begin()),
+                 std::make_move_iterator(existing.end()));
+  path_to_idr_map_ = ResourceMap(std::move(entries));
+
 #if BUILDFLAG(LOAD_WEBUI_FROM_DISK)
+  for (const auto& resource : paths) {
     if (load_from_disk_ && resource.filepath.has_value()) {
       CHECK(strlen(resource.filepath.value()) > 0u);
       idr_to_file_map_[resource.id] = resource.filepath.value();
     }
-#endif  // BUILDFLAG(LOAD_WEBUI_FROM_DISK)
   }
+#endif  // BUILDFLAG(LOAD_WEBUI_FROM_DISK)
 }
 
 void WebUIDataSourceImpl::SetDefaultResource(int resource_id) {
@@ -359,21 +368,6 @@ void WebUIDataSourceImpl::OverrideCrossOriginResourcePolicy(
     const std::string& value) {
   CHECK(!resources_frozen_);
   corp_value_ = value;
-}
-
-void WebUIDataSourceImpl::SetAllowAllOrigins(bool allow_all_origins) {
-  CHECK(!resources_frozen_);
-  access_control_allow_all_origins_ = allow_all_origins;
-}
-
-void WebUIDataSourceImpl::AddAccessControlAllowOrigin(
-    const url::Origin& origin) {
-  CHECK(!resources_frozen_);
-  CHECK(!origin.opaque())
-      << "Opaque origins cannot be uniquely allowlisted. For sandboxed WebUI "
-         "frames, allow the precursor origin instead; for arbitrary opaque "
-         "origins, use SetAllowAllOrigins(true).";
-  access_control_allow_origins_.insert(origin);
 }
 
 void WebUIDataSourceImpl::DisableTrustedTypesCSP() {
@@ -595,7 +589,7 @@ bool WebUIDataSourceImpl::ShouldReplaceI18nInJS() const {
 }
 
 int WebUIDataSourceImpl::URLToIdrOrDefault(const GURL& url) const {
-  const std::string path(url.path().substr(1));
+  const std::string_view path = url.path().substr(1);
   auto it = path_to_idr_map_.find(path);
   if (it != path_to_idr_map_.end())
     return it->second;

@@ -997,8 +997,7 @@ int EnableSystemTracing(const installer::InstallerState& installer_state,
       base::CommandLine(base::CommandLine::NO_PROGRAM),
       install_static::GetClientStateKeyPath(),
       {install_static::GetTracingServiceClsid()},
-      {install_static::GetTracingServiceIid()},
-      install_static::GetOldTracingServiceIids());
+      {install_static::GetTracingServiceIid()});
   if (work_item.Do()) {
     return installer::INSTALL_REPAIRED;
   }

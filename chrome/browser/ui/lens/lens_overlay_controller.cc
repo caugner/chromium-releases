@@ -323,6 +323,12 @@ uint64_t LensOverlayController::GetInvocationTimeSinceEpoch() {
 }
 
 void LensOverlayController::SendText(lens::mojom::TextPtr text) {
+  if (IsSelectedRegionOnlyMode()) {
+    // Suppress text overlays in region-only mode. Bounding box coordinates
+    // returned for the cropped region payload do not map to the full viewport
+    // overlay coordinate frame.
+    return;
+  }
   if (!page_) {
     // Store the text to send once the page is bound.
     pre_initialization_text_ = std::move(text);
@@ -333,6 +339,12 @@ void LensOverlayController::SendText(lens::mojom::TextPtr text) {
 
 void LensOverlayController::SendRegionText(lens::mojom::TextPtr text,
                                            bool is_injected_image) {
+  if (IsSelectedRegionOnlyMode()) {
+    // Suppress text overlays in region-only mode. Bounding box coordinates
+    // returned for the cropped region payload do not map to the full viewport
+    // overlay coordinate frame.
+    return;
+  }
   if (!page_) {
     return;
   }
@@ -342,6 +354,12 @@ void LensOverlayController::SendRegionText(lens::mojom::TextPtr text,
 
 void LensOverlayController::SendObjects(
     std::vector<lens::mojom::OverlayObjectPtr> objects) {
+  if (IsSelectedRegionOnlyMode()) {
+    // Suppress object overlays in region-only mode. Bounding box coordinates
+    // returned for the cropped region payload do not map to the full viewport
+    // overlay coordinate frame.
+    return;
+  }
   if (!page_) {
     // Store the objects to send once the page is bound.
     pre_initialization_objects_ = std::move(objects);
@@ -1357,6 +1375,12 @@ bool LensOverlayController::IsContextualSearchbox() {
       ->IsContextualSearchbox();
 }
 
+bool LensOverlayController::IsSelectedRegionOnlyMode() {
+  return GetLensQueryFlowRouter() &&
+         GetLensQueryFlowRouter()->context_upload_mode() ==
+             lens::LensQueryFlowRouter::ContextUploadMode::kSelectedRegionOnly;
+}
+
 GURL LensOverlayController::GetInitialURL() {
   return GURL(chrome::kChromeUILensOverlayUntrustedURL);
 }
@@ -1375,6 +1399,10 @@ SidePanelType LensOverlayController::GetSidePanelType() {
 
 bool LensOverlayController::ShouldCloseSidePanel() {
   return true;
+}
+
+bool LensOverlayController::ShouldWaitForSidePanelReflow() {
+  return CoBrowsePanelWithLensOverlayEnabled();
 }
 
 bool LensOverlayController::CoBrowsePanelWithLensOverlayEnabled() const {
@@ -1437,8 +1465,14 @@ void LensOverlayController::OnFullscreenStateChanged() {
   if (lens::features::GetLensOverlayEnableInFullscreen()) {
     return;
   }
-  // If there is top chrome we can keep the overlay open.
-  if (tab_->GetBrowserWindowInterface()->IsTabStripVisible()) {
+  // If there is top chrome and we are not in tab fullscreen we can keep the
+  // overlay open.
+  auto* const exclusive_access_manager =
+      ExclusiveAccessManager::From(tab_->GetBrowserWindowInterface());
+  if (tab_->GetBrowserWindowInterface()->IsTabStripVisible() &&
+      exclusive_access_manager &&
+      !exclusive_access_manager->fullscreen_controller()
+           ->IsWindowFullscreenForTabOrPending()) {
     return;
   }
   lens_search_controller_->CloseLensSync(
@@ -1506,6 +1540,9 @@ void LensOverlayController::FinishedWaitingForReflow(
   if (state_ == State::kClosingOpenedSidePanel) {
     lens::RecordTimeToCloseOpenedSidePanel(base::TimeTicks::Now() -
                                            reflow_start_time);
+  }
+  if (state_ == State::kClosingOpenedSidePanel ||
+      state_ == State::kWaitingForOpeningSidePanelReflow) {
     OverlayBaseController::FinishedWaitingForReflow(reflow_start_time);
   }
 }
@@ -1529,12 +1566,9 @@ void LensOverlayController::NotifyTabWillEnterBackground() {
 
 OverlayBaseController::PreselectionUIConfig
 LensOverlayController::GetPreselectionBubbleConfig() {
-  int message_string_id =
-      CoBrowsePanelWithLensOverlayEnabled()
-          ? IDS_LENS_OVERLAY_COBROWSE_INITIAL_TOAST_LABEL
-          : IDS_LENS_OVERLAY_INITIAL_TOAST_MESSAGE_SIMPLIFIED;
-  return {.message_string_id = message_string_id,
-          .bubble_background_color = kColorLensOverlayToastBackground,
+  return {
+      .message_string_id = IDS_LENS_OVERLAY_INITIAL_TOAST_MESSAGE_SIMPLIFIED,
+      .bubble_background_color = kColorLensOverlayToastBackground,
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
           .icon = &vector_icons::kGoogleLensMonochromeLogoIcon
 #else

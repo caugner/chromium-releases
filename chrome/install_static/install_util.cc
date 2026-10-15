@@ -354,10 +354,6 @@ const IID& GetElevatorIid() {
   return InstallDetails::Get().elevator_iid();
 }
 
-base::span<const IID> GetOldElevatorIids() {
-  return InstallDetails::Get().old_elevator_iids();
-}
-
 std::wstring GetElevationServiceName() {
   std::wstring name = GetElevationServiceDisplayName();
   std::erase_if(name, isspace);
@@ -376,10 +372,6 @@ const CLSID& GetTracingServiceClsid() {
 
 const IID& GetTracingServiceIid() {
   return InstallDetails::Get().tracing_service_iid();
-}
-
-base::span<const IID> GetOldTracingServiceIids() {
-  return InstallDetails::Get().old_tracing_service_iids();
 }
 
 std::wstring GetTracingServiceName() {

@@ -73,6 +73,7 @@ class MockSearchboxPage : public searchbox::mojom::Page {
               (searchbox::mojom::SelectionDirection,
                searchbox::mojom::SelectionStep));
   MOCK_METHOD(void, OpenCurrentSelection, (WindowOpenDisposition));
+  MOCK_METHOD(void, ResetPopupToInitialState, ());
   MOCK_METHOD(void, SetAimButtonVisible, (bool visible));
   MOCK_METHOD(void,
               SetAimButtonConfig,
@@ -140,6 +141,7 @@ class MockOmniboxPopupPage : public omnibox_popup::mojom::Page {
               (override));
   MOCK_METHOD(void, SetFocus, (bool is_focused), (override));
   MOCK_METHOD(void, ClearAutocompleteMatches, (), (override));
+  MOCK_METHOD(void, ClearPopup, (ClearPopupCallback callback), (override));
 };
 #endif
 

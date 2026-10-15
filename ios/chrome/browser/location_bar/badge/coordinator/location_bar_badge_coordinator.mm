@@ -89,9 +89,6 @@
   } else {
     [self attachContextualPanelEntrypoint];
   }
-  id<GeminiCommands> geminiHandler =
-      HandlerForProtocol(_dispatcher, GeminiCommands);
-  _mediator.geminiHandler = geminiHandler;
   if (!IsChromeNextIaEnabled()) {
     [_dispatcher startDispatchingToTarget:_mediator
                               forProtocol:@protocol(LocationBarBadgeCommands)];
@@ -170,6 +167,16 @@
 
 - (CGPoint)helpAnchorUsingBottomOmnibox:(BOOL)isBottomOmnibox {
   return [self.viewController helpAnchorUsingBottomOmnibox:isBottomOmnibox];
+}
+
+- (void)locationBarBadgeMediator:(LocationBarBadgeMediator*)mediator
+    startGeminiEntryFlowWithStartupState:(GeminiStartupState*)startupState {
+  id<GeminiCommands> geminiHandler =
+      HandlerForProtocol(_dispatcher, GeminiCommands);
+  [geminiHandler startGeminiEntryFlowWithStartupState:startupState
+                                   baseViewController:self.baseViewController
+                             showSnackbarOnCompletion:YES
+                                           completion:nil];
 }
 
 #pragma mark - ContextualPanelEntrypointCommands

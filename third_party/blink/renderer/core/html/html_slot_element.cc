@@ -261,30 +261,19 @@ void HTMLSlotElement::Assign(const HeapVector<Member<Node>>& nodes) {
   }
 
   if (!changed_slots.empty()) {
-    if (RuntimeEnabledFeatures::SlotAssignNotifyDifferentShadowRootsEnabled()) {
-      if (shadow_root) {
-        for (HTMLSlotElement& slot :
-             Traversal<HTMLSlotElement>::DescendantsOf(*shadow_root)) {
-          if (changed_slots.Take(&slot)) {
-            slot.DidSlotChange(SlotChangeType::kSignalSlotChangeEvent);
-          }
+    if (shadow_root) {
+      for (HTMLSlotElement& slot :
+           Traversal<HTMLSlotElement>::DescendantsOf(*shadow_root)) {
+        if (changed_slots.Take(&slot)) {
+          slot.DidSlotChange(SlotChangeType::kSignalSlotChangeEvent);
         }
       }
-      // A previous slot may belong to a different shadow tree than `this`, or
-      // `this` may not be in a shadow tree at all. Such slots are not reached
-      // by the traversal above; signal them here.
-      for (HTMLSlotElement* slot : changed_slots) {
-        slot->DidSlotChange(SlotChangeType::kSignalSlotChangeEvent);
-      }
-    } else {
-      if (shadow_root) {
-        for (HTMLSlotElement& slot :
-             Traversal<HTMLSlotElement>::DescendantsOf(*shadow_root)) {
-          if (changed_slots.Contains(&slot)) {
-            slot.DidSlotChange(SlotChangeType::kSignalSlotChangeEvent);
-          }
-        }
-      }
+    }
+    // A previous slot may belong to a different shadow tree than `this`, or
+    // `this` may not be in a shadow tree at all. Such slots are not reached
+    // by the traversal above; signal them here.
+    for (HTMLSlotElement* slot : changed_slots) {
+      slot->DidSlotChange(SlotChangeType::kSignalSlotChangeEvent);
     }
   }
 }
@@ -313,8 +302,7 @@ void HTMLSlotElement::ClearAssignedNodesAndFlatTreeChildren() {
 
 void HTMLSlotElement::UpdateFlatTreeNodeDataForAssignedNodes() {
   Node* previous = nullptr;
-  const HeapVector<Member<Node>> assigned_nodes = assigned_nodes_;
-  for (auto& current : assigned_nodes) {
+  for (auto& current : assigned_nodes_) {
     bool mark_parent_slot_changed = false;
     if (!current->NeedsStyleRecalc() && !current->GetLayoutObject()) {
       if (current->IsTextNode() ||
@@ -361,8 +349,7 @@ void HTMLSlotElement::DetachDisplayLockedAssignedNodesLayoutTreeIfNeeded() {
   // detach the node's layout tree.
   StyleEngine& style_engine = GetDocument().GetStyleEngine();
   StyleEngine::DetachLayoutTreeScope detach_scope(style_engine);
-  const HeapVector<Member<Node>> assigned_nodes = assigned_nodes_;
-  for (auto& current : assigned_nodes) {
+  for (auto& current : assigned_nodes_) {
     if (current->GetForceReattachLayoutTree()) {
       current->DetachLayoutTree();
       // Restore the force-reattach state for when it's no longer display

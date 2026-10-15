@@ -15,6 +15,7 @@
 #include "chrome/browser/ui/browser_window/public/browser_collection_observer.h"
 #include "chrome/browser/ui/browser_window/public/profile_browser_collection.h"
 #include "chrome/browser/ui/webui/top_chrome/webui_contents_wrapper.h"
+#include "components/prefs/pref_change_registrar.h"
 #include "content/public/browser/context_menu_params.h"
 #include "third_party/blink/public/mojom/page/draggable_region.mojom-forward.h"
 #include "third_party/skia/include/core/SkRegion.h"
@@ -47,6 +48,9 @@ class OmniboxEverywhereUIManager : public views::WidgetObserver,
  public:
   DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kOmniboxEverywhereElementId);
 
+  static constexpr int kPopupFixedWidth = 848;
+  static constexpr int kDefaultRestingHeight = 152;
+
   enum ContextMenuCommandId {
     kCut = 1,
     kCopy = 2,
@@ -77,9 +81,14 @@ class OmniboxEverywhereUIManager : public views::WidgetObserver,
   // Returns true if the widget is visible.
   bool IsVisible() const;
 
+  // Returns true if the widget is active/focused.
+  bool IsActive() const;
+
   // views::WidgetObserver:
   void OnWidgetActivationChanged(views::Widget* widget, bool active) override;
   void OnWidgetDestroying(views::Widget* widget) override;
+  void OnWidgetUserDragStarted(views::Widget* widget) override;
+  void OnWidgetUserDragEnded(views::Widget* widget) override;
 
   // WebUIContentsWrapper::Host:
   void CloseUI() override;
@@ -90,6 +99,11 @@ class OmniboxEverywhereUIManager : public views::WidgetObserver,
       content::WebContents* web_contents,
       const content::MediaStreamRequest& request,
       content::MediaResponseCallback callback) override;
+  content::WebContents* OpenURLFromTab(
+      content::WebContents* source,
+      const content::OpenURLParams& params,
+      base::OnceCallback<void(content::NavigationHandle&)>
+          navigation_handle_callback) override;
   void RunFileChooser(content::RenderFrameHost* render_frame_host,
                       scoped_refptr<content::FileSelectListener> listener,
                       const blink::mojom::FileChooserParams& params) override;
@@ -111,19 +125,26 @@ class OmniboxEverywhereUIManager : public views::WidgetObserver,
   void OnDrivePickerOpened();
   void OnDrivePickerClosed();
 
+  void OnScreensharePickerOpened();
+  void OnScreensharePickerClosed();
+
   // BrowserCollectionObserver:
   void OnBrowserCreated(BrowserWindowInterface* browser) override {}
   void OnBrowserClosed(BrowserWindowInterface* browser) override;
   void OnBrowserActivated(BrowserWindowInterface* browser) override;
   void OnBrowserDeactivated(BrowserWindowInterface* browser) override {}
 
-  void SetIsNavigating(bool is_navigating) { is_navigating_ = is_navigating; }
-  bool IsNavigating() const { return is_navigating_; }
-
   Profile* profile() { return profile_; }
   const Profile* profile() const { return profile_; }
   views::Widget* widget() { return widget_.get(); }
   const views::Widget* widget() const { return widget_.get(); }
+  content::WebContents* web_contents() const;
+  OmniboxEverywhereWidgetDelegate* widget_delegate();
+  const OmniboxEverywhereWidgetDelegate* widget_delegate() const;
+
+  bool IsPointInDraggableRegion(const gfx::Point& point) const;
+
+  // For testing:
   WebUIContentsWrapper* contents_wrapper_for_testing() {
     return contents_wrapper_.get();
   }
@@ -135,6 +156,9 @@ class OmniboxEverywhereUIManager : public views::WidgetObserver,
   }
   bool is_drive_picker_open_for_testing() const {
     return is_drive_picker_open_;
+  }
+  bool is_screenshare_picker_open_for_testing() const {
+    return is_screenshare_picker_open_;
   }
   bool is_context_menu_open_for_testing() const {
     return is_context_menu_open_;
@@ -152,22 +176,20 @@ class OmniboxEverywhereUIManager : public views::WidgetObserver,
     menu_runner_factory_ = std::move(factory);
   }
 
-  OmniboxEverywhereWidgetDelegate* widget_delegate();
-  const OmniboxEverywhereWidgetDelegate* widget_delegate() const;
-
-  bool IsPointInDraggableRegion(const gfx::Point& point) const;
-
  private:
-  content::WebContents* web_contents() const;
   void EnsureContentsWrapperInitialized(Profile* profile);
   void CreateAndInitWidget(gfx::NativeWindow context);
   void ActivateAndFocus();
+  void OnEphemeralModelPrefChanged();
+  void OnMostVisitedPrefChanged();
+  static gfx::Rect CalculateWidgetBounds(int height);
 
   std::unique_ptr<WebUIContentsWrapper> CreateContentsWrapper(Profile* profile);
 
   void CleanUpWidget();
   void OnWidgetClosed(views::Widget::ClosedReason reason);
   void OnContextMenuClosed();
+  bool HasModalDialogOpen() const;
 
 #if defined(USE_AURA)
   std::unique_ptr<OmniboxEverywhereEventHandlerAura> event_handler_;
@@ -185,7 +207,9 @@ class OmniboxEverywhereUIManager : public views::WidgetObserver,
   bool is_file_chooser_open_ = false;
   bool is_drive_picker_open_ = false;
   bool is_context_menu_open_ = false;
-  bool is_navigating_ = false;
+  bool is_screenshare_picker_open_ = false;
+  bool is_dragging_ = false;
+  std::optional<gfx::Size> pending_auto_resize_size_;
   std::optional<SkRegion> draggable_region_;
 
   std::unique_ptr<views::UnhandledKeyboardEventHandler>
@@ -194,6 +218,8 @@ class OmniboxEverywhereUIManager : public views::WidgetObserver,
   std::unique_ptr<ui::SimpleMenuModel> context_menu_model_;
   std::unique_ptr<views::MenuRunner> context_menu_runner_;
 
+  PrefChangeRegistrar local_state_pref_change_registrar_;
+  PrefChangeRegistrar profile_pref_change_registrar_;
   base::ScopedObservation<views::Widget, views::WidgetObserver>
       widget_observation_{this};
   base::ScopedObservation<ProfileBrowserCollection, BrowserCollectionObserver>

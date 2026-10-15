@@ -1338,7 +1338,8 @@ void HTMLInputElement::SetSuggestedValue(const String& value) {
   needs_to_update_view_value_ = true;
   String sanitized_value = SanitizeValue(value);
 
-  if (IsInCanvasSubtree()) {
+  if (RuntimeEnabledFeatures::CanvasDrawElementEnabled(GetExecutionContext()) &&
+      IsInCanvasSubtree()) {
     // Hide suggested values when under canvas, to prevent leaking this
     // information to javascript.
     sanitized_value = String();
@@ -1366,7 +1367,8 @@ void HTMLInputElement::SetSuggestedValue(const String& value) {
 
 void HTMLInputElement::DidChangeIsInCanvasSubtree() {
   TextControlElement::DidChangeIsInCanvasSubtree();
-  if (IsInCanvasSubtree()) {
+  if (IsInCanvasSubtree() &&
+      RuntimeEnabledFeatures::CanvasDrawElementEnabled(GetExecutionContext())) {
     // Hide suggested values when under canvas, to prevent leaking this
     // information to javascript.
     SetSuggestedValue(String());
@@ -1415,6 +1417,9 @@ void HTMLInputElement::SetValue(const String& value,
   if (!input_type_->CanSetValue(value))
     return;
 
+  const bool had_suggested_value =
+      RuntimeEnabledFeatures::FindIgnoreSuggestionFixEnabled() &&
+      !SuggestedValue().empty();
   // Clear the suggested value. Use the base class version to not trigger a view
   // update.
   TextControlElement::SetSuggestedValue(String());
@@ -1434,6 +1439,12 @@ void HTMLInputElement::SetValue(const String& value,
     input_type_->SetValue(sanitized_value, value_changed, event_behavior,
                           selection);
     input_type_view_->DidSetValue(sanitized_value, value_changed);
+
+    if (had_suggested_value && !value_changed) {
+      // The view may still render the just-cleared suggested value; force a
+      // resync to the committed value. crbug.com/553252820
+      input_type_view_->UpdateView();
+    }
 
     if (value_changed) {
       NotifyFormStateChanged();
@@ -1599,6 +1610,10 @@ void HTMLInputElement::RunActivationBehavior(
 }
 
 void HTMLInputElement::DefaultEventHandler(Event& evt) {
+  if (RuntimeEnabledFeatures::InputDisabledHandlerFixEnabled() &&
+      IsDisabledFormControl()) {
+    return;
+  }
   auto* mouse_event = DynamicTo<MouseEvent>(evt);
   if (mouse_event && evt.type() == event_type_names::kClick &&
       mouse_event->button() ==

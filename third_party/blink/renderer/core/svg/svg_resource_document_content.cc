@@ -211,8 +211,7 @@ void SVGResourceDocumentContent::NotifyObserver(
 }
 
 void SVGResourceDocumentContent::NotifyObservers() {
-  HeapVector<Member<SVGResourceDocumentObserver>> observer_list(observers_);
-  for (auto& observer : observer_list) {
+  for (auto& observer : observers_) {
     observer->ResourceNotifyFinished(this);
   }
 }
@@ -251,8 +250,7 @@ void SVGResourceDocumentContent::ContentChanged() {
   if (inhibit_content_change_) {
     return;
   }
-  HeapVector<Member<SVGResourceDocumentObserver>> observer_list(observers_);
-  for (auto& observer : observer_list) {
+  for (auto& observer : observers_) {
     observer->ResourceContentChanged(this);
   }
 }
@@ -290,9 +288,6 @@ SVGResourceDocumentContent* SVGResourceDocumentContent::Fetch(
 
   Page* page = document.GetPage();
   auto& cache = page->GetSVGDocumentResourceTracker();
-  if (cache.IsDisposed()) {
-    return nullptr;
-  }
 
   SVGDocumentResource* resource = SVGDocumentResource::Fetch(
       params, document.Fetcher(), page->GetAgentGroupScheduler());

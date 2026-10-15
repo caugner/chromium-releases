@@ -225,6 +225,18 @@ class CONTENT_EXPORT RenderFrameHost : public IPC::Listener {
   // Returns the route id for this frame.
   virtual int GetRoutingID() const = 0;
 
+  // Returns the ID of the NavigationHandle that created the document that this
+  // RenderFrameHost represents, if there was such a navigation. The value is
+  // assigned after receiving the DidCommitNavigation IPC. It is not updated
+  // after same-document navigations (which may have their own navigation
+  // IDs).
+  //
+  // Returns 0 if this RenderFrameHost is for an initial empty document of a
+  // frame, and thus was not created for a navigation. This may later change to
+  // a non-zero value if the RenderFrameHost is reused for a navigation to a
+  // non-initial document.
+  virtual int64_t GetNavigationId() const = 0;
+
   // Returns the frame token for this frame.
   virtual const blink::LocalFrameToken& GetFrameToken() const = 0;
 
@@ -831,6 +843,11 @@ class CONTENT_EXPORT RenderFrameHost : public IPC::Listener {
   // DisallowActivationReasonId.kMinEmbedderDisallowActivationReason.
   virtual bool IsInactiveAndDisallowActivation(uint64_t reason) = 0;
 
+  // Returns whether the frame is focused. A frame is considered focused when it
+  // is the parent chain of the focused frame within the frame tree. In
+  // addition, its associated RenderWidgetHost has to be focused.
+  virtual bool IsFocused() = 0;
+
   // Get the number of proxies to this frame, in all processes. Exposed for
   // use by resource metrics.
   virtual size_t GetProxyCount() = 0;
@@ -1140,6 +1157,10 @@ class CONTENT_EXPORT RenderFrameHost : public IPC::Listener {
   // enables a set of additional features that can be used with MojoJs. For
   // example, helper methods for MojoJs to better work with Web API objects.
   virtual void EnableMojoJsBindings(mojom::ExtraMojoJsFeaturesPtr features) = 0;
+
+  // Indicates that this frame wants stack traces included in console error
+  // notifications (`untrusted_stack_trace` in `DidAddMessageToConsole`).
+  virtual void SetWantErrorMessageStackTrace() = 0;
 
   // Whether the current document is loaded inside iframe credentialless.
   // Updated on every cross-document navigation.

@@ -55,6 +55,7 @@ class DummyOmniboxPopupPresenterDelegate
   OmniboxPopupAimPresenter* GetOmniboxPopupAimPresenter() const override {
     return nullptr;
   }
+  views::View* GetLocationBarFocusRestoreView() override { return nullptr; }
 };
 
 class OmniboxPopupPresenterBaseTest : public views::ViewsTestBase {

@@ -38,11 +38,9 @@ void WebUIURLFetcher::Start() {
     return;
   }
 
-  // TODO(crbug.com/566312711): Remove the bypass origin lock.
   mojo::Remote<network::mojom::URLLoaderFactory> factory(
-      content::CreateWebUIURLLoaderFactoryWithoutOriginLock(
-          content::WebUIURLLoaderFactoryPasskey::GetPassKey(),
-          render_frame_host, url_.GetScheme(), {}));
+      content::CreateWebUIURLLoaderFactory(render_frame_host, url_.GetScheme(),
+                                           {}));
 
   net::NetworkTrafficAnnotationTag traffic_annotation =
       net::DefineNetworkTrafficAnnotation("webui_content_scripts_download", R"(

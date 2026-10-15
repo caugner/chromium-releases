@@ -527,7 +527,8 @@ std::vector<RequestAction> RulesetManager::EvaluateRequestInternal(
       } else {
         bool is_dse_redirect =
             ExtensionsBrowserClient::Get()->IsDefaultSearchEngineRedirect(
-                browser_context_, request.url, action->redirect_url.value());
+                browser_context_, action->extension_id, request.url,
+                action->redirect_url.value());
         if (is_dse_redirect) {
           base::UmaHistogramEnumeration(
               "Extensions.DeclarativeNetRequest.RedirectAction",
@@ -582,6 +583,15 @@ std::vector<RequestAction> RulesetManager::EvaluateRequestInternal(
 bool RulesetManager::ShouldEvaluateRequest(
     const WebRequestInfo& request) const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  // Requests for privileged content (see //chrome's PrivilegedWebContents) are
+  // exempt from Declarative Net Request, mirroring their invisibility to the
+  // webRequest API. This covers a privileged WebContents' own main-frame
+  // navigation as well as requests from its renderer. It must come before the
+  // HideRequest() DCHECK below, because such requests are also hidden.
+  if (request.is_privileged) {
+    return false;
+  }
 
   // Ensure clients filter out sensitive requests.
   DCHECK(!WebRequestPermissions::HideRequest(permission_helper_, request));

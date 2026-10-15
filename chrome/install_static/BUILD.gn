@@ -19,11 +19,13 @@ if (is_win) {
   # This file contains utility functions that only depend on kernel32.
   # Please don't add dependencies on other system libraries.
   static_library("install_static_util") {
-    deps = [ "//base/version_info:generate_version_info" ]
+    deps = [
+      "//base",
+      "//base/version_info:generate_version_info",
+    ]
 
     public_deps = [
       ":buildflags",
-      "//base",
       "//build:branding_buildflags",
       "//chrome/chrome_elf:nt_registry",
     ]

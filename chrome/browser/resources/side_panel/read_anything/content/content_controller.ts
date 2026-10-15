@@ -17,12 +17,6 @@ import {NodeStore} from './node_store.js';
 import {removeExtraneousElementsFrom} from './readability_content_processing.js';
 import {ReadabilityImageClassifier} from './readability_image_classifier.js';
 
-const READABILITY_SET_HTML_OPTIONS: SetHtmlOptions = {
-  sanitizer: {
-    removeElements: ['style', 'meta', 'template'],
-  },
-};
-
 const DATA_PREFIX = 'data-';
 const LINK_DATA_ATTR = 'link';
 const LINKS_OFF_TAG = 'span';
@@ -148,6 +142,13 @@ export class ContentController {
   private currentState_: ContentState = CONTENT_STATES[ContentType.NO_CONTENT];
   private previousRootId_?: number;
 
+  // The Trusted Types policy is registered globally on the window object.
+  // The browser only allows a policy name to be registered once per page load.
+  // Making this static ensures that multiple instances of ContentController
+  // (which occur frequently during WebUI test runs) share the same policy
+  // reference and do not trigger a "Policy already exists" TypeError.
+  private static trustedUpdatePolicy: TrustedTypePolicy|undefined;
+
   // Holds the text nodes extracted from the current rendered distillation.
   // This array ensures that we can link a DOM node back to its AXTree
   // mapping for text selection via its index in this array.
@@ -261,7 +262,8 @@ export class ContentController {
       }
 
       const contentContainer = document.createElement('div');
-      contentContainer.setHTML(contentHtml, READABILITY_SET_HTML_OPTIONS);
+      contentContainer.innerHTML = this.getTrustedHtml(contentHtml);
+
 
       // Strip single newlines from text nodes to prevent unexpected sentence
       // breaks, as Readability preserves raw HTML newlines which are visually
@@ -774,10 +776,6 @@ export class ContentController {
   }
 
   loadImages() {
-    if (!chrome.readingMode.imagesFeatureEnabled) {
-      return;
-    }
-
     this.nodeStore_.fetchImages();
   }
 
@@ -1027,10 +1025,6 @@ export class ContentController {
   }
 
   private updateImagesForAxTree_(shadowRoot: ParentNode): boolean {
-    if (!chrome.readingMode.imagesFeatureEnabled) {
-      return false;
-    }
-
     const imagesEnabled = chrome.readingMode.imagesEnabled;
     if (imagesEnabled) {
       this.nodeStore_.clearHiddenImageNodes();
@@ -1050,9 +1044,7 @@ export class ContentController {
       return false;
     }
 
-    // If chrome.readingMode.imagesFeatureEnabled is disabled, hide images also.
-    const imagesEnabled = chrome.readingMode.imagesEnabled &&
-        chrome.readingMode.imagesFeatureEnabled;
+    const imagesEnabled = chrome.readingMode.imagesEnabled;
     // We look for 'img' tags (standard HTML) and 'figure' tags like screen2x.
     const images = container.querySelectorAll<HTMLElement>('img, figure');
 
@@ -1091,6 +1083,25 @@ export class ContentController {
         }
       });
     });
+  }
+
+  private getTrustedHtml(html: string): TrustedHTML {
+    if (!ContentController.trustedUpdatePolicy || !isDistilledByReadability()) {
+      return window.trustedTypes!.emptyHTML;
+    }
+    return ContentController.trustedUpdatePolicy.createHTML(html);
+  }
+
+  configureTrustedTypes(): void {
+    if (!window.trustedTypes || ContentController.trustedUpdatePolicy) {
+      return;
+    }
+    ContentController.trustedUpdatePolicy =
+        window.trustedTypes.createPolicy('reader-mode-policy', {
+          createHTML: (s: string) => s,
+          createScript: () => '',
+          createScriptURL: () => '',
+        });
   }
 
   static getInstance(): ContentController {

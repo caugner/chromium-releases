@@ -24,7 +24,6 @@
 #include "components/page_info/core/features.h"
 #include "components/page_info/page_info.h"
 #include "components/page_info/page_info_ui.h"
-#include "components/permissions/android/permissions_android_feature_map.h"
 #include "components/permissions/features.h"
 #include "components/security_state/core/security_state.h"
 #include "content/public/browser/navigation_controller.h"
@@ -220,8 +219,10 @@ void PageInfoControllerAndroid::SetPermissionInfo(
   base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
   permissions_to_display.push_back(
       ContentSettingsType::FILE_SYSTEM_WRITE_GUARD);
-  if (cmd->HasSwitch(switches::kEnableExperimentalWebPlatformFeatures))
+  permissions_to_display.push_back(ContentSettingsType::SERIAL_GUARD);
+  if (cmd->HasSwitch(switches::kEnableExperimentalWebPlatformFeatures)) {
     permissions_to_display.push_back(ContentSettingsType::BLUETOOTH_SCANNING);
+  }
   permissions_to_display.push_back(ContentSettingsType::VR);
   permissions_to_display.push_back(ContentSettingsType::AR);
 #if BUILDFLAG(ENABLE_VR)
@@ -332,13 +333,8 @@ std::optional<PermissionSetting> PageInfoControllerAndroid::GetSettingToDisplay(
     // The javascript content setting should show up if it is blocked globally
     // to give users an easy way to create exceptions.
     return permission.default_setting;
-  } else if (permission.type == ContentSettingsType::NOTIFICATIONS &&
-             (base::FeatureList::IsEnabled(
-                  permissions::kPermissionsAndroidClapperLoud) ||
-              base::FeatureList::IsEnabled(
-                  permissions::kPermissionsAndroidClapperQuiet))) {
-    // For the Clapper experiment, Notifications permission should be
-    // displayed while it is being requested.
+  } else if (permission.type == ContentSettingsType::NOTIFICATIONS) {
+    // Notifications permission should be displayed while it is being requested.
     return permission.default_setting;
   } else if (permission.type == ContentSettingsType::SOUND) {
     // The sound content setting should always show up when the tab has played
@@ -361,18 +357,6 @@ std::optional<PermissionSetting> PageInfoControllerAndroid::GetSettingToDisplay(
   // subpage directly from the permissions returned from this controller.
 
   return std::nullopt;
-}
-
-void PageInfoControllerAndroid::SetAdPersonalizationInfo(
-    const AdPersonalizationInfo& info) {
-  JNIEnv* env = base::android::AttachCurrentThread();
-  std::vector<std::u16string> topic_names;
-  for (const auto& topic : info.accessed_topics) {
-    topic_names.push_back(topic.GetLocalizedRepresentation());
-  }
-  Java_PageInfoController_setAdPersonalizationInfo(
-      env, controller_jobject_, info.has_joined_user_to_interest_group,
-      base::android::ToJavaArrayOfStrings(env, topic_names));
 }
 
 DEFINE_JNI(PageInfoController)

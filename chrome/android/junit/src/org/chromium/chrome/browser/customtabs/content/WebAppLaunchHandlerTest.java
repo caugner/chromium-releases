@@ -23,18 +23,23 @@ import static org.mockito.Mockito.when;
 import static org.robolectric.Shadows.shadowOf;
 
 import android.app.Activity;
+import android.app.ComponentCaller;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ProviderInfo;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Looper;
+import android.os.Process;
 import android.text.TextUtils;
 
+import androidx.annotation.Nullable;
 import androidx.browser.customtabs.CustomTabsSessionToken;
 import androidx.browser.trusted.FileHandlingData;
 import androidx.browser.trusted.LaunchHandlerClientMode;
+import androidx.browser.trusted.sharing.ShareData;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -49,7 +54,6 @@ import org.robolectric.annotation.Config;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Promise;
 import org.chromium.base.test.BaseRobolectricTestRunner;
-import org.chromium.base.test.util.Batch;
 import org.chromium.chrome.browser.ShortcutHelper;
 import org.chromium.chrome.browser.browserservices.intents.SessionHolder;
 import org.chromium.chrome.browser.browserservices.ui.controller.CurrentPageVerifier;
@@ -64,7 +68,6 @@ import java.util.Objects;
 
 /** Tests for {@link WebAppLaunchHandler}. */
 @RunWith(BaseRobolectricTestRunner.class)
-@Batch(Batch.UNIT_TESTS)
 @Config(manifest = Config.NONE)
 public class WebAppLaunchHandlerTest {
     static final int WRONG_CLIENT_MODE = 65;
@@ -156,12 +159,22 @@ public class WebAppLaunchHandlerTest {
 
     private CustomTabIntentDataProvider createIntentDataProvider(
             @LaunchHandlerClientMode.ClientMode int clientMode, String url) {
+        return createIntentDataProvider(clientMode, url, null, false);
+    }
+
+    private CustomTabIntentDataProvider createIntentDataProvider(
+            @LaunchHandlerClientMode.ClientMode int clientMode,
+            String url,
+            @Nullable Intent intent,
+            boolean isTrusted) {
         CustomTabIntentDataProvider dataProvider = mock(CustomTabIntentDataProvider.class);
         when(dataProvider.getLaunchHandlerClientMode()).thenReturn(clientMode);
         when(dataProvider.getUrlToLoad()).thenReturn(url);
         when(dataProvider.getClientPackageName()).thenReturn(TEST_PACKAGE_NAME);
         when(dataProvider.getFileHandlingData()).thenReturn(mFileHandlingData);
         when(dataProvider.getSession()).thenReturn(mSessionMock);
+        when(dataProvider.getIntent()).thenReturn(intent);
+        when(dataProvider.isTrustedIntent()).thenReturn(isTrusted);
         return dataProvider;
     }
 
@@ -201,6 +214,44 @@ public class WebAppLaunchHandlerTest {
             boolean expectedNotifyQueue,
             boolean expectedVerificationSuccess,
             boolean hasSpeculativeNavigation) {
+        doTestHandleIntent(
+                clientMode,
+                url,
+                expectedLoadUrl,
+                expectedNotifyQueue,
+                expectedVerificationSuccess,
+                hasSpeculativeNavigation,
+                null);
+    }
+
+    private void doTestHandleIntent(
+            @LaunchHandlerClientMode.ClientMode int clientMode,
+            String url,
+            boolean expectedLoadUrl,
+            boolean expectedNotifyQueue,
+            boolean expectedVerificationSuccess,
+            boolean hasSpeculativeNavigation,
+            @Nullable Intent intent) {
+        doTestHandleIntent(
+                clientMode,
+                url,
+                expectedLoadUrl,
+                expectedNotifyQueue,
+                expectedVerificationSuccess,
+                hasSpeculativeNavigation,
+                intent,
+                /* isTrusted= */ false);
+    }
+
+    private void doTestHandleIntent(
+            @LaunchHandlerClientMode.ClientMode int clientMode,
+            String url,
+            boolean expectedLoadUrl,
+            boolean expectedNotifyQueue,
+            boolean expectedVerificationSuccess,
+            boolean hasSpeculativeNavigation,
+            @Nullable Intent intent,
+            boolean isTrusted) {
         clearInvocations(mWebAppLaunchHandlerJniMock, mNavigationControllerMock);
         if (hasSpeculativeNavigation) {
             when(mTabProviderMock.getInitialTabCreationMode()).thenReturn(TabCreationMode.HIDDEN);
@@ -211,7 +262,8 @@ public class WebAppLaunchHandlerTest {
         }
         WebAppLaunchHandler launchHandler = createWebAppLaunchHandler();
 
-        CustomTabIntentDataProvider dataProvider = createIntentDataProvider(clientMode, url);
+        CustomTabIntentDataProvider dataProvider =
+                createIntentDataProvider(clientMode, url, intent, isTrusted);
 
         if (Objects.equals(url, INITIAL_URL)) {
             launchHandler.handleInitialIntent(dataProvider);
@@ -514,7 +566,7 @@ public class WebAppLaunchHandlerTest {
         launchHandler.handleInitialIntent(dataProvider);
         shadowOf(Looper.getMainLooper()).idle();
 
-        verifyNoInteractions(mActivityMock);
+        verify(mActivityMock, never()).startActivity(any());
         verifyNoInteractions(mNavigationControllerMock);
 
         String expectedScope = ShortcutHelper.getScopeFromUrl(INITIAL_URL);
@@ -554,7 +606,7 @@ public class WebAppLaunchHandlerTest {
         shadowOf(Looper.getMainLooper()).idle();
 
         if (expectedStartActivityTimes == 0) {
-            verifyNoInteractions(mActivityMock);
+            verify(mActivityMock, never()).startActivity(any());
         } else {
             verify(mActivityMock, times(expectedStartActivityTimes))
                     .startActivity(
@@ -717,6 +769,37 @@ public class WebAppLaunchHandlerTest {
     }
 
     @Test
+    public void testFileHandling_stashedDataUsed() {
+        final Uri authorizedUri =
+                Uri.parse("content://com.android.externalstorage.documents/photo.png");
+        mFileHandlingData = new FileHandlingData(Arrays.asList(authorizedUri));
+        mExpectedFileList = new String[] {authorizedUri.toString()};
+        mExpectedCanWriteList = new boolean[] {true};
+
+        Intent intent = new Intent();
+        FileHandlingData verifiedData = new FileHandlingData(Arrays.asList(authorizedUri));
+        intent.putExtra(
+                CustomTabIntentDataProvider.EXTRA_VERIFIED_FILE_HANDLING_DATA,
+                verifiedData.toBundle());
+        intent.putExtra(
+                CustomTabIntentDataProvider.EXTRA_VERIFIED_FILE_CAN_WRITE, new boolean[] {true});
+
+        // Mock checkUriPermission to return DENIED to prove we don't use it
+        when(mActivityMock.checkUriPermission(eq(authorizedUri), anyInt(), anyInt(), anyInt()))
+                .thenReturn(PackageManager.PERMISSION_DENIED);
+
+        doTestHandleIntent(
+                LaunchHandlerClientMode.AUTO,
+                INITIAL_URL,
+                /* expectedLoadUrl= */ false,
+                /* expectedNotifyQueue= */ true,
+                /* expectedVerificationSuccess= */ true,
+                /* hasSpeculativeNavigation= */ false,
+                intent,
+                /* isTrusted= */ false);
+    }
+
+    @Test
     public void currentPageVerifierFailed() {
         when(mCurrentPageVerifierMock.getState())
                 .thenReturn(
@@ -814,5 +897,101 @@ public class WebAppLaunchHandlerTest {
                 INITIAL_URL,
                 /* expectedLoadUrl= */ false,
                 /* expectedNotifyQueue= */ true);
+    }
+
+    @Test
+    @Config(sdk = Build.VERSION_CODES.VANILLA_ICE_CREAM)
+    public void testFileHandling_trampolineFallback() {
+        ComponentCaller callerMock = mock(ComponentCaller.class);
+        when(callerMock.getUid()).thenReturn(Process.myUid());
+        when(mActivityMock.getCurrentCaller()).thenReturn(callerMock);
+
+        final Uri authorizedUri =
+                Uri.parse("content://com.android.externalstorage.documents/photo.png");
+        mFileHandlingData = new FileHandlingData(Arrays.asList(authorizedUri));
+        mExpectedFileList = new String[] {authorizedUri.toString()};
+        mExpectedCanWriteList = new boolean[] {true};
+
+        when(mActivityMock.checkUriPermission(eq(authorizedUri), eq(67890), eq(12345), anyInt()))
+                .thenReturn(PackageManager.PERMISSION_GRANTED);
+
+        doTestHandleIntent(
+                LaunchHandlerClientMode.AUTO,
+                INITIAL_URL,
+                /* expectedLoadUrl= */ false,
+                /* expectedNotifyQueue= */ true);
+    }
+
+    @Test
+    @Config(sdk = Build.VERSION_CODES.VANILLA_ICE_CREAM)
+    public void testFileHandling_trampolineFallback_denied() {
+        ComponentCaller callerMock = mock(ComponentCaller.class);
+        when(callerMock.getUid()).thenReturn(Process.myUid());
+        when(mActivityMock.getCurrentCaller()).thenReturn(callerMock);
+
+        final Uri authorizedUri =
+                Uri.parse("content://com.android.externalstorage.documents/photo.png");
+        mFileHandlingData = new FileHandlingData(Arrays.asList(authorizedUri));
+        mExpectedFileList = new String[0];
+        mExpectedCanWriteList = new boolean[0];
+
+        when(mActivityMock.checkUriPermission(eq(authorizedUri), eq(67890), eq(12345), anyInt()))
+                .thenReturn(PackageManager.PERMISSION_DENIED);
+
+        doTestHandleIntent(
+                LaunchHandlerClientMode.AUTO,
+                INITIAL_URL,
+                /* expectedLoadUrl= */ false,
+                /* expectedNotifyQueue= */ true);
+    }
+
+    @Test
+    public void testFilterShareData_StashedDataUsed() {
+        Intent intent = new Intent();
+        Uri fileUri = Uri.parse("content://com.example/file.jpg");
+        ShareData verifiedData = new ShareData("title", "text", Arrays.asList(fileUri));
+        intent.putExtra(
+                CustomTabIntentDataProvider.EXTRA_VERIFIED_SHARE_DATA, verifiedData.toBundle());
+
+        CustomTabIntentDataProvider dataProvider = mock(CustomTabIntentDataProvider.class);
+        when(dataProvider.getIntent()).thenReturn(intent);
+
+        ShareData result = WebAppLaunchHandler.filterShareData(dataProvider, mActivityMock, null);
+        Assert.assertNotNull(result);
+        Assert.assertEquals("title", result.title);
+        Assert.assertEquals(fileUri, result.uris.get(0));
+    }
+
+    @Test
+    public void testFilterShareData_RawDataFiltered() {
+        Intent intent = new Intent();
+        Uri authorizedUri = Uri.parse("content://com.example/authorized.jpg");
+        Uri unauthorizedUri = Uri.parse("content://com.example/unauthorized.jpg");
+        ShareData rawData =
+                new ShareData("title", "text", Arrays.asList(authorizedUri, unauthorizedUri));
+
+        CustomTabIntentDataProvider dataProvider = mock(CustomTabIntentDataProvider.class);
+        when(dataProvider.getIntent()).thenReturn(intent);
+        when(dataProvider.getShareData()).thenReturn(rawData);
+        when(dataProvider.getSession()).thenReturn(mSessionMock);
+
+        when(mActivityMock.checkUriPermission(
+                        eq(authorizedUri),
+                        anyInt(),
+                        anyInt(),
+                        eq(Intent.FLAG_GRANT_READ_URI_PERMISSION)))
+                .thenReturn(PackageManager.PERMISSION_GRANTED);
+        when(mActivityMock.checkUriPermission(
+                        eq(unauthorizedUri),
+                        anyInt(),
+                        anyInt(),
+                        eq(Intent.FLAG_GRANT_READ_URI_PERMISSION)))
+                .thenReturn(PackageManager.PERMISSION_DENIED);
+
+        ShareData result = WebAppLaunchHandler.filterShareData(dataProvider, mActivityMock, null);
+        Assert.assertNotNull(result);
+        Assert.assertEquals("title", result.title);
+        Assert.assertEquals(1, result.uris.size());
+        Assert.assertEquals(authorizedUri, result.uris.get(0));
     }
 }

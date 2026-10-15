@@ -1890,7 +1890,7 @@ message OBSOLETE_ExtendedFkeysModifierProto {
 }
 
 message ChromeDeviceSettingsProto {
-  reserved 61, 71, 90, 131;
+  reserved 61, 71, 90, 131, 1478, 1479, 1480;
   optional DevicePolicyRefreshRateProto device_policy_refresh_rate = 1;
   optional UserWhitelistProto user_whitelist = 2;
   optional GuestModeEnabledProto guest_mode_enabled = 3;

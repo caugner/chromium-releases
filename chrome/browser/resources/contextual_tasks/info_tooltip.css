@@ -14,6 +14,7 @@ cr-tooltip {
   --paper-tooltip-opacity: 1.0;
   margin-top: -20px;
   pointer-events: all;
+  transition: right 100ms ease-out, left 100ms ease-out, top 100ms ease-out;
 }
 
 cr-tooltip::part(tooltip) {
@@ -36,7 +37,6 @@ cr-tooltip::part(tooltip) {
   margin-top: -5px;
 }
 
-/* Caret for Left-aligned Tooltips (copied from onboarding_tooltip.css) */
 :host([horizontal-align='left']) cr-tooltip::part(tooltip)::after {
   content: '';
   position: absolute;
@@ -49,19 +49,17 @@ cr-tooltip::part(tooltip) {
     transparent;
 }
 
-/* Caret for Right-aligned Tooltips (copied from lens_search_tooltip.css) */
 :host([horizontal-align='right']) cr-tooltip::part(tooltip)::after {
   content: '';
   position: absolute;
   top: 100%;
-  inset-inline-end: 16px;
+  inset-inline-end: var(--info-tooltip-caret-inline-end, 16px);
   border-width: 8px;
   border-style: solid;
   border-color: var(--paper-tooltip-background) transparent transparent
     transparent;
 }
 
-/* Close Icon Button absolute positioning */
 #closeBtn {
   position: absolute;
   top: 16px;
@@ -72,7 +70,6 @@ cr-tooltip::part(tooltip) {
   margin: 0;
 }
 
-/* Add padding to prevent text from overlapping with absolute positioned close icon button */
 :host([close-button-type='icon']) cr-tooltip::part(tooltip) {
   padding-inline-end: 48px;
 }
@@ -92,4 +89,8 @@ cr-tooltip::part(tooltip) {
   display: flex;
   justify-content: flex-end;
   padding-top: 12px;
+}
+
+a {
+  color: var(--cr-link-color);
 }

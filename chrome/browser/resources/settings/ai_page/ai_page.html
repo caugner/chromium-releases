@@ -10,7 +10,7 @@
   <div>
     <cr-link-row id="passwordChangeRowV2" class="hr"
         hidden="[[!showPasswordChangeControl_]]"
-        start-icon="cr20:password"
+        start-icon="cr20:password-manager"
         label="$i18n{passwordChangeSettingLabel}"
         sub-label="$i18n{passwordChangeSettingSubLabel}"
         on-click="onPasswordChangeRowClick_" external>
@@ -39,6 +39,14 @@
         sub-label="$i18n{aiSuggestionsSublabel}"
         role-description="$i18n{subpageArrowRoleDescription}"
         on-click="onAiSuggestionsRowClick_">
+    </cr-link-row>
+    <cr-link-row id="inlineCueMenuRow" class="hr"
+        hidden="[[!showInlineCueMenuControl_]]"
+        start-icon="settings20:text-select-end"
+        label="$i18n{siteSettingsInlineCueMenu}"
+        sub-label="$i18n{siteSettingsInlineCueMenuDescription}"
+        role-description="$i18n{subpageArrowRoleDescription}"
+        on-click="onInlineCueMenuRowClick_">
     </cr-link-row>
     <cr-link-row id="skillsRow" class="hr"
         hidden="[[!showSkillsSettingPage_]]"

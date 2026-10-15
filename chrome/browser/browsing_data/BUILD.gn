@@ -146,7 +146,6 @@ source_set("impl") {
     "//chrome/browser/webid",
     "//components/browsing_data/content",
     "//components/browsing_data/core",
-    "//components/browsing_topics",
     "//components/commerce/core:feature_utils",
     "//components/commerce/core:shopping_service",
     "//components/content_settings/browser",
@@ -164,7 +163,6 @@ source_set("impl") {
     "//components/payments/content:utils",
     "//components/performance_manager",
     "//components/privacy_sandbox:privacy_sandbox_settings_headers",
-    "//components/safe_browsing/core/browser:suspicious_site_warning_allowlist",
     "//components/safe_browsing/core/browser:verdict_cache_manager",
     "//components/search_engines",
     "//components/strings",
@@ -299,7 +297,6 @@ source_set("unit_tests") {
     "//components/privacy_sandbox/privacy_sandbox_attestations:test_support",
     "//components/private_verification_tokens/common:private_verification_tokens_database",
     "//components/reading_list/core:test_support",
-    "//components/safe_browsing/core/browser:suspicious_site_warning_allowlist",
     "//components/safe_browsing/core/browser:verdict_cache_manager",
     "//components/site_engagement/content",
     "//components/site_isolation",
@@ -368,6 +365,10 @@ source_set("platform_browser_tests") {
     "//testing/gmock",
     "//testing/gtest",
   ]
+
+  if (!is_android) {
+    deps += [ "//chrome/browser/ui/browser_window" ]
+  }
 }
 
 if (!is_android) {
@@ -404,6 +405,7 @@ if (!is_android) {
       "//chrome/browser/sync",
       "//chrome/browser/sync/test/integration:sync_integration_test_support",
       "//chrome/browser/ui",
+      "//chrome/browser/ui/browser_window",
       "//chrome/browser/unified_consent",
       "//chrome/browser/webdata_services",
       "//chrome/test:test_support",

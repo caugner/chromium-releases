@@ -2,6 +2,18 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+source_set("features") {
+  public = [ "features.h" ]
+  sources = [ "features.cc" ]
+  public_deps = [ "//base" ]
+}
+
+source_set("metrics") {
+  public = [ "metrics.h" ]
+  sources = [ "metrics.cc" ]
+  public_deps = [ "//base" ]
+}
+
 source_set("dictation") {
   public = [
     "application_registration_delegate.h",
@@ -9,10 +21,8 @@ source_set("dictation") {
     "dictation_keyed_service.h",
     "dictation_keyed_service_factory.h",
     "dictation_multiplexer.h",
-    "features.h",
     "local_hotkey_manager.h",
     "logging.h",
-    "metrics.h",
     "onboarding_manager.h",
     "session_controller.h",
     "session_controller_delegate.h",
@@ -24,11 +34,13 @@ source_set("dictation") {
     "target.h",
   ]
   public_deps = [
+    ":features",
     "//base",
     "//chrome/browser/profiles:profile",
     "//content/public/browser",
   ]
   deps = [
+    ":metrics",
     "//chrome/browser/ui/views/dictation",
     "//components/prefs",
   ]
@@ -45,12 +57,10 @@ source_set("impl") {
     "dictation_keyed_service.cc",
     "dictation_keyed_service_factory.cc",
     "dictation_multiplexer.cc",
-    "features.cc",
     "listener_stream_provider.cc",
     "listener_stream_provider.h",
     "local_hotkey_manager.cc",
     "logging.cc",
-    "metrics.cc",
     "onboarding_manager.cc",
     "session_controller.cc",
     "session_state.cc",
@@ -61,6 +71,7 @@ source_set("impl") {
 
   deps = [
     ":dictation",
+    ":metrics",
     "//base",
     "//chrome/browser/component_updater",
     "//chrome/browser/extensions",
@@ -129,6 +140,7 @@ source_set("unit_tests") {
 
   deps = [
     ":impl",
+    ":metrics",
     ":test_support",
     "//base/test:test_support",
     "//chrome/browser/ui:test_support",
@@ -152,7 +164,10 @@ source_set("browser_tests") {
   ]
   deps = [
     ":impl",
+    ":metrics",
     ":test_support",
+    "//chrome/browser/glic/browser_ui",
+    "//chrome/browser/glic/browser_ui:glow",
     "//chrome/browser/glic/test_support",
     "//chrome/browser/policy:test_support",
     "//chrome/browser/profiles:profile",

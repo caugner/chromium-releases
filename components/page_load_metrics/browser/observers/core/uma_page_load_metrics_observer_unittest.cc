@@ -21,6 +21,7 @@
 #include "components/page_load_metrics/browser/page_load_tracker.h"
 #include "components/page_load_metrics/common/test/page_load_metrics_test_util.h"
 #include "content/public/browser/navigation_handle.h"
+#include "content/public/browser/tracing_support.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/test/navigation_simulator.h"
@@ -89,6 +90,11 @@ class UmaPageLoadMetricsObserverTest
     page_load_metrics::PageLoadMetricsObserverContentTestHarness::SetUp();
     page_load_metrics::LargestContentfulPaintHandler::SetTestMode(true);
     WebContentsObserver::Observe(web_contents());
+  }
+
+  void TearDown() override {
+    content::ResetWebContentsListTrackRegistrationForTesting();
+    page_load_metrics::PageLoadMetricsObserverContentTestHarness::TearDown();
   }
 
   void OnCpuTimingUpdate(RenderFrameHost* render_frame_host,
@@ -1140,13 +1146,16 @@ TEST_P(UmaPageLoadMetricsObserverTest, NormalizedResponsivenessMetrics) {
   base::TimeTicks current_time = base::TimeTicks::Now();
   event_timings.emplace_back(page_load_metrics::mojom::EventTiming::New(
       base::Milliseconds(50), 1, current_time + base::Milliseconds(1000),
-      current_time + base::Milliseconds(1050)));
+      current_time + base::Milliseconds(1050),
+      /*performance_timeline_navigation_id=*/1u));
   event_timings.emplace_back(page_load_metrics::mojom::EventTiming::New(
       base::Milliseconds(100), 2, current_time + base::Milliseconds(2000),
-      current_time + base::Milliseconds(2050)));
+      current_time + base::Milliseconds(2050),
+      /*performance_timeline_navigation_id=*/1u));
   event_timings.emplace_back(page_load_metrics::mojom::EventTiming::New(
       base::Milliseconds(150), 3, current_time + base::Milliseconds(3000),
-      current_time + base::Milliseconds(3050)));
+      current_time + base::Milliseconds(3050),
+      /*performance_timeline_navigation_id=*/1u));
   NavigateAndCommit(GURL(kDefaultTestUrl));
   tester()->SimulateEventTimingUpdate(event_timings);
   // Navigate again to force histogram recording.

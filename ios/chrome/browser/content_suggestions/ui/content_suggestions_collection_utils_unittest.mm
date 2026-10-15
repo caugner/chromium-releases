@@ -9,6 +9,7 @@
 #import "base/test/scoped_feature_list.h"
 #import "ios/chrome/browser/ntp/search_engine_logo/ui/search_engine_logo_state.h"
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_feature.h"
+#import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_header_constants.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/start_surface/ui_bundled/start_surface_features.h"
 #import "ios/testing/scoped_block_swizzler.h"
@@ -250,8 +251,25 @@ TEST_F(ContentSuggestionsCollectionUtilsTest, NearestAncestor) {
 }
 
 TEST_F(ContentSuggestionsCollectionUtilsTest, fakeOmniboxHeight) {
-  CGFloat expectedHeight = IsAimEnabledInNtp() ? 64 : 50;
-  EXPECT_EQ(expectedHeight, FakeOmniboxHeight());
+  ScopedBlockSwizzler preferredContentSizeSwizzler(
+      [UIApplication class], @selector(preferredContentSizeCategory), ^{
+        return UIContentSizeCategoryLarge;
+      });
+
+  // Control (Disabled).
+  {
+    base::test::ScopedFeatureList scoped_feature_list;
+    scoped_feature_list.InitAndDisableFeature(kNewTabPageUICleanup);
+    CGFloat expectedHeight = IsAimEnabledInNtp() ? 64 : 50;
+    EXPECT_EQ(expectedHeight, FakeOmniboxHeight());
+  }
+
+  // Enabled.
+  {
+    base::test::ScopedFeatureList scoped_feature_list;
+    scoped_feature_list.InitAndEnableFeature(kNewTabPageUICleanup);
+    EXPECT_EQ(72.0, FakeOmniboxHeight());
+  }
 }
 
 TEST_F(ContentSuggestionsCollectionUtilsTest, pinnedFakeOmniboxHeight) {
@@ -278,6 +296,139 @@ TEST_F(ContentSuggestionsCollectionUtilsTest, SameLogoAndDoodleHeight) {
   CGFloat height_with_doodle = HeightForLogoHeader(
       SearchEngineLogoState::kDoodle, IPhonePortraitTraitCollection());
   EXPECT_EQ(height_with_logo, height_with_doodle);
+}
+
+// Test padding helpers for kNewTabPageUICleanup experiment arms.
+TEST_F(ContentSuggestionsCollectionUtilsTest, NTPPaddingExperimentHelpers) {
+  // Control (Disabled).
+  EXPECT_FALSE(IsNewTabPageUICleanupEnabled());
+  EXPECT_FALSE(IsNewTabPageUICleanupFakeboxOnlyEnabled());
+  EXPECT_EQ(DoodleTopMargin(SearchEngineLogoState::kLogo,
+                            IPhonePortraitTraitCollection()),
+            LogoTopPadding(SearchEngineLogoState::kLogo,
+                           IPhonePortraitTraitCollection()));
+  EXPECT_EQ(DoodleTopMargin(SearchEngineLogoState::kDoodle,
+                            IPhonePortraitTraitCollection()),
+            LogoTopPadding(SearchEngineLogoState::kDoodle,
+                           IPhonePortraitTraitCollection()));
+  EXPECT_EQ(SearchFieldTopMargin(SearchEngineLogoState::kLogo),
+            LogoToFakeboxPadding(SearchEngineLogoState::kLogo));
+  EXPECT_EQ(SearchFieldTopMargin(SearchEngineLogoState::kDoodle),
+            LogoToFakeboxPadding(SearchEngineLogoState::kDoodle));
+  EXPECT_EQ(kQuickActionsTopPaddingControl, QuickActionsTopPadding());
+  EXPECT_EQ(kMostVisitedTopPaddingControl, MostVisitedTopPadding());
+  EXPECT_EQ(kReducedModuleSpacingControl, ReducedModuleSpacing());
+
+  // Tight Padding (Arm 1).
+  {
+    base::test::ScopedFeatureList scoped_feature_list;
+    scoped_feature_list.InitAndEnableFeatureWithParameters(
+        kNewTabPageUICleanup, {{kNewTabPageUICleanupArmParam, "1"}});
+    EXPECT_TRUE(IsNewTabPageUICleanupEnabled());
+    EXPECT_FALSE(IsNewTabPageUICleanupFakeboxOnlyEnabled());
+    EXPECT_EQ(FakeToolbarHeight() + kLogoTopPaddingTight,
+              LogoTopPadding(SearchEngineLogoState::kLogo,
+                             IPhonePortraitTraitCollection()));
+    EXPECT_EQ(FakeToolbarHeight() + kDoodleTopPaddingTight,
+              LogoTopPadding(SearchEngineLogoState::kDoodle,
+                             IPhonePortraitTraitCollection()));
+    EXPECT_EQ(kLogoToFakeboxPaddingTight,
+              LogoToFakeboxPadding(SearchEngineLogoState::kLogo));
+    EXPECT_EQ(kDoodleToFakeboxPaddingTight,
+              LogoToFakeboxPadding(SearchEngineLogoState::kDoodle));
+    EXPECT_EQ(
+        kQuickActionsTopPadding - ntp_header::kScrolledToTopOmniboxBottomMargin,
+        QuickActionsTopPadding());
+    EXPECT_EQ(kMostVisitedTopPaddingTight, MostVisitedTopPadding());
+    EXPECT_EQ(kReducedModuleSpacing, ReducedModuleSpacing());
+  }
+
+  // Medium Padding (Arm 2).
+  {
+    base::test::ScopedFeatureList scoped_feature_list;
+    scoped_feature_list.InitAndEnableFeatureWithParameters(
+        kNewTabPageUICleanup, {{kNewTabPageUICleanupArmParam, "2"}});
+    EXPECT_TRUE(IsNewTabPageUICleanupEnabled());
+    EXPECT_FALSE(IsNewTabPageUICleanupFakeboxOnlyEnabled());
+    EXPECT_EQ(FakeToolbarHeight() + kLogoTopPaddingMedium,
+              LogoTopPadding(SearchEngineLogoState::kLogo,
+                             IPhonePortraitTraitCollection()));
+    EXPECT_EQ(FakeToolbarHeight() + kDoodleTopPaddingMedium,
+              LogoTopPadding(SearchEngineLogoState::kDoodle,
+                             IPhonePortraitTraitCollection()));
+    EXPECT_EQ(kLogoToFakeboxPaddingMedium,
+              LogoToFakeboxPadding(SearchEngineLogoState::kLogo));
+    EXPECT_EQ(kDoodleToFakeboxPaddingMedium,
+              LogoToFakeboxPadding(SearchEngineLogoState::kDoodle));
+    EXPECT_EQ(
+        kQuickActionsTopPadding - ntp_header::kScrolledToTopOmniboxBottomMargin,
+        QuickActionsTopPadding());
+    EXPECT_EQ(kMostVisitedTopPaddingMedium, MostVisitedTopPadding());
+    EXPECT_EQ(kReducedModuleSpacing, ReducedModuleSpacing());
+  }
+
+  // Preferred Padding (Arm 3).
+  {
+    base::test::ScopedFeatureList scoped_feature_list;
+    scoped_feature_list.InitAndEnableFeatureWithParameters(
+        kNewTabPageUICleanup, {{kNewTabPageUICleanupArmParam, "3"}});
+    EXPECT_TRUE(IsNewTabPageUICleanupEnabled());
+    EXPECT_FALSE(IsNewTabPageUICleanupFakeboxOnlyEnabled());
+    EXPECT_EQ(FakeToolbarHeight() + kLogoTopPaddingPreferred,
+              LogoTopPadding(SearchEngineLogoState::kLogo,
+                             IPhonePortraitTraitCollection()));
+    EXPECT_EQ(FakeToolbarHeight() + kDoodleTopPaddingPreferred,
+              LogoTopPadding(SearchEngineLogoState::kDoodle,
+                             IPhonePortraitTraitCollection()));
+    EXPECT_EQ(kLogoToFakeboxPaddingPreferred,
+              LogoToFakeboxPadding(SearchEngineLogoState::kLogo));
+    EXPECT_EQ(kDoodleToFakeboxPaddingPreferred,
+              LogoToFakeboxPadding(SearchEngineLogoState::kDoodle));
+    EXPECT_EQ(
+        kQuickActionsTopPadding - ntp_header::kScrolledToTopOmniboxBottomMargin,
+        QuickActionsTopPadding());
+    EXPECT_EQ(kMostVisitedTopPaddingPreferred, MostVisitedTopPadding());
+    EXPECT_EQ(kReducedModuleSpacing, ReducedModuleSpacing());
+  }
+
+  // Fakebox Background and Shadow Update (Arm 4).
+  {
+    base::test::ScopedFeatureList scoped_feature_list;
+    scoped_feature_list.InitAndEnableFeatureWithParameters(
+        kNewTabPageUICleanup, {{kNewTabPageUICleanupArmParam, "4"}});
+    EXPECT_FALSE(IsNewTabPageUICleanupEnabled());
+    EXPECT_TRUE(IsNewTabPageUICleanupFakeboxOnlyEnabled());
+    EXPECT_EQ(DoodleTopMargin(SearchEngineLogoState::kLogo,
+                              IPhonePortraitTraitCollection()),
+              LogoTopPadding(SearchEngineLogoState::kLogo,
+                             IPhonePortraitTraitCollection()));
+    EXPECT_EQ(DoodleTopMargin(SearchEngineLogoState::kDoodle,
+                              IPhonePortraitTraitCollection()),
+              LogoTopPadding(SearchEngineLogoState::kDoodle,
+                             IPhonePortraitTraitCollection()));
+    EXPECT_EQ(SearchFieldTopMargin(SearchEngineLogoState::kLogo),
+              LogoToFakeboxPadding(SearchEngineLogoState::kLogo));
+    EXPECT_EQ(SearchFieldTopMargin(SearchEngineLogoState::kDoodle),
+              LogoToFakeboxPadding(SearchEngineLogoState::kDoodle));
+    EXPECT_EQ(kQuickActionsTopPaddingControl, QuickActionsTopPadding());
+    EXPECT_EQ(kMostVisitedTopPaddingControl, MostVisitedTopPadding());
+    EXPECT_EQ(kReducedModuleSpacingControl, ReducedModuleSpacing());
+  }
+
+  // iPad (Regular x Regular Size Class) overrides.
+  {
+    base::test::ScopedFeatureList scoped_feature_list;
+    scoped_feature_list.InitAndEnableFeatureWithParameters(
+        kNewTabPageUICleanup, {{kNewTabPageUICleanupArmParam, "1"}});
+    EXPECT_EQ(162.0, LogoTopPadding(SearchEngineLogoState::kLogo,
+                                    IPadTraitCollection()));
+    EXPECT_EQ(162.0, LogoTopPadding(SearchEngineLogoState::kDoodle,
+                                    IPadTraitCollection()));
+    EXPECT_EQ(162.0, DoodleTopMargin(SearchEngineLogoState::kLogo,
+                                     IPadTraitCollection()));
+    EXPECT_EQ(kReducedModuleSpacingRegularXRegular,
+              ReducedModuleSpacing(IPadTraitCollection()));
+  }
 }
 
 }  // namespace content_suggestions

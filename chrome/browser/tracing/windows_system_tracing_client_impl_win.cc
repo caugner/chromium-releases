@@ -21,9 +21,8 @@
 #include "base/task/thread_pool.h"
 #include "base/win/com_init_util.h"
 #include "base/win/win_util.h"
-#include "base/win/windows_handle_util.h"
 #include "chrome/installer/util/install_service_work_item.h"
-#include "mojo/public/cpp/platform/platform_channel.h"
+#include "mojo/public/cpp/platform/named_platform_channel.h"
 #include "mojo/public/cpp/system/invitation.h"
 
 namespace {
@@ -105,17 +104,14 @@ WindowsSystemTracingClientImpl::Host::CreateSession() {
 base::expected<WindowsSystemTracingClientImpl::ServiceState, HRESULT>
 WindowsSystemTracingClientImpl::Host::Invite(
     Microsoft::WRL::ComPtr<ISystemTraceSession> trace_session) {
-  mojo::PlatformChannel channel;
+  mojo::NamedPlatformChannel channel(mojo::NamedPlatformChannel::Options{});
   mojo::OutgoingInvitation invitation;
   invitation.set_extra_flags(MOJO_SEND_INVITATION_FLAG_ELEVATED);
   mojo::ScopedMessagePipeHandle pipe = invitation.AttachMessagePipe(0);
 
   DWORD pid = base::kNullProcessId;
-  auto remote_endpoint = channel.TakeRemoteEndpoint();
-  HRESULT hresult = trace_session->AcceptInvitation(
-      base::win::HandleToUint32(
-          remote_endpoint.platform_handle().GetHandle().get()),
-      &pid);
+  HRESULT hresult =
+      trace_session->AcceptInvitation(channel.GetServerName().c_str(), &pid);
   RecordLaunchResult(LaunchStage::kAcceptInvitation, hresult);
   if (FAILED(hresult)) {
     return base::unexpected(hresult);
@@ -123,7 +119,7 @@ WindowsSystemTracingClientImpl::Host::Invite(
 
   mojo::OutgoingInvitation::Send(std::move(invitation),
                                  /*target_process=*/base::kNullProcessHandle,
-                                 channel.TakeLocalEndpoint());
+                                 channel.TakeServerEndpoint());
 
   trace_session_ = std::move(trace_session);
   return base::ok(std::make_pair(pid, std::move(pipe)));

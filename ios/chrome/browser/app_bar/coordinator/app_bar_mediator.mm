@@ -20,7 +20,9 @@
 #import "components/prefs/pref_change_registrar.h"
 #import "components/regional_capabilities/regional_capabilities_service.h"
 #import "components/search/search.h"
+#import "components/signin/public/base/consent_level.h"
 #import "components/signin/public/base/signin_metrics.h"
+#import "components/signin/public/identity_manager/identity_manager.h"
 #import "components/signin/public/identity_manager/objc/identity_manager_observer_bridge.h"
 #import "components/variations/service/variations_service.h"
 #import "ios/chrome/browser/aim/model/aim_util.h"
@@ -53,9 +55,9 @@
 #import "ios/chrome/browser/policy/model/policy_util.h"
 #import "ios/chrome/browser/search_engines/model/search_engine_observer_bridge.h"
 #import "ios/chrome/browser/shared/coordinator/scene/state/incognito_state.h"
-#import "ios/chrome/browser/shared/coordinator/scene/state/layout_state.h"
 #import "ios/chrome/browser/shared/coordinator/scene/state/layout_state_passkey.h"
 #import "ios/chrome/browser/shared/coordinator/scene/state/lens_overlay_state_notifier.h"
+#import "ios/chrome/browser/shared/coordinator/scene/state/scene_layout_state.h"
 #import "ios/chrome/browser/shared/coordinator/scene/state/tab_grid_state.h"
 #import "ios/chrome/browser/shared/model/application_context/application_context.h"
 #import "ios/chrome/browser/shared/model/url/chrome_url_constants.h"
@@ -83,6 +85,7 @@
 #import "ios/chrome/browser/url_loading/model/url_loading_params.h"
 #import "ios/web/public/web_state.h"
 #import "ios/web/public/web_state_observer_bridge.h"
+#import "net/base/network_change_notifier.h"
 #import "url/gurl.h"
 
 using base::UmaHistogramEnumeration;
@@ -97,9 +100,36 @@ class AppBarMediatorPassKeyFactory {
 }  // namespace layout_state
 
 namespace {
+
+// Observes network connection changes to update Assistant button.
+class NetworkChangeObserverBridge
+    : public net::NetworkChangeNotifier::NetworkChangeObserver {
+ public:
+  explicit NetworkChangeObserverBridge(void (^on_network_changed)())
+      : on_network_changed_(on_network_changed) {
+    net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
+  }
+
+  ~NetworkChangeObserverBridge() override {
+    net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
+  }
+
+  // net::NetworkChangeNotifier::NetworkChangeObserver implementation:
+  void OnNetworkChanged(
+      net::NetworkChangeNotifier::ConnectionType type) override {
+    if (on_network_changed_) {
+      on_network_changed_();
+    }
+  }
+
+ private:
+  __strong void (^on_network_changed_)();
+};
+
 inline LayoutStateAssistantPassKey PassKey() {
   return layout_state::AppBarMediatorPassKeyFactory::CreateKey();
 }
+
 }  // namespace
 
 @interface AppBarMediator () <AuthenticationServiceObserving,
@@ -163,8 +193,9 @@ inline LayoutStateAssistantPassKey PassKey() {
   std::unique_ptr<PrefChangeRegistrar> _prefChangeRegistrar;
   std::unique_ptr<PrefObserverBridge> _prefObserverBridge;
   BOOL _initialAssistantButtonStateRecorded;
-  raw_ptr<AimEligibilityService> _aimEligibilityService;
+  raw_ptr<AimEligibilityService> _AIMEligibilityService;
   base::CallbackListSubscription _aimEligibilitySubscription;
+  std::unique_ptr<NetworkChangeObserverBridge> _networkChangeObserver;
 }
 
 - (instancetype)
@@ -235,16 +266,19 @@ inline LayoutStateAssistantPassKey PassKey() {
       _geminiObserver = std::make_unique<GeminiBrowserAgentObserverBridge>(
           self, _geminiBrowserAgent);
     }
-
-    _aimEligibilityService = aimEligibilityService;
+    _AIMEligibilityService = aimEligibilityService;
     __weak __typeof(self) weakSelf = self;
-    if (_aimEligibilityService) {
+    if (_AIMEligibilityService) {
       _aimEligibilitySubscription =
-          _aimEligibilityService->RegisterEligibilityChangedCallback(
+          _AIMEligibilityService->RegisterEligibilityChangedCallback(
               base::BindRepeating(^{
                 [weakSelf updateAssistantButton];
               }));
     }
+
+    _networkChangeObserver = std::make_unique<NetworkChangeObserverBridge>(^{
+      [weakSelf updateAssistantButton];
+    });
 
     _tabGridState = tabGridState;
     [_tabGridState addObserver:self];
@@ -409,6 +443,8 @@ inline LayoutStateAssistantPassKey PassKey() {
   _geminiObserver.reset();
   _URLLoader = nullptr;
   _aimEligibilitySubscription = {};
+  _AIMEligibilityService = nullptr;
+  _networkChangeObserver.reset();
   _incognitoState = nil;
   _tabGridState = nil;
   _lensOverlayState = nil;
@@ -429,6 +465,18 @@ inline LayoutStateAssistantPassKey PassKey() {
 - (void)didChangeWebStateList:(WebStateList*)webStateList
                        change:(const WebStateListChange&)change
                        status:(const WebStateListStatus&)status {
+  if (change.type() == WebStateListChange::Type::kGroupDelete) {
+    const WebStateListChangeGroupDelete& deletion =
+        change.As<WebStateListChangeGroupDelete>();
+    if (deletion.deleted_group() == self.currentTabGroup) {
+      self.currentTabGroup = nullptr;
+    }
+  }
+
+  if (webStateList->IsBatchInProgress()) {
+    return;
+  }
+
   if (status.active_web_state_change() && !_tabGridState.tabGridVisible) {
     self.currentTabGroup = GetGroupForActiveWebState(webStateList);
   }
@@ -455,14 +503,15 @@ inline LayoutStateAssistantPassKey PassKey() {
       }
       break;
     }
-    case WebStateListChange::Type::kGroupDelete: {
-      const WebStateListChangeGroupDelete& deletion =
-          change.As<WebStateListChangeGroupDelete>();
-      if (deletion.deleted_group() == self.currentTabGroup) {
-        self.currentTabGroup = nullptr;
-      }
+    case WebStateListChange::Type::kGroupDelete:
       break;
-    }
+  }
+  [self updateConsumer];
+}
+
+- (void)webStateListBatchOperationEnded:(WebStateList*)webStateList {
+  if (!_tabGridState.tabGridVisible) {
+    self.currentTabGroup = GetGroupForActiveWebState(webStateList);
   }
   [self updateConsumer];
 }
@@ -865,28 +914,55 @@ inline LayoutStateAssistantPassKey PassKey() {
   return NO;
 }
 
+// Returns YES if the primary identity is in an unverified state requiring
+// re-authentication / managing account approval.
+- (BOOL)isPrimaryIdentityUnverified {
+  if (!_authenticationService ||
+      !_authenticationService->HasPrimaryIdentity() || !_identityManager) {
+    return NO;
+  }
+  CoreAccountId accountId =
+      _identityManager->GetPrimaryAccountId(signin::ConsentLevel::kSignin);
+  if (accountId.empty()) {
+    return NO;
+  }
+  return _identityManager->HasAccountWithRefreshTokenInPersistentErrorState(
+      accountId);
+}
+
 // Returns YES if Gemini is eligible to be shown in the App Bar.
 - (BOOL)isGeminiEligible {
-  BOOL geminiAllowed = NO;
-  if (_geminiService) {
-    geminiAllowed = _geminiService->IsProfileEligibleForGemini();
-    if (!geminiAllowed && _authenticationService &&
-        !_authenticationService->HasPrimaryIdentity()) {
-      // If the profile is ineligible, it might be just because the user is
-      // signed out. We still want to show the Gemini button (disabled) for
-      // signed-out users to encourage sign-in, unless a local enterprise
-      // policy explicitly disables it or sign-in is disabled.
-      geminiAllowed = gemini::GeminiAllowedByPolicy(_prefService) &&
-                      _authenticationService->SigninEnabled();
+  if (!IsPageActionMenuEnabled() || [self isEEAOrJapan] || !_geminiService) {
+    return NO;
+  }
+
+  if (!gemini::GeminiAllowedByPolicy(_prefService)) {
+    return NO;
+  }
+
+  BOOL isSignedOut = !_authenticationService->HasPrimaryIdentity();
+  BOOL isUnverified = [self isPrimaryIdentityUnverified];
+  if (isSignedOut || isUnverified) {
+    // For signed-out or unverified users, optimistically show the button to
+    // encourage sign-in or verification if sign-in is allowed.
+    return _authenticationService->SigninEnabled();
+  }
+
+  if (!net::NetworkChangeNotifier::IsOffline() &&
+      !_geminiService->IsWorkspacePolicyCheckPending()) {
+    std::optional<gemini::IneligibilityReasons> ineligibilityReasons =
+        _geminiService->GeminiIneligibilityForProfile();
+    if (ineligibilityReasons && ineligibilityReasons->workspace) {
+      return NO;
     }
   }
 
-  return IsPageActionMenuEnabled() && geminiAllowed && ![self isEEAOrJapan];
+  return YES;
 }
 
 // Returns YES if AIM is eligible to be shown in the App Bar.
 - (BOOL)isAimEligible {
-  return _aimEligibilityService && _aimEligibilityService->IsAimEligible();
+  return _AIMEligibilityService && _AIMEligibilityService->IsAimEligible();
 }
 
 // Returns YES if Lens is eligible to be shown in the App Bar.
@@ -943,10 +1019,8 @@ inline LayoutStateAssistantPassKey PassKey() {
   UIImage* avatar = nil;
   switch (state) {
     case AppBarAssistantButtonState::kAsk:
-      enabled = _geminiBrowserAgent &&
-                _geminiBrowserAgent->IsGeminiAvailableForActiveWebState();
-      highlighted = enabled && _geminiBrowserAgent &&
-                    _geminiBrowserAgent->is_floaty_invoked();
+      highlighted =
+          _geminiBrowserAgent && _geminiBrowserAgent->is_floaty_invoked();
       break;
     case AppBarAssistantButtonState::kAccount:
       if (_authenticationService && !_authenticationService->SigninEnabled()) {

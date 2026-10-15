@@ -4,7 +4,6 @@
 
 #include "gpu/command_buffer/service/shared_context_state.h"
 
-#include "base/atomic_sequence_num.h"
 #include "base/compiler_specific.h"
 #include "base/debug/crash_logging.h"
 #include "base/debug/dump_without_crashing.h"
@@ -844,9 +843,8 @@ bool SharedContextState::FlushAndSubmit(bool sync_to_cpu) {
                                           : skgpu::graphite::SyncToCpu::kNo);
     return flush_succeeded;
   } else if (gr_context()) {
-    return gr_context()
-        ->flushAndSubmit(sync_to_cpu ? GrSyncCpu::kYes : GrSyncCpu::kNo)
-        .fSuccess;
+    gr_context()->flush();
+    return gr_context()->submit(sync_to_cpu ? GrSyncCpu::kYes : GrSyncCpu::kNo);
   }
   return true;
 }
@@ -872,7 +870,7 @@ bool SharedContextState::FlushWriteAccess(
       for (int plane_index = 0; plane_index < num_planes; plane_index++) {
         auto* surface = access->surface(plane_index);
         DCHECK(surface);
-        success &= skgpu::ganesh::Flush(surface).fSuccess;
+        skgpu::ganesh::Flush(surface);
       }
     }
   }

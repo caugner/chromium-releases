@@ -404,22 +404,6 @@ void HTMLImageElement::ParseAttribute(
       GetImageLoader().UpdateFromElement(
           ImageLoader::kUpdateIgnorePreviousError);
     }
-  } else if (name == html_names::kSharedstoragewritableAttr &&
-             RuntimeEnabledFeatures::SharedStorageAPIEnabled(
-                 GetExecutionContext())) {
-    auto* execution_context = GetExecutionContext();
-    if (!execution_context || !execution_context->IsSecureContext()) {
-      GetDocument().AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
-          mojom::blink::ConsoleMessageSource::kOther,
-          mojom::blink::ConsoleMessageLevel::kError,
-          "sharedStorageWritable: sharedStorage operations are only available "
-          "in secure contexts."));
-    } else if (!params.new_value.IsNull()) {
-      UseCounter::Count(GetDocument(),
-                        WebFeature::kSharedStorageAPI_Image_Attribute);
-      Deprecation::CountDeprecation(
-          execution_context, mojom::blink::WebFeature::kSharedStorageAPIAll);
-    }
   } else {
     HTMLElement::ParseAttribute(params);
   }
@@ -883,8 +867,8 @@ int HTMLImageElement::x() const {
   if (!r)
     return 0;
 
-  PhysicalOffset abs_pos =
-      r->LocalToAbsolutePoint(PhysicalOffset(), kIgnoreTransforms);
+  PhysicalOffset abs_pos = r->LocalToAbsolutePoint(
+      PhysicalOffset(), {MapCoordinatesMode::kIgnoreTransforms});
   return abs_pos.left.ToInt();
 }
 
@@ -895,8 +879,8 @@ int HTMLImageElement::y() const {
   if (!r)
     return 0;
 
-  PhysicalOffset abs_pos =
-      r->LocalToAbsolutePoint(PhysicalOffset(), kIgnoreTransforms);
+  PhysicalOffset abs_pos = r->LocalToAbsolutePoint(
+      PhysicalOffset(), {MapCoordinatesMode::kIgnoreTransforms});
   return abs_pos.top.ToInt();
 }
 

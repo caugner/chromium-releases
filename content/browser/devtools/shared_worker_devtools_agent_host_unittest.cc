@@ -12,7 +12,6 @@
 #include "content/browser/devtools/shared_worker_devtools_manager.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/site_instance_impl.h"
-#include "content/browser/storage_partition_impl.h"
 #include "content/browser/worker_host/shared_worker_host.h"
 #include "content/browser/worker_host/shared_worker_service_impl.h"
 #include "content/public/browser/shared_worker_instance.h"
@@ -57,10 +56,7 @@ TEST_F(SharedWorkerDevToolsAgentHostTest, AvoidCrossProfileMatches) {
   RenderProcessHost* rph1 = site_instance1->GetOrCreateProcessForTesting();
   ASSERT_TRUE(rph1->Init());
 
-  SharedWorkerServiceImpl service1(
-      static_cast<StoragePartitionImpl*>(
-          regular_context.GetDefaultStoragePartition()),
-      nullptr);
+  SharedWorkerServiceImpl service1(nullptr, nullptr);
   SharedWorkerInstance instance1(
       kWorkerUrl, blink::mojom::ScriptType::kClassic,
       network::mojom::CredentialsMode::kSameOrigin, "name", storage_key,
@@ -85,10 +81,7 @@ TEST_F(SharedWorkerDevToolsAgentHostTest, AvoidCrossProfileMatches) {
   RenderProcessHost* rph2 = site_instance2->GetOrCreateProcessForTesting();
   ASSERT_TRUE(rph2->Init());
 
-  SharedWorkerServiceImpl service2(
-      static_cast<StoragePartitionImpl*>(
-          incognito_context.GetDefaultStoragePartition()),
-      nullptr);
+  SharedWorkerServiceImpl service2(nullptr, nullptr);
   SharedWorkerInstance instance2(
       kWorkerUrl, blink::mojom::ScriptType::kClassic,
       network::mojom::CredentialsMode::kSameOrigin, "name", storage_key,

@@ -389,8 +389,7 @@ UpdateServiceStub::UpdateServiceStub(
     base::RepeatingClosure task_end_listener,
     base::RepeatingClosure endpoint_created_listener_for_testing)
     : filter_(std::make_unique<UpdateServiceStubUntrusted>(this)),
-      server_(CreateServerEndpointOptions(scope,
-                                          GetUpdateServiceServerName(scope)),
+      server_(CreateServerEndpointOptions(GetUpdateServiceServerName(scope)),
               base::BindRepeating(base::BindRepeating(
                   [](mojom::UpdateService* interface,
                      mojom::UpdateService* filter,

@@ -444,7 +444,7 @@ class MenuControllerTest : public ViewsTestBase,
   MenuItemView* FindInitialSelectableMenuItemUp(MenuItemView* parent);
 
   internal::MenuControllerDelegate* current_controller_delegate() {
-    return menu_controller_->delegate_;
+    return menu_controller_->delegate();
   }
 
   bool showing() const { return menu_controller_->showing_; }
@@ -1041,7 +1041,7 @@ void MenuControllerTest::DestroyMenuController() {
 
   menu_controller_->showing_ = false;
   menu_controller_->owner_ = nullptr;
-  delete menu_controller_.ExtractAsDangling();
+  menu_controller_.ExtractAsDangling()->Destroy();
 }
 
 // static

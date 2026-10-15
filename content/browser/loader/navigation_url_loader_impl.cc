@@ -66,6 +66,7 @@
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/download_utils.h"
 #include "content/public/browser/frame_accept_header.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/navigation_ui_data.h"
 #include "content/public/browser/network_service_instance.h"
 #include "content/public/browser/network_service_util.h"
@@ -279,8 +280,6 @@ std::unique_ptr<network::ResourceRequest> CreateResourceRequest(
   new_request->is_outermost_main_frame = request_info.is_outermost_main_frame;
   new_request->request_initiator = request_info.common_params->initiator_origin;
   new_request->headers.AddHeadersFromString(request_info.begin_params->headers);
-  new_request->devtools_accepted_stream_types =
-      request_info.devtools_accepted_stream_types;
   // For ResourceType purposes, fenced frames are considered a kSubFrame.
   new_request->resource_type =
       static_cast<int>(request_info.is_outermost_main_frame
@@ -347,8 +346,6 @@ std::unique_ptr<network::ResourceRequest> CreateResourceRequest(
           ? net::StorageAccessApiStatus::kAccessViaAPI
           : net::StorageAccessApiStatus::kNone;
 
-  new_request->shared_storage_writable_eligible =
-      request_info.shared_storage_writable_eligible;
   new_request->is_ad_tagged = request_info.is_ad_tagged;
 
   new_request->skip_service_worker =
@@ -567,8 +564,6 @@ void CheckParsedHeadersEquals(const network::mojom::ParsedHeadersPtr& lhs,
   CHECK(mojo::Equals(adjusted_lhs->content_language, rhs->content_language));
   CHECK(mojo::Equals(adjusted_lhs->no_vary_search_with_parse_error,
                      rhs->no_vary_search_with_parse_error));
-  CHECK(mojo::Equals(adjusted_lhs->observe_browsing_topics,
-                     rhs->observe_browsing_topics));
   CHECK(mojo::Equals(adjusted_lhs->allow_cross_origin_event_reporting,
                      rhs->allow_cross_origin_event_reporting));
   CHECK(mojo::Equals(adjusted_lhs->declarative_performance_observer_policy,
@@ -715,8 +710,7 @@ void NavigationURLLoaderImpl::Start() {
           url_loader_factory::Create(
               ContentBrowserClient::URLLoaderFactoryType::kNavigation,
               url_loader_factory::TerminalParams::ForNonNetwork(
-                  CreateWebUIURLLoaderFactoryWithoutOriginLock(
-                      WebUIURLLoaderFactoryPasskey::GetPassKey(),
+                  CreateWebUIURLLoaderFactory(
                       frame_tree_node->current_frame_host(), scheme, {}),
                   network::mojom::kBrowserProcessId),
               url_loader_factory::ContentClientParams(
@@ -1426,19 +1420,8 @@ void NavigationURLLoaderImpl::OnReceiveResponse(
   TRACE_EVENT("navigation", "NavigationURLLoaderImpl::OnReceiveResponse",
               perfetto::Flow::FromPointer(this));
   DCHECK(!cached_metadata);
-  if (loader_holder_.HasExclusiveTask()) {
-    // Receiving a response while an exclusive task (such as header parsing
-    // for a redirect or an interceptor check) is in flight violates the
-    // URLLoaderClient protocol. Cancel immediately.
-    if (loader_holder_.url_loader()) {
-      loader_holder_.url_loader()->CancelWithError(
-          net::ERR_UNEXPECTED,
-          std::string_view(base::NumberToString(net::ERR_UNEXPECTED)));
-    } else {
-      OnComplete(network::URLLoaderCompletionStatus(net::ERR_UNEXPECTED));
-    }
-    return;
-  }
+  // TODO(https://crbug.com/434182226): Remove DUMP_WILL_BE_.
+  DUMP_WILL_BE_CHECK(!loader_holder_.HasExclusiveTask());
   LogQueueTimeHistogram("Navigation.QueueTime.OnReceiveResponse",
                         resource_request().is_outermost_main_frame);
 
@@ -1579,32 +1562,44 @@ void NavigationURLLoaderImpl::CallOnReceivedResponse(
 void NavigationURLLoaderImpl::OnReceiveRedirect(
     const net::RedirectInfo& redirect_info,
     network::mojom::URLResponseHeadPtr head) {
+  // TODO(https://crbug.com/434182226): Remove DUMP_WILL_BE_.
+  DUMP_WILL_BE_CHECK(!loader_holder_.HasExclusiveTask());
   LogQueueTimeHistogram("Navigation.QueueTime.OnReceiveRedirect",
                         resource_request().is_outermost_main_frame);
   net::Error error = net::OK;
 
-  if (loader_holder_.HasExclusiveTask()) {
-    // A redirect shouldn't be received while another exclusive task is already
-    // in flight. Receiving an overlapping redirect from a network service
-    // violates the URLLoaderClient protocol. Fail the navigation immediately.
-    error = net::ERR_UNEXPECTED;
-  } else if (url_.SchemeIsBlob()) {
+  bool bypass_redirect_checks = false;
+  if (base::FeatureList::IsEnabled(features::kBypassRedirectChecksPerRequest)) {
+    // A proxying URLLoaderFactory may authorize a redirect to bypass safety
+    // checks. This authorization is set directly on the NavigationRequest
+    // in the browser process. NavigationURLLoaderImpl doesn't have a direct
+    // pointer to the NavigationRequest, so we look it up via the
+    // FrameTreeNode. We check the navigation ID to ensure we don't apply the
+    // bypass to a different navigation in the same frame.
+    if (FrameTreeNode* frame_tree_node =
+            FrameTreeNode::GloballyFindByID(frame_tree_node_id_)) {
+      if (NavigationRequest* nav_request =
+              frame_tree_node->navigation_request()) {
+        if (nav_request->GetNavigationId() == request_info_->navigation_id) {
+          bypass_redirect_checks =
+              nav_request->ConsumeBypassRedirectChecksForNextRedirect();
+        }
+      }
+    }
+  } else {
+    bypass_redirect_checks = bypass_redirect_checks_;
+  }
+
+  if (url_.SchemeIsBlob()) {
     // Loading a blob URL never produces a redirect.
     error = net::ERR_UNSAFE_REDIRECT;
-  } else {
-    bool bypass_redirect_checks =
-        base::FeatureList::IsEnabled(features::kBypassRedirectChecksPerRequest)
-            ? head->bypass_redirect_checks
-            : bypass_redirect_checks_;
-
-    if (!bypass_redirect_checks &&
-        !IsSafeRedirectTarget(url_, redirect_info.new_url)) {
-      error = net::ERR_UNSAFE_REDIRECT;
-    } else if (--redirect_limit_ == 0) {
-      error = net::ERR_TOO_MANY_REDIRECTS;
-      if (redirect_info.is_signed_exchange_fallback_redirect) {
-        UMA_HISTOGRAM_BOOLEAN("SignedExchange.FallbackRedirectLoop", true);
-      }
+  } else if (!bypass_redirect_checks &&
+             !IsSafeRedirectTarget(url_, redirect_info.new_url)) {
+    error = net::ERR_UNSAFE_REDIRECT;
+  } else if (--redirect_limit_ == 0) {
+    error = net::ERR_TOO_MANY_REDIRECTS;
+    if (redirect_info.is_signed_exchange_fallback_redirect) {
+      UMA_HISTOGRAM_BOOLEAN("SignedExchange.FallbackRedirectLoop", true);
     }
   }
   if (error != net::OK) {
@@ -1619,9 +1614,8 @@ void NavigationURLLoaderImpl::OnReceiveRedirect(
           error, std::string_view(base::NumberToString(error)));
     } else {
       // TODO(https://crbug.com/434182226): Turn this to `CHECK()`.
-      DUMP_WILL_BE_CHECK(loader_holder_.state() ==
-                             LoaderHolder::State::kLoadingViaReceiver ||
-                         loader_holder_.state() == LoaderHolder::State::kNone);
+      DUMP_WILL_BE_CHECK_EQ(loader_holder_.state(),
+                            LoaderHolder::State::kLoadingViaReceiver);
       // TODO(crbug.com/40118809): Make sure ResetWithReason() is called
       // on the original `url_loader_`.
       OnComplete(network::URLLoaderCompletionStatus(error));
@@ -2287,7 +2281,8 @@ NavigationURLLoaderImpl::CreateNetworkLoaderFactory(
       frame_tree_node->navigation_request()->GetNavigationId(), ukm_id,
       factory_builder, &header_client, bypass_redirect_checks,
       /*disable_secure_dns=*/nullptr, /*factory_override=*/nullptr,
-      GetUIThreadTaskRunner({BrowserTaskType::kNavigationNetworkResponse}));
+      GetUIThreadTaskRunner({BrowserTaskType::kNavigationNetworkResponse}),
+      /*is_for_network_service=*/true);
 
   auto devtools_params =
       devtools_instrumentation::WillCreateURLLoaderFactoryParams::ForFrame(
@@ -2321,7 +2316,8 @@ NavigationURLLoaderImpl::CreateNetworkLoaderFactory(
             std::move(cookie_overrides),
             network::GetNoOpNetworkRestrictionsId()));
   } else {
-    if (!devtools_cookie_overrides.empty() || !cookie_overrides.empty()) {
+    if (!devtools_cookie_overrides.empty() || !cookie_overrides.empty() ||
+        factory_builder.RequiresFreshFactory()) {
       network::mojom::URLLoaderFactoryParamsPtr params =
           storage_partition->CreateURLLoaderFactoryParams();
       params->devtools_cookie_setting_overrides =

@@ -122,6 +122,7 @@ import org.chromium.chrome.browser.lifecycle.DestroyObserver;
 import org.chromium.chrome.browser.lifecycle.InflationObserver;
 import org.chromium.chrome.browser.lifecycle.NativeInitObserver;
 import org.chromium.chrome.browser.lifecycle.WindowFocusChangedObserver;
+import org.chromium.chrome.browser.media.TabSharingToolbarUiCoordinator;
 import org.chromium.chrome.browser.merchant_viewer.MerchantTrustMetrics;
 import org.chromium.chrome.browser.merchant_viewer.MerchantTrustSignalsCoordinator;
 import org.chromium.chrome.browser.messages.ChromeMessageAutodismissDurationProvider;
@@ -160,6 +161,8 @@ import org.chromium.chrome.browser.signin.WebSigninRedirectCoordinatorSupplier;
 import org.chromium.chrome.browser.signin.services.WebSigninBridge;
 import org.chromium.chrome.browser.tab.AccessibilityVisibilityHandler;
 import org.chromium.chrome.browser.tab.AutofillSessionLifetimeController;
+import org.chromium.chrome.browser.tab.CurrentTabObserver;
+import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabLaunchType;
 import org.chromium.chrome.browser.tab.TabObscuringHandler;
@@ -236,6 +239,7 @@ import org.chromium.components.browser_ui.widget.MenuOrKeyboardActionController;
 import org.chromium.components.browser_ui.widget.gesture.BackPressHandler;
 import org.chromium.components.browser_ui.widget.scrim.ScrimManager;
 import org.chromium.components.browser_ui.widget.scrim.ScrimManager.ScrimClient;
+import org.chromium.components.dom_distiller.core.DomDistillerUrlUtils;
 import org.chromium.components.embedder_support.contextmenu.ContextMenuPopulatorFactory;
 import org.chromium.components.feature_engagement.EventConstants;
 import org.chromium.components.feature_engagement.Tracker;
@@ -250,6 +254,7 @@ import org.chromium.components.signin.metrics.SigninAccessPoint;
 import org.chromium.components.ukm.UkmRecorder;
 import org.chromium.content_public.browser.BrowserContextHandle;
 import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.content_public.browser.NavigationHandle;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsAccessibility;
 import org.chromium.ui.base.ActivityResultTracker;
@@ -440,16 +445,18 @@ public class RootUiCoordinator
     protected final NonNullObservableSupplier<Integer> mOverviewColorSupplier;
     private @Nullable ContextualSearchObserver mReadAloudContextualSearchObserver;
     private PageZoomBarCoordinator mPageZoomBarCoordinator;
+    private @Nullable CurrentTabObserver mReaderModeTabObserver;
     private @Nullable ReaderModeBottomSheetManager mReaderModeBottomSheetManager;
     private @Nullable AppMenuObserver mAppMenuObserver;
     private @Nullable LinkHoverStatusBarCoordinator mLinkHoverStatusBarCoordinator;
+    private @Nullable TabSharingToolbarUiCoordinator mTabSharingToolbarUiCoordinator;
     private @Nullable BookmarkAllTabsHandler mBookmarkAllTabsHandler;
 
     private final OneshotSupplierImpl<ToolbarManager> mToolbarManagerOneshotSupplier =
             new OneshotSupplierImpl<>();
     private ActivityRecreationController mActivityRecreationController;
     private @Nullable RestoreTabsFeatureHelper mRestoreTabsFeatureHelper;
-    private @Nullable EdgeToEdgeController mEdgeToEdgeController;
+    protected @Nullable EdgeToEdgeController mEdgeToEdgeController;
     private @Nullable ComposedBrowserControlsVisibilityDelegate
             mAppBrowserControlsVisibilityDelegate;
     protected final EdgeToEdgeManager mEdgeToEdgeManager;
@@ -770,9 +777,22 @@ public class RootUiCoordinator
                             }
 
                             @Override
-                            public boolean isActivityFocused() {
-                                return ApplicationStatus.getLastTrackedFocusedActivity()
-                                        == mActivity;
+                            public boolean canShowPopupWindow() {
+                                if (ApplicationStatus.getLastTrackedFocusedActivity()
+                                        != mActivity) {
+                                    return false;
+                                }
+                                // The zoom indicator popup is only for web pages with zoomable
+                                // content. Native pages (such as SettingsPage) render native
+                                // Android UI and shouldn't display a zoom indicator popup.
+                                Tab tab = mActivityTabProvider.get();
+                                if (tab == null || tab.isNativePage()) {
+                                    return false;
+                                }
+                                return mAppMenuCoordinator == null
+                                        || !mAppMenuCoordinator
+                                                .getAppMenuHandler()
+                                                .isAppMenuShowing();
                             }
                         });
 
@@ -1034,7 +1054,10 @@ public class RootUiCoordinator
             mIncognitoStateProvider = null;
         }
 
-        if (mFindToolbarManager != null) mFindToolbarManager.removeObserver(mFindToolbarObserver);
+        if (mFindToolbarManager != null) {
+            mFindToolbarManager.removeObserver(mFindToolbarObserver);
+            mFindToolbarManager.destroy();
+        }
 
         var modalDialogManager = mModalDialogManagerSupplier.get();
         if (mModalDialogManagerObserver != null && modalDialogManager != null) {
@@ -1146,6 +1169,11 @@ public class RootUiCoordinator
 
         mTopInsetProvider.destroy();
 
+        if (mReaderModeTabObserver != null) {
+            mReaderModeTabObserver.destroy();
+            mReaderModeTabObserver = null;
+        }
+
         if (mReaderModeBottomSheetManager != null) {
             mReaderModeBottomSheetManager.destroy();
             mReaderModeBottomSheetManager = null;
@@ -1160,6 +1188,11 @@ public class RootUiCoordinator
         if (mLinkHoverStatusBarCoordinator != null) {
             mLinkHoverStatusBarCoordinator.destroy();
             mLinkHoverStatusBarCoordinator = null;
+        }
+
+        if (mTabSharingToolbarUiCoordinator != null) {
+            mTabSharingToolbarUiCoordinator.destroy();
+            mTabSharingToolbarUiCoordinator = null;
         }
 
         if (mAutomotiveBackButtonToolbarCoordinator != null) {
@@ -1343,8 +1376,7 @@ public class RootUiCoordinator
                             /* itemDelegate= */ null,
                             mShareDelegateSupplier,
                             ChromeContextMenuPopulator.ContextMenuMode.THIN_WEB_VIEW,
-                            /* customContentActions= */ Collections.emptyList(),
-                            getLeftSideUiWidthSupplier());
+                            /* customContentActions= */ Collections.emptyList());
             mEphemeralTabCoordinatorSupplier.set(
                     new EphemeralTabCoordinator(
                             mActivity,
@@ -1386,13 +1418,11 @@ public class RootUiCoordinator
         if (contextualSearchManager != null) {
             contextualSearchManager.addObserver(mReadAloudContextualSearchObserver);
         }
-        mReaderModeBottomSheetManager =
-                new ReaderModeBottomSheetManager(
-                        mActivity,
-                        assertNonNull(getBottomSheetController()),
-                        mActivityTabProvider,
-                        mBrowserControlsManager,
-                        mToolbarThemeColorProvider);
+        if (!ChromeFeatureList.sAndroidStartupImprovements.isEnabled()) {
+            initReaderModeBottomSheetManager();
+        } else {
+            initReaderModeBottomSheetLazyObserver();
+        }
 
         if (DeviceInfo.isAutomotive()) {
             mAutomotiveBackButtonToolbarCoordinator =
@@ -1404,7 +1434,11 @@ public class RootUiCoordinator
                             mBackPressManager);
         }
 
-        if (mWindowAndroid.getInsetObserver() != null
+        // TODO(crbug.com/498302496): Remove TopInsetCoordinator creation and
+        // TransitiveTopInsetProvider once sEdgelessTopInset is fully launched and
+        // TopInsetCoordinator is deleted.
+        if (!EdgeToEdgeUtils.isEdgelessTopInsetEnabled()
+                && mWindowAndroid.getInsetObserver() != null
                 && NtpCustomizationUtils.supportsEnableEdgeToEdgeOnTop(mWindowAndroid, mIsTablet)) {
             // Only create TopInsetCoordinator if there's a valid TransitiveTopInsetProvider
             // available. TopInsetCoordinator registers a listener with the singleton
@@ -1425,7 +1459,10 @@ public class RootUiCoordinator
                 transitiveTopInsetProvider.set(topInsetCoordinator);
             }
         }
-        if (ChromeFeatureList.isEnabled(ChromeFeatureList.LINK_HOVER_STATUS_BAR)) {
+        // Temporarily disable LinkHoverStatusBar on non-desktop devices.
+        // TODO(b/542488395): Enable this on non-desktop devices.
+        if (DeviceInfo.isDesktop()
+                && ChromeFeatureList.isEnabled(ChromeFeatureList.LINK_HOVER_STATUS_BAR)) {
             ViewStub statusBarStub = mActivity.findViewById(R.id.link_hover_status_bar_stub);
             mLinkHoverStatusBarCoordinator =
                     new LinkHoverStatusBarCoordinator(
@@ -1438,6 +1475,62 @@ public class RootUiCoordinator
                         mCompositorViewHolderSupplier.asNonNull().get(),
                         () -> mBrowserControlsManager.getContentOffset());
         AnchoredDialogCoordinatorProvider.attach(mWindowAndroid, mAnchoredDialogCoordinator);
+
+        ViewGroup controlContainer = (ViewGroup) mActivity.findViewById(R.id.control_container);
+        if (ChromeFeatureList.sTabSharingToolbarAndroid.isEnabled() && controlContainer != null) {
+            mTabSharingToolbarUiCoordinator =
+                    new TabSharingToolbarUiCoordinator(
+                            mActivity, controlContainer, mTopControlsStacker, mActivityTabProvider);
+        }
+    }
+
+    private void initReaderModeBottomSheetManager() {
+        if (mReaderModeBottomSheetManager != null) return;
+        mReaderModeBottomSheetManager =
+                new ReaderModeBottomSheetManager(
+                        mActivity,
+                        assertNonNull(getBottomSheetController()),
+                        mActivityTabProvider,
+                        mBrowserControlsManager,
+                        mToolbarThemeColorProvider);
+        if (mReaderModeTabObserver != null) {
+            mReaderModeTabObserver.destroy();
+            mReaderModeTabObserver = null;
+        }
+    }
+
+    private void initReaderModeBottomSheetLazyObserver() {
+        Tab currentTab = mActivityTabProvider.get();
+        if (currentTab != null && DomDistillerUrlUtils.isDistilledPage(currentTab.getUrl())) {
+            initReaderModeBottomSheetManager();
+            return;
+        }
+
+        CurrentTabObserver observer =
+                new CurrentTabObserver(
+                        mActivityTabProvider.asObservable(),
+                        new EmptyTabObserver() {
+                            @Override
+                            public void onDidFinishNavigationInPrimaryMainFrame(
+                                    Tab tab, NavigationHandle navigationHandle) {
+                                if (navigationHandle.hasCommitted()
+                                        && navigationHandle.isInPrimaryMainFrame()
+                                        && DomDistillerUrlUtils.isDistilledPage(tab.getUrl())) {
+                                    initReaderModeBottomSheetManager();
+                                }
+                            }
+                        },
+                        (@Nullable Tab tab) -> {
+                            if (tab != null && DomDistillerUrlUtils.isDistilledPage(tab.getUrl())) {
+                                initReaderModeBottomSheetManager();
+                            }
+                        });
+
+        if (mReaderModeBottomSheetManager != null) {
+            observer.destroy();
+        } else {
+            mReaderModeTabObserver = observer;
+        }
     }
 
     protected boolean isContextualSearchEnabled() {
@@ -2205,6 +2298,9 @@ public class RootUiCoordinator
 
     protected void onScrimColorChanged(@ColorInt int scrimColor) {
         mStatusBarColorController.onScrimColorChanged(scrimColor);
+        if (mDesktopWindowStateManager != null) {
+            mDesktopWindowStateManager.onScrimColorChanged(scrimColor);
+        }
     }
 
     protected void setLayoutStateProvider(LayoutStateProvider layoutStateProvider) {
@@ -2352,6 +2448,7 @@ public class RootUiCoordinator
                         mActionModeControllerCallback,
                         mBackPressManager,
                         mActivity.findViewById(R.id.secondary_ui_container),
+                        mIsTablet ? mActivity.findViewById(R.id.control_container) : null,
                         mBrowserControlsManager);
 
         mFindToolbarObserver =
@@ -2535,6 +2632,14 @@ public class RootUiCoordinator
                             mLayoutManagerSupplier,
                             mFullscreenManager);
             mEdgeToEdgeControllerSupplier.set(mEdgeToEdgeController);
+            // TODO(crbug.com/498302496): Pass mEdgeToEdgeController directly to downstream
+            // consumers (e.g. ToolbarManager, NewTabAnimationLayout) instead of using
+            // TransitiveTopInsetProvider.
+            if (EdgeToEdgeUtils.isEdgelessTopInsetEnabled()
+                    && mTopInsetProvider
+                            instanceof TransitiveTopInsetProvider transitiveTopInsetProvider) {
+                transitiveTopInsetProvider.set(mEdgeToEdgeController);
+            }
             mEdgeToEdgeBottomChin = createEdgeToEdgeBottomChin();
 
             recordIfMissingNavigationBar();
@@ -2912,21 +3017,5 @@ public class RootUiCoordinator
      */
     protected @Nullable OneshotSupplier<SideUiStateProvider> getSideUiStateProviderSupplier() {
         return null;
-    }
-
-    /**
-     * Returns the supplier for the left side UI width in px.
-     *
-     * <p>If the current Activity does not have left side UI, the supplier will always supply 0
-     *
-     * <p>NOTE: Always prefer {@link SideUiStateProvider} rather than this supplier. This supplier
-     * is created because some components can't depend on {@link SideUiStateProvider}, such as
-     * {@link ContextMenuPopulatorFactory}.
-     *
-     * <p>TOOD(crbug.com/543470110): Fix the dependency issue and remove this supplier.
-     */
-    @Deprecated
-    public Supplier<Integer> getLeftSideUiWidthSupplier() {
-        return () -> 0;
     }
 }

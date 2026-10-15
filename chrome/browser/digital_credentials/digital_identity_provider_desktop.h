@@ -5,7 +5,6 @@
 #ifndef CHROME_BROWSER_DIGITAL_CREDENTIALS_DIGITAL_IDENTITY_PROVIDER_DESKTOP_H_
 #define CHROME_BROWSER_DIGITAL_CREDENTIALS_DIGITAL_IDENTITY_PROVIDER_DESKTOP_H_
 
-#include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/timer/timer.h"
 #include "content/public/browser/cross_device_request_info.h"
@@ -83,9 +82,6 @@ class DigitalIdentityProviderDesktop : public content::DigitalIdentityProvider {
       content::DigitalIdentityProvider::RequestStatusForMetrics);
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(DigitalIdentityMultiStepDialogBrowserTest,
-                           OnCableEventOwnerDestroyedDuringDialogUpdate);
-
   // Called whenever some significant event occurs during the transaction.
   void OnEvent(const std::string& qr_url,
                RequestInfo::RequestType request_type,

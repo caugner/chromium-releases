@@ -172,6 +172,16 @@ Het label is aanpasbaar via het beleid <ph name="ENTERPRISE_CUSTOM_LABEL_POLICY_
 <translation id="1100840127293327071">De optie om bestaande browsegegevens standaard te bewaren niet aanvinken</translation>
 <translation id="1105572260329131950">Standaardiconen gebruiken voor beveiligde verbindingen</translation>
 <translation id="1105711894873068933">Nadat <ph name="LACROS_NAME" /> is uitgezet, worden alle gebruikersgegevens verwijderd als er weer wordt ingelogd.</translation>
+<translation id="1106279506320506502">Geeft aan of de geïsoleerde modus aanstaat.
+
+De geïsoleerde modus is een kortstondige browsemodus die alleen beschikbaar is voor Enterprise.
+De modus ondersteunt DLP-gerelateerd zakelijk beleid en afgedwongen geïnstalleerde extensies.
+
+Als je deze optie instelt op 1 - Aangezet, wordt de geïsoleerde modus aangezet en de incognitomodus uitgezet.
+
+Als je het beleid instelt op 0 - Uitgezet of niet instelt, wordt de geïsoleerde modus uitgezet.
+
+Dit beleid vereist een <ph name="CHROME_ENTERPRISE_PREMIUM_NAME" />-licentie om van kracht te worden.</translation>
 <translation id="1106342730891876476">Instellingen voor delen</translation>
 <translation id="1107538157073168076">Extensie voor inzichten uitzetten</translation>
 <translation id="1110426799149444997">Regio doorzoeken uitzetten voor <ph name="GOOGLE_LENS_PRODUCT_NAME" />.</translation>
@@ -1031,7 +1041,6 @@ Vanaf <ph name="PRODUCT_NAME" /> 147 wordt dit beleid beëindigd. IT-beheerders 
 Als je het beleid instelt op False, of niet instelt, worden er geen gebeurtenissen vastgelegd.</translation>
 <translation id="1692990221685273468">Bepaalt of de ingebouwde certificaatverificatie beperkingen afdwingt die zijn gecodeerd in vertrouwensankers die worden geladen vanuit de vertrouwde opslag van het platform.</translation>
 <translation id="169467210981344373">HTTP-verificatiecache met wereldwijd bereik uitzetten</translation>
-<translation id="169509902091359310">Spraakgestuurd typen niet toestaan.</translation>
 <translation id="1696501581280568361">Stelt profielscheiding voor</translation>
 <translation id="1698810555265314018">Dit beleid beheert de afbeeldingsresolutie voor afdrukken als <ph name="PRODUCT_NAME" /> gerasterde pdf's afdrukt.
 
@@ -1618,6 +1627,17 @@ Dit beleid wordt meestal niet toegepast als beveiliging tegen phishing.</transla
 <translation id="2057317273526988987">Toegang verlenen aan een lijst met URL's</translation>
 <translation id="205807990145127714">Telemetriegegevens om te rapporteren over signaalsterkte.</translation>
 <translation id="2060153898336610735">Automatisch op basis van huidige taal</translation>
+<translation id="2060316966423154087">Hiermee bepaal je of gebruikers <ph name="PRODUCT_NAME" /> generatieve AI kunnen laten gebruiken om formulieren beter te begrijpen en meer velden te laten invullen.
+
+0 = Heeft hetzelfde effect als 1. Vóór M153 stond de instelling toe dat Google relevante gegevens gebruikte om zijn AI-modellen te verbeteren. Relevante gegevens kunnen prompts, invoer, uitvoer, bronmateriaal en geschreven feedback zijn, afhankelijk van de functie. 0 is de standaardwaarde, behalve zoals hieronder aangegeven.
+
+1 = Hiermee wordt toegestaan dat de functie wordt gebruikt, maar wordt niet toegestaan dat Google modellen verbetert met relevante gegevens (waaronder prompts, invoer, uitvoer, bronmateriaal en geschreven feedback). 1 is de standaardwaarde voor zakelijke gebruikers die worden beheerd door <ph name="GOOGLE_ADMIN_CONSOLE_PRODUCT_NAME" /> en voor onderwijsaccounts die worden beheerd door <ph name="GOOGLE_WORKSPACE_PRODUCT_NAME" />.
+
+2 = Hiermee wordt de functie niet toegestaan.
+
+Als je het beleid niet instelt, wordt het gedrag bepaald door het beleid <ph name="GEN_AI_DEFAULT_SETTINGS_POLICY_NAME" />.
+
+Ga naar https://support.google.com/chrome/a?p=generative_ai_settings voor meer informatie over gegevensverwerking voor generatieve AI-functies.</translation>
 <translation id="2061123930713023976">Opnamen van netwerkpakketten voor fouten opsporen toestaan</translation>
 <translation id="2061810934846663491">De vereiste domeinnamen configureren voor hosts voor externe toegang</translation>
 <translation id="2062632109797189011">De beëindigde API window.webkitStorageInfo opnieuw aanzetten</translation>
@@ -2021,18 +2041,6 @@ Als je het beleid niet instelt, kunnen gebruikers de lijst met vastgezette apps 
 
       Als je het beleid instelt op 'False' of niet instelt, wordt er geen knop weergegeven.</translation>
 <translation id="2294382669900758280">Er wordt geen rekening gehouden met het afspelen van video in Android-apps, zelfs niet wanneer dit beleid is ingesteld op <ph name="TRUE" /> (Waar).</translation>
-<translation id="2296529215567227994">Geeft aan of de incognitomodus moet worden vervangen door de geïsoleerde modus.
-
-De geïsoleerde modus is een kortstondige browsemodus die alleen beschikbaar is voor Enterprise en die de incognitomodus vervangt.
-In tegenstelling tot de incognitomodus biedt de geïsoleerde modus ondersteuning voor DLP-gerelateerd zakelijk beleid en afgedwongen geïnstalleerde extensies.
-
-Beleid voor de incognitomodus wordt niet toegepast op de geïsoleerde modus.
-
-Als je deze optie instelt op 1 - Aangezet, wordt de geïsoleerde modus geactiveerd en vervangt deze de incognitomodus.
-
-Als je het beleid instelt op 0 - Uitgezet of niet instelt, wordt de geïsoleerde modus uitgezet en wordt het standaardgedrag van Incognito gebruikt.
-
-Dit beleid vereist een <ph name="CHROME_ENTERPRISE_PREMIUM_NAME" />-licentie om van kracht te worden.</translation>
 <translation id="2299220924812062390">Lijst met aangezette plug-ins specificeren</translation>
 <translation id="2299815818824242485">Lookups via proxy met hogere beveiliging niet toestaan</translation>
 <translation id="2303795211377219696">Automatisch invullen aanzetten voor creditcards</translation>
@@ -2047,6 +2055,7 @@ Dit beleid vereist een <ph name="CHROME_ENTERPRISE_PREMIUM_NAME" />-licentie om 
 <translation id="230713790688681130">Hindi InScript-indeling aanzetten</translation>
 <translation id="2307496301287881990">Statussen van scherm en grafische kaart rapporteren</translation>
 <translation id="2308084581803907194">Hoge complexiteit</translation>
+<translation id="2308557460534055666">Configuratiebeleid voor de <ph name="ON_DATA_COPIED_ENTERPRISE_CONNECTOR" /> Chrome Enterprise Connector</translation>
 <translation id="2308899582897965249">Stil afdrukken uitzetten</translation>
 <translation id="2309284543927494965">Updates blokkeren</translation>
 <translation id="2309341709647905294">Geen informatie rapporteren over randapparaten die zijn aangesloten op het apparaat</translation>
@@ -2777,17 +2786,6 @@ Dit beleid vereist aanvullende instellingen om van kracht te worden. Ga naar htt
       Als deze instelling uitstaat, kunnen webpagina's JavaScript niet gebruiken en kan de gebruiker die instelling niet wijzigen.
 
       Als deze instelling aanstaat of niet is ingesteld, kunnen webpagina's JavaScript gebruiken, maar kan de gebruiker die instelling wijzigen.</translation>
-<translation id="2746385336260438202">Spraakgestuurd typen is een AI-gestuurde functie waarmee gebruikers tekst kunnen invoeren en bewerken met hun stem. De functie wordt mogelijk gemaakt door generatieve AI-modellen die transcriptie en opmaak van hoge kwaliteit bieden.
-
-0 = Hiermee wordt toegestaan dat de functie wordt gebruikt en dat Google relevante gegevens gebruikt om de AI-modellen te verbeteren. Relevante gegevens kunnen prompts, invoer, uitvoer, bronmateriaal en geschreven feedback zijn, afhankelijk van de functie. De gegevens kunnen ook door mensen worden beoordeeld om AI-modellen te verbeteren. 0 is de standaardwaarde, behalve zoals hieronder aangegeven.
-
-1 = Hiermee wordt toegestaan dat de functie wordt gebruikt, maar wordt niet toegestaan dat Google modellen verbetert met content van gebruikers (waaronder prompts, invoer, uitvoer, bronmateriaal en geschreven feedback). 1 is de standaardwaarde voor zakelijke gebruikers die worden beheerd via <ph name="GOOGLE_ADMIN_CONSOLE_PRODUCT_NAME" /> en voor onderwijsaccounts die worden beheerd via <ph name="GOOGLE_WORKSPACE_PRODUCT_NAME" />.
-
-2 = Hiermee wordt de functie niet toegestaan.
-
-Als je het beleid niet instelt, wordt het gedrag bepaald door het beleid <ph name="GEN_AI_DEFAULT_SETTINGS_POLICY_NAME" />.
-
-Ga naar https://support.google.com/chrome/a?p=generative_ai_settings voor meer informatie over gegevensverwerking voor generatieve AI-functies.</translation>
 <translation id="274769314493317695">Als <ph name="PRINTERS_WHITELIST" /> wordt gekozen voor <ph name="BULK_PRINTERS_ACCESS_MODE_POLICY_NAME" />, kun je door <ph name="NATIVE_PRINTERS_BULK_WHITELIST_POLICY_NAME" /> in te stellen aangeven welke printers gebruikers kunnen gebruiken. Alleen printers waarvan de ID's overeenkomen met de waarden in dit beleid, zijn beschikbaar voor de gebruiker. De ID's moeten overeenkomen met het veld <ph name="ID_FIELD" /> of <ph name="GUID_FIELD" /> in het bestand dat is opgegeven in <ph name="NATIVE_PRINTERS_BULK_CONFIGURATION_POLICY_NAME" />.
 
       Dit beleid is verouderd. Gebruik in plaats daarvan <ph name="PRINTERS_BULK_ALLOWLIST_POLICY_NAME" />.</translation>
@@ -3020,6 +3018,23 @@ De complexiteitsniveaus zijn gebaseerd op de statistieken voor wachtwoordkwalite
 
 Raadpleeg het Helpcentrum-artikel voor gedetailleerde uitleg over wat elk niveau inhoudt voor zowel pincodes als wachtwoorden.</translation>
 <translation id="2926813071464307947">De sandbox voor de app-container van het weergaveprogramma uitzetten</translation>
+<translation id="2928782459146756987">Lijst met instellingen voor <ph name="PRODUCT_NAME" /> Enterprise Connectors-services die moeten worden toegepast op de <ph name="ON_DATA_COPIED_ENTERPRISE_CONNECTOR" /> Enterprise Connector. De lijst wordt geactiveerd als gegevens naar het klembord worden gekopieerd vanuit <ph name="PRODUCT_NAME" />.
+
+De velden <ph name="ENTERPRISE_CONNECTOR_URL_LIST_FIELD" />, <ph name="ENTERPRISE_CONNECTOR_TAGS_FIELD" />, <ph name="ENTERPRISE_CONNECTOR_ENABLE_FIELD" /> en <ph name="ENTERPRISE_CONNECTOR_DISABLE_FIELD" /> worden gebruikt om te bepalen of de connector gegevens voor analyse moet sturen als ze worden gekopieerd vanaf een specifieke pagina en welke tags moeten worden opgenomen in het analyseverzoek voor die gegevens. Een tag die overeenkomt met een 'enable'-patroon, wordt opgenomen in het analyseverzoek als de pagina-URL overeenkomt met een patroon dat is gekoppeld aan die tag, op voorwaarde dat er geen 'disable'-patroon met dezelfde tag overeenkomt met de pagina-URL. De analyse vindt plaats als er ten minste 1 tag moet worden opgenomen in het verzoek.
+
+Het veld <ph name="ENTERPRISE_CONNECTOR_SERVICE_PROVIDER_FIELD" /> geeft aan bij welke analyseserviceprovider de instellingen horen.
+
+Als je het veld <ph name="ENTERPRISE_CONNECTOR_BLOCK_UNTIL_VERDICT_FIELD" /> instelt op 1, betekent dit dat <ph name="PRODUCT_NAME" /> wacht op een reactie van de analyseservice voordat het OS-klembord toegang krijgt tot de gegevens. Elke andere waarde met een geheel getal betekent dat <ph name="PRODUCT_NAME" /> het OS-klembord onmiddellijk toegang geeft tot de gegevens.
+
+Als je het veld <ph name="ENTERPRISE_CONNECTOR_DEFAULT_ACTION_FIELD" /> instelt op blokkeren, geeft <ph name="PRODUCT_NAME" /> het OS-klembord geen toegang tot de gegevens als er een fout optreedt tijdens de communicatie met de analyseservice. Elke andere waarde betekent dat <ph name="PRODUCT_NAME" /> het OS-klembord toegang geeft tot de gegevens.
+
+Het veld <ph name="ENTERPRISE_CONNECTOR_MINIMUM_DATA_SIZE" /> geeft de minimumgrootte (in bytes) aan die gegevens die zijn gekopieerd vanuit <ph name="PRODUCT_NAME" /> ten minste moeten hebben om te worden gescand. De standaardwaarde is 100 bytes als het veld niet is ingesteld.
+
+Het veld <ph name="ENTERPRISE_CONNECTOR_REQUIRE_JUSTIFICATION_TAGS_FIELD" /> wordt gebruikt om te bepalen voor welke tags de connector moet vereisen dat de gebruiker een verantwoording opgeeft om een scan over te slaan die resulteert in een waarschuwing die kan worden genegeerd. Als je het veld niet instelt, wordt aangenomen dat er geen verantwoording vereist is.
+
+Met het veld <ph name="ENTERPRISE_CONNECTOR_VERIFICATION_FIELD" /> kunnen beheerders platformspecifieke verificatievereisten instellen.
+
+Dit beleid vereist aanvullende instellingen om van kracht te worden. Ga naar https://support.google.com/chrome/a?p=chrome_enterprise_connector_policies_setting voor meer informatie.</translation>
 <translation id="2930792103747180259">Uitgezet: ophalen op de achtergrond via service workers is toegestaan zonder beperkingen.</translation>
 <translation id="2931888116345994552">Hiermee zet je componentupdates voor alle componenten in <ph name="PRODUCT_NAME" /> aan als het beleid wordt toegepast of niet is ingesteld.
 
@@ -3440,22 +3455,6 @@ Als je het beleid moet gebruiken om het wissen van window.name uit te zetten bij
 <translation id="3181114468897395940">De instellingen voor PageUp/PageDown gebruiken de sneltoets met de functietoets Alt</translation>
 <translation id="3182503302060513467">De pagina Nieuw tabblad toont de aankondiging in de middelste ruimte als die beschikbaar is</translation>
 <translation id="3184161739683646075">Hiermee wordt de modus voor DNS-over-HTTPS bepaald</translation>
-<translation id="3184247679989063353">Lijst met URL-patronen. Netwerkverzoeken die worden gestart vanaf websites die worden geleverd via overeenkomende oorsprongen, worden niet onderworpen aan <ph name="LOCAL_NETWORK_ACCESS" />-checks.
-
-Voor oorsprongen die niet overeenkomen met de hier genoemde patronen, is de persoonlijke configuratie van de gebruiker van toepassing.
-
-Ga naar https://chromeenterprise.google/policies/url-patterns voor gedetailleerde informatie over geldige URL-patronen.
-
-Zie https://wicg.github.io/local-network-access/ voor beperkingen voor <ph name="LOCAL_NETWORK_ACCESS" />.
-
-Er zijn meerdere beleidsregels met oorsprongen die van invloed zijn op verzoeken aan lokale apparaten en lokale netwerkeindpunten. Als een oorsprong overeenkomt met meer dan één van de volgende beleidsregels, hebben de beleidsregels voorrang in deze volgorde:
-
-- LocalNetworkBlockedForUrls
-- LocalNetworkAllowedForUrls
-- LoopbackNetworkAccessBlockedForUrls
-- LoopbackNetworkAccessAllowedForUrls
-- LocalNetworkAccessBlockedForUrls
-- LocalNetworkAccessAllowedForUrls</translation>
 <translation id="3184638144755436350">Chrome blokkeert navigatie naar externe protocollen in iframes in sandboxes. Zie https://chromestatus.com/features/5680742077038592.
 
       Als dit is ingesteld op True, kan Chrome die navigatie blokkeren.
@@ -4161,6 +4160,14 @@ Als je dit beleid instelt, kunnen gebruikers het niet wijzigen. Als je het belei
 <translation id="366494444808132420">Gemini-integraties toestaan</translation>
 <translation id="3665437376055221832">De gebruiker alleen vragen als geen enkel certificaat overeenkomt met de automatische selectie.</translation>
 <translation id="3671773704245936868">Markering toetsenbordfocus uitzetten</translation>
+<translation id="367258298235646178">Hiermee kunnen beheerders het uiterlijk van watermerken aanpassen die worden toegepast door regels voor Gegevensverlies voorkomen (Data Loss Prevention, DLP). Dit omvat het instellen van de ondoorzichtigheid van de opvulling/omtrek, het definiëren van de lettergrootte en het instellen van de tijdzone van de tijdstempel.
+Als je dit beleid of bepaalde waarden niet instelt, gebruikt Chrome het standaardgedrag voor watermerken.
+De standaardwaarden op desktop zijn: ondoorzichtigheid van opvulling op 4, ondoorzichtigheid van omtrek op 6 en lettergrootte op 24. Op iOS zijn de standaardwaarden: ondoorzichtigheid van opvulling op 10, ondoorzichtigheid van omtrek op 15 en lettergrootte op 16. Op alle platforms is tijdzone van tijdstempel standaard ingesteld op user_device (lokale tijdzone van het apparaat van de gebruiker).
+
+De ondoorzichtigheid van de opvulling is een percentage van 0 (volledig transparant) tot 100 (volledig ondoorzichtig).
+De ondoorzichtigheid van de omtrek is een percentage van 0 (volledig transparant) tot 100 (volledig ondoorzichtig).
+De lettergrootte wordt aangegeven in punten.
+De tijdzone van het tijdstempel geeft de IANA-tijdzone-ID aan (bijv. 'America/Toronto') die wordt gebruikt voor het opmaken van tijdstempels voor watermerken (ondersteund vanaf Chrome 152 en hoger). Deze ID's volgen de namen in de IANA Time Zone Database (https://www.iana.org/time-zones).</translation>
 <translation id="3674010627788940405">CORS-verzoekheaders zonder jokertekens niet ondersteunen.</translation>
 <translation id="3675248815331229366">Als je het beleid instelt, kun je een lijst met URL-patronen instellen voor sites die geen toegang tot de geolocatie van de gebruiker hebben en die de gebruiker ook niet om toestemming kunnen vragen.
 
@@ -4604,6 +4611,11 @@ Op desktopplatforms kan het downloaden van modellen ook worden uitgezet door <ph
 
       Als je het beleid niet toepast of niet instelt, is <ph name="PLUGIN_VM_NAME" /> niet aangezet voor het apparaat.</translation>
 <translation id="3973371701361892765">Archief nooit automatisch verbergen</translation>
+<translation id="3974715256242096353">Als het beleid is ingesteld op Onwaar, kunnen gebruikers de achtergrond van de pagina Nieuw tabblad niet aanpassen. Eventuele bestaande aangepaste achtergronden worden definitief verwijderd, zelfs als het beleid later weer wordt ingesteld op Waar.
+
+Als het beleid wordt ingesteld op Waar of niet wordt ingesteld, kunnen gebruikers de achtergrond van de pagina Nieuw tabblad aanpassen.
+
+Opmerking: Voor Android wordt het beleid pas toegepast op de browser nadat deze opnieuw is opgestart.</translation>
 <translation id="3977304360459208438">Gebruik de standaardinstellingen voor 3DES cipher suites in TLS</translation>
 <translation id="3977906634350977040">Als je het beleid toepast, kan de host voor externe toegang pincode- en koppelingsverificaties gebruiken bij de acceptatie van clientverbindingen.
 
@@ -4694,7 +4706,7 @@ Overwegingen:
 <translation id="402759845255257575">Niet toestaan dat sites JavaScript uitvoeren</translation>
 <translation id="4027608872760987929">Standaard zoekprovider gebruiken</translation>
 <translation id="4030152268425532846">Automatisch inloggen voortijdig afbreken niet toestaan</translation>
-<translation id="4042229154265896020">Spraakgestuurd typen toestaan.</translation>
+<translation id="4032740546145417900">Sta Praten om te typen niet toe.</translation>
 <translation id="4043796890723386527">Voorkomen dat gebruikers secundaire profielen maken en gebruiken of dat ze de gastmodus gebruiken in de <ph name="LACROS_NAME" />-browser</translation>
 <translation id="4047633048700722778">Als je dit beleid instelt, wordt de toepassing van het SafeSites URL-filter beheerd. Dit filter gebruikt de Google Safe Search API om URL's al dan niet te classificeren als pornografisch.
 
@@ -5167,6 +5179,22 @@ Opmerking: Met dit beleid wordt het beleid <ph name="ARC_GLS_POLICY_NAME" /> be�
 <translation id="4363057787588706121">Toestaan dat lijstbeleid van verschillende bronnen kan worden samengevoegd</translation>
 <translation id="4363101430102811068">Datalekdetectie voor ingevoerde gegevens aanzetten</translation>
 <translation id="436581050240847513">Apparaatnetwerkinterface rapporteren</translation>
+<translation id="4366420138981318392">Lijst met URL-patronen. Netwerkverzoeken die worden gestart vanaf websites die worden geleverd via overeenkomende oorsprongen, worden niet onderworpen aan <ph name="LOCAL_NETWORK_ACCESS" />-checks.
+
+Voor oorsprongen die niet overeenkomen met de hier genoemde patronen, is de persoonlijke configuratie van de gebruiker van toepassing.
+
+Ga naar https://chromeenterprise.google/policies/url-patterns voor gedetailleerde informatie over geldige URL-patronen.
+
+Zie https://wicg.github.io/local-network-access/ voor beperkingen voor <ph name="LOCAL_NETWORK_ACCESS" />.
+
+Er zijn meerdere beleidsregels met oorsprongen die van invloed zijn op verzoeken aan lokale apparaten en lokale netwerkeindpunten. Als een oorsprong overeenkomt met meer dan één van de volgende beleidsregels, hebben de beleidsregels voorrang in deze volgorde:
+
+  - LocalNetworkBlockedForUrls
+  - LocalNetworkAllowedForUrls
+  - LoopbackNetworkBlockedForUrls
+  - LoopbackNetworkAllowedForUrls
+  - LocalNetworkAccessBlockedForUrls
+  - LocalNetworkAccessAllowedForUrls</translation>
 <translation id="4369307906396795087">Scripts voor workers (web workers, service workers, enzovoort) maken gebruik van minder strenge MIME-typecontrole. Workerscripts met verouderde MIME-typen, zoals <ph name="MIMETYPE_TEXT_ASCII" />, werken ook.</translation>
 <translation id="4370937370030117032">Gebruikersnaam en bestandsnaam naar systeemeigen printers sturen uitzetten</translation>
 <translation id="4372704773119750918">Zakelijke gebruikers niet toestaan deel uit te maken van multiprofielen (primair of secundair)</translation>
@@ -5833,6 +5861,7 @@ Anders worden alleen geselecteerde services aangezet.</translation>
 Als je het beleid niet toepast, wordt de promotie voor de extensie voor inloggegevensproviders niet getoond aan de gebruiker.</translation>
 <translation id="4768446404233019970">3DES cipher suites aanzetten in TLS</translation>
 <translation id="4770334626033858263">De configuratie die is gebruikt om de toegangscode voor ouders te genereren en te verifiëren.</translation>
+<translation id="477383002672213319">Verbeterd automatisch invullen toestaan zonder AI-modellen te verbeteren (verbetert AI-modellen vóór M153).</translation>
 <translation id="4773997835955617342">Hiermee wordt de voorgestelde <ph name="KRB5_CONFIG" />-configuratie voor de nieuwe handmatig gemaakte tickets gewijzigd.
 
       Als je dit beleid toepast, wordt de waarde van het beleid KerberosCustomPrefilledConfig toegepast als voorgestelde configuratie en getoond in het gedeelte Geavanceerd van het dialoogvenster voor Kerberos-verificatie.
@@ -5914,6 +5943,22 @@ Als je het beleid instelt op False, wordt het standaardgedrag gebruikt.</transla
 <translation id="4826977043372474305">Wifi-inloggegevens van de kiosk worden opgeslagen op kioskniveau</translation>
 <translation id="4827727182370777723">Standaardinstelling voor het recht voor lokale lettertypen</translation>
 <translation id="482803100714220060">Volledige URL's tonen</translation>
+<translation id="4830717535196994979">Lijst met URL-patronen. Netwerkverzoeken die worden gestart vanaf websites die worden geleverd via overeenkomende oorsprongen, worden geblokkeerd voor het indienen van <ph name="LOCAL_NETWORK_ACCESS" />-verzoeken.
+
+Voor oorsprongen die niet overeenkomen met de hier genoemde patronen, is de persoonlijke configuratie van de gebruiker van toepassing.
+
+Ga naar https://chromeenterprise.google/policies/url-patterns voor gedetailleerde informatie over geldige URL-patronen.
+
+Zie https://wicg.github.io/local-network-access/ voor beperkingen voor <ph name="LOCAL_NETWORK_ACCESS" />.
+
+Er zijn meerdere beleidsregels met oorsprongen die van invloed zijn op verzoeken aan lokale apparaten en lokale netwerkeindpunten. Als een oorsprong overeenkomt met meer dan één van de volgende beleidsregels, hebben de beleidsregels voorrang in deze volgorde:
+
+  - LocalNetworkBlockedForUrls
+  - LocalNetworkAllowedForUrls
+  - LoopbackNetworkBlockedForUrls
+  - LoopbackNetworkAllowedForUrls
+  - LocalNetworkAccessBlockedForUrls
+  - LocalNetworkAccessAllowedForUrls</translation>
 <translation id="4832373379539003927">Hiermee bepaal je of de pdf-viewer in <ph name="PRODUCT_NAME" /> XFA-formulieren in pdf-documenten ondersteunt.
 
 Als je dit beleid instelt op Waar, wordt ondersteuning voor XFA-formulieren aangezet.
@@ -6329,9 +6374,6 @@ Als je het beleid niet instelt, wordt het gedrag bepaald door het beleid <ph nam
 Ga naar https://support.google.com/chrome/a?p=generative_ai_settings voor meer informatie over gegevensverwerking voor generatieve AI-functies.</translation>
 <translation id="5070539335358964387">'Zoeken en invullen met Gemini' toestaan en AI-modellen verbeteren.</translation>
 <translation id="5071303485174858500">Beperkte beheerde gastsessie uitzetten.</translation>
-<translation id="5073609397321802133">Als het beleid is ingesteld op 'False', kunnen gebruikers de achtergrond van de pagina 'Nieuw tabblad' niet aanpassen. Eventuele bestaande aangepaste achtergronden worden definitief verwijderd, zelfs als het beleid later weer wordt ingesteld op 'True'.
-
-      Als het beleid wordt ingesteld op 'True' of niet wordt ingesteld, kunnen gebruikers de achtergrond van de pagina 'Nieuw tabblad' aanpassen.</translation>
 <translation id="5073788301065423829">Met dit beleid kun je Help me met schrijven aan- of uitzetten voor ChromeOS.
 
 Als je dit beleid toepast, staat Help me met schrijven aan.
@@ -6649,6 +6691,17 @@ Opmerking: Deze functie is nog niet algemeen beschikbaar, dus als je deze aanzet
 <translation id="5247584184349816217">De screensaver op het vergrendelscherm aanzetten.</translation>
 <translation id="5247973380763021389">Voorkomen dat cloudbeleidsregels voor gebruikers cloudbeleidsregels voor machines overschrijven.</translation>
 <translation id="5249006530384016395">Bepaalt of de beëindigde <ph name="CUSTOM_STATE_DEPRECATED_SYNTAX" />-syntaxis voor de aangepaste css-status aanstaat</translation>
+<translation id="5249271416806588789">Praten om te typen is een AI-gestuurde functie waarmee gebruikers tekst kunnen invoeren en bewerken met hun stem. De functie wordt mogelijk gemaakt door generatieve AI-modellen die transcriptie en opmaak van hoge kwaliteit bieden.
+
+0 = Hiermee wordt toegestaan dat de functie wordt gebruikt en dat Google relevante gegevens gebruikt om de AI-modellen te verbeteren. Relevante gegevens kunnen prompts, invoer, uitvoer, bronmateriaal en geschreven feedback zijn, afhankelijk van de functie. De gegevens kunnen ook door mensen worden beoordeeld om AI-modellen te verbeteren. 0 is de standaardwaarde, behalve zoals hieronder aangegeven.
+
+1 = Hiermee wordt toegestaan dat de functie wordt gebruikt, maar wordt niet toegestaan dat Google modellen verbetert met content van gebruikers (waaronder prompts, invoer, uitvoer, bronmateriaal en geschreven feedback). 1 is de standaardwaarde voor zakelijke gebruikers die worden beheerd via <ph name="GOOGLE_ADMIN_CONSOLE_PRODUCT_NAME" /> en voor onderwijsaccounts die worden beheerd via <ph name="GOOGLE_WORKSPACE_PRODUCT_NAME" />.
+
+2 = Hiermee wordt de functie niet toegestaan.
+
+Als je het beleid niet instelt, wordt het gedrag bepaald door het beleid <ph name="GEN_AI_DEFAULT_SETTINGS_POLICY_NAME" />.
+
+Ga naar https://support.google.com/chrome/a?p=generative_ai_settings voor meer informatie over gegevensverwerking voor generatieve AI-functies.</translation>
 <translation id="5249453807420671499">Gebruikers kunnen Kerberos-accounts toevoegen</translation>
 <translation id="5249555581286638799">Modus voor hoge efficiëntie aanzetten</translation>
 <translation id="5252210248395576403">Dit beleid geeft Snelle antwoorden toegang tot geselecteerde content en toestemming om de informatie naar de server te sturen om vertaalresultaten te krijgen.
@@ -6850,17 +6903,6 @@ Als je het beleid instelt op Onwaar, hebben ze geen toegang tot de functie.</tra
 <translation id="537786648513450280">Het gebruik van Android-apps van niet-vertrouwde bronnen beheren voor het apparaat</translation>
 <translation id="5378885577701865339">De functie voor gedeeld klembord uitzetten</translation>
 <translation id="5385337904220716757">Alleen toegang tot geolocatie van systeem toestaan voor systeemservices</translation>
-<translation id="538768040137709073">Zet de functie Gedeeld klembord aan, waarmee gebruikers tekst kunnen sturen tussen Chrome-desktops en een Android-apparaat als de synchronisatie is aangezet en de gebruiker is ingelogd.
-
-          Als dit beleid is ingesteld op True, kunnen Chrome-gebruikers tekst tussen apparaten sturen.
-
-          Als dit beleid is ingesteld op False, kunnen Chrome-gebruikers geen tekst tussen apparaten sturen.
-
-          Als je dit beleid instelt, kunnen gebruikers het niet wijzigen of overschrijven.
-
-          Als dit beleid niet is ingesteld, staat de functie Gedeeld klembord standaard uit.
-
-          Beheerders kunnen zelf beleidsregels voor alle gewenste platforms instellen. We raden je aan dit beleid op één waarde in te stellen voor alle platforms.</translation>
 <translation id="5389708774452952523">Toestaan dat het audioproces wordt uitgevoerd met hogere prioriteit dan normaal in Windows</translation>
 <translation id="5390083518957894426">Zet online opnieuw verifiëren op vergrendelscherm aan voor SAML-gebruikers</translation>
 <translation id="5391388690191341203">Lokaal account op apparaat voor automatisch inloggen</translation>
@@ -7070,6 +7112,13 @@ Als <ph name="NTPCARDSVISIBLE" /> niet wordt toegepast, wordt de kaart SharePoin
 <translation id="5537400155400537818">Uitgezet: css-zoom behoudt het verouderde gedrag van vóór de standaardisatie.</translation>
 <translation id="5537587542872235553">Toestaan dat afgedwongen geïnstalleerde geïsoleerde web-apps en kiosk-apps de Device Attributes API gebruiken</translation>
 <translation id="553806128266843748">Een Booleaanse markering die aangeeft of throttling aanstaat.</translation>
+<translation id="5540415024237352600">Dit beleid wordt beëindigd in M153 en wordt niet meer ondersteund (heeft geen effect) in een toekomstige release. Ad-hoc-handtekeningen voor systeemeigen apps die worden gemaakt bij de installatie van een progressive web-app (PWA), staan nu permanent aan op <ph name="MAC_OS_NAME" />. Hierdoor heeft elke geïnstalleerde app een unieke identiteit voor <ph name="MAC_OS_NAME" />-systeemcomponenten.
+
+Als je het beleid toepast of niet instelt, wordt het gebruik van ad-hoc-handtekeningen aangezet voor de systeemeigen app die wordt gemaakt bij de installatie van een progressive web-app (PWA). Hierdoor heeft elke geïnstalleerde app een unieke identiteit voor <ph name="MAC_OS_NAME" />-systeemcomponenten.
+
+Als je het beleid niet toepast, heeft elke systeemeigen app die wordt gemaakt bij het installeren van progressive web-apps dezelfde identiteit. Dit kan de <ph name="MAC_OS_NAME" />-functionaliteit verstoren.
+
+Zet het beleid alleen uit als je een oplossing voor beveiliging van eindpunten gebruikt die apps met een ad-hoc-handtekening blokkeert.</translation>
 <translation id="5540885720415375851">Toestaan dat lokale apparaten worden gevonden</translation>
 <translation id="5542235730745104308">Als je het beleid instelt op True, gebruikt <ph name="PRODUCT_NAME" /> alternatieve foutpagina's die zijn ingebouwd (zoals Pagina niet gevonden). Als je het beleid instelt op False, gebruikt <ph name="PRODUCT_NAME" /> nooit alternatieve foutpagina's.
 
@@ -7268,7 +7317,6 @@ Als dit beleid is ingesteld voor de <ph name="PRODUCT_OS_NAME" />-kiosk, wordt d
           Als je deze instelling uitzet, staat Wachtwoordmanager niet toe dat de gebruiker opgeslagen wachtwoorden als leesbare tekst toont in het venster van Wachtwoordmanager.
 
           Als je deze instelling aanzet of niet instelt, kunnen gebruikers hun wachtwoorden als leesbare tekst bekijken in Wachtwoordmanager.</translation>
-<translation id="561873855783619782">Spraakgestuurd typen toestaan zonder gegevensverzameling.</translation>
 <translation id="5620392548325769024">Welkomstpagina tonen bij eerste opstart van de browser na een upgrade van het besturingssysteem</translation>
 <translation id="5621503441067774084">Cursormarkering op het inlogscherm aanzetten</translation>
 <translation id="5622590774455244290">Android-apps kunnen deze lijst op vrijwillige basis respecteren, maar dit kan niet worden afgedwongen.</translation>
@@ -7803,6 +7851,7 @@ Als je dit beleid niet instelt, is <ph name="DEFAULT_AUTOMATIC_DOWNLOADS_SETTING
       Als je het beleid niet toepast, kunnen gebruikers geen feedback naar Google sturen.</translation>
 <translation id="5976636832661103220">De instellingen voor F11 gebruiken de sneltoets met de functietoets Shift</translation>
 <translation id="5979376378555121803">Gehoste app</translation>
+<translation id="5983016603010860828">Instellingen voor Praten om te typen</translation>
 <translation id="5983274643567559194">Het instellen van een sneltoets voor de actie Verwijderen staat uit.</translation>
 <translation id="5984099692320899605">NTLM-verificatie niet gebruiken</translation>
 <translation id="5984237109586500246">Webcontent accepteren die wordt geleverd als Signed HTTP Exchanges</translation>
@@ -7999,14 +8048,6 @@ Als je dit beleid toepast of niet instelt, kunnen gebruikers systeemsneltoetsen 
 
 Als je dit beleid niet toepast, staat de Sneltoetsen-app in de modus Alleen lezen en is aanpassing niet toegestaan.</translation>
 <translation id="6150320133676152520">Automatisch versturen van pincode op het vergrendel- en inlogscherm uitzetten</translation>
-<translation id="6152224988699207920">Hiermee kunnen beheerders het uiterlijk van watermerken aanpassen die worden toegepast door regels voor Gegevensverlies voorkomen (Data Loss Prevention, DLP). Dit omvat het instellen van de ondoorzichtigheid van de opvulling/omtrek, het definiëren van de lettergrootte en het instellen van de tijdzone van de tijdstempel.
-Als je dit beleid of bepaalde waarden niet instelt, gebruikt Chrome het standaardgedrag voor watermerken.
-De standaardwaarden zijn: ondoorzichtigheid van opvulling op 4, ondoorzichtigheid van omtrek op 6, lettergrootte op 24 en tijdzone van tijdstempel ingesteld op user_device (lokale tijdzone van het apparaat van de gebruiker).
-
-De ondoorzichtigheid van de opvulling is een percentage van 0 (volledig transparant) tot 100 (volledig ondoorzichtig).
-De ondoorzichtigheid van de omtrek is een percentage van 0 (volledig transparant) tot 100 (volledig ondoorzichtig).
-De lettergrootte wordt aangegeven in punten.
-De tijdzone van het tijdstempel geeft de IANA-tijdzone-ID aan (bijv. 'America/Toronto') die wordt gebruikt voor het opmaken van tijdstempels voor watermerken (ondersteund vanaf Chrome 152 en hoger). Deze ID's volgen de namen in de IANA Time Zone Database (https://www.iana.org/time-zones).</translation>
 <translation id="6155350825868160236">Toestaan dat gebruikers kiezen of Google-webservices worden gebruikt om spelfouten op te lossen</translation>
 <translation id="6155936611791017817">De standaardstatus van de grote cursor op het inlogscherm instellen</translation>
 <translation id="6157537876488211233">Door komma's gescheiden lijst van regels voor proxyomzeiling</translation>
@@ -9861,6 +9902,20 @@ Opmerking: Als je dit beleid gebruikt om de tijdzone automatisch te wijzigen, mo
       Als je het beleid instelt op 'False', kunnen gebruikers, apps en extensies de modus voor volledig scherm niet openen.</translation>
 <translation id="7180529638251181928">Beperkte modus niet afdwingen op <ph name="YOUTUBE_PRODUCT_NAME" /></translation>
 <translation id="718126088895133062">Met dit beleid wordt de licentiegebruikers-ID voor <ph name="PLUGIN_VM_NAME" /> voor dit apparaat opgegeven.</translation>
+<translation id="7182622189057326705">Dit beleid is beëindigd en heeft geen effect omdat de functie voor gedeeld klembord is verwijderd uit Chrome.
+
+Oorspronkelijke beschrijving:
+De functie voor gedeeld klembord aanzetten, waarmee gebruikers tekst kunnen sturen tussen Chrome-desktops en een Android-apparaat als synchronisatie is aangezet en de gebruiker is ingelogd.
+
+          Als dit beleid is ingesteld op waar, staat de mogelijkheid om tekst tussen apparaten te sturen aan voor Chrome-gebruikers.
+
+          Als dit beleid is ingesteld op onwaar, staat de mogelijkheid om tekst tussen apparaten te sturen uit voor Chrome-gebruikers.
+
+          Als je dit beleid instelt, kunnen gebruikers dit niet wijzigen of overschrijven.
+
+          Als dit beleid niet is ingesteld, staat de functie voor gedeeld klembord standaard aan.
+
+          Beheerder kunnen zelf beleidsregels voor alle gewenste platforms instellen. We raden je aan dit beleid op één waarde in te stellen voor alle platforms.</translation>
 <translation id="7185078796915954712">TLS 1.3</translation>
 <translation id="7185630966939835143">Een Google-webservice gebruiken om spelfouten op te lossen</translation>
 <translation id="7187248416163189586">Rapportage van achtergrondverlichtingsinformatie van apparaat uitzetten</translation>
@@ -10029,6 +10084,7 @@ Als je dit beleid niet toepast of niet instelt, staan de instellingen voor Kerbe
       Als je dit beleid toepast, blijven sites blootstaan aan bepaalde typen cross-site aanvallen en kunnen gebruikers ook zonder gebruik van cookies van site naar site worden gevolgd door het toevoegen van items aan het HTTP-verificatiecachegeheugen via gegevens die zijn ingesloten in URL's.
 
 Dit beleid is bedoeld om bedrijven die afhankelijk zijn van het oude gedrag in de gelegenheid te stellen hun inlogprocedures te updaten. Het beleid wordt in de toekomst verwijderd.</translation>
+<translation id="7322231030019184787">Sta Praten om te typen toe zonder gegevensverzameling.</translation>
 <translation id="7322825363493984512">Het wachtwoord om systeemservices te verifiëren bij de externe webproxy.</translation>
 <translation id="7323773727263636287">Zet de toegankelijkheidsfunctie voor kleurcorrectie aan.
 
@@ -10489,6 +10545,7 @@ Ga naar https://chromeenterprise.google/policies/url-patterns voor gedetailleerd
       Wanneer dit beleid is ingesteld, kan de toegangscode voor ouders worden geverifieerd op het apparaat van de gebruiker met een kinderaccount.
       Wanneer dit beleid niet is ingesteld, kan de toegangscode voor ouders niet worden geverifieerd op het apparaat van de gebruiker met een kinderaccount.</translation>
 <translation id="7623431489198474050">Extern attest voor contentbescherming uitzetten</translation>
+<translation id="7624832415093566709">Sta Praten om te typen toe.</translation>
 <translation id="7625858205605842562">Als je het beleid instelt, kun je een lijst met URL-patronen maken om op te geven welke sites gebruikers niet mogen vragen om toegang tot een USB-apparaat.
 
       Als je het beleid niet instelt, is <ph name="DEFAULT_WEB_USB_GUARD_SETTING_POLICY_NAME" /> (indien ingesteld) van toepassing op alle sites. Zo niet, dan gelden de persoonlijke instellingen van de gebruiker.
@@ -10995,11 +11052,6 @@ Als je het beleid <ph name="ENABLE_MEDIA_ROUTER_POLICY_NAME" /> niet toepast, he
 
       Als je het beleid niet instelt, worden clientcertificaten voor geen enkele site automatisch geselecteerd.</translation>
 <translation id="7937766917976512374">Het opnemen van video's toestaan of weigeren</translation>
-<translation id="7937825205289116563">Als je het beleid toepast of niet instelt, wordt het gebruik van ad-hoc-handtekeningen aangezet voor de systeemeigen app die wordt gemaakt bij de installatie van een progressive web-app (PWA). Hierdoor heeft elke geïnstalleerde app een unieke identiteit voor <ph name="MAC_OS_NAME" />-systeemcomponenten.
-
-Als je het beleid niet toepast, heeft elke systeemeigen app die wordt gemaakt bij het installeren van progressive web-apps dezelfde identiteit. Dit kan de <ph name="MAC_OS_NAME" />-functionaliteit verstoren.
-
-Zet het beleid alleen uit als je een oplossing voor beveiliging van eindpunten gebruikt die apps met een ad-hoc-handtekening blokkeert.</translation>
 <translation id="7941528208359969119">Toestaan dat online <ph name="OCSP_CRL_LABEL" />-checks worden uitgevoerd</translation>
 <translation id="7941975817681987555">Geen netwerkacties voorspellen voor een netwerkverbinding</translation>
 <translation id="794447754389837404">Toegang tot privénetwerken blokkeren in de Direct Sockets API op deze sites</translation>
@@ -11489,22 +11541,6 @@ Voor <ph name="PRODUCT_NAME" /> is dit beleid alleen van kracht als de machine i
 
 Meer informatie over verouderde technologieën vind je op https://chromestatus.com/features.</translation>
 <translation id="8273183018575414926">Progressive web-apps</translation>
-<translation id="8274053052968966211">Lijst met URL-patronen. Netwerkverzoeken die worden gestart vanaf websites die worden geleverd via overeenkomende oorsprongen, worden geblokkeerd voor het indienen van <ph name="LOCAL_NETWORK_ACCESS" />-verzoeken.
-
-Voor oorsprongen die niet overeenkomen met de hier genoemde patronen, is de persoonlijke configuratie van de gebruiker van toepassing.
-
-Ga naar https://chromeenterprise.google/policies/url-patterns voor gedetailleerde informatie over geldige URL-patronen.
-
-Zie https://wicg.github.io/local-network-access/ voor beperkingen voor <ph name="LOCAL_NETWORK_ACCESS" />.
-
-Er zijn meerdere beleidsregels met oorsprongen die van invloed zijn op verzoeken aan lokale apparaten en lokale netwerkeindpunten. Als een oorsprong overeenkomt met meer dan één van de volgende beleidsregels, hebben de beleidsregels voorrang in deze volgorde:
-
-- LocalNetworkBlockedForUrls
-- LocalNetworkAllowedForUrls
-- LoopbackNetworkAccessBlockedForUrls
-- LoopbackNetworkAccessAllowedForUrls
-- LocalNetworkAccessBlockedForUrls
-- LocalNetworkAccessAllowedForUrls</translation>
 <translation id="8274603902181597201">De eCryptfs-hoofdmap van de gebruiker wissen en beginnen met een nieuwe hoofdmap die is versleuteld met ext4</translation>
 <translation id="8274926413890711289">Opties voor gedetailleerde rapportage aanzetten</translation>
 <translation id="8275103737670730746">Toestaan dat API's voor bestands- of directorykiezers worden aangeroepen zonder eerder gebruikersgebaar</translation>
@@ -11593,7 +11629,6 @@ Als je dit beleid niet instelt, staat gezichtsbediening in eerste instantie uit,
 <translation id="8330437518362176921">Alleen de door het beleid geleverde update-URL gebruiken als Chrome-kiosk-apps worden gedownload en geüpdatet</translation>
 <translation id="8331479227794770304">Plaktoetsen aanzetten</translation>
 <translation id="8332822245414537447">Controle van RSA-sleutelgebruik uitzetten</translation>
-<translation id="8333141477131859004">Verbeterd automatisch invullen toestaan en AI-modellen verbeteren.</translation>
 <translation id="8334685561819743286">Automatische correctie op fysiek toetsenbord als gebruikers typen uitzetten</translation>
 <translation id="8336986243404088829">Dit beleid beperkt geheugenaanvallen tussen processen via zijkanalen door het renderproces te isoleren op de CPU-kern en te voorkomen dat andere processen dezelfde kern delen. De mitigatie wordt ondersteund in <ph name="MS_WIN_NAME" /> 11 24H2 en hoger. Als het OS niet de vereiste planningsondersteuning heeft, heeft dit beleid geen effect. Dit beleid kan de prestaties vertragen in sommige veeleisende scenario's, vergelijkbaar met het uitzetten van hyperthreading. Ga voor meer informatie naar https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-process_mitigation_side_channel_isolation_policy
 Als je dit beleid toepast, worden alle andere processen niet gepland op dezelfde CPU-kern wanneer het renderproces wordt uitgevoerd.
@@ -12049,7 +12084,6 @@ Dit beleid is altijd van kracht voor <ph name="PRODUCT_OS_NAME" />.</translation
 <translation id="8634062512783775032"><ph name="AES_KL_NAME" /> gebruiken als het versleutelingsalgoritme voor versleuteling van gebruikersopslag (als dit wordt ondersteund)</translation>
 <translation id="8637566476051166626">Expliciet toegestane netwerkpoorten</translation>
 <translation id="8643838501942693770">Cookies van derden toestaan, maar toestaan dat gebruikers deze instelling wijzigen</translation>
-<translation id="8644225074581442734">Instellingen voor spraakgestuurd typen</translation>
 <translation id="864611373241249369">Nadat <ph name="LACROS_NAME" /> is uitgezet, proberen we alle gegevens te migreren.</translation>
 <translation id="8648844602494595665">Dit beleid bepaalt hoe er wordt omgegaan met het hangsloticoon in de omnibox.
        Vanaf Chrome M93 is er een nieuw omnibox-icoon voor beveiligde verbindingen.
@@ -12679,17 +12713,6 @@ Als je het beleid niet instelt, kan <ph name="PRODUCT_NAME" /> deze logboeken st
 <translation id="9053841574218808519">Plug-ins die niet verouderd zijn, altijd uitvoeren</translation>
 <translation id="9055866143096316150">Wake lock-verzoeken voor het scherm verlagen naar wake lock-verzoeken voor het systeem</translation>
 <translation id="9057159618445405645">Het standaardgedrag van de Chrome-browser gebruiken</translation>
-<translation id="9061455386353325110">Hiermee bepaal je of gebruikers <ph name="PRODUCT_NAME" /> generatieve AI kunnen laten gebruiken om formulieren beter te begrijpen en meer velden te laten invullen.
-
-0 = Hiermee wordt toegestaan dat de functie wordt gebruikt en dat Google relevante gegevens gebruikt om de AI-modellen te verbeteren. Relevante gegevens kunnen prompts, invoer, uitvoer, bronmateriaal en geschreven feedback zijn, afhankelijk van de functie. 0 is de standaardwaarde, behalve zoals hieronder aangegeven.
-
-1 = Hiermee wordt toegestaan dat de functie wordt gebruikt, maar wordt niet toegestaan dat Google modellen verbetert met content van gebruikers (waaronder prompts, invoer, uitvoer, bronmateriaal en geschreven feedback). 1 is de standaardwaarde voor zakelijke gebruikers die worden beheerd door <ph name="GOOGLE_ADMIN_CONSOLE_PRODUCT_NAME" /> en voor onderwijsaccounts die worden beheerd door <ph name="GOOGLE_WORKSPACE_PRODUCT_NAME" />.
-
-2 = Hiermee wordt de functie niet toegestaan.
-
-Als je het beleid niet instelt, wordt het gedrag bepaald door het beleid <ph name="GEN_AI_DEFAULT_SETTINGS_POLICY_NAME" />.
-
-Ga naar https://support.google.com/chrome/a?p=generative_ai_settings voor meer informatie over gegevensverwerking voor generatieve AI-functies.</translation>
 <translation id="9061609750723054419">De zichtbaarheid van de beheermelding op de pagina Nieuw tabblad voor beheerde browsers beheren</translation>
 <translation id="9063485115966829754">De pdf-viewer gebruikt de GuestView-architectuur.</translation>
 <translation id="9064546884927958824">Als je het beleid instelt, kun je een lijst met URL-patronen opgeven van sites die afbeeldingen mogen weergeven.

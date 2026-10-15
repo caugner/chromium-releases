@@ -66,7 +66,6 @@
 #include "chrome/browser/ui/views/omnibox/omnibox_popup_webui_base_content.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_text_view.h"
 #include "chrome/browser/ui/views/page_action/page_action_container_view.h"
-#include "chrome/browser/ui/views/page_action/page_action_icon_controller.h"
 #include "chrome/browser/ui/views/page_action/page_action_view.h"
 #include "chrome/browser/ui/views/send_tab_to_self/send_tab_to_self_bubble_controller.h"
 #include "chrome/common/webui_url_constants.h"
@@ -471,6 +470,14 @@ void OmniboxViewViews::EnterKeywordModeForDefaultSearchProvider() {
 
 gfx::Range OmniboxViewViews::GetSelectionBounds() const {
   return GetSelectedRange();
+}
+
+void OmniboxViewViews::SetSelectionBounds(gfx::Range selection) {
+  SetSelectedRange(selection);
+}
+
+bool OmniboxViewViews::HasSelection() const {
+  return views::Textfield::HasSelection();
 }
 
 void OmniboxViewViews::SelectAll(bool reversed) {
@@ -1089,36 +1096,8 @@ void OmniboxViewViews::ClearAccessibilityLabel() {
 void OmniboxViewViews::SetAccessibilityLabel(const std::u16string& display_text,
                                              const AutocompleteMatch& match,
                                              bool notify_text_changed) {
-  if (controller()->edit_model()->GetPopupSelection().state ==
-      OmniboxPopupSelection::LineState::FOCUSED_BUTTON_AIM) {
-    friendly_suggestion_text_ =
-        controller()->edit_model()->GetPopupAccessibilityLabelForAimButton();
-  } else if (controller()->edit_model()->GetPopupSelection().line ==
-             OmniboxPopupSelection::kNoMatch) {
-    // If nothing is selected in the popup, we are in the no-default-match edge
-    // case, and |match| is a synthetically generated match. In that case,
-    // bypass OmniboxPopupModel and get the label from our synthetic |match|.
-    friendly_suggestion_text_ = AutocompleteMatchType::ToAccessibilityLabel(
-        match, /*header_text=*/u"", display_text,
-        OmniboxPopupSelection::kNoMatch,
-        controller()->autocomplete_controller()->result().size(),
-        std::u16string(), &friendly_suggestion_text_prefix_length_);
-  } else {
-    friendly_suggestion_text_ =
-        controller()
-            ->edit_model()
-            ->GetPopupAccessibilityLabelForCurrentSelection(
-                display_text, true, &friendly_suggestion_text_prefix_length_);
-
-    // If the line immediately after the current selection is the
-    // informational IPH row, append its accessibility label at the end of
-    // this selection's accessibility label.
-    friendly_suggestion_text_ +=
-        controller()
-            ->edit_model()
-            ->MaybeGetPopupAccessibilityLabelForIPHSuggestion();
-  }
-
+  friendly_suggestion_text_ = ComputeFriendlySuggestionTextForAccessibility(
+      display_text, match, friendly_suggestion_text_prefix_length_);
   UpdateAccessibleValue();
 
 #if BUILDFLAG(IS_MAC)
@@ -1608,25 +1587,8 @@ bool OmniboxViewViews::HandleAccessibleAction(
   return Textfield::HandleAccessibleAction(action_data);
 }
 
-void OmniboxViewViews::UpdateTextForContextualTasksPage() {
-  if (!controller()->client()->IsContextualTasksPage()) {
-    return;
-  }
-
-  if (HasFocus()) {
-    std::u16string text = controller()->client()->GetURLForDisplay();
-    controller()->edit_model()->SetUserText(text);
-    SetWindowTextAndCaretPos(text, /*caret_pos=*/0, /*update_popup=*/true,
-                             /*notify_text_changed=*/true);
-  } else {
-    RevertAll();
-  }
-}
-
 void OmniboxViewViews::OnFocus() {
   views::Textfield::OnFocus();
-
-  UpdateTextForContextualTasksPage();
 
   // TODO(oshima): Get control key state.
   controller()->edit_model()->OnSetFocus(false);
@@ -1666,8 +1628,6 @@ void OmniboxViewViews::OnBlur() {
           OmniboxPopupState::kAim) {
     return;
   }
-
-  UpdateTextForContextualTasksPage();
 
   // Save the user's existing selection to restore it later.
   saved_selection_for_focus_change_ = GetSelectedRange();

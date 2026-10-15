@@ -168,6 +168,8 @@ void PrerendererImpl::ProcessCandidatesForPrerender(
     return;
   }
 
+  CHECK(render_frame_host_->IsActive());
+
   // Extract only the candidates which apply to prerender, and sort them by URL
   // so we can efficiently compare them to `started_prerenders_`.
   // If both prerender and prerender-until-script are applied to the same URL,
@@ -317,11 +319,9 @@ void PrerendererImpl::ProcessCandidatesForPrerender(
               PrerenderFinalStatus::kSpeculationRuleRemoved));
   if (base::FeatureList::IsEnabled(
           features::kPrerender2FallbackPrefetchSpecRules)) {
-    WebContents* web_contents =
-        WebContents::FromRenderFrameHost(&render_frame_host_.get());
     auto* prefetch_document_manager =
         content::PrefetchDocumentManager::GetOrCreateForCurrentDocument(
-            web_contents->GetPrimaryMainFrame());
+            render_frame_host_->GetOutermostMainFrame());
     for (const auto& [url, preloading_type] : to_be_cancelled_prerender_list) {
       prefetch_document_manager->ResetPrefetchAheadOfPrerenderIfExist(
           preloading_type, url);
@@ -352,6 +352,7 @@ void PrerendererImpl::ProcessCandidatesForPrerender(
 }
 
 void PrerendererImpl::OnLCPPredicted() {
+  CHECK(render_frame_host_->IsActive());
   blocked_ = false;
   for (auto& [candidate, enacting_predictor, confidence] :
        std::move(blocked_candidates_)) {
@@ -363,6 +364,10 @@ bool PrerendererImpl::MaybePrerender(
     const blink::mojom::SpeculationCandidatePtr& candidate,
     const PreloadingPredictor& enacting_predictor,
     PreloadingConfidence confidence) {
+  if (!render_frame_host_->IsActive()) {
+    return false;
+  }
+
   // Check actions. Only Prerender and PrerenderUntilScript are allowed.
   switch (candidate->action) {
     case blink::mojom::SpeculationAction::kPrerender:
@@ -391,10 +396,6 @@ bool PrerendererImpl::MaybePrerender(
                                      confidence);
     return false;
   }
-
-  // Prerendering frames should not trigger any prerender request.
-  CHECK(!render_frame_host_->IsInLifecycleState(
-      RenderFrameHost::LifecycleState::kPrerendering));
 
   if (!registry_) {
     return false;
@@ -475,6 +476,16 @@ bool PrerendererImpl::MaybePrerender(
           ? features::kPrerender2WarmUpCompositorForImmediate
           : features::kPrerender2WarmUpCompositorForNonImmediate);
 
+  // `SpeculationCandidate::tags` must never be empty: rules that specify no
+  // tags carry a single null tag instead (see blink.mojom).
+  // Candidates arriving over IPC are checked by SpeculationHostImpl's
+  // CandidatesAreValid(), and PreloadingDecider only ever overwrites `tags`
+  // with a non-empty merge, so an empty list here means a browser-side bug
+  // rather than a misbehaving renderer. This is where crbug.com/550345163
+  // crashed; the equivalent guard for prefetch lives in
+  // PrefetchDocumentManager's TagsFromCandidate().
+  CHECK(!candidate->tags.empty());
+
   PrerenderAttributes attributes(
       candidate->url,
       PreloadingTriggerTypeFromSpeculationInjectionType(
@@ -529,7 +540,7 @@ bool PrerendererImpl::MaybePrerender(
 
           auto* prefetch_document_manager =
               content::PrefetchDocumentManager::GetOrCreateForCurrentDocument(
-                  web_contents->GetPrimaryMainFrame());
+                  render_frame_host_->GetOutermostMainFrame());
           prefetch_document_manager->PrefetchAheadOfPrerender(
               attributes.preload_pipeline_info, candidate.Clone(),
               enacting_predictor);
@@ -547,7 +558,8 @@ bool PrerendererImpl::MaybePrerender(
                 creating_predictor, enacting_predictor,
                 ConvertSpeculationActionToPreloadingType(candidate->action),
                 std::move(same_url_matcher),
-                web_contents->GetPrimaryMainFrame()->GetPageUkmSourceId()));
+                render_frame_host_->GetOutermostMainFrame()
+                    ->GetPageUkmSourceId()));
         preloading_attempt->SetSpeculationEagerness(candidate->eagerness);
         return registry_->CreateAndStartHost(attributes, preloading_attempt);
       }

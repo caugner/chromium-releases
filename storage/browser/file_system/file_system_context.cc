@@ -423,7 +423,7 @@ void FileSystemContext::OnGetOrCreateBucket(
     OpenFileSystemMode mode,
     OpenFileSystemCallback callback,
     QuotaErrorOr<BucketInfo> result) {
-  if (!result.has_value() || result->storage_key != storage_key) {
+  if (!result.has_value()) {
     std::move(callback).Run(FileSystemURL(), std::string(),
                             base::File::FILE_ERROR_FAILED);
     return;

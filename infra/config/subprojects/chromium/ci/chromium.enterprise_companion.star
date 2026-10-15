@@ -60,7 +60,6 @@ ci.builder(
     ),
     gn_args = gn_args.config(
         configs = [
-            "enterprise_companion",
             "debug_static_builder",
             "remoteexec",
             "linux",
@@ -69,7 +68,6 @@ ci.builder(
     ),
     builderless = True,
     os = os.LINUX_DEFAULT,
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "debug|linux",
         short_name = "bld",
@@ -96,7 +94,6 @@ ci.builder(
     ),
     gn_args = gn_args.config(
         configs = [
-            "enterprise_companion",
             "release_builder",
             "remoteexec",
             "linux",
@@ -105,7 +102,6 @@ ci.builder(
     ),
     builderless = True,
     os = os.LINUX_DEFAULT,
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "release|linux",
         short_name = "bld",
@@ -141,7 +137,6 @@ ci.thin_tester(
             "x86-64",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "debug|linux",
         short_name = "test",
@@ -177,7 +172,6 @@ ci.thin_tester(
             "x86-64",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "release|linux",
         short_name = "test",
@@ -204,7 +198,6 @@ ci.builder(
     ),
     gn_args = gn_args.config(
         configs = [
-            "enterprise_companion",
             "debug_static_builder",
             "remoteexec",
             "mac",
@@ -246,7 +239,6 @@ ci.builder(
     ),
     gn_args = gn_args.config(
         configs = [
-            "enterprise_companion",
             "release_builder",
             "remoteexec",
             "mac",
@@ -290,7 +282,6 @@ ci.builder(
         configs = [
             "mac",
             "arm64",
-            "enterprise_companion",
             "debug_static_builder",
             "remoteexec",
         ],
@@ -332,7 +323,6 @@ ci.builder(
         configs = [
             "mac",
             "arm64",
-            "enterprise_companion",
             "release_builder",
             "remoteexec",
         ],
@@ -372,7 +362,6 @@ ci.builder(
     ),
     gn_args = gn_args.config(
         configs = [
-            "enterprise_companion",
             "asan",
             "debug_static_builder",
             "remoteexec",
@@ -423,7 +412,6 @@ ci.thin_tester(
             "mac_14_arm64",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "release|mac",
         short_name = "14 arm64",
@@ -458,7 +446,6 @@ ci.thin_tester(
             "mac_14_x64",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "debug|mac",
         short_name = "14 asan",
@@ -493,7 +480,6 @@ ci.thin_tester(
             "mac_13_arm64",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "debug|mac",
         short_name = "13 arm64",
@@ -528,7 +514,6 @@ ci.thin_tester(
             "mac_13_x64",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "release|mac",
         short_name = "13",
@@ -555,7 +540,6 @@ ci.builder(
     ),
     gn_args = gn_args.config(
         configs = [
-            "enterprise_companion",
             "debug_static_builder",
             "remoteexec",
             "win",
@@ -596,7 +580,6 @@ ci.builder(
     ),
     gn_args = gn_args.config(
         configs = [
-            "enterprise_companion",
             "debug_static_builder",
             "remoteexec",
             "win",
@@ -640,7 +623,6 @@ ci.builder(
     ),
     gn_args = gn_args.config(
         configs = [
-            "enterprise_companion",
             "release_builder",
             "remoteexec",
             "minimal_symbols",
@@ -682,7 +664,6 @@ ci.builder(
     ),
     gn_args = gn_args.config(
         configs = [
-            "enterprise_companion",
             "release_builder",
             "remoteexec",
             "minimal_symbols",
@@ -733,7 +714,6 @@ ci.thin_tester(
             "x86-64",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "debug|win (64)",
         short_name = "10",
@@ -769,7 +749,6 @@ ci.thin_tester(
             "x86-64",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "debug|win (32)",
         short_name = "10 (x64)",
@@ -805,7 +784,6 @@ ci.thin_tester(
             "x86-64",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "release|win (32)",
         short_name = "10 (x64)",
@@ -841,7 +819,6 @@ ci.thin_tester(
             "x86-64",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "release|win (64)",
         short_name = "10",
@@ -877,7 +854,6 @@ ci.thin_tester(
             "x86-64",
         ],
     ),
-    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "release|win (64)",
         short_name = "11",

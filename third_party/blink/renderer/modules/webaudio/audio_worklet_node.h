@@ -7,7 +7,6 @@
 
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_audio_worklet_node_options.h"
-#include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_param_map.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_worklet_handler.h"
@@ -31,9 +30,8 @@ class ScriptState;
 //               [Main Scope]                   |    [AudioWorkletGlobalScope]
 //  AudioWorkletNode <-> AudioWorkletHandler <==|==>   AudioWorkletProcessor
 //   (JS interface)       (Renderer access)     |      (V8 audio processing)
-class MODULES_EXPORT AudioWorkletNode final
-    : public AudioNode,
-      public ActiveScriptWrappable<AudioWorkletNode> {
+class AudioWorkletNode final : public AudioNode,
+                               public ActiveScriptWrappable<AudioWorkletNode> {
   DEFINE_WRAPPERTYPEINFO();
 
  public:

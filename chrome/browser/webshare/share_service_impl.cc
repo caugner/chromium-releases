@@ -19,7 +19,6 @@
 #include "chrome/browser/bad_message.h"
 #include "chrome/browser/browser_process.h"
 #include "components/safe_browsing/buildflags.h"
-#include "content/public/browser/weak_document_ptr.h"
 #include "content/public/browser/web_contents.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "services/network/public/mojom/permissions_policy/permissions_policy_feature.mojom.h"
@@ -278,7 +277,7 @@ void ShareServiceImpl::RunShareOperation(
   safe_browsing_request_.reset();
 #endif
 
-  content::WebContents* web_contents =
+  content::WebContents* const web_contents =
       content::WebContents::FromRenderFrameHost(&render_frame_host());
   if (!web_contents) {
     VLOG(1) << "Cannot share after navigating away";
@@ -314,21 +313,9 @@ void ShareServiceImpl::RunShareOperation(
          blink::mojom::ShareError result) { std::move(callback).Run(result); },
       std::move(sharing_service_operation), std::move(callback)));
 #elif BUILDFLAG(IS_WIN)
-  base::WeakPtr<ShareServiceImpl> weak_this = weak_factory_.GetWeakPtr();
-  content::WeakDocumentPtr weak_document =
-      render_frame_host().GetWeakDocumentPtr();
   auto blocker = web_contents->ForSecurityDropFullscreen(
       /*display_id=*/display::kInvalidDisplayId);
-  if (!weak_this) {
-    return;
-  }
-  content::RenderFrameHost* rfh = weak_document.AsRenderFrameHostIfValid();
-  if (!blocker || !rfh || !rfh->IsActive()) {
-    std::move(callback).Run(blink::mojom::ShareError::PERMISSION_DENIED);
-    return;
-  }
-  web_contents = content::WebContents::FromRenderFrameHost(rfh);
-  if (!web_contents) {
+  if (!blocker) {
     std::move(callback).Run(blink::mojom::ShareError::PERMISSION_DENIED);
     return;
   }

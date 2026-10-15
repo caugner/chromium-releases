@@ -349,13 +349,7 @@ class PrerenderBrowserTest : public ContentBrowserTest,
         std::make_unique<test::PrerenderTestHelper>(base::BindRepeating(
             &PrerenderBrowserTest::web_contents, base::Unretained(this)));
 
-    // Input suppression during paintholding interferes with the input event
-    // dispatches to top frames.  Disabling kDropInputEventsWhilePaintHolding
-    // because the tests here are not about top frame paintholding.
-    feature_list_.InitWithFeatures(
-        {::features::kSuppressesPrerenderingOnSlowNetwork,
-         blink::features::kFetchLaterAPI},
-        {blink::features::kDropInputEventsWhilePaintHolding});
+    feature_list_.InitWithFeatures({blink::features::kFetchLaterAPI}, {});
   }
   ~PrerenderBrowserTest() override = default;
 
@@ -547,8 +541,21 @@ class PrerenderBrowserTest : public ContentBrowserTest,
                              JsReplace(script, service_worker_url)));
   }
 
+  [[nodiscard]] bool NavigateToURL(Shell* window, const GURL& url) {
+    bool result = content::NavigateToURL(window, url);
+    SimulateEndOfPaintHoldingOnPrimaryMainFrame(web_contents());
+    return result;
+  }
+
+  [[nodiscard]] bool NavigateToURL(WebContents* web_contents, const GURL& url) {
+    bool result = content::NavigateToURL(web_contents, url);
+    SimulateEndOfPaintHoldingOnPrimaryMainFrame(web_contents);
+    return result;
+  }
+
   void NavigatePrimaryPage(const GURL& url) {
     prerender_helper_->NavigatePrimaryPage(url);
+    SimulateEndOfPaintHoldingOnPrimaryMainFrame(web_contents());
   }
 
   void NavigatePrimaryPageFromAddressBar(const GURL& url) {
@@ -11793,73 +11800,6 @@ IN_PROC_BROWSER_TEST_F(PrerenderBackForwardCacheBrowserTest,
       EvalJs(current_frame_host(), "getSessionStorageKeys()").ExtractString());
 }
 
-// Regression test for crbug.com/568719351:
-// Verifies that if a BackForwardCache restore navigation triggers prerender
-// activation checks in NavigationRequest::BeginNavigation(), and cancelling a
-// matching prerender synchronously starts a queued pending prerender whose
-// navigation evicts the BFCached page being restored (synchronously destroying
-// the primary main frame's NavigationRequest), BeginNavigation() does not
-// access `this` after it is destroyed.
-IN_PROC_BROWSER_TEST_F(PrerenderBackForwardCacheBrowserTest,
-                       EvictBackForwardCacheDuringPrerenderActivationCheck) {
-  net::test_server::ControllableHttpResponse response1(
-      embedded_test_server(), "/empty.html?prerender=1");
-  ASSERT_TRUE(embedded_test_server()->Start());
-
-  const GURL initial_url = embedded_test_server()->GetURL("/empty.html");
-  const GURL next_url = embedded_test_server()->GetURL("/empty.html?next");
-  const GURL prerender1_url =
-      embedded_test_server()->GetURL("/empty.html?prerender=1");
-  const GURL prerender2_url =
-      embedded_test_server()->GetURL("/empty.html?prerender2");
-
-  // 1. Navigate to `initial_url` and then `next_url` so `initial_rfh` is
-  // stored in the BackForwardCache.
-  ASSERT_TRUE(NavigateToURL(shell(), initial_url));
-  RenderFrameHostImplWrapper initial_rfh(current_frame_host());
-  ASSERT_TRUE(NavigateToURL(shell(), next_url));
-  ASSERT_TRUE(initial_rfh->IsInBackForwardCache());
-
-  // 2. Trigger `prerender1_url` with a No-Vary-Search hint matching
-  // `initial_url`, and hold its initial navigation in-flight so it remains the
-  // running prerender (`running_prerender_host_id_`). Queue `prerender2_url`
-  // behind it in `pending_prerenders_`.
-  test::PrerenderHostRegistryObserver registry_observer(*web_contents_impl());
-  AddPrerenderAsync(prerender1_url, R"(params=(\\\"prerender\\\"))");
-  response1.WaitForRequest();
-  AddPrerenderAsync(prerender2_url);
-  registry_observer.WaitForTrigger(prerender2_url);
-
-  // 3. When `prerender2_url` starts its initial navigation (triggered
-  // synchronously when `prerender1_url` is cancelled during
-  // `FindPotentialHostToActivate()`), evict `initial_rfh` from BFCache (e.g.
-  // simulating ServiceWorker activation evicting BFCached controllees). This
-  // synchronously calls `RestartBackForwardCachedNavigationAsync()` and
-  // destroys the in-flight BFCache restore `NavigationRequest`.
-  bool evicted_during_prerender2_start = false;
-  base::RunLoop primary_page_changed_loop;
-  testing::NiceMock<MockWebContentsObserver> observer(web_contents());
-  ON_CALL(observer, DidStartNavigation(testing::_))
-      .WillByDefault([&](NavigationHandle* navigation_handle) {
-        if (navigation_handle->GetURL() == prerender2_url &&
-            initial_rfh->IsInBackForwardCache()) {
-          evicted_during_prerender2_start = true;
-          initial_rfh->EvictFromBackForwardCacheWithReason(
-              BackForwardCacheMetrics::NotRestoredReason::
-                  kServiceWorkerVersionActivation);
-        }
-      });
-  ON_CALL(observer, PrimaryPageChanged(testing::_))
-      .WillByDefault([&](Page&) { primary_page_changed_loop.Quit(); });
-
-  // 4. Navigate back to `initial_url`. The BFCache restore navigation is
-  // restarted as a normal navigation and should complete without crashing.
-  shell()->GoBackOrForward(-1);
-  EXPECT_TRUE(evicted_during_prerender2_start);
-  primary_page_changed_loop.Run();
-  EXPECT_EQ(web_contents()->GetLastCommittedURL(), initial_url);
-}
-
 #if !BUILDFLAG(IS_ANDROID)
 // The out-of-process StorageService is not implemented on Android. Also as
 // commented below, test_api->CrashNow() won't work on x86 and x86_64 Android.
@@ -16185,76 +16125,6 @@ IN_PROC_BROWSER_TEST_F(PrerenderTargetHintBrowserTest,
   EXPECT_TRUE(ExecJs(web_contents(), ""));
 }
 
-// Tests that Prerender is suppressed by slow network.
-IN_PROC_BROWSER_TEST_P(PrerenderBrowserTestFallbackEnabledDisabled,
-                       SlowNetwork) {
-  // Emulate slow network.
-  MockClientHintsControllerDelegate client_hints_controller_delegate(
-      GetShellUserAgentMetadata());
-  ShellContentBrowserClient::Get()
-      ->browser_context()
-      ->set_client_hints_controller_delegate(&client_hints_controller_delegate);
-  network::NetworkQualityTracker& network_quality_tracker =
-      *client_hints_controller_delegate.GetNetworkQualityTracker();
-  base::TimeDelta http_rtt =
-      base::Milliseconds(1) +
-      ::features::kSuppressesPrerenderingOnSlowNetworkThreshold.Get();
-  network_quality_tracker.ReportRTTsAndThroughputForTesting(
-      http_rtt, network_quality_tracker.GetDownstreamThroughputKbps());
-
-  ASSERT_TRUE(embedded_test_server()->Start());
-
-  GURL initial_url = GetUrl("/empty.html");
-  GURL prerendering_url = GetUrl("/empty.html?prerender");
-
-  // Attempt to prerender.
-  test::PrerenderHostRegistryObserver observer(*web_contents_impl());
-  ASSERT_TRUE(NavigateToURL(shell(), initial_url));
-  AddPrerenderAsync(prerendering_url);
-  observer.WaitForTrigger(prerendering_url);
-
-  // It should fail.
-  EXPECT_FALSE(HasHostForUrl(prerendering_url));
-  ExpectFinalStatusForSpeculationRule(PrerenderFinalStatus::kSlowNetwork);
-
-  // Navigate primary page to flush the metrics.
-  NavigatePrimaryPage(prerendering_url);
-
-  if (IsPrerender2FallbackPrefetchSpecRulesEnabled()) {
-    // Prerender is cancelled, but prefetch ahead of prerender is still alive
-    // and the navigation uses it.
-    ExpectPreloadingAttemptUkm(
-        {attempt_ukm_entry_builder().BuildEntry(
-             PrimaryPageSourceId(), PreloadingType::kPrerender,
-             PreloadingEligibility::kSlowNetwork,
-             PreloadingHoldbackStatus::kUnspecified,
-             PreloadingTriggeringOutcome::kUnspecified,
-             PreloadingFailureReason::kUnspecified,
-             /*accurate=*/true,
-             /*ready_time=*/std::nullopt,
-             blink::mojom::SpeculationEagerness::kImmediate),
-         attempt_ukm_entry_builder().BuildEntry(
-             PrimaryPageSourceId(), PreloadingType::kPrefetch,
-             PreloadingEligibility::kEligible,
-             PreloadingHoldbackStatus::kAllowed,
-             PreloadingTriggeringOutcome::kSuccess,
-             PreloadingFailureReason::kUnspecified,
-             /*accurate=*/true,
-             /*ready_time=*/kMockElapsedTime,
-             blink::mojom::SpeculationEagerness::kImmediate)});
-  } else {
-    ExpectPreloadingAttemptUkm({attempt_ukm_entry_builder().BuildEntry(
-        PrimaryPageSourceId(), PreloadingType::kPrerender,
-        PreloadingEligibility::kSlowNetwork,
-        PreloadingHoldbackStatus::kUnspecified,
-        PreloadingTriggeringOutcome::kUnspecified,
-        PreloadingFailureReason::kUnspecified,
-        /*accurate=*/true,
-        /*ready_time=*/std::nullopt,
-        blink::mojom::SpeculationEagerness::kImmediate)});
-  }
-}
-
 class V8OptimizerContentBrowserClient
     : public ContentBrowserTestContentBrowserClient {
  public:
@@ -16362,7 +16232,8 @@ class PrerenderSessionHistoryBrowserTest
     if (from_browser) {
       ASSERT_TRUE(NavigateToURL(web_contents, url));
     } else {
-      ASSERT_TRUE(NavigateToURLFromRenderer(web_contents, url));
+      ASSERT_TRUE(content::NavigateToURLFromRenderer(web_contents, url));
+      SimulateEndOfPaintHoldingOnPrimaryMainFrame(web_contents);
     }
   }
 
@@ -18547,7 +18418,7 @@ class PrerenderActivationBeaconBrowserTest
     }
 
     if (base::StartsWith(path, "/beacon", base::CompareCase::SENSITIVE)) {
-      EXPECT_EQ(request.method, net::test_server::METHOD_HEAD);
+      EXPECT_EQ(request.method, net::test_server::METHOD_GET);
 
       GetUIThreadTaskRunner({})->PostTask(
           FROM_HERE,
@@ -18904,7 +18775,7 @@ class PrerenderActivationBeaconRedirectSameSiteBrowserTest
 
   std::unique_ptr<net::test_server::HttpResponse> HandleBeaconRequest(
       const net::test_server::HttpRequest& request) {
-    EXPECT_EQ(request.method, net::test_server::METHOD_HEAD);
+    EXPECT_EQ(request.method, net::test_server::METHOD_GET);
 
     GetUIThreadTaskRunner({})->PostTask(
         FROM_HERE,

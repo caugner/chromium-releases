@@ -369,14 +369,6 @@ bool Request::RequestToken(
   // TODO(crbug.com/40218857): handle active mode with multiple IdP.
   if (idp_get_params_ptrs[0]->mode == blink::mojom::RpMode::kActive) {
     rp_mode_ = RpMode::kActive;
-    std::optional<base::TimeTicks> user_info_accounts_response_time =
-        GetPageData(render_frame_host().GetPage())
-            ->ConsumeUserInfoAccountsResponseTime(
-                idp_get_params_ptrs[0]->providers[0]->config->config_url);
-    if (user_info_accounts_response_time) {
-      fedcm_metrics_->RecordTimeBetweenUserInfoAndActiveModeAPI(
-          start_time_ - user_info_accounts_response_time.value());
-    }
     if (!had_transient_user_activation_) {
       CompleteRequestWithError(
           FederatedRequestResult::kMissingTransientUserActivation,
@@ -515,12 +507,14 @@ bool Request::RequestToken(
     const GURL& idp_config_url = idp_order_[0];
     auto get_info_it = token_request_get_infos_.find(idp_config_url);
     CHECK(get_info_it != token_request_get_infos_.end());
-    if (!GetDialogController()->ShowLoadingDialog(
-            CreateRpData(/*client_metadata_received=*/false),
-            FormatOriginForDisplay(url::Origin::Create(idp_config_url)),
-            get_info_it->second.rp_context, rp_mode_,
-            base::BindOnce(&Request::OnDialogDismissed,
-                           weak_ptr_factory_.GetWeakPtr()))) {
+    if (!ShowDialog([&]() {
+          return GetDialogController()->ShowLoadingDialog(
+              CreateRpData(/*client_metadata_received=*/false),
+              FormatOriginForDisplay(url::Origin::Create(idp_config_url)),
+              get_info_it->second.rp_context, rp_mode_,
+              base::BindOnce(&Request::OnDialogDismissed,
+                             weak_ptr_factory_.GetWeakPtr()));
+        })) {
       return false;
     }
     did_show_ui_ = true;
@@ -586,6 +580,26 @@ void Request::FetchEndpointsForIdps(const std::set<GURL>& idp_config_urls) {
           rp_mode_, icon_ideal_size, icon_minimum_size, mediation_requirement_),
       base::BindOnce(&Request::OnAccountsResultsReceived,
                      weak_ptr_factory_.GetWeakPtr()));
+
+  // When retrying (e.g. after IDP sign-in failure popup), there is only 1 IDP
+  // requested and its .well-known and config endpoints/metadata are already
+  // cached in `idp_infos_`. In this case, bypass ConfigFetcher and directly
+  // fetch accounts for the cached IDP.
+  if (idps.size() == 1u) {
+    auto it = idp_infos_.find(idps[0].identity_provider_config_url);
+    if (it != idp_infos_.end() && it->second) {
+      std::vector<std::unique_ptr<IdentityProviderInfo>> cached_idp_infos;
+      cached_idp_infos.push_back(
+          std::make_unique<IdentityProviderInfo>(*it->second));
+      fedcm_accounts_fetcher_->FetchAccountsForIdps(
+          cached_idp_infos, token_request_get_infos_, fedcm_metrics_.get(),
+          GetEmbeddingOrigin(),
+          base::BindRepeating(&Request::FilterAccounts,
+                              weak_ptr_factory_.GetWeakPtr()));
+      return;
+    }
+  }
+
   fedcm_accounts_fetcher_->FetchEndpointsForIdps(
       idps, token_request_get_infos_, fedcm_metrics_.get(),
       GetEmbeddingOrigin(),
@@ -623,7 +637,9 @@ void Request::FilterAccounts(const GURL& idp_config_url,
 void Request::OnAccountsResultsReceived(
     base::TimeTicks well_known_and_config_fetched_time,
     std::vector<AccountsFetcher::Result> results) {
-  SetWellKnownAndConfigFetchedTime(well_known_and_config_fetched_time);
+  if (!well_known_and_config_fetched_time.is_null()) {
+    SetWellKnownAndConfigFetchedTime(well_known_and_config_fetched_time);
+  }
 
   for (auto& result : results) {
     if (result.idp_info) {
@@ -876,13 +892,7 @@ Request::AutoReauthnInfo Request::CheckAutoReauthnEligibility() {
       auto_reauthn_permission_delegate()->IsAutoReauthnDisabledByEmbedder(
           WebContents::FromRenderFrameHost(&render_frame_host()));
 
-  std::optional<base::TimeDelta> time_from_embargo;
   if (is_auto_reauthn_embargoed) {
-    time_from_embargo =
-        base::Time::Now() -
-        auto_reauthn_permission_delegate()->GetAutoReauthnEmbargoStartTime(
-            GetEmbeddingOrigin());
-
     // See `kFederatedIdentityAutoReauthnEmbargoDuration`.
     render_frame_host().AddMessageToConsole(
         blink::mojom::ConsoleMessageLevel::kInfo,
@@ -905,8 +915,7 @@ Request::AutoReauthnInfo Request::CheckAutoReauthnEligibility() {
   fedcm_metrics_->RecordAutoReauthnMetrics(
       has_single_returning_account, auto_reauthn_account.get(), is_eligible,
       !is_auto_reauthn_setting_enabled, is_auto_reauthn_embargoed,
-      is_auto_reauthn_blocked_by_embedder, time_from_embargo,
-      requires_user_mediation);
+      is_auto_reauthn_blocked_by_embedder, requires_user_mediation);
 
   if (is_eligible) {
     result.is_eligible = true;
@@ -1034,31 +1043,35 @@ void Request::MaybeShowAccountsDialog() {
     GetDialogController()->SetIsInterceptionEnabled(intercept);
   }
 
+  bool shown = false;
   if (identity_selection_type_ != kExplicit) {
     OnAccountSelected(accounts_[0]->identity_provider->idp_metadata.config_url,
                       accounts_[0]->id, /*is_sign_in=*/true);
-    if (!GetDialogController()->ShowVerifyingDialog(
-            CreateRpData(/*client_metadata_received=*/true), auto_reauthn.idp,
-            accounts_[0], SignInMode::kAuto, rp_mode_,
-            base::BindOnce(&Request::OnAccountsDisplayed,
-                           weak_ptr_factory_.GetWeakPtr()))) {
-      return;
-    }
+    shown = ShowDialog([&]() {
+      return GetDialogController()->ShowVerifyingDialog(
+          CreateRpData(/*client_metadata_received=*/true), auto_reauthn.idp,
+          accounts_[0], SignInMode::kAuto, rp_mode_,
+          base::BindOnce(&Request::OnAccountsDisplayed,
+                         weak_ptr_factory_.GetWeakPtr()));
+    });
   } else {
-    if (!GetDialogController()->ShowAccountsDialog(
-            CreateRpData(/*client_metadata_received=*/true),
-            idp_data_for_display_, accounts_, filtered_accounts_, rp_mode_,
-            base::BindOnce(&Request::OnAccountSelected,
-                           weak_ptr_factory_.GetWeakPtr()),
-            base::BindRepeating(&Request::LoginToIdP,
-                                weak_ptr_factory_.GetWeakPtr(),
-                                /*can_append_hints=*/false),
-            base::BindOnce(&Request::OnDialogDismissed,
-                           weak_ptr_factory_.GetWeakPtr()),
-            base::BindOnce(&Request::OnAccountsDisplayed,
-                           weak_ptr_factory_.GetWeakPtr()))) {
-      return;
-    }
+    shown = ShowDialog([&]() {
+      return GetDialogController()->ShowAccountsDialog(
+          CreateRpData(/*client_metadata_received=*/true),
+          idp_data_for_display_, accounts_, filtered_accounts_, rp_mode_,
+          base::BindOnce(&Request::OnAccountSelected,
+                         weak_ptr_factory_.GetWeakPtr()),
+          base::BindRepeating(&Request::LoginToIdP,
+                              weak_ptr_factory_.GetWeakPtr(),
+                              /*can_append_hints=*/false),
+          base::BindOnce(&Request::OnDialogDismissed,
+                         weak_ptr_factory_.GetWeakPtr()),
+          base::BindOnce(&Request::OnAccountsDisplayed,
+                         weak_ptr_factory_.GetWeakPtr()));
+    });
+  }
+  if (!shown) {
+    return;
   }
   AfterAccountsDialogShown(did_succeed_for_at_least_one_idp);
 }
@@ -1136,12 +1149,14 @@ void Request::NotifyAutofillSuggestionAccepted(
   // before we can call ShowAccountsDialog() to create the internal state
   // necessary in the dialog controller. We should probably be able to create
   // the internal state on demand in case it isn't available.
-  if (!GetDialogController()->ShowLoadingDialog(
-          CreateRpData(/*client_metadata_received=*/true),
-          FormatOriginForDisplay(url::Origin::Create(idp)),
-          get_info_it->second.rp_context, blink::mojom::RpMode::kActive,
-          base::BindOnce(&Request::OnDialogDismissed,
-                         weak_ptr_factory_.GetWeakPtr()))) {
+  if (!ShowDialog([&]() {
+        return GetDialogController()->ShowLoadingDialog(
+            CreateRpData(/*client_metadata_received=*/true),
+            FormatOriginForDisplay(url::Origin::Create(idp)),
+            get_info_it->second.rp_context, blink::mojom::RpMode::kActive,
+            base::BindOnce(&Request::OnDialogDismissed,
+                           weak_ptr_factory_.GetWeakPtr()));
+      })) {
     return;
   }
   did_show_ui_ = true;
@@ -1161,19 +1176,21 @@ void Request::NotifyAutofillSuggestionAccepted(
   for (const auto& account : selected) {
     account->display_priority = IdentityRequestAccount::DisplayPriority::kNew;
   }
-  if (!GetDialogController()->ShowAccountsDialog(
-          CreateRpData(/*client_metadata_received=*/true),
-          idp_data_for_display_, selected, filtered_accounts_,
-          blink::mojom::RpMode::kActive,
-          base::BindOnce(&Request::OnAccountSelected,
-                         weak_ptr_factory_.GetWeakPtr()),
-          base::BindRepeating(&Request::LoginToIdP,
-                              weak_ptr_factory_.GetWeakPtr(),
-                              /*can_append_hints=*/false),
-          base::BindOnce(&Request::OnDialogDismissed,
-                         weak_ptr_factory_.GetWeakPtr()),
-          base::BindOnce(&Request::OnAccountsDisplayed,
-                         weak_ptr_factory_.GetWeakPtr()))) {
+  if (!ShowDialog([&]() {
+        return GetDialogController()->ShowAccountsDialog(
+            CreateRpData(/*client_metadata_received=*/true),
+            idp_data_for_display_, selected, filtered_accounts_,
+            blink::mojom::RpMode::kActive,
+            base::BindOnce(&Request::OnAccountSelected,
+                           weak_ptr_factory_.GetWeakPtr()),
+            base::BindRepeating(&Request::LoginToIdP,
+                                weak_ptr_factory_.GetWeakPtr(),
+                                /*can_append_hints=*/false),
+            base::BindOnce(&Request::OnDialogDismissed,
+                           weak_ptr_factory_.GetWeakPtr()),
+            base::BindOnce(&Request::OnAccountsDisplayed,
+                           weak_ptr_factory_.GetWeakPtr()));
+      })) {
     return;
   }
   // TODO(crbug.com/435216589): Should we call AfterAccountsDialogShown here?
@@ -1248,15 +1265,17 @@ void Request::ShowSingleIdpFailureDialog() {
                    !idp_info->provider->domain_hint.empty() ||
                    !idp_info->metadata.requested_label.empty();
 
-  if (!GetDialogController()->ShowFailureDialog(
-          CreateRpData(/*client_metadata_received=*/true),
-          FormatOriginForDisplay(idp_origin), idp_info->rp_context, rp_mode_,
-          idp_info->metadata, filtered_accounts_,
-          base::BindOnce(&Request::OnDismissFailureDialog,
-                         weak_ptr_factory_.GetWeakPtr()),
-          base::BindRepeating(&Request::LoginToIdP,
-                              weak_ptr_factory_.GetWeakPtr(),
-                              /*can_append_hints=*/true))) {
+  if (!ShowDialog([&]() {
+        return GetDialogController()->ShowFailureDialog(
+            CreateRpData(/*client_metadata_received=*/true),
+            FormatOriginForDisplay(idp_origin), idp_info->rp_context, rp_mode_,
+            idp_info->metadata, filtered_accounts_,
+            base::BindOnce(&Request::OnDismissFailureDialog,
+                           weak_ptr_factory_.GetWeakPtr()),
+            base::BindRepeating(&Request::LoginToIdP,
+                                weak_ptr_factory_.GetWeakPtr(),
+                                /*can_append_hints=*/true));
+      })) {
     return;
   }
   did_show_ui_ = true;
@@ -1513,12 +1532,21 @@ void Request::ShowModalDialog(DialogType dialog_type,
     }
   };
 
-  WebContents* web_contents = GetDialogController()->ShowModalDialog(
-      url_to_show, rp_mode_,
-      base::BindOnce(&Request::OnDialogDismissed,
-                     weak_ptr_factory_.GetWeakPtr()),
-      base::BindOnce(create_registry_async, weak_ptr_factory_.GetWeakPtr(),
-                     idp_config_url));
+  WebContents* web_contents = nullptr;
+  if (!ShowDialog([&]() {
+        web_contents = GetDialogController()->ShowModalDialog(
+            url_to_show, rp_mode_,
+            base::BindOnce(&Request::OnDialogDismissed,
+                           weak_ptr_factory_.GetWeakPtr()),
+            base::BindOnce(create_registry_async,
+                           weak_ptr_factory_.GetWeakPtr(), idp_config_url),
+            base::BindOnce(&Request::OnNativeAppResult,
+                           weak_ptr_factory_.GetWeakPtr(), dialog_type,
+                           idp_config_url));
+        return true;
+      })) {
+    return;
+  }
   did_show_ui_ = true;
   // This may be null on Android, as the method cannot return the WebContents of
   // the CCT that will be created.
@@ -1675,19 +1703,21 @@ void Request::ShowErrorDialog(const GURL& idp_config_url,
   token_error_ = token_error;
 
   // TODO(crbug.com/40282657): Refactor IdentityCredentialTokenError
-  if (!GetDialogController()->ShowErrorDialog(
-          CreateRpData(/*client_metadata_received=*/true),
-          FormatOriginForDisplay(url::Origin::Create(idp_config_url)),
-          idp_infos_[idp_config_url]->rp_context, rp_mode_,
-          idp_infos_[idp_config_url]->metadata, token_error,
-          base::BindOnce(&Request::OnDismissErrorDialog,
-                         weak_ptr_factory_.GetWeakPtr(), idp_config_url,
-                         status),
-          token_error && !token_error->url.is_empty()
-              ? base::BindOnce(
-                    &Request::ShowModalDialog, weak_ptr_factory_.GetWeakPtr(),
-                    DialogType::kErrorUrlPopup, config_url_, token_error->url)
-              : base::NullCallback())) {
+  if (!ShowDialog([&]() {
+        return GetDialogController()->ShowErrorDialog(
+            CreateRpData(/*client_metadata_received=*/true),
+            FormatOriginForDisplay(url::Origin::Create(idp_config_url)),
+            idp_infos_[idp_config_url]->rp_context, rp_mode_,
+            idp_infos_[idp_config_url]->metadata, token_error,
+            base::BindOnce(&Request::OnDismissErrorDialog,
+                           weak_ptr_factory_.GetWeakPtr(), idp_config_url,
+                           status),
+            token_error && !token_error->url.is_empty()
+                ? base::BindOnce(
+                      &Request::ShowModalDialog, weak_ptr_factory_.GetWeakPtr(),
+                      DialogType::kErrorUrlPopup, config_url_, token_error->url)
+                : base::NullCallback());
+      })) {
     return;
   }
   did_show_ui_ = true;
@@ -1721,14 +1751,14 @@ void Request::OnTokenResponseReceived(
   // takes a long time due to latency etc. In case that the fetching process is
   // fast, we still want to show the "Verify" sheet for at least
   // `kTokenRequestDelay` seconds for better UX.
-  // Note that for active flow or conditional flow we can complete without delay
-  // because there is no contextual UI displayed to users.
+  // Note that for active flow, conditional flow, or when an error occurs we can
+  // complete without delay.
   id_assertion_response_time_ = base::TimeTicks::Now();
   base::TimeDelta fetch_time =
       id_assertion_response_time_ - select_account_time_;
   if (should_complete_request_immediately_ || rp_mode_ == RpMode::kActive ||
       mediation_requirement_ == MediationRequirement::kConditional ||
-      fetch_time >= kTokenRequestDelay) {
+      should_show_error_ui || fetch_time >= kTokenRequestDelay) {
     std::move(complete_request_callback).Run();
     return;
   }
@@ -2064,6 +2094,17 @@ IdentityRequestDialogController* Request::GetDialogController() {
   return request_service_->GetOrCreateDialogController();
 }
 
+bool Request::ShowDialog(base::FunctionRef<bool()> show_dialog_callback) {
+  // Showing a FedCM UI may cause the tab to drop fullscreen or lose focus,
+  // during which the frame may be detached and this Request destroyed. Check
+  // that the Request is still alive before returning true.
+  base::WeakPtr<Request> weak_this = weak_ptr_factory_.GetWeakPtr();
+  if (!show_dialog_callback()) {
+    return false;
+  }
+  return weak_this != nullptr;
+}
+
 base::WeakPtr<Request> Request::GetWeakPtr() {
   return weak_ptr_factory_.GetWeakPtr();
 }
@@ -2180,6 +2221,49 @@ void Request::OnOriginMismatch(Method method,
       blink::mojom::ConsoleMessageLevel::kError, error_messsage);
 }
 
+void Request::OnIntentResolved(const std::string& token) {
+  blink::mojom::ResolveTokenParamsPtr params =
+      blink::mojom::ResolveTokenParams::NewToken(base::Value(token));
+  OnResolve(config_url_, std::nullopt, std::move(params));
+}
+
+void Request::OnNativeAppResult(
+    DialogType dialog_type,
+    const GURL& idp_config_url,
+    IdentityRequestDialogController::NativeAppResult result) {
+  if (!request_token_callback_) {
+    return;
+  }
+  if (result.type ==
+      IdentityRequestDialogController::NativeAppResult::Type::kToken) {
+    if (dialog_type != DialogType::kContinueOnPopup) {
+      CompleteRequestWithError(FederatedRequestResult::kError,
+                               TokenStatus::kLoginPopupClosedWithoutSignin,
+                               /*should_delay_callback=*/false);
+      return;
+    }
+    OnIntentResolved(result.token);
+  } else if (result.type == IdentityRequestDialogController::NativeAppResult::
+                                Type::kLoginFinished) {
+    if (dialog_type != DialogType::kLoginToIdpPopup) {
+      CompleteRequestWithError(FederatedRequestResult::kError,
+                               TokenStatus::kContinuationPopupClosedByUser,
+                               /*should_delay_callback=*/false);
+      return;
+    }
+    OnNativeAppLoginFinished(idp_config_url);
+  }
+}
+
+void Request::OnNativeAppLoginFinished(const GURL& idp_config_url) {
+  GetDialogController()->CloseModalDialog();
+  permission_delegate()->RemoveIdpSigninStatusObserver(this);
+  permission_delegate()->SetIdpSigninStatus(
+      url::Origin::Create(idp_config_url), /*is_signed_in=*/true, std::nullopt);
+  idps_user_tried_to_signin_to_.insert(idp_config_url);
+  FetchEndpointsForIdps({idp_config_url});
+}
+
 FederatedApiPermissionStatus Request::GetApiPermissionStatus() {
   DCHECK(api_permission_delegate());
   return api_permission_delegate()->GetApiPermissionStatus(
@@ -2245,7 +2329,13 @@ void Request::ClickErrorDialogGotItForDevtools() {
 
 void Request::ClickErrorDialogMoreDetailsForDevtools() {
   DCHECK(token_error_ && token_error_->url.is_valid());
-  ShowModalDialog(DialogType::kErrorUrlPopup, config_url_, token_error_->url);
+  if (!ShowDialog([&]() {
+        ShowModalDialog(DialogType::kErrorUrlPopup, config_url_,
+                        token_error_->url);
+        return true;
+      })) {
+    return;
+  }
   OnDismissErrorDialog(
       config_url_, token_request_status_,
       IdentityRequestDialogController::DismissReason::kMoreDetailsButton);
@@ -2325,12 +2415,7 @@ bool Request::ShouldFailBeforeFetchingAccounts(const GURL& config_url) {
   bool is_auto_reauthn_embargoed =
       auto_reauthn_permission_delegate()->IsAutoReauthnEmbargoed(
           GetEmbeddingOrigin());
-  std::optional<base::TimeDelta> time_from_embargo;
   if (is_auto_reauthn_embargoed) {
-    time_from_embargo =
-        base::Time::Now() -
-        auto_reauthn_permission_delegate()->GetAutoReauthnEmbargoStartTime(
-            GetEmbeddingOrigin());
     render_frame_host().AddMessageToConsole(
         blink::mojom::ConsoleMessageLevel::kError,
         "Silent mediation issue: auto re-authn is in quiet period because it "
@@ -2367,7 +2452,7 @@ bool Request::ShouldFailBeforeFetchingAccounts(const GURL& config_url) {
         /*auto_signin_account=*/nullptr,
         /*auto_reauthn_success=*/false, !is_auto_reauthn_setting_enabled,
         is_auto_reauthn_embargoed, is_auto_reauthn_blocked_by_embedder,
-        time_from_embargo, requires_user_mediation);
+        requires_user_mediation);
     return true;
   }
   return false;
