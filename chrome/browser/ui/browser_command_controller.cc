@@ -18,6 +18,7 @@
 #include "base/i18n/rtl.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/user_metrics.h"
+#include "base/notimplemented.h"
 #include "base/time/time.h"
 #include "build/branding_buildflags.h"
 #include "build/build_config.h"
@@ -56,6 +57,7 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_select_file_dialog_controller.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
@@ -104,6 +106,7 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/common/webui_url_constants.h"
 #include "components/bookmarks/browser/bookmark_model_load_waiter.h"
+#include "components/bookmarks/common/bookmark_bar_visibility_state.h"
 #include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/dom_distiller/core/dom_distiller_features.h"
 #include "components/input/native_web_keyboard_event.h"
@@ -137,6 +140,7 @@
 
 #if !BUILDFLAG(IS_ANDROID)
 #include "chrome/browser/devtools/devtools_policy_dialog.h"
+#include "chrome/browser/lifetime/application_lifetime_desktop.h"
 #include "chrome/browser/ui/interaction/browser_elements.h"
 #include "ui/base/interaction/element_identifier.h"
 #include "ui/base/interaction/element_tracker.h"
@@ -147,8 +151,12 @@
 #endif
 
 #if BUILDFLAG(IS_WIN)
+#include <windows.h>
+
 #include "base/win/windows_version.h"
 #include "content/public/browser/gpu_data_manager.h"
+#include "ui/aura/window.h"
+#include "ui/aura/window_tree_host.h"
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS)
@@ -316,6 +324,11 @@ BrowserCommandController::BrowserCommandController(BrowserWindowInterface* bwi)
           base::Unretained(this)));
   profile_pref_registrar_.Add(
       bookmarks::prefs::kShowBookmarkBar,
+      base::BindRepeating(
+          &BrowserCommandController::UpdateCommandsForBookmarkBar,
+          base::Unretained(this)));
+  profile_pref_registrar_.Add(
+      bookmarks::prefs::kBookmarkBarVisibilityState,
       base::BindRepeating(
           &BrowserCommandController::UpdateCommandsForBookmarkBar,
           base::Unretained(this)));
@@ -756,7 +769,7 @@ bool BrowserCommandController::ExecuteCommandWithDisposition(
       break;
     case IDC_NEW_SPLIT_TAB:
       if (!browser_->tab_strip_model()->GetActiveTab()->IsSplit()) {
-        NewSplitTab(browser_,
+        NewSplitTab(browser_, split_tabs::SplitTabLayout::kSideBySide,
                     split_tabs::SplitTabCreatedSource::kKeyboardShortcut);
       }
       break;
@@ -779,7 +792,7 @@ bool BrowserCommandController::ExecuteCommandWithDisposition(
       break;
 #endif
 
-#if BUILDFLAG(IS_LINUX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
     case IDC_MINIMIZE_WINDOW:
       browser_->window()->Minimize();
       break;
@@ -789,13 +802,38 @@ bool BrowserCommandController::ExecuteCommandWithDisposition(
     case IDC_RESTORE_WINDOW:
       browser_->window()->Restore();
       break;
+
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
+
+#if BUILDFLAG(IS_LINUX)
     case IDC_USE_SYSTEM_TITLE_BAR: {
       PrefService* prefs = profile()->GetPrefs();
       prefs->SetBoolean(prefs::kUseCustomChromeFrame,
                         !prefs->GetBoolean(prefs::kUseCustomChromeFrame));
       break;
     }
-#endif
+#endif  // BUILDFLAG(IS_LINUX)
+
+#if BUILDFLAG(IS_WIN)
+    case IDC_MOVE_WINDOW: {
+      HWND hwnd = BrowserView::GetBrowserViewForBrowser(browser_)
+                      ->GetWidget()
+                      ->GetNativeWindow()
+                      ->GetHost()
+                      ->GetAcceleratedWidget();
+      PostMessage(hwnd, WM_SYSCOMMAND, SC_MOVE, 0);
+      break;
+    }
+    case IDC_SIZE_WINDOW: {
+      HWND hwnd = BrowserView::GetBrowserViewForBrowser(browser_)
+                      ->GetWidget()
+                      ->GetNativeWindow()
+                      ->GetHost()
+                      ->GetAcceleratedWidget();
+      PostMessage(hwnd, WM_SYSCOMMAND, SC_SIZE, 0);
+      break;
+    }
+#endif  // BUILDFLAG(IS_WIN)
 
 #if BUILDFLAG(IS_MAC)
     case IDC_TOGGLE_FULLSCREEN_TOOLBAR:
@@ -1015,7 +1053,9 @@ bool BrowserCommandController::ExecuteCommandWithDisposition(
 
     // Show various bits of UI
     case IDC_OPEN_FILE:
-      browser_->OpenFile();
+      browser_->GetFeatures()
+          .browser_select_file_dialog_controller()
+          ->OpenFile();
       break;
     case IDC_CREATE_SHORTCUT:
       base::RecordAction(base::UserMetricsAction("CreateShortcut"));
@@ -1078,6 +1118,24 @@ bool BrowserCommandController::ExecuteCommandWithDisposition(
       break;
     case IDC_SHOW_BOOKMARK_BAR:
       ToggleBookmarkBar(browser_);
+      break;
+    case IDC_BOOKMARK_BAR_SUBMENU_ALWAYS_SHOW:
+      base::RecordAction(base::UserMetricsAction(
+          "WrenchMenu_Bookmarks_AlwaysShowBookmarkBar"));
+      SetBookmarkBarVisibilityState(
+          browser_, bookmarks::BookmarkBarVisibilityState::kAlwaysShow);
+      break;
+    case IDC_BOOKMARK_BAR_SUBMENU_ALWAYS_HIDE:
+      base::RecordAction(base::UserMetricsAction(
+          "WrenchMenu_Bookmarks_AlwaysHideBookmarkBar"));
+      SetBookmarkBarVisibilityState(
+          browser_, bookmarks::BookmarkBarVisibilityState::kAlwaysHide);
+      break;
+    case IDC_BOOKMARK_BAR_SUBMENU_ONLY_ON_NTP:
+      base::RecordAction(base::UserMetricsAction(
+          "WrenchMenu_Bookmarks_OnlyShowBookmarkBarOnNtp"));
+      SetBookmarkBarVisibilityState(
+          browser_, bookmarks::BookmarkBarVisibilityState::kOnlyShowOnNtp);
       break;
     case IDC_SHOW_FULL_URLS:
       ToggleShowFullURLs(browser_);
@@ -1616,20 +1674,28 @@ void BrowserCommandController::InitCommandState() {
   command_updater_.UpdateCommandEnabled(IDC_VISIT_DESKTOP_OF_LRU_USER_4, true);
   command_updater_.UpdateCommandEnabled(IDC_VISIT_DESKTOP_OF_LRU_USER_5, true);
 #endif
-#if BUILDFLAG(IS_LINUX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
   command_updater_.UpdateCommandEnabled(IDC_MINIMIZE_WINDOW, true);
   command_updater_.UpdateCommandEnabled(IDC_MAXIMIZE_WINDOW, true);
   command_updater_.UpdateCommandEnabled(IDC_RESTORE_WINDOW, true);
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
 
+#if BUILDFLAG(IS_LINUX)
   bool use_system_title_bar = true;
 #if BUILDFLAG(IS_OZONE)
   use_system_title_bar = ui::OzonePlatform::GetInstance()
                              ->GetPlatformRuntimeProperties()
                              .supports_server_side_window_decorations;
-#endif
+#endif  // BUILDFLAG(IS_OZONE)
   command_updater_.UpdateCommandEnabled(IDC_USE_SYSTEM_TITLE_BAR,
                                         use_system_title_bar);
 #endif  // BUILDFLAG(IS_LINUX)
+
+#if BUILDFLAG(IS_WIN)
+  command_updater_.UpdateCommandEnabled(IDC_MOVE_WINDOW, true);
+  command_updater_.UpdateCommandEnabled(IDC_SIZE_WINDOW, true);
+#endif  // BUILDFLAG(IS_WIN)
+
   command_updater_.UpdateCommandEnabled(IDC_OPEN_IN_PWA_WINDOW,
                                         web_app::CanPopOutWebApp(profile()));
 
@@ -2123,13 +2189,29 @@ void BrowserCommandController::UpdateCommandsForBookmarkBar() {
     return;
   }
 
+  const bool common_enabled =
+      browser_defaults::bookmarks_enabled && !profile()->IsGuestSession() &&
+      !profile()->IsSystemProfile() && IsShowingMainUI();
+
+  const bool visibility_commands_enabled =
+      common_enabled &&
+      !profile()->GetPrefs()->IsManagedPreference(
+          bookmarks::prefs::kBookmarkBarVisibilityState) &&
+      !profile()->GetPrefs()->IsManagedPreference(
+          bookmarks::prefs::kShowBookmarkBar);
+
   command_updater_.UpdateCommandEnabled(
-      IDC_SHOW_BOOKMARK_BAR, browser_defaults::bookmarks_enabled &&
-                                 !profile()->IsGuestSession() &&
-                                 !profile()->IsSystemProfile() &&
-                                 !profile()->GetPrefs()->IsManagedPreference(
-                                     bookmarks::prefs::kShowBookmarkBar) &&
-                                 IsShowingMainUI());
+      IDC_SHOW_BOOKMARK_BAR,
+      common_enabled && !profile()->GetPrefs()->IsManagedPreference(
+                            bookmarks::prefs::kShowBookmarkBar));
+  command_updater_.UpdateCommandEnabled(IDC_BOOKMARK_BAR_SUBMENU,
+                                        common_enabled);
+  command_updater_.UpdateCommandEnabled(IDC_BOOKMARK_BAR_SUBMENU_ALWAYS_SHOW,
+                                        visibility_commands_enabled);
+  command_updater_.UpdateCommandEnabled(IDC_BOOKMARK_BAR_SUBMENU_ALWAYS_HIDE,
+                                        visibility_commands_enabled);
+  command_updater_.UpdateCommandEnabled(IDC_BOOKMARK_BAR_SUBMENU_ONLY_ON_NTP,
+                                        visibility_commands_enabled);
 }
 
 void BrowserCommandController::UpdateCommandsForFileSelectionDialogs() {
@@ -2324,6 +2406,10 @@ void BrowserCommandController::UpdateGlicState() {
       command_updater_.UpdateCommandEnabled(
           IDC_OPEN_GLIC,
           glic::GlicEnabling::IsEnabledForProfile(profile()) && !glic_active);
+
+      if (auto* const action = FindAction(kActionSidePanelShowGlic)) {
+        action->SetVisible(glic::GlicEnabling::ShouldShowGlicButton(profile()));
+      }
     }
   }
 }
@@ -2496,6 +2582,12 @@ void BrowserCommandController::UpdateCommandAndActionEnabled(
 void BrowserCommandController::UpdateCommandsForEnableGlicChanged() {
   command_updater_.UpdateCommandEnabled(
       IDC_OPEN_GLIC, glic::GlicEnabling::IsEnabledForProfile(profile()));
+
+  if (glic::GlicEnabling::IsEnabledByGlobalCriteria()) {
+    if (auto* const action = FindAction(kActionSidePanelShowGlic)) {
+      action->SetVisible(glic::GlicEnabling::ShouldShowGlicButton(profile()));
+    }
+  }
 }
 
 BrowserWindow* BrowserCommandController::window() {

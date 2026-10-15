@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.actor.ui;
 
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import android.app.Activity;
@@ -16,6 +17,7 @@ import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
@@ -41,6 +43,9 @@ import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabObscuringHandler;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
+import org.chromium.chrome.browser.ui.side_ui.SideUiCoordinator.SideUiSpecs;
+import org.chromium.chrome.browser.ui.side_ui.SideUiObserver;
+import org.chromium.chrome.browser.ui.side_ui.SideUiStateProvider;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.ChromeRenderTestRule;
 import org.chromium.components.browser_ui.widget.gesture.BackPressHandlerRegistry;
@@ -60,7 +65,7 @@ public class ActorOverlayViewRenderTest {
     public ChromeRenderTestRule mRenderTestRule =
             ChromeRenderTestRule.Builder.withPublicCorpus()
                     .setBugComponent(ChromeRenderTestRule.Component.UI_BROWSER_GLIC)
-                    .setRevision(4)
+                    .setRevision(5)
                     .build();
 
     @Mock private TabModelSelector mTabModelSelector;
@@ -69,6 +74,7 @@ public class ActorOverlayViewRenderTest {
     @Mock private LayoutManager mLayoutManager;
     @Mock private Profile mProfile;
     @Mock private ActorKeyedService mActorKeyedService;
+    @Mock private SideUiStateProvider mSideUiStateProvider;
     private TestBrowserControlsVisibilityManager mBrowserControlsVisibilityManager;
 
     private TabObscuringHandler mTabObscuringHandler;
@@ -118,7 +124,8 @@ public class ActorOverlayViewRenderTest {
                                     mSnackbarManager,
                                     mBackPressHandlerRegistry,
                                     mLayoutManagerSupplier,
-                                    mProfileSupplier);
+                                    mProfileSupplier,
+                                    mSideUiStateProvider);
                 });
     }
 
@@ -144,6 +151,32 @@ public class ActorOverlayViewRenderTest {
     @Test
     @MediumTest
     @Feature({"RenderTest"})
+    public void testActorOverlay_accountsForSideUi() throws Exception {
+        ArgumentCaptor<SideUiObserver> sideUiObserverCaptor =
+                ArgumentCaptor.forClass(SideUiObserver.class);
+        verify(mSideUiStateProvider).addObserver(sideUiObserverCaptor.capture());
+
+        SideUiSpecs sideUiSpecs =
+                new SideUiSpecs(/* leftContainerWidth= */ 50, /* rightContainerWidth= */ 250);
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> {
+                    sideUiObserverCaptor.getValue().onSideUiSpecsChanged(sideUiSpecs);
+                    mCoordinator.getMediator().setOverlayVisible(true);
+                });
+
+        CriteriaHelper.pollUiThread(
+                () -> {
+                    return mParentView.getChildAt(0) != null
+                            && mParentView.getChildAt(0).getWidth() > 0;
+                },
+                "View did not get layout dimensions");
+
+        mRenderTestRule.render(mParentView, "actor_overlay_side_ui");
+    }
+
+    @Test
+    @MediumTest
+    @Feature({"RenderTest"})
     public void testActorOverlayHovered() throws Exception {
         ThreadUtils.runOnUiThreadBlocking(
                 () -> {
@@ -159,6 +192,28 @@ public class ActorOverlayViewRenderTest {
                 "View did not get layout dimensions");
 
         mRenderTestRule.render(mParentView, "actor_overlay_hovered");
+    }
+
+    @Test
+    @MediumTest
+    @Feature({"RenderTest"})
+    public void testActorOverlayWithTakeOverButton() throws Exception {
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> {
+                    mCoordinator.getMediator().setOverlayVisible(true);
+                    mCoordinator
+                            .getModelForTesting()
+                            .set(ActorOverlayProperties.TAKE_OVER_TASK_BUTTON_VISIBLE, true);
+                });
+
+        CriteriaHelper.pollUiThread(
+                () -> {
+                    return mParentView.getChildAt(0) != null
+                            && mParentView.getChildAt(0).getWidth() > 0;
+                },
+                "View did not get layout dimensions");
+
+        mRenderTestRule.render(mParentView, "actor_overlay_with_take_over_button");
     }
 
     // Test implementation that used to bypass mockito limitations on mocking extended interfaces.
@@ -265,6 +320,9 @@ public class ActorOverlayViewRenderTest {
 
         @Override
         public void showAndroidControls(boolean animate) {}
+
+        @Override
+        public void hideAndroidControls(boolean animate) {}
 
         @Override
         public void restoreControlsPositions() {}

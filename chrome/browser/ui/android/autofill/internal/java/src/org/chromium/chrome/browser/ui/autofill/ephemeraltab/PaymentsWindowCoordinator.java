@@ -56,6 +56,7 @@ class PaymentsWindowCoordinator implements EphemeralTabObserver {
         mEphemeralTabCoordinator.addObserver(this);
         Profile profile = Profile.fromWebContents(merchantWebContents);
         assert profile != null;
+        // TODO (crbug.com/519576741): Handle EphemeralTab rejecting show.
         mEphemeralTabCoordinator.requestOpenSheet(
                 url,
                 /* fullPageUrl= */ null,
@@ -63,7 +64,12 @@ class PaymentsWindowCoordinator implements EphemeralTabObserver {
                 profile,
                 /* canPromoteToNewTab= */ false,
                 /* shouldHaveContextMenu= */ false,
-                /* initiatorOrigin= */ null);
+                /* initiatorOrigin= */ null,
+                /* requestDeniedCallback= */ this::onUserDeniedTabOpening);
+    }
+
+    private void onUserDeniedTabOpening() {
+        mPaymentsWindowBridge.onUserDeniedTabOpening();
     }
 
     /** Attempts to close an ephemeral tab. */

@@ -339,6 +339,10 @@ class CustomWindowTargeter : public aura::WindowTargeter {
       return true;
     }
 
+    if (shell_surface_->IsPointWithinOverlay(local_point)) {
+      return true;
+    }
+
     aura::Window::ConvertPointToTarget(window, surface->window(), &local_point);
     return surface->HitTest(local_point);
   }
@@ -1131,6 +1135,19 @@ void ShellSurfaceBase::RemoveOverlay() {
   UpdateResizability();
 }
 
+bool ShellSurfaceBase::IsPointWithinOverlay(const gfx::Point& point) const {
+  if (!HasOverlay()) {
+    return false;
+  }
+
+  gfx::Point point_in_overlay = point;
+  aura::Window::ConvertPointToTarget(widget_->GetNativeWindow(),
+                                     overlay_widget_->GetNativeWindow(),
+                                     &point_in_overlay);
+
+  return overlay_widget_->GetNativeWindow()->ContainsPoint(point_in_overlay);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // SurfaceDelegate overrides:
 
@@ -1433,6 +1450,8 @@ void ShellSurfaceBase::OnCaptureChanged(aura::Window* lost_capture,
   if (lost_capture == gained_capture_parent)
     return;
 
+  base::WeakPtr<aura::Window> weak_gained =
+      gained_capture ? gained_capture->GetWeakPtrAsWindow() : nullptr;
   if (!gained_capture) {
     // If `gained_capture` is nullptr, find the closest ancestor of
     // `lost_capture` that is a popup with grab.
@@ -1443,11 +1462,17 @@ void ShellSurfaceBase::OnCaptureChanged(aura::Window* lost_capture,
         break;
       }
     }
-    // Give capture to the new `gained_capture`.
     if (gained_capture) {
+      base::WeakPtr<aura::Window> weak_lost =
+          lost_capture ? lost_capture->GetWeakPtrAsWindow() : nullptr;
+      weak_gained = gained_capture->GetWeakPtrAsWindow();
       ShellSurfaceBase* parent_shell_surface =
           GetShellSurfaceBaseForWindow(gained_capture);
       parent_shell_surface->StartCapture();
+      // If the lost capture is destroyed, there is nothing to close.
+      if (!weak_lost) {
+        return;
+      }
     }
   }
 
@@ -1474,7 +1499,7 @@ void ShellSurfaceBase::OnCaptureChanged(aura::Window* lost_capture,
 
   // Please note that `gained_capture_ancestors` also includes `gained_capture`.
   base::flat_set<aura::Window*> gained_capture_ancestors;
-  for (aura::Window* next = gained_capture; next != nullptr;
+  for (aura::Window* next = weak_gained.get(); next != nullptr;
        next = wm::GetTransientParent(next)) {
     gained_capture_ancestors.insert(next);
   }
@@ -2287,9 +2312,21 @@ void ShellSurfaceBase::OnPostWidgetCommit() {
 
 void ShellSurfaceBase::ShowWidget(bool activate) {
   if (activate) {
+    // Minimized windows cannot gain focus, when being un-minimized they will
+    // call into `ShowWidget` again which will validate activation permissions.
+    auto* window_state = ash::WindowState::Get(widget_->GetNativeWindow());
+    if (!(window_state && window_state->IsMinimized()) &&
+        GetSecurityDelegate() &&
+        !GetSecurityDelegate()->CanSelfActivate(widget_->GetNativeWindow())) {
+      activate = false;
+    }
+  }
+
+  if (activate) {
     // Widget will minimize itself if the initial state is minimized.
     widget_->Show();
   } else {
+    // `ShowInactive` does not have minimize support.
     widget_->ShowInactive();
   }
 }

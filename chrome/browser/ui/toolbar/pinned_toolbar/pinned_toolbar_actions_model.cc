@@ -21,6 +21,7 @@
 #include "chrome/browser/ui/tab_search_feature.h"
 #include "chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model_factory.h"
 #include "chrome/browser/ui/toolbar/toolbar_pref_names.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_change_registrar.h"
@@ -217,7 +218,6 @@ void PinnedToolbarActionsModel::ResetToDefault() {
   pref_service_->ClearPref(prefs::kShowHomeButton);
   pref_service_->ClearPref(prefs::kShowForwardButton);
   pref_service_->ClearPref(prefs::kPinSplitTabButton);
-  pref_service_->ClearPref(prefs::kPinContextualTaskButton);
   pref_service_->ClearPref(prefs::kPinnedActions);
 }
 
@@ -230,8 +230,7 @@ bool PinnedToolbarActionsModel::IsDefault() const {
   return std::ranges::all_of(
       std::initializer_list{prefs::kPinnedActions, prefs::kShowHomeButton,
                             prefs::kShowForwardButton,
-                            prefs::kPinSplitTabButton,
-                            prefs::kPinContextualTaskButton},
+                            prefs::kPinSplitTabButton},
       is_default_pref_value);
 }
 
@@ -253,6 +252,14 @@ void PinnedToolbarActionsModel::MaybeMigrateExistingPinnedStates() {
         pref_service_->GetBoolean(prefs::kShowCastIconInToolbar);
     UpdatePinnedState(kActionRouteMedia, previously_pinned);
     pref_service_->SetBoolean(prefs::kPinnedCastMigrationComplete, true);
+  }
+  if (base::FeatureList::IsEnabled(
+          features::kTabsFromOtherDevicesSidePanelPinnedByDefault) &&
+      !pref_service_->GetBoolean(
+          prefs::kTabsFromOtherDevicesAutoPinnedMigration)) {
+    UpdatePinnedState(kActionSidePanelShowTabsFromOtherDevices, true);
+    pref_service_->SetBoolean(prefs::kTabsFromOtherDevicesAutoPinnedMigration,
+                              true);
   }
 }
 

@@ -298,16 +298,7 @@ ci.thin_tester(
                     shards = 50,
                 ),
             ),
-            "chrome_public_test_apk": targets.mixin(
-                args = [
-                    "--test-launcher-filter-file=../../testing/buildbot/filters/android.desktop.chrome_public_test_apk_desktop.filter",
-                    "--test-launcher-filter-file=../../testing/buildbot/filters/android.desktop.emulator_15.chrome_public_test_apk.filter",
-                ],
-            ),
             "chrome_public_test_apk_desktop": targets.mixin(
-                args = [
-                    "--test-launcher-filter-file=../../testing/buildbot/filters/android.desktop.chrome_public_test_apk_desktop.filter",
-                ],
                 swarming = targets.swarming(
                     shards = 3,
                 ),
@@ -335,7 +326,9 @@ ci.thin_tester(
     targets_settings = targets.settings(
         os_type = targets.os_type.ANDROID,
     ),
+    builderless = True,
     cores = 8,
+    ssd = None,
     gardener_rotations = gardener_rotations.ANDROID,
     console_view_entry = consoles.console_view_entry(
         category = "tester|x64",

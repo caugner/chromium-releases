@@ -7,6 +7,7 @@ package org.chromium.chrome.browser.toolbar.optional_button;
 import static org.junit.Assert.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
@@ -16,7 +17,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
-import android.content.res.ColorStateList;
 import android.content.res.Resources;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
@@ -45,6 +45,7 @@ import org.chromium.chrome.browser.toolbar.adaptive.AdaptiveToolbarButtonVariant
 import org.chromium.chrome.browser.toolbar.adaptive.AdaptiveToolbarFeatures;
 import org.chromium.chrome.browser.toolbar.optional_button.ButtonData.ButtonSpec;
 import org.chromium.chrome.browser.toolbar.optional_button.OptionalButtonCoordinator.TransitionType;
+import org.chromium.chrome.browser.ui.theme.BrandedColorScheme;
 import org.chromium.chrome.browser.user_education.IphCommandBuilder;
 import org.chromium.chrome.browser.user_education.UserEducationHelper;
 import org.chromium.components.feature_engagement.FeatureConstants;
@@ -125,19 +126,20 @@ public class OptionalButtonCoordinatorTest {
     }
 
     @Test
-    public void testSetIconForegroundColor() {
-        ColorStateList colorStateList = ColorStateList.valueOf(Color.RED);
-
-        mOptionalButtonCoordinator.setIconForegroundColor(colorStateList);
-
-        verify(mMockOptionalButtonView).setColorStateList(colorStateList);
-    }
-
-    @Test
     public void testSetBackgroundColorFilter() {
         mOptionalButtonCoordinator.setBackgroundColorFilter(Color.GREEN);
 
         verify(mMockOptionalButtonView).setBackgroundColorFilter(Color.GREEN);
+    }
+
+    @Test
+    public void testSetBrandedColorScheme() {
+        clearInvocations(mMockOptionalButtonView);
+        mOptionalButtonCoordinator.setBrandedColorScheme(BrandedColorScheme.LIGHT_BRANDED_THEME);
+
+        verify(mMockOptionalButtonView)
+                .setBrandedColorScheme(BrandedColorScheme.LIGHT_BRANDED_THEME);
+        verify(mMockOptionalButtonView).setColorStateList(any());
     }
 
     @Test

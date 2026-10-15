@@ -58,7 +58,7 @@ DangerousDownloadDialogBridge::~DangerousDownloadDialogBridge() {
 
 void DangerousDownloadDialogBridge::Show(download::DownloadItem* download_item,
                                          ui::WindowAndroid* window_android) {
-  // Don't show dangerous download again if it is already showing.
+  // Don't show download again if it is already showing.
   if (std::ranges::contains(download_items_, download_item)) {
     return;
   }
@@ -78,7 +78,8 @@ void DangerousDownloadDialogBridge::Show(download::DownloadItem* download_item,
       download_item->GetTotalBytes(),
       base::android::ConvertUTF16ToJavaString(env,
                                               GetDownloadDomain(download_item)),
-      ResourceMapper::MapToJavaDrawableId(IDR_ANDROID_INFOBAR_WARNING));
+      ResourceMapper::MapToJavaDrawableId(IDR_ANDROID_INFOBAR_WARNING),
+      download_item->IsDangerous());
 }
 
 void DangerousDownloadDialogBridge::OnDownloadDestroyed(
@@ -96,7 +97,11 @@ void DangerousDownloadDialogBridge::Accepted(JNIEnv* env,
       &download_items_, download_guid);
   if (download) {
     download->RemoveObserver(this);
-    download->ValidateDangerousDownload();
+    if (download->IsDangerous()) {
+      download->ValidateDangerousDownload();
+    } else {
+      download->ConfirmNonDangerousDownload();
+    }
   }
 }
 

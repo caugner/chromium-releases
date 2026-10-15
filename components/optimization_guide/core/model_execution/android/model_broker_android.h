@@ -85,6 +85,7 @@ class ModelBrokerAndroid final : public OnDeviceCapability,
       base::WeakPtr<on_device_model::mojom::OnDeviceModel> model);
 
   void AddModelDownloadProgressObserver(
+      const std::string& use_case,
       mojo::PendingRemote<on_device_model::mojom::DownloadObserver> observer);
 
   void OnDownloadProgressUpdated(int64_t downloaded_bytes, int64_t total_bytes);
@@ -124,6 +125,10 @@ class ModelBrokerAndroid final : public OnDeviceCapability,
   // real download is in progress with progress callbacks. Used to decide
   // whether to send an initial zero-progress event to late-joining observers.
   bool has_active_download_progress_ = false;
+
+  // Whether the model was already downloaded. Used to send 0% and 100% progress
+  // to observers added after the model became available.
+  bool model_already_downloaded_ = false;
 
   base::WeakPtrFactory<ModelBrokerAndroid> weak_ptr_factory_{this};
 };

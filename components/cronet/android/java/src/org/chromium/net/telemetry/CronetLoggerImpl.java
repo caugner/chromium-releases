@@ -85,10 +85,10 @@ public class CronetLoggerImpl extends CronetLogger {
                     info.cronetInitializationRef,
                     info.engineCreationLatencyMillis,
                     info.engineAsyncLatencyMillis,
-                    /* httpflagsLatency*/ -1,
-                    /* httpFlagsLoadedSuccessfully*/ OptionalBoolean.UNSET.getValue(),
-                    /* httpFlagsKeys*/ new long[] {},
-                    /* httpFlagsValues*/ new long[] {},
+                    /* httpflagsLatency= */ -1,
+                    /* httpFlagsLoadedSuccessfully= */ OptionalBoolean.UNSET.getValue(),
+                    /* httpFlagsKeys= */ new long[] {},
+                    /* httpFlagsValues= */ new long[] {},
                     info.cronetImplVersion,
                     convertToProtoCronetEngineBuilderInitializedSource(info.source),
                     Process.myUid());
@@ -153,6 +153,22 @@ public class CronetLoggerImpl extends CronetLogger {
                     convertToProtoCronetAdaptiveTrafficRequestState(info.getMainRequestState()),
                     convertToProtoCronetAdaptiveTrafficRequestState(
                             info.getFallbackRequestState()));
+        }
+    }
+
+    @Override
+    public void logCronetUmaHistogram(long metricHash, int value, CronetSource source) {
+        if (Log.isLoggable(TAG, Log.VERBOSE)) {
+            Log.v(TAG, String.format("Cronet UMA: hash=%d, value=%d", metricHash, value));
+        }
+        try (var traceEvent =
+                ScopedSysTraceEvent.scoped("CronetLoggerImpl#logCronetUmaHistogram")) {
+            CronetStatsLog.write(
+                    CronetStatsLog.CRONET_UMA_METRIC_REPORTED,
+                    Process.myUid(),
+                    convertToProtoCronetUmaMetricReportedSource(source),
+                    metricHash,
+                    value);
         }
     }
 
@@ -437,5 +453,24 @@ public class CronetLoggerImpl extends CronetLogger {
         }
         return CronetStatsLog
                 .CRONET_ADAPTIVE_TRAFFIC_TERMINATED__MAIN_STREAM_STATE__CRONET_REQUEST_STATE_UNKNOWN;
+    }
+
+    private static int convertToProtoCronetUmaMetricReportedSource(CronetSource source) {
+        switch (source) {
+            case CRONET_SOURCE_STATICALLY_LINKED:
+                return CronetStatsLog
+                        .CRONET_UMA_METRIC_REPORTED__SOURCE__CRONET_SOURCE_EMBEDDED_NATIVE;
+            case CRONET_SOURCE_PLAY_SERVICES:
+                return CronetStatsLog
+                        .CRONET_UMA_METRIC_REPORTED__SOURCE__CRONET_SOURCE_GMSCORE_NATIVE;
+            case CRONET_SOURCE_FALLBACK:
+                return CronetStatsLog
+                        .CRONET_UMA_METRIC_REPORTED__SOURCE__CRONET_SOURCE_EMBEDDED_JAVA;
+            case CRONET_SOURCE_PLATFORM:
+                return CronetStatsLog
+                        .CRONET_UMA_METRIC_REPORTED__SOURCE__CRONET_SOURCE_HTTPENGINE_NATIVE;
+            default:
+                return CronetStatsLog.CRONET_UMA_METRIC_REPORTED__SOURCE__CRONET_SOURCE_UNSPECIFIED;
+        }
     }
 }

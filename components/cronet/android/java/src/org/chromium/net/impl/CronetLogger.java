@@ -151,6 +151,15 @@ public abstract class CronetLogger {
     public abstract void logCronetAdaptiveTrafficTerminated(
             CronetAdaptiveTrafficTerminatedInfo info);
 
+    /**
+     * Logs a Cronet UMA histogram sample.
+     *
+     * @param metricHash the hash of the histogram name, converted from unsigned 64-bit integer to
+     *     signed 64-bit integer with two's complement wraparound.
+     * @param value the sample value.
+     */
+    public abstract void logCronetUmaHistogram(long metricHash, int value, CronetSource source);
+
     // TODO(crbug.com/41494309): consider using AutoValue for this.
     public static final class CronetEngineBuilderInitializedInfo {
         public long cronetInitializationRef;
@@ -315,7 +324,7 @@ public abstract class CronetLogger {
         private final int mUid;
         private final int mNetworkInternalErrorCode;
         private final int mQuicErrorCode;
-        private final @ConnectionCloseSource int mSource;
+        private final @ConnectionCloseSource int mConnectionCloseSource;
         private final RequestFailureReason mFailureReason;
         private final boolean mSocketReused;
         private final String mCronetVersion;
@@ -347,9 +356,9 @@ public abstract class CronetLogger {
                 int uid,
                 int networkInternalErrorCode,
                 int quicErrorCode,
-                @ConnectionCloseSource int source,
+                @ConnectionCloseSource int connectionCloseSource,
                 RequestFailureReason failureReason,
-                boolean sockedReused,
+                boolean socketReused,
                 String cronetVersion,
                 CronetSource cronetSource,
                 long timeToEstablishDnsMicros,
@@ -377,9 +386,9 @@ public abstract class CronetLogger {
             mUid = uid;
             mNetworkInternalErrorCode = networkInternalErrorCode;
             mQuicErrorCode = quicErrorCode;
-            mSource = source;
+            mConnectionCloseSource = connectionCloseSource;
             mFailureReason = failureReason;
-            mSocketReused = sockedReused;
+            mSocketReused = socketReused;
             mCronetVersion = cronetVersion;
             mCronetSource = cronetSource;
             mTimeToEstablishDnsMicros = timeToEstablishDnsMicros;
@@ -479,7 +488,7 @@ public abstract class CronetLogger {
         }
 
         public @ConnectionCloseSource int getConnectionCloseSource() {
-            return mSource;
+            return mConnectionCloseSource;
         }
 
         public RequestFailureReason getFailureReason() {

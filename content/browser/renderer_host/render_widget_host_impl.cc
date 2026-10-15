@@ -441,8 +441,6 @@ RenderWidgetHostImpl::RenderWidgetHostImpl(
   CHECK_NE(IPC::mojom::kRoutingIdNone, routing_id_);
   CHECK(base::ThreadPoolInstance::Get());
 
-  AddInputEventObserver(BrowserAccessibilityStateImpl::GetInstance());
-
   std::pair<RoutingIDWidgetMap::iterator, bool> result =
       g_routing_id_widget_map.Get().insert(std::make_pair(
           RenderWidgetHostID(
@@ -2072,6 +2070,9 @@ void RenderWidgetHostImpl::DragSourceEndedAt(const gfx::PointF& client_point,
 }
 
 void RenderWidgetHostImpl::DragSourceSystemDragEnded() {
+  if (delegate_) {
+    delegate_->OnDragSourceEnded();
+  }
   // TODO(crbug.com/40138933): Replace with a for_frame() check.
   if (!blink_frame_widget_) {
     return;
@@ -2158,11 +2159,6 @@ RenderProcessHostPriorityClient::Priority RenderWidgetHostImpl::GetPriority() {
     should_contribute = false;
   }
 
-#if BUILDFLAG(IS_ANDROID)
-  // should_contribute represents whether the RenderWidgetHost is active or not.
-  // For example, RenderWidgetHost is inactive if it is in BFCache.
-  priority.has_active_clients = should_contribute;
-#endif
   if (!should_contribute) {
     priority.is_hidden = true;
     priority.frame_depth = RenderProcessHostImpl::kMaxFrameDepthForPriority;
@@ -2186,12 +2182,17 @@ RenderWidgetHostImpl::GetWidgetInputHandler() {
   return GetRenderInputRouter()->GetWidgetInputHandler();
 }
 
-void RenderWidgetHostImpl::NotifyScreenInfoChanged() {
+void RenderWidgetHostImpl::NotifyScreenInfoChanged(bool ignore_ack) {
   // The resize message (which may not happen immediately) will carry with it
   // the screen info as well as the new size (if the screen has changed scale
   // factor). Force sending the new visual properties even if there is one in
-  // flight to ensure proper IPC ordering for features like the Fullscreen API.
-  SynchronizeVisualPropertiesIgnoringPendingAck();
+  // flight to ensure proper IPC ordering for features like the Fullscreen API
+  // if ignore_ack is true. Otherwise, respect the pending ACK throttle.
+  if (ignore_ack) {
+    SynchronizeVisualPropertiesIgnoringPendingAck();
+  } else {
+    SynchronizeVisualProperties();
+  }
 
   // The device scale factor will be same for all the views contained by the
   // primary main frame, so just set it once.
@@ -2929,6 +2930,9 @@ void RenderWidgetHostImpl::StartDragging(
     const gfx::Rect& drag_obj_rect_in_dip,
     blink::mojom::DragEventSourceInfoPtr event_info) {
   DropData drop_data = DragDataToDropData(*drag_data);
+  if (delegate_) {
+    delegate_->OnStartDragging(&drop_data, source_rfh.GetGlobalFrameToken());
+  }
   DropData filtered_data(drop_data);
   RenderProcessHost* process = GetProcess();
   ChildProcessSecurityPolicyImpl* policy =
@@ -4159,31 +4163,6 @@ RenderWidgetHostImpl::GetEmbeddedRenderInputRouters() {
   return GetEmbeddedRenderWidgetHosts(GetView());
 }
 
-namespace {
-
-bool TransformPointAndRectToRootView(RenderWidgetHostViewBase* view,
-                                     RenderWidgetHostViewBase* root_view,
-                                     gfx::Point* transformed_point,
-                                     gfx::Rect* transformed_rect) {
-  gfx::Transform transform_to_main_frame;
-  if (!view->GetTransformToViewCoordSpace(root_view,
-                                          &transform_to_main_frame)) {
-    return false;
-  }
-
-  if (transformed_point) {
-    *transformed_point = transform_to_main_frame.MapPoint(*transformed_point);
-  }
-
-  if (transformed_rect) {
-    *transformed_rect = transform_to_main_frame.MapRect(*transformed_rect);
-  }
-
-  return true;
-}
-
-}  // namespace
-
 void RenderWidgetHostImpl::AnimateDoubleTapZoomInMainFrame(
     const gfx::Point& point,
     const gfx::Rect& rect_to_zoom) {
@@ -4201,9 +4180,9 @@ void RenderWidgetHostImpl::AnimateDoubleTapZoomInMainFrame(
   auto* root_view = view_->GetRootView();
   gfx::Point transformed_point(point);
   gfx::Rect transformed_rect_to_zoom(rect_to_zoom);
-  if (!TransformPointAndRectToRootView(view_.get(), root_view,
-                                       &transformed_point,
-                                       &transformed_rect_to_zoom)) {
+  if (!RenderWidgetHostViewBase::TransformPointAndRectToRootView(
+          view_.get(), root_view, &transformed_point,
+          &transformed_rect_to_zoom)) {
     return;
   }
 
@@ -4229,8 +4208,8 @@ void RenderWidgetHostImpl::ZoomToFindInPageRectInMainFrame(
 
   auto* root_view = view_->GetRootView();
   gfx::Rect transformed_rect_to_zoom(rect_to_zoom);
-  if (!TransformPointAndRectToRootView(view_.get(), root_view, nullptr,
-                                       &transformed_rect_to_zoom)) {
+  if (!RenderWidgetHostViewBase::TransformPointAndRectToRootView(
+          view_.get(), root_view, nullptr, &transformed_rect_to_zoom)) {
     return;
   }
 

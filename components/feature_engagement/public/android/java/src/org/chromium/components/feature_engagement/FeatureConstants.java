@@ -20,20 +20,22 @@ import java.lang.annotation.RetentionPolicy;
     // FEATURE_CONSTANTS_JAVA_STRING_DEF_START
     FeatureConstants.ACCOUNT_SETTINGS_HISTORY_SYNC,
     FeatureConstants.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_ADD_TO_BOOKMARKS_FEATURE,
-    FeatureConstants.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_GLIC_FEATURE,
     FeatureConstants.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_NEW_TAB_FEATURE,
     FeatureConstants.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_OPEN_IN_BROWSER_FEATURE,
     FeatureConstants.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_READ_ALOUD_FEATURE,
     FeatureConstants.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_SHARE_FEATURE,
     FeatureConstants.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_TRANSLATE_FEATURE,
     FeatureConstants.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_VOICE_SEARCH_FEATURE,
+    FeatureConstants.ADAPTIVE_BUTTON_PIN_GLIC_TOOLBAR_BUTTON_FEATURE,
+    FeatureConstants.ANDROID_BOTTOM_BAR_GLIC,
+    FeatureConstants.ANDROID_BOTTOM_BAR_NEW_TAB,
+    FeatureConstants.ANDROID_BOTTOM_BAR_PROMO_DIALOG,
     FeatureConstants.ANDROID_TAB_DECLUTTER_FEATURE,
     FeatureConstants.APP_RATING_PROMPT_FEATURE,
     FeatureConstants.APP_SPECIFIC_HISTORY_FEATURE,
     FeatureConstants.AUTO_DARK_OPT_OUT_FEATURE,
     FeatureConstants.AUTO_DARK_USER_EDUCATION_MESSAGE_FEATURE,
     FeatureConstants.AUTO_DARK_USER_EDUCATION_MESSAGE_OPT_IN_FEATURE,
-    FeatureConstants.BOOKMARKS_BAR_FEATURE,
     FeatureConstants.BOTTOM_TOOLBAR_FEATURE,
     FeatureConstants.CCT_HISTORY_FEATURE,
     FeatureConstants.CCT_MINIMIZED_FEATURE,
@@ -70,6 +72,7 @@ import java.lang.annotation.RetentionPolicy;
     FeatureConstants.INSTANCE_SWITCHER,
     FeatureConstants.IPH_EXTENSIONS_MANAGE_APP_MENU_FEATURE,
     FeatureConstants.IPH_EXTENSIONS_MANAGE_TOOLBAR_FEATURE,
+    FeatureConstants.IPH_INCOGNITO_INDICATOR_CLOSE_ALL_WINDOWS,
     FeatureConstants.IPH_MIC_TOOLBAR_FEATURE,
     FeatureConstants.IPH_PDF_PAGE_DOWNLOAD,
     FeatureConstants.IPH_SHARE_SCREENSHOT_FEATURE,
@@ -77,8 +80,6 @@ import java.lang.annotation.RetentionPolicy;
     FeatureConstants.IPH_TAB_SWITCHER_XR,
     FeatureConstants.IPH_TAB_TEARING_XR,
     FeatureConstants.IPH_TOUCH_TO_SEARCH_CALLOUT,
-    FeatureConstants.IPH_WEB_FEED_POST_FOLLOW_DIALOG_FEATURE,
-    FeatureConstants.IPH_WEB_FEED_POST_FOLLOW_DIALOG_FEATURE_WITH_UI_UPDATE,
     FeatureConstants.KEYBOARD_ACCESSORY_ACCOUNT_NAME_EMAIL_SUGGESTION_FEATURE,
     FeatureConstants.KEYBOARD_ACCESSORY_ADDRESS_FILL_FEATURE,
     FeatureConstants.KEYBOARD_ACCESSORY_AT_MEMORY_FEATURE,
@@ -93,7 +94,6 @@ import java.lang.annotation.RetentionPolicy;
     FeatureConstants.KEYBOARD_ACCESSORY_PAYMENT_OFFER_FEATURE,
     FeatureConstants.KEYBOARD_ACCESSORY_PAYMENT_VIRTUAL_CARD_DISABLED_FEATURE,
     FeatureConstants.KEYBOARD_ACCESSORY_PAYMENT_VIRTUAL_CARD_FEATURE,
-    FeatureConstants.KEYBOARD_ACCESSORY_PLUS_ADDRESS_CREATE_SUGGESTION,
     FeatureConstants.KEYBOARD_ACCESSORY_VIRTUAL_CARD_CVC_FILL_FEATURE,
     FeatureConstants.MENU_ADD_TO_GROUP,
     FeatureConstants.MOST_VISITED_TILES_CUSTOMIZATION_PIN,
@@ -155,9 +155,6 @@ public @interface FeatureConstants {
     String ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_ADD_TO_BOOKMARKS_FEATURE =
             "IPH_AdaptiveButtonInTopToolbarCustomization_AddToBookmarks";
 
-    String ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_GLIC_FEATURE =
-            "IPH_AdaptiveButtonInTopToolbarCustomization_Glic";
-
     String ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_NEW_TAB_FEATURE =
             "IPH_AdaptiveButtonInTopToolbarCustomization_NewTab";
 
@@ -176,6 +173,18 @@ public @interface FeatureConstants {
     String ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_VOICE_SEARCH_FEATURE =
             "IPH_AdaptiveButtonInTopToolbarCustomization_VoiceSearch";
 
+    String ADAPTIVE_BUTTON_PIN_GLIC_TOOLBAR_BUTTON_FEATURE =
+            "IPH_AdaptiveButtonPinGlicToolbarButton";
+
+    /** Describes the GLIC button on the new bottom bar. */
+    String ANDROID_BOTTOM_BAR_GLIC = "IPH_AndroidBottomBarGlic";
+
+    /** Describes the new tab button moved down in the bottom bar. */
+    String ANDROID_BOTTOM_BAR_NEW_TAB = "IPH_AndroidBottomBarNewTab";
+
+    /** Describes the promo dialog shown to introduce the bottom bar. */
+    String ANDROID_BOTTOM_BAR_PROMO_DIALOG = "IPH_AndroidBottomBarPromoDialog";
+
     String ANDROID_TAB_DECLUTTER_FEATURE = "IPH_AndroidTabDeclutter";
 
     String APP_RATING_PROMPT_FEATURE = "IPH_AppRatingPrompt";
@@ -187,8 +196,6 @@ public @interface FeatureConstants {
 
     String AUTO_DARK_USER_EDUCATION_MESSAGE_OPT_IN_FEATURE =
             "IPH_AutoDarkUserEducationMessageOptIn";
-
-    String BOOKMARKS_BAR_FEATURE = "IPH_BookmarksBar";
 
     String BOTTOM_TOOLBAR_FEATURE = "IPH_BottomToolbarTip";
 
@@ -296,6 +303,12 @@ public @interface FeatureConstants {
      */
     String IPH_EXTENSIONS_MANAGE_TOOLBAR_FEATURE = "IPH_ExtensionsManageToolbar";
 
+    /**
+     * An IPH feature to inform users that they can close all Incognito windows by tapping the
+     * Incognito indicator.
+     */
+    String IPH_INCOGNITO_INDICATOR_CLOSE_ALL_WINDOWS = "IPH_IncognitoIndicatorCloseAllWindows";
+
     /** An IPH feature attached to the mic button in the toolbar prompring user to try voice. */
     String IPH_MIC_TOOLBAR_FEATURE = "IPH_MicToolbar";
 
@@ -316,13 +329,6 @@ public @interface FeatureConstants {
 
     /** An IPH feature to inform users that the touch to search panel can be expanded. */
     String IPH_TOUCH_TO_SEARCH_CALLOUT = "IPH_TouchToSearchCallout";
-
-    /** A dialog IPH feature to inform users about the WebFeed post-follow. */
-    String IPH_WEB_FEED_POST_FOLLOW_DIALOG_FEATURE = "IPH_WebFeedPostFollowDialog";
-
-    /** A dialog IPH feature to inform users about the WebFeed post-follow after the UI update. */
-    String IPH_WEB_FEED_POST_FOLLOW_DIALOG_FEATURE_WITH_UI_UPDATE =
-            "IPH_WebFeedPostFollowDialogWithUIUpdate";
 
     String KEYBOARD_ACCESSORY_ACCOUNT_NAME_EMAIL_SUGGESTION_FEATURE =
             "IPH_AutofillAccountNameEmailSuggestion";
@@ -356,8 +362,6 @@ public @interface FeatureConstants {
             "IPH_AutofillDisabledVirtualCardSuggestion";
 
     String KEYBOARD_ACCESSORY_PAYMENT_VIRTUAL_CARD_FEATURE = "IPH_AutofillVirtualCardSuggestion";
-
-    String KEYBOARD_ACCESSORY_PLUS_ADDRESS_CREATE_SUGGESTION = "IPH_PlusAddressCreateSuggestion";
 
     String KEYBOARD_ACCESSORY_VIRTUAL_CARD_CVC_FILL_FEATURE =
             "IPH_AutofillVirtualCardCVCSuggestion";

@@ -63,6 +63,7 @@
 #include "ui/views/style/typography_provider.h"
 #include "ui/views/vector_icons.h"
 #include "ui/views/view_class_properties.h"
+#include "ui/views/view_tracker.h"
 #include "ui/views/view_utils.h"
 #include "ui/views/widget/widget.h"
 
@@ -167,6 +168,20 @@ void MenuItemView::UpdateAccessibleCheckedState() {
     if (auto* scrollview_accessibility =
             GetScrollViewContainerViewAccessibility()) {
       scrollview_accessibility->RemoveCheckedState();
+    }
+  }
+}
+
+void MenuItemView::RefreshCheckmarkState() {
+  UpdateAccessibleCheckedState();
+  if (radio_check_image_view_) {
+    if (type_ == Type::kCheckbox) {
+      bool is_checked =
+          GetDelegate() && GetDelegate()->IsItemChecked(GetCommand());
+      radio_check_image_view_->SetVisible(is_checked);
+    }
+    if (GetWidget()) {
+      UpdateSelectionBasedState(last_paint_as_selected_);
     }
   }
 }
@@ -497,6 +512,9 @@ SubmenuView* MenuItemView::CreateSubmenu() {
   // Initialize the submenu indicator icon (arrow).
   submenu_arrow_image_view_ = AddChildView(std::make_unique<ImageView>());
 
+  // Cannot have the minor icon on the right if a sub-menu is set.
+  CHECK(!minor_icon_on_right_);
+
   // Force an update as `submenu_arrow_image_view_` needs to be updated. The
   // state is also updated when the theme changes (which is also called when
   // added to a widget).
@@ -561,6 +579,12 @@ void MenuItemView::SetMinorIcon(const ui::ImageModel& minor_icon) {
   invalidate_dimensions();  // Triggers preferred size recalculation.
 }
 
+void MenuItemView::SetMinorIconOnRight(bool minor_icon_on_right) {
+  minor_icon_on_right_ = minor_icon_on_right;
+  CHECK(!minor_icon_on_right_ || !submenu_arrow_image_view_);
+  invalidate_dimensions();
+}
+
 void MenuItemView::SetSelected(bool selected) {
   if (selected_ == selected) {
     return;
@@ -613,6 +637,13 @@ void MenuItemView::SetIcon(const ui::ImageModel& icon) {
 
 const ui::ImageModel MenuItemView::GetIcon() const {
   return icon_view_ ? icon_view_->GetImageModel() : ui::ImageModel();
+}
+
+void MenuItemView::SetIconColor(std::optional<ui::ColorVariant> icon_color) {
+  icon_color_ = icon_color;
+  if (GetWidget() && !IsScheduledForDeletion()) {
+    UpdateSelectionBasedState(last_paint_as_selected_);
+  }
 }
 
 void MenuItemView::SetIconView(std::unique_ptr<ImageView> icon_view) {
@@ -1033,20 +1064,30 @@ void MenuItemView::UpdateEmptyMenusAndMetrics() {
   // visible items. Copy the children, since we may mutate them as we go.
   const Views children = submenu_->children();
   bool has_visible_menu_items = false;
+
+  // Making changes to selection, etc. can cause `this` to be deleted. Track the
+  // continued existence of this object while updating.
+  ViewTracker tracker(this);
+
   for (View* child : children) {
     MenuItemView* const child_menu = AsViewClass<MenuItemView>(child);
     if (!child_menu) {
       continue;
     }
     if (IsViewClass<EmptyMenuMenuItem>(child)) {
+      const bool selected = child_menu->IsSelected();
       // Prevent view destruction until selection is updated.
       // We remove the child before updating selection in case of re-entrancy.
       std::unique_ptr<View> removed_child = submenu_->RemoveChildViewT(child);
-      if (child_menu->IsSelected()) {
+      if (tracker && selected) {
         // Update selection to this menu before deleting the currently
         // selected child.
         GetMenuController()->SetSelection(
             this, MenuController::SELECTION_UPDATE_IMMEDIATELY);
+        // This can also delete `this`, so check for that.
+        if (!tracker) {
+          return;
+        }
       }
       submenu_
           ->InvalidateLayout();  // Ideally the submenu would have a layout
@@ -1199,18 +1240,29 @@ void MenuItemView::PaintBackground(gfx::Canvas* canvas,
 
     // Note that `bottom_rounded_corners_` should only be set when the
     // highlighted item is at the bottom of the menu.
+    gfx::RectF highlight_bounds(GetLocalBounds());
+    SkVector radii[4]{{0, 0}, {0, 0}, {0, 0}, {0, 0}};
+    if (menu_item_background_.has_value()) {
+      highlight_bounds.Inset(gfx::InsetsF::VH(0, GetItemHorizontalBorder()));
+      const float radius = menu_item_background_->corner_radius;
+      for (auto& i : radii) {
+        i.set(radius, radius);
+      }
+    } else {
+      radii[2].set(bottom_rounded_corners_.lower_right(),
+                   bottom_rounded_corners_.lower_right());
+      radii[3].set(bottom_rounded_corners_.lower_left(),
+                   bottom_rounded_corners_.lower_left());
+    }
+
     SkRRect rounded_rect;
-    SkVector radii[4]{{0, 0},
-                      {0, 0},
-                      {bottom_rounded_corners_.lower_right(),
-                       bottom_rounded_corners_.lower_right()},
-                      {bottom_rounded_corners_.lower_left(),
-                       bottom_rounded_corners_.lower_left()}};
-    rounded_rect.setRectRadii(gfx::RectFToSkRect(gfx::RectF(GetLocalBounds())),
-                              radii);
+    rounded_rect.setRectRadii(gfx::RectFToSkRect(highlight_bounds), radii);
     canvas->sk_canvas()->drawRRect(rounded_rect, flags);
   } else if (paint_as_selected) {
     gfx::Rect item_bounds = GetLocalBounds();
+    if (menu_item_background_.has_value()) {
+      item_bounds.Inset(gfx::Insets::VH(0, GetItemHorizontalBorder()));
+    }
     if (type_ == Type::kActionableSubMenu) {
       if (submenu_area_of_actionable_submenu_selected_) {
         item_bounds = GetSubmenuAreaOfActionableSubmenu();
@@ -1222,7 +1274,9 @@ void MenuItemView::PaintBackground(gfx::Canvas* canvas,
     AdjustBoundsForRTLUI(&item_bounds);
 
     ui::NativeTheme::MenuItemExtraParams menu_item_extra_params;
-    menu_item_extra_params.corner_radius = config.item_corner_radius;
+    menu_item_extra_params.corner_radius =
+        menu_item_background_.has_value() ? menu_item_background_->corner_radius
+                                          : config.item_corner_radius;
     GetNativeTheme()->Paint(
         canvas->sk_canvas(), GetColorProvider(),
         ui::NativeTheme::kMenuItemBackground, ui::NativeTheme::kHovered,
@@ -1244,15 +1298,41 @@ void MenuItemView::PaintMinorIconAndText(gfx::Canvas* canvas, SkColor color) {
       submenu_arrow_image_view_
           ? submenu_arrow_image_view_->width() + config.item_horizontal_padding
           : 0;
-
-  gfx::Rect minor_text_bounds(
-      width() - submenu->trailing_padding() - max_minor_text_width,
-      vertical_margin, max_minor_text_width - submenu_arrow_width,
-      height() - vertical_margin * 2);
-  minor_text_bounds.set_x(GetMirroredXForRect(minor_text_bounds));
+  const int minor_icon_width =
+      !minor_icon_.IsEmpty()
+          ? minor_icon_.Size().width() +
+                (minor_text.empty() ? 0 : config.item_horizontal_padding)
+          : 0;
 
   std::unique_ptr<gfx::RenderText> render_text =
       gfx::RenderText::CreateRenderText();
+
+  gfx::Rect minor_text_bounds(
+      width() - submenu->trailing_padding() - max_minor_text_width,
+      vertical_margin,
+      max_minor_text_width - submenu_arrow_width -
+          (minor_icon_on_right_ ? minor_icon_width : 0),
+      height() - vertical_margin * 2);
+  minor_text_bounds.set_x(GetMirroredXForRect(minor_text_bounds));
+
+  auto paint_minor_icon = [&](bool paint_on_right) {
+    if (!minor_icon_.IsEmpty()) {
+      const gfx::ImageSkia image = minor_icon_.Rasterize(GetColorProvider());
+
+      const int padding =
+          minor_text.empty() ? 0 : config.item_horizontal_padding;
+      const int image_x =
+          (paint_on_right)
+              ? GetMirroredRect(minor_text_bounds).right() + padding
+              : GetMirroredRect(minor_text_bounds).right() -
+                    render_text->GetContentWidth() - padding - image.width();
+      const int image_y = minor_text_bounds.y() +
+                          (minor_text_bounds.height() - image.height()) / 2;
+      canvas->DrawImageInt(
+          image, GetMirroredXWithWidthInView(image_x, image.width()), image_y);
+    }
+  };
+
   if (!minor_text.empty()) {
     render_text->SetText(minor_text);
     render_text->SetFontList(GetFontList());
@@ -1266,19 +1346,7 @@ void MenuItemView::PaintMinorIconAndText(gfx::Canvas* canvas, SkColor color) {
     render_text->Draw(canvas);
   }
 
-  if (!minor_icon_.IsEmpty()) {
-    const gfx::ImageSkia image = minor_icon_.Rasterize(GetColorProvider());
-
-    const int image_x =
-        GetMirroredRect(minor_text_bounds).right() -
-        render_text->GetContentWidth() -
-        (minor_text.empty() ? 0 : config.item_horizontal_padding) -
-        image.width();
-    const int image_y = minor_text_bounds.y() +
-                        (minor_text_bounds.height() - image.height()) / 2;
-    canvas->DrawImageInt(
-        image, GetMirroredXWithWidthInView(image_x, image.width()), image_y);
-  }
+  paint_minor_icon(minor_icon_on_right_);
 }
 
 SkColor MenuItemView::GetTextColor(bool minor, bool paint_as_selected) const {
@@ -1595,17 +1663,24 @@ void MenuItemView::UpdateSelectionBasedState(bool paint_as_selected) {
   const Colors colors = CalculateColors(paint_as_selected);
   if (submenu_arrow_image_view_) {
     submenu_arrow_image_view_->SetImage(ui::ImageModel::FromVectorIcon(
-        vector_icons::kSubmenuArrowChromeRefreshIcon, colors.icon_color));
+        features::IsRoundedIconsEnabled()
+            ? vector_icons::kKeyboardArrowRightFlippableIcon
+            : vector_icons::kSubmenuArrowChromeRefreshOldIcon,
+        colors.icon_color));
   }
   MenuDelegate* delegate = GetDelegate();
   if (type_ == Type::kCheckbox && delegate &&
       delegate->IsItemChecked(GetCommand())) {
-    radio_check_image_view_->SetImage(
-        ui::ImageModel::FromVectorIcon(kMenuCheckIcon, colors.icon_color));
+    radio_check_image_view_->SetImage(ui::ImageModel::FromVectorIcon(
+        features::IsRoundedIconsEnabled() ? kCheckSmallIcon : kMenuCheckOldIcon,
+        colors.icon_color));
   } else if (type_ == Type::kRadio) {
     const bool toggled = delegate && delegate->IsItemChecked(GetCommand());
     const gfx::VectorIcon& radio_icon =
-        toggled ? kMenuRadioSelectedIcon : kMenuRadioEmptyIcon;
+        toggled ? features::IsRoundedIconsEnabled() ? kRadioButtonCheckedIcon
+                                                    : kMenuRadioSelectedOldIcon
+        : features::IsRoundedIconsEnabled() ? kCircleIcon
+                                            : kMenuRadioEmptyOldIcon;
     const SkColor radio_icon_color = GetColorProvider()->GetColor(
         toggled ? ui::kColorRadioButtonForegroundChecked
                 : ui::kColorRadioButtonForegroundUnchecked);

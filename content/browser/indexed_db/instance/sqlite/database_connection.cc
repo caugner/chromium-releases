@@ -153,7 +153,7 @@ uint32_t GetPageCount(sql::Database& db) {
   if (!statement.Step()) {
     return 0;
   }
-  return static_cast<uint32_t>(statement.ColumnInt(0));
+  return base::checked_cast<uint32_t>(statement.ColumnInt(0));
 }
 
 uint32_t GetFreelistCount(sql::Database& db) {
@@ -161,26 +161,27 @@ uint32_t GetFreelistCount(sql::Database& db) {
   if (!statement.Step()) {
     return 0;
   }
-  return static_cast<uint32_t>(statement.ColumnInt(0));
+  return base::checked_cast<uint32_t>(statement.ColumnInt(0));
 }
 
-uint16_t GetPageSize(sql::Database& db) {
+base::ByteSize GetPageSize(sql::Database& db) {
   // The maximum page size is 65536 bytes.
   sql::Statement statement(db.GetReadonlyStatement("PRAGMA page_size"));
   if (!statement.Step()) {
-    return 0;
+    return base::ByteSize();
   }
-  return static_cast<uint16_t>(statement.ColumnInt(0));
+  return base::ByteSize(static_cast<uint64_t>(statement.ColumnInt(0)));
 }
 
 // Returns the size of the used portion of the database (excluding free pages).
-uint64_t GetUsedSize(sql::Database& db) {
+base::ByteSize GetUsedSize(sql::Database& db) {
   uint32_t page_count = GetPageCount(db);
   uint32_t freelist_count = GetFreelistCount(db);
-  if (page_count < freelist_count) {
-    return 0;
+  if (page_count <= freelist_count) {
+    return base::ByteSize();
   }
-  return static_cast<uint64_t>(page_count - freelist_count) * GetPageSize(db);
+
+  return GetPageSize(db) * (page_count - freelist_count);
 }
 
 // The separator used to join the strings when encoding an `IndexedDBKeyPath` of
@@ -334,20 +335,18 @@ bool TryVacuum(sql::Database& db,
   // VACUUM copies the used pages into a temp database and then overwrites the
   // original, requiring approximately twice the used size in free space:
   // https://www.sqlite.org/lang_vacuum.html.
-  uint64_t needed_space = 2 * GetUsedSize(db);
-  std::optional<int64_t> free_space =
-      base::SysInfo::AmountOfFreeDiskSpace(db_path.DirName());
-  std::optional<int64_t> total_space =
-      base::SysInfo::AmountOfTotalDiskSpace(db_path.DirName());
-  if (needed_space == 0 || !free_space || *free_space < 0 || !total_space ||
-      *total_space < 0 || *total_space < *free_space) {
+  base::ByteSize needed_space = GetUsedSize(db) * 2;
+  std::optional<base::SysInfo::DiskSpaceInfo> disk_space =
+      base::SysInfo::AmountOfDiskSpace(db_path.DirName());
+  if (needed_space.is_zero() || !disk_space ||
+      disk_space->total < disk_space->available) {
     LogVacuumEvent(VacuumEvent::kErrorComputingSpaceRequirements);
     return false;
   }
   // Leave a buffer of 1% of total disk space since other write operations
   // may be in progress.
-  uint64_t used_space = static_cast<uint64_t>(*total_space - *free_space);
-  if (used_space + needed_space > 99.0 / 100 * *total_space) {
+  base::ByteSize buffer = disk_space->total / 100;
+  if (needed_space + buffer > disk_space->available) {
     LogVacuumEvent(VacuumEvent::kInsufficientDiskSpace);
     return false;
   }
@@ -998,17 +997,27 @@ StatusOr<std::unique_ptr<DatabaseConnection>> DatabaseConnection::Open(
       base::WrapUnique(new DatabaseConnection(path, backing_store));
   Status s = connection->Init(name);
   if (!path.empty() && !s.ok()) {
+    bool should_retry_opening = true;
     IndexedDBDataLossInfo loss;
     if (connection->marked_for_permanent_deletion_) {
-      loss.status = blink::mojom::IDBDataLoss::Total;
-      loss.message = s.ToString();
+      if (!name) {
+        // Don't bother retrying since the caller doesn't want to create the DB.
+        should_retry_opening = false;
+      } else {
+        // Capture and surface data loss info.
+        loss.status = blink::mojom::IDBDataLoss::Total;
+        loss.message = s.ToString();
+      }
     }
-    // If opening fails, recover or destroy the DB and try once more.
-    std::move(*connection).GetCleanupTask().Run(/*force_closing=*/false);
-    connection = base::WrapUnique(new DatabaseConnection(path, backing_store));
-    s = connection->Init(name);
-    connection->data_loss_info_ = std::move(loss);
-    s.Log("IndexedDB.SQLite.OpenRetryResult");
+    if (should_retry_opening) {
+      // Recover or destroy the DB and try once more.
+      std::move(*connection).GetCleanupTask().Run(/*force_closing=*/false);
+      connection =
+          base::WrapUnique(new DatabaseConnection(path, backing_store));
+      s = connection->Init(name);
+      connection->data_loss_info_ = std::move(loss);
+      s.Log("IndexedDB.SQLite.OpenRetryResult");
+    }
   }
   if (s.ok() && erase_if_zygotic && connection->IsZygotic()) {
     s = Status::Corruption(
@@ -1247,6 +1256,10 @@ Status DatabaseConnection::Init(std::optional<std::u16string_view> name) {
 
   const bool is_new_db = !sql::MetaTable::DoesTableExist(db_.get());
   if (is_new_db) {
+    if (!name) {
+      return Fatal(Status::Corruption("Missing meta table"),
+                   SpecificEvent::kMissingMetaTable);
+    }
     IDB_RETURN_IF_ERROR(CreateSchema(db_.get(), *name));
   }
 
@@ -1408,12 +1421,12 @@ int64_t DatabaseConnection::GetCommittedVersion() const {
 }
 
 uint64_t DatabaseConnection::GetSize() const {
-  uint64_t used_size = GetUsedSize(*db_);
-  if (used_size == 0) {
+  base::ByteSize used_size = GetUsedSize(*db_);
+  if (used_size.is_zero()) {
     // Can only happen if one of the pragmas failed. Log under a common bucket.
     LogEvent(SpecificEvent::kPragmaPageCountFailed);
   }
-  return used_size;
+  return used_size.InBytes();
 }
 
 std::unique_ptr<BackingStoreDatabaseImpl>

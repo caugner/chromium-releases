@@ -25,6 +25,7 @@
 #include "components/vector_icons/vector_icons.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/mojom/dialog_button.mojom.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/widget/widget.h"
 
@@ -42,7 +43,9 @@ std::unique_ptr<ConsentRequester>* GetTestInstanceStorage() {
 
 ui::ImageModel GetIcon() {
   return ui::ImageModel::FromVectorIcon(
-      vector_icons::kBusinessIcon, ui::kColorIcon,
+      features::IsRoundedIconsEnabled() ? vector_icons::kDomainIcon
+                                        : vector_icons::kBusinessOldIcon,
+      ui::kColorIcon,
       ChromeLayoutProvider::Get()->GetDistanceMetric(
           views::DISTANCE_BUBBLE_HEADER_VECTOR_ICON_SIZE));
 }
@@ -150,8 +153,13 @@ void ConsentDialogCoordinator::Show() {
     return;
   }
   base::RecordAction(base::UserMetricsAction("DeviceSignalsConsent_Shown"));
-  dialog_widget_ = chrome::ShowBrowserModal(
+
+  auto weak_this = weak_ptr_factory_.GetWeakPtr();
+  views::Widget* widget = chrome::ShowBrowserModal(
       browser_, CreateDeviceSignalsConsentDialogModel());
+  if (weak_this) {
+    dialog_widget_ = widget;
+  }
 }
 
 void ConsentDialogCoordinator::OnConsentDialogAccept() {

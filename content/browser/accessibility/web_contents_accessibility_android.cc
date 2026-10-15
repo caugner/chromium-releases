@@ -416,11 +416,13 @@ std::optional<int> MaybeFindRowColumn(ui::BrowserAccessibility* start_node,
   // Move in the desired direction by the element type.
   int want_row_index = cur_row_index, want_col_index = cur_col_index;
   if (want_row) {
-    want_row_index += forwards ? 1 : -1;
+    want_row_index +=
+        forwards ? cell_node->GetTableCellRowSpan().value_or(1) : -1;
   }
 
   if (want_col) {
-    want_col_index += forwards ? 1 : -1;
+    want_col_index +=
+        forwards ? cell_node->GetTableCellColSpan().value_or(1) : -1;
   }
 
   if (want_col_bounds || want_table_bounds) {
@@ -537,6 +539,46 @@ ScopedJavaLocalRef<jobject> ToJavaStringRangesMap(
       base::BindRepeating(&base::android::ConvertUTF16ToJavaString,
                           base::Unretained(env)),
       ranges_count);
+}
+
+// If `node` is or is under an editable, returns the highest editable parent,
+// otherwise returns null.
+ui::AXNode* GetRootEditable(ui::AXNode* node) {
+  while (node) {
+    if (node->data().IsAtomicTextField() ||
+        node->data().GetBoolAttribute(
+            ax::mojom::BoolAttribute::kNonAtomicTextFieldRoot)) {
+      return node;
+    }
+    node = node->parent();
+  }
+  return node;
+}
+
+// Selection is not valid if it is cross documents, or its start and end have
+// different root editable nodes.
+// These restrictions are primarily validated in `blink::AXSelection::IsValid()`
+// for atomic text fields and in `blink::AssertUserSelection` in general, and
+// are based on the behavior in `blink::SelectionAdjuster` class.
+bool IsSelectionValid(
+    const ui::BrowserAccessibility::AXPosition& start_position,
+    const ui::BrowserAccessibility::AXPosition& end_position) {
+  CHECK(!start_position->IsNullPosition());
+  CHECK(!end_position->IsNullPosition());
+
+  if (start_position->tree_id() != end_position->tree_id()) {
+    return false;
+  }
+
+  if (start_position->GetAnchor() == end_position->GetAnchor()) {
+    return true;
+  }
+
+  ui::AXNode* start_root_editable =
+      GetRootEditable(start_position->GetAnchor());
+  ui::AXNode* end_root_editable = GetRootEditable(end_position->GetAnchor());
+
+  return start_root_editable == end_root_editable;
 }
 
 }  // anonymous namespace
@@ -2080,13 +2122,32 @@ void WebContentsAccessibilityAndroid::Blur(JNIEnv* env) {
   }
 }
 
+int32_t WebContentsAccessibilityAndroid::GetFocus(JNIEnv* env) {
+  BrowserAccessibilityManagerAndroid* root_manager =
+      GetRootBrowserAccessibilityManager();
+  if (!root_manager) {
+    return ui::kInvalidAXNodeID;
+  }
+
+  ui::BrowserAccessibility* current_focus = root_manager->GetFocus();
+  if (!current_focus) {
+    return ui::kInvalidAXNodeID;
+  }
+  return static_cast<BrowserAccessibilityAndroid*>(current_focus)
+      ->GetUniqueId();
+}
+
 void WebContentsAccessibilityAndroid::ScrollToMakeNodeVisible(
     JNIEnv* env,
     int32_t unique_id) {
   BrowserAccessibilityAndroid* node = GetAXFromUniqueID(unique_id);
   if (node) {
-    node->manager()->ScrollToMakeVisible(
-        *node, gfx::Rect(node->GetUnclippedFrameBoundsRect().size()));
+    // Passing an empty gfx::Rect() signals to Blink to scroll the element's
+    // natural layout bounds into view. Explicitly deriving and passing
+    // absolute-sized target rects can miscalculate scroll destinations for
+    // elements nested inside positioned layers or web components, leading to
+    // unexpected page over-scrolling.
+    node->manager()->ScrollToMakeVisible(*node, gfx::Rect());
   }
 }
 
@@ -2153,6 +2214,10 @@ bool WebContentsAccessibilityAndroid::SetExtendedSelection(
     return false;
   }
 
+  if (!IsSelectionValid(start_position, end_position)) {
+    return false;
+  }
+
   node->manager()->SetSelection(ui::BrowserAccessibility::AXRange(
       std::move(start_position), std::move(end_position)));
   return true;
@@ -2173,7 +2238,6 @@ void WebContentsAccessibilityAndroid::ClearExtendedSelection(JNIEnv* env,
   ui::BrowserAccessibility::AXPosition end_position =
       node->CreatePositionForSelectionAt(ax::mojom::kNoSelectionOffset);
 
-  // TODO(crbug.com/443078007): Add test.
   node->manager()->SetSelection(ui::BrowserAccessibility::AXRange(
       std::move(start_position), std::move(end_position)));
 }

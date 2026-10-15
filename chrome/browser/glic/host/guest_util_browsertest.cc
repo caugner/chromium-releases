@@ -6,8 +6,10 @@
 
 #include "base/check_deref.h"
 #include "base/test/scoped_feature_list.h"
+#include "chrome/browser/autocomplete/aim_eligibility_service_factory.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/glic/glic_pref_names.h"
+#include "chrome/browser/glic/test_support/glic_browser_test.h"
 #include "chrome/browser/glic/test_support/glic_test_environment.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
@@ -20,6 +22,8 @@
 #include "components/guest_view/browser/guest_view_base.h"
 #include "components/guest_view/browser/guest_view_manager_delegate.h"
 #include "components/guest_view/browser/test_guest_view_manager.h"
+#include "components/keyed_service/content/browser_context_dependency_manager.h"
+#include "components/omnibox/browser/mock_aim_eligibility_service.h"
 #include "components/signin/public/identity_manager/identity_test_utils.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
@@ -109,32 +113,36 @@ guest_view::TestGuestViewManager& GetGuestViewManager(
                          ->CreateGuestViewManagerDelegate()));
 }
 
-class GuestUtilBrowserTest : public InProcessBrowserTest {
+class GuestUtilBrowserTest : public GlicBrowserTest {
  public:
-  GuestUtilBrowserTest() = default;
-  GuestUtilBrowserTest(const GuestUtilBrowserTest&) = delete;
-  GuestUtilBrowserTest& operator=(const GuestUtilBrowserTest&) = delete;
-
-  ~GuestUtilBrowserTest() override = default;
-
-  void SetUpOnMainThread() override {
-    InProcessBrowserTest::SetUpOnMainThread();
+  void SetUpInProcessBrowserTestFixture() override {
+    create_services_subscription_ =
+        BrowserContextDependencyManager::GetInstance()
+            ->RegisterCreateServicesCallbackForTesting(base::BindRepeating(
+                &GuestUtilBrowserTest::OnWillCreateBrowserContextServices,
+                base::Unretained(this)));
   }
 
-  void TearDownOnMainThread() override {
-    InProcessBrowserTest::TearDownOnMainThread();
-  }
-
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    // Load blank page in glic guest view
-    command_line->AppendSwitchASCII(::switches::kGlicGuestURL, "about:blank");
+  virtual void OnWillCreateBrowserContextServices(
+      content::BrowserContext* context) {
+    AimEligibilityServiceFactory::GetInstance()->SetTestingFactory(
+        context, base::BindRepeating([](content::BrowserContext* context)
+                                         -> std::unique_ptr<KeyedService> {
+          auto service =
+              std::make_unique<testing::NiceMock<MockAimEligibilityService>>(
+                  *Profile::FromBrowserContext(context)->GetPrefs(), nullptr,
+                  nullptr, nullptr);
+          ON_CALL(*service, IsAimEligible())
+              .WillByDefault(testing::Return(true));
+          return service;
+        }));
   }
 
  protected:
   guest_view::TestGuestViewManagerFactory& factory() { return factory_; }
 
  private:
-  glic::GlicTestEnvironment glic_test_environment_;
+  base::CallbackListSubscription create_services_subscription_;
   guest_view::TestGuestViewManagerFactory factory_;
 };
 
@@ -159,7 +167,7 @@ IN_PROC_BROWSER_TEST_F(GuestUtilBrowserTest, OnGuestAdded_NonGlic) {
 IN_PROC_BROWSER_TEST_F(GuestUtilBrowserTest, OnGuestAdded_Glic) {
   EXPECT_EQ(0ULL, GetGuestViewManager(factory()).GetCurrentGuestCount());
 
-  OpenWebUiWithGuestView(GURL{chrome::kChromeUIGlicURL});
+  ASSERT_OK(OpenGlicForActiveTab());
 
   auto* guest_view =
       GetGuestViewManager(factory()).WaitForSingleGuestViewCreated();

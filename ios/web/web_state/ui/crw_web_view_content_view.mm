@@ -8,12 +8,18 @@
 #import <limits>
 
 #import "base/check.h"
+#import "base/feature_list.h"
 #import "base/notreached.h"
 #import "ios/web/common/crw_viewport_controller.h"
 #import "ios/web/common/crw_web_view_resizing_type.h"
 #import "ios/web/public/web_client.h"
 
 namespace {
+
+// Feature flag to enable the layout subviews ordering fix. This is used as a kill switch.
+BASE_FEATURE(kCRWWebViewContentViewLayoutFixKillSwitch,
+             "CRWWebViewContentViewLayoutFixKillSwitch",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Background color RGB values for the content view which is displayed when the
 // `_webView` is offset from the screen due to user interaction. Displaying this
@@ -22,7 +28,18 @@ namespace {
 // used by UIWebView.
 const CGFloat kBackgroundRGBComponents[] = {0.75f, 0.74f, 0.76f};
 
+// MIME type string for PDF documents.
+NSString* const kPDFMimeType = @"application/pdf";
+
 }  // namespace
+
+@interface CRWWebViewContentView () {
+  UIEdgeInsets _pendingMinInset;
+  UIEdgeInsets _pendingMaxInset;
+  UIEdgeInsets _maxViewportInset;
+  BOOL _hasPendingViewportInsets;
+}
+@end
 
 @implementation CRWWebViewContentView
 @synthesize contentOffset = _contentOffset;
@@ -35,6 +52,7 @@ const CGFloat kBackgroundRGBComponents[] = {0.75f, 0.74f, 0.76f};
 @synthesize webView = _webView;
 @synthesize fullscreenState = _fullscreenState;
 @synthesize webViewResizingType = _webViewResizingType;
+@synthesize mimeType = _mimeType;
 
 - (instancetype)initWithWebView:(UIView<CRWViewportController>*)webView
                      scrollView:(UIScrollView*)scrollView
@@ -55,6 +73,17 @@ const CGFloat kBackgroundRGBComponents[] = {0.75f, 0.74f, 0.76f};
     }
   }
   return self;
+}
+
+- (void)setMimeType:(NSString*)mimeType {
+  if (_mimeType != mimeType && ![_mimeType isEqualToString:mimeType]) {
+    _mimeType = mimeType;
+    [self setNeedsLayout];
+    // Force a re-evaluation of obscuredInsets now that the MIME type is known.
+    UIEdgeInsets currentInsets = _obscuredInsets;
+    _obscuredInsets = UIEdgeInsetsZero;
+    [self setObscuredInsets:currentInsets];
+  }
 }
 
 - (instancetype)initForTesting {
@@ -91,14 +120,31 @@ const CGFloat kBackgroundRGBComponents[] = {0.75f, 0.74f, 0.76f};
 }
 
 - (void)layoutSubviews {
+  if (base::FeatureList::IsEnabled(
+          kCRWWebViewContentViewLayoutFixKillSwitch)) {
+    [super layoutSubviews];
+  }
   switch (self.webViewResizingType) {
     case WebViewResizingType::kContentInset:
+      if (_hasPendingViewportInsets) {
+        [self setMinimumViewportInset:_pendingMinInset
+                 maximumViewportInset:_pendingMaxInset];
+      }
       break;
     case WebViewResizingType::kFrame:
-      _webView.frame = UIEdgeInsetsInsetRect(self.frame, _obscuredInsets);
+      if ([self.mimeType isEqualToString:kPDFMimeType]) {
+        UIEdgeInsets maxInsets = _maxViewportInset;
+        maxInsets.bottom = 0;
+        _webView.frame = UIEdgeInsetsInsetRect(self.frame, maxInsets);
+      } else {
+        _webView.frame = UIEdgeInsetsInsetRect(self.frame, _obscuredInsets);
+      }
       break;
   }
-  [super layoutSubviews];
+  if (!base::FeatureList::IsEnabled(
+          kCRWWebViewContentViewLayoutFixKillSwitch)) {
+    [super layoutSubviews];
+  }
 }
 
 #pragma mark Layout
@@ -151,11 +197,35 @@ const CGFloat kBackgroundRGBComponents[] = {0.75f, 0.74f, 0.76f};
       }
       break;
     case WebViewResizingType::kFrame:
+      if ([self.mimeType isEqualToString:kPDFMimeType]) {
+        _scrollView.contentInsetAdjustmentBehavior =
+            UIScrollViewContentInsetAdjustmentNever;
+
+        // Keep the WKWebView frame constant during scroll. Resizing the frame
+        // dynamically breaks scroll momentum in PDFs. We do not change the
+        // frame here, but rather rely on layoutSubviews and
+        // setMinimumViewportInset.
+        UIEdgeInsets maxInsets = _maxViewportInset;
+        maxInsets.bottom = 0;
+
+        // Offset contentInset by maxInsets to fake the toolbar collapse
+        // visually.
+        UIEdgeInsets adjustedContentInset = obscuredInsets;
+        adjustedContentInset.top -= maxInsets.top;
+        adjustedContentInset.left -= maxInsets.left;
+        adjustedContentInset.right -= maxInsets.right;
+
+        _scrollView.contentInset = adjustedContentInset;
+        break;
+      }
+
       // Update the scroll offset to account for the changing frame.
-      CGFloat topDelta = obscuredInsets.top - _obscuredInsets.top;
       CGPoint offset = _scrollView.contentOffset;
-      offset.y = std::max<CGFloat>(0, offset.y + topDelta);
-      _scrollView.contentOffset = offset;
+      if (offset.y > 0) {
+        CGFloat topDelta = obscuredInsets.top - _obscuredInsets.top;
+        offset.y = std::max<CGFloat>(0, offset.y + topDelta);
+        _scrollView.contentOffset = offset;
+      }
       // Update the frame.
       _webView.frame = UIEdgeInsetsInsetRect(self.frame, obscuredInsets);
       break;
@@ -166,17 +236,44 @@ const CGFloat kBackgroundRGBComponents[] = {0.75f, 0.74f, 0.76f};
 - (void)setMinimumViewportInset:(UIEdgeInsets)minInset
            maximumViewportInset:(UIEdgeInsets)maxInset {
   switch (self.webViewResizingType) {
-    case WebViewResizingType::kContentInset:
-      [_webView setMinimumViewportInset:minInset maximumViewportInset:maxInset];
-      [_webView setNeedsLayout];
+    case WebViewResizingType::kContentInset: {
+      CGRect insetRect = UIEdgeInsetsInsetRect(_webView.bounds, maxInset);
+      // Only apply the viewport insets if the web view's frame is large enough
+      // to accommodate them.
+      if (_webView.window &&
+          (!base::FeatureList::IsEnabled(
+               kCRWWebViewContentViewLayoutFixKillSwitch) ||
+           !CGRectIsEmpty(insetRect))) {
+        [_webView setMinimumViewportInset:minInset
+                     maximumViewportInset:maxInset];
+        [_webView setNeedsLayout];
+        _hasPendingViewportInsets = NO;
+      } else {
+        _pendingMinInset = minInset;
+        _pendingMaxInset = maxInset;
+        _hasPendingViewportInsets = YES;
+      }
       break;
-    case WebViewResizingType::kFrame:
-      // Do not set the min/max viewport insets if we are resizing frame. Since
-      // these insets are relative to the frame and we cannot report negative
-      // insets, there is no way to properly report the minimum insets. If we
-      // could report negative insets, we would have to update this every time
-      // the obscured insets changed. See http://crbug.com/40944174#comment17.
+    }
+    case WebViewResizingType::kFrame: {
+      _maxViewportInset = maxInset;
+
+      if ([self.mimeType isEqualToString:kPDFMimeType]) {
+        // Inset the frame by maxInsets to prevent covering the page indicator
+        // badge underneath the top toolbar.
+        UIEdgeInsets maxInsetsForFrame = _maxViewportInset;
+        maxInsetsForFrame.bottom = 0;
+        _webView.frame = UIEdgeInsetsInsetRect(self.frame, maxInsetsForFrame);
+      }
+
+      // Do not pass the min/max viewport insets to the underlying web view if
+      // we are resizing its frame. Since these insets are relative to the frame
+      // and we cannot report negative insets, there is no way to properly
+      // report the minimum insets. See http://crbug.com/40944174#comment17. We
+      // do, however, cache the maxInset so it can be used to lock the frame
+      // size for the iOS 18 PDF scroll momentum workaround.
       break;
+    }
   }
 }
 

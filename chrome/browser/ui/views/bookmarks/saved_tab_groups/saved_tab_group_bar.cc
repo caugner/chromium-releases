@@ -16,6 +16,7 @@
 #include "base/uuid.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_group_sync/tab_group_sync_service_factory.h"
+#include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils_desktop.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
@@ -172,7 +173,7 @@ void SavedTabGroupBar::UpdateDropIndex() {
   const std::optional<size_t> current_index =
       GetIndexOfGroup(dragged_group_guid);
 
-  std::optional<size_t> drop_index = std::nullopt;
+  std::optional<size_t> drop_index;
 
   if (!drop_index.has_value()) {
     drop_index = get_drop_index(this, cursor_location, false);
@@ -437,6 +438,7 @@ void SavedTabGroupBar::AddTabGroupButton(const SavedTabGroup& group,
 }
 
 void SavedTabGroupBar::ShowEverythingMenu() {
+  chrome::UpdateBookmarkBarVisibilityPrefOnUserAction(browser_->GetProfile());
   base::RecordAction(base::UserMetricsAction(
       "TabGroups_SavedTabGroups_EverythingButtonPressed"));
 
@@ -614,6 +616,7 @@ views::View* SavedTabGroupBar::GetButton(const base::Uuid& guid) {
 void SavedTabGroupBar::OnTabGroupButtonPressed(const base::Uuid& id,
                                                const ui::Event& event) {
   DCHECK(tab_group_service_ && tab_group_service_->GetGroup(id).has_value());
+  chrome::UpdateBookmarkBarVisibilityPrefOnUserAction(browser_->GetProfile());
   const std::optional<SavedTabGroup> group = tab_group_service_->GetGroup(id);
 
   if (group->saved_tabs().empty()) {

@@ -7,8 +7,9 @@
 
 #import <UIKit/UIKit.h>
 
-// Accessibility identifier for the toolbar view.
-extern NSString* const kToolbarViewIdentifier;
+// Accessibility identifiers for the toolbar views.
+extern NSString* const kPrimaryToolbarViewIdentifier;
+extern NSString* const kSecondaryToolbarViewIdentifier;
 
 // Accessibility identifiers for toolbar buttons.
 extern NSString* const kToolbarBackButtonIdentifier;
@@ -38,6 +39,8 @@ extern const CGFloat kToolbarPadding;
 // The padding in the toolbar when at the top on iPhone portrait..
 extern const CGFloat kTopToolbarIPhonePortraitPadding;
 
+// The height of the toolbar when in fullscreen on iPad.
+extern const CGFloat kTopToolbarIPadHeightFullscreen;
 // The height of the toolbar when in fullscreen.
 extern const CGFloat kToolbarHeightFullscreen;
 // The height of the toolbar when at the top in fullscreen on iPhone portrait.
@@ -46,5 +49,13 @@ extern const CGFloat kTopToolbarIPhonePortraitHeightFullscreen;
 extern const CGFloat kLocationBarHeightFullscreen;
 // The padding in the toolbar when in fullscreen.
 extern const CGFloat kToolbarPaddingFullscreen;
+// Vertical offset of the outer separator.
+extern const CGFloat kOuterSeparatorVerticalOffset;
+// Additional height added to the bottom omnibox when attached above the
+// keyboard.
+extern const CGFloat kKeyboardAttachedOmniboxBottomPadding;
+// Additional height added to the bottom omnibox when attached above the
+// keyboard in landscape orientation.
+extern const CGFloat kKeyboardAttachedOmniboxBottomPaddingLandscape;
 
 #endif  // IOS_CHROME_BROWSER_TOOLBAR_UI_TOOLBAR_CONSTANTS_H_

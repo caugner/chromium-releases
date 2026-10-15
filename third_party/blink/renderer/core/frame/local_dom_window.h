@@ -70,7 +70,7 @@ class CustomElementRegistry;
 class ScrollResult;
 class Document;
 class DocumentInit;
-class DOMSelection;
+class DomSelection;
 class DOMViewport;
 class DOMVisualViewport;
 class CrashReportContext;
@@ -329,7 +329,7 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   //  90 is when rotated counter clockwise.
   int orientation() const;
 
-  DOMSelection* getSelection();
+  DomSelection* getSelection();
 
   void print(ScriptState*);
   void stop();
@@ -386,6 +386,13 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   bool originAgentCluster() const;
 
   // Custom elements
+  //
+  // `window.customElements`. The ScriptState* overload is the web-exposed
+  // accessor and returns nullptr in non-main worlds (window.customElements
+  // only ever exposes the global registry, which is owned by the main
+  // world). See TreeScope::customElementRegistry() for the broader rule
+  // about when to pass ScriptState -- in short, any caller that will hand
+  // the registry to script must pass it.
   CustomElementRegistry* customElements(ScriptState*) const;
   CustomElementRegistry* customElements() const;
   CustomElementRegistry* MaybeCustomElements() const;
@@ -530,6 +537,31 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   // document.
   bool ConsumeDisplayCaptureRequestToken();
 
+  // Returns the state of the |digital_credentials_create_token_| in this
+  // document.
+  bool IsDigitalCredentialsCreateTokenActive() const;
+
+  // Consumes the |digital_credentials_create_token_| if it was active in this
+  // document.
+  bool ConsumeDigitalCredentialsCreateToken();
+
+  // Activates the |digital_credentials_create_token_| for testing.
+  void ActivateDigitalCredentialsCreateTokenForTesting() {
+    digital_credentials_create_token_.Activate();
+  }
+
+  // Returns the state of the |digital_credentials_get_token_| in this document.
+  bool IsDigitalCredentialsGetTokenActive() const;
+
+  // Consumes the |digital_credentials_get_token_| if it was active in this
+  // document.
+  bool ConsumeDigitalCredentialsGetToken();
+
+  // Activates the |digital_credentials_get_token_| for testing.
+  void ActivateDigitalCredentialsGetTokenForTesting() {
+    digital_credentials_get_token_.Activate();
+  }
+
   // Called when a network request buffered an additional `num_bytes` while this
   // frame is in back-forward cache.
   void DidBufferLoadWhileInBackForwardCache(bool update_process_wide_count,
@@ -638,6 +670,8 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   DelegatedCapabilityRequestToken payment_request_token_;
   DelegatedCapabilityRequestToken fullscreen_request_token_;
   DelegatedCapabilityRequestToken display_capture_request_token_;
+  DelegatedCapabilityRequestToken digital_credentials_create_token_;
+  DelegatedCapabilityRequestToken digital_credentials_get_token_;
 
   // https://dom.spec.whatwg.org/#window-current-event
   // We represent the "undefined" value as nullptr.

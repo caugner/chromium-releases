@@ -8,6 +8,8 @@ import {hasAllowedInputs} from './common.js';
 import type {ComposeboxElement} from './composebox.js';
 
 export function getHtml(this: ComposeboxElement) {
+  // Show `contextual-entrypoint-and-menu` if should show menu; otherwise
+  // just show button.
   // clang-format off
   return html`
 <div class="context-menu-container" id="contextMenuContainer"
@@ -25,6 +27,7 @@ export function getHtml(this: ComposeboxElement) {
         @tool-click="${this.onToolClick}"
         @model-click="${this.onModelClick}"
         @get-tab-preview="${this.onGetTabPreview}"
+        @wait-for-tab-load="${this.onWaitForTabLoad}"
         @context-menu-closed="${this.onContextMenuClosed}"
         @context-menu-opened="${this.onContextMenuOpened}"
         @open-image-upload="${this.onOpenImageUpload}"
@@ -32,17 +35,29 @@ export function getHtml(this: ComposeboxElement) {
         @open-drive-upload="${this.onOpenDriveUpload}"
         @smart-tab-sharing-active-changed="${
             this.onSmartTabSharingActiveChanged}"
+        @share-tabs-flyout-open-changed="${this.onShareTabsFlyoutOpenChanged}"
+        @request-tab-suggestions-load="${this.onRequestTabSuggestionsLoad}"
         .inputState="${this.inputState}"
         .usePecApi="${this.usePecApi}"
         .smartTabSharingActive="${this.smartTabSharingActive}"
+        .smartTabSharingVisible="${this.smartTabSharingVisible}"
+        .shareTabsFlyoutOpen="${this.shareTabsFlyoutOpen}"
         .searchboxLayoutMode="${this.searchboxLayoutMode}"
         .tabSuggestions="${this.tabSuggestions}"
+        .tabSuggestionsLoading="${this.tabSuggestionsLoading}"
+        .tabSuggestionsHasLoaded="${this.tabSuggestionsHasLoaded}"
+        .recentTabId="${this.recentTabId}"
         .hasImageFiles="${this.hasImageFiles()}"
         .disabledTabIds="${this.addedTabsIds}"
+        .aimThreadRestoredTabs="${this.aimThreadRestoredTabs}"
         .fileNum="${this.files.size}"
         .sharedTabs="${this.getSharedTabs()}"
+        .isSidePanel="${this.isSidePanel}"
         ?upload-button-disabled="${this.uploadButtonDisabled}"
-        ?show-context-menu-description="${this.showContextMenuDescription}">
+        ?show-context-menu-description="${this.showContextMenuDescription}"
+        .glifAnimationState="${this.glifAnimationState}"
+        .energyEffectAnimationEnabled="${this.energyEffectAnimationEnabled}"
+        .disableFallbackGlifAnimation="${this.disableFallbackGlifAnimation}">
     </cr-composebox-contextual-entrypoint-and-menu>
   ` : (hasAllowedInputs(this.inputState, this.usePecApi) ? html`
     <cr-composebox-contextual-entrypoint-button
@@ -50,12 +65,17 @@ export function getHtml(this: ComposeboxElement) {
         part="composebox-entrypoint"
         exportparts="context-menu-entrypoint-icon, entrypoint-button"
         class="upload-button no-overlap"
+        @wait-for-tab-load="${this.onWaitForTabLoad}"
         .inputState="${this.inputState}"
         .isOblongShape="${this.isOblongShape}"
         .applyContextButtonBackground="${this.applyContextButtonBackground}"
         .sharedTabs="${this.getSharedTabs()}"
+        .restoredTabs="${this.aimThreadRestoredTabs}"
         ?upload-button-disabled="${this.uploadButtonDisabled}"
-        ?show-context-menu-description="${this.showContextMenuDescription}">
+        ?show-context-menu-description="${this.showContextMenuDescription}"
+        .glifAnimationState="${this.glifAnimationState}"
+        .energyEffectAnimationEnabled="${this.energyEffectAnimationEnabled}"
+        .disableFallbackGlifAnimation="${this.disableFallbackGlifAnimation}">
     </cr-composebox-contextual-entrypoint-button>
   ` : '')}
   ${this.searchboxLayoutMode === 'Compact' && this.shouldShowVoiceSearch() ? html`

@@ -137,6 +137,10 @@ class CONTENT_EXPORT StoragePartitionImpl
   // (e.g. resource context).
   ~StoragePartitionImpl() override;
 
+  // Returns true if the session storage database should be cleared instead of
+  // preserving data from the previous session.
+  bool ShouldClearSessionStorageOnStartup() const;
+
   // Quota managed data uses a different representation for storage types than
   // StoragePartition uses. This method generates that representation.
   static storage::QuotaClientTypes GenerateQuotaClientTypes(
@@ -486,7 +490,8 @@ class CONTENT_EXPORT StoragePartitionImpl
   mojo::PendingRemote<network::mojom::URLLoaderNetworkServiceObserver>
   CreateURLLoaderNetworkObserverForServiceOrSharedWorker(
       const network::OriginatingProcessId& process_id,
-      const url::Origin& worker_origin);
+      const url::Origin& worker_origin,
+      const std::optional<blink::StorageKey>& storage_key = std::nullopt);
 
   mojo::PendingRemote<network::mojom::DeviceBoundSessionAccessObserver>
   CreateDeviceBoundSessionObserverForServiceWorker();
@@ -523,27 +528,28 @@ class CONTENT_EXPORT StoragePartitionImpl
           receiver,
       std::unique_ptr<NavigationStateKeepAlive> handle);
 
-  // Forward the call to `NetworkContext::RevokeNetworkForNonces` and save the
-  // nonces in `StoragePartitionImpl`. Clients should revoke network access for
-  // nonces using this function instead of calling
-  // `NetworkContext::RevokeNetworkForNonces` directly. This is because this
-  // function saves the nonces so that they can be restored in case of a
+  // Forward the call to `NetworkContext::RestrictNetworkForIds` and save the
+  // IDs in `StoragePartitionImpl`. Clients should restrict network access for
+  // IDs using this function instead of calling
+  // `NetworkContext::RestrictNetworkForIds` directly. This is because this
+  // function saves the IDs so that they can be restored in case of a
   // `NetworkService` crash.
-  void RevokeNetworkForNoncesInNetworkContext(
+  void RestrictNetworkForIdsInNetworkContext(
       const std::map<base::UnguessableToken, network::ConnectionAllowlists>&
-          nonces_to_allowlists,
+          ids_to_allowlists,
       base::OnceClosure callback);
 
-  // Forward the call to `NetworkContext::ClearNonces` and remove the stored
-  // nonce values in `StoragePartitionImpl`. Clients should clear nonces using
-  // this function instead of calling `NetworkContext::ClearNonces` directly.
-  // This should only be called when the nonces saved by
-  // `RevokeNetworkForNoncesInNetworkContext` are no longer relevant.
-  // The nonces are cleared after a time delay, which will prevent races where
-  // network requests succeed while the fenced frame corresponding to the
-  // nonces is being destroyed.
-  void ClearNoncesInNetworkContextAfterDelay(
-      const std::vector<base::UnguessableToken>& nonces);
+  // Forward the call to `NetworkContext::ClearNetworkRestrictions` and remove
+  // the stored ID values in `StoragePartitionImpl`. Clients should clear
+  // restrictions using this function instead of calling
+  // `NetworkContext::ClearNetworkRestrictions` directly.
+  // This should only be called when the IDs saved by
+  // `RestrictNetworkForIdsInNetworkContext` are no longer relevant.
+  // The IDs are cleared after a time delay, which will prevent races where
+  // network requests succeed while the frame corresponding to the IDs is being
+  // destroyed.
+  void ClearNetworkRestrictionsAfterDelay(
+      const std::vector<base::UnguessableToken>& network_restrictions_ids);
 
   // Get the NavigationStateKeepAlive associated with `frame_token`. See
   // `navigation_state_keep_alive_map_`.
@@ -555,7 +561,7 @@ class CONTENT_EXPORT StoragePartitionImpl
   void RemoveKeepAliveHandleFromMap(blink::LocalFrameToken frame_token,
                                     NavigationStateKeepAlive* keep_alive);
 
-  void SetClearNoncesInNetworkContextParamsForTesting(
+  void SetClearNetworkRestrictionsParamsForTesting(
       const base::TimeDelta& delay,
       base::RepeatingClosure callback);
 
@@ -645,8 +651,10 @@ class CONTENT_EXPORT StoragePartitionImpl
         GlobalRenderFrameHostId global_render_frame_host_id);
 
     // Used when `type` is `kSharedOrServiceWorkerContext`.
-    URLLoaderNetworkContext(const network::OriginatingProcessId& process_id,
-                            const url::Origin& worker_origin);
+    URLLoaderNetworkContext(
+        const network::OriginatingProcessId& process_id,
+        const url::Origin& worker_origin,
+        const std::optional<blink::StorageKey>& storage_key = std::nullopt);
 
     // Used when `type` is `kNavigationRequestContext`.
     explicit URLLoaderNetworkContext(NavigationRequest& navigation_request);
@@ -663,6 +671,9 @@ class CONTENT_EXPORT StoragePartitionImpl
     network::OriginatingProcessId process_id() const { return process_id_; }
     const std::optional<url::Origin>& worker_origin() const {
       return worker_origin_;
+    }
+    const std::optional<blink::StorageKey>& storage_key() const {
+      return storage_key_;
     }
 
     // If `type_` is kSharedOrServiceWorkerContext, returns nullptr. Otherwise
@@ -681,6 +692,14 @@ class CONTENT_EXPORT StoragePartitionImpl
 
     // Only valid and non-nullopt when `type_` is kSharedOrServiceWorkerContext.
     std::optional<url::Origin> worker_origin_;
+
+    // Only valid when `type_` is kSharedOrServiceWorkerContext.
+    // Holds the storage key of the worker that owns this network context.
+    // When present, `CalculateStorageKey()` uses this key to scope
+    // Clear-Site-Data filter deletions to the worker's top-level site
+    // partition. Is `std::nullopt` for contexts that lack a worker storage
+    // key.
+    std::optional<blink::StorageKey> storage_key_;
   };
 
   // `relative_partition_path` is the relative path under `profile_path` to the
@@ -757,8 +776,8 @@ class CONTENT_EXPORT StoragePartitionImpl
 
   void DeleteStaleSessionOnlyCookiesAfterDelay();
 
-  void ClearNoncesInNetworkContextAfterDelayCallback(
-      const std::vector<base::UnguessableToken>& nonces);
+  void ClearNetworkRestrictionsAfterDelayCallback(
+      const std::vector<base::UnguessableToken>& network_restrictions_ids);
 
   // The callback for BindLockManager, invoked after bucket info is resolved.
   void CreateLockManagerWithBucketInfo(
@@ -959,7 +978,7 @@ class CONTENT_EXPORT StoragePartitionImpl
   // `NetworkContext` nonces when there is a `NetworkService`
   // crash.
   std::map<base::UnguessableToken, network::ConnectionAllowlists>
-      network_revocation_nonces_;
+      network_restrictions_ids_;
 
   // We need to delay deleting stale session cookies until after the cookie db
   // has initialized, otherwise we will bypass lazy loading and block.
@@ -969,11 +988,11 @@ class CONTENT_EXPORT StoragePartitionImpl
   // We need a delay when removing fenced frame nonces from here and from the
   // network service, to avoid races where a fenced frame could regain network
   // access during destruction. See the comment on
-  // `ClearNoncesInNetworkContextAfterDelay` for more info.
-  base::TimeDelta clear_nonces_in_network_context_delay_{base::Minutes(1)};
-  // Because removing the nonces after a delay is async, we need a callback to
+  // `ClearNetworkRestrictionsAfterDelay` for more info.
+  base::TimeDelta clear_network_restrictions_delay_{base::Minutes(1)};
+  // Because removing the IDs after a delay is async, we need a callback to
   // execute when the task completes in order to test it.
-  base::RepeatingClosure clear_nonces_in_network_context_callback_for_testing_ =
+  base::RepeatingClosure clear_network_restrictions_callback_for_testing_ =
       base::DoNothing();
 
   // Tracks the number of active documents within the same StoragePartition,

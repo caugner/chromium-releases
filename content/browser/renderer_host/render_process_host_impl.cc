@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "base/base_switches.h"
+#include "base/byte_size.h"
 #include "base/clang_profiling_buildflags.h"
 #include "base/command_line.h"
 #include "base/containers/adapters.h"
@@ -158,6 +159,7 @@
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_iterator.h"
 #include "content/public/browser/resource_coordinator_service.h"
+#include "content/public/browser/security_principal.h"
 #include "content/public/browser/site_isolation_policy.h"
 #include "content/public/browser/tracing_support.h"
 #include "content/public/browser/weak_document_ptr.h"
@@ -1542,7 +1544,7 @@ size_t RenderProcessHost::GetMaxRendererProcessCount() {
 #else
         60;  // In MB
 #endif
-    max_count = base::SysInfo::AmountOfPhysicalMemory().InMiB() / 2;
+    max_count = base::SysInfo::AmountOfTotalPhysicalMemory().InMiB() / 2;
     max_count /= kEstimatedWebContentsMemoryUsage;
 
     static constexpr size_t kMinRendererProcessCount = 3;
@@ -1634,7 +1636,8 @@ RenderProcessHost* RenderProcessHostImpl::CreateRenderProcessHost(
 
 #if !BUILDFLAG(IS_ANDROID)
   if (site_instance) {
-    const GURL& site_url = site_instance->GetSiteURL();
+    const GURL& site_url =
+        site_instance->GetSecurityPrincipal().GetDeprecatedSiteURL();
     if (GetContentClient()->browser()->IsTopChromeWebUIURL(site_url)) {
       flags |= RenderProcessFlags::kForTopChromeWebUI;
     }
@@ -1681,8 +1684,7 @@ RenderProcessHostImpl::RenderProcessHostImpl(
                 false /* boost_for_discard */,
 #if BUILDFLAG(IS_ANDROID)
                 is_spare_renderer,
-                ChildProcessImportance::NORMAL,
-                false /* has_active_clients */
+                ChildProcessImportance::NORMAL
 #else
                 std::nullopt
 #endif
@@ -1700,9 +1702,8 @@ RenderProcessHostImpl::RenderProcessHostImpl(
           perfetto::NamedTrack::FromPointer("RenderProcessHostImpl",
                                             this,
                                             GetChildProcessTracingTrack(id_))) {
-  // TODO(https://crbug.com/497761255): CHECK-exclusion: Convert to CHECK once
-  // we are sure this isn't hit.
-  DCHECK(!browser_context->ShutdownStarted());
+
+  CHECK(!browser_context->ShutdownStarted());
   TRACE_EVENT("shutdown", "RenderProcessHostImpl",
               ChromeTrackEvent::kRenderProcessHost, *this);
   TRACE_EVENT_BEGIN("shutdown", "Browser.RenderProcessHostImpl", tracing_track_,
@@ -2726,7 +2727,7 @@ void RenderProcessHostImpl::WriteIntoTrace(
     const {
   proto->set_id(GetDeprecatedID());
   proto->set_process_lock(GetProcessLock().ToString());
-  proto.Set(TraceProto::kBrowserContext, browser_context_);
+  proto.Set(TraceProto::kBrowserContext, browser_context_.get());
 
   // Pid() can be called only on valid process, so we should check for this
   // before accessing it. In addition, Pid() should only be read once the
@@ -3484,7 +3485,7 @@ void RenderProcessHostImpl::NotifySpareManagerAboutRecentlyUsedSiteInstance(
   SpareRenderProcessHostManagerImpl::Get().PrepareForFutureRequests(
       site_instance->GetBrowserContext(),
       GetContentClient()->browser()->GetSpareRendererDelayForSiteURL(
-          site_instance->GetSiteURL()));
+          site_instance->GetSecurityPrincipal().GetDeprecatedSiteURL()));
 }
 
 // static
@@ -3495,8 +3496,9 @@ bool RenderProcessHostImpl::IsSpareProcessKeptAtAllTimes() {
   // The comparison below is using 1077 rather than 1024 because this helps
   // ensure that devices with exactly 1GB of RAM won't get included because of
   // inaccuracies or off-by-one errors.
-  if (base::SysInfo::AmountOfPhysicalMemory().InMiB() <=
-      features::kAndroidSpareRendererMemoryThreshold.Get()) {
+  if (base::SysInfo::AmountOfTotalPhysicalMemory() <=
+      base::MiBU(base::saturated_cast<uint64_t>(
+          features::kAndroidSpareRendererMemoryThreshold.Get()))) {
     return false;
   }
 
@@ -5452,7 +5454,7 @@ RenderProcessHost* RenderProcessHostImpl::GetProcessHostForSiteInstance(
     spare_process_manager.PrepareForFutureRequests(
         browser_context,
         GetContentClient()->browser()->GetSpareRendererDelayForSiteURL(
-            site_instance->GetSiteURL()));
+            site_instance->GetSecurityPrincipal().GetDeprecatedSiteURL()));
   }
 
   if (is_unmatched_service_worker) {
@@ -5830,7 +5832,6 @@ void RenderProcessHostImpl::UpdateProcessPriorityInputs() {
 #if BUILDFLAG(IS_ANDROID)
   ChildProcessImportance new_effective_importance =
       ChildProcessImportance::NORMAL;
-  bool new_has_active_clients = false;
 #endif
   for (RenderProcessHostPriorityClient* client : priority_clients_) {
     RenderProcessHostPriorityClient::Priority priority = client->GetPriority();
@@ -5859,8 +5860,6 @@ void RenderProcessHostImpl::UpdateProcessPriorityInputs() {
 #if BUILDFLAG(IS_ANDROID)
     new_effective_importance =
         std::max(new_effective_importance, priority.importance);
-    new_has_active_clients =
-        new_has_active_clients || priority.has_active_clients;
 #endif
   }
 
@@ -5873,11 +5872,9 @@ void RenderProcessHostImpl::UpdateProcessPriorityInputs() {
   intersects_viewport_ = new_intersects_viewport;
   is_discarding_ = new_is_discarding;
 #if BUILDFLAG(IS_ANDROID)
-  inputs_changed = inputs_changed ||
-                   new_effective_importance != effective_importance_ ||
-                   new_has_active_clients != has_active_clients_;
+  inputs_changed =
+      inputs_changed || new_effective_importance != effective_importance_;
   effective_importance_ = new_effective_importance;
-  has_active_clients_ = new_has_active_clients;
 #endif
   if (inputs_changed)
     UpdateProcessPriority();
@@ -5902,7 +5899,7 @@ void RenderProcessHostImpl::UpdateProcessPriority() {
       boost_for_loading_count_ > 0, is_discarding_,
 #if BUILDFLAG(IS_ANDROID)
       spare_renderer_priority_status_ == SpareRendererPriorityStatus::kSpare,
-      GetEffectiveImportance(), has_active_clients_
+      GetEffectiveImportance()
 #else
       priority_override_
 #endif

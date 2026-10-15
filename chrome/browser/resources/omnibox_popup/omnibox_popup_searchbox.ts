@@ -5,20 +5,23 @@
 import '//resources/cr_components/searchbox/searchbox_dropdown.js';
 import '//resources/cr_components/searchbox/searchbox_input.js';
 
-import {I18nMixinLit} from '//resources/cr_elements/i18n_mixin_lit.js';
-import {WebUiListenerMixinLit} from '//resources/cr_elements/web_ui_listener_mixin_lit.js';
-import {loadTimeData} from '//resources/js/load_time_data.js';
-import type {PropertyValues} from '//resources/lit/v3_0/lit.rollup.js';
-import {CrLitElement} from '//resources/lit/v3_0/lit.rollup.js';
-import type {PageCallbackRouter, PageHandlerInterface} from '//resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
-
-import {getCss} from './omnibox_popup_searchbox.css.js';
-import {getHtml} from './omnibox_popup_searchbox.html.js';
 import {SearchboxBrowserProxy} from '//resources/cr_components/searchbox/searchbox_browser_proxy.js';
 import type {SearchboxDropdownElement} from '//resources/cr_components/searchbox/searchbox_dropdown.js';
 import type {SearchboxInputElement} from '//resources/cr_components/searchbox/searchbox_input.js';
 import type {SearchboxMixinInterface} from '//resources/cr_components/searchbox/searchbox_mixin.js';
 import {SearchboxMixin} from '//resources/cr_components/searchbox/searchbox_mixin.js';
+import {I18nMixinLit} from '//resources/cr_elements/i18n_mixin_lit.js';
+import {WebUiListenerMixinLit} from '//resources/cr_elements/web_ui_listener_mixin_lit.js';
+import {EventTracker} from '//resources/js/event_tracker.js';
+import {loadTimeData} from '//resources/js/load_time_data.js';
+import type {PropertyValues} from '//resources/lit/v3_0/lit.rollup.js';
+import {CrLitElement} from '//resources/lit/v3_0/lit.rollup.js';
+import type {AutocompleteResult, PageCallbackRouter as SearchboxPageCallbackRouter, PageHandlerInterface as SearchboxPageHandlerInterface} from '//resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
+
+import {browserProxyFactory} from './omnibox_popup.mojom-webui.js';
+import type {PageCallbackRouter as PopupPageCallbackRouter, PageHandlerInterface as PopupPageHandlerInterface} from './omnibox_popup.mojom-webui.js';
+import {getCss} from './omnibox_popup_searchbox.css.js';
+import {getHtml} from './omnibox_popup_searchbox.html.js';
 
 export interface OmniboxPopupSearchboxElement {
   $: {
@@ -74,6 +77,16 @@ export class OmniboxPopupSearchboxElement extends
         type: Boolean,
         reflect: true,
       },
+      // TODO(b/517218130): Ensure Omnibox is laid out correctly when
+      //   `isTouchUi_` is true.
+      isTouchUi_: {
+        type: Boolean,
+        reflect: true,
+      },
+      omniboxPopupDebugEnabled_: {
+        type: Boolean,
+        reflect: true,
+      },
     };
   }
 
@@ -89,34 +102,58 @@ export class OmniboxPopupSearchboxElement extends
   protected accessor searchboxLensSearchEnabled_: boolean =
       loadTimeData.getBoolean('searchboxLensSearch');
   protected accessor useWebkitSearchIcons_: boolean = false;
+  // TODO(b/519185419): Remove `isTouchUi_` property and from `loadTimeData` and
+  // get layout constants and font sizes from a C++ layout helper instead.
+  protected accessor isTouchUi_: boolean = loadTimeData.getBoolean('isTouchUi');
+  protected accessor omniboxPopupDebugEnabled_: boolean =
+      loadTimeData.getBoolean('omniboxPopupDebugEnabled');
 
-  private pageHandler_: PageHandlerInterface;
-  private callbackRouter_: PageCallbackRouter;
-  private autocompleteResultChangedListenerId_: number|null = null;
+  private eventTracker_ = new EventTracker();
+  private searchboxPageHandler_: SearchboxPageHandlerInterface;
+  private searchboxCallbackRouter_: SearchboxPageCallbackRouter;
+  private popupCallbackRouter_: PopupPageCallbackRouter;
+  private popupPageHandler_: PopupPageHandlerInterface;
+  private listenerIds_: number[] = [];
+  private popupListenerIds_: number[] = [];
 
   constructor() {
     super();
-    const browserProxy = SearchboxBrowserProxy.getInstance();
-    this.pageHandler_ = browserProxy.handler;
-    this.callbackRouter_ = browserProxy.callbackRouter;
+    const searchboxBrowserProxy = SearchboxBrowserProxy.getInstance();
+    this.searchboxPageHandler_ = searchboxBrowserProxy.handler;
+    this.searchboxCallbackRouter_ = searchboxBrowserProxy.callbackRouter;
+    const popupBrowserProxy = browserProxyFactory.getInstance();
+    this.popupCallbackRouter_ = popupBrowserProxy.callbackRouter;
+    this.popupPageHandler_ = popupBrowserProxy.handler;
   }
 
   override connectedCallback() {
     super.connectedCallback();
     // TODO(crbug.com/497883783): Move autocompleteResultChangedListenerId_
     // property to SearchboxMixin.
-    this.autocompleteResultChangedListenerId_ =
-        this.callbackRouter_.autocompleteResultChanged.addListener(
-            this.onAutocompleteResultChanged.bind(this));
+    this.listenerIds_ = [
+      this.searchboxCallbackRouter_.autocompleteResultChanged.addListener(
+          this.onAutocompleteResultChanged.bind(this)),
+    ];
+    this.popupListenerIds_ = [
+      this.popupCallbackRouter_.setInputText.addListener(
+          (input: string) => this.$.input.setInputText(input)),
+    ];
+
+    this.eventTracker_.add(this, 'escape-searchbox', () => {
+      if (!this.dropdownIsVisible) {
+        this.popupPageHandler_.closeUI();
+      }
+    });
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
-    if (this.autocompleteResultChangedListenerId_ !== null) {
-      this.callbackRouter_.removeListener(
-          this.autocompleteResultChangedListenerId_);
-      this.autocompleteResultChangedListenerId_ = null;
-    }
+    this.listenerIds_.forEach(
+        id => this.searchboxCallbackRouter_.removeListener(id));
+    this.listenerIds_ = [];
+    this.popupListenerIds_.forEach(
+        id => this.popupCallbackRouter_.removeListener(id));
+    this.popupListenerIds_ = [];
   }
 
   override willUpdate(changedProperties: PropertyValues<this>) {
@@ -152,8 +189,8 @@ export class OmniboxPopupSearchboxElement extends
     return this.$.inputWrapper;
   }
 
-  override pageHandler(): PageHandlerInterface {
-    return this.pageHandler_;
+  override pageHandler(): SearchboxPageHandlerInterface {
+    return this.searchboxPageHandler_;
   }
 
   isInputEmpty(): boolean {
@@ -181,8 +218,62 @@ export class OmniboxPopupSearchboxElement extends
   // Event handlers
   //========================================================================
 
+  // TODO(b/519266700): This logic is very similar to mixin. We should look
+  // into refactoring when we clean up the mixin method.
+  override async onAutocompleteResultChanged(result: AutocompleteResult) {
+    if (this.lastQueriedInput &&
+            (this.lastQueriedInput.trimStart() !== result.input) ||
+        !result.matches.length) {
+      return;  // Stale result; ignore.
+    }
+
+    this.result = result;
+    const hasMatches = this.hasMatches();
+
+    this.dropdownIsVisible = hasMatches;
+
+    const firstMatch = hasMatches ? this.result.matches[0] : null;
+    if (firstMatch && firstMatch.allowedToBeDefaultMatch) {
+      // Select the default match and update the input.
+      this.getDropdownElement().selectFirst();
+      this.getInputElement().setInput({
+        text: this.lastQueriedInput ?? '',
+        inline: firstMatch.inlineAutocompletion,
+      });
+    } else if (
+        this.getInputElement().inputElement.value.trim() && hasMatches &&
+        this.selectedMatchIndex >= 0 &&
+        this.selectedMatchIndex < this.result.matches.length) {
+      // Restore the selection and update the input. Don't restore when the
+      // user deletes all their input and autocomplete is queried or else the
+      // empty input will change to the value of the first result.
+      await this.getDropdownElement().selectIndex(this.selectedMatchIndex);
+      this.getInputElement().setInput({
+        text: this.selectedMatch!.fillIntoEdit,
+        inline: '',
+        moveCursorToEnd: true,
+      });
+    } else {
+      // Remove the selection and update the input.
+      this.getDropdownElement().unselect();
+      this.getInputElement().setInput({
+        text: result.input,
+        inline: '',
+      });
+    }
+  }
+
+  override onInputFocusChanged(e: CustomEvent<{value: string}>) {
+    // Don't populate results if there is already a query, when a user
+    // clicks into input (i.e. drafting state with query).
+    if (this.lastQueriedInput) {
+      return;
+    }
+    super.onInputFocusChanged(e);
+  }
+
   protected onInputFocusin_() {
-    this.pageHandler_.onFocusChanged(true);
+    this.searchboxPageHandler_.onFocusChanged(true);
   }
 
   protected computePlaceholderText_(): string {

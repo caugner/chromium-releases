@@ -2,24 +2,27 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ui/ozone/platform/x11/x11_window.h"
-#include "ui/platform_window/extensions/x11_extension_delegate.h"
-
 #include <memory>
 #include <utility>
 
+#include "base/nix/xdg_util.h"
 #include "base/run_loop.h"
+#include "base/test/run_until.h"
 #include "base/test/task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/x/x11_util.h"
 #include "ui/display/display.h"
 #include "ui/display/screen_base.h"
 #include "ui/events/devices/x11/touch_factory_x11.h"
 #include "ui/events/event.h"
 #include "ui/events/platform/x11/x11_event_source.h"
 #include "ui/events/test/events_test_utils_x11.h"
+#include "ui/gfx/x/atom_cache.h"
 #include "ui/gfx/x/event.h"
+#include "ui/ozone/platform/x11/x11_window.h"
 #include "ui/ozone/platform/x11/x11_window_manager.h"
 #include "ui/ozone/test/mock_platform_window_delegate.h"
+#include "ui/platform_window/extensions/x11_extension_delegate.h"
 #include "ui/platform_window/platform_window_delegate.h"
 #include "ui/platform_window/platform_window_init_properties.h"
 
@@ -478,10 +481,165 @@ TEST_F(X11WindowOzoneTest, OnWindowMappedUseAfterFreeAfterMaximize) {
   x11::Event map_event(/*send_event=*/false, std::move(map_notify));
   connection->DispatchEvent(map_event);
 
-  // The synchronous-free path must have been exercised; otherwise the test
-  // didn't reach the vulnerable frame.
-  EXPECT_TRUE(freed) << "delegate->OnBoundsChanged() was not invoked "
-                        "synchronously from OnWindowMapped/Maximize";
+  EXPECT_TRUE(base::test::RunUntil([&]() {
+    connection->DispatchAll();
+    return freed;
+  })) << "delegate->OnBoundsChanged() was not invoked from "
+         "OnWindowMapped/Maximize";
+
+  connection->DestroyWindow({new_parent});
+}
+
+// Verifies that X11Window::SetOverrideRedirect() does not cause a
+// use-after-free if the window is synchronously deleted during Map().
+TEST_F(X11WindowOzoneTest, SetOverrideRedirectSelfDeleteUaf) {
+  testing::NiceMock<MockPlatformWindowDelegate> delegate;
+  gfx::AcceleratedWidget widget;
+  constexpr gfx::Rect bounds(30, 80, 800, 600);
+  std::unique_ptr<PlatformWindow> window =
+      CreatePlatformWindow(&delegate, bounds, &widget, nullptr);
+
+  auto* connection = x11::Connection::Get();
+  auto xwindow = static_cast<x11::Window>(widget);
+
+  // Prime the X11Window's `GeometryCache` so the first `Map()` /
+  // `GetBoundsInPixels()` does not itself fire a synchronous
+  // `OnBoundsChanged()`.
+  window->GetBoundsInPixels();
+
+  // Show the window so window_mapped_in_client_ becomes true (allowing remap).
+  window->Show(false);
+
+  // Create a real parent window at a non-zero offset so that after
+  // a synthetic reparent, only the absolute origin of `xwindow` changes.
+  // `override_redirect` avoids any WM interference.
+  x11::Window new_parent = connection->GenerateId<x11::Window>();
+  connection->CreateWindow({
+      .wid = new_parent,
+      .parent = connection->default_root(),
+      .x = 200,
+      .y = 200,
+      .width = 1000,
+      .height = 1000,
+      .c_class = x11::WindowClass::InputOnly,
+      .override_redirect = x11::Bool32(true),
+  });
+
+  // Synthesize a `ReparentNotify` so the leaf `GeometryCache` becomes
+  // un-ready. The next `GetBoundsInPixels()` (inside the `Map()` called
+  // from `SetOverrideRedirect()`) will block on the new parent's geometry,
+  // observe an origin change, and fire `OnBoundsChanged()` synchronously.
+  x11::ReparentNotifyEvent reparent{};
+  reparent.event = xwindow;
+  reparent.window = xwindow;
+  reparent.parent = new_parent;
+  reparent.x = 0;
+  reparent.y = 0;
+  x11::Event reparent_event(/*send_event=*/false, std::move(reparent));
+  connection->DispatchEvent(reparent_event);
+
+  // Arm the delegate so the next synchronous `OnBoundsChanged()` frees
+  // the `X11Window`.
+  bool armed = true;
+  bool freed = false;
+  EXPECT_CALL(delegate, OnBoundsChanged(_))
+      .WillRepeatedly([&](const PlatformWindowDelegate::BoundsChange&) {
+        if (armed) {
+          armed = false;
+          freed = true;
+          window.reset();
+        }
+      });
+
+  // Call `SetOverrideRedirect` via the `X11Extension` interface on X11Window.
+  auto* x11_window_raw = static_cast<X11Window*>(window.get());
+  x11_window_raw->SetOverrideRedirect(true);
+
+  EXPECT_TRUE(base::test::RunUntil([&]() {
+    connection->DispatchAll();
+    return freed;
+  })) << "delegate->OnBoundsChanged() was not invoked from SetOverrideRedirect";
+
+  connection->DestroyWindow({new_parent});
+}
+
+// Verifies that X11Window::DispatchUiEvent() does not cause a use-after-free
+// if the located_events_grabber is synchronously deleted during geometry fetch
+// (GetBoundsInPixels()).
+TEST_F(X11WindowOzoneTest, DispatchUiEventGrabberFreedDuringGeometryFetch) {
+  // Setup window1 (grabber)
+  testing::NiceMock<MockPlatformWindowDelegate> delegate1;
+  gfx::AcceleratedWidget widget1;
+  constexpr gfx::Rect bounds1(30, 80, 800, 600);
+  std::unique_ptr<PlatformWindow> window1 =
+      CreatePlatformWindow(&delegate1, bounds1, &widget1, nullptr);
+
+  // Setup window2 (target)
+  testing::NiceMock<MockPlatformWindowDelegate> delegate2;
+  gfx::AcceleratedWidget widget2;
+  constexpr gfx::Rect bounds2(900, 80, 800, 600);
+  std::unique_ptr<PlatformWindow> window2 =
+      CreatePlatformWindow(&delegate2, bounds2, &widget2, nullptr);
+
+  auto* connection = x11::Connection::Get();
+  auto xwindow1 = static_cast<x11::Window>(widget1);
+
+  // Set window1 as the grabber.
+  window1->SetCapture();
+  EXPECT_TRUE(window1->HasCapture());
+
+  // Force the grabber window's GeometryCache (and its parent chain) to
+  // become Ready.
+  window1->GetBoundsInPixels();
+
+  // Create a real parent window at a non-zero offset so that after reparenting,
+  // the absolute origin changes. override_redirect avoids any WM interference.
+  x11::Window new_parent = connection->GenerateId<x11::Window>();
+  connection->CreateWindow({
+      .wid = new_parent,
+      .parent = connection->default_root(),
+      .x = 200,
+      .y = 200,
+      .width = 1000,
+      .height = 1000,
+      .c_class = x11::WindowClass::InputOnly,
+      .override_redirect = x11::Bool32(true),
+  });
+
+  // Synthesize the ReparentNotify WM reparent event.
+  x11::ReparentNotifyEvent reparent{};
+  reparent.event = xwindow1;
+  reparent.window = xwindow1;
+  reparent.parent = new_parent;
+  reparent.x = 0;
+  reparent.y = 0;
+  x11::Event reparent_event(/*send_event=*/false, std::move(reparent));
+  connection->DispatchEvent(reparent_event);
+
+  // Arm the grabber window's delegate to free window1 during OnBoundsChanged.
+  bool armed = true;
+  bool freed = false;
+  EXPECT_CALL(delegate1, OnBoundsChanged(_))
+      .WillRepeatedly([&](const PlatformWindowDelegate::BoundsChange&) {
+        if (armed) {
+          armed = false;
+          freed = true;
+          window1.reset();
+        }
+      });
+
+  // Prepare a located event (e.g. mouse press) targeting window2 (widget2).
+  ScopedXI2Event xi_event;
+  xi_event.InitGenericButtonEvent(kPointerDeviceId, EventType::kMousePressed,
+                                  gfx::Point(100, 100), EF_NONE);
+
+  // Dispatch the event to window2.
+  DispatchXEvent(xi_event, widget2);
+
+  EXPECT_TRUE(base::test::RunUntil([&]() {
+    connection->DispatchAll();
+    return freed;
+  })) << "grabber delegate was never invoked";
 
   connection->DestroyWindow({new_parent});
 }
@@ -556,9 +714,10 @@ TEST_F(X11WindowOzoneTest, DispatchEventSelfFreedDuringMouseOnWindow) {
   // Step 7: Dispatch the event to widget. This will trigger DispatchEvent.
   DispatchXEvent(xi_event, widget);
 
-  // If we got here without ASAN/crash tripping, verify the window was indeed
-  // freed.
-  EXPECT_TRUE(freed) << "delegate was never invoked synchronously";
+  EXPECT_TRUE(base::test::RunUntil([&]() {
+    connection->DispatchAll();
+    return freed;
+  })) << "delegate was never invoked";
 
   connection->DestroyWindow({new_parent});
 }

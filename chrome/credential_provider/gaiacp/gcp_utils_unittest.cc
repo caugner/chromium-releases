@@ -4,25 +4,47 @@
 
 #include "chrome/credential_provider/gaiacp/gcp_utils.h"
 
+#include <windows.h>
+
+#include <shlobj.h>
+
+#include <algorithm>
+#include <array>
 #include <string_view>
 
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/containers/span.h"
+#include "base/files/file_util.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/process/launch.h"
 #include "base/strings/strcat.h"
 #include "base/strings/strcat_win.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/gmock_expected_support.h"
+#include "base/test/test_file_util.h"
 #include "base/test/test_reg_util_win.h"
 #include "base/values.h"
+#include "base/win/access_token.h"
 #include "base/win/scoped_handle.h"
+#include "base/win/security_descriptor.h"
+#include "base/win/security_util.h"
+#include "base/win/sid.h"
 #include "build/build_config.h"
 #include "chrome/credential_provider/common/gcp_strings.h"
 #include "chrome/credential_provider/gaiacp/mdm_utils.h"
 #include "chrome/credential_provider/gaiacp/reg_utils.h"
 #include "chrome/credential_provider/test/gcp_fakes.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace credential_provider {
+
+using ::testing::AllOf;
+using ::testing::HasSubstr;
+using ::testing::Not;
+using ::testing::Optional;
+using ::testing::StartsWith;
 
 TEST(GcpPasswordTest, GenerateRandomPassword) {
   wchar_t password[64];
@@ -70,7 +92,7 @@ class GcpProcHelperTest : public ::testing::Test {
   bool TestPipe(const base::win::ScopedHandle::Handle& reading,
                 const base::win::ScopedHandle::Handle& writing);
 
-  void StripCrLf(char* buffer);
+  void StripCrLf(base::span<char> buffer);
 
   FakeOSUserManager fake_os_user_manager_;
 };
@@ -86,29 +108,34 @@ void GcpProcHelperTest::CreateHandle(base::win::ScopedHandle* handle) {
 bool GcpProcHelperTest::TestPipe(
     const base::win::ScopedHandle::Handle& reading,
     const base::win::ScopedHandle::Handle& writing) {
-  char input_buffer[8];
-  char output_buffer[8];
-  UNSAFE_TODO(strcpy_s(input_buffer, std::size(input_buffer), "hello"));
-  const DWORD kExpectedDataLength = strlen(input_buffer) + 1;
+  std::array<char, 8> input_buffer = {};
+  std::array<char, 8> output_buffer = {};
+  base::span(input_buffer).first(6u).copy_from(std::to_array("hello"));
+  const DWORD kExpectedDataLength = strlen(input_buffer.data()) + 1;
 
   // Make sure what is written can be read.
   DWORD written;
-  EXPECT_TRUE(::WriteFile(writing, input_buffer, kExpectedDataLength, &written,
-                          nullptr));
+  EXPECT_TRUE(::WriteFile(writing, input_buffer.data(), kExpectedDataLength,
+                          &written, nullptr));
   EXPECT_EQ(kExpectedDataLength, written);
 
   DWORD read;
-  EXPECT_TRUE(ReadFile(reading, output_buffer, std::size(output_buffer), &read,
-                       nullptr));
+  EXPECT_TRUE(ReadFile(reading, output_buffer.data(), std::size(output_buffer),
+                       &read, nullptr));
   EXPECT_EQ(kExpectedDataLength, read);
-  return UNSAFE_TODO(strcmp(input_buffer, output_buffer)) == 0;
+  return std::string_view(input_buffer.data()) ==
+         std::string_view(output_buffer.data());
 }
 
-void GcpProcHelperTest::StripCrLf(char* buffer) {
-  for (char* p = UNSAFE_TODO(buffer + strlen(buffer) - 1); p >= buffer;
-       UNSAFE_TODO(--p)) {
-    if (*p == '\n' || *p == '\r')
-      *p = 0;
+void GcpProcHelperTest::StripCrLf(base::span<char> buffer) {
+  // Find the NUL terminator or use full size if not found.
+  auto it = std::ranges::find(buffer, '\0');
+  auto content =
+      buffer.first(static_cast<size_t>(std::distance(buffer.begin(), it)));
+  for (char& c : content) {
+    if (c == '\n' || c == '\r') {
+      c = 0;
+    }
   }
 }
 
@@ -449,12 +476,13 @@ TEST_F(GcpProcHelperTest, WaitForProcess) {
 
   // Write to stdin of the child process.
   const int kBufferSize = 16;
-  char input_buffer[kBufferSize];
-  UNSAFE_TODO(strcpy_s(input_buffer, std::size(input_buffer), "hello"));
-  const DWORD kExpectedDataLength = strlen(input_buffer) + 1;
+  std::array<char, kBufferSize> input_buffer = {};
+  base::span(input_buffer).first(6u).copy_from(std::to_array("hello"));
+  const DWORD kExpectedDataLength = strlen(input_buffer.data()) + 1;
   DWORD written;
-  ASSERT_TRUE(::WriteFile(parent_handles.hstdin_write.get(), input_buffer,
-                          kExpectedDataLength, &written, nullptr));
+  ASSERT_TRUE(::WriteFile(parent_handles.hstdin_write.get(),
+                          input_buffer.data(), kExpectedDataLength, &written,
+                          nullptr));
   ASSERT_EQ(kExpectedDataLength, written);
   ASSERT_TRUE(FlushFileBuffers(parent_handles.hstdin_write.get()));
   parent_handles.hstdin_write.Close();
@@ -465,12 +493,12 @@ TEST_F(GcpProcHelperTest, WaitForProcess) {
   startupinfo.Shutdown();
 
   DWORD exit_code;
-  char output_buffer[kBufferSize];
+  std::array<char, kBufferSize> output_buffer = {};
   EXPECT_EQ(S_OK, WaitForProcess(process.Handle(), parent_handles, &exit_code,
-                                 output_buffer, kBufferSize));
+                                 output_buffer.data(), kBufferSize));
   EXPECT_EQ(0u, exit_code);
   StripCrLf(output_buffer);
-  EXPECT_STREQ(input_buffer, output_buffer);
+  EXPECT_STREQ(input_buffer.data(), output_buffer.data());
 }
 
 TEST_F(GcpProcHelperTest, GetCommandLineForEntrypoint) {
@@ -605,5 +633,87 @@ INSTANTIATE_TEST_SUITE_P(
                        ::testing::Values("machine_guid", ""),
                        ::testing::Values("true"),
                        ::testing::Values("device_resource_id", "")));
+
+class GcpUtilsSecureCreateDirectoryTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    if (!::IsUserAnAdmin()) {
+      GTEST_SKIP() << "Test requires administrative privileges.";
+    }
+    ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
+  }
+
+  void TearDown() override {
+    if (temp_dir_.IsValid() && ::IsUserAnAdmin()) {
+      if (auto token = base::win::AccessToken::FromCurrentProcess(); token) {
+        std::vector<base::win::Sid> sids;
+        sids.push_back(token->User().Clone());
+        base::win::GrantAccessToPath(
+            temp_dir_.GetPath(), sids, GENERIC_ALL | STANDARD_RIGHTS_ALL,
+            CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE);
+      }
+    }
+  }
+
+  base::ScopedTempDir temp_dir_;
+};
+
+TEST_F(GcpUtilsSecureCreateDirectoryTest, NewDirectory) {
+  base::FilePath new_dir = temp_dir_.GetPath().Append(L"NewSecureDir");
+  EXPECT_FALSE(base::DirectoryExists(new_dir));
+  EXPECT_TRUE(SecureCreateDirectory(new_dir));
+  EXPECT_TRUE(base::DirectoryExists(new_dir));
+  EXPECT_THAT(base::GetFileDacl(new_dir),
+              AllOf(StartsWith(L"D:P"), HasSubstr(L";;;BA)"),
+                    HasSubstr(L";;;SY)"), Not(HasSubstr(L";;;WD)"))));
+}
+
+TEST_F(GcpUtilsSecureCreateDirectoryTest, ExistingDirectory) {
+  base::FilePath existing_dir = temp_dir_.GetPath().Append(L"ExistingDir");
+  EXPECT_TRUE(base::CreateDirectory(existing_dir));
+  EXPECT_TRUE(base::DirectoryExists(existing_dir));
+  EXPECT_TRUE(SecureCreateDirectory(existing_dir));
+  EXPECT_THAT(base::GetFileDacl(existing_dir),
+              AllOf(StartsWith(L"D:P"), HasSubstr(L";;;BA)"),
+                    HasSubstr(L";;;SY)"), Not(HasSubstr(L";;;WD)"))));
+}
+
+TEST_F(GcpUtilsSecureCreateDirectoryTest,
+       IdempotentOnExistingSecuredDirectory) {
+  base::FilePath target_dir = temp_dir_.GetPath().Append(L"SecuredDir");
+  EXPECT_TRUE(SecureCreateDirectory(target_dir));
+  EXPECT_THAT(base::GetFileDacl(target_dir),
+              AllOf(StartsWith(L"D:P"), HasSubstr(L";;;BA)"),
+                    HasSubstr(L";;;SY)"), Not(HasSubstr(L";;;WD)"))));
+
+  // Apply SecureCreateDirectory a second time to an already secured directory.
+  EXPECT_TRUE(SecureCreateDirectory(target_dir));
+  EXPECT_THAT(base::GetFileDacl(target_dir),
+              AllOf(StartsWith(L"D:P"), HasSubstr(L";;;BA)"),
+                    HasSubstr(L";;;SY)"), Not(HasSubstr(L";;;WD)"))));
+}
+
+TEST_F(GcpUtilsSecureCreateDirectoryTest, FailOnExistingFileConflict) {
+  base::FilePath file_path = temp_dir_.GetPath().Append(L"ConflictingFile");
+  ASSERT_TRUE(base::WriteFile(file_path, "dummy data"));
+  EXPECT_TRUE(base::PathExists(file_path));
+  EXPECT_FALSE(base::DirectoryExists(file_path));
+
+  // Should fail because file_path exists as a file, not a directory.
+  EXPECT_FALSE(SecureCreateDirectory(file_path));
+}
+
+TEST_F(GcpUtilsSecureCreateDirectoryTest, FailOnReparsePoint) {
+  base::FilePath target_dir = temp_dir_.GetPath().Append(L"TargetDir");
+  base::FilePath link_dir = temp_dir_.GetPath().Append(L"LinkDir");
+  ASSERT_TRUE(base::CreateDirectory(target_dir));
+  if (::CreateSymbolicLinkW(link_dir.value().c_str(),
+                            target_dir.value().c_str(),
+                            SYMBOLIC_LINK_FLAG_DIRECTORY)) {
+    // If symlink/reparse point creation succeeded, SecureCreateDirectory must
+    // reject it.
+    EXPECT_FALSE(SecureCreateDirectory(link_dir));
+  }
+}
 
 }  // namespace credential_provider

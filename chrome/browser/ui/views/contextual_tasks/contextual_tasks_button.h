@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_CONTEXTUAL_TASKS_CONTEXTUAL_TASKS_BUTTON_H_
 #define CHROME_BROWSER_UI_VIEWS_CONTEXTUAL_TASKS_CONTEXTUAL_TASKS_BUTTON_H_
 
+#include <memory>
+
 #include "base/callback_list.h"
 #include "base/memory/raw_ptr.h"
 #include "base/scoped_observation.h"
@@ -18,6 +20,11 @@
 
 class BrowserWindowInterface;
 
+namespace ui {
+class ImageModel;
+class LayerOwner;
+}
+
 class ContextualTasksButton
     : public ToolbarButton,
       public contextual_tasks::ContextualTasksPanelController::Observer,
@@ -25,7 +32,6 @@ class ContextualTasksButton
   METADATA_HEADER(ContextualTasksButton, ToolbarButton)
 
  public:
-  DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kContextualTasksToolbarButton);
   explicit ContextualTasksButton(
       BrowserWindowInterface* browser_window_interface);
   ~ContextualTasksButton() override;
@@ -44,23 +50,30 @@ class ContextualTasksButton
   void OnImmersiveFullscreenExited() override;
   void OnImmersiveModeControllerDestroyed() override;
 
+  // views::ViewObserver:
+  void OnViewLayerBoundsSet(views::View* observed_view) override;
+
  protected:
   void UpdateColorsAndInsets() override;
 
  private:
   void OnButtonPress();
-  void OnPinStateChanged();
   void OnSidePanelAlignmentChanged();
   void OnShouldUpdateVisibility(bool should_show);
   void OnEligibilityChange(bool is_eligible);
   void MaybeUpdateVisibility();
+  void UpdateDropShadowLayerBounds();
+  ui::ImageModel GetButtonImage();
 
-  BooleanPrefMember pin_state_;
   BooleanPrefMember side_panel_alignment_;
   base::CallbackListSubscription should_update_visibility_subscription_;
   base::CallbackListSubscription eligibility_change_subscription_;
   base::CallbackListSubscription vertical_tabs_subscription_;
   raw_ptr<BrowserWindowInterface> browser_window_interface_ = nullptr;
+
+  // Since the contextual tasks button is not a standard shape, it requires a
+  // LayerOwner to paint the custom drop shadow.
+  std::unique_ptr<ui::LayerOwner> drop_shadow_painted_layer_;
 
   base::ScopedObservation<
       contextual_tasks::ContextualTasksPanelController,

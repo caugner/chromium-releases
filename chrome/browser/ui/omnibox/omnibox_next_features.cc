@@ -96,6 +96,13 @@ BASE_FEATURE(kOmniboxAnimatedCaret, ENABLED);
 // If enabled, enables energy effect in the omnibox.
 BASE_FEATURE(kEnergyEffectInOmnibox, ENABLED);
 
+// If enabled, the "Ask Google about this page" action will route to cobrowse.
+BASE_FEATURE(kWebUIOmniboxAskGAboutThisPage, DISABLED);
+
+
+// If enabled, the Ai Mode button will be dynamically shown in the omnibox.
+BASE_FEATURE(kWebUIOmniboxDynamicAiModeButton, DISABLED);
+
 // Decodes a proto object from its serialized Base64 string representation.
 // Returns true if decoding and parsing succeed, false otherwise.
 bool ParseProtoFromBase64String(const std::string& input,
@@ -224,6 +231,11 @@ bool IsWebUIOmniboxFullPopupEnabled() {
          base::FeatureList::IsEnabled(omnibox::kWebUIOmniboxFullPopupV2);
 }
 
+bool IsWebUIOmniboxInBrowserViewEnabled() {
+  return base::FeatureList::IsEnabled(omnibox::kWebUIOmniboxFullPopupV2) &&
+         kWebUIOmniboxFullPopupV2UseBrowserView.Get();
+}
+
 bool IsAimPopupFeatureEnabled() {
   return base::FeatureList::IsEnabled(internal::kWebUIOmniboxAimPopup);
 }
@@ -330,14 +342,6 @@ const base::FeatureParam<bool> kShowLensSearchChip(
     &internal::kWebUIOmniboxSimplification,
     "Omnibox_ShowLensSearchChip",
     false);
-const base::FeatureParam<bool> kAddTabUploadDelayOnRecentTabChipClick(
-    &internal::kWebUIOmniboxAimPopup,
-    "Omnibox_AddTabUploadDelayOnRecentTabChipClick",
-    true);
-const base::FeatureParam<bool> kShowRecentTabChip(
-    &internal::kWebUIOmniboxAimPopup,
-    "Omnibox_ShowRecentTabChip",
-    false);
 const base::FeatureParam<bool> kShowSmartCompose(
     &internal::kWebUIOmniboxAimPopup,
     "Omnibox_ShowSmartCompose",
@@ -363,8 +367,17 @@ const base::FeatureParam<bool> kContextButtonShapeIsOblong{
 const base::FeatureParam<bool> kContextButtonShowSuggestionLabel{
     &internal::kWebUIOmniboxSimplification,
     "Omnibox_ContextButtonShowSuggestionLabel", false};
+const base::FeatureParam<bool> kWebUIOmniboxFullPopupV2UseBrowserView{
+    &kWebUIOmniboxFullPopupV2, "Omnibox_UseBrowserView", false};
+
+const base::FeatureParam<bool> kAskGCoBrowse{
+    &kWebUIOmniboxAskGAboutThisPage, "Omnibox_AskGCoBrowse", false};
+const base::FeatureParam<bool> kAskGCoBrowseWithVisualSelection{
+    &kWebUIOmniboxAskGAboutThisPage,
+    "Omnibox_AskGCoBrowseWithVisualSelection", false};
 
 FeatureConfig::FeatureConfig() : config(GetNTPComposeboxConfig()) {}
+
 
 FeatureConfig::FeatureConfig(const FeatureConfig&) = default;
 FeatureConfig::FeatureConfig(FeatureConfig&&) = default;

@@ -9,6 +9,7 @@
 #include <utility>
 #include <variant>
 
+#include "base/command_line.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
 #include "base/memory/safety_checks.h"
@@ -38,14 +39,17 @@
 #include "content/browser/worker_host/dedicated_worker_hosts_for_document.h"
 #include "content/browser/worker_host/dedicated_worker_service_impl.h"
 #include "content/browser/worker_host/worker_script_fetcher.h"
+#include "content/browser/worker_host/worker_util.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/network_service_util.h"
 #include "content/public/browser/permission_controller.h"
 #include "content/public/browser/permission_descriptor_util.h"
 #include "content/public/browser/service_worker_context.h"
+#include "content/public/browser/site_isolation_policy.h"
 #include "content/public/common/child_process_id_util.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/content_switches.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "mojo/public/cpp/system/message_pipe.h"
 #include "net/base/isolation_info.h"
@@ -62,6 +66,7 @@
 #include "third_party/blink/public/common/service_worker/service_worker_scope_match.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
+#include "third_party/blink/public/common/web_preferences/web_preferences.h"
 #include "third_party/blink/public/mojom/back_forward_cache_not_restored_reasons.mojom.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom.h"
 #include "third_party/blink/public/mojom/loader/fetch_client_settings_object.mojom.h"
@@ -172,7 +177,7 @@ DedicatedWorkerHost::~DedicatedWorkerHost() {
     lock_manager->RemoveLockObserver(GetToken().value());
   }
 
-  GetStoragePartitionImpl()->ClearNoncesInNetworkContextAfterDelay({
+  GetStoragePartitionImpl()->ClearNetworkRestrictionsAfterDelay({
       network_restrictions_id_,
   });
 
@@ -220,18 +225,20 @@ void DedicatedWorkerHost::CreateLockManager(
                                                             this);
 }
 
-void DedicatedWorkerHost::OnLockContention() {
+bool DedicatedWorkerHost::OnLockContention() {
   RenderFrameHostImpl* ancestor_render_frame_host =
       RenderFrameHostImpl::FromID(ancestor_render_frame_host_id_);
   if (!ancestor_render_frame_host) {
     // The frame may have already been closed.
-    return;
+    return false;
   }
   if (ancestor_render_frame_host->IsInBackForwardCache()) {
     // Evict the frame from the back-forward cache to avoid deadlock.
     ancestor_render_frame_host->EvictFromBackForwardCacheWithReason(
         BackForwardCacheMetrics::NotRestoredReason::kWebLocksContention);
+    return true;
   }
+  return false;
 }
 
 void DedicatedWorkerHost::OnMojoDisconnect() {
@@ -353,7 +360,13 @@ void DedicatedWorkerHost::StartScriptLoad(
   // initiator origin to keep consistency with WorkerScriptFetcher, but probably
   // this should be calculated based on the worker origin as the factories be
   // used for subresource loading on the worker.
-  file_url_support_ = creator_origin_.scheme() == url::kFileScheme;
+  std::optional<blink::web_pref::WebPreferences> web_preferences;
+  if (creator_render_frame_host) {
+    web_preferences = creator_render_frame_host->GetOrCreateWebPreferences();
+  }
+  file_url_support_ = DoesCreatorAllowFileUrlSupport(
+      creator_origin_, web_preferences ? &*web_preferences : nullptr,
+      creator_worker ? creator_worker->file_url_support() : false);
 
   // For blob URL workers, inherit the controller from the worker's parent.
   // See https://w3c.github.io/ServiceWorker/#control-and-use-worker-client
@@ -395,12 +408,13 @@ void DedicatedWorkerHost::StartScriptLoad(
   WorkerScriptFetcher::CreateAndStart(
       worker_process_host_->GetDeprecatedID(), token_, script_url,
       *nearest_ancestor_render_frame_host, creator_render_frame_host,
+      creator_worker,
       nearest_ancestor_render_frame_host->ComputeSiteForCookies(),
       creator_origin_, worker_storage_key_,
       nearest_ancestor_render_frame_host->GetIsolationInfoForSubresources(),
       std::move(client_security_state), credentials_mode,
       std::move(outside_fetch_client_settings_object),
-      network::mojom::RequestDestination::kWorker,
+      network::mojom::RequestDestination::kWorker, file_url_support_,
       storage_partition_impl->GetServiceWorkerContext(),
       service_worker_handle_.get(), std::move(blob_url_loader_factory), nullptr,
       storage_partition_impl, partition_domain,
@@ -458,6 +472,16 @@ void DedicatedWorkerHost::DidStartScriptLoad(
     CHECK(result->main_script_load_params);
     DCHECK(result->main_script_load_params->response_head);
     DCHECK(result->main_script_load_params->response_head->parsed_headers);
+
+    if (SiteIsolationPolicy::ShouldUrlUseApplicationIsolationLevel(
+            ancestor_render_frame_host->GetBrowserContext(),
+            result->final_response_url)) {
+      GetContentClient()->browser()->EnsureRequiredHeadersForIsolatedApp(
+          ancestor_render_frame_host->GetBrowserContext(),
+          result->final_response_url,
+          result->main_script_load_params->response_head.get(),
+          /*frame_tree_node=*/std::nullopt);
+    }
 
     worker_client_security_state_ = network::mojom::ClientSecurityState::New();
     worker_client_security_state_->ip_address_space = CalculateIPAddressSpace(

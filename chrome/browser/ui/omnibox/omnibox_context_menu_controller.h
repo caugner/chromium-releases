@@ -34,6 +34,8 @@ class OmniboxPopupFileSelector;
 class OmniboxPopupUI;
 class OmniboxEditModel;
 class OmniboxController;
+class OmniboxContextMenuControllerPecBrowserTest;
+class OmniboxContextMenuControllerPecBrowserTestWithFlagsDisabled;
 
 namespace favicon_base {
 struct FaviconImageResult;
@@ -55,6 +57,19 @@ namespace contextual_search {
 struct FileInfo;
 }  // namespace contextual_search
 
+class OmniboxContextMenuController;
+
+// Child class to override custom font in submenu.
+class TabSimpleMenuModel : public ui::SimpleMenuModel {
+ public:
+  explicit TabSimpleMenuModel(OmniboxContextMenuController* controller);
+
+  const gfx::FontList* GetLabelFontListAt(size_t index) const override;
+
+ private:
+  raw_ptr<OmniboxContextMenuController> controller_;
+};
+
 enum class OmniboxPopupState;
 
 // OmniboxContextMenuController creates and manages state for the context menu
@@ -72,6 +87,8 @@ class OmniboxContextMenuController : public ui::SimpleMenuModel::Delegate {
     std::u16string title;
     GURL url;
     base::TimeTicks last_active;
+    bool is_active_tab = false;
+    bool is_checked = false;
   };
 
   OmniboxContextMenuController(const OmniboxContextMenuController&) = delete;
@@ -81,6 +98,9 @@ class OmniboxContextMenuController : public ui::SimpleMenuModel::Delegate {
   ~OmniboxContextMenuController() override;
 
   ui::SimpleMenuModel* menu_model() { return menu_model_.get(); }
+  ui::SimpleMenuModel* shared_tabs_menu_model() {
+    return shared_tabs_menu_model_.get();
+  }
 
   void ExecuteCommand(int command_id, int event_flags) override;
   bool IsCommandIdEnabled(int command_id) const override;
@@ -92,7 +112,8 @@ class OmniboxContextMenuController : public ui::SimpleMenuModel::Delegate {
       OmniboxPopupState page_type) const;
   bool IsCommandIdVisible(int command_id) const override;
   void AddTabContext(const TabInfo& tab_info);
-  void UpdateSearchboxContext(
+  static void UpdateSearchboxContext(
+      content::WebContents* web_contents,
       std::optional<TabInfo> tab_info,
       std::optional<omnibox::ToolMode> tool_mode,
       std::vector<searchbox::mojom::SearchContextAttachmentPtr> attachments =
@@ -101,7 +122,20 @@ class OmniboxContextMenuController : public ui::SimpleMenuModel::Delegate {
   static void RecordContextMenuItemSelection(const std::string& prefix,
                                              omnibox::ContextType context_type);
 
+  static OmniboxController* GetOmniboxController(
+      content::WebContents* web_contents);
+  static OmniboxPopupUI* GetOmniboxPopupUI(content::WebContents* web_contents);
+  std::optional<size_t> GetMaxTabSuggestions() const;
+  bool IsTabCommandId(int command_id) const;
+
  private:
+  friend class TabSimpleMenuModel;
+  FRIEND_TEST_ALL_PREFIXES(OmniboxContextMenuControllerPecBrowserTest,
+                           ModelPickerCheckmark);
+  FRIEND_TEST_ALL_PREFIXES(
+      OmniboxContextMenuControllerPecBrowserTestWithFlagsDisabled,
+      VerifyModelPickerCheckmark_FlagOff);
+
   FRIEND_TEST_ALL_PREFIXES(OmniboxContextMenuControllerTest,
                            IsCommandIdEnabledHelper_InitialState);
   FRIEND_TEST_ALL_PREFIXES(OmniboxContextMenuControllerTest,
@@ -118,6 +152,8 @@ class OmniboxContextMenuController : public ui::SimpleMenuModel::Delegate {
                            GetIconForInputType_Drive);
   FRIEND_TEST_ALL_PREFIXES(OmniboxContextMenuControllerTest,
                            ExecuteCommand_DriveInputType);
+  FRIEND_TEST_ALL_PREFIXES(OmniboxContextMenuControllerTest,
+                           IsTabCommandId_HandlesInfinity);
 
   // Keeps track of various bits of info that are necessary to dynamically
   // render the contents of the context menu, based on the InputState received
@@ -171,15 +207,10 @@ class OmniboxContextMenuController : public ui::SimpleMenuModel::Delegate {
 
   bool IsContentSharingEnabled() const;
 
-  int GetMaxTabSuggestions() const;
-
   omnibox::ContextType CommandIdToEnum(int command_id) const;
 
   void RecordContextMenuItemSelection(const std::string& prefix,
                                       int command_id);
-
-  // Callback for when drive upload response is available.
-  void OnDriveUploadResponse(searchbox::mojom::DriveUploadResponsePtr response);
 
   /* Helpers for InputType input_state fields. */
   const omnibox::InputTypeConfig* GetInputTypeConfig(
@@ -206,7 +237,8 @@ class OmniboxContextMenuController : public ui::SimpleMenuModel::Delegate {
   raw_ptr<OmniboxEditModel> GetEditModel();
   raw_ptr<OmniboxPopupUI> GetOmniboxPopupUI() const;
 
-  std::unique_ptr<ui::SimpleMenuModel> menu_model_;
+  std::unique_ptr<TabSimpleMenuModel> menu_model_;
+  std::unique_ptr<TabSimpleMenuModel> shared_tabs_menu_model_;
   base::WeakPtr<OmniboxPopupFileSelector> file_selector_;
   base::WeakPtr<content::WebContents> web_contents_;
   raw_ptr<OmniboxEditModel> edit_model_;

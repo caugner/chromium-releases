@@ -7,6 +7,8 @@ import type {WebViewType} from './web_view_type.js';
 
 interface WebViewWithPartition extends chrome.webviewTag.WebView {
   partition: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [key: string]: any;
 }
 
 function generateUnguessableToken(): string {
@@ -28,7 +30,7 @@ export class WindowManager {
 
   constructor(private mainWebview: WebViewType) {
     this.mainWebview.addEventListener('newwindow', (e: Event) => {
-      this.onNewWindow(e as unknown as chrome.webviewTag.NewWindowEvent);
+      this.onNewWindow(e as chrome.webviewTag.NewWindowEvent);
     });
 
     // Register listener for calls from C++
@@ -49,7 +51,7 @@ export class WindowManager {
         WebViewWithPartition;
     newWebview.partition = 'persist:contextual-tasks';
 
-    e.window.attach(newWebview as unknown as {[key: string]: void});
+    e.window.attach(newWebview);
 
     // Generate a random 128-bit unguessable token formatted as a 32-character
     // uppercase hex string to satisfy Mojo validation constraints.

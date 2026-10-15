@@ -445,9 +445,8 @@ ReadAnythingAppController::ReadAnythingAppController(
                           /* recompute_display_nodes= */ true));
   pdf_draw_debouncer_ = std::make_unique<base::RetainingOneShotTimer>(
       FROM_HERE, base::Milliseconds(kPdfDrawDebounceMs),
-      base::BindRepeating(&ReadAnythingAppController::Draw,
-                          weak_ptr_factory_.GetWeakPtr(),
-                          /* recompute_display_nodes= */ false));
+      base::BindRepeating(&ReadAnythingAppController::OnPdfDebounceFinished,
+                          weak_ptr_factory_.GetWeakPtr()));
   renderer_load_triggered_time_ms_ = base::TimeTicks::Now();
   distiller_ = std::make_unique<AXTreeDistiller>(
       render_frame,
@@ -564,7 +563,8 @@ void ReadAnythingAppController::OnStringAttributeChanged(
   }
 }
 
-bool ReadAnythingAppController::IsUpdateProcessingPaused() const {
+bool ReadAnythingAppController::IsUpdateProcessingPaused(
+    bool allow_selection_updates) const {
   if (model_.screen2x_distiller_running() ||
       read_aloud_model_.speech_playing()) {
     return true;
@@ -588,9 +588,13 @@ bool ReadAnythingAppController::IsUpdateProcessingPaused() const {
       read_anything::mojom::ReadAnythingPresentationState::
           kInImmersiveOverlay) {
     // We only want to block the processing/distillation pipeline if there is
-    // already a good distillation on IRM. If a distillation is pending, or if
-    // the current distillation is empty, we don't want to block the pending
-    // update.
+    // already a good distillation on IRM. If a distillation or selection is
+    // pending, or if the current distillation is empty, we don't want to
+    // block the pending update.
+    if (allow_selection_updates && model_.has_pending_selection()) {
+      return false;
+    }
+
     return model_.distillation_state() ==
            read_anything::mojom::ReadAnythingDistillationState::
                kDistillationWithContent;
@@ -599,8 +603,10 @@ bool ReadAnythingAppController::IsUpdateProcessingPaused() const {
   return false;
 }
 
-void ReadAnythingAppController::ProcessPendingUpdatesIfAllowed() {
-  if (IsUpdateProcessingPaused() || !model_.ContainsActiveTree()) {
+void ReadAnythingAppController::ProcessPendingUpdatesIfAllowed(
+    bool allow_selection_updates) {
+  if (IsUpdateProcessingPaused(allow_selection_updates) ||
+      !model_.ContainsActiveTree()) {
     return;
   }
 
@@ -673,6 +679,11 @@ void ReadAnythingAppController::ProcessModelUpdates() {
 
   if (model_.requires_distillation()) {
     Distill();
+  }
+
+  if (IsReadabilityEnabled() && model_.requires_readability_distillation()) {
+    PrepareForNewContentDistillation();
+    page_handler_->RequestReadabilityDistillation();
   }
 
   if (model_.redraw_required()) {
@@ -766,6 +777,9 @@ void ReadAnythingAppController::SetDistillationState(
       model_.set_should_map_rendered_text_to_tree_for_readability(false);
     }
     model_.ResetAXTreeAnchors();
+  } else if (state == read_anything::mojom::ReadAnythingDistillationState::
+                          kDistillationWithContent) {
+    model_.set_page_start_time(base::TimeTicks::Now());
   }
 }
 
@@ -785,6 +799,8 @@ void ReadAnythingAppController::OnActiveAXTreeIDChanged(
     RecordSessionMetricsIfShownOrRecentlyHidden();
   }
 
+  PrepareForNewContentDistillation();
+
   // Cancel any running draw timers.
   post_user_entry_draw_timer_->Stop();
   pdf_draw_debouncer_->Stop();
@@ -792,7 +808,7 @@ void ReadAnythingAppController::OnActiveAXTreeIDChanged(
   model_.SetRootTreeId(tree_id);
   model_.SetUkmSourceIdForTree(tree_id, ukm_source_id);
   model_.set_is_pdf(is_pdf);
-  if (is_pdf) {
+  if (is_pdf && !IsHidden()) {
     pdf_draw_debouncer_->Reset();
   }
 
@@ -808,15 +824,7 @@ void ReadAnythingAppController::OnActiveAXTreeIDChanged(
   model_.ClearPendingUpdates();
   model_.set_requires_distillation(false);
   model_.set_page_finished_loading(false);
-
-  // Clear any stale distillation content.
-  dom_distiller_title_.clear();
-  dom_distiller_content_html_.clear();
-
-  // Reset mapping state for the new page. Since no readability distillation is
-  // displayed yet, the mapping algorithm is not yet in progress.
-  model_.set_is_readability_mapping_in_progress(false);
-  model_.set_has_logged_early_selection(false);
+  model_.set_page_start_time(std::nullopt);
 
   // Reset the distillation method for the new page. Every navigation
   // starts with the flag-determined distillation method before potentially
@@ -834,6 +842,27 @@ void ReadAnythingAppController::OnActiveAXTreeIDChanged(
     return;
   }
   DistillNewTree();
+}
+
+void ReadAnythingAppController::PrepareForNewContentDistillation() {
+  if (!IsReadabilityEnabled()) {
+    return;
+  }
+  rendered_text_blocks_ready_recorded_ = false;
+  active_tree_changed_start_time_ = base::TimeTicks::Now();
+
+  model_.set_requires_readability_distillation(false);
+
+  // TODO: crbug.com/526701545: Show Loading screen when re-distilling.
+
+  // Clear any stale distillation content.
+  dom_distiller_title_.clear();
+  dom_distiller_content_html_.clear();
+
+  // Reset mapping state for the new page. Since no readability distillation is
+  // displayed yet, the mapping algorithm is not yet in progress.
+  model_.set_is_readability_mapping_in_progress(false);
+  model_.set_has_logged_early_selection(false);
 }
 
 ReadAnythingAppModel::DistillationMethod
@@ -1086,7 +1115,7 @@ void ReadAnythingAppController::OnAXTreeDistilled(
       }
       DrawEmptyState();
     }
-  } else {
+  } else if (!model_.is_pdf() || !pdf_draw_debouncer_->IsRunning()) {
     if (features::IsImmersiveReadAnythingEnabled()) {
       SetDistillationState(read_anything::mojom::ReadAnythingDistillationState::
                                kDistillationWithContent);
@@ -1108,6 +1137,27 @@ void ReadAnythingAppController::OnAXTreeDistilled(
   // Once drawing is complete, process pending updates on the active tree if
   // there are no other factors blocking the processing of updates
   ProcessPendingUpdatesIfAllowed();
+}
+
+void ReadAnythingAppController::OnPdfDebounceFinished() {
+  if (IsHidden()) {
+    return;
+  }
+
+  if (model_.is_empty()) {
+    DrawEmptyState();
+  } else {
+    Draw(/*recompute_display_nodes=*/false);
+  }
+
+  if (features::IsImmersiveReadAnythingEnabled()) {
+    SetDistillationState(
+        model_.is_empty()
+            ? read_anything::mojom::ReadAnythingDistillationState::
+                  kDistillationEmpty
+            : read_anything::mojom::ReadAnythingDistillationState::
+                  kDistillationWithContent);
+  }
 }
 
 bool ReadAnythingAppController::PostProcessSelection() {
@@ -1358,6 +1408,8 @@ gin::ObjectTemplateBuilder ReadAnythingAppController::GetObjectTemplateBuilder(
       .SetProperty("lineFocusCursorLine",
                    &ReadAnythingAppController::LineFocusCursorLine)
       .SetProperty("maxLineWidth", &ReadAnythingAppController::MaxLineWidth)
+      .SetProperty("activePresentationState",
+                   &ReadAnythingAppController::ActivePresentationState)
       .SetProperty("inHiddenPresentationState",
                    &ReadAnythingAppController::InHiddenPresentationState)
       .SetProperty("inSidePanelPresentationState",
@@ -1367,6 +1419,7 @@ gin::ObjectTemplateBuilder ReadAnythingAppController::GetObjectTemplateBuilder(
           &ReadAnythingAppController::InImmersiveOverlayPresentationState)
       .SetProperty("speechRate", &ReadAnythingAppController::SpeechRate)
       .SetProperty("isGoogleDocs", &ReadAnythingAppController::IsGoogleDocs)
+      .SetProperty("isPdf", &ReadAnythingAppController::IsPdf)
       .SetProperty("isImmersiveEnabled",
                    &ReadAnythingAppController::IsImmersiveEnabled)
       .SetProperty("isImprovedReadAloudEnabled",
@@ -1803,6 +1856,10 @@ int ReadAnythingAppController::MaxLineWidth() const {
   return a11y::kMaxLineWidth;
 }
 
+int ReadAnythingAppController::ActivePresentationState() const {
+  return std::to_underlying(model_.active_presentation_state());
+}
+
 int ReadAnythingAppController::InHiddenPresentationState() const {
   return std::to_underlying(
       read_anything::mojom::ReadAnythingPresentationState::kInactive);
@@ -1932,11 +1989,21 @@ void ReadAnythingAppController::SendGetPresentationStateRequest() const {
 
 void ReadAnythingAppController::OnGetPresentationState(
     read_anything::mojom::ReadAnythingPresentationState presentation_state) {
+  bool is_immersive_opening =
+      (presentation_state ==
+       read_anything::mojom::ReadAnythingPresentationState::
+           kInImmersiveOverlay) &&
+      (model_.active_presentation_state() !=
+       read_anything::mojom::ReadAnythingPresentationState::
+           kInImmersiveOverlay);
+
   model_.set_active_presentation_state(presentation_state);
   // Now that the presentation state changed which is potentially one of the
   // factors blocking processing, see if we can unblock processing of the
   // updates.
-  ProcessPendingUpdatesIfAllowed();
+  ProcessPendingUpdatesIfAllowed(
+      /* allow_selection_updates=*/is_immersive_opening);
+
   ExecuteJavaScript("chrome.readingMode.onPresentationStateReceived(" +
                     base::ToString(static_cast<int>(presentation_state)) +
                     ");");
@@ -2044,6 +2111,10 @@ bool ReadAnythingAppController::IsChromeOsAsh() const {
 
 bool ReadAnythingAppController::IsGoogleDocs() const {
   return model_.IsDocs();
+}
+
+bool ReadAnythingAppController::IsPdf() const {
+  return model_.is_pdf();
 }
 
 std::vector<std::string> ReadAnythingAppController::GetSupportedFonts() {
@@ -2255,6 +2326,9 @@ void ReadAnythingAppController::OnDistilled(int word_count) {
         "Accessibility.ReadAnything.WordsDistilledByReadability", word_count, 1,
         kMaxWordsConsumed, kWordsConsumedBuckets);
   }
+  base::UmaHistogramCustomCounts(
+      "Accessibility.ReadAnything.WordsDistilledOnNewPage", word_count, 1,
+      kMaxWordsConsumed, kWordsConsumedBuckets);
 }
 
 void ReadAnythingAppController::UpdateWordsSeen(int words_seen) {
@@ -2364,20 +2438,24 @@ void ReadAnythingAppController::OnHighlightGranularityChanged(
   read_aloud_model_.set_highlight_granularity(granularity);
 }
 
-void ReadAnythingAppController::OnLineFocusChanged(int line_focus) {
+void ReadAnythingAppController::OnLineFocusChanged(
+    int current_line_focus,
+    int last_non_disabled_line_focus) {
   if (!IsLineFocusEnabled()) {
     return;
   }
 
-  if (const auto maybe_enum =
-          ToEnum<read_anything::mojom::LineFocus>(line_focus)) {
-    page_handler_->OnLineFocusChanged(maybe_enum.value());
+  const auto maybe_current =
+      ToEnum<read_anything::mojom::LineFocus>(current_line_focus);
+  const auto maybe_last =
+      ToEnum<read_anything::mojom::LineFocus>(last_non_disabled_line_focus);
+  if (maybe_current && maybe_last) {
+    page_handler_->OnLineFocusChanged(maybe_current.value(),
+                                      maybe_last.value());
     bool line_focus_on =
-        maybe_enum.value() != read_anything::mojom::LineFocus::kOff;
+        maybe_current.value() != read_anything::mojom::LineFocus::kOff;
     model_.set_line_focus_enabled(line_focus_on);
-    if (line_focus_on) {
-      model_.set_last_non_disabled_line_focus(maybe_enum.value());
-    }
+    model_.set_last_non_disabled_line_focus(maybe_last.value());
   }
 }
 
@@ -2802,10 +2880,12 @@ void ReadAnythingAppController::RecordSessionMetricsIfShownOrRecentlyHidden(
     return;
   }
 
+  LogPageDuration();
   LogLineFocusSession();
   RecordNumSelections();
   RecordEstimatedWordsHeard();
   RecordEstimatedWordsSeen();
+  read_aloud_model_.ResetAndLogSingleSampleMetrics();
 }
 
 void ReadAnythingAppController::StartLineFocusSession() {
@@ -2835,6 +2915,27 @@ void ReadAnythingAppController::LogLineFocusSession() {
         model_.line_focus_speech_lines());
     model_.ResetLineFocusSession();
   }
+}
+
+void ReadAnythingAppController::LogPageDuration() {
+  if (!model_.page_start_time().has_value()) {
+    return;
+  }
+
+  base::TimeDelta duration =
+      base::TimeTicks::Now() - model_.page_start_time().value();
+  model_.set_page_start_time(std::nullopt);
+  std::string page_type = model_.is_pdf() ? "Pdf" : "WebPage";
+  std::string view_mode =
+      (model_.active_presentation_state() ==
+       read_anything::mojom::ReadAnythingPresentationState::kInImmersiveOverlay)
+          ? "FullPage"
+          : "SidePanel";
+  std::string histogram_name =
+      absl::StrFormat("Accessibility.ReadAnything.PageDuration.%sIn%s",
+                      page_type.c_str(), view_mode.c_str());
+  base::UmaHistogramCustomTimes(histogram_name, duration, base::Seconds(1),
+                                base::Hours(24), /*buckets=*/100);
 }
 
 void ReadAnythingAppController::AddLineFocusScrollDistance(int distance) {
@@ -3065,6 +3166,17 @@ void ReadAnythingAppController::ApplyAccessibilityUpdatesForReadability(
 
 void ReadAnythingAppController::OnRenderedTextBlocksAvailable(
     const std::vector<std::u16string>& blocks) {
+  if (!rendered_text_blocks_ready_recorded_) {
+    DCHECK(!active_tree_changed_start_time_.is_null());
+    base::TimeDelta elapsed_time =
+        base::TimeTicks::Now() - active_tree_changed_start_time_;
+    base::UmaHistogramLongTimes(
+        "Accessibility.ReadAnything."
+        "TimeFromActiveAXTreeIDChangedToRenderedTextBlocks",
+        elapsed_time);
+    rendered_text_blocks_ready_recorded_ = true;
+  }
+
   if (!IsReadabilitySelectTextEnabled()) {
     return;
   }

@@ -7,8 +7,6 @@
 #include <algorithm>
 #include <utility>
 
-#include "base/feature_list.h"
-#include "extensions/common/extension_features.h"
 #include "extensions/common/mojom/event_dispatcher.mojom.h"
 #include "extensions/renderer/bindings/api_binding_util.h"
 #include "extensions/renderer/bindings/api_event_listeners.h"
@@ -165,10 +163,7 @@ void EventEmitter::AddListener(gin::Arguments* arguments) {
   }
 
   v8::Local<v8::Object> options;
-  if (base::FeatureList::IsEnabled(
-          extensions_features::
-              kWebRequestPersistFilteredEventsViaEventRouter) &&
-      !arguments->PeekNext().IsEmpty()) {
+  if (!arguments->PeekNext().IsEmpty()) {
     // The `options` argument is currently limited to webRequest API only.
     std::string_view event_name = listeners_->GetEventName();
     if (!event_name.starts_with(kWebRequestEventPrefix) &&
@@ -301,6 +296,16 @@ v8::Local<v8::Value> EventEmitter::DispatchSync(
       }
       exception_handler_->HandleException(context, "Error in event handler",
                                           &try_catch);
+      // `ExceptionHandler:HandleException()` can run arbitrary JS code (e.g. if
+      // the thrown error defines a custom `stack` property getter), which might
+      // invalidate and tear down `context`. In this case, bail out to avoid
+      // executing remaining listeners on a destroyed context or dereferencing
+      // freed per-context data. We `break` so that any previous listeners
+      // return values are sent back to interested callers.
+      if (!binding::IsContextValid(context)) {
+        context.Clear();
+        break;
+      }
       try_catch.Reset();
     }
   }

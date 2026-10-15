@@ -8,7 +8,7 @@ import {getRequiredElement} from 'chrome://resources/js/util.js';
 
 import type {BrowserProxyImpl} from './browser_proxy.js';
 import type {ZoomAction} from './glic.mojom-webui.js';
-import {PanelStateKind, PrepareForClientResult, ProfileReadyState, WebUiState} from './glic.mojom-webui.js';
+import {HelpCenterTopic, PanelStateKind, PrepareForClientResult, ProfileReadyState, WebUiState} from './glic.mojom-webui.js';
 import type {ApiHostEmbedder} from './glic_api_impl/host/glic_api_host.js';
 import {WebClientState} from './glic_api_impl/host/glic_api_host.js';
 import {isFullWebView} from './shared/web_view_type.js';
@@ -52,6 +52,9 @@ interface PageElementTypes {
   unresponsiveOverlay: HTMLElement;
   reload: HTMLButtonElement;
   showError: HTMLButtonElement;
+  locationMismatchPanel: HTMLElement;
+  locationMismatchHelpButton: HTMLButtonElement;
+  ineligibleAccountHelpButton: HTMLButtonElement;
 }
 
 const $: PageElementTypes = new Proxy({}, {
@@ -61,7 +64,8 @@ const $: PageElementTypes = new Proxy({}, {
                             }) as unknown as PageElementTypes;
 
 type PanelId = 'loadingPanel'|'guestPanel'|'offlinePanel'|'errorPanel'|
-    'unavailablePanel'|'disabledByAdminPanel'|'signInPanel';
+    'unavailablePanel'|'ineligibleAccountPanel'|'disabledByAdminPanel'|
+    'signInPanel'|'locationMismatchPanel';
 
 interface StateDescriptor {
   onEnter?: () => void;
@@ -118,6 +122,7 @@ export enum WebUiErrorReason {
 
 export class GlicAppController implements WebviewDelegate, ApiHostEmbedder {
   loadingTimer: number|undefined;
+  private isFreCompleted: boolean = loadTimeData.getBoolean('completedFre');
 
   // This is used to simulate no connection for tests.
   private simulateNoConnection: boolean =
@@ -189,6 +194,14 @@ export class GlicAppController implements WebviewDelegate, ApiHostEmbedder {
     });
     $.disabledByAdminPanel.querySelector('a')?.addEventListener('click', () => {
       this.openDisabledByAdminLink();
+    });
+    $.locationMismatchHelpButton.addEventListener('click', () => {
+      this.browserProxy.pageHandler.openHelpCenterTopicAndClosePanel(
+          HelpCenterTopic.kLocationMismatch);
+    });
+    $.ineligibleAccountHelpButton.addEventListener('click', () => {
+      this.browserProxy.pageHandler.openHelpCenterTopicAndClosePanel(
+          HelpCenterTopic.kIneligibleAccount);
     });
     $.signInButton.addEventListener('click', () => {
       this.signIn();
@@ -318,7 +331,17 @@ export class GlicAppController implements WebviewDelegate, ApiHostEmbedder {
       return;
     }
     chrome.histograms.recordEnumerationValue(
-        'Glic.PanelWebUiState.Error', reason, WebUiErrorReason.MAX_VALUE + 1);
+        'Glic.PanelWebUiState.Error',
+        reason,
+        WebUiErrorReason.MAX_VALUE + 1,
+    );
+    if (!this.isFreCompleted) {
+      chrome.histograms.recordEnumerationValue(
+          'Glic.Fre.PanelWebUiState.Error',
+          reason,
+          WebUiErrorReason.MAX_VALUE + 1,
+      );
+    }
     this.setState(WebUiState.kError);
   }
 
@@ -376,6 +399,17 @@ export class GlicAppController implements WebviewDelegate, ApiHostEmbedder {
       },
     ],
     [
+      WebUiState.kIneligibleAccount,
+      {
+        reloadOnOpen: true,
+        onEnter:
+            () => {
+              this.destroyWebview();
+              this.showPanel('ineligibleAccountPanel');
+            },
+      },
+    ],
+    [
       WebUiState.kDisabledByAdmin,
       {
         reloadOnOpen: true,
@@ -383,6 +417,17 @@ export class GlicAppController implements WebviewDelegate, ApiHostEmbedder {
             () => {
               this.destroyWebview();
               this.showPanel('disabledByAdminPanel');
+            },
+      },
+    ],
+    [
+      WebUiState.kLocationMismatch,
+      {
+        reloadOnOpen: true,
+        onEnter:
+            () => {
+              this.destroyWebview();
+              this.showPanel('locationMismatchPanel');
             },
       },
     ],
@@ -453,9 +498,11 @@ export class GlicAppController implements WebviewDelegate, ApiHostEmbedder {
 
   private beginLoad(): void {
     // Wait a moment before showing the loading panel.
-    this.loadingTimer = setTimeout(() => {
-      this.setState(WebUiState.kShowLoading);
-    }, kPreHoldLoadingTimeMs);
+    if (!loadTimeData.getBoolean('noLoader')) {
+      this.loadingTimer = setTimeout(() => {
+        this.setState(WebUiState.kShowLoading);
+      }, kPreHoldLoadingTimeMs);
+    }
 
     this.load();
   }
@@ -497,6 +544,12 @@ export class GlicAppController implements WebviewDelegate, ApiHostEmbedder {
       case ProfileReadyState.kIneligible:
       case ProfileReadyState.kUnknownError:
         this.setState(WebUiState.kUnavailable);
+        return;
+      case ProfileReadyState.kIneligibleAccount:
+        this.setState(WebUiState.kIneligibleAccount);
+        return;
+      case ProfileReadyState.kLocationMismatch:
+        this.setState(WebUiState.kLocationMismatch);
         return;
       case ProfileReadyState.kDisabledByAdmin:
         $.disabledByAdminPanel.classList.toggle(
@@ -543,6 +596,10 @@ export class GlicAppController implements WebviewDelegate, ApiHostEmbedder {
         this.webviewPersistentState);
     this.webview.getWebClientState().subscribe(
         this.webClientStateChanged.bind(this));
+
+    if (loadTimeData.getBoolean('noLoader')) {
+      this.showPanel('guestPanel');
+    }
 
     // Browser is expected to call client's notifyPanelWillOpen(), and then we
     // expect a call to webClientReady() when that finishes.
@@ -703,6 +760,10 @@ export class GlicAppController implements WebviewDelegate, ApiHostEmbedder {
     });
   }
 
+  onboardingCompleted(): void {
+    this.isFreCompleted = true;
+  }
+
   webClientWarmed(): void {
     if (this.state === WebUiState.kBeginLoad ||
         this.state === WebUiState.kFinishLoading ||
@@ -850,6 +911,12 @@ export class GlicAppController implements WebviewDelegate, ApiHostEmbedder {
         case ProfileReadyState.kUnknownError:
         case ProfileReadyState.kIneligible:
           this.setState(WebUiState.kUnavailable);
+          break;
+        case ProfileReadyState.kIneligibleAccount:
+          this.setState(WebUiState.kIneligibleAccount);
+          break;
+        case ProfileReadyState.kLocationMismatch:
+          this.setState(WebUiState.kLocationMismatch);
           break;
         case ProfileReadyState.kDisabledByAdmin:
           $.disabledByAdminPanel.classList.toggle(

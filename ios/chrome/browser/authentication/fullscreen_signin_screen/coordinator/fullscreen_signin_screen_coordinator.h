@@ -9,6 +9,7 @@
 #import "ios/chrome/browser/shared/coordinator/chrome_coordinator/chrome_coordinator.h"
 
 @protocol FirstRunScreenDelegate;
+@protocol SystemIdentity;
 enum class SigninContextStyle;
 namespace signin_metrics {
 enum class AccessPoint : int;
@@ -18,6 +19,14 @@ enum class PromoAction : int;
 // Coordinator responsible for presenting the fullscreen sign-in UI.
 // It is a child coordinator managed by the FullscreenSigninCoordinator.
 @interface FullscreenSigninScreenCoordinator : ChromeCoordinator
+
+// `identity` is used to select a specific identity. If there are multiple
+// accounts on device this identity will be shown as chosen in account picker
+// flow.
+@property(nonatomic, weak) id<SystemIdentity> identity;
+
+// If `YES`, will allow switching signed-in account.
+@property(nonatomic, assign) BOOL canSwitchAccount;
 
 // Initiates a FullscreenSigninScreenCoordinator with `navigationController`,
 // `browser` and `delegate`.

@@ -47,9 +47,9 @@
   BookmarksFolderChooserViewController* _viewController;
   // Coordinator to show the folder editor UI.
   BookmarksFolderEditorCoordinator* _folderEditorCoordinator;
-  // List of id of moved nodes. This is to avoid to move a
-  // folder inside a child folder. Only set between init and start.
-  std::set<int64_t> _movedNodeIds;
+  // List of nodes to hide when displaying folders. This is to avoid to move a
+  // folder inside a child folder.
+  std::set<raw_ptr<const bookmarks::BookmarkNode>> _hiddenNodes;
   // The folder that has a blue check mark beside it in the UI.
   // This is only used for clients of this coordinator to update the UI. This
   // does not reflect the folder users chose by clicking. For that information
@@ -63,13 +63,13 @@
     initWithBaseNavigationController:
         (UINavigationController*)navigationController
                              browser:(Browser*)browser
-                          movedNodes:
-                              (const std::set<
-                                  raw_ptr<const bookmarks::BookmarkNode>>&)
-                                  movedNodes {
+                         hiddenNodes:
+                             (const std::set<
+                                 raw_ptr<const bookmarks::BookmarkNode>>&)
+                                 hiddenNodes {
   self = [self initWithBaseViewController:navigationController
                                   browser:browser
-                               movedNodes:movedNodes];
+                              hiddenNodes:hiddenNodes];
   if (self) {
     _baseNavigationController = navigationController;
   }
@@ -79,14 +79,12 @@
 - (instancetype)
     initWithBaseViewController:(UIViewController*)viewController
                        browser:(Browser*)browser
-                    movedNodes:(const std::set<
-                                   raw_ptr<const bookmarks::BookmarkNode>>&)
-                                   movedNodes {
+                   hiddenNodes:
+                       (const std::set<raw_ptr<const bookmarks::BookmarkNode>>&)
+                           hiddenNodes {
   self = [super initWithBaseViewController:viewController browser:browser];
   if (self) {
-    for (const raw_ptr<const bookmarks::BookmarkNode>& node : movedNodes) {
-      _movedNodeIds.insert(node->id());
-    }
+    _hiddenNodes = hiddenNodes;
     _allowsNewFolders = YES;
   }
   return self;
@@ -99,8 +97,8 @@
   return YES;
 }
 
-- (std::set<raw_ptr<const bookmarks::BookmarkNode>>)movedNodes {
-  return [_mediator movedNodes];
+- (const std::set<raw_ptr<const bookmarks::BookmarkNode>>&)editedNodes {
+  return [_mediator editedNodes];
 }
 
 - (void)setSelectedFolder:(const bookmarks::BookmarkNode*)folder {
@@ -129,10 +127,10 @@
   syncer::SyncService* syncService = SyncServiceFactory::GetForProfile(profile);
   _mediator = [[BookmarksFolderChooserMediator alloc]
       initWithBookmarkModel:model
-               movedNodeIds:std::move(_movedNodeIds)
+                editedNodes:std::move(_hiddenNodes)
       authenticationService:authenticationService
                 syncService:syncService];
-  _movedNodeIds.clear();
+  _hiddenNodes.clear();
   _mediator.delegate = self;
   _mediator.selectedFolderNode = _selectedFolder;
   _viewController = [[BookmarksFolderChooserViewController alloc]

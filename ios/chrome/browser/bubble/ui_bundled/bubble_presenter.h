@@ -7,6 +7,7 @@
 
 #import <UIKit/UIKit.h>
 
+#import "base/feature_list.h"
 #import "base/memory/raw_ptr.h"
 
 @protocol BubblePresenterDelegate;
@@ -15,6 +16,7 @@
 class FullscreenController;
 class HostContentSettingsMap;
 @class LayoutGuideCenter;
+@class LayoutState;
 class OverlayPresenter;
 @protocol BWGCommands;
 @protocol FullscreenCommands;
@@ -45,6 +47,7 @@ class DeviceSwitcherResultDispatcher;
                      webStateList:(raw_ptr<WebStateList>)webStateList
              fullscreenController:
                  (raw_ptr<FullscreenController>)fullscreenController
+                      layoutState:(LayoutState*)layoutState
     overlayPresenterForWebContent:
         (raw_ptr<OverlayPresenter>)webContentOverlayPresenter
                     infobarBanner:(raw_ptr<OverlayPresenter>)bannerPresenter
@@ -165,7 +168,7 @@ class DeviceSwitcherResultDispatcher;
 // Optionally present a bubble associated with the page action menu icon in the
 // Omnibox. The eligibility is based off if the BWG Promo was shown and
 // dismissed.
-- (void)presentPageActionMenuBubble;
+- (void)presentPageActionMenuBubbleForFeature:(const base::Feature&)feature;
 
 // Optionally presents a bubble associated with the reader mode options.
 - (void)presentReaderModeOptionsBubble;

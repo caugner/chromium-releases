@@ -126,9 +126,11 @@
 
   self.authenticationService =
       AuthenticationServiceFactory::GetForProfile(profile);
-  if (self.authenticationService->GetPrimaryIdentity()) {
-    // Don't show the sign-in screen since the user is already signed in.
-    [_delegate screenWillFinishPresenting];
+  if (!self.canSwitchAccount &&
+      self.authenticationService->GetPrimaryIdentity()) {
+    // If account switch is not possible, don't show the sign-in screen when the
+    // user is already signed in.
+    [_delegate firstRunScreenCoordinatorWantsToBeStopped:self];
     return;
   }
 
@@ -154,6 +156,7 @@
                        localPrefService:localPrefService
                             prefService:prefService
                             syncService:syncService
+                       selectedIdentity:self.identity
                             accessPoint:_accessPoint
                             promoAction:_promoAction
                   profileMetricsService:profileMetricsService
@@ -292,7 +295,7 @@
 - (void)finishPresentingWithSignIn:(BOOL)signIn {
   _finishing = YES;
   [self.mediator finishPresentingWithSignIn:signIn];
-  [self.delegate screenWillFinishPresenting];
+  [self.delegate firstRunScreenCoordinatorWantsToBeStopped:self];
 }
 
 // Shows the UMA dialog so the user can manage metric reporting.

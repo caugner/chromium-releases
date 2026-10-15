@@ -17,11 +17,13 @@
 #include "chrome/browser/skills/skills_service_factory.h"
 #include "chrome/browser/ui/webui/skills/skills.mojom.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/prefs/pref_service.h"
 #include "components/skills/internal/skills_downloader.h"
 #include "components/skills/mocks/mock_skills_service.h"
 #include "components/skills/proto/skill.pb.h"
 #include "components/skills/public/skill.mojom.h"
 #include "components/skills/public/skills_metrics.h"
+#include "components/skills/public/skills_prefs.h"
 #include "components/skills/public/skills_types.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_task_environment.h"
@@ -55,6 +57,7 @@ class MockSkillsPage : public skills::mojom::SkillsPage {
               Update1PSkills,
               (mojom::BrowseSkillsInitialStatePtr),
               (override));
+  MOCK_METHOD(void, SetSkillsEnabled, (bool enabled), (override));
 
   mojo::Receiver<skills::mojom::SkillsPage> receiver_{this};
 };
@@ -213,6 +216,51 @@ TEST_F(SkillsPageHandlerTest, Request1PSkills_DownloadAlreadyRunning) {
   histogram_tester_.ExpectBucketCount(
       "Skills.Management.FirstParty.DownloadRequestStatus",
       SkillsDownloadRequestStatus::kAlreadyRunning, 1);
+}
+
+TEST_F(SkillsPageHandlerTest, OnSkillsEnabledPrefChanged) {
+  base::RunLoop run_loop;
+  EXPECT_CALL(mock_page_, SetSkillsEnabled(false)).WillOnce([&run_loop]() {
+    run_loop.Quit();
+  });
+  profile_.GetPrefs()->SetBoolean(skills::prefs::kChromeSkillsEnabled, false);
+  run_loop.Run();
+}
+
+TEST_F(SkillsPageHandlerTest, HidesInternalSkillsFromBrowser) {
+  auto first_party_skill_data = std::make_unique<FirstPartySkillData>();
+
+  // Standard visible skill
+  skills::proto::Skill visible_skill;
+  visible_skill.set_id("visible_id");
+  visible_skill.set_name("Visible Skill");
+  visible_skill.set_category("Category");
+  first_party_skill_data->skills_list.push_back(visible_skill);
+
+  // Internal hidden skill
+  skills::proto::Skill internal_skill;
+  internal_skill.set_id("internal_id");
+  internal_skill.set_name("Internal Skill");
+  internal_skill.set_category("Internal");
+  first_party_skill_data->skills_list.push_back(internal_skill);
+
+  base::RunLoop run_loop;
+  EXPECT_CALL(mock_page_, Update1PSkills(_))
+      .WillOnce([&run_loop](mojom::BrowseSkillsInitialStatePtr state) {
+        // Should only contain the "Category" skill map entry, NOT "internal"
+        EXPECT_EQ(1u, state->skill_map.size());
+        EXPECT_TRUE(state->skill_map.contains("Category"));
+        EXPECT_FALSE(state->skill_map.contains("internal"));
+
+        const auto& skills = state->skill_map.at("Category");
+        ASSERT_EQ(1u, skills.size());
+        EXPECT_EQ("visible_id", skills[0].id);
+
+        run_loop.Quit();
+      });
+
+  handler_->OnDiscoverySkillsUpdated(first_party_skill_data.get());
+  run_loop.Run();
 }
 
 }  // namespace

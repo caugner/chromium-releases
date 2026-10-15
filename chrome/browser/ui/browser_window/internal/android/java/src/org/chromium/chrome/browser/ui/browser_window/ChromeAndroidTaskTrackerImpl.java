@@ -13,6 +13,7 @@ import android.graphics.Rect;
 import android.os.Bundle;
 import android.util.ArrayMap;
 
+import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.JniOnceCallback;
 import org.chromium.base.ObserverList;
@@ -21,6 +22,7 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.customtabs.PopupCreatorFactory;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.multiwindow.MultiInstanceManager.NewWindowAppSource;
 import org.chromium.chrome.browser.multiwindow.MultiInstanceOrchestratorFactory;
 import org.chromium.chrome.browser.ui.browser_window.ChromeAndroidTask.PendingTaskInfo;
@@ -236,11 +238,9 @@ final class ChromeAndroidTaskTrackerImpl implements ChromeAndroidTaskTracker {
         return getAllTasks().size();
     }
 
-    /** Returns all PENDING and ALIVE Tasks. */
+    /** Returns all ALIVE Tasks. */
     /*package*/ List<ChromeAndroidTask> getAllTasks() {
-        List<ChromeAndroidTask> tasks = new ArrayList<>(mTasks.values());
-        tasks.addAll(mPendingTasks.values());
-        return tasks;
+        return new ArrayList<>(mTasks.values());
     }
 
     /**
@@ -252,7 +252,7 @@ final class ChromeAndroidTaskTrackerImpl implements ChromeAndroidTaskTracker {
      * <p>This method must be called on the UI thread.
      */
     void removeAllForTesting() {
-        List<ChromeAndroidTask> tasks = new ArrayList<>(mTasks.values());
+        List<ChromeAndroidTask> tasks = getAllTasks();
         mTasks.clear();
         for (var task : tasks) {
             task.destroy();
@@ -307,7 +307,12 @@ final class ChromeAndroidTaskTrackerImpl implements ChromeAndroidTaskTracker {
         Activity activity = activityWindowAndroid.getActivity().get();
         assert activity != null : "ActivityWindowAndroid should have an Activity.";
 
-        return activity.getTaskId();
+        // TODO(https://crbug.com/518763461): remove flag once verified
+        if (ChromeFeatureList.sTaskGetIdAnrFix.isEnabled()) {
+            return ApplicationStatus.getTaskId(activity);
+        } else {
+            return activity.getTaskId();
+        }
     }
 
     /** Returns an array of the native {@code BrowserWindowInterface} addresses. */

@@ -116,6 +116,10 @@
 #include "extensions/common/constants.h"
 #endif
 
+#if BUILDFLAG(ENABLE_EXTENSIONS) && !BUILDFLAG(IS_ANDROID)
+#include "extensions/browser/mime_handler/mime_handler_stream_manager.h"
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS) && !BUILDFLAG(IS_ANDROID)
+
 #if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
 #include "chrome/browser/permissions/prediction_service/contextual_notification_permission_ui_selector.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
@@ -130,7 +134,14 @@ using permissions::PermissionRequestGestureType;
 
 #if BUILDFLAG(IS_ANDROID)
 bool ShouldUseQuietUI(content::WebContents* web_contents,
-                      ContentSettingsType type) {
+                      const permissions::PermissionRequest& request) {
+  if (request.GetGeolocationPromptType() ==
+      permissions::GeolocationPromptType::kUpgradeToPrecise) {
+    // We don't support quiet UI for upgrade prompts from approximate location
+    // to precise location.
+    return false;
+  }
+  ContentSettingsType type = request.GetContentSettingsType();
   auto* manager =
       permissions::PermissionRequestManager::FromWebContents(web_contents);
   if (type != ContentSettingsType::NOTIFICATIONS &&
@@ -323,16 +334,30 @@ void ChromePermissionsClient::AreSitesImportant(
 }
 
 // Some Google-affiliated domains are not allowed to delete cookies for
-// supervised accounts.
+// supervised accounts. This restriction can also be applied to enterprise
+// users via policy.
 bool ChromePermissionsClient::IsCookieDeletionDisabled(
     content::BrowserContext* browser_context,
     const GURL& origin) {
-  if (!Profile::FromBrowserContext(browser_context)->IsChild()) {
+  Profile* profile = Profile::FromBrowserContext(browser_context);
+  bool is_youtube =
+      google_util::IsYoutubeDomainUrl(origin, google_util::ALLOW_SUBDOMAIN,
+                                      google_util::ALLOW_NON_STANDARD_PORTS);
+  if (!is_youtube) {
     return false;
   }
 
-  return google_util::IsYoutubeDomainUrl(origin, google_util::ALLOW_SUBDOMAIN,
-                                         google_util::ALLOW_NON_STANDARD_PORTS);
+  if (profile->IsChild()) {
+    return true;
+  }
+
+  const PrefService::Preference* pref = profile->GetPrefs()->FindPreference(
+      prefs::kRestrictYouTubeCookiesDeletion);
+  if (pref && pref->IsManaged()) {
+    return pref->GetValue()->GetBool();
+  }
+
+  return false;
 }
 
 void ChromePermissionsClient::GetUkmSourceId(
@@ -733,7 +758,9 @@ std::optional<GURL> ChromePermissionsClient::GetCanonicalOriginOverride(
 
 std::optional<GURL> ChromePermissionsClient::GetEmbeddingOriginOverride(
     const GURL& requesting_origin,
-    content::WebContents* web_contents) {
+    content::RenderFrameHost* render_frame_host) {
+  content::WebContents* web_contents =
+      content::WebContents::FromRenderFrameHost(render_frame_host);
   GURL embedding_origin =
       web_contents->GetLastCommittedURL().DeprecatedGetOriginAsURL();
   // This check is needed in cases where the requesting origin is embedded in a
@@ -764,9 +791,40 @@ std::optional<GURL> ChromePermissionsClient::GetEmbeddingOriginOverride(
     // `GetCanonicalOriginOverride()`.
     return embedding_origin;
   }
+
+#if BUILDFLAG(ENABLE_EXTENSIONS) && !BUILDFLAG(IS_ANDROID)
+  // When a MIME handler extension is rendered as an OOPIF, key the
+  // embedding origin to the extension so prompts and content settings
+  // are attributed to the extension that produced the streamed content,
+  // not the navigation host that triggered it.
+  //
+  // The override applies only when the requesting frame lies inside the
+  // extension OOPIF subtree. Without this scoping, a top-level page
+  // (e.g. evil.com) that embeds an invisible PDF in an iframe would
+  // have its own permission prompts (e.g. camera) attributed to the
+  // MIME handler extension, because `MimeHandlerStreamManager` is
+  // attached to the WebContents the moment any PDF in the tab is
+  // intercepted -- not only when the extension itself is the requester.
+  // Inside the extension subtree the override applies to every
+  // descendant -- including cross-origin children -- because those
+  // frames only exist because the extension embedded them.
+  if (auto* manager =
+          extensions::mime_handler::MimeHandlerStreamManager::FromWebContents(
+              web_contents)) {
+    for (content::RenderFrameHost* ancestor = render_frame_host; ancestor;
+         ancestor = ancestor->GetParent()) {
+      if (manager->IsExtensionHost(ancestor)) {
+        return ancestor->GetLastCommittedOrigin().GetURL();
+      }
+    }
+  }
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS) && !BUILDFLAG(IS_ANDROID)
+
   return std::nullopt;
 }
 
+// Considers any `new tab page` or `new tab` origins as being from the new tab
+// page.
 bool ChromePermissionsClient::IsFromNewTabPage(
     content::WebContents* web_contents,
     const GURL& requester,
@@ -778,8 +836,8 @@ bool ChromePermissionsClient::IsFromNewTabPage(
       url::Origin::Create(chrome::ChromeUINewTabURLAsGURL());
   url::Origin ntp_origin =
       url::Origin::Create(chrome::ChromeUINewTabPageURLAsGURL());
-  // A page is not from the new tab page if its embedder is not a new tab page
-  // type.
+  // A page is definitely not from the new tab page if its embedder is not a
+  // new tab page type (`new tab page` or `new tab`).
   if (embedding_origin != ntp_origin && embedding_origin != new_tab_origin) {
     return false;
   }
@@ -851,9 +909,10 @@ bool ChromePermissionsClient::IsDseOrigin(
 std::unique_ptr<ChromePermissionsClient::PermissionMessageDelegate>
 ChromePermissionsClient::MaybeCreateMessageUI(
     content::WebContents* web_contents,
-    ContentSettingsType type,
+    const permissions::PermissionRequest& request,
     base::WeakPtr<permissions::PermissionPromptAndroid> prompt) {
-  if (ShouldUseQuietUI(web_contents, type) ||
+  ContentSettingsType type = request.GetContentSettingsType();
+  if (ShouldUseQuietUI(web_contents, request) ||
       // The quiet UI is enabled for both Notifications and Geolocation but the
       // Loud Clapper supports only Notifications.
       (type == ContentSettingsType::NOTIFICATIONS &&

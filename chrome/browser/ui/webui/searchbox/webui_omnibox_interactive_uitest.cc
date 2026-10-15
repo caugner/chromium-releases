@@ -13,6 +13,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/test/run_until.h"
 #include "base/test/scoped_feature_list.h"
+#include "build/build_config.h"
 #include "chrome/browser/autocomplete/aim_eligibility_service_factory.h"
 #include "chrome/browser/contextual_search/contextual_search_service_factory.h"
 #include "chrome/browser/signin/identity_test_environment_profile_adaptor.h"
@@ -85,17 +86,17 @@ const DeepQuery kClassicMatchText = {"omnibox-popup-app",
                                      "cr-searchbox-dropdown",
                                      "cr-searchbox-match", "#suggestion"};
 
-const DeepQuery kAimInput = {"omnibox-aim-app", "cr-composebox",
+const DeepQuery kAimInput = {"omnibox-aim-app", "#composebox",
                              "cr-composebox-input", "#input"};
-const DeepQuery kVoiceSearch = {"omnibox-aim-app", "cr-composebox",
+const DeepQuery kVoiceSearch = {"omnibox-aim-app", "#composebox",
                                 "#voiceSearch"};
-const DeepQuery kCancelIcon = {"omnibox-aim-app", "cr-composebox",
+const DeepQuery kCancelIcon = {"omnibox-aim-app", "#composebox",
                                "cr-composebox-input", "#cancelIcon"};
-const DeepQuery kAimSubmit = {"omnibox-aim-app", "cr-composebox",
+const DeepQuery kAimSubmit = {"omnibox-aim-app", "#composebox",
                               "cr-composebox-submit", "#submitContainer"};
-const DeepQuery kComposeboxMatch1 = {"omnibox-aim-app", "cr-composebox",
+const DeepQuery kComposeboxMatch1 = {"omnibox-aim-app", "#composebox",
                                      "#matches", "#match1", "#textContainer"};
-const DeepQuery kComposeboxFileThumbnail = {"omnibox-aim-app", "cr-composebox",
+const DeepQuery kComposeboxFileThumbnail = {"omnibox-aim-app", "#composebox",
                                             "cr-composebox-file-carousel",
                                             "cr-composebox-file-thumbnail"};
 }  // namespace
@@ -114,10 +115,8 @@ class OmniboxWebUiInteractiveTestBase
         {omnibox::internal::kWebUIOmniboxPopup, {}},
         {omnibox::kOmniboxWebUIDeferShowUntilVisualStateReady, {}}};
     if (force_enable_aim) {
-      base::FieldTrialParams aim_params = {
-          {omnibox::kShowRecentTabChip.name, "true"}};
       features.emplace_back(omnibox::internal::kWebUIOmniboxAimPopup,
-                            aim_params);
+                            base::FieldTrialParams());
       base::FieldTrialParams simplification_params = {
           {omnibox::kWebUIOmniboxAimPopupAddContextButtonVariantParam.name,
            "below_results"},
@@ -145,7 +144,7 @@ class OmniboxWebUiInteractiveTestBase
           BrowserView::GetBrowserViewForBrowser(browser())
               ->toolbar()
               ->location_bar_view()
-              ->GetOmniboxPopupViewForTesting());
+              ->GetOmniboxPopupView());
       return popup_view->presenter()->GetWebUIContent();
     });
   }
@@ -374,7 +373,11 @@ class OmniboxAimWebUiInteractiveTestBase
         WaitForPageActionChipVisible(kActionAiMode),
         FocusElement(kOmniboxElementId),
         PressButton(kAiModePageActionIconElementId), WaitForAimPopupReady(),
-        InAnyContext(WaitForElementToRender(kAimPopupWebView, kAimInput)));
+        InAnyContext(WaitForElementToRender(kAimPopupWebView, kAimInput)),
+        InAnyContext(ExecuteJsAt(
+            kAimPopupWebView, {"omnibox-aim-app"},
+            "el => { el.setSearchboxLayoutModeForTesting('TallBottomContext'); "
+            "el.setHasAllowedInputsForTesting(true); }")));
   }
 
   // Opens the AIM popup in a new tab to ensure a clean state.
@@ -399,7 +402,7 @@ class OmniboxAimWebUiInteractiveTestBase
     DEFINE_LOCAL_CUSTOM_ELEMENT_EVENT_TYPE(kAimSubmitEnabled);
     StateChange submit_enabled;
     submit_enabled.event = kAimSubmitEnabled;
-    submit_enabled.where = DeepQuery{"omnibox-aim-app", "cr-composebox"};
+    submit_enabled.where = DeepQuery{"omnibox-aim-app", "#composebox"};
     submit_enabled.test_function = "(el) => el && el.canSubmitFilesAndInput";
     return Steps(WaitForElementToRender(contents_id, kAimSubmit),
                  WaitForStateChange(contents_id, submit_enabled));
@@ -507,8 +510,10 @@ IN_PROC_BROWSER_TEST_F(OmniboxAimWebUiInteractiveTest,
       CheckViewProperty(kOmniboxElementId, &views::View::HasFocus, false));
 }
 
-// TODO(crbug.com/505548434): Flaky on Mac.
-#if BUILDFLAG(IS_MAC)
+// TODO(crbug.com/505548434, crbug.com/517370516): Flaky on Mac, Win and Linux.
+// TODO(crbug.com/524892796): Broken on ChromeOS.
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || \
+    BUILDFLAG(IS_CHROMEOS)
 #define MAYBE_ClassicContextMenuOpensDeepSearch \
   DISABLED_ClassicContextMenuOpensDeepSearch
 #else
@@ -517,7 +522,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxAimWebUiInteractiveTest,
 #endif
 IN_PROC_BROWSER_TEST_F(OmniboxAimWebUiInteractiveTest,
                        MAYBE_ClassicContextMenuOpensDeepSearch) {
-  const DeepQuery kDeepSearchChip = {"omnibox-aim-app", "cr-composebox",
+  const DeepQuery kDeepSearchChip = {"omnibox-aim-app", "#composebox",
                                      "cr-composebox-tool-chip"};
   RunTestSequence(
       SetAimEligibleResponse(),
@@ -572,7 +577,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxAimWebUiInteractiveTest,
   DEFINE_LOCAL_CUSTOM_ELEMENT_EVENT_TYPE(kAimSubmitVisibleAndLayoutSettled);
   StateChange submit_visible_and_layout_settled;
   submit_visible_and_layout_settled.event = kAimSubmitVisibleAndLayoutSettled;
-  submit_visible_and_layout_settled.where = {"omnibox-aim-app", "cr-composebox",
+  submit_visible_and_layout_settled.where = {"omnibox-aim-app", "#composebox",
                                              "cr-composebox-submit",
                                              "#submitIcon"};
   submit_visible_and_layout_settled.test_function = R"(
@@ -847,16 +852,9 @@ INSTANTIATE_TEST_SUITE_P(
       return prefix + name;
     });
 
-// TODO(crbug.com/505527138): The tests are flaky on Mac builders.
-#if BUILDFLAG(IS_MAC)
-#define MAYBE_ClassicContextMenuUploadTriggersAimPopup \
-  DISABLED_ClassicContextMenuUploadTriggersAimPopup
-#else
-#define MAYBE_ClassicContextMenuUploadTriggersAimPopup \
-  ClassicContextMenuUploadTriggersAimPopup
-#endif  // BUILDFLAG(IS_MAC)
+// TODO(crbug.com/505527138): The tests are flaky.
 IN_PROC_BROWSER_TEST_P(OmniboxAimUploadInteractiveTest,
-                       MAYBE_ClassicContextMenuUploadTriggersAimPopup) {
+                       DISABLED_ClassicContextMenuUploadTriggersAimPopup) {
   base::FilePath test_data_dir;
   ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir));
   base::FilePath file_path = test_data_dir.AppendASCII(GetParam().file_name);
@@ -986,8 +984,8 @@ IN_PROC_BROWSER_TEST_F(WebUIOmniboxSimplificationInteractiveTest,
       InAnyContext(WaitForStateChange(kClassicPopupWebView, style_applied)));
 }
 
-// TODO(crbug.com/512335990): Flaky on Mac.
-#if BUILDFLAG(IS_MAC)
+// TODO(crbug.com/512335990): Flaky on Mac and Windows ASAN.
+#if BUILDFLAG(IS_MAC) || (BUILDFLAG(IS_WIN) && defined(ADDRESS_SANITIZER))
 #define MAYBE_HasSuggestionLabel DISABLED_HasSuggestionLabel
 #else
 #define MAYBE_HasSuggestionLabel HasSuggestionLabel

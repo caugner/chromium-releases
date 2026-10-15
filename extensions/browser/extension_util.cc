@@ -16,6 +16,7 @@
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/child_process_security_policy.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/security_principal.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/storage_partition.h"
@@ -78,6 +79,30 @@ bool ExtensionIsFromWebstore(const Extension& extension) {
          extension.location() == mojom::ManifestLocation::kInternal;
 }
 
+// Handles logic that only requires the ExtensionId and the BrowserContext.
+// This is safe to call even when the extension is completely unloaded.
+bool IsIncognitoEnabledForIdAndContext(const ExtensionId& extension_id,
+                                       content::BrowserContext* context) {
+#if BUILDFLAG(IS_CHROMEOS)
+  // An OTR Profile is used for captive portal signin to hide PII from
+  // captive portals (which require HTTP redirects to function).
+  // However, for captive portal signin we do not want want to disable
+  // extensions by default. (Proxies are explicitly disabled elsewhere).
+  // See b/261727502 for details.
+  PrefService* prefs = user_prefs::UserPrefs::Get(context);
+  if (prefs) {
+    const PrefService::Preference* captive_portal_pref =
+        prefs->FindPreference(chromeos::prefs::kCaptivePortalSignin);
+    if (captive_portal_pref && captive_portal_pref->GetValue()->GetBool()) {
+      return true;
+    }
+  }
+#endif
+
+  // The ultimate fallback database check.
+  return ExtensionPrefs::Get(context)->IsIncognitoEnabled(extension_id);
+}
+
 }  // namespace
 
 bool CanBeIncognitoEnabled(const Extension* extension) {
@@ -86,11 +111,8 @@ bool CanBeIncognitoEnabled(const Extension* extension) {
           extension->location() == mojom::ManifestLocation::kComponent);
 }
 
-bool IsIncognitoEnabled(const ExtensionId& extension_id,
+bool IsIncognitoEnabled(const Extension* extension,
                         content::BrowserContext* context) {
-  const Extension* extension =
-      ExtensionRegistry::Get(context)->enabled_extensions().GetByID(
-          extension_id);
   if (extension) {
     if (!CanBeIncognitoEnabled(extension)) {
       return false;
@@ -109,22 +131,22 @@ bool IsIncognitoEnabled(const ExtensionId& extension_id,
     }
 #endif
   }
-#if BUILDFLAG(IS_CHROMEOS)
-  // An OTR Profile is used for captive portal signin to hide PII from
-  // captive portals (which require HTTP redirects to function).
-  // However, for captive portal signin we do not want want to disable
-  // extensions by default. (Proxies are explicitly disabled elsewhere).
-  // See b/261727502 for details.
-  PrefService* prefs = user_prefs::UserPrefs::Get(context);
-  if (prefs) {
-    const PrefService::Preference* captive_portal_pref =
-        prefs->FindPreference(chromeos::prefs::kCaptivePortalSignin);
-    if (captive_portal_pref && captive_portal_pref->GetValue()->GetBool()) {
-      return true;
+
+  return IsIncognitoEnabledForIdAndContext(extension->id(), context);
+}
+
+bool IsIncognitoEnabled(const ExtensionId& extension_id,
+                        content::BrowserContext* context) {
+  ExtensionRegistry* registry = ExtensionRegistry::Get(context);
+  if (registry) {
+    const Extension* extension =
+        registry->enabled_extensions().GetByID(extension_id);
+    if (extension) {
+      return IsIncognitoEnabled(extension, context);
     }
   }
-#endif
-  return ExtensionPrefs::Get(context)->IsIncognitoEnabled(extension_id);
+
+  return IsIncognitoEnabledForIdAndContext(extension_id, context);
 }
 
 bool CanCrossIncognito(const Extension* extension,
@@ -391,7 +413,8 @@ ExtensionId GetExtensionIdForSiteInstance(
 
   // Navigating to a disabled (or uninstalled or not-yet-installed) extension
   // will set the site URL to chrome-extension://invalid.
-  ExtensionId maybe_extension_id = site_instance.GetSiteURL().GetHost();
+  ExtensionId maybe_extension_id =
+      site_instance.GetSecurityPrincipal().GetHost();
   if (maybe_extension_id == "invalid") {
     return ExtensionId();
   }
@@ -413,7 +436,7 @@ std::string GetExtensionIdFromFrame(
     return std::string();
   }
 
-  return site_instance->GetSiteURL().GetHost();
+  return site_instance->GetSecurityPrincipal().GetHost();
 }
 
 bool CanRendererHostExtensionOrigin(int render_process_id,
@@ -565,6 +588,19 @@ bool IsExtensionDownload(const download::DownloadItem& download_item) {
     return true;
   }
   return false;
+}
+
+const GURL& GetURLForExtensionPermissionCheck(content::RenderFrameHost* rfh) {
+  // Avoid `CHECK_NE(lifecycle_state(), LifecycleStateImpl::kSpeculative)` in
+  // `content::RenderFrameHost::IsErrorDocument()` by checking for an empty
+  // `GURL` first.
+  if (!rfh || rfh->GetLastCommittedURL().is_empty()) {
+    return GURL::EmptyGURL();
+  }
+  if (rfh->IsErrorDocument()) {
+    return GURL::EmptyGURL();
+  }
+  return rfh->GetLastCommittedURL();
 }
 
 }  // namespace extensions::util

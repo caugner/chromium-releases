@@ -4,8 +4,7 @@
 
 #include "chrome/browser/ui/views/drive_picker_host/drive_picker_host_view.h"
 
-#include "base/memory/raw_ptr.h"
-#include "base/test/scoped_feature_list.h"
+#include "chrome/browser/ui/browser_window/test/mock_browser_window_interface.h"
 #include "chrome/browser/ui/webui/drive_picker_host/drive_picker_host_ui.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/testing_profile.h"
@@ -17,8 +16,13 @@
 #include "content/public/test/scoped_web_ui_controller_factory_registration.h"
 #include "content/public/test/test_renderer_host.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "ui/base/accelerators/accelerator.h"
+#include "ui/compositor/layer.h"
+#include "ui/gfx/geometry/rounded_corners_f.h"
 #include "ui/views/controls/webview/webview.h"
+#include "ui/views/layout/layout_provider.h"
 #include "ui/views/view_utils.h"
+#include "ui/views/widget/widget.h"
 #include "url/gurl.h"
 
 namespace {
@@ -27,11 +31,10 @@ class MockDrivePickerHostUI : public DrivePickerHostUI {
  public:
   explicit MockDrivePickerHostUI(content::WebUI* web_ui)
       : DrivePickerHostUI(web_ui) {}
-  MOCK_METHOD(
-      void,
-      TriggerDrivePickerHost,
-      (mojo::PendingRemote<drive_picker_host::mojom::DrivePickerResultHandler>),
-      (override));
+  MOCK_METHOD(void,
+              TriggerDrivePickerHost,
+              (std::unique_ptr<drive_picker_host::DrivePickerHostRequest>),
+              (override));
 };
 
 class MockDrivePickerHostUIConfig : public DrivePickerHostUIConfig {
@@ -67,9 +70,13 @@ class DrivePickerHostViewTest : public ChromeViewsTestBase {
   }
 
   TestingProfile* profile() { return profile_.get(); }
+  MockBrowserWindowInterface* browser_window_interface() {
+    return &mock_browser_window_interface_;
+  }
 
  private:
   std::unique_ptr<TestingProfile> profile_;
+  MockBrowserWindowInterface mock_browser_window_interface_;
 
   // Needed because DrivePickerHostView creates a views::WebView and
   // TriggerDrivePickerHostUi test uses NavigationSimulator to "load" the
@@ -81,7 +88,8 @@ class DrivePickerHostViewTest : public ChromeViewsTestBase {
 };
 
 TEST_F(DrivePickerHostViewTest, Initialization) {
-  auto view = std::make_unique<DrivePickerHostView>(profile());
+  auto view = std::make_unique<DrivePickerHostView>(profile(),
+                                                    browser_window_interface());
 
   EXPECT_EQ(view->children().size(), 1u);
   EXPECT_FALSE(view->GetBackground());
@@ -94,7 +102,8 @@ TEST_F(DrivePickerHostViewTest, TriggerDrivePickerHostUi) {
   content::ScopedWebUIConfigRegistration registration(
       std::make_unique<MockDrivePickerHostUIConfig>());
 
-  auto view = std::make_unique<DrivePickerHostView>(profile());
+  auto view = std::make_unique<DrivePickerHostView>(profile(),
+                                                    browser_window_interface());
 
   content::WebContents* contents =
       views::AsViewClass<views::WebView>(view->view_tracker_.view())
@@ -108,8 +117,62 @@ TEST_F(DrivePickerHostViewTest, TriggerDrivePickerHostUi) {
       contents->GetWebUI()->GetController()->GetAs<MockDrivePickerHostUI>();
   ASSERT_TRUE(mock_controller);
   EXPECT_CALL(*mock_controller, TriggerDrivePickerHost(testing::_));
-  view->TriggerDrivePickerHostUi(mojo::NullRemote());
+  auto request = std::make_unique<drive_picker_host::DrivePickerHostRequest>(
+      drive_picker_host::DrivePickerHostRequest::RequestType::kPickerUi,
+      mojo::PendingRemote<
+          drive_picker_host::mojom::DrivePickerResultHandler>());
+  view->TriggerDrivePickerHostUi(std::move(request));
 
   // Clean up the view to avoid dangling references.
   view.reset();
+}
+
+TEST_F(DrivePickerHostViewTest, SetsCornerRadiusOnAddedToWidget) {
+  auto view = std::make_unique<DrivePickerHostView>(profile(),
+                                                    browser_window_interface());
+
+  auto widget = std::make_unique<views::Widget>();
+  views::Widget::InitParams params(
+      views::Widget::InitParams::CLIENT_OWNS_WIDGET,
+      views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
+  params.context = GetContext();
+  widget->Init(std::move(params));
+
+  DrivePickerHostView* view_ptr = view.get();
+  widget->SetContentsView(std::move(view));
+
+  views::WebView* web_view =
+      views::AsViewClass<views::WebView>(view_ptr->view_tracker_.view());
+  ASSERT_TRUE(web_view);
+
+  // Verify that the corner radii were set to 0 (rectangular) on the WebView
+  // holder.
+  gfx::RoundedCornersF holder_radii =
+      web_view->holder()->GetUILayer()->rounded_corner_radii();
+  EXPECT_TRUE(holder_radii.IsEmpty());
+
+  // Verify that the corner radii were set to 0 on the view's layer.
+  gfx::RoundedCornersF view_radii = view_ptr->layer()->rounded_corner_radii();
+  EXPECT_TRUE(view_radii.IsEmpty());
+}
+
+TEST_F(DrivePickerHostViewTest, EscapeAcceleratorClosesWidget) {
+  auto view = std::make_unique<DrivePickerHostView>(profile(),
+                                                    browser_window_interface());
+
+  auto widget = std::make_unique<views::Widget>();
+  views::Widget::InitParams params(
+      views::Widget::InitParams::CLIENT_OWNS_WIDGET,
+      views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
+  params.context = GetContext();
+  widget->Init(std::move(params));
+  views::View* view_ptr = widget->SetContentsView(std::move(view));
+  widget->Show();
+
+  EXPECT_FALSE(widget->IsClosed());
+
+  ui::Accelerator escape_accelerator(ui::VKEY_ESCAPE, ui::EF_NONE);
+  view_ptr->AcceleratorPressed(escape_accelerator);
+
+  EXPECT_TRUE(widget->IsClosed());
 }

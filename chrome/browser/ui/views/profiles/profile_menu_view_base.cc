@@ -31,7 +31,6 @@
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/chrome_typography.h"
 #include "chrome/browser/ui/views/controls/hover_button.h"
-#include "chrome/grit/generated_resources.h"
 #include "components/signin/public/base/signin_switches.h"
 #include "components/supervised_user/core/browser/family_link_user_capabilities.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -212,7 +211,9 @@ class AvatarImageView : public views::ImageView {
       // This can happen if the account image hasn't been fetched yet, if there
       // is no image, or in tests.
       avatar_image_ = ui::ImageModel::FromVectorIcon(
-          kUserAccountAvatarIcon, ui::kColorMenuIcon, image_size_);
+          features::IsRoundedIconsEnabled() ? kAccountCircleIcon
+                                            : kUserAccountAvatarOldIcon,
+          ui::kColorMenuIcon, image_size_);
     }
   }
 
@@ -394,8 +395,10 @@ ProfileMenuViewBase::ProfileMenuViewBase(views::BubbleAnchor anchor_element,
   } else if (views::View* anchor_view = anchor_element.GetIfView()) {
     anchor_view_.SetView(anchor_view);
   }
-  views::InkDrop::Get(anchor_view_.view())
-      ->AnimateToState(views::InkDropState::ACTIVATED, nullptr);
+  if (views::View* view = anchor_view_.view()) {
+    views::InkDrop::Get(view)->AnimateToState(views::InkDropState::ACTIVATED,
+                                              nullptr);
+  }
 
   SetEnableArrowKeyTraversal(true);
 
@@ -407,7 +410,7 @@ ProfileMenuViewBase::ProfileMenuViewBase(views::BubbleAnchor anchor_element,
   GetViewAccessibility().SetRole(ax::mojom::Role::kMenu);
 
   RegisterWindowClosingCallback(base::BindOnce(
-      &ProfileMenuViewBase::OnWindowClosing, base::Unretained(this)));
+      &ProfileMenuViewBase::OnWindowClosing, weak_factory_.GetWeakPtr()));
 
   SetBackground(views::CreateSolidBackground(kColorProfileMenuBackground));
 }
@@ -824,8 +827,10 @@ void ProfileMenuViewBase::OnWindowClosing() {
     return;
   }
 
-  views::InkDrop::Get(anchor_view_.view())
-      ->AnimateToState(views::InkDropState::DEACTIVATED, nullptr);
+  if (views::View* view = anchor_view_.view()) {
+    views::InkDrop::Get(view)->AnimateToState(views::InkDropState::DEACTIVATED,
+                                              nullptr);
+  }
 }
 
 bool ProfileMenuViewBase::HandleContextMenu(

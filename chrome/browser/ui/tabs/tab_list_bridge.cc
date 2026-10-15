@@ -149,8 +149,11 @@ void TabListBridge::ActivateTab(tabs::TabHandle tab) {
 tabs::TabInterface* TabListBridge::OpenTab(const GURL& url,
                                            int index,
                                            bool foreground) {
-  // If `index` is specified as `TabStripModel::kNoTab`, then the tab is added
-  // to the end of the tab strip.
+  // If `index` is `TabStripModel::kNoTab` or equals the tab strip size, then
+  // the tab is added to the end of the tab strip.
+  if (index == tab_strip_->count()) {
+    index = TabStripModel::kNoTab;
+  }
   CHECK(index == TabStripModel::kNoTab || tab_strip_->ContainsIndex(index));
 
   // TODO(crbug.com/460650221): It's a bit of a code smell to reach in and grab
@@ -503,7 +506,7 @@ void TabListBridge::MoveTabToWindow(tabs::TabHandle tab,
       destination_index, std::move(detached_tab), AddTabTypes::ADD_NONE);
 }
 
-void TabListBridge::MoveTabGroupToWindow(tab_groups::TabGroupId group_id,
+bool TabListBridge::MoveTabGroupToWindow(tab_groups::TabGroupId group_id,
                                          SessionID destination_window_id,
                                          int destination_index) {
   BrowserWindowInterface* target_window =
@@ -517,13 +520,13 @@ void TabListBridge::MoveTabGroupToWindow(tab_groups::TabGroupId group_id,
       static_cast<TabListBridge*>(target_list_interface);
   auto target_tab_strip = target_bridge->tab_strip_;
   if (!target_tab_strip->SupportsTabGroups()) {
-    return;
+    return false;
   }
 
   // Handle the case where `destination_window_id` points to the same window.
   if (this == target_bridge) {
     MoveGroupTo(group_id, destination_index);
-    return;
+    return true;
   }
 
   TabGroup* tab_group = tab_strip_->group_model()->GetTabGroup(group_id);
@@ -562,6 +565,7 @@ void TabListBridge::MoveTabGroupToWindow(tab_groups::TabGroupId group_id,
       tab_strip_->DetachTabGroupForInsertion(group_id);
   target_tab_strip->InsertDetachedTabGroupAt(std::move(detached_group),
                                              target_index);
+  return true;
 }
 
 void TabListBridge::OnTabStripModelChanged(

@@ -498,7 +498,7 @@ void RenderWidgetHostViewAura::InitAsPopup(
                                         display::kInvalidDisplayId);
 
   SetBounds(bounds_in_screen);
-  Show();
+  ShowWithVisibility(PageVisibilityState::kVisible);
   if (NeedsMouseCapture())
     window_->SetCapture();
 
@@ -676,10 +676,6 @@ void RenderWidgetHostViewAura::EnsureSurfaceSynchronizedForWebTest() {
 
 bool RenderWidgetHostViewAura::IsShowing() {
   return window_->IsVisible();
-}
-
-void RenderWidgetHostViewAura::WasUnOccluded() {
-  ShowImpl(PageVisibilityState::kVisible);
 }
 
 void RenderWidgetHostViewAura::ShowImpl(PageVisibilityState page_visibility) {
@@ -2378,6 +2374,8 @@ void RenderWidgetHostViewAura::OnDeviceScaleFactorChanged(
 }
 
 void RenderWidgetHostViewAura::OnWindowDestroying(aura::Window* window) {
+  event_handler_->set_window(nullptr);
+
   // Make sure that the input method no longer references to this object before
   // this object is removed from the root window (i.e. this object loses access
   // to the input method).
@@ -2597,8 +2595,11 @@ void RenderWidgetHostViewAura::OnStartStylusWriting() {
   // callback response from the renderer process. This will be used to discard
   // responses in OnFocusHandled()/OnFocusFailed() later for such cases.
   handwriting_controller->OnStartStylusWriting(
-      base::BindRepeating(&RenderWidgetHostViewAura::OnFocusHandwritingTarget,
-                          weak_ptr_factory_.GetWeakPtr()),
+      stylus_handwriting_focus_callback_.is_null()
+          ? base::BindRepeating(
+                &RenderWidgetHostViewAura::OnFocusHandwritingTarget,
+                weak_ptr_factory_.GetWeakPtr())
+          : std::move(stylus_handwriting_focus_callback_),
       last_stylus_handwriting_properties_.value());
   last_stylus_handwriting_properties_.reset();
 }
@@ -2646,14 +2647,24 @@ void RenderWidgetHostViewAura::OnEditElementFocusedForStylusWriting(
                : handwriting_controller->OnFocusFailed();
 }
 
+void RenderWidgetHostViewAura::SetStylusHandwritingFocusCallback(
+    OnFocusHandwritingTargetCallback callback) {
+  stylus_handwriting_focus_callback_ = std::move(callback);
+}
+
 void RenderWidgetHostViewAura::OnFocusHandwritingTarget(
     const gfx::Rect& focus_screen_rect_in_dips,
     const gfx::Size& tolerance_screen_distance_in_dips) {
   // TODO(crbug.com/355578906): Consider `tolerance_screen_distance_in_dips`.
-  if (host()) {
-    host()->UpdateElementFocusForStylusWriting(
-        ConvertRectFromScreen(focus_screen_rect_in_dips));
+  if (!host()) {
+    if (StylusHandwritingControllerWin::GetInstance()) {
+      StylusHandwritingControllerWin::GetInstance()->OnFocusFailed();
+    }
+    return;
   }
+
+  host()->UpdateElementFocusForStylusWriting(
+      ConvertRectFromScreen(focus_screen_rect_in_dips));
 }
 #endif  // BUILDFLAG(IS_WIN)
 
@@ -3088,6 +3099,11 @@ void RenderWidgetHostViewAura::ResetGestureDetection() {
   // which can confuse event validation.
 }
 
+void RenderWidgetHostViewAura::SetShouldUseDefaultDeadlineOnResize(
+    bool enable) {
+  use_default_deadline_on_resize_ = enable;
+}
+
 bool RenderWidgetHostViewAura::FocusedFrameHasStickyActivation() const {
   // Unless user has interacted with the iframe, we shouldn't be displaying VK
   // or fire geometrychange event.
@@ -3200,16 +3216,21 @@ void RenderWidgetHostViewAura::UpdateLegacyWin() {
   if (legacy_window_destroyed_ || !GetHostWindowHWND())
     return;
 
+  // `Create`, `UpdateParent`, and `SetBounds` can all spin a nested message
+  // loop on Windows, potentially destroying `this`.
+  base::WeakPtr<RenderWidgetHostViewAura> weak_this(
+      weak_ptr_factory_.GetWeakPtr());
+
   if (!legacy_render_widget_host_HWND_) {
-    legacy_render_widget_host_HWND_ =
+    LegacyRenderWidgetHostHWND* legacy_window =
         LegacyRenderWidgetHostHWND::Create(GetHostWindowHWND(), this);
+    if (!weak_this) {
+      return;
+    }
+    legacy_render_widget_host_HWND_ = legacy_window;
   }
 
   if (legacy_render_widget_host_HWND_) {
-    // Both UpdateParent and SetBounds can spin a nested message loop on
-    // Windows, potentially destroying `this`.
-    base::WeakPtr<RenderWidgetHostViewAura> weak_this(
-        weak_ptr_factory_.GetWeakPtr());
     legacy_render_widget_host_HWND_->UpdateParent(GetHostWindowHWND());
     if (!weak_this) {
       return;
@@ -3674,6 +3695,10 @@ ui::Compositor* RenderWidgetHostViewAura::GetCompositor() {
     return nullptr;
 
   return window_->GetHost()->compositor();
+}
+
+bool RenderWidgetHostViewAura::ShouldUseDefaultDeadlineOnResize() const {
+  return use_default_deadline_on_resize_;
 }
 
 #if BUILDFLAG(IS_WIN)

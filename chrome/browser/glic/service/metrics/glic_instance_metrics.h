@@ -10,6 +10,7 @@
 
 #include "base/callback_list.h"
 #include "base/containers/flat_map.h"
+#include "base/containers/flat_set.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/raw_ref.h"
 #include "chrome/browser/glic/host/glic.mojom.h"
@@ -20,6 +21,7 @@
 #include "chrome/browser/glic/service/metrics/metrics_types.h"
 
 class PrefService;
+class Profile;
 
 namespace metrics {
 
@@ -47,6 +49,8 @@ namespace glic {
 
 class GlicSharingManager;
 struct ShowOptions;
+
+using SafeEmbedderKey = std::variant<tabs::TabHandle, FloatingEmbedderKey>;
 
 // This enumerates a set of possible lifecycle errors which are logged when the
 // sequence of received events was not expected.
@@ -123,7 +127,10 @@ enum class GlicInstanceEvent {
   kShown = 47,
   kOpen = 48,
   kWebUiStateWarmed = 49,
-  kMaxValue = kWebUiStateWarmed,
+  // kOpen2 = 50 - Only used in Canary M150
+  kWebUiStateLocationMismatch = 51,
+  kWebUiStateIneligibleAccount = 52,
+  kMaxValue = kWebUiStateIneligibleAccount,
 };
 // LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:GlicInstanceEvent)
 
@@ -158,13 +165,14 @@ class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
   };
 
   explicit GlicInstanceMetrics(
-      const metrics::ProfileMetricsService* profile_metrics_service);
+      const metrics::ProfileMetricsService* profile_metrics_service,
+      Profile* profile = nullptr);
   GlicInstanceMetrics(
       const metrics::ProfileMetricsService* profile_metrics_service,
       GlicSharingManager* sharing_manager,
       enterprise_reporting::SaasUsageReportingController*
           saas_usage_reporting_controller,
-      PrefService* pref_service = nullptr);
+      Profile* profile = nullptr);
   ~GlicInstanceMetrics() override;
 
   GlicInstanceMetrics(const GlicInstanceMetrics&) = delete;
@@ -257,6 +265,12 @@ class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
   // instance.
   void OnOpen(glic::mojom::InvocationSource source, const ShowOptions& options);
 
+  // Returns true if this is the first time this specific embedder is becoming
+  // visible after being opened/closed.
+  bool MarkShownAndCheckIfFirstTime(EmbedderKey key);
+
+  void ResetShownState(EmbedderKey key);
+
   // Called when a tab that was bound to this instance is destroyed.
   void OnBoundTabDestroyed();
 
@@ -292,9 +306,6 @@ class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
 
   void OnUserResizeStarted(const gfx::Size& start_size);
   void OnUserResizeEnded(const gfx::Size& end_size);
-
-  void OnSelectionAreasChanged(int count);
-  void OnPolylinePointsChanged(const std::vector<int>& counts);
 
   void OnZoomLevelChange();
 
@@ -361,8 +372,7 @@ class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
   void OnSessionStarted();
   void OnSessionFinished();
 
-  void OnPinnedTabsChanged(
-      const std::vector<content::WebContents*>& pinned_contents);
+  void OnPinnedTabsChanged(const std::vector<tabs::TabInterface*>& pinned_tabs);
 
   // Records the response latency (from user input submitted to response stop)
   // by the number of attached tabs.
@@ -416,6 +426,7 @@ class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
 
   bool is_client_ready_ = false;
   bool is_opt_in_pending_ = false;
+  bool has_consented_ = false;
 
   void MaybeRecordOptInImpression();
 
@@ -425,6 +436,7 @@ class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
   raw_ptr<GlicSharingManager> sharing_manager_ = nullptr;
   raw_ptr<enterprise_reporting::SaasUsageReportingController>
       saas_usage_reporting_controller_ = nullptr;
+  raw_ptr<Profile> profile_ = nullptr;
   raw_ptr<PrefService> pref_service_ = nullptr;
 
   bool first_side_panel_close_recorded_ = false;
@@ -437,13 +449,11 @@ class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
   // session ends).
   int scroll_attempt_count_ = 0;
 
-  // Whether region selection is active.
-  int selection_areas_count_ = 0;
-  std::vector<int> polyline_point_counts_;
-
   // The number of zoom change attempts (tracked per instance and reset when
   // the instance is destroyed).
   int zoom_change_count_ = 0;
+
+  base::flat_set<SafeEmbedderKey> seen_embedders_;
 };
 
 }  // namespace glic

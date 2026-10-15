@@ -5,7 +5,9 @@
 #ifndef CHROME_BROWSER_SHARING_GLIC_EXPERIMENTAL_TRIGGERING_GLIC_EXPERIMENTAL_TRIGGERING_MESSAGE_HANDLER_H_
 #define CHROME_BROWSER_SHARING_GLIC_EXPERIMENTAL_TRIGGERING_GLIC_EXPERIMENTAL_TRIGGERING_MESSAGE_HANDLER_H_
 
+#include <map>
 #include <optional>
+#include <string>
 
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -15,18 +17,16 @@
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/unique_receiver_set.h"
 
-namespace glic {
-class GlicInstance;
-class GlicKeyedService;
-}  // namespace glic
-
 class Profile;
+
+class BrowserWindowInterface;
 
 class SharingMessageSender;
 
 namespace tabs {
 class TabInterface;
 }
+class ExperimentalTriggeringUpdatesHandler;
 
 class GlicExperimentalTriggeringMessageHandler : public SharingMessageHandler {
  public:
@@ -42,28 +42,35 @@ class GlicExperimentalTriggeringMessageHandler : public SharingMessageHandler {
   void OnMessage(components_sharing_message::SharingMessage message,
                  DoneCallback done_callback) override;
 
+  size_t GetUpdatesHandlerMapSizeForTesting() const {
+    return context_id_to_updates_handler_map_.size();
+  }
+
  protected:
   // Virtual for testing purposes to allow mocking the active tab.
   virtual tabs::TabInterface* GetActiveTab() const;
+  // Virtual for testing purposes to allow mocking the browser window.
+  virtual BrowserWindowInterface* GetBrowserWindow() const;
 
  private:
-  void OnClientConnectedForUpdates(
-      components_sharing_message::ServerChannelConfiguration server_channel,
-      std::optional<int64_t> last_seen_sequence_number,
-      base::WeakPtr<glic::GlicInstance> instance);
+  friend class ExperimentalTriggeringUpdatesHandler;
 
-  void ProcessStopActionRequest(
-      components_sharing_message::SharingMessage message,
-      tabs::TabInterface* active_tab,
-      glic::GlicKeyedService* glic_service,
-      DoneCallback done_callback);
+  void OnUpdatesHandlerCleanup(std::string context_id);
+
+  // Returns true if the incoming experimental triggering version is supported
+  // by the client. Returns false if the incoming version is newer than the
+  // client version, or if the client version is unavailable.
+  bool IsVersionSupported(int incoming_version) const;
+
+  // Returns the local experimental triggering version supported by the client.
+  // Returns std::nullopt if the version is unavailable (e.g. if the user is in
+  // the kUnavailable state).
+  std::optional<int> GetLocalTriggeringVersion() const;
 
   const raw_ptr<Profile> profile_;
-
   const raw_ptr<SharingMessageSender> message_sender_;
-  mojo::UniqueReceiverSet<glic::mojom::ExperimentalTriggeringUpdatesHandler>
-      listeners_;
-
+  std::map<std::string, std::unique_ptr<ExperimentalTriggeringUpdatesHandler>>
+      context_id_to_updates_handler_map_;
   base::WeakPtrFactory<GlicExperimentalTriggeringMessageHandler>
       weak_ptr_factory_{this};
 };

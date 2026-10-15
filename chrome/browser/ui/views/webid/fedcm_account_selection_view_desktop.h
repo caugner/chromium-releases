@@ -7,12 +7,13 @@
 
 #include <memory>
 
+#include "base/functional/function_ref.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/picture_in_picture/picture_in_picture_occlusion_observer.h"
 #include "chrome/browser/picture_in_picture/scoped_picture_in_picture_occlusion_observation.h"
-#include "chrome/browser/ui/page_actions/page_action_observer.h"
+#include "chrome/browser/ui/page_action/page_action_observer.h"
 #include "chrome/browser/ui/tabs/public/tab_dialog_manager.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/views/webid/account_selection_bubble_view.h"
@@ -406,11 +407,10 @@ class FedCmAccountSelectionView : public AccountSelectionView,
   // the background, becomes foregrounded.
   void BackgroundTaskTabForegrounded(tabs::TabInterface* tab);
 
+  // Calls a delegate method while guarding against `this` being deleted.
   // Returns false if `this` got deleted. In that case, the caller must early
   // return.
-  bool NotifyDelegateOfAccountSelection(
-      const Account& account,
-      const content::IdentityProviderData& idp_data);
+  [[nodiscard]] bool NotifyDelegate(base::FunctionRef<void()> notify_callback);
 
   // Shows the verifying sheet.
   void ShowVerifyingSheet(const IdentityRequestAccountPtr& account);
@@ -430,6 +430,9 @@ class FedCmAccountSelectionView : public AccountSelectionView,
   // Shows the page action (omnibox chip) for Ambient UI.
   bool ShowPageAction(const std::vector<IdentityProviderDataPtr>& idp_list,
                       const std::vector<IdentityRequestAccountPtr>& accounts);
+
+  // Returns whether the ambient UI is enabled.
+  bool IsAmbientEnabled() const;
 
   // Shows the multi account picker and updates the internal state.
   void ShowMultiAccountPicker(

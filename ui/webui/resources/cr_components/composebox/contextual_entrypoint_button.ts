@@ -21,7 +21,7 @@ import type {TabInfo} from '//resources/mojo/components/omnibox/browser/searchbo
 import type {InputState} from '//resources/mojo/components/omnibox/composebox/composebox_query.mojom-webui.js';
 import {ToolMode} from '//resources/mojo/components/omnibox/composebox/composebox_query.mojom-webui.js';
 
-import {GlifAnimationState, recordBoolean} from './common.js';
+import {GlifAnimationState, recordBoolean, recordUserAction} from './common.js';
 import {getCss} from './contextual_entrypoint_button.css.js';
 import {getHtml} from './contextual_entrypoint_button.html.js';
 import {WindowProxy} from './window_proxy.js';
@@ -39,7 +39,7 @@ export class ContextualEntrypointButtonElement extends
   }
 
   override render() {
-    return getHtml.bind(this as any)();
+    return getHtml.bind(this)();
   }
 
   static override get properties() {
@@ -57,7 +57,15 @@ export class ContextualEntrypointButtonElement extends
       isOblongShape: {type: Boolean, reflect: true},
       windowWidthBelowThreshold_: {type: Boolean},
       sharedTabs: {type: Array},
+      restoredTabs: {type: Array},
       tabFaviconChipsToCoinsEnabled_: {type: Boolean},
+      energyEffectAnimationEnabled: {type: Boolean, reflect: true},
+      disableFallbackGlifAnimation: {type: Boolean},
+      smartTabSharingActive: {type: Boolean},
+      isLensSearchbox_: {
+        type: Boolean,
+        reflect: true,
+      },
     };
   }
 
@@ -65,22 +73,42 @@ export class ContextualEntrypointButtonElement extends
   accessor showSuggestionLabel: boolean = false;
   accessor inputState: InputState|null = null;
   accessor sharedTabs: TabInfo[] = [];
+  accessor restoredTabs: TabInfo[] = [];
   accessor glifAnimationState: GlifAnimationState =
       GlifAnimationState.INELIGIBLE;
   accessor uploadButtonDisabled: boolean = false;
   accessor hasPopupFocus: boolean = false;
   accessor applyContextButtonBackground: boolean = false;
   accessor isOblongShape: boolean = false;
+  accessor energyEffectAnimationEnabled: boolean = false;
+  accessor disableFallbackGlifAnimation: boolean = false;
+  accessor smartTabSharingActive: boolean = false;
   protected accessor windowWidthBelowThreshold_: boolean = false;
+  protected accessor isLensSearchbox_: boolean =
+      loadTimeData.valueExists('isLensSearchbox') &&
+      loadTimeData.getBoolean('isLensSearchbox');
   protected accessor tabFaviconChipsToCoinsEnabled_: boolean =
       loadTimeData.getBoolean('tabFaviconChipsToCoinsEnabled');
   private showContextMenuDescriptionEnabled_: boolean =
       loadTimeData.getBoolean('composeboxShowContextMenuDescription');
   private metricsSource_: string = loadTimeData.getString('composeboxSource');
   private eventTracker_: EventTracker = new EventTracker();
+  private hasRecordedShown_: boolean = false;
+  private hasRecordedHover_: boolean = false;
 
   constructor() {
     super();
+  }
+
+  // Return reversed lists of restored (historical) and
+  // shared tabs (selected tabs).
+  protected getTabs_(): TabInfo[] {
+    if (this.smartTabSharingActive) {
+      return [];
+    }
+    const reversedShared = [...this.sharedTabs].reverse();
+    const reversedRestored = [...(this.restoredTabs || [])].reverse();
+    return reversedShared.concat(reversedRestored);
   }
 
   override connectedCallback() {
@@ -90,6 +118,11 @@ export class ContextualEntrypointButtonElement extends
         (e: MediaQueryListEvent) => {
           this.windowWidthBelowThreshold_ = e.matches;
         });
+    if (!this.hasRecordedShown_) {
+      recordUserAction(
+          'ContextualSearch.AddTabsButton.Shown.' + this.metricsSource_);
+      this.hasRecordedShown_ = true;
+    }
   }
 
   override disconnectedCallback() {
@@ -112,6 +145,9 @@ export class ContextualEntrypointButtonElement extends
   protected onEntrypointClick_(e: Event) {
     e.stopPropagation();
 
+    recordUserAction(
+        'ContextualSearch.AddTabsButton.Clicked.' + this.metricsSource_);
+
     const metricName =
         'ContextualSearch.ContextMenuEntry.Clicked.' + this.metricsSource_;
     recordBoolean(metricName, true);
@@ -122,6 +158,19 @@ export class ContextualEntrypointButtonElement extends
       x: entrypoint.getBoundingClientRect().left,
       y: entrypoint.getBoundingClientRect().bottom,
     });
+  }
+
+  protected onEntrypointPointerenter_() {
+    if (!this.hasRecordedHover_) {
+      recordUserAction(
+          'ContextualSearch.AddTabsButton.Hovered.' + this.metricsSource_);
+      this.hasRecordedHover_ = true;
+    }
+    this.fire('context-menu-entrypoint-hover');
+  }
+
+  protected onIconAnimationend_(e: AnimationEvent) {
+    this.onAnimationEnd_(e, 'icon-rotate');
   }
 
   protected onDescriptionAnimationend_(e: AnimationEvent) {

@@ -2,8 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/chromeos/ui_mode.gni")
-
 assert(is_chromeos)
 
 static_library("projector_app") {
@@ -24,6 +22,7 @@ static_library("projector_app") {
     "//base",
     "//chrome/browser:browser_process",
     "//chrome/browser/profiles:profile",
+    "//chrome/browser/signin",
     "//chrome/browser/ui/ash/projector",
     "//chrome/common",
     "//chromeos/ash/components/channel",

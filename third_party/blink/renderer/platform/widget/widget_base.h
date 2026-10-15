@@ -11,6 +11,7 @@
 #include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "cc/animation/animation_timeline.h"
+#include "cc/metrics/begin_main_frame_metrics.h"
 #include "cc/mojo_embedder/async_layer_tree_frame_sink.h"
 #include "cc/paint/element_id.h"
 #include "cc/trees/browser_controls_params.h"
@@ -185,10 +186,8 @@ class PLATFORM_EXPORT WidgetBase : public mojom::blink::Widget,
       const cc::CompositorCommitData& commit_data) override;
   void BeginMainFrame(const viz::BeginFrameArgs& args) override;
   void OnDeferMainFrameUpdatesChanged(bool) override;
-  void OnDeferCommitsChanged(
-      bool defer_status,
-      cc::PaintHoldingReason reason,
-      std::optional<cc::PaintHoldingCommitTrigger> trigger) override;
+  void OnDeferCommitsChanged(bool defer_status,
+                             cc::PaintHoldingReason reason) override;
   void OnCommitRequested() override;
   void DidBeginMainFrame() override;
   void RequestNewLayerTreeFrameSink(
@@ -260,8 +259,14 @@ class PLATFORM_EXPORT WidgetBase : public mojom::blink::Widget,
 
   // Posts a task with the given delay, then calls ScheduleAnimation() on the
   // WidgetBaseClient.
-  void RequestAnimationAfterDelay(const base::TimeDelta& delay,
+  void RequestAnimationAfterDelay(cc::BeginMainFrameReason,
+                                  const base::TimeDelta& delay,
                                   bool urgent = false);
+
+  void RequestAnimationAfterDelay(const base::TimeDelta& delay,
+                                  bool urgent = false) {
+    RequestAnimationAfterDelay(cc::BeginMainFrameReason::kOther, delay, urgent);
+  }
 
   void ShowVirtualKeyboard();
   void UpdateSelectionBounds();
@@ -418,10 +423,6 @@ class PLATFORM_EXPORT WidgetBase : public mojom::blink::Widget,
 
   // Helper to get the non-emulated device scale factor.
   float GetOriginalDeviceScaleFactor() const;
-
-  // Indicates a change in scheduling needs that should be forwarded to viz.
-  void RequestEfficientScheduling(
-      bool prefer_efficient_scheduling) const override;
 
  private:
   static void AssertAreCompatible(const WidgetBase& a, const WidgetBase& b);

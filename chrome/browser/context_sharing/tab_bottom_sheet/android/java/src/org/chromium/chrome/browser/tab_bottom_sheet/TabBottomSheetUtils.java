@@ -4,7 +4,13 @@
 
 package org.chromium.chrome.browser.tab_bottom_sheet;
 
+import android.app.Activity;
+
+import androidx.annotation.VisibleForTesting;
+
+import org.chromium.base.ActivityState;
 import org.chromium.base.UnownedUserDataKey;
+import org.chromium.build.annotations.Contract;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
@@ -25,7 +31,8 @@ public final class TabBottomSheetUtils {
     }
 
     public static boolean canResizeWebView() {
-        return ChromeFeatureList.sTabBottomSheetResizeWebview.getValue();
+        return isTabBottomSheetEnabled()
+                && ChromeFeatureList.sTabBottomSheetResizeWebview.isEnabled();
     }
 
     /**
@@ -35,7 +42,9 @@ public final class TabBottomSheetUtils {
      * @param windowAndroid The {@link WindowAndroid} to attach to.
      * @param manager The {@link TabBottomSheetManager} to attach.
      */
-    static void attachManagerToWindow(WindowAndroid windowAndroid, TabBottomSheetManager manager) {
+    @VisibleForTesting(otherwise = VisibleForTesting.PACKAGE_PRIVATE)
+    public static void attachManagerToWindow(
+            WindowAndroid windowAndroid, TabBottomSheetManager manager) {
         MANAGER_KEY.attachToHost(windowAndroid.getUnownedUserDataHost(), manager);
     }
 
@@ -44,7 +53,8 @@ public final class TabBottomSheetUtils {
      *
      * @param windowAndroid The {@link WindowAndroid} to detach from.
      */
-    static void detachManagerFromWindow(WindowAndroid windowAndroid) {
+    @VisibleForTesting(otherwise = VisibleForTesting.PACKAGE_PRIVATE)
+    public static void detachManagerFromWindow(WindowAndroid windowAndroid) {
         MANAGER_KEY.detachFromHost(windowAndroid.getUnownedUserDataHost());
     }
 
@@ -90,5 +100,29 @@ public final class TabBottomSheetUtils {
      */
     static @Nullable CoBrowseViewFactory getFactoryFromWindow(WindowAndroid windowAndroid) {
         return FACTORY_KEY.retrieveDataFromHost(windowAndroid.getUnownedUserDataHost());
+    }
+
+    /**
+     * Returns whether the Activity associated with the given WindowAndroid is finishing or
+     * destroyed. Also returns true if the WindowAndroid or the Activity is null.
+     */
+    @Contract("null -> true")
+    public static boolean isActivityFinishingOrDestroyed(@Nullable WindowAndroid windowAndroid) {
+        if (windowAndroid == null) return true;
+        Activity activity = windowAndroid.getActivity().get();
+        return activity == null || activity.isDestroyed() || activity.isFinishing();
+    }
+
+    /**
+     * Returns whether the Activity associated with the given WindowAndroid is in an inactive state
+     * (PAUSED, STOPPED, or DESTROYED). Also returns true if the WindowAndroid is null.
+     */
+    @Contract("null -> true")
+    public static boolean isActivityInactive(@Nullable WindowAndroid windowAndroid) {
+        if (windowAndroid == null) return true;
+        @ActivityState int activityState = windowAndroid.getActivityState();
+        return activityState == ActivityState.PAUSED
+                || activityState == ActivityState.STOPPED
+                || activityState == ActivityState.DESTROYED;
     }
 }

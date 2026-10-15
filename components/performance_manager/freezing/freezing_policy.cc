@@ -564,6 +564,7 @@ void FreezingPolicy::OnTakenFromGraph(Graph* graph) {
 }
 
 void FreezingPolicy::OnPageNodeAdded(const PageNode* page_node) {
+  CHECK_EQ(page_node->GetType(), PageType::kUnknown);
   auto& page_freezing_state = GetFreezingState(page_node);
 
   PageLiveStateDecorator::Data::GetOrCreateForPageNode(page_node)->AddObserver(
@@ -625,6 +626,13 @@ void FreezingPolicy::OnBeforePageNodeRemoved(const PageNode* page_node) {
 void FreezingPolicy::OnTypeChanged(const PageNode* page_node,
                                    PageType previous_type) {
   CHECK_EQ(previous_type, PageType::kUnknown, base::NotFatalUntil::M140);
+  if (page_node->GetType() == PageType::kNonTabWebUI) {
+    // This Page is marked as a Non Tab WebUI, opt it out of freezing.
+    OnCannotFreezeReasonChange(page_node, /*add=*/true,
+                               CannotFreezeReason::kNonTabWebUI);
+    return;
+  }
+
   if (page_node->GetType() != PageType::kTab) {
     return;
   }
@@ -1181,7 +1189,7 @@ void FreezingPolicy::UpdateFrozenStateOnCPUMeasurement(
 }
 
 void FreezingPolicy::OnOptOutPolicyChanged(
-    std::string_view browser_context_id) {
+    const base::UnguessableToken& browser_context_id) {
   CHECK(opt_out_checker_);
   // Check all pages  with the given `browser_context_id` to see if they're
   // opted out of freezing by the new policy.
@@ -1264,7 +1272,7 @@ void FreezingPolicy::RecordFreezingEligibilityUKM() {
   // will start subsampling those UKM events. Thus, it's better to subsample the
   // event emission code itself to increase the proportion of emitted events
   // that are actually recorded.
-  if (!metrics_subsampler_.ShouldSample(0.01)) {
+  if (!base::ShouldRecordSubsampledMetric(0.01)) {
     return;
   }
 

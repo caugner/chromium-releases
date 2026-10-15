@@ -116,7 +116,7 @@ class PLATFORM_EXPORT WidgetInputHandlerManager final
                         std::unique_ptr<cc::EventMetrics> metrics,
                         HandledEventCallback handled_callback) override;
   void InputEventsDispatched(bool raf_aligned) override;
-  void SetNeedsMainFrame(bool urgent) override;
+  void SetNeedsMainFrame(cc::BeginMainFrameReason reason, bool urgent) override;
   bool RequestedMainFramePending() override;
 
   void OnFirstContentfulPaint();
@@ -141,7 +141,8 @@ class PLATFORM_EXPORT WidgetInputHandlerManager final
 
   void ProcessTouchAction(cc::TouchAction touch_action);
 
-  mojom::blink::WidgetInputHandlerHost* GetWidgetInputHandlerHost();
+  mojo::SharedRemote<mojom::blink::WidgetInputHandlerHost>
+  GetWidgetInputHandlerHost();
   mojo::SharedRemote<mojom::blink::WidgetInputHandlerHost>
   GetVizWidgetInputHandlerHost();
 
@@ -336,7 +337,9 @@ class PLATFORM_EXPORT WidgetInputHandlerManager final
 
   // The WidgetInputHandlerHost is bound on the compositor task runner
   // but class can be called on the compositor and main thread.
-  mojo::SharedRemote<mojom::blink::WidgetInputHandlerHost> host_;
+  base::Lock host_lock_;
+  mojo::SharedRemote<mojom::blink::WidgetInputHandlerHost> host_
+      GUARDED_BY(host_lock_);
   base::Lock viz_host_lock_;
   mojo::SharedRemote<mojom::blink::WidgetInputHandlerHost> viz_host_
       GUARDED_BY(viz_host_lock_);

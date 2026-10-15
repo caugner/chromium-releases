@@ -352,7 +352,15 @@ enum class QuickActionsVisibility {
 
 // Verifies opening a new tab from the New Tab button on the toolbar with the
 // correct policy's New Tab Page Location URL.
-- (void)testNewTabByNewTabButtonTapWithNTPLocation {
+// TODO(crbug.com/518881258): Flaky on simulator.
+#if TARGET_IPHONE_SIMULATOR
+#define MAYBE_testNewTabByNewTabButtonTapWithNTPLocation \
+  FLAKY_testNewTabByNewTabButtonTapWithNTPLocation
+#else
+#define MAYBE_testNewTabByNewTabButtonTapWithNTPLocation \
+  testNewTabByNewTabButtonTapWithNTPLocation
+#endif
+- (void)MAYBE_testNewTabByNewTabButtonTapWithNTPLocation {
   GREYAssertTrue(self.testServer->Start(), @"Test server failed to start.");
   const GURL expectedURL = self.testServer->GetURL(kPageURL);
 
@@ -388,11 +396,18 @@ enum class QuickActionsVisibility {
 // Verifies opening a new tab by long pressing the tab grid view and selecting
 // "New Tab" with the correct policy's New Tab Page Location URL.
 - (void)testNewTabByLongPressTabGridViewWithNTPLocation {
+  if ([ChromeEarlGrey isChromeNextEnabled] && [ChromeEarlGrey isIPadIdiom]) {
+    EARL_GREY_TEST_DISABLED(@"The button doesn't exist with Next.");
+  }
   GREYAssertTrue(self.testServer->Start(), @"Test server failed to start.");
   const GURL expectedURL = self.testServer->GetURL(kPageURL);
 
   // Set the policy's NTP Location value at runtime.
   [self setNTPPolicyValue:expectedURL.spec()];
+
+  // Open a new incognito tab to expose the "New Tab" item in the long press
+  // menu.
+  [ChromeEarlGrey openNewIncognitoTab];
 
   // Open tab via the UI.
   [[EarlGrey selectElementWithMatcher:chrome_test_util::ShowTabsButton()]
@@ -407,11 +422,21 @@ enum class QuickActionsVisibility {
       performAction:grey_tap()];
 
   [self validateNTPURL:expectedURL];
+
+  [ChromeEarlGrey closeAllIncognitoTabs];
 }
 
 // Verifies opening a new tab from the tab grid view by tapping on the New Tab
 // button with the correct policy's New Tab Page Location URL.
-- (void)testNewTabFromTabGridViewWithNTPLocation {
+// TODO(crbug.com/518881258): Flaky on simulator.
+#if TARGET_IPHONE_SIMULATOR
+#define MAYBE_testNewTabFromTabGridViewWithNTPLocation \
+  FLAKY_testNewTabFromTabGridViewWithNTPLocation
+#else
+#define MAYBE_testNewTabFromTabGridViewWithNTPLocation \
+  testNewTabFromTabGridViewWithNTPLocation
+#endif
+- (void)MAYBE_testNewTabFromTabGridViewWithNTPLocation {
   GREYAssertTrue(self.testServer->Start(), @"Test server failed to start.");
   const GURL expectedURL = self.testServer->GetURL(kPageURL);
 

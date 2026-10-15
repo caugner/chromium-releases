@@ -18,6 +18,7 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/containers/span.h"
+#include "base/containers/span_reader.h"
 #include "base/debug/crash_logging.h"
 #include "base/files/file.h"
 #include "base/files/file_util.h"
@@ -728,6 +729,7 @@ bool ResourceBundle::HasDataResource(int resource_id) const {
   if (delegate_ && delegate_->HasDataResource(resource_id)) {
     return true;
   }
+  base::AutoLock lock_scope(*resource_handles_lock_);
   for (const auto& resource_handle : resource_handles_) {
     if (resource_handle->HasResource(static_cast<uint16_t>(resource_id))) {
       return true;
@@ -790,6 +792,8 @@ std::string_view ResourceBundle::GetRawDataResourceForScale(
       return data;
     }
   }
+
+  base::AutoLock lock_scope(*resource_handles_lock_);
 
   if (scale_factor != ui::k100Percent) {
     for (const auto& resource_handle : resource_handles_) {
@@ -1012,6 +1016,7 @@ void ResourceBundle::CheckCanOverrideStringResources() {
 ResourceBundle::ResourceBundle(Delegate* delegate)
     : delegate_(delegate),
       locale_resources_data_lock_(new base::Lock),
+      resource_handles_lock_(new base::Lock),
       max_scale_factor_(k100Percent) {
   mangle_localized_strings_ = base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kMangleLocalizedStrings);
@@ -1103,6 +1108,7 @@ void ResourceBundle::AddDataPackFromPathInternal(
 
 void ResourceBundle::AddResourceHandle(
     std::unique_ptr<ResourceHandle> resource_handle) {
+  base::AutoLock lock_scope(*resource_handles_lock_);
 #if DCHECK_IS_ON()
   resource_handle->CheckForDuplicateResources(resource_handles_);
 #endif
@@ -1136,7 +1142,13 @@ void ResourceBundle::InitDefaultFontList() {
 }
 
 gfx::ImageSkia ResourceBundle::CreateImageSkia(int resource_id) {
-  DCHECK(!resource_handles_.empty()) << "Missing call to SetResourcesDataDLL?";
+#if DCHECK_IS_ON()
+  {
+    base::AutoLock lock_scope(*resource_handles_lock_);
+    DCHECK(!resource_handles_.empty())
+        << "Missing call to SetResourcesDataDLL?";
+  }
+#endif
 
   std::optional<LottieData> data = GetLottieData(resource_id);
   if (data) {
@@ -1195,6 +1207,7 @@ bool ResourceBundle::LoadBitmap(int resource_id,
                                 SkBitmap* bitmap,
                                 bool* fell_back_to_1x) const {
   DCHECK(fell_back_to_1x);
+  base::AutoLock lock_scope(*resource_handles_lock_);
   for (const auto& pack : resource_handles_) {
     if (pack->GetResourceScaleFactor() == ui::kScaleFactorNone &&
         LoadBitmap(*pack, resource_id, bitmap, fell_back_to_1x)) {
@@ -1296,9 +1309,9 @@ std::u16string ResourceBundle::GetLocalizedStringImpl(int resource_id) const {
   // Data pack encodes strings as either UTF8 or UTF16.
   std::u16string msg;
   if (encoding == ResourceHandle::UTF16) {
-    CHECK_EQ(data->size() % sizeof(std::u16string::value_type), 0u);
-    msg.resize(data->size() / sizeof(std::u16string::value_type));
-    base::as_writable_byte_span(msg).copy_from(base::as_byte_span(*data));
+    auto utf16_span = base::subtle::reinterpret_span<const char16_t>(
+        base::as_byte_span(*data));
+    msg.assign(utf16_span.begin(), utf16_span.end());
   } else if (encoding == ResourceHandle::UTF8) {
     // Best-effort conversion.
     base::UTF8ToUTF16(data->data(), data->size(), &msg);
@@ -1308,37 +1321,33 @@ std::u16string ResourceBundle::GetLocalizedStringImpl(int resource_id) const {
 
 // static
 bool ResourceBundle::PNGContainsFallbackMarker(base::span<const uint8_t> buf) {
-  if (buf.size() < std::size(kPngMagic) ||
-      buf.first(std::size(kPngMagic)) != kPngMagic) {
+  base::SpanReader reader(buf);
+
+  auto magic = reader.Read(std::size(kPngMagic));
+  if (!magic || *magic != kPngMagic) {
     return false;  // Data invalid or a JPEG.
   }
-  buf = buf.subspan(std::size(kPngMagic));
 
   // Scan for custom chunks until we find one, find the IDAT chunk, or run out
   // of chunks.
-  for (;;) {
-    if (buf.size() < kPngChunkMetadataSize) {
-      break;
+  while (reader.remaining() >= kPngChunkMetadataSize) {
+    uint32_t length = *reader.ReadU32BigEndian();
+    auto type = *reader.Read(4u);
+
+    if (length == 0u && type == kPngScaleChunkType) {
+      return true;
     }
-    uint32_t length = base::U32FromBigEndian(buf.first<4u>());
-    if (buf.size() - kPngChunkMetadataSize < length) {
-      break;
-    }
-    if (length == 0u) {
-      auto scale_chunk =
-          buf.subspan(sizeof(uint32_t), std::size(kPngScaleChunkType));
-      if (scale_chunk == kPngScaleChunkType) {
-        return true;
-      }
-    }
-    auto data_chunk =
-        buf.subspan(sizeof(uint32_t), std::size(kPngDataChunkType));
-    if (data_chunk == kPngDataChunkType) {
+
+    if (type == kPngDataChunkType) {
       // Stop looking for custom chunks, any custom chunks should be before an
       // IDAT chunk.
       break;
     }
-    buf = buf.subspan(length + kPngChunkMetadataSize);
+
+    // Skip data and CRC.
+    if (!reader.Skip(length + 4u)) {
+      break;
+    }
   }
   return false;
 }

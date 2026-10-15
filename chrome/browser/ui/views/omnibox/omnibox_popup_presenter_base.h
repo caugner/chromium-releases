@@ -93,6 +93,7 @@ class OmniboxPopupPresenterBase : public content::WebContentsObserver,
   // SearchboxHandler::Delegate:
   void OnEmbeddedPermissionDialogChanged(bool is_showing,
                                          const gfx::Size& prompt_size) override;
+  OmniboxController* GetOmniboxController() override;
 
   views::Widget* get_widget_for_testing() { return widget_.get(); }
 
@@ -110,6 +111,8 @@ class OmniboxPopupPresenterBase : public content::WebContentsObserver,
       "Omnibox.Popup.WebUI";
   inline static constexpr std::string_view kAimPopupMetricPrefix =
       "Omnibox.Popup.Aim";
+  inline static constexpr std::string_view kFullWebUIPopupMetricPrefix =
+      "Omnibox.Popup.FullWebUI";
 
   // The container for the WebUI WebView.
   views::View* GetUIContainer() const;
@@ -125,6 +128,9 @@ class OmniboxPopupPresenterBase : public content::WebContentsObserver,
 
   // Returns whether or not the popup should include the location bar cutout.
   virtual bool ShouldShowLocationBarCutout() const;
+
+  // Returns whether or not the popup should trust the content height directly.
+  virtual bool ShouldUseWebContentHeight() const;
 
   // Returns whether the WebUI content view receive focus.
   virtual bool ShouldReceiveFocus() const;

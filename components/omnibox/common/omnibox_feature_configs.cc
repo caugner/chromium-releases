@@ -4,9 +4,12 @@
 
 #include "omnibox_feature_configs.h"
 
+#include <vector>
+
 #include "base/check.h"
 #include "base/feature_list.h"
 #include "base/metrics/field_trial_params.h"
+#include "base/strings/string_split.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/omnibox/common/omnibox_features.h"
@@ -85,7 +88,7 @@ AiModeOmniboxEntryPoint::AiModeOmniboxEntryPoint() {
 
   hide_aim_hint_text_on_ntp_open =
       base::FeatureParam<bool>(&omnibox::kAiModeOmniboxEntryPoint,
-                              "HideAimHintTextOnNtpOpen", true)
+                               "HideAimHintTextOnNtpOpen", false)
           .Get();
 
   hide_other_page_actions_on_ntp =
@@ -95,17 +98,17 @@ AiModeOmniboxEntryPoint::AiModeOmniboxEntryPoint() {
 
   aim_hint_impression_limit_daily =
       base::FeatureParam<int>(&omnibox::kAiModeOmniboxEntryPoint,
-                              "AimHintImpressionLimitDaily", 1)
+                              "AimHintImpressionLimitDaily", 3)
           .Get();
 
   aim_hint_impression_limit_total =
       base::FeatureParam<int>(&omnibox::kAiModeOmniboxEntryPoint,
-                              "AimHintImpressionLimitTotal", 5)
+                              "AimHintImpressionLimitTotal", 15)
           .Get();
 
   enable_hint_impression_limits =
       base::FeatureParam<bool>(&omnibox::kAiModeOmniboxEntryPoint,
-                               "EnableHintImpressionLimits", false)
+                               "EnableHintImpressionLimits", true)
           .Get();
 }
 
@@ -783,9 +786,7 @@ ComposeboxSuggestionLimit::ComposeboxSuggestionLimit() {
 
 // Feature to enable embedded permission prompts (user-pull model) to be used in
 // cobrowsing (full window and side panel), new tab page, and omnibox.
-BASE_FEATURE(kEmbeddedPermissionEnabled,
-             "EmbeddedPermissionEnabled",
-             base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kEmbeddedPermissionEnabled, base::FEATURE_DISABLED_BY_DEFAULT);
 
 ComposeboxSuggestionLimit::ComposeboxSuggestionLimit(
     const ComposeboxSuggestionLimit&) = default;
@@ -798,5 +799,48 @@ ComposeboxSuggestionLimit&
 ComposeboxSuggestionLimit::ComposeboxSuggestionLimit::operator=(
     ComposeboxSuggestionLimit&&) = default;
 ComposeboxSuggestionLimit::~ComposeboxSuggestionLimit() = default;
+
+// Feature to enable the short suggest path.
+BASE_FEATURE(SuggestPathClientConfig::kUseShortSuggestPathV1,
+             "OmniboxUseShortSuggestPathV1",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE_PARAM(std::string,
+                   kSuggestPathClient,
+                   &SuggestPathClientConfig::kUseShortSuggestPathV1,
+                   "OmniboxSuggestPathClient",
+                   "");
+
+SuggestPathClientConfig::SuggestPathClientConfig() {
+  enabled = base::FeatureList::IsEnabled(kUseShortSuggestPathV1);
+  const std::string param_value = kSuggestPathClient.Get();
+
+  if (param_value.empty()) {
+    enable_for_all = true;
+  } else {
+    enable_for_all = false;
+    std::vector<std::string> client_list = base::SplitString(
+        param_value, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
+    allowed_clients.insert(client_list.begin(), client_list.end());
+  }
+}
+
+bool SuggestPathClientConfig::ShouldUseShortPath(
+    const std::string& client_name) const {
+  if (!enabled) {
+    return false;
+  }
+
+  return enable_for_all || allowed_clients.contains(client_name);
+}
+
+SuggestPathClientConfig::SuggestPathClientConfig(
+    const SuggestPathClientConfig&) = default;
+SuggestPathClientConfig::SuggestPathClientConfig(SuggestPathClientConfig&&) =
+    default;
+SuggestPathClientConfig& SuggestPathClientConfig::operator=(
+    const SuggestPathClientConfig&) = default;
+SuggestPathClientConfig& SuggestPathClientConfig::operator=(
+    SuggestPathClientConfig&&) = default;
+SuggestPathClientConfig::~SuggestPathClientConfig() = default;
 
 }  // namespace omnibox_feature_configs

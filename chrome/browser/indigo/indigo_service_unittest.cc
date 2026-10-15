@@ -5,13 +5,17 @@
 #include "chrome/browser/indigo/indigo_service.h"
 
 #include "base/command_line.h"
+#include "base/files/file_util.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/test/mock_callback.h"
 #include "base/test/scoped_command_line.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "base/test/test_future.h"
 #include "chrome/browser/component_updater/indigo_component_installer.h"
+#include "chrome/browser/glic/public/glic_enabling.h"
 #include "chrome/browser/indigo/indigo_prefs.h"
+#include "chrome/browser/indigo/proto/indigo_prompts.pb.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/prefs/pref_registry_simple.h"
@@ -150,6 +154,58 @@ TEST_F(IndigoServiceTest, CapabilitiesDisable) {
   EXPECT_TRUE(LocalEligibilityBecomes(LocalEligibility::kMissingCapabilities));
 }
 
+TEST_F(IndigoServiceTest, RefreshTokenError) {
+  CreateService();
+  MakeAccountAvailableAndCapable();
+  EXPECT_TRUE(LocalEligibilityBecomes(LocalEligibility::kEligible));
+
+  identity_test_env_.SetInvalidRefreshTokenForPrimaryAccount();
+  EXPECT_TRUE(LocalEligibilityBecomes(
+      LocalEligibility::kRefreshTokenInPersistentErrorState));
+  EXPECT_TRUE(service_->IsLocallyEligible());
+}
+
+TEST_F(IndigoServiceTest, RefreshTokenErrorResolved) {
+  CreateService();
+  MakeAccountAvailableAndCapable();
+  EXPECT_TRUE(LocalEligibilityBecomes(LocalEligibility::kEligible));
+
+  identity_test_env_.SetInvalidRefreshTokenForPrimaryAccount();
+  EXPECT_TRUE(LocalEligibilityBecomes(
+      LocalEligibility::kRefreshTokenInPersistentErrorState));
+
+  identity_test_env_.SetRefreshTokenForPrimaryAccount();
+  EXPECT_TRUE(LocalEligibilityBecomes(LocalEligibility::kEligible));
+}
+
+TEST_F(IndigoServiceTest, GlicRequirementEnabledAndDisabled) {
+  scoped_feature_list_.Reset();
+  scoped_feature_list_.InitAndEnableFeatureWithParameters(
+      features::kIndigo, {{features::kIndigoRequireGlicEnabling.name, "true"}});
+
+  CreateService();
+  MakeAccountAvailableAndCapable();
+
+  // Initially Glic is not enabled for the profile, so local eligibility becomes
+  // kGlicDisabledForProfile.
+  glic::GlicEnabling::SetBypassEnablementChecksForTesting(false);
+  EXPECT_TRUE(
+      LocalEligibilityBecomes(LocalEligibility::kGlicDisabledForProfile));
+
+  // Once Glic is enabled (bypassing enablement checks), local eligibility
+  // becomes kEligible.
+  glic::GlicEnabling::SetBypassEnablementChecksForTesting(true);
+  {
+    CoreAccountId account_id =
+        identity_test_env_.identity_manager()->GetPrimaryAccountId(
+            signin::ConsentLevel::kSignin);
+    AccountInfo info = identity_test_env_.identity_manager()
+                           ->FindExtendedAccountInfoByAccountId(account_id);
+    service_->OnExtendedAccountInfoUpdated(info);
+  }
+  EXPECT_TRUE(LocalEligibilityBecomes(LocalEligibility::kEligible));
+}
+
 TEST_F(IndigoServiceTest, PolicyDisabledFromConstruction) {
   SetPolicySettings(prefs::Policy::kDisallowed);
   CreateService();
@@ -164,6 +220,38 @@ TEST_F(IndigoServiceTest, PolicyChangeTriggersUpdate) {
 
   SetPolicySettings(prefs::Policy::kDisallowed);
   EXPECT_TRUE(LocalEligibilityBecomes(LocalEligibility::kDisabledByPolicy));
+}
+
+TEST_F(IndigoServiceTest, ManagedDomain) {
+  CreateService();
+
+  AccountInfo info = identity_test_env_.MakePrimaryAccountAvailable(
+      "test@example.com", signin::ConsentLevel::kSignin);
+  AccountCapabilitiesTestMutator mutator(&info.capabilities);
+  mutator.set_can_use_model_execution_features(true);
+
+  AccountInfo::Builder builder(info);
+  builder.SetHostedDomain("example.com");
+  AccountInfo updated_info = builder.Build();
+  identity_test_env_.UpdateAccountInfoForAccount(updated_info);
+
+  EXPECT_TRUE(LocalEligibilityBecomes(LocalEligibility::kManagedDomain));
+}
+
+TEST_F(IndigoServiceTest, GoogleInternalAccountNotManaged) {
+  CreateService();
+
+  AccountInfo info = identity_test_env_.MakePrimaryAccountAvailable(
+      "test@google.com", signin::ConsentLevel::kSignin);
+  AccountCapabilitiesTestMutator mutator(&info.capabilities);
+  mutator.set_can_use_model_execution_features(true);
+
+  AccountInfo::Builder builder(info);
+  builder.SetHostedDomain("google.com");
+  AccountInfo updated_info = builder.Build();
+  identity_test_env_.UpdateAccountInfoForAccount(updated_info);
+
+  EXPECT_TRUE(LocalEligibilityBecomes(LocalEligibility::kEligible));
 }
 
 TEST_F(IndigoServiceTest, AnchoredMessageTrigger) {
@@ -281,6 +369,85 @@ TEST_F(IndigoServiceNoScriptTest, DynamicComponentReady) {
   // It should transition to kNotSignedIn (since we are not signed in).
   EXPECT_EQ(future.Take(), LocalEligibility::kNotSignedIn);
   EXPECT_EQ(service_->GetLocalEligibility(), LocalEligibility::kNotSignedIn);
+}
+
+TEST_F(IndigoServiceTest, LoadPrompts) {
+  base::ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+
+  // Create a test proto.
+  chrome::aix::indigo::IndigoPrompts proto;
+  auto* prompt1 = proto.add_prompts();
+  prompt1->set_key("v5");
+  prompt1->set_prompt("Test prompt v5");
+  auto* prompt2 = proto.add_prompts();
+  prompt2->set_key("v6");
+  prompt2->set_prompt("Test prompt v6");
+
+  // Serialize to file.
+  base::FilePath prompts_path =
+      temp_dir.GetPath().Append(FILE_PATH_LITERAL("indigo_prompts.bin"));
+  std::string serialized;
+  ASSERT_TRUE(proto.SerializeToString(&serialized));
+  ASSERT_TRUE(base::WriteFile(prompts_path, serialized));
+
+  CreateService();
+
+  // Initially prompts should not be loaded.
+  EXPECT_EQ(service_->GetPrompt("v5"), std::nullopt);
+
+  base::test::TestFuture<void> prompts_loaded_future;
+  service_->SetPromptsLoadedCallbackForTesting(
+      prompts_loaded_future.GetCallback());
+
+  // Simulate component ready with the temp dir.
+  component_updater::IndigoComponentInstallerPolicy policy;
+  policy.ComponentReady(base::Version("1.0"), temp_dir.GetPath(),
+                        base::DictValue());
+
+  // Wait for the background task to load prompts.
+  EXPECT_TRUE(prompts_loaded_future.Wait());
+
+  // Verify prompts are loaded.
+  EXPECT_EQ(service_->GetPrompt("v5"), "Test prompt v5");
+  EXPECT_EQ(service_->GetPrompt("v6"), "Test prompt v6");
+  EXPECT_EQ(service_->GetPrompt("non_existent"), std::nullopt);
+}
+
+TEST_F(IndigoServiceTest, LoadPromptsComponentAlreadyReady) {
+  base::ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+
+  // Create a test proto.
+  chrome::aix::indigo::IndigoPrompts proto;
+  auto* prompt1 = proto.add_prompts();
+  prompt1->set_key("v5");
+  prompt1->set_prompt("Test prompt v5");
+
+  // Serialize to file.
+  base::FilePath prompts_path =
+      temp_dir.GetPath().Append(FILE_PATH_LITERAL("indigo_prompts.bin"));
+  std::string serialized;
+  ASSERT_TRUE(proto.SerializeToString(&serialized));
+  ASSERT_TRUE(base::WriteFile(prompts_path, serialized));
+
+  // Simulate component ready BEFORE service creation.
+  component_updater::IndigoComponentInstallerPolicy policy;
+  policy.ComponentReady(base::Version("1.0"), temp_dir.GetPath(),
+                        base::DictValue());
+
+  CreateService();
+
+  // Verify prompts are loaded. Since the component was already ready,
+  // the service should start loading them immediately.
+  if (service_->GetPrompt("v5") != "Test prompt v5") {
+    base::test::TestFuture<void> prompts_loaded_future;
+    service_->SetPromptsLoadedCallbackForTesting(
+        prompts_loaded_future.GetCallback());
+    EXPECT_TRUE(prompts_loaded_future.Wait());
+  }
+
+  EXPECT_EQ(service_->GetPrompt("v5"), "Test prompt v5");
 }
 
 }  // namespace indigo

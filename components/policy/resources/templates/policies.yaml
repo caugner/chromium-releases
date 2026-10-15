@@ -1455,6 +1455,8 @@ policies:
   1454: HttpHeaderInjection
   1455: ChromeSuggestionsSettings
   1456: RestrictBackgroundFetchFromServiceWorkerEnabled
+  1457: GeminiEnterpriseSettings
+  1458: RestrictYouTubeCookiesDeletion
 
 atomic_groups:
   1: Homepage
@@ -1520,3 +1522,4 @@ atomic_groups:
   61: LegacyCookieScopeSettings
   62: GeolocationSettings
   63: SocketPoolSizeSettings
+  64: SubAppsWithoutPromptsSettings

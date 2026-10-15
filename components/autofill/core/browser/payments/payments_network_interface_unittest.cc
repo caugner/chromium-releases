@@ -1779,7 +1779,7 @@ TEST_P(PaymentsNetworkInterfaceTestWithPaymentsRpcResultParam,
   request_details.type =
       GetDetailsForUpdateBnplPaymentInstrumentRequestDetails::
           GetDetailsForUpdateBnplPaymentInstrumentType::kGetDetailsForAcceptTos;
-  request_details.instrument_id = 111222333444;
+  request_details.instrument_id = "111222333444";
   std::string context_token = "some_token";
 
   payments_network_interface_->GetDetailsForUpdateBnplPaymentInstrument(
@@ -1892,7 +1892,7 @@ TEST_P(PaymentsNetworkInterfaceTestWithPaymentsRpcResultParam,
   request_details.billing_customer_number = 555666777888;
   request_details.context_token = "context_token";
   request_details.risk_data = "wjhJLg";
-  request_details.instrument_id = 111222333444;
+  request_details.instrument_id = "111222333444";
   request_details.issuer_id = "Affirm";
   request_details.type = UpdateBnplPaymentInstrumentRequestDetails::
       UpdateBnplPaymentInstrumentType::kAcceptTos;

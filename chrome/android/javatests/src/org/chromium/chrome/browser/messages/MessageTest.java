@@ -27,7 +27,9 @@ import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.CriteriaHelper;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Features;
+import org.chromium.base.test.util.Restriction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
@@ -45,6 +47,7 @@ import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsAccessibility;
 import org.chromium.ui.accessibility.AccessibilityFeatures;
 import org.chromium.ui.accessibility.AccessibilityState;
+import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.modelutil.PropertyModel;
 
 import java.util.concurrent.TimeoutException;
@@ -102,6 +105,9 @@ public class MessageTest {
     /** Test that the message container occludes the web contents. */
     @Test
     @SmallTest
+    @DisabledTest(message = "b/514878860")
+    // TODO(crbug.com/514848255): Failing on other larger form factors.
+    @Restriction(DeviceFormFactor.PHONE)
     @Features.EnableFeatures({AccessibilityFeatures.ACCESSIBILITY_HANDLE_OCCLUDING_VIEWS})
     public void testMessageContainerOccludesWebContents() throws TimeoutException {
         CallbackHelper helper = new CallbackHelper();

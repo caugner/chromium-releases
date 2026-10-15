@@ -6,22 +6,55 @@
 
 #include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/functional/bind.h"
 #include "base/task/sequenced_task_runner.h"
+#include "base/task/thread_pool.h"
 #include "chrome/browser/component_updater/indigo_component_installer.h"
 #include "chrome/browser/extensions/component_loader.h"
+#include "chrome/browser/glic/public/glic_enabling.h"
 #include "chrome/browser/indigo/api_client.h"
 #include "chrome/browser/indigo/indigo_extension_utils.h"
 #include "chrome/browser/indigo/indigo_prefs.h"
+#include "chrome/browser/indigo/proto/indigo_prompts.pb.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_features.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/prefs/pref_service.h"
+#include "components/signin/public/base/signin_metrics.h"
+#include "components/signin/public/identity_manager/account_info.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "content/public/browser/storage_partition.h"
+#include "google_apis/gaia/gaia_auth_util.h"
+#include "google_apis/gaia/google_service_auth_error.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 
 namespace indigo {
+
+namespace {
+
+base::flat_map<std::string, std::string> LoadPromptsFromDisk(
+    const base::FilePath& file_path) {
+  base::flat_map<std::string, std::string> prompts;
+  std::string binary_data;
+  if (!base::ReadFileToString(file_path, &binary_data)) {
+    VLOG(1) << "Failed to read prompts file: " << file_path;
+    return prompts;
+  }
+
+  chrome::aix::indigo::IndigoPrompts proto;
+  if (!proto.ParseFromString(binary_data)) {
+    VLOG(1) << "Failed to parse prompts proto";
+    return prompts;
+  }
+
+  for (const auto& prompt : proto.prompts()) {
+    prompts[prompt.key()] = prompt.prompt();
+  }
+  return prompts;
+}
+
+}  // namespace
 
 CombinedEligibility::CombinedEligibility() = default;
 CombinedEligibility::CombinedEligibility(const CombinedEligibility&) = default;
@@ -90,10 +123,15 @@ IndigoService::IndigoService(Profile* profile,
       indigo_extension_utils::GetManifest(),
       base::FilePath(FILE_PATH_LITERAL("indigo")));
 
-  indigo_component_ready_subscription_ =
-      component_updater::RegisterIndigoComponentReadyCallback(
-          base::BindRepeating(&IndigoService::OnIndigoComponentReady,
-                              base::Unretained(this)));
+  // If component was already installed skip registering ready callback.
+  if (component_updater::GetIndigoComponentInstallDir().has_value()) {
+    OnIndigoComponentReady();
+  } else {
+    indigo_component_ready_subscription_ =
+        component_updater::RegisterIndigoComponentReadyCallback(
+            base::BindRepeating(&IndigoService::OnIndigoComponentReady,
+                                base::Unretained(this)));
+  }
 }
 
 IndigoService::~IndigoService() = default;
@@ -113,6 +151,17 @@ void IndigoService::OnPrimaryAccountChanged(
 }
 
 void IndigoService::OnExtendedAccountInfoUpdated(const AccountInfo& info) {
+  UpdateLocalEligibilityAndNotify();
+}
+
+void IndigoService::OnErrorStateOfRefreshTokenUpdatedForAccount(
+    const CoreAccountInfo& account_info,
+    const GoogleServiceAuthError& error,
+    signin_metrics::SourceForRefreshTokenOperation token_operation_source) {
+  if (account_info.account_id !=
+      identity_manager_->GetPrimaryAccountId(signin::ConsentLevel::kSignin)) {
+    return;
+  }
   UpdateLocalEligibilityAndNotify();
 }
 
@@ -154,9 +203,24 @@ LocalEligibility IndigoService::ComputeLocalEligibility() const {
 
   AccountInfo info =
       identity_manager_->FindExtendedAccountInfoByAccountId(account_id);
+  if (info.IsManaged() == signin::Tribool::kTrue &&
+      !gaia::IsGoogleInternalAccountEmail(info.email)) {
+    return LocalEligibility::kManagedDomain;
+  }
+
   if (info.capabilities.can_use_model_execution_features() !=
       signin::Tribool::kTrue) {
     return LocalEligibility::kMissingCapabilities;
+  }
+
+  if (features::kIndigoRequireGlicEnabling.Get() &&
+      !glic::GlicEnabling::IsEnabledForProfile(profile_)) {
+    return LocalEligibility::kGlicDisabledForProfile;
+  }
+
+  if (identity_manager_->HasAccountWithRefreshTokenInPersistentErrorState(
+          account_id)) {
+    return LocalEligibility::kRefreshTokenInPersistentErrorState;
   }
 
   return LocalEligibility::kEligible;
@@ -172,6 +236,20 @@ void IndigoService::UpdateLocalEligibilityAndNotify() {
 
 void IndigoService::OnIndigoComponentReady() {
   UpdateLocalEligibilityAndNotify();
+
+  if (!prompts_loaded_) {
+    std::optional<base::FilePath> install_dir =
+        component_updater::GetIndigoComponentInstallDir();
+    if (install_dir.has_value()) {
+      base::FilePath prompts_path =
+          install_dir->Append(FILE_PATH_LITERAL("indigo_prompts.bin"));
+      base::ThreadPool::PostTaskAndReplyWithResult(
+          FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
+          base::BindOnce(&LoadPromptsFromDisk, prompts_path),
+          base::BindOnce(&IndigoService::OnPromptsLoaded,
+                         weak_ptr_factory_.GetWeakPtr()));
+    }
+  }
 }
 
 void IndigoService::GetCombinedEligibility(
@@ -247,6 +325,29 @@ void IndigoService::OnRemoteEligibilityReceived(
 void IndigoService::SetRemoteEligibilityFetcherForTesting(
     RemoteEligibilityFetcher fetcher) {
   remote_eligibility_fetcher_ = std::move(fetcher);
+}
+
+void IndigoService::SetPromptsLoadedCallbackForTesting(
+    base::OnceClosure callback) {
+  prompts_loaded_callback_for_testing_ = std::move(callback);
+}
+
+void IndigoService::OnPromptsLoaded(
+    base::flat_map<std::string, std::string> prompts) {
+  prompts_ = std::move(prompts);
+  prompts_loaded_ = true;
+  if (prompts_loaded_callback_for_testing_) {
+    std::move(prompts_loaded_callback_for_testing_).Run();
+  }
+}
+
+std::optional<std::string> IndigoService::GetPrompt(
+    const std::string& key) const {
+  auto it = prompts_.find(key);
+  if (it == prompts_.end()) {
+    return std::nullopt;
+  }
+  return it->second;
 }
 
 }  // namespace indigo

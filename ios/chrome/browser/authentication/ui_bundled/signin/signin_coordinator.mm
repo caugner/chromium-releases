@@ -5,16 +5,19 @@
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_coordinator.h"
 
 #import "base/apple/foundation_util.h"
+#import "base/feature_list.h"
 #import "base/notreached.h"
 #import "base/strings/sys_string_conversions.h"
 #import "components/pref_registry/pref_registry_syncable.h"
 #import "components/prefs/pref_service.h"
 #import "components/signin/public/base/signin_metrics.h"
+#import "components/signin/public/base/signin_switches.h"
 #import "ios/chrome/browser/authentication/add_account_signin/coordinator/add_account_signin_coordinator.h"
 #import "ios/chrome/browser/authentication/consistency_promo_signin/coordinator/consistency_promo_signin_coordinator.h"
 #import "ios/chrome/browser/authentication/trusted_vault_reauthentication/coordinator/trusted_vault_reauthentication_coordinator.h"
 #import "ios/chrome/browser/authentication/trusted_vault_reauthentication/coordinator/trusted_vault_reauthentication_coordinator_delegate.h"
 #import "ios/chrome/browser/authentication/two_screens_signin/coordinator/two_screens_signin_coordinator.h"
+#import "ios/chrome/browser/authentication/ui_bundled/signin/deeplink_signin/deeplink_signin_coordinator.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/history_sync/history_sync_signin_coordinator.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/instant_signin/instant_signin_coordinator.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/logging/first_run_signin_logger.h"
@@ -151,6 +154,18 @@ using signin_metrics::PromoAction;
                                            accessPoint:command.accessPoint
                                            promoAction:command.promoAction
                                           showSnackbar:command.showSnackbar];
+      break;
+    }
+    case AuthenticationOperation::kDeepLinkSignin: {
+      signinCoordinator = [SigninCoordinator
+          deeplinkSigninCoordinatorWithBaseViewController:baseViewController
+                                                  browser:browser
+                                     selectedAccountEmail:
+                                         command.targetAccountEmail
+                        changeProfileContinuationProvider:
+                            command.changeProfileContinuationProvider
+                                       externalEntryPoint:
+                                           command.externalEntryPoint];
       break;
     }
   }
@@ -351,6 +366,26 @@ using signin_metrics::PromoAction;
                     contextStyle:contextStyle
                      accessPoint:accessPoint
                     showSnackbar:showSnackbar];
+}
+
++ (SigninCoordinator*)
+    deeplinkSigninCoordinatorWithBaseViewController:
+        (UIViewController*)viewController
+                                            browser:(Browser*)browser
+                               selectedAccountEmail:
+                                   (NSString*)selectedAccountEmail
+                  changeProfileContinuationProvider:
+                      (const ChangeProfileContinuationProvider&)
+                          changeProfileContinuationProvider
+                                 externalEntryPoint:(signin::ExternalEntryPoint)
+                                                        externalEntryPoint {
+  CHECK(base::FeatureList::IsEnabled(switches::kCrossDeviceSignin));
+  return [[DeeplinkSigninCoordinator alloc]
+             initWithBaseViewController:viewController
+                                browser:browser
+                   selectedAccountEmail:selectedAccountEmail
+      changeProfileContinuationProvider:changeProfileContinuationProvider
+                     externalEntryPoint:externalEntryPoint];
 }
 
 #pragma mark - SigninCoordinator

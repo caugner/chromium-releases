@@ -48,6 +48,30 @@ enum class HttpsFirstModeSetting {
 //      /tools/metrics/histograms/metadata/security/enums.xml
 // )
 
+// Detailed HFM state at startup, distinguishing between different enablement
+// reasons. These values are persisted to logs. Entries should not be renumbered
+// and numeric values should never be reused. Must be kept in sync with
+// HttpsFirstModeStartupState in enums.xml.
+enum class HttpsFirstModeStartupState {
+  kDisabled = 0,
+  kEnabledFull = 1,
+  kEnabledBalancedExplicit = 2,
+  kEnabledBalancedTypicallySecure = 3,
+  kEnabledBalancedEsbPairing = 4,
+  kEnabledBalancedAutoEnable = 5,
+  kMaxValue = kEnabledBalancedAutoEnable,
+};
+
+// Events for implicit HFM setting changes (e.g. due to ESB pairing).
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+// Must be kept in sync with HttpsFirstModeImplicitStateChange in enums.xml.
+enum class HttpsFirstModeImplicitStateChange {
+  kBalancedEnabledByEsb = 0,
+  kBalancedDisabledByEsb = 1,
+  kMaxValue = kBalancedDisabledByEsb,
+};
+
 // A `KeyedService` that tracks changes to the HTTPS-First Mode pref for each
 // profile. This is currently used for:
 // - Recording pref state in metrics and registering the client for a synthetic
@@ -67,6 +91,10 @@ class HttpsFirstModeService : public KeyedService {
   // Runs Typically Secure User and Site Engagement heuristics after the service
   // is created.
   void AfterStartup();
+
+  // Migrates existing Enhanced bundle users to Balanced HFM and schedules the
+  // upgrade Toast if they haven't manually customized HFM.
+  void MigrateEnhancedBundleUsersAndMaybeShowToast();
 
   // Returns true if the Typically Secure Heuristic enabled HTTPS-First Mode
   // in this profile. Does not update the recorded fallback events list.
@@ -106,6 +134,10 @@ class HttpsFirstModeService : public KeyedService {
 
  private:
   void OnHttpsFirstModePrefChanged();
+  void OnSafeBrowsingEnhancedPrefChanged();
+  // Triggered when the Security Settings Bundle pref changes during the
+  // session.
+  void OnSecuritySettingsBundleChanged();
   // HTTPS-Upgrade fallback events are stored in a pref. This method extracts
   // the fallback events, deletes old events, adds a new event if
   // `add_new_entry` is true. Returns true if the heuristic indicates that

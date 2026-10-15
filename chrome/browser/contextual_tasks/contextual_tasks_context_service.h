@@ -58,36 +58,7 @@ namespace contextual_tasks {
 
 struct SiteExclusionDetail;
 class ContextualTasksContextModelHandler;
-
-// Represents a single turn in a thread.
-struct ThreadTurn {
-  ThreadTurn();
-  ThreadTurn(const ThreadTurn&);
-  ThreadTurn& operator=(const ThreadTurn&);
-  ~ThreadTurn();
-
-  // User query for this turn.
-  std::string query;
-};
-
-// Represents a conversation thread, including current and previous turns.
-struct ConversationThread {
-  ConversationThread();
-  ConversationThread(const ConversationThread&);
-  ConversationThread& operator=(const ConversationThread&);
-  ~ConversationThread();
-
-  // The query from the current turn.
-  std::string query;
-
-  // Previous turns in the thread, in chronological order (oldest first).
-  // The first element in this vector is the first turn in the thread.
-  std::vector<ThreadTurn> previous_turns;
-
-  // Titles of shared (attached as context) tabs, coming from context library.
-  // These are union of tabs shared across all previous turns.
-  std::vector<std::string> shared_tab_titles;
-};
+struct ConversationThread;
 
 enum class ContextDeterminationStatus {
   kSuccess = 0,
@@ -141,6 +112,9 @@ class ContextualTasksContextService
       const ContextualTasksContextService&) = delete;
   ~ContextualTasksContextService() override;
 
+  // Returns whether smart tab sharing is enabled for `profile`.
+  static bool GetIsSmartTabSharingEnabled(const Profile* profile);
+
   // Returns the relevant tabs for `query`. Will invoke `callback` when done.
   virtual void GetRelevantTabsForQuery(
       const TabSelectionOptions& options,
@@ -183,13 +157,16 @@ class ContextualTasksContextService
     passage_embeddings::Embedding query_embedding;
     int query_word_count = 0;
 
-    base::WeakPtr<content::WebContents> active_tab;
+    // Using this tab to contextualize the query e.g. this will be the active
+    // tab when the query comes from the side panel, or the most recent tab if
+    // the query comes from the AIM full tab or NTP.
+    base::WeakPtr<content::WebContents> context_tab;
     std::vector<page_content_annotations::PassageEmbedding>
-        active_tab_embeddings;
+        context_tab_passage_embeddings;
 
-    std::optional<passage_embeddings::Embedding> active_tab_title_embedding;
-    std::optional<float> active_tab_title_similarity;
-    std::vector<ScoredPassage> active_tab_passage_similarities;
+    std::optional<passage_embeddings::Embedding> context_tab_title_embedding;
+    std::optional<float> context_tab_title_similarity;
+    std::vector<ScoredPassage> context_tab_passage_similarities;
   };
 
   // EmbedderMetadataObserver:
@@ -205,6 +182,8 @@ class ContextualTasksContextService
       const std::string& query,
       const TabSelectionOptions& options,
       base::TimeTicks start_time,
+      std::optional<base::WeakPtr<content::WebContents>>
+          active_tab_at_query_time,
       const std::vector<GURL>& explicit_urls,
       int64_t request_id,
       std::vector<std::string> passages,
@@ -221,8 +200,7 @@ class ContextualTasksContextService
       const TabSelectionOptions& options,
       base::TimeTicks start_time,
       const std::vector<GURL>& explicit_urls,
-      base::OnceCallback<void(std::vector<base::WeakPtr<content::WebContents>>)>
-          callback,
+      int64_t request_id,
       std::unique_ptr<optimization_guide::ModelQualityLogEntry> log_entry,
       std::vector<base::WeakPtr<content::WebContents>> relevant_tabs);
 
@@ -242,7 +220,7 @@ class ContextualTasksContextService
   void OnAllTabsScored(
       const std::string& query,
       const TabSelectionOptions& options,
-      const std::vector<base::WeakPtr<content::WebContents>>& all_tabs,
+      const std::vector<base::WeakPtr<content::WebContents>>& all_eligible_tabs,
       const std::vector<GURL>& explicit_urls,
       base::OnceCallback<void(std::vector<base::WeakPtr<content::WebContents>>)>
           on_selection_complete,
@@ -256,10 +234,21 @@ class ContextualTasksContextService
   std::vector<base::WeakPtr<content::WebContents>> GetAllEligibleTabs(
       base::WeakPtr<BrowserWindowInterface> browser_window_interface);
 
+  // Returns the tab that should be used to contextualize the query.
+  content::WebContents* GetQueryContextualizingTab(
+      const std::vector<base::WeakPtr<content::WebContents>>& all_eligible_tabs,
+      std::optional<base::WeakPtr<content::WebContents>>
+          active_tab_at_query_time,
+      SiteExclusionDetail& site_exclusion_detail);
+
   // Creates the QueryState including active tab context.
   QueryState CreateQueryState(
       const std::string& query,
-      const passage_embeddings::Embedding& query_embedding);
+      const passage_embeddings::Embedding& query_embedding,
+      std::optional<base::WeakPtr<content::WebContents>>
+          active_tab_at_query_time,
+      const std::vector<base::WeakPtr<content::WebContents>>&
+          all_eligible_tabs);
 
   // Computes TabSignals for a candidate tab.
   TabSignals ComputeTabSignals(content::WebContents* web_contents,
@@ -271,7 +260,9 @@ class ContextualTasksContextService
       const std::string& query,
       const TabSelectionOptions& options,
       const passage_embeddings::Embedding& query_embedding,
-      const std::vector<base::WeakPtr<content::WebContents>>& all_tabs,
+      std::optional<base::WeakPtr<content::WebContents>>
+          active_tab_at_query_time,
+      const std::vector<base::WeakPtr<content::WebContents>>& all_eligible_tabs,
       const std::vector<GURL>& explicit_urls,
       base::OnceCallback<void(std::vector<base::WeakPtr<content::WebContents>>)>
           on_selection_complete,
@@ -285,15 +276,6 @@ class ContextualTasksContextService
 
   // Returns the WebContents of the currently active tab.
   content::WebContents* GetActiveTabWebContents();
-
-  // Returns the duration since the tab was last active.
-  std::optional<base::TimeDelta> GetDurationSinceLastActive(
-      content::WebContents* web_contents);
-
-  // Returns the time spent in the tab on its last visit. If the tab is still
-  // active, then it returns the time spent in the current visit.
-  std::optional<base::TimeDelta> GetDurationOfCurrentOrLastVisit(
-      content::WebContents* web_contents);
 
   // Returns whether the tab is valid i.e. it is not NTP, internal page, etc.
   // `site_exclusion_detail` is updated with results of site exclusion filtering
@@ -323,12 +305,12 @@ class ContextualTasksContextService
 
   struct PendingRequest {
     PendingRequest(
-        passage_embeddings::Embedder::TaskId task_id,
+        passage_embeddings::Embedder::Job job,
         base::OnceCallback<
             void(std::vector<base::WeakPtr<content::WebContents>>)> callback);
     ~PendingRequest();
 
-    passage_embeddings::Embedder::TaskId task_id;
+    passage_embeddings::Embedder::Job job;
     base::OnceCallback<void(std::vector<base::WeakPtr<content::WebContents>>)>
         callback;
   };

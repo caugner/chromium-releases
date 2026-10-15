@@ -9,6 +9,7 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/scoped_observation.h"
 #include "chrome/browser/digital_credentials/digital_identity_interstitial_closed_reason.h"
+#include "chrome/browser/ui/views/extensions/security_dialog_tracker.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/constrained_window/constrained_window_views.h"
 #include "components/url_formatter/elide_url.h"
@@ -160,7 +161,8 @@ void DigitalIdentitySafetyInterstitialControllerDesktop::ShowInterstitialImpl(
       .SetTitle(l10n_util::GetStringUTF16(
           IDS_WEB_DIGITAL_CREDENTIALS_INTERSTITIAL_DIALOG_TITLE))
       .AddParagraph(ui::DialogModelLabel(body_text))
-      .SetInitiallyFocusedField(kContinueButtonId);
+      .SetInitiallyFocusedField(kContinueButtonId)
+      .SetEnableInputProtection(true);
 
   if (was_request_aborted) {
     dialog_model_builder.AddParagraph(
@@ -170,6 +172,8 @@ void DigitalIdentitySafetyInterstitialControllerDesktop::ShowInterstitialImpl(
   }
   dialog_widget_ = constrained_window::ShowWebModal(
       dialog_model_builder.Build(), web_contents_.get());
+  extensions::SecurityDialogTracker::GetInstance()->AddSecurityDialog(
+      dialog_widget_);
 
   // ShowWebModal() can synchronously drop fullscreen mode. On macOS, this
   // can spin a nested run loop that processes a tab close, potentially

@@ -3101,36 +3101,6 @@
       ]
     },
     {
-      "id": 430,
-      "cr_bugs": [
-        341327464
-      ],
-      "description": "Block all Intel NPU drivers versions less than 4404 except those between 3159 and 4023 for WebNN",
-      "vendor_id": "0x8086",
-      "driver_version": {
-        "op": "<",
-        "value": "32.0.100.4404"
-      },
-      "os": {
-        "type": "win"
-      },
-      "multi_gpu_category": "npu",
-      "exceptions": [
-        {
-          "multi_gpu_category": "npu",
-          "vendor_id": "0x8086",
-          "driver_version": {
-            "op": "between",
-            "value": "32.0.100.3159",
-            "value2": "32.0.100.4023"
-          }
-        }
-      ],
-      "features": [
-        "disable_webnn_for_npu"
-      ]
-    },
-    {
       "id": 431,
       "cr_bugs": [
         1501767
@@ -3757,6 +3727,19 @@
       ]
     },
     {
+      "id": 475,
+      "description": "Disable accelerated video decoding on AMD Strix Halo to prevent kernel hanging",
+      "cr_bugs": [447709687],
+      "os": {
+        "type": "linux"
+      },
+      "vendor_id": "0x1002",
+      "device_id": ["0x1586"],
+      "features": [
+        "disable_vaapi"
+      ]
+    },
+    {
       "id": 476,
       "description": "Qualcomm GPUs crash when invalidating incomplete framebuffers",
       "cr_bugs": [507508103],
@@ -3773,6 +3756,19 @@
       ]
     },
     {
+      "id": 478,
+      "description": "Program binaries don't contain transform feedback varyings on Mali GPUs",
+      "cr_bugs": [510589906],
+      "os": {
+        "type": "linux"
+      },
+      "gl_vendor": "ARM.*",
+      "gl_renderer": "Mali.*",
+      "features": [
+        "disable_program_caching_for_transform_feedback"
+      ]
+    },
+    {
       "id": 480,
       "cr_bugs": [520656244],
       "description": "Reattach FBO depth/stencil attachments when they are reallocated on Qualcomm GPUs",
@@ -3783,6 +3779,60 @@
       },
       "features": [
         "reattach_fbo_depth_stencil_on_reallocation"
+      ]
+    },
+    {
+      "id": 483,
+      "cr_bugs": [528131939],
+      "description": "Reset texture base level before calling glCompressedTexSubImage2D for ASTC textures to work around PowerVR driver bug.",
+      "os": {
+        "type": "android"
+      },
+      "gl_vendor": "Imagination.*",
+      "features": [
+        "reset_base_level_for_astc_sub_image"
+      ]
+    },
+    {
+      "id": 484,
+      "cr_bugs": [529867799],
+      "description": "Pack large row length separately when packing into a pixel pack buffer to work around Mali driver bug.",
+      "gl_vendor": "ARM.*",
+      "features": [
+        "pack_large_row_length_separately_pack_buffer"
+      ]
+    },
+    {
+      "id": 486,
+      "cr_bugs": [534903095],
+      "description": "Changing BASE_LEVEL of NPOT immutable texture triggers driver bug on PowerVR GPUs.",
+      "os": {
+        "type": "android"
+      },
+      "gl_vendor": "Imagination.*",
+      "features": [
+        "dont_change_base_level_for_npot_immutable_textures"
+      ]
+    },
+    {
+      "id": 487,
+      "cr_bugs": [499602793],
+      "description": "Reattach texture to FBO after layer count increase on PowerVR GPUs.",
+      "os": {
+        "type": "android"
+      },
+      "gl_vendor": "Imagination.*",
+      "features": [
+        "reattach_texture_to_fbo_after_layer_increase"
+      ]
+    },
+    {
+      "id": 488,
+      "cr_bugs": [534468209],
+      "description": "Flush pending GPU jobs/queries before unbinding or deleting a user framebuffer object on ARM Mali Valhall/Avalon GPUs to avoid driver crash.",
+      "gl_vendor": "ARM.*",
+      "features": [
+        "flush_queries_before_deleting_or_unbinding_fbo"
       ]
     }
   ]

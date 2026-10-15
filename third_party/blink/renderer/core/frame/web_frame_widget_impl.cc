@@ -239,27 +239,64 @@ void ForEachRemoteFrameChildrenControlledByWidget(
   }
 }
 
-viz::FrameSinkId GetRemoteFrameSinkId(const HitTestResult& result) {
-  Node* node = result.InnerNode();
-  auto* frame_owner = DynamicTo<HTMLFrameOwnerElement>(node);
-  if (!frame_owner || !frame_owner->ContentFrame() ||
-      !frame_owner->ContentFrame()->IsRemoteFrame())
+viz::FrameSinkId GetFrameSinkIdForPluginElement(
+    HTMLPlugInElement* plugin_element) {
+  WebPluginContainerImpl* plugin_container = plugin_element->OwnedPlugin();
+  if (!plugin_container) {
     return viz::FrameSinkId();
+  }
+
+  WebPlugin* plugin = plugin_container->Plugin();
+  if (!plugin) {
+    return viz::FrameSinkId();
+  }
+
+  return plugin->GetFrameSinkId();
+}
+
+viz::FrameSinkId GetFrameSinkIdForFrameOwnerElement(
+    HTMLFrameOwnerElement* frame_owner) {
+  if (!frame_owner->ContentFrame() ||
+      !frame_owner->ContentFrame()->IsRemoteFrame()) {
+    return viz::FrameSinkId();
+  }
 
   RemoteFrame* remote_frame = To<RemoteFrame>(frame_owner->ContentFrame());
-  if (remote_frame->IsIgnoredForHitTest())
+  if (remote_frame->IsIgnoredForHitTest()) {
     return viz::FrameSinkId();
+  }
+
+  return remote_frame->GetFrameSinkId();
+}
+
+viz::FrameSinkId GetRemoteFrameSinkId(const HitTestResult& result) {
+  Node* node = result.InnerNode();
+  if (!node) {
+    return viz::FrameSinkId();
+  }
+
   LayoutObject* object = node->GetLayoutObject();
-  DCHECK(object);
-  if (!object->IsBox())
+  if (!object || !object->IsBox()) {
     return viz::FrameSinkId();
+  }
 
   PhysicalOffset local_point(ToRoundedPoint(result.LocalPoint()));
   if (!To<LayoutBox>(object)->PhysicalContentBoxRect().Contains(local_point)) {
     return viz::FrameSinkId();
   }
 
-  return remote_frame->GetFrameSinkId();
+  if (auto* plugin_element = DynamicTo<HTMLPlugInElement>(node)) {
+    viz::FrameSinkId id = GetFrameSinkIdForPluginElement(plugin_element);
+    if (id.is_valid()) {
+      return id;
+    }
+  }
+
+  if (auto* frame_owner = DynamicTo<HTMLFrameOwnerElement>(node)) {
+    return GetFrameSinkIdForFrameOwnerElement(frame_owner);
+  }
+
+  return viz::FrameSinkId();
 }
 
 bool IsElementNotNullAndEditable(Element* element) {
@@ -1585,6 +1622,10 @@ void WebFrameWidgetImpl::SetBackgroundColor(SkColor color) {
       SkColor4f::FromColor(color));
 }
 
+void WebFrameWidgetImpl::SendEarlyFinalBeginMainFrame() {
+  widget_base_->LayerTreeHost()->RequestImmediateBeginMainFrame();
+}
+
 void WebFrameWidgetImpl::SetOverscrollBehavior(
     const cc::OverscrollBehavior& overscroll_behavior) {
   if (!View()->does_composite())
@@ -1760,7 +1801,8 @@ void WebFrameWidgetImpl::DidCompletePageScaleAnimation() {
     std::move(page_scale_animation_for_testing_callback_).Run();
 }
 
-void WebFrameWidgetImpl::ScheduleAnimation(bool urgent) {
+void WebFrameWidgetImpl::ScheduleAnimation(cc::BeginMainFrameReason reason,
+                                           bool urgent) {
   if (!View()->does_composite()) {
     non_composited_client_->ScheduleNonCompositedAnimation();
     return;
@@ -1770,7 +1812,7 @@ void WebFrameWidgetImpl::ScheduleAnimation(bool urgent) {
     return;
   }
 
-  widget_base_->LayerTreeHost()->SetNeedsAnimate(urgent);
+  widget_base_->LayerTreeHost()->SetNeedsAnimate(reason, urgent);
 }
 
 void WebFrameWidgetImpl::FocusChanged(mojom::blink::FocusState focus_state) {
@@ -2100,11 +2142,10 @@ bool WebFrameWidgetImpl::StartDeferringCommits(base::TimeDelta timeout,
   return widget_base_->LayerTreeHost()->StartDeferringCommits(timeout, reason);
 }
 
-void WebFrameWidgetImpl::StopDeferringCommits(
-    cc::PaintHoldingCommitTrigger triggger) {
+void WebFrameWidgetImpl::StopDeferringCommits() {
   if (!View()->does_composite())
     return;
-  widget_base_->LayerTreeHost()->StopDeferringCommits(triggger);
+  widget_base_->LayerTreeHost()->StopDeferringCommits();
 }
 
 std::unique_ptr<cc::ScopedPauseRendering> WebFrameWidgetImpl::PauseRendering() {
@@ -3237,7 +3278,7 @@ void WebFrameWidgetImpl::RequestMouseLock(
     bool has_transient_user_activation,
     bool request_unadjusted_movement,
     mojom::blink::WidgetInputHandlerHost::RequestMouseLockCallback callback) {
-  mojom::blink::WidgetInputHandlerHost* host =
+  auto host =
       widget_base_->widget_input_handler_manager()->GetWidgetInputHandlerHost();
 
   // If we don't have a host just leave the callback uncalled. This simulates
@@ -3409,7 +3450,14 @@ void WebFrameWidgetImpl::PresentationCallbackForMeaningfulLayout(
 void WebFrameWidgetImpl::RequestAnimationAfterDelay(
     const base::TimeDelta& delay,
     bool urgent) {
-  widget_base_->RequestAnimationAfterDelay(delay, urgent);
+  RequestAnimationAfterDelay(cc::BeginMainFrameReason::kOther, delay, urgent);
+}
+
+void WebFrameWidgetImpl::RequestAnimationAfterDelay(
+    cc::BeginMainFrameReason reason,
+    const base::TimeDelta& delay,
+    bool urgent) {
+  widget_base_->RequestAnimationAfterDelay(reason, delay, urgent);
 }
 
 void WebFrameWidgetImpl::SetRootLayer(scoped_refptr<cc::Layer> layer) {
@@ -4025,7 +4073,7 @@ void WebFrameWidgetImpl::ProcessTouchAction(WebTouchAction touch_action) {
 void WebFrameWidgetImpl::SetPanAction(mojom::blink::PanAction pan_action) {
   if (!widget_base_->widget_input_handler_manager())
     return;
-  mojom::blink::WidgetInputHandlerHost* host =
+  auto host =
       widget_base_->widget_input_handler_manager()->GetWidgetInputHandlerHost();
   if (!host)
     return;
@@ -4088,18 +4136,16 @@ void WebFrameWidgetImpl::FlushInputForTesting(base::OnceClosure done_callback) {
 }
 
 void WebFrameWidgetImpl::SetMouseCapture(bool capture) {
-  if (mojom::blink::WidgetInputHandlerHost* host =
-          widget_base_->widget_input_handler_manager()
-              ->GetWidgetInputHandlerHost()) {
+  if (auto host = widget_base_->widget_input_handler_manager()
+                      ->GetWidgetInputHandlerHost()) {
     host->SetMouseCapture(capture);
   }
 }
 
 void WebFrameWidgetImpl::NotifyAutoscrollForSelectionInMainFrame(
     bool autoscroll_selection) {
-  if (mojom::blink::WidgetInputHandlerHost* host =
-          widget_base_->widget_input_handler_manager()
-              ->GetWidgetInputHandlerHost()) {
+  if (auto host = widget_base_->widget_input_handler_manager()
+                      ->GetWidgetInputHandlerHost()) {
     host->SetAutoscrollSelectionActiveInMainFrame(autoscroll_selection);
   }
 

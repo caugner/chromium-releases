@@ -2,23 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {
-  createRef,
-  css,
-  html,
-  LitElement,
-  nothing,
-  ref,
-} from 'chrome://resources/mwc/lit/index.js';
+import {createRef, css, html, LitElement, nothing, ref} from 'chrome://resources/mwc/lit/index.js';
 
 import {assertExists} from '../../assert.js';
 import {I18nString} from '../../i18n_string.js';
-import {
-  getCloudDestination,
-  getI18nMessage,
-  isCloudDestination,
-  isCloudDestinationOnedrive,
-} from '../../models/load_time_data.js';
+import {getCloudDestination, getI18nMessage, isCloudDestination, isCloudDestinationOnedrive} from '../../models/load_time_data.js';
 import * as localStorage from '../../models/local_storage.js';
 import {LocalStorageKey} from '../../type.js';
 import {DEFAULT_STYLE} from '../styles.js';

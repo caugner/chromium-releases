@@ -6,6 +6,7 @@
 #include "ash/constants/ash_pref_names.h"
 #include "ash/constants/ash_switches.h"
 #include "base/auto_reset.h"
+#include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/metrics/histogram_base.h"
 #include "base/strings/string_util.h"
@@ -41,9 +42,11 @@
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/public/base/consent_level.h"
+#include "components/signin/public/base/signin_switches.h"
 #include "components/signin/public/identity_manager/account_capabilities_test_mutator.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/identity_test_utils.h"
+#include "components/sync/base/features.h"
 #include "components/sync/base/pref_names.h"
 #include "components/sync/service/sync_service.h"
 #include "components/sync/service/sync_user_settings.h"
@@ -151,13 +154,15 @@ class SyncConsentTest : public OobeBaseTest {
     LoginDisplayHost::default_host()->GetWizardContext()->is_branded_build =
         true;
 
-      expected_consent_ids_ = {
-          IDS_LOGIN_SYNC_CONSENT_SCREEN_TITLE_WITH_DEVICE,
-          IDS_LOGIN_SYNC_CONSENT_SCREEN_SUBTITLE_2,
-          IDS_LOGIN_SYNC_CONSENT_SCREEN_OS_SYNC_NAME_2,
-          IDS_LOGIN_SYNC_CONSENT_SCREEN_CHROME_BROWSER_SYNC_NAME_2,
-          IDS_LOGIN_SYNC_CONSENT_SCREEN_CHROME_BROWSER_SYNC_DESCRIPTION,
-      };
+    expected_consent_ids_ = {
+        IDS_LOGIN_SYNC_CONSENT_SCREEN_TITLE_WITH_DEVICE,
+        IDS_LOGIN_SYNC_CONSENT_SCREEN_SUBTITLE_2,
+        IDS_LOGIN_SYNC_CONSENT_SCREEN_OS_SYNC_NAME_2,
+        UseConsentLevelSigninForNewUsers()
+            ? IDS_LOGIN_SYNC_CONSENT_SCREEN_CHROME_BROWSER_SYNC_NAME_3
+            : IDS_LOGIN_SYNC_CONSENT_SCREEN_CHROME_BROWSER_SYNC_NAME_2,
+        IDS_LOGIN_SYNC_CONSENT_SCREEN_CHROME_BROWSER_SYNC_DESCRIPTION,
+    };
 
     if (is_minor_user_) {
       // In minor mode, decline and turn on button should be displayed.
@@ -243,6 +248,15 @@ class SyncConsentTest : public OobeBaseTest {
   }
 
  protected:
+  bool UseConsentLevelSigninForNewUsers() const {
+    return base::FeatureList::IsEnabled(
+               syncer::kReplaceSyncPromosWithSignInPromos) &&
+           base::FeatureList::IsEnabled(
+               ::switches::kChromeOsUseConsentLevelSigninForNewUsers) &&
+           !base::FeatureList::IsEnabled(
+               ::switches::kUndoChromeOsUseConsentLevelSignin);
+  }
+
   std::optional<SyncConsentScreen::Result> screen_result_;
   base::HistogramTester histogram_tester_;
   std::vector<int> expected_consent_ids_;
@@ -368,8 +382,12 @@ IN_PROC_BROWSER_TEST_F(SyncConsentTest, SyncConsentRecorder) {
   histogram_tester_.ExpectUniqueSample(
       "OOBE.SyncConsentScreen.Behavior",
       SyncConsentScreen::SyncScreenBehavior::kShow, 1);
-  histogram_tester_.ExpectUniqueSample("OOBE.SyncConsentScreen.SyncEnabled",
-                                       true, 1);
+  if (UseConsentLevelSigninForNewUsers()) {
+    histogram_tester_.ExpectTotalCount("OOBE.SyncConsentScreen.SyncEnabled", 0);
+  } else {
+    histogram_tester_.ExpectUniqueSample("OOBE.SyncConsentScreen.SyncEnabled",
+                                         true, 1);
+  }
 }
 
 // Tests the different combinations of minor mode and ARC restricted mode.
@@ -576,8 +594,13 @@ IN_PROC_BROWSER_TEST_F(SyncConsentMinorModeTest, Accept) {
   // Expect all data types are disabled for minor users when initialized.
   Profile* profile = ProfileManager::GetPrimaryUserProfile();
   auto* identity_manager = IdentityManagerFactory::GetForProfile(profile);
-  EXPECT_TRUE(identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSync));
+  const bool is_consent_level_signin = UseConsentLevelSigninForNewUsers();
+  EXPECT_TRUE(
+      identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSignin));
+  EXPECT_EQ(identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSync),
+            !is_consent_level_signin);
   syncer::SyncUserSettings* settings = GetSyncUserSettings();
+
   EXPECT_FALSE(settings->IsSyncEverythingEnabled());
   EXPECT_TRUE(settings->GetSelectedTypes().empty());
   EXPECT_FALSE(settings->IsSyncAllOsTypesEnabled());
@@ -587,8 +610,13 @@ IN_PROC_BROWSER_TEST_F(SyncConsentMinorModeTest, Accept) {
   consent_recorded_waiter.Wait();
   screen->SetDelegateForTesting(nullptr);  // cleanup
 
-  // Expect sync everything toggle is on after user accepted sync consent.
-  EXPECT_TRUE(settings->IsSyncEverythingEnabled());
+  // Expect sync everything toggle is on after user accepted sync consent only
+  // if the consent level is kSync. With consent level kSignin,
+  // prefs::internal::kSyncKeepEverythingSynced is never true again once it's
+  // false.
+  if (!is_consent_level_signin) {
+    EXPECT_TRUE(settings->IsSyncEverythingEnabled());
+  }
   EXPECT_TRUE(settings->IsSyncAllOsTypesEnabled());
 
   EXPECT_EQ(SyncConsentScreen::CONSENT_GIVEN,
@@ -617,8 +645,12 @@ IN_PROC_BROWSER_TEST_F(SyncConsentMinorModeTest, Accept) {
   histogram_tester_.ExpectUniqueSample(
       "OOBE.SyncConsentScreen.UserChoice",
       SyncConsentScreenHandler::UserChoice::kAccepted, 1);
-  histogram_tester_.ExpectUniqueSample("OOBE.SyncConsentScreen.SyncEnabled",
-                                       true, 1);
+  if (is_consent_level_signin) {
+    histogram_tester_.ExpectTotalCount("OOBE.SyncConsentScreen.SyncEnabled", 0);
+  } else {
+    histogram_tester_.ExpectUniqueSample("OOBE.SyncConsentScreen.SyncEnabled",
+                                         true, 1);
+  }
 }
 
 IN_PROC_BROWSER_TEST_F(SyncConsentMinorModeTest, Decline) {
@@ -637,8 +669,13 @@ IN_PROC_BROWSER_TEST_F(SyncConsentMinorModeTest, Decline) {
   // Expect all data types are disabled for minor users when initialized.
   Profile* profile = ProfileManager::GetPrimaryUserProfile();
   auto* identity_manager = IdentityManagerFactory::GetForProfile(profile);
-  EXPECT_TRUE(identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSync));
+  const bool is_consent_level_signin = UseConsentLevelSigninForNewUsers();
+  EXPECT_TRUE(
+      identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSignin));
+  EXPECT_EQ(identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSync),
+            !is_consent_level_signin);
   syncer::SyncUserSettings* settings = GetSyncUserSettings();
+
   EXPECT_FALSE(settings->IsSyncEverythingEnabled());
   EXPECT_TRUE(settings->GetSelectedTypes().empty());
   EXPECT_FALSE(settings->IsSyncAllOsTypesEnabled());
@@ -679,8 +716,12 @@ IN_PROC_BROWSER_TEST_F(SyncConsentMinorModeTest, Decline) {
   histogram_tester_.ExpectUniqueSample(
       "OOBE.SyncConsentScreen.UserChoice",
       SyncConsentScreenHandler::UserChoice::kDeclined, 1);
-  histogram_tester_.ExpectUniqueSample("OOBE.SyncConsentScreen.SyncEnabled",
-                                       false, 1);
+  if (is_consent_level_signin) {
+    histogram_tester_.ExpectTotalCount("OOBE.SyncConsentScreen.SyncEnabled", 0);
+  } else {
+    histogram_tester_.ExpectUniqueSample("OOBE.SyncConsentScreen.SyncEnabled",
+                                         false, 1);
+  }
 }
 
 IN_PROC_BROWSER_TEST_F(SyncConsentMinorModeTest,

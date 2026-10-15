@@ -18,7 +18,6 @@
 #include "ash/webui/personalization_app/mojom/personalization_app.mojom.h"
 #include "ash/webui/personalization_app/personalization_app_url_constants.h"
 #include "ash/webui/personalization_app/proto/backdrop_wallpaper.pb.h"
-#include "ash/webui/system_apps/public/system_web_app_type.h"
 #include "base/check_is_test.h"
 #include "base/command_line.h"
 #include "base/containers/extend.h"
@@ -53,6 +52,7 @@
 #include "chromeos/ash/components/cryptohome/system_salt_getter.h"
 #include "chromeos/ash/components/policy/device_local_account/device_local_account_type.h"
 #include "chromeos/ash/components/settings/cros_settings_names.h"
+#include "chromeos/ash/components/system_web_apps/system_web_app_type.h"
 #include "chromeos/ui/base/window_properties.h"
 #include "components/account_id/account_id.h"
 #include "components/prefs/pref_service.h"
@@ -658,7 +658,12 @@ void WallpaperControllerClientImpl::OnGooglePhotosDailyAlbumFetched(
         return ids.Peek(base::PersistentHash(photo->id)) == ids.end();
       });
 
-  DCHECK(selected_itr != photos.end());
+  // If all photos are in the cache (e.g. repeated IDs in the album caused by a
+  // compromised network process), fallback to the first photo.
+  if (selected_itr == photos.end()) {
+    selected_itr = photos.begin();
+  }
+
   auto& selected = *selected_itr;
 
   ids.Put(base::PersistentHash(selected->id));

@@ -4,22 +4,44 @@
 
 #import "ios/chrome/browser/toolbar/coordinator/toolbar_mediator.h"
 
+#import "base/metrics/user_metrics.h"
 #import "base/notimplemented.h"
+#import "base/strings/string_util.h"
+#import "components/country_codes/country_codes.h"
 #import "components/omnibox/browser/omnibox_pref_names.h"
+#import "components/policy/core/common/policy_pref_names.h"
+#import "components/prefs/ios/pref_observer_bridge.h"
+#import "components/prefs/pref_change_registrar.h"
+#import "components/regional_capabilities/regional_capabilities_service.h"
+#import "components/variations/service/variations_service.h"
 #import "ios/chrome/browser/banner_promo/model/default_browser_banner_promo_app_agent.h"
+#import "ios/chrome/browser/bubble/model/tab_based_iph_browser_agent.h"
 #import "ios/chrome/browser/default_browser/model/promo_source.h"
 #import "ios/chrome/browser/fullscreen/public/fullscreen_metrics.h"
 #import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_controller.h"
+#import "ios/chrome/browser/intelligence/bwg/model/gemini_browser_agent.h"
+#import "ios/chrome/browser/intelligence/bwg/model/gemini_browser_agent_observer_bridge.h"
+#import "ios/chrome/browser/intelligence/bwg/model/gemini_service.h"
+#import "ios/chrome/browser/intelligence/bwg/utils/gemini_constants.h"
+#import "ios/chrome/browser/intelligence/bwg/utils/gemini_prefs.h"
+#import "ios/chrome/browser/intelligence/features/features.h"
+#import "ios/chrome/browser/reader_mode/model/reader_mode_web_state_utils.h"
 #import "ios/chrome/browser/shared/model/application_context/application_context.h"
 #import "ios/chrome/browser/shared/model/prefs/pref_backed_boolean.h"
 #import "ios/chrome/browser/shared/model/url/url_util.h"
 #import "ios/chrome/browser/shared/model/web_state_list/active_web_state_observation_forwarder.h"
+#import "ios/chrome/browser/shared/model/web_state_list/tab_group.h"
+#import "ios/chrome/browser/shared/model/web_state_list/tab_group_utils.h"
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list_observer_bridge.h"
+#import "ios/chrome/browser/shared/public/commands/bwg_commands.h"
 #import "ios/chrome/browser/shared/public/commands/fullscreen_commands.h"
+#import "ios/chrome/browser/shared/public/commands/scene_commands.h"
 #import "ios/chrome/browser/shared/public/commands/settings_commands.h"
+#import "ios/chrome/browser/shared/public/commands/show_signin_command.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/shared/ui/util/uikit_ui_util.h"
+#import "ios/chrome/browser/signin/model/authentication_service.h"
 #import "ios/chrome/browser/toolbar/ui/buttons/toolbar_button_menu_factory.h"
 #import "ios/chrome/browser/toolbar/ui/buttons/toolbar_button_menu_factory_delegate.h"
 #import "ios/chrome/browser/toolbar/ui/toolbar_consumer.h"
@@ -34,6 +56,8 @@
 @interface ToolbarMediator () <BooleanObserver,
                                CRWWebStateObserver,
                                DefaultBrowserBannerAppAgentObserver,
+                               GeminiBrowserAgentObserving,
+                               PrefObserverDelegate,
                                ToolbarButtonMenuFactoryDelegate,
                                WebStateListObserving>
 @end
@@ -45,6 +69,10 @@
       _activeWebStateObservationForwarder;
   std::unique_ptr<web::WebStateObserverBridge> _activeWebStateObserver;
   ToolbarButtonMenuFactory* _buttonMenuFactory;
+  raw_ptr<PrefService> _prefService;
+  raw_ptr<AuthenticationService> _authenticationService;
+  std::unique_ptr<PrefChangeRegistrar> _prefChangeRegistrar;
+  std::unique_ptr<PrefObserverBridge> _prefObserverBridge;
   // Pref tracking if bottom omnibox is enabled.
   PrefBackedBoolean* _bottomOmniboxEnabled;
   // Whether this mediator is tracking a toolbar at the top position.
@@ -55,14 +83,22 @@
   BOOL _locationBarIndicatorActive;
   // The default browser banner app agent.
   DefaultBrowserBannerPromoAppAgent* _defaultBrowserBannerAppAgent;
+  raw_ptr<GeminiService> _geminiService;
+  raw_ptr<GeminiBrowserAgent> _geminiBrowserAgent;
+  std::unique_ptr<GeminiBrowserAgentObserverBridge> _geminiObserver;
 }
 
-- (instancetype)initWithWebStateList:(WebStateList*)webStateList
-                       actionFactory:(BrowserActionFactory*)actionFactory
-                fullscreenController:(FullscreenController*)fullscreenController
-                         topPosition:(BOOL)topPosition
-        defaultBrowserBannerAppAgent:
-            (DefaultBrowserBannerPromoAppAgent*)defaultBrowserBannerAppAgent {
+- (instancetype)initWithIncognito:(BOOL)incognito
+                     webStateList:(WebStateList*)webStateList
+                    actionFactory:(BrowserActionFactory*)actionFactory
+                      prefService:(PrefService*)prefService
+             fullscreenController:(FullscreenController*)fullscreenController
+                      topPosition:(BOOL)topPosition
+     defaultBrowserBannerAppAgent:
+         (DefaultBrowserBannerPromoAppAgent*)defaultBrowserBannerAppAgent
+            authenticationService:(AuthenticationService*)authenticationService
+                    geminiService:(GeminiService*)geminiService
+               geminiBrowserAgent:(GeminiBrowserAgent*)geminiBrowserAgent {
   self = [super init];
   if (self) {
     _webStateList = webStateList;
@@ -76,14 +112,32 @@
             webStateList, _activeWebStateObserver.get());
 
     _buttonMenuFactory = [[ToolbarButtonMenuFactory alloc]
-        initForToolbarWithIncognito:_incognito
-                       webStateList:_webStateList
+        initForToolbarWithIncognito:incognito
+                       webStateList:webStateList
                       actionFactory:actionFactory];
     _buttonMenuFactory.delegate = self;
+
+    _authenticationService = authenticationService;
+    CHECK(prefService);
+    _prefService = prefService;
+    _prefChangeRegistrar = std::make_unique<PrefChangeRegistrar>();
+    _prefChangeRegistrar->Init(prefService);
+    _prefObserverBridge = std::make_unique<PrefObserverBridge>(self);
+    _prefObserverBridge->ObserveChangesForPreference(
+        policy::policy_prefs::kIncognitoModeAvailability,
+        _prefChangeRegistrar.get());
 
     _fullscreenController = fullscreenController;
     _topPosition = topPosition;
     _locationBarIndicatorActive = NO;
+
+    _geminiService = geminiService;
+    _geminiBrowserAgent = geminiBrowserAgent;
+
+    if (_geminiBrowserAgent) {
+      _geminiObserver = std::make_unique<GeminiBrowserAgentObserverBridge>(
+          self, _geminiBrowserAgent);
+    }
 
     if (_topPosition && defaultBrowserBannerAppAgent) {
       _defaultBrowserBannerAppAgent = defaultBrowserBannerAppAgent;
@@ -113,13 +167,14 @@
   return self;
 }
 
-- (void)updateConsumerWithWebState:(web::WebState*)webState {
+#pragma mark - Public
+
+- (void)updateConsumerWithWebState:(web::WebState*)webState
+                          animated:(BOOL)animated {
   if (!webState) {
     return;
   }
-  [self.consumer setCanGoBack:self.navigationBrowserAgent->CanGoBack(webState)];
-  [self.consumer
-      setCanGoForward:self.navigationBrowserAgent->CanGoForward(webState)];
+  [self updateConsumerNavigationButtons:webState animated:animated];
 
   const GURL visibleURL = webState->GetVisibleURL();
   [self.consumer setShareEnabled:!visibleURL.is_empty()];
@@ -141,8 +196,10 @@
       forButtonType:ToolbarButtonTypeForward];
   [self.consumer setMenu:[_buttonMenuFactory menuForAssistantButton]
            forButtonType:ToolbarButtonTypeAssistant];
-  /// TODO(crbug.com/493948951): Support context menu for tab grid button in the
-  /// Toolbar (iPad).
+  [self.consumer setMenu:[_buttonMenuFactory menuForTabGridButton]
+           forButtonType:ToolbarButtonTypeTabGrid];
+  [self updateConsumerTabCountAndGroupState];
+  [self updateAssistantButton];
 }
 
 - (void)disconnect {
@@ -154,6 +211,13 @@
   _webStateList = nullptr;
   _buttonMenuFactory = nil;
   _fullscreenController = nullptr;
+  _geminiObserver.reset();
+  _geminiService = nil;
+  _geminiBrowserAgent = nil;
+  _prefChangeRegistrar.reset();
+  _prefObserverBridge.reset();
+  _prefService = nullptr;
+  _authenticationService = nullptr;
 }
 
 - (void)setConsumer:(id<ToolbarConsumer>)consumer {
@@ -162,7 +226,8 @@
   }
   _consumer = consumer;
   if (_webStateList) {
-    [self updateConsumerWithWebState:_webStateList->GetActiveWebState()];
+    [self updateConsumerWithWebState:_webStateList->GetActiveWebState()
+                            animated:NO];
   }
   [self updateToolbarPosition];
 }
@@ -197,11 +262,17 @@
   if (self.navigationBrowserAgent) {
     self.navigationBrowserAgent->GoBack();
   }
+  if (self.tabBasedIPHAgent) {
+    self.tabBasedIPHAgent->NotifyBackForwardButtonTap();
+  }
 }
 
 - (void)goForward {
   if (self.navigationBrowserAgent) {
     self.navigationBrowserAgent->GoForward();
+  }
+  if (self.tabBasedIPHAgent) {
+    self.tabBasedIPHAgent->NotifyBackForwardButtonTap();
   }
 }
 
@@ -217,10 +288,39 @@
   }
 }
 
-#pragma mark - ToolbarMutator
-
 - (void)tabGroupIndicatorVisibilityUpdated:(BOOL)visible {
   [self setUICurrentlySupportsPromo:!visible];
+}
+
+- (void)assistantButtonTapped {
+  GeminiStartupState* startupState = [[GeminiStartupState alloc]
+      initWithEntryPoint:gemini::EntryPoint::Toolbar];
+  [self.geminiHandler
+      startGeminiEntryFlowWithStartupState:startupState
+                        baseViewController:self.baseViewController
+                               accessPoint:signin_metrics::AccessPoint::
+                                               kIosGeminiButtonToolbar
+                  showSnackbarOnCompletion:YES
+                                completion:nil];
+}
+
+- (void)recordUserActionsForToolsMenuTapped {
+  if (!_webStateList) {
+    return;
+  }
+  web::WebState* webState = _webStateList->GetActiveWebState();
+  if (!webState) {
+    return;
+  }
+
+  if (IsUrlNtp(webState->GetVisibleURL())) {
+    base::RecordAction(base::UserMetricsAction("MobileToolbarShowMenuOnNTP"));
+  }
+  base::RecordAction(base::UserMetricsAction("MobileToolbarShowMenu"));
+  if (IsReaderModeActiveInWebState(webState)) {
+    base::RecordAction(
+        base::UserMetricsAction("MobileToolbarShowMenuFromReaderMode"));
+  }
 }
 
 #pragma mark - ToolbarButtonMenuFactoryDelegate
@@ -254,48 +354,33 @@
   NOTREACHED();
 }
 
-- (void)addCurrentTabToGroup:(const TabGroup*)destinationGroup {
-  /// TODO(crbug.com/493948951): Implement this (iPad).
-  NOTIMPLEMENTED();
-}
-
-- (void)removeCurrentTabFromGroup {
-  /// TODO(crbug.com/493948951): Implement this (iPad).
-  NOTIMPLEMENTED();
-}
-
-- (void)moveCurrentTabToGroup:(const TabGroup*)destinationGroup {
-  /// TODO(crbug.com/493948951): Implement this (iPad).
-  NOTIMPLEMENTED();
-}
-
 #pragma mark - CRWWebStateObserver
 
 - (void)webState:(web::WebState*)webState
     didLoadPageWithSuccess:(BOOL)loadSuccess {
-  [self updateConsumerWithWebState:webState];
+  [self updateConsumerWithWebState:webState animated:YES];
 }
 
 - (void)webState:(web::WebState*)webState
     didStartNavigation:(web::NavigationContext*)navigation {
-  [self updateConsumerWithWebState:webState];
+  [self updateConsumerWithWebState:webState animated:YES];
 }
 
 - (void)webState:(web::WebState*)webState
     didFinishNavigation:(web::NavigationContext*)navigation {
-  [self updateConsumerWithWebState:webState];
+  [self updateConsumerWithWebState:webState animated:YES];
 }
 
 - (void)webStateDidStartLoading:(web::WebState*)webState {
-  [self updateConsumerWithWebState:webState];
+  [self updateConsumerWithWebState:webState animated:NO];
 }
 
 - (void)webStateDidStopLoading:(web::WebState*)webState {
-  [self updateConsumerWithWebState:webState];
+  [self updateConsumerWithWebState:webState animated:YES];
 }
 
 - (void)webStateDidChangeBackForwardState:(web::WebState*)webState {
-  [self updateConsumerWithWebState:webState];
+  [self updateConsumerWithWebState:webState animated:YES];
 }
 
 #pragma mark - WebStateListObserving
@@ -304,7 +389,9 @@
                        change:(const WebStateListChange&)change
                        status:(const WebStateListStatus&)status {
   if (status.active_web_state_change() && status.new_active_web_state) {
-    [self updateConsumerWithWebState:status.new_active_web_state];
+    [self updateConsumerWithWebState:status.new_active_web_state animated:NO];
+  } else {
+    [self updateConsumerTabCountAndGroupState];
   }
 }
 
@@ -351,6 +438,27 @@
   [self constraintToKeyboard:NO withNotification:notification];
 }
 
+#pragma mark - GeminiBrowserAgentObserverBridge
+
+- (void)geminiFloatyInvokedChanged:(BOOL)isInvoked {
+  [self updateAssistantButton];
+}
+
+- (void)geminiAvailabilityChanged:(BOOL)available {
+  [self updateAssistantButton];
+}
+
+#pragma mark - PrefObserverDelegate
+
+- (void)onPreferenceChanged:(const std::string&)preferenceName {
+  if (preferenceName == policy::policy_prefs::kIncognitoModeAvailability) {
+    if (_webStateList && _webStateList->GetActiveWebState()) {
+      [self updateConsumerWithWebState:_webStateList->GetActiveWebState()
+                              animated:NO];
+    }
+  }
+}
+
 #pragma mark - Private
 
 // Updates the position of the toolbar by updating its visibility.
@@ -371,45 +479,46 @@
   if (_topPosition || !_bottomOmniboxEnabled.value) {
     return;
   }
-  // Whether to cleanup the location indication previously shown for web
-  // content.
-  BOOL hideLocationIndicator =
-      !shouldConstraintToKeyboard && _locationBarIndicatorActive;
 
-  // Whether to show the secondary toolbar as a location indicator when keyboard
-  // is active for web content. Bottom omnibox exclusive.
-  BOOL keyboardActiveForWebContent = [self keyboardIsActiveForWebContent];
-  BOOL showLocationIndicator = shouldConstraintToKeyboard &&
-                               keyboardActiveForWebContent &&
-                               !_locationBarIndicatorActive;
+  // Determine if the toolbar should currently be pinned above the keyboard.
+  BOOL targetIndicatorActive =
+      shouldConstraintToKeyboard && [self keyboardIsActiveForWebContent];
 
-  BOOL shouldAnimateOmniboxMovement =
-      showLocationIndicator || hideLocationIndicator;
-  if (!shouldAnimateOmniboxMovement) {
+  // Early return if the indicator is inactive and should remain inactive.
+  // If active, we continue so the UI consumer can process frame updates.
+  if (!targetIndicatorActive && !_locationBarIndicatorActive) {
     return;
   }
 
-  _locationBarIndicatorActive = showLocationIndicator;
+  BOOL stateChanged = (targetIndicatorActive != _locationBarIndicatorActive);
+  _locationBarIndicatorActive = targetIndicatorActive;
 
-  FullscreenModeTransitionTrigger trigger =
-      FullscreenModeTransitionTrigger::kForcedByCode;
+  // Only transition fullscreen modes if the indicator state is actually
+  // changing. This prevents continuous frame updates from looping the
+  // animation.
+  if (stateChanged) {
+    FullscreenModeTransitionTrigger trigger =
+        FullscreenModeTransitionTrigger::kForcedByCode;
 
-  if (IsFullscreenRefactoringEnabled()) {
-    if (showLocationIndicator) {
-      [self.fullscreenCommands enterFullscreenWithTrigger:trigger animated:YES];
-    } else {
-      [self.fullscreenCommands exitFullscreenWithTrigger:trigger animated:YES];
-    }
-  } else if (_fullscreenController) {
-    if (showLocationIndicator) {
-      _fullscreenController->EnterForceFullscreenMode(
-          /* insets_update_enabled */ false, trigger);
-    } else {
-      _fullscreenController->ExitForceFullscreenMode(trigger);
+    if (IsFullscreenRefactoringEnabled()) {
+      if (targetIndicatorActive) {
+        [self.fullscreenCommands enterFullscreenWithTrigger:trigger
+                                                   animated:YES];
+      } else {
+        [self.fullscreenCommands exitFullscreenWithTrigger:trigger
+                                                  animated:YES];
+      }
+    } else if (_fullscreenController) {
+      if (targetIndicatorActive) {
+        _fullscreenController->EnterForceFullscreenMode(
+            /* insets_update_enabled= */ false, trigger);
+      } else {
+        _fullscreenController->ExitForceFullscreenMode(trigger);
+      }
     }
   }
 
-  [self.consumer setLocationIndicatorVisible:showLocationIndicator
+  [self.consumer setLocationIndicatorVisible:targetIndicatorActive
                              forNotification:notification];
 }
 
@@ -422,6 +531,85 @@
         .keyboardVisible;
   }
   return NO;
+}
+
+// Updates the consumer navigation arrows (forward, back) states for the given
+// `webState`.
+- (void)updateConsumerNavigationButtons:(web::WebState*)webState
+                               animated:(BOOL)animated {
+  if (!webState) {
+    return;
+  }
+  const GURL lastCommittedURL = webState->GetLastCommittedURL();
+  BOOL isLastCommittedUrlNtp =
+      IsUrlNtp(lastCommittedURL) || lastCommittedURL.is_empty();
+  BOOL isToolbarTransitioningToVisible =
+      isLastCommittedUrlNtp && !IsUrlNtp(webState->GetVisibleURL());
+
+  BOOL canGoForward = self.navigationBrowserAgent->CanGoForward(webState);
+  if (isToolbarTransitioningToVisible) {
+    // Navigation buttons will be preloaded before the toolbar appears.
+    animated = NO;
+    if (webState->GetNavigationManager()->GetPendingItemIndex() == -1) {
+      // The Web State is mid-navigation from the NTP to a webpage. Prevents the
+      // forward button from appearing during the navigation if it will not be
+      // present after the navigation.
+      canGoForward = NO;
+    }
+  }
+
+  [self.consumer setCanGoBack:self.navigationBrowserAgent->CanGoBack(webState)];
+  [self.consumer setCanGoForward:canGoForward animated:animated];
+}
+
+// Updates the consumer tab state.
+- (void)updateConsumerTabCountAndGroupState {
+  if (_webStateList) {
+    const TabGroup* group = GetGroupForActiveWebState(_webStateList);
+    if (group) {
+      [self.consumer updateTabCount:group->range().count()];
+      [self.consumer setInTabGroup:YES];
+    } else {
+      [self.consumer updateTabCount:_webStateList->count()];
+      [self.consumer setInTabGroup:NO];
+    }
+  } else {
+    [self.consumer updateTabCount:0];
+    [self.consumer setInTabGroup:NO];
+  }
+}
+
+// Updates the consumer with the latest assistant button state.
+- (void)updateAssistantButton {
+  BOOL geminiAllowed = NO;
+  if (_geminiService) {
+    geminiAllowed = _geminiService->IsProfileEligibleForGemini();
+    if (!geminiAllowed && _authenticationService &&
+        !_authenticationService->HasPrimaryIdentity()) {
+      // If the profile is ineligible, it might be just because the user is
+      // signed out. We still want to show the Gemini button (disabled) for
+      // signed-out users to encourage sign-in, unless a local enterprise
+      // policy explicitly disables it.
+      geminiAllowed = gemini::GeminiAllowedByPolicy(_prefService);
+    }
+  }
+
+  BOOL isEEAOrJapan = NO;
+  variations::VariationsService* variationsService =
+      GetApplicationContext()->GetVariationsService();
+  if (variationsService) {
+    country_codes::CountryId countryId(
+        base::ToUpperASCII(variationsService->GetStoredPermanentCountry()));
+    isEEAOrJapan = regional_capabilities::RegionalCapabilitiesService::
+                       IsInAnySearchEngineChoiceScreenRegion(countryId) ||
+                   countryId == country_codes::CountryId("JP");
+  }
+
+  BOOL visible = IsPageActionMenuEnabled() && geminiAllowed && !isEEAOrJapan;
+  BOOL enabled = visible && _geminiBrowserAgent &&
+                 _geminiBrowserAgent->IsGeminiAvailableForActiveWebState();
+
+  [self.consumer setAssistantButtonVisible:visible enabled:enabled];
 }
 
 @end

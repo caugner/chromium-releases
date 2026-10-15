@@ -58,6 +58,7 @@
 #include "net/base/url_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/lens_server_proto/aim_communication.pb.h"
+#include "ui/base/ui_base_switches.h"
 #include "ui/webui/resources/cr_components/composebox/composebox.mojom.h"
 
 namespace {
@@ -101,8 +102,10 @@ class MockContextualTasksPage : public contextual_tasks::mojom::Page {
               OnLensOverlayStateChanged,
               (bool is_showing, bool maybe_show_overlay_hint_text),
               (override));
-  MOCK_METHOD(void, SetTaskDetails, (const base::Uuid&), (override));
-  MOCK_METHOD(void, SetAimUrl, (const GURL&), (override));
+  MOCK_METHOD(void,
+              SetTaskDetails,
+              (const base::Uuid&, const GURL&, bool),
+              (override));
   MOCK_METHOD(void, ShowErrorPage, (), (override));
   MOCK_METHOD(void, HideErrorPage, (), (override));
   MOCK_METHOD(void, ShowOauthErrorDialog, (), (override));
@@ -114,6 +117,9 @@ class MockContextualTasksPage : public contextual_tasks::mojom::Page {
   MOCK_METHOD(void, UnlockInput, (), (override));
   MOCK_METHOD(void, SetShowReopenTabs, (bool show), (override));
   MOCK_METHOD(void, SetExpandButtonEnabled, (bool enabled), (override));
+  MOCK_METHOD(void, TurnOnSmartTabSharing, (), (override));
+  MOCK_METHOD(void, ShowSmartTabSharingTryItIph, (), (override));
+  MOCK_METHOD(void, ShowSmartTabSharingDefaultOnIph, (), (override));
   MOCK_METHOD(void,
               RemoveInjectedInput,
               (const base::UnguessableToken& file_token),
@@ -667,14 +673,16 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksNoMockBrowserTest,
   content::WebContents* web_contents =
       TabListInterface::From(browser())->GetActiveTab()->GetContents();
 
-  auto* controller = static_cast<ContextualTasksUI*>(
-      web_contents->GetWebUI()->GetController());
+  auto* controller = static_cast<contextual_tasks::ContextualTasksUIInterface*>(
+      static_cast<ContextualTasksUI*>(
+          web_contents->GetWebUI()->GetController()));
   ASSERT_TRUE(controller);
 
   auto* zoom_controller = zoom::ZoomController::FromWebContents(web_contents);
 
   // Set tracked host.
-  controller->SetAimUrl(GURL("https://google.com"));
+  controller->PushTaskDetailsToPage(std::nullopt, GURL("https://google.com"),
+                                    /*replace_navigation_entry=*/false);
 
   content::HostZoomMap* zoom_map =
       content::HostZoomMap::GetDefaultForBrowserContext(browser()->profile());
@@ -721,6 +729,43 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksNoMockBrowserTest,
   // Wait for load stop on that web_contents.
   EXPECT_TRUE(content::WaitForLoadStop(web_contents));
 }
+
+#if BUILDFLAG(IS_ANDROID)
+class ContextualTasksDarkModeBrowserTest
+    : public ContextualTasksNoMockBrowserTest {
+ public:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    ContextualTasksNoMockBrowserTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitch(switches::kForceDarkMode);
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(ContextualTasksDarkModeBrowserTest,
+                       DarkModeLoadTimeData) {
+  EXPECT_TRUE(ui_test_utils::NavigateToURL(
+      browser(), GURL(chrome::kChromeUIContextualTasksURL)));
+  content::WebContents* web_contents =
+      TabListInterface::From(browser())->GetActiveTab()->GetContents();
+
+  bool is_dark_mode =
+      content::EvalJs(web_contents, "loadTimeData.getBoolean('darkMode')")
+          .ExtractBool();
+  EXPECT_TRUE(is_dark_mode);
+}
+
+IN_PROC_BROWSER_TEST_F(ContextualTasksNoMockBrowserTest,
+                       LightModeLoadTimeData) {
+  EXPECT_TRUE(ui_test_utils::NavigateToURL(
+      browser(), GURL(chrome::kChromeUIContextualTasksURL)));
+  content::WebContents* web_contents =
+      TabListInterface::From(browser())->GetActiveTab()->GetContents();
+
+  bool is_dark_mode =
+      content::EvalJs(web_contents, "loadTimeData.getBoolean('darkMode')")
+          .ExtractBool();
+  EXPECT_FALSE(is_dark_mode);
+}
+#endif  // BUILDFLAG(IS_ANDROID)
 
 IN_PROC_BROWSER_TEST_F(ContextualTasksUIBrowserTest,
                        UpdateModelFromUrlOnNavigation) {

@@ -9,7 +9,7 @@
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/buildflag.h"
-#include "chrome/browser/background/glic/glic_controller.h"
+#include "chrome/browser/background/glic/glic_background_mode_manager.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/glic/fre/glic_fre_controller.h"
 #include "chrome/browser/glic/glic_metrics.h"
@@ -17,6 +17,7 @@
 #include "chrome/browser/glic/glic_profile_manager.h"
 #include "chrome/browser/glic/host/glic.mojom.h"
 #include "chrome/browser/glic/host/glic_web_contents_warming_pool.h"
+#include "chrome/browser/glic/public/glic_keyed_service.h"
 #include "chrome/browser/glic/public/glic_keyed_service_factory.h"
 #include "chrome/browser/glic/public/service/glic_instance_coordinator.h"
 #include "chrome/browser/glic/service/glic_instance_coordinator_impl.h"
@@ -30,6 +31,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_test_util.h"
 #include "chrome/browser/renderer_context_menu/render_view_context_menu.h"
+#include "chrome/browser/tab_list/tab_list_interface.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
@@ -38,12 +40,18 @@
 #include "chrome/browser/ui/views/tabs/tab_strip_action_container.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/interaction/interactive_browser_test.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
+#include "extensions/browser/background_script_executor.h"
 #include "ui/base/test/ui_controls.h"
+#if BUILDFLAG(IS_OZONE)
+#include "ui/ozone/public/ozone_platform.h"
+#endif
+
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/display/test/virtual_display_util.h"
@@ -93,14 +101,16 @@ class GlicInstanceCoordinatorUiTest : public test::InteractiveGlicTest {
   }
 
   auto SimulateOpenMenuItem() {
-    return Do([this]() {
-      glic_controller_->Show(mojom::InvocationSource::kOsButtonMenu);
+    return Do([]() {
+      GlicBackgroundModeManager::GetInstance()->ToggleUI(
+          /*prevent_close=*/true, mojom::InvocationSource::kOsButtonMenu);
     });
   }
 
   auto SimulateOsButton() {
-    return Do([this]() {
-      glic_controller_->Toggle(mojom::InvocationSource::kOsButton);
+    return Do([]() {
+      GlicBackgroundModeManager::GetInstance()->ToggleUI(
+          /*prevent_close=*/false, mojom::InvocationSource::kOsButton);
     });
   }
 
@@ -139,9 +149,6 @@ class GlicInstanceCoordinatorUiTest : public test::InteractiveGlicTest {
   }
 
  private:
-  std::unique_ptr<GlicController> glic_controller_ =
-      std::make_unique<GlicController>();
-
   base::test::ScopedFeatureList features_;
 };
 
@@ -279,19 +286,6 @@ IN_PROC_BROWSER_TEST_F(GlicInstanceCoordinatorUiTest,
       InAnyContext(ActivateSurface(test::kGlicHostElementId)),
       SimulateAcceleratorPress(ui::Accelerator(ui::VKEY_ESCAPE, ui::EF_NONE)),
       WaitForGlicClose());
-}
-
-// TODO(crbug.com/454088252): Re-enable this test when there is a glic state for
-// post-resize.
-IN_PROC_BROWSER_TEST_F(GlicInstanceCoordinatorUiTest,
-                       DISABLED_CloseWithContextMenu) {
-  RunTestSequence(
-      OpenGlicFloatingWindow(), MoveMouseTo(kGlicViewElementId),
-      MayInvolveNativeContextMenu(
-          ClickMouse(ui_controls::RIGHT), WaitForHide(kBrowserViewElementId),
-          InAnyContext(
-              SelectMenuItem(RenderViewContextMenu::kGlicCloseMenuItem))),
-      CheckControllerHasWidget(false));
 }
 
 // TODO(crbug.com/401158115): Flaky on macOS
@@ -603,16 +597,7 @@ IN_PROC_BROWSER_TEST_F(GlicInstanceCoordinatorUiTest, TestInitialBounds) {
 class GlicInstanceCoordinatorLocationMetricsUiTest
     : public GlicInstanceCoordinatorUiTest {
  public:
-  GlicInstanceCoordinatorLocationMetricsUiTest() {
-    features_.InitWithFeatures(
-        /*enabled_features=*/{},
-        /*disabled_features=*/{features::kGlicPanelResetOnSessionTimeout,
-                               features::kGlicPanelResetSizeAndLocationOnOpen});
-  }
   ~GlicInstanceCoordinatorLocationMetricsUiTest() override = default;
-
- private:
-  base::test::ScopedFeatureList features_;
 };
 
 IN_PROC_BROWSER_TEST_F(GlicInstanceCoordinatorLocationMetricsUiTest,
@@ -695,61 +680,6 @@ IN_PROC_BROWSER_TEST_F(GlicInstanceCoordinatorLocationMetricsUiTest,
   // ChromeRelativePosition::kChromeOnOtherDisplay isn't being tested since
   // tests involving moving Glic to another display are flaky.
 }
-
-IN_PROC_BROWSER_TEST_F(GlicInstanceCoordinatorLocationMetricsUiTest,
-                       TestPercentOverlapMetrics) {
-  if (base::FeatureList::IsEnabled(features::kGlicMultiInstance)) {
-    // TODO(b/453696965): Broken in multi-instance.
-    GTEST_SKIP() << "Skipping for kGlicMultiInstance";
-  }
-  if (IsWorkAreaTooSmallForTest()) {
-    GTEST_SKIP()
-        << "Test's work area bounds are too small for consistent results.";
-  }
-  // The GlicButton and Tabstrip are not actually shown until a tab is created.
-  chrome::AddTabAt(browser(), GURL("about:blank"), 0, true);
-  // Set browser bounds to the center cell of the work area bounds.
-  gfx::Rect browser_bounds = gfx::Rect(50, 50, 500, 400);
-  browser()->window()->SetBounds(browser_bounds);
-  browser_bounds = browser()->window()->GetBounds();
-  gfx::Size glic_expected_size = GlicWidget::GetInitialSize();
-
-  base::HistogramTester tester;
-
-  auto open_and_close = [this,
-                         &tester](PercentOverlap expected_percent_overlap) {
-    RunTestSequence(ActivateSurface(kBrowserViewElementId),
-                    SimulateGlicHotkey(), WaitForAndInstrumentGlic(kNone),
-                    CheckControllerWidgetMode(GlicWindowMode::kDetached),
-                    SimulateOsButton(), WaitForHide(test::kGlicHostElementId),
-                    CheckControllerHasWidget(false));
-
-    tester.ExpectBucketCount("Glic.PercentOverlapWithBrowser.OnOpen",
-                             expected_percent_overlap, 1);
-    tester.ExpectBucketCount("Glic.PercentOverlapWithBrowser.OnClose",
-                             expected_percent_overlap, 1);
-  };
-
-  gfx::Point test_origin = browser_bounds.top_right();
-  SetPreviousPosition(test_origin);
-  open_and_close(PercentOverlap::k0);
-
-  test_origin.Offset(-0.5 * glic_expected_size.width(), 0);
-  SetPreviousPosition(test_origin);
-  open_and_close(PercentOverlap::k50);
-
-  test_origin = browser_bounds.origin();
-  SetPreviousPosition(test_origin);
-  open_and_close(PercentOverlap::k100);
-
-  RunTestSequence(OpenGlicFloatingWindow());
-  browser()->window()->Minimize();
-  ASSERT_TRUE(ui_test_utils::WaitForMinimized(browser()));
-  EXPECT_FALSE(browser()->window()->IsActive());
-  RunTestSequence(CloseGlicWindow());
-  tester.ExpectBucketCount("Glic.PositionOnChrome.OnClose",
-                           ChromeRelativePosition::kNoVisibleChromeBrowser, 1);
-}
 #endif  // BUILDFLAG(IS_MAC)
 
 // Note: ChromeOS maintains account auth as a part of OS User session,
@@ -775,7 +705,7 @@ IN_PROC_BROWSER_TEST_F(GlicInstanceCoordinatorUiTest,
   g_browser_process->local_state()->SetBoolean(prefs::kGlicLauncherEnabled,
                                                true);
   service1->ToggleUI(nullptr, false, mojom::InvocationSource::kOsHotkey);
-  EXPECT_TRUE(service1->IsWindowShowing());
+  EXPECT_TRUE(service1->instance_coordinator().IsAnyPanelShowing());
 
   // Delete the second profile
   ui_test_utils::BrowserDestroyedObserver observer(browser1);
@@ -784,20 +714,13 @@ IN_PROC_BROWSER_TEST_F(GlicInstanceCoordinatorUiTest,
       ProfileMetrics::DELETE_PROFILE_USER_MANAGER);
   observer.Wait();
 
-  EXPECT_FALSE(service1->IsWindowShowing());
+  EXPECT_FALSE(service1->instance_coordinator().IsAnyPanelShowing());
 }
 #endif  // !BUILDFLAG(IS_CHROMEOS)
 
 class GlicInstanceCoordinatorWithPreviousPostionUiTest
     : public GlicInstanceCoordinatorUiTest {
  public:
-  GlicInstanceCoordinatorWithPreviousPostionUiTest() {
-    features_.InitWithFeatures(
-        /*enabled_features=*/{},
-        /*disabled_features=*/{features::kGlicPanelResetOnSessionTimeout,
-                               features::kGlicPanelResetSizeAndLocationOnOpen,
-                               features::kGlicPanelResetOnStart});
-  }
   void SetUpBrowserContextKeyedServices(
       content::BrowserContext* context) override {
     // Set initial bounds via pref and check that they are used.
@@ -807,9 +730,6 @@ class GlicInstanceCoordinatorWithPreviousPostionUiTest
         prefs::kGlicPreviousPositionY, 10);
     test::InteractiveGlicTest::SetUpBrowserContextKeyedServices(context);
   }
-
- private:
-  base::test::ScopedFeatureList features_;
 };
 
 IN_PROC_BROWSER_TEST_F(GlicInstanceCoordinatorWithPreviousPostionUiTest,
@@ -908,5 +828,111 @@ IN_PROC_BROWSER_TEST_F(GlicInstanceCoordinatorWithDelayedPreloadingUiTest,
       InAnyContext(
           WaitForShow(kGlicViewElementId).SetMustRemainVisible(false)));
 }
+
+#if !BUILDFLAG(IS_ANDROID)
+IN_PROC_BROWSER_TEST_F(GlicInstanceCoordinatorUiTest,
+                       ActivateTabWithConversation) {
+#if BUILDFLAG(IS_OZONE)
+  // Programmatic window activation does not work on the Weston reference
+  // implementation of Wayland used on Linux/ChromeOS testbots, and is
+  // unreliable on Linux in general. In these environments, we completely skip
+  // this test at runtime.
+  if (!ui::OzonePlatform::GetInstance()
+           ->GetPlatformProperties()
+           .supports_global_screen_coordinates) {
+    GTEST_SKIP() << "Programmatic window activation is not supported by the "
+                    "active Ozone platform.";
+  }
+#endif
+
+  BrowserWindowInterface* window_a = browser();
+  auto* tab_list_a = TabListInterface::From(window_a);
+  tabs::TabInterface* tab_a = tab_list_a->GetActiveTab();
+  ASSERT_TRUE(tab_a);
+
+  glic::GlicKeyedService* service = glic_service();
+  service->instance_coordinator().CreateNewConversationForTabs({tab_a});
+
+  glic::GlicInstance* instance =
+      service->instance_coordinator().GetInstanceForTab(tab_a);
+  ASSERT_TRUE(instance);
+
+  {
+    auto conversation_info = glic::mojom::ConversationInfo::New();
+    conversation_info->conversation_id = "test_conversation_id";
+    static_cast<glic::GlicInstanceImpl*>(instance)->RegisterConversation(
+        std::move(conversation_info), base::DoNothing());
+  }
+
+  Browser* window_b =
+      ui_test_utils::OpenNewEmptyWindowAndWaitUntilActivated(GetProfile());
+  ASSERT_TRUE(window_b);
+
+  EXPECT_TRUE(ui_test_utils::IsBrowserActive(window_b));
+  EXPECT_FALSE(ui_test_utils::IsBrowserActive(window_a));
+
+  ui_test_utils::BrowserActivationWaiter waiter_a(window_a);
+
+  glic::GlicInstanceCoordinator::ActivateTabResult cxx_result =
+      service->instance_coordinator().ActivateTabWithConversation(
+          "test_conversation_id");
+  EXPECT_EQ(cxx_result,
+            glic::GlicInstanceCoordinator::ActivateTabResult::kSuccess);
+
+  waiter_a.WaitForActivation();
+
+  EXPECT_EQ(tab_list_a->GetActiveTab(), tab_a);
+}
+
+IN_PROC_BROWSER_TEST_F(GlicInstanceCoordinatorUiTest,
+                       ActivateTabWithConversation_SelectsMostRecentlyActive) {
+  BrowserWindowInterface* window_a = browser();
+  auto* tab_list_a = TabListInterface::From(window_a);
+  tabs::TabInterface* tab_1 = tab_list_a->GetActiveTab();
+  ASSERT_TRUE(tab_1);
+
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), GURL("about:blank"), WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
+  tabs::TabInterface* tab_2 = tab_list_a->GetActiveTab();
+  ASSERT_TRUE(tab_2);
+  ASSERT_NE(tab_1, tab_2);
+
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), GURL("about:blank"), WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
+  tabs::TabInterface* tab_3 = tab_list_a->GetActiveTab();
+  ASSERT_TRUE(tab_3);
+  ASSERT_NE(tab_2, tab_3);
+
+  glic::GlicKeyedService* service = glic_service();
+  service->instance_coordinator().CreateNewConversationForTabs({tab_1, tab_2});
+
+  glic::GlicInstance* instance =
+      service->instance_coordinator().GetInstanceForTab(tab_1);
+  ASSERT_TRUE(instance);
+
+  {
+    auto conversation_info = glic::mojom::ConversationInfo::New();
+    conversation_info->conversation_id = "test_conversation_id";
+    static_cast<glic::GlicInstanceImpl*>(instance)->RegisterConversation(
+        std::move(conversation_info), base::DoNothing());
+  }
+
+  tab_list_a->ActivateTab(tab_1->GetHandle());
+  tab_list_a->ActivateTab(tab_2->GetHandle());
+  tab_list_a->ActivateTab(tab_3->GetHandle());
+
+  EXPECT_EQ(tab_list_a->GetActiveTab(), tab_3);
+
+  glic::GlicInstanceCoordinator::ActivateTabResult cxx_result =
+      service->instance_coordinator().ActivateTabWithConversation(
+          "test_conversation_id");
+  EXPECT_EQ(cxx_result,
+            glic::GlicInstanceCoordinator::ActivateTabResult::kSuccess);
+
+  EXPECT_EQ(tab_list_a->GetActiveTab(), tab_2);
+}
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 }  // namespace glic

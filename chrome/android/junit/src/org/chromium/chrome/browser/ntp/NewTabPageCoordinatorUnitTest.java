@@ -8,9 +8,12 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -19,6 +22,8 @@ import android.content.Context;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+
+import androidx.recyclerview.widget.RecyclerView;
 
 import org.junit.After;
 import org.junit.Before;
@@ -32,11 +37,14 @@ import org.robolectric.Robolectric;
 import org.robolectric.annotation.Config;
 
 import org.chromium.base.DeviceInfo;
+import org.chromium.base.FakeTimeTestRule;
 import org.chromium.base.supplier.OneshotSupplierImpl;
 import org.chromium.base.test.BaseRobolectricTestRunner;
-import org.chromium.base.test.util.Features;
+import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.base.test.util.HistogramWatcher;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.back_press.BackPressManager;
+import org.chromium.chrome.browser.browser_controls.BrowserControlsVisibilityManager;
 import org.chromium.chrome.browser.composeplate.ComposeplateUtils;
 import org.chromium.chrome.browser.composeplate.ComposeplateUtilsJni;
 import org.chromium.chrome.browser.feed.FeedSurfaceScrollDelegate;
@@ -44,6 +52,9 @@ import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.incognito.IncognitoUtils;
 import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
 import org.chromium.chrome.browser.magic_stack.ModuleRegistry;
+import org.chromium.chrome.browser.ntp_customization.NtpCustomizationCoordinator;
+import org.chromium.chrome.browser.ntp_customization.NtpCustomizationCoordinatorFactory;
+import org.chromium.chrome.browser.ntp_customization.NtpCustomizationUtils;
 import org.chromium.chrome.browser.omnibox.SearchEngineUtils;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.search_engines.TemplateUrlServiceFactory;
@@ -83,7 +94,7 @@ import java.util.function.Supplier;
 /** Unit tests for {@link NewTabPageCoordinator}. */
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
-@Features.EnableFeatures({
+@EnableFeatures({
     ChromeFeatureList.SEGMENTATION_PLATFORM_ANDROID_HOME_MODULE_RANKER_V2,
     SigninFeatures.ENABLE_SEAMLESS_SIGNIN,
     SigninFeatures.MAKE_IDENTITY_MANAGER_SOURCE_OF_ACCOUNTS
@@ -91,6 +102,7 @@ import java.util.function.Supplier;
 public class NewTabPageCoordinatorUnitTest {
     @Rule public final MockitoRule mMockitoRule = MockitoJUnit.rule();
     @Rule public SuggestionsDependenciesRule mSuggestionsDeps = new SuggestionsDependenciesRule();
+    @Rule public FakeTimeTestRule mFakeTimeTestRule = new FakeTimeTestRule();
 
     @Mock private ComposeplateUtils.Natives mMockComposeplateUtilsJni;
     @Mock private HomeModulesRankingHelper.Natives mHomeModulesRankingHelperJniMock;
@@ -119,6 +131,9 @@ public class NewTabPageCoordinatorUnitTest {
     @Mock private IdentityManager mIdentityManager;
     @Mock private SigninManager mSigninManager;
     @Mock private SyncService mSyncService;
+    @Mock private BackPressManager mBackPressManager;
+    @Mock private BrowserControlsVisibilityManager mBrowserControlsVisibilityManager;
+    @Mock private RecyclerView mRecyclerView;
 
     private Activity mActivity;
     private NewTabPageLayout mNewTabPageLayout;
@@ -288,6 +303,24 @@ public class NewTabPageCoordinatorUnitTest {
         assertNull(model.get(NewTabPageLayoutProperties.SEARCH_BOX_VIEW));
     }
 
+    @Test
+    public void testTriggerCustomizationBottomSheet() {
+        NtpCustomizationCoordinatorFactory factory = mock(NtpCustomizationCoordinatorFactory.class);
+        NtpCustomizationCoordinatorFactory.setInstanceForTesting(factory);
+        NtpCustomizationCoordinator customizationCoordinator =
+                mock(NtpCustomizationCoordinator.class);
+        when(factory.create(any(), any(), any(), anyInt(), any(), any(), any()))
+                .thenReturn(customizationCoordinator);
+        assertFalse(NtpCustomizationUtils.isThemeTipBottomSheetShownFromSharedPreference());
+
+        mCoordinator.triggerCustomizationBottomSheet();
+
+        verify(customizationCoordinator).showBottomSheet();
+        assertTrue(NtpCustomizationUtils.isThemeTipBottomSheetShownFromSharedPreference());
+
+        NtpCustomizationUtils.resetSharedPreferenceForTesting();
+    }
+
     private void createCoordinator() {
         mNewTabPageLayout =
                 (NewTabPageLayout)
@@ -310,7 +343,8 @@ public class NewTabPageCoordinatorUnitTest {
                         mSnackbarManager,
                         /* isTablet= */ false,
                         mTabStripHeightSupplier,
-                        mHomeSurfaceTracker);
+                        mHomeSurfaceTracker,
+                        mBackPressManager);
 
         mCoordinator.initialize(
                 mTileGroupDelegate,
@@ -326,5 +360,83 @@ public class NewTabPageCoordinatorUnitTest {
     private void verifyIsHomeSurface(boolean isHomeSurface) {
         assertEquals(isHomeSurface, mCoordinator.isHomeSurface());
         assertNotNull(mCoordinator.getHomeModulesCoordinatorForTesting());
+    }
+
+    @Test
+    public void testSearchBoxAndComposeplateMaxWidthLimit() {
+        NewTabPageLayout layout = mCoordinator.getNewTabPageLayout();
+        int maxSearchBoxWidthPx =
+                mActivity.getResources().getDimensionPixelSize(R.dimen.ntp_search_box_max_width);
+
+        // Set the parent measure width to be significantly larger than the max allowed width
+        // to ensure the unconstrained width (width - margins) is guaranteed to exceed the cap.
+        int measureWidth = maxSearchBoxWidthPx * 10;
+        mCoordinator.onMeasure(measureWidth);
+
+        View searchBoxView = layout.findViewById(R.id.search_box);
+        assertNotNull(searchBoxView);
+        assertEquals(maxSearchBoxWidthPx, searchBoxView.getLayoutParams().width);
+
+        View composeplateView = layout.findViewById(R.id.composeplate_view);
+        assertNotNull(composeplateView);
+        assertEquals(maxSearchBoxWidthPx, composeplateView.getLayoutParams().width);
+    }
+
+    @Test
+    public void testNtpScrollListener_hidesControls_whenNotLoading() {
+        when(mBrowserControlsVisibilityManager.getBottomControlsHeight()).thenReturn(100);
+        when(mTab.isLoading()).thenReturn(false);
+
+        NewTabPage.NtpScrollListener listener =
+                new NewTabPage.NtpScrollListener(
+                        mBrowserControlsVisibilityManager, mActivity, mTab);
+
+        // Scroll past the threshold (20dp * 1.0 = 20px). Scroll down by 25px:
+        listener.onScrolled(mRecyclerView, 0, 25);
+        verify(mBrowserControlsVisibilityManager).hideAndroidControls(true);
+    }
+
+    @Test
+    public void testNtpScrollListener_doesNotHideControls_whenLoading() {
+        when(mBrowserControlsVisibilityManager.getBottomControlsHeight()).thenReturn(100);
+        when(mTab.isLoading()).thenReturn(true);
+
+        NewTabPage.NtpScrollListener listener =
+                new NewTabPage.NtpScrollListener(
+                        mBrowserControlsVisibilityManager, mActivity, mTab);
+
+        // Scroll past the threshold.
+        listener.onScrolled(mRecyclerView, 0, 25);
+        verify(mBrowserControlsVisibilityManager, never()).hideAndroidControls(true);
+    }
+
+    @Test
+    public void testNtpScrollListener_showsControls_whenNotLoading() {
+        when(mBrowserControlsVisibilityManager.getBottomControlsHeight()).thenReturn(100);
+        when(mBrowserControlsVisibilityManager.getBottomControlHiddenRatio()).thenReturn(1.0f);
+        when(mTab.isLoading()).thenReturn(false);
+
+        NewTabPage.NtpScrollListener listener =
+                new NewTabPage.NtpScrollListener(
+                        mBrowserControlsVisibilityManager, mActivity, mTab);
+
+        // Scroll up past the threshold.
+        listener.onScrolled(mRecyclerView, 0, -25);
+        verify(mBrowserControlsVisibilityManager).showAndroidControls(true);
+    }
+
+    @Test
+    public void testNtpScrollListener_doesNotShowControls_whenLoading() {
+        when(mBrowserControlsVisibilityManager.getBottomControlsHeight()).thenReturn(100);
+        when(mBrowserControlsVisibilityManager.getBottomControlHiddenRatio()).thenReturn(1.0f);
+        when(mTab.isLoading()).thenReturn(true);
+
+        NewTabPage.NtpScrollListener listener =
+                new NewTabPage.NtpScrollListener(
+                        mBrowserControlsVisibilityManager, mActivity, mTab);
+
+        // Scroll up past the threshold.
+        listener.onScrolled(mRecyclerView, 0, -25);
+        verify(mBrowserControlsVisibilityManager, never()).showAndroidControls(true);
     }
 }

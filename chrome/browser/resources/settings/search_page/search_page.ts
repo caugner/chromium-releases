@@ -32,7 +32,7 @@ import {Router} from '../router.js';
 import {SettingsViewMixin} from '../settings_page/settings_view_mixin.js';
 
 import type {CategorizedTemplateUrls, SearchEngine, SearchEnginesBrowserProxy, SearchEnginesInfo} from './search_engines_browser_proxy.js';
-import {SearchEnginesBrowserProxyImpl} from './search_engines_browser_proxy.js';
+import {SearchEnginesBrowserProxyImpl, SearchEnginesInteractions} from './search_engines_browser_proxy.js';
 import {getTemplate} from './search_page.html.js';
 
 const SettingsSearchPageElementBase =
@@ -123,7 +123,7 @@ export class SettingsSearchPageElement extends SettingsSearchPageElementBase {
     this.addWebUiListener('search-engines-changed', updateSearchEngines);
   }
 
-  private onDisableExtension_() {
+  private onDisableExtensionClick_() {
     this.dispatchEvent(new CustomEvent('refresh-pref', {
       bubbles: true,
       composed: true,
@@ -132,6 +132,8 @@ export class SettingsSearchPageElement extends SettingsSearchPageElementBase {
   }
 
   private onManageSearchEnginesClick_() {
+    this.browserProxy_.recordSearchEnginesPageHistogram(
+        SearchEnginesInteractions.SUBPAGE_NAVIGATED);
     Router.getInstance().navigateTo(routes.SEARCH_ENGINES);
   }
 
@@ -192,7 +194,9 @@ export class SettingsSearchPageElement extends SettingsSearchPageElementBase {
     assert(childViewId === 'searchEngines');
     const control =
         this.shadowRoot!.querySelector<HTMLElement>('#enginesSubpageTrigger');
-    assert(control);
+    assert(
+        control,
+        `Failed to find associated control for child '${childViewId}'`);
     return control;
   }
 }

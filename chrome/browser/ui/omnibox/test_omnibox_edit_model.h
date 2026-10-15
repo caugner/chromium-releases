@@ -6,10 +6,19 @@
 #define CHROME_BROWSER_UI_OMNIBOX_TEST_OMNIBOX_EDIT_MODEL_H_
 
 #include <memory>
+#include <string>
 
 #include "base/memory/raw_ptr.h"
+#include "base/time/time.h"
+#include "chrome/browser/ui/omnibox/omnibox_controller.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
-#include "components/prefs/testing_pref_service.h"
+#include "components/contextual_search/contextual_search_session_handle.h"
+#include "components/omnibox/browser/autocomplete_enums.h"
+#include "components/omnibox/browser/autocomplete_match.h"
+#include "components/prefs/pref_service.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/base/window_open_disposition.h"
+#include "url/gurl.h"
 
 class TestOmniboxEditModel : public OmniboxEditModel {
  public:
@@ -19,9 +28,6 @@ class TestOmniboxEditModel : public OmniboxEditModel {
   TestOmniboxEditModel(const TestOmniboxEditModel&) = delete;
   TestOmniboxEditModel& operator=(const TestOmniboxEditModel&) = delete;
 
-  using OmniboxEditModel::SetIsKeywordHint;
-  using OmniboxEditModel::SetKeyword;
-
   // OmniboxEditModel:
   AutocompleteMatch CurrentMatchAndAlternateNavUrl(
       GURL* alternate_nav_url) const override;
@@ -30,7 +36,7 @@ class TestOmniboxEditModel : public OmniboxEditModel {
                           const std::u16string& inline_autocompletion,
                           const std::u16string& keyword,
                           const std::u16string& keyword_placeholder,
-                          bool is_keyword_hint,
+                          KeywordState keyword_state,
                           const std::u16string& additional_text,
                           const AutocompleteMatch& match) override;
 
@@ -53,6 +59,12 @@ class TestOmniboxEditModel : public OmniboxEditModel {
       const std::u16string& keyword) const;
 
   void SetCurrentMatchForTest(const AutocompleteMatch& match);
+
+  void NavigateToAiModeWithContextualizerOnContextualizationCompleteForTesting(
+      const std::u16string& query_text,
+      WindowOpenDisposition disposition,
+      base::WeakPtr<contextual_search::ContextualSearchSessionHandle>
+          session_handle);
 
   bool HasTemporaryText() { return has_temporary_text_; }
 

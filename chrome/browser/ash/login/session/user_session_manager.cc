@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "ash/constants/ash_features.h"
+#include "ash/constants/ash_login_pref_names.h"
 #include "ash/constants/ash_pref_names.h"
 #include "ash/constants/ash_switches.h"
 #include "ash/metrics/login_unlock_throughput_recorder.h"
@@ -76,7 +77,6 @@
 #include "chrome/browser/ash/login/existing_user_controller.h"
 #include "chrome/browser/ash/login/helper.h"
 #include "chrome/browser/ash/login/lock/screen_locker.h"
-#include "chrome/browser/ash/login/login_pref_names.h"
 #include "chrome/browser/ash/login/onboarding_user_activity_counter.h"
 #include "chrome/browser/ash/login/profile_auth_data.h"
 #include "chrome/browser/ash/login/quick_unlock/pin_backend.h"
@@ -133,7 +133,6 @@
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/logging_chrome.h"
-#include "chrome/common/pref_names.h"
 #include "chromeos/ash/components/account_manager/account_manager_factory.h"
 #include "chromeos/ash/components/browser_context_helper/browser_context_flusher.h"
 #include "chromeos/ash/components/browser_context_helper/browser_context_helper.h"
@@ -652,7 +651,8 @@ bool MaybeStartManagementTransition(Profile* profile) {
 bool MaybeShowManagedTermsOfService(Profile* profile) {
   user_manager::UserManager* user_manager = user_manager::UserManager::Get();
   if (user_manager->IsCurrentUserNew() ||
-      !profile->GetPrefs()->IsManagedPreference(::prefs::kTermsOfServiceURL)) {
+      !profile->GetPrefs()->IsManagedPreference(
+          ash::prefs::kTermsOfServiceURL)) {
     return false;
   }
 
@@ -666,6 +666,27 @@ bool MaybeShowManagedTermsOfService(Profile* profile) {
   return true;
 }
 
+signin::ConsentLevel GetExpectedConsentLevel(
+    signin::IdentityManager* identity_manager) {
+  if (identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSync) ||
+      !base::FeatureList::IsEnabled(
+          syncer::kReplaceSyncPromosWithSignInPromos) ||
+      base::FeatureList::IsEnabled(
+          ::switches::kUndoChromeOsUseConsentLevelSignin)) {
+    return signin::ConsentLevel::kSync;
+  }
+
+  // If the user already has kSignin, keep it (do not migrate to kSync) unless
+  // kUndoChromeOsUseConsentLevelSignin is enabled above.
+  if (identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSignin) ||
+      base::FeatureList::IsEnabled(
+          ::switches::kChromeOsUseConsentLevelSigninForNewUsers)) {
+    return signin::ConsentLevel::kSignin;
+  }
+
+  return signin::ConsentLevel::kSync;
+}
+
 }  // namespace
 
 // static
@@ -676,8 +697,8 @@ UserSessionManager* UserSessionManager::GetInstance() {
 
 // static
 void UserSessionManager::RegisterPrefs(PrefRegistrySimple* registry) {
-  registry->RegisterStringPref(::prefs::kRLZBrand, std::string());
-  registry->RegisterBooleanPref(::prefs::kRLZDisabled, false);
+  registry->RegisterStringPref(ash::prefs::kRLZBrand, std::string());
+  registry->RegisterBooleanPref(ash::prefs::kRLZDisabled, false);
 }
 
 UserSessionManager::UserSessionManager(
@@ -1606,17 +1627,21 @@ void UserSessionManager::InitProfilePreferences(
           base::FeatureList::IsEnabled(
               syncer::kEstimateNewSignInUsersWithFinchAvailablePopulation));
     }
+
+    const signin::ConsentLevel consent_level =
+        GetExpectedConsentLevel(identity_manager);
+
     const signin::PrimaryAccountMutator::PrimaryAccountError
         set_account_result =
             identity_manager->GetPrimaryAccountMutator()->SetPrimaryAccount(
-                account_id, ConsentLevel::kSync,
+                account_id, consent_level,
                 signin_metrics::AccessPoint::kAshUserSessionManager);
     VLOG(1) << "SetPrimaryAccount result="
             << static_cast<int>(set_account_result);
 
     // TODO(http://crbug.com/40916881): Remove.
     const CoreAccountInfo& identity_manager_account_info =
-        identity_manager->GetPrimaryAccountInfo(ConsentLevel::kSync);
+        identity_manager->GetPrimaryAccountInfo(consent_level);
     if (identity_manager_account_info.gaia != gaia_id) {
       signin::PrimaryAccountMutator::PrimaryAccountError
           set_account_result_copy = set_account_result;
@@ -1640,8 +1665,8 @@ void UserSessionManager::InitProfilePreferences(
           identity_manager_account_info.account_id.ToString().c_str(), 32);
     }
 
-    CHECK(identity_manager->HasPrimaryAccount(ConsentLevel::kSync));
-    CHECK_EQ(identity_manager->GetPrimaryAccountInfo(ConsentLevel::kSync).gaia,
+    CHECK(identity_manager->HasPrimaryAccount(consent_level));
+    CHECK_EQ(identity_manager->GetPrimaryAccountInfo(consent_level).gaia,
              gaia_id);
 
     DCHECK_EQ(account_id,
@@ -2112,8 +2137,49 @@ void UserSessionManager::RestoreAuthSessionImpl(
   login_manager->RestoreSession(user_context_.GetAccessToken());
 }
 
+void UserSessionManager::MaybeMigrateConsentLevelToSync(Profile* profile) {
+  const user_manager::User* user =
+      ash::BrowserContextHelper::Get()->GetUserByBrowserContext(profile);
+  if (!user || !user->HasGaiaAccount()) {
+    return;
+  }
+
+  CHECK(!profile->IsOffTheRecord());
+
+  signin::IdentityManager* identity_manager =
+      IdentityManagerFactory::GetForProfile(profile);
+  // Only enforce consent level if the user is already signed in.
+  if (!identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSignin)) {
+    return;
+  }
+
+  // The migration is a one-way upgrade from kSignin to kSync; we never
+  // downgrade. In particular, users who are already at the kSync consent level
+  // are never migrated to kSignin and remain unaffected.
+  //
+  // On ChromeOS, only new users get the kSignin consent level if the
+  // `kChromeOsUseConsentLevelSigninForNewUsers` flag is enabled. When that
+  // flag is disabled (or if we revert back to the default behavior), we migrate
+  // those kSignin users to kSync.
+  if (GetExpectedConsentLevel(identity_manager) ==
+          signin::ConsentLevel::kSync &&
+      !identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSync)) {
+    const signin::PrimaryAccountMutator::PrimaryAccountError
+        set_account_result =
+            identity_manager->GetPrimaryAccountMutator()->SetPrimaryAccount(
+                identity_manager->GetPrimaryAccountId(
+                    signin::ConsentLevel::kSignin),
+                signin::ConsentLevel::kSync,
+                signin_metrics::AccessPoint::kAshUserSessionManager);
+    CHECK_EQ(set_account_result,
+             signin::PrimaryAccountMutator::PrimaryAccountError::kNoError);
+  }
+}
+
 void UserSessionManager::OnUserProfileLoaded(Profile* profile,
                                              const user_manager::User* user) {
+  MaybeMigrateConsentLevelToSync(profile);
+
   session_manager::SessionManager::Get()->NotifyUserProfileLoaded(
       user->GetAccountId());
 

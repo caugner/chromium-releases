@@ -647,18 +647,19 @@ RenderWidgetHostViewAndroid::RenderWidgetHostViewAndroid(
     : RenderWidgetHostViewBase(widget_host),
       is_window_visible_(true),
       is_window_activity_started_(true),
+      page_visibility_(widget_host->IsHidden() ? PageVisibilityState::kHidden
+                                               : PageVisibilityState::kVisible),
       view_visibility_(widget_host->IsHidden() ? Visibility::HIDDEN
                                                : Visibility::VISIBLE),
       ime_adapter_android_(nullptr),
       selection_popup_controller_(nullptr),
-      text_suggestion_host_(nullptr),
       gesture_listener_manager_(nullptr),
       view_(ui::ViewAndroid::LayoutType::kMatchParent),
-      gesture_provider_(
+      gesture_provider_(base::MakeRefCounted<ui::FilteredGestureProvider>(
           ui::GetGestureProviderConfig(
               ui::GestureProviderConfigType::CURRENT_PLATFORM,
               GetUIThreadTaskRunner({BrowserTaskType::kUserInput})),
-          this),
+          this)),
       stylus_text_selector_(this),
       using_browser_compositor_(CompositorImpl::IsInitialized()),
       synchronous_compositor_client_(nullptr),
@@ -756,6 +757,7 @@ RenderWidgetHostViewAndroid::RenderWidgetHostViewAndroid(
 }
 
 RenderWidgetHostViewAndroid::~RenderWidgetHostViewAndroid() {
+  gesture_provider_->Shutdown();
   UpdateNativeViewTree(/*parent_native_view=*/nullptr,
                        /*parent_layer=*/nullptr);
   view_.set_event_handler(nullptr);
@@ -940,7 +942,7 @@ void RenderWidgetHostViewAndroid::OnRenderFrameMetadataChangedBeforeActivation(
     is_transparent = false;
   }
 
-  gesture_provider_.SetDoubleTapSupportForPageEnabled(
+  gesture_provider_->SetDoubleTapSupportForPageEnabled(
       !metadata.is_mobile_optimized);
 
   float dip_scale = view_.GetDipScale();
@@ -1239,41 +1241,25 @@ bool RenderWidgetHostViewAndroid::IsSurfaceAvailableForCopy() {
 
 void RenderWidgetHostViewAndroid::ShowWithVisibility(
     PageVisibilityState page_visibility) {
-  // We can transition from `PageVisibilityState::kHiddenButPainting` to
-  // `PageVisibilityState::kVisible` while view_visibility_ == VISIBLE. We only
-  // want to support updating visibility requests for this transition.
-  if (page_visibility_ == page_visibility &&
-      view_visibility_ == Visibility::VISIBLE) {
-    return;
+  TRACE_EVENT0("content", "RenderWidgetHostViewAndroid::ShowWithVisibility");
+  DCHECK_NE(page_visibility, PageVisibilityState::kHidden);
+  Visibility next_view_visibility = view_visibility_;
+  if (page_visibility == PageVisibilityState::kVisible) {
+    next_view_visibility = Visibility::VISIBLE;
+  } else if (page_visibility == PageVisibilityState::kHiddenButPainting &&
+             next_view_visibility == Visibility::VISIBLE) {
+    next_view_visibility = Visibility::HIDDEN;
   }
-
-  page_visibility_ = page_visibility;
-  SetViewVisibility(Visibility::VISIBLE);
+  TryUpdateVisibilities(next_view_visibility, page_visibility);
 }
 
 void RenderWidgetHostViewAndroid::Hide() {
-  if (view_visibility_ == Visibility::HIDDEN) {
-    return;
-  }
-
-  page_visibility_ = PageVisibilityState::kHidden;
-  SetViewVisibility(Visibility::HIDDEN);
+  TRACE_EVENT0("content", "RenderWidgetHostViewAndroid::Hide");
+  TryUpdateVisibilities(Visibility::HIDDEN, PageVisibilityState::kHidden);
 }
 
 void RenderWidgetHostViewAndroid::WasOccluded() {
-  if (view_visibility_ == Visibility::OCCLUDED) {
-    return;
-  }
-
-  // In occlusion cases, we do not want to hide the frontbuffer as we want the
-  // last state of the page to be visible in case there are delays with the
-  // occlusion state update.
-  page_visibility_ = PageVisibilityState::kHidden;
-  SetViewVisibility(Visibility::OCCLUDED);
-}
-
-void RenderWidgetHostViewAndroid::WasUnOccluded() {
-  ShowWithVisibility(PageVisibilityState::kVisible);
+  TryUpdateVisibilities(Visibility::OCCLUDED, PageVisibilityState::kHidden);
 }
 
 bool RenderWidgetHostViewAndroid::IsShowing() {
@@ -1604,8 +1590,13 @@ bool RenderWidgetHostViewAndroid::OnTouchEvent(
 
   // Receiving any other touch event before the double-tap timeout expires
   // cancels opening the spellcheck menu.
-  if (text_suggestion_host_)
-    text_suggestion_host_->StopSuggestionMenuTimer();
+  if (auto* focused_frame = host_->frame_tree()->GetFocusedFrame()) {
+    if (auto* suggestion_host =
+            TextSuggestionHostAndroid::GetForCurrentDocument(
+                focused_frame->current_frame_host())) {
+      suggestion_host->StopSuggestionMenuTimer();
+    }
+  }
 
   // If a browser-based widget consumes the touch event, it's critical that
   // touch event interception be disabled. This avoids issues with
@@ -1674,8 +1665,15 @@ bool RenderWidgetHostViewAndroid::OnTouchEvent(
     }
   }
 
+  auto weak_this = weak_ptr_factory_.GetWeakPtr();
+  // Keep the gesture provider alive during event dispatch as it can trigger
+  // synchronous view destruction.
+  scoped_refptr<ui::FilteredGestureProvider> protector(gesture_provider_);
   ui::FilteredGestureProvider::TouchHandlingResult result =
-      gesture_provider_.OnTouchEvent(event);
+      protector->OnTouchEvent(event);
+  if (!weak_this) {
+    return false;
+  }
   if (!result.succeeded)
     return false;
 
@@ -1783,12 +1781,12 @@ void RenderWidgetHostViewAndroid::ActivatedOrEvictedFromBackForwardCache() {
 }
 
 void RenderWidgetHostViewAndroid::SetDoubleTapSupportEnabled(bool enabled) {
-  gesture_provider_.SetDoubleTapSupportForPlatformEnabled(enabled);
+  gesture_provider_->SetDoubleTapSupportForPlatformEnabled(enabled);
 }
 
 void RenderWidgetHostViewAndroid::SetMultiTouchZoomSupportEnabled(
     bool enabled) {
-  gesture_provider_.SetMultiTouchZoomSupportEnabled(enabled);
+  gesture_provider_->SetMultiTouchZoomSupportEnabled(enabled);
 }
 
 void RenderWidgetHostViewAndroid::FocusedNodeChanged(
@@ -1951,7 +1949,7 @@ void RenderWidgetHostViewAndroid::CopyFromSurface(
 
 ui::FilteredGestureProvider*
 RenderWidgetHostViewAndroid::GetFilteredGestureProviderForTesting() {
-  return &gesture_provider_;
+  return gesture_provider_.get();
 }
 
 void RenderWidgetHostViewAndroid::CopyFromExactSurface(
@@ -2100,6 +2098,10 @@ void RenderWidgetHostViewAndroid::OnOverscrollRefreshHandlerAvailable() {
   CreateOverscrollControllerIfPossible();
 }
 
+void RenderWidgetHostViewAndroid::ResetOverscrollController() {
+  overscroll_controller_.reset();
+}
+
 bool RenderWidgetHostViewAndroid::SupportsAnimation() const {
   // The synchronous (WebView) compositor does not have a proper browser
   // compositor with which to drive animations.
@@ -2168,7 +2170,7 @@ void RenderWidgetHostViewAndroid::OnSelectionEvent(
           InputTransferHandlerAndroid::RequestInputBackReason::
               kStartTouchSelectionDragGesture);
     }
-    if (gesture_provider_.GetCurrentDownEvent()) {
+    if (gesture_provider_->GetCurrentDownEvent()) {
       ResetGestureDetection();
     }
   }
@@ -2379,8 +2381,13 @@ void RenderWidgetHostViewAndroid::ShowInternal() {
   OnShowWithPageVisibility(page_visibility_);
 }
 
+bool RenderWidgetHostViewAndroid::VisibilityNeedsDrawing() const {
+  return view_visibility_ == Visibility::VISIBLE ||
+         page_visibility_ == PageVisibilityState::kHiddenButPainting;
+}
+
 void RenderWidgetHostViewAndroid::UpdateVisibility() {
-  bool should_be_showing = (view_visibility_ == Visibility::VISIBLE) &&
+  bool should_be_showing = VisibilityNeedsDrawing() &&
                            is_window_activity_started_ && is_window_visible_;
   if (should_be_showing) {
     ShowInternal();
@@ -2389,12 +2396,38 @@ void RenderWidgetHostViewAndroid::UpdateVisibility() {
   }
 }
 
-void RenderWidgetHostViewAndroid::SetViewVisibility(Visibility visibility) {
-  if (view_visibility_ == visibility) {
+void RenderWidgetHostViewAndroid::TryUpdateVisibilities(
+    Visibility new_view_visibility,
+    PageVisibilityState new_page_visibility) {
+#if DCHECK_IS_ON()
+  switch (new_view_visibility) {
+    case Visibility::VISIBLE:
+      // A visible view must have a visible page. It cannot be hidden or
+      // hidden-but-painting.
+      DCHECK_EQ(new_page_visibility, PageVisibilityState::kVisible);
+      break;
+    case Visibility::HIDDEN:
+    case Visibility::OCCLUDED:
+      // A hidden or occluded view cannot have a visible page. It must be hidden
+      // or hidden-but-painting.
+      DCHECK_NE(new_page_visibility, PageVisibilityState::kVisible);
+      break;
+  }
+#endif
+
+  if (view_visibility_ == new_view_visibility &&
+      page_visibility_ == new_page_visibility) {
     return;
   }
-  view_visibility_ = visibility;
-  view_.SetIsHitTestEligible(view_visibility_ == Visibility::VISIBLE);
+
+  bool view_visibility_changed = (view_visibility_ != new_view_visibility);
+  view_visibility_ = new_view_visibility;
+  page_visibility_ = new_page_visibility;
+
+  if (view_visibility_changed) {
+    view_.SetIsHitTestEligible(view_visibility_ == Visibility::VISIBLE);
+  }
+
   UpdateVisibility();
 }
 
@@ -2458,7 +2491,7 @@ void RenderWidgetHostViewAndroid::HideInternal() {
 void RenderWidgetHostViewAndroid::StartObservingRootWindow() {
   DCHECK(view_.parent());
   DCHECK(view_.GetWindowAndroid());
-  DCHECK(view_visibility_ == Visibility::VISIBLE);
+  DCHECK(VisibilityNeedsDrawing());
   if (observing_root_window_)
     return;
 
@@ -2683,10 +2716,6 @@ bool RenderWidgetHostViewAndroid::LockKeyboard(
     return true;
   }
 
-  if (!base::FeatureList::IsEnabled(features::kKeyboardLockApiOnAndroid)) {
-    return false;
-  }
-
   ui::WindowAndroid* window_android = view_.GetWindowAndroid();
   if (!window_android) {
     return false;
@@ -2703,7 +2732,6 @@ bool RenderWidgetHostViewAndroid::LockKeyboard(
 
 void RenderWidgetHostViewAndroid::UnlockKeyboard() {
   CHECK(keyboard_locked_);
-  CHECK(base::FeatureList::IsEnabled(features::kKeyboardLockApiOnAndroid));
   keyboard_locked_ = false;
   locked_keyboard_keys_.reset();
   if (ui::WindowAndroid* window_android = view_.GetWindowAndroid()) {
@@ -2729,8 +2757,14 @@ void RenderWidgetHostViewAndroid::SendKeyEvent(
 
   // Receiving a key event before the double-tap timeout expires cancels opening
   // the spellcheck menu. If the suggestion menu is open, we close the menu.
-  if (text_suggestion_host_)
-    text_suggestion_host_->OnKeyEvent();
+  if (auto* focused_frame = host_->frame_tree()->GetFocusedFrame()) {
+    if (auto* suggestion_host =
+            TextSuggestionHostAndroid::GetForCurrentDocument(
+                focused_frame->current_frame_host())) {
+      suggestion_host->StopSuggestionMenuTimer();
+      suggestion_host->HidePopups();
+    }
+  }
 
   // If the key has been reserved as part of the active KeyboardLock request,
   // then we want to mark it as such so it is not intercepted by the browser.
@@ -2841,7 +2875,8 @@ void RenderWidgetHostViewAndroid::SendGestureEvent(
   input_helper_->RouteOrForwardGestureEvent(event);
 }
 
-ui::FilteredGestureProvider& RenderWidgetHostViewAndroid::GetGestureProvider() {
+scoped_refptr<ui::FilteredGestureProvider>
+RenderWidgetHostViewAndroid::GetGestureProvider() {
   return gesture_provider_;
 }
 
@@ -2992,7 +3027,7 @@ void RenderWidgetHostViewAndroid::UpdateNativeViewTree(
   // TODO(enne): figure out a more straightforward init path for screen infos.
   UpdateScreenInfo();
 
-  if ((view_visibility_ == Visibility::VISIBLE) && view_.GetWindowAndroid()) {
+  if (VisibilityNeedsDrawing() && view_.GetWindowAndroid()) {
     StartObservingRootWindow();
   }
 
@@ -3159,7 +3194,7 @@ void RenderWidgetHostViewAndroid::OnAttachedToWindow() {
     return;
 
   UpdateScreenInfo();
-  if (view_visibility_ == Visibility::VISIBLE) {
+  if (VisibilityNeedsDrawing()) {
     StartObservingRootWindow();
   }
   DCHECK(view_.GetWindowAndroid());
@@ -3351,7 +3386,7 @@ void RenderWidgetHostViewAndroid::DidNavigate() {
     RenderWidgetHostViewBase::DidNavigate();
     return;
   }
-  if (view_visibility_ != Visibility::VISIBLE) {
+  if (!VisibilityNeedsDrawing()) {
     // Navigating while hidden should not allocate a new LocalSurfaceID. Once
     // sizes are ready, or we begin to Show, we can then allocate the new
     // LocalSurfaceId.
@@ -3691,7 +3726,7 @@ void RenderWidgetHostViewAndroid::WasEvicted() {
   // upon creating RenderWidgetHostViewAndroid. When this occurs while visible
   // a new LocalSurfaceId should be generated. If eviction occurs while not
   // visible, then the new LocalSurfaceId can be allocated upon the next Show.
-  if (view_visibility_ == Visibility::VISIBLE) {
+  if (VisibilityNeedsDrawing()) {
     local_surface_id_allocator_.GenerateId();
     // Guarantee that the new LocalSurfaceId is propagated. Rather than relying
     // upon calls to Show() and OnDidUpdateVisualPropertiesComplete(). As there
@@ -3845,7 +3880,7 @@ void RenderWidgetHostViewAndroid::EndRotationAndSyncIfNecessary() {
     return;
   EndRotationBatching();
 
-  if (view_visibility_ == Visibility::VISIBLE) {
+  if (VisibilityNeedsDrawing()) {
     SynchronizeVisualProperties(cc::DeadlinePolicy::UseDefaultDeadline(),
                                 std::nullopt,
                                 /*reuse_current_local_surface_id=*/false,
@@ -3872,7 +3907,7 @@ void RenderWidgetHostViewAndroid::SetTouchpadOverscrollHistoryNavigation(
 }
 
 void RenderWidgetHostViewAndroid::OnUnconfirmedTapConvertedToTap() {
-  gesture_provider_.OnUnconfirmedTapConvertedToTap();
+  gesture_provider_->OnUnconfirmedTapConvertedToTap();
 }
 
 CompositorImpl* RenderWidgetHostViewAndroid::GetCompositorImpl() {

@@ -8,6 +8,7 @@
 #import <UIKit/UIKit.h>
 
 #import "base/ios/block_types.h"
+#import "components/signin/public/base/signin_deep_link_payload.h"
 #import "components/signin/public/base/signin_metrics.h"
 #import "ios/chrome/browser/authentication/ui_bundled/change_profile_continuation_provider.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/buggy_authentication_view_owner.h"
@@ -18,6 +19,8 @@
 
 enum class AccountMenuAccessPoint;
 class Browser;
+@class ScreenProvider;
+@class ShowSigninCommand;
 @protocol SystemIdentity;
 namespace syncer {
 enum class TrustedVaultUserActionTriggerForUMA;
@@ -28,7 +31,6 @@ enum class SecurityDomainId;
 namespace user_prefs {
 class PrefRegistrySyncable;
 }  // namespace user_prefs
-@class ShowSigninCommand;
 
 // Main class for sign-in coordinator. This class should not be instantiated
 // directly, this should be done using the class methods.
@@ -237,6 +239,19 @@ class PrefRegistrySyncable;
                                      promoAction:(signin_metrics::PromoAction)
                                                      promoAction
                                     showSnackbar:(BOOL)showSnackbar;
+
+// Returns a coordinator for signing users in using the `selectedAccountEmail`.
++ (SigninCoordinator*)
+    deeplinkSigninCoordinatorWithBaseViewController:
+        (UIViewController*)viewController
+                                            browser:(Browser*)browser
+                               selectedAccountEmail:
+                                   (NSString*)selectedAccountEmail
+                  changeProfileContinuationProvider:
+                      (const ChangeProfileContinuationProvider&)
+                          changeProfileContinuationProvider
+                                 externalEntryPoint:(signin::ExternalEntryPoint)
+                                                        externalEntryPoint;
 
 // ChromeCoordinator.
 - (void)start NS_REQUIRES_SUPER;

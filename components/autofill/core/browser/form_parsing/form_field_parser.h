@@ -5,6 +5,9 @@
 #ifndef COMPONENTS_AUTOFILL_CORE_BROWSER_FORM_PARSING_FORM_FIELD_PARSER_H_
 #define COMPONENTS_AUTOFILL_CORE_BROWSER_FORM_PARSING_FORM_FIELD_PARSER_H_
 
+#include <stddef.h>
+
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <string>
@@ -13,6 +16,7 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/containers/flat_map.h"
 #include "base/containers/lru_cache.h"
 #include "base/containers/span.h"
 #include "base/feature_list.h"
@@ -21,11 +25,15 @@
 #include "base/memory/raw_ref.h"
 #include "components/autofill/core/browser/country_type.h"
 #include "components/autofill/core/browser/field_types.h"
+#include "components/autofill/core/browser/form_parsing/autofill_parsing_utils.h"
 #include "components/autofill/core/browser/form_parsing/field_candidates.h"
 #include "components/autofill/core/browser/form_parsing/regex_patterns.h"
 #include "components/autofill/core/common/autofill_features.h"
+#include "components/autofill/core/common/dense_set.h"
+#include "components/autofill/core/common/form_field_data.h"
 #include "components/autofill/core/common/is_required.h"
 #include "components/autofill/core/common/language_code.h"
+#include "components/autofill/core/common/unique_ids.h"
 
 namespace autofill {
 

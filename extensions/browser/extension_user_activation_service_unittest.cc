@@ -8,6 +8,9 @@
 #include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_browser_context.h"
 #include "extensions/browser/extensions_test.h"
+#include "base/feature_list.h"
+#include "build/build_config.h"
+#include "content/public/common/content_features.h"
 #include "extensions/common/extension_id.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -37,7 +40,20 @@ class ExtensionUserActivationServiceTest : public ExtensionsTest {
   std::unique_ptr<ExtensionUserActivationService> service_;
 };
 
-TEST_F(ExtensionUserActivationServiceTest, TransientActivation) {
+// TODO(crbug.com/511260483): Flaky on MSAN.
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_TransientActivation DISABLED_TransientActivation
+#else
+#define MAYBE_TransientActivation TransientActivation
+#endif
+TEST_F(ExtensionUserActivationServiceTest, MAYBE_TransientActivation) {
+#if defined(MEMORY_SANITIZER)
+  if (base::FeatureList::IsEnabled(features::kInitialWebUI)) {
+    GTEST_SKIP() << "Skipping test on MSAN with InitialWebUI enabled. "
+                    "See crbug.com/477426026.";
+  }
+#endif
+
   const ExtensionId kExtensionId = std::string("foo");
 
   EXPECT_FALSE(service()->HasTransientActivation(kExtensionId));
@@ -80,8 +96,23 @@ TEST_F(ExtensionUserActivationServiceTest,
   EXPECT_TRUE(service()->HasTransientActivation(kExtensionId));
 }
 
+// TODO(crbug.com/511260483): Flaky on MSAN.
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_TransientActivation_MultipleExtensions \
+  DISABLED_TransientActivation_MultipleExtensions
+#else
+#define MAYBE_TransientActivation_MultipleExtensions \
+  TransientActivation_MultipleExtensions
+#endif
 TEST_F(ExtensionUserActivationServiceTest,
-       TransientActivation_MultipleExtensions) {
+       MAYBE_TransientActivation_MultipleExtensions) {
+#if defined(MEMORY_SANITIZER)
+  if (base::FeatureList::IsEnabled(features::kInitialWebUI)) {
+    GTEST_SKIP() << "Skipping test on MSAN with InitialWebUI enabled. "
+                    "See crbug.com/477426026.";
+  }
+#endif
+
   const ExtensionId kExtensionId1 = std::string("foo");
   const ExtensionId kExtensionId2 = std::string("bar");
 

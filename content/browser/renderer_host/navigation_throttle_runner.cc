@@ -150,10 +150,9 @@ void NavigationThrottleRunner::ResumeProcessingNavigationEvent(
 }
 
 void NavigationThrottleRunner::ProcessInternal() {
-  TRACE_EVENT0("navigation", "NavigationThrottleRunner::ProcessInternal");
-  // TODO(https://crbug.com/497761255): CHECK-exclusion: Convert to CHECK once
-  // we are sure this isn't hit.
-  DCHECK_NE(NavigationThrottleEvent::kNoEvent, current_event_);
+  TRACE_EVENT("navigation", "NavigationThrottleRunner::ProcessInternal",
+              "current_event", current_event_);
+  CHECK_NE(NavigationThrottleEvent::kNoEvent, current_event_);
   base::Time start_time = base::Time::Now();
   if (!event_process_start_time_.has_value()) {
     event_process_start_time_ = start_time;

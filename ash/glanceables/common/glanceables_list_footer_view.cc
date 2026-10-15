@@ -21,6 +21,7 @@
 #include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/models/image_model.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/chromeos/styles/cros_tokens_color_mappings.h"
 #include "ui/gfx/text_constants.h"
 #include "ui/views/accessibility/view_accessibility.h"
@@ -62,10 +63,12 @@ class SeeAllButton : public views::LabelButton {
     SetCallback(std::move(on_see_all_pressed));
     SetID(std::to_underlying(GlanceablesViewId::kListFooterSeeAllButton));
     SetHorizontalAlignment(gfx::HorizontalAlignment::ALIGN_RIGHT);
-    SetImageModel(
-        views::Button::STATE_NORMAL,
-        ui::ImageModel::FromVectorIcon(vector_icons::kLaunchIcon,
-                                       cros_tokens::kCrosSysOnSurface));
+    SetImageModel(views::Button::STATE_NORMAL,
+                  ui::ImageModel::FromVectorIcon(
+                      ::features::IsRoundedIconsEnabled()
+                          ? vector_icons::kOpenInNewFlippableIcon
+                          : vector_icons::kLaunchOldIcon,
+                      cros_tokens::kCrosSysOnSurface));
     SetImageLabelSpacing(kSeeAllIconLabelSpacing);
     SetTextColor(views::Button::STATE_NORMAL, cros_tokens::kCrosSysOnSurface);
     TypographyProvider::Get()->StyleLabel(TypographyToken::kCrosButton2,

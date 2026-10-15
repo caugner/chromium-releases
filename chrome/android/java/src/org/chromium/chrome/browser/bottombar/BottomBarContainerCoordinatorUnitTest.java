@@ -14,6 +14,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import android.app.Activity;
+import android.content.res.Configuration;
 import android.view.View;
 import android.widget.FrameLayout;
 
@@ -30,21 +31,30 @@ import org.robolectric.annotation.Config;
 
 import org.chromium.base.Callback;
 import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.OneshotSupplierImpl;
 import org.chromium.base.supplier.SettableNonNullObservableSupplier;
 import org.chromium.base.supplier.SettableNullableObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.RobolectricUtil;
 import org.chromium.chrome.browser.browser_controls.BottomControlsStacker.LayerScrollBehavior;
+import org.chromium.chrome.browser.glic.GlicEnabling;
+import org.chromium.chrome.browser.glic.GlicKeyedService;
+import org.chromium.chrome.browser.glic.GlicKeyedServiceFactory;
+import org.chromium.chrome.browser.omaha.UpdateMenuItemHelper;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.theme.ThemeColorProvider;
 import org.chromium.chrome.browser.toolbar.bottom.BottomControlsCoordinator.BottomControlsVisibilityController;
+import org.chromium.chrome.browser.toolbar.menu_button.MenuUiState;
 import org.chromium.chrome.browser.ui.actions.ActionId;
 import org.chromium.chrome.browser.ui.actions.ActionRegistry;
+import org.chromium.chrome.browser.ui.appmenu.AppMenuCoordinator;
 import org.chromium.chrome.browser.ui.bottombar.BottomBar;
 import org.chromium.chrome.browser.ui.bottombar.BottomBarHostManager.Host;
 import org.chromium.chrome.browser.ui.bottombar.BottomBarUtils;
 import org.chromium.chrome.browser.ui.theme.BrandedColorScheme;
 import org.chromium.ui.base.TestActivity;
+import org.chromium.ui.modaldialog.ModalDialogManager;
 import org.chromium.ui.modelutil.PropertyModel;
 
 /** Unit tests for {@link BottomBarContainerCoordinator}. */
@@ -63,6 +73,9 @@ public class BottomBarContainerCoordinatorUnitTest {
     @Mock private ThemeColorProvider mThemeColorProvider;
     @Mock private ActionRegistry mActionRegistry;
     @Mock private Profile mProfile;
+    @Mock private ModalDialogManager mModalDialogManager;
+    @Mock private UpdateMenuItemHelper mUpdateMenuItemHelper;
+    @Mock private GlicKeyedService mGlicKeyedService;
 
     private final SettableNullableObservableSupplier<Tab> mTabSupplier =
             ObservableSuppliers.createNullable();
@@ -74,12 +87,20 @@ public class BottomBarContainerCoordinatorUnitTest {
     private Activity mActivity;
     private FrameLayout mBottomBarContainer;
     private SettableNonNullObservableSupplier<Boolean> mHomepageEnabledSupplier;
+    private SettableNonNullObservableSupplier<Boolean> mOmniboxFocusStateSupplier;
+    private SettableNonNullObservableSupplier<ModalDialogManager> mModalDialogManagerSupplier;
     private BottomBarContainerCoordinator mCoordinator;
 
     @Before
     public void setUp() {
         mTabSupplier.set(null);
         when(mActionRegistry.get(anyInt())).thenReturn(mActionSupplier);
+        when(mProfile.getOriginalProfile()).thenReturn(mProfile);
+        UpdateMenuItemHelper.setInstanceForTesting(mUpdateMenuItemHelper);
+        when(mUpdateMenuItemHelper.getUiState()).thenReturn(new MenuUiState());
+        GlicKeyedServiceFactory.setForTesting(mGlicKeyedService);
+        GlicEnabling.setEnabledForTesting(false);
+
         mActivityScenarioRule
                 .getScenario()
                 .onActivity(
@@ -87,6 +108,9 @@ public class BottomBarContainerCoordinatorUnitTest {
                             mActivity = activity;
                             mBottomBarContainer = new FrameLayout(mActivity);
                             mHomepageEnabledSupplier = ObservableSuppliers.createNonNull(true);
+                            mOmniboxFocusStateSupplier = ObservableSuppliers.createNonNull(false);
+                            mModalDialogManagerSupplier =
+                                    ObservableSuppliers.createNonNull(mModalDialogManager);
                             mProfileSupplier.set(mProfile);
                             mCoordinator =
                                     new BottomBarContainerCoordinator(
@@ -96,7 +120,10 @@ public class BottomBarContainerCoordinatorUnitTest {
                                             mTabSupplier,
                                             mThemeColorProvider,
                                             mHomepageEnabledSupplier,
-                                            mProfileSupplier);
+                                            mProfileSupplier,
+                                            mOmniboxFocusStateSupplier,
+                                            mModalDialogManagerSupplier,
+                                            new OneshotSupplierImpl<AppMenuCoordinator>());
                         });
     }
 
@@ -168,5 +195,70 @@ public class BottomBarContainerCoordinatorUnitTest {
         assertEquals(childView, mBottomBarContainer.getChildAt(0));
         verify(mRequestLayerUpdateCallback).onResult(true);
         verify(mOnModelTokenChange, times(2)).onResult(any());
+    }
+
+    @Test
+    public void testOnConfigurationChanged() {
+        mCoordinator.initializeWithNative(mVisibilityController, mOnModelTokenChange);
+        verify(mOnModelTokenChange, times(1)).onResult(any());
+
+        Configuration newConfig = new Configuration();
+        newConfig.orientation = Configuration.ORIENTATION_LANDSCAPE;
+
+        mCoordinator.getComponentCallbacksForTesting().onConfigurationChanged(newConfig);
+
+        // Runnable is posted, verify it hasn't run yet.
+        verify(mOnModelTokenChange, times(1)).onResult(any());
+
+        // Run posted tasks.
+        RobolectricUtil.runAllBackgroundAndUi();
+
+        // Verify runnable executed.
+        verify(mOnModelTokenChange, times(2)).onResult(any());
+    }
+
+    @Test
+    public void testOnConfigurationChanged_debounce() {
+        mCoordinator.initializeWithNative(mVisibilityController, mOnModelTokenChange);
+        verify(mOnModelTokenChange, times(1)).onResult(any());
+
+        Configuration newConfig1 = new Configuration();
+        newConfig1.orientation = Configuration.ORIENTATION_LANDSCAPE;
+
+        Configuration newConfig2 = new Configuration();
+        newConfig2.orientation = Configuration.ORIENTATION_PORTRAIT;
+
+        mCoordinator.getComponentCallbacksForTesting().onConfigurationChanged(newConfig1);
+        mCoordinator.getComponentCallbacksForTesting().onConfigurationChanged(newConfig2);
+
+        // Run posted tasks.
+        RobolectricUtil.runAllBackgroundAndUi();
+
+        // Verify runnable executed only once more (total 2).
+        verify(mOnModelTokenChange, times(2)).onResult(any());
+    }
+
+    @Test
+    public void testOnConfigurationChanged_sameOrientation() {
+        mCoordinator.initializeWithNative(mVisibilityController, mOnModelTokenChange);
+        verify(mOnModelTokenChange, times(1)).onResult(any());
+
+        Configuration newConfig = new Configuration();
+        int currentOrientation = mActivity.getResources().getConfiguration().orientation;
+        newConfig.orientation = currentOrientation;
+
+        mCoordinator.getComponentCallbacksForTesting().onConfigurationChanged(newConfig);
+
+        // Run posted tasks.
+        RobolectricUtil.runAllBackgroundAndUi();
+
+        // Verify runnable NOT executed.
+        verify(mOnModelTokenChange, times(1)).onResult(any());
+    }
+
+    @Test
+    public void testOnBackgroundColorChanged() {
+        mCoordinator.onBackgroundColorChanged();
+        verify(mRequestLayerUpdateCallback).onResult(false);
     }
 }

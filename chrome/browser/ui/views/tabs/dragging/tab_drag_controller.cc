@@ -532,6 +532,18 @@ TabDragController::Liveness TabDragController::Init(
       std::make_unique<DraggedTabsClosedTracker>(
           ref->source_context_->GetTabStripModel(), this);
 
+  // To support immersive fullscreen on macOS, get the top-level widget, which
+  // is the browser widget. In immersive fullscreen there are other
+  // intermediate widgets that host the toolbar and tab strip; getting their
+  // restored bounds is not helpful. Getting the top-level widget in the
+  // non-immersive fullscreen case is a essentially a NOP, so use it
+  // unconditionally here for all platforms.
+  const views::Widget* source_top_level_widget =
+      ref->source_context_->GetWidget()->GetTopLevelWidget();
+  CHECK(source_top_level_widget);
+  ref->initial_window_size_ =
+      source_top_level_widget->GetRestoredBounds().size();
+
   ///////// DO NOT ADD INITIALIZATION CODE BELOW THIS LINE ////////
   // We need to be initialized at this point because SetCapture may reenter this
   // TabDragController and we do not want to deal with a partially-uninitialized
@@ -2194,16 +2206,6 @@ void TabDragController::RevertSplitAt(size_t drag_index) {
   if (attached_context_ != source_context_) {
     // The Split was inserted into another TabDragContext. We need to
     // put it back into the original one.
-    if (tab_data.tab_group_data.has_value()) {
-      const TabGroup* group =
-          source_context_->GetTabStripModel()->group_model()->GetTabGroup(
-              tab_data.tab_group_data->group_id);
-      if (group) {
-        target_index =
-            group->ListTabs().start() + tab_data.tab_group_data->index_in_group;
-      }
-    }
-
     std::unique_ptr<DetachedTabCollection> detached_split =
         attached_context_->GetTabStripModel()->DetachSplitTabForInsertion(
             split_id);
@@ -2256,6 +2258,30 @@ void TabDragController::CompleteDrag() {
   base::UmaHistogramEnumeration(
       absl::StrFormat("TabStrip.%s.TabDragDestination", GetTabStripMode()),
       destination);
+
+  bool has_pinned = false;
+  bool has_unpinned = false;
+  for (const auto& data : drag_data_.tab_drag_data_) {
+    if (data.view_type == TabSlotView::ViewType::kTabGroupHeader ||
+        !data.pinned) {
+      has_unpinned = true;
+    } else if (data.pinned) {
+      has_pinned = true;
+    }
+  }
+
+  TabDragPinnedness pinnedness;
+  if (has_pinned && has_unpinned) {
+    pinnedness = TabDragPinnedness::kMixed;
+  } else if (has_pinned) {
+    pinnedness = TabDragPinnedness::kAllPinned;
+  } else {
+    pinnedness = TabDragPinnedness::kAllUnpinned;
+  }
+
+  base::UmaHistogramEnumeration(
+      absl::StrFormat("TabStrip.%s.TabDragPinnedness", GetTabStripMode()),
+      pinnedness);
 
   if (current_drag_target_ && current_drag_target_->CanDropTab()) {
     current_drag_target_->HandleTabDrop(*this);
@@ -2452,14 +2478,7 @@ void TabDragController::RestoreAttachedWindowForDrag() {
 
 gfx::Size TabDragController::CalculateDraggedWindowSize(
     TabDragContext* source) {
-  // To support immersive fullscreen on macOS get the top level widget, which
-  // will be the browser widget. In immersive fullscreen there are other
-  // intermediate widgets that host the toolbar and tab strip, getting their
-  // restored bounds is not helpful. Getting the top level widget in the
-  // non-immersive fullscreen case is a essentially a NOP, so use it
-  // unconditionally here for all platforms.
-  gfx::Size new_size(
-      source->GetWidget()->GetTopLevelWidget()->GetRestoredBounds().size());
+  gfx::Size new_size(initial_window_size_);
 
   // Limit the window size to the current display's size, less some insets.
   const gfx::Size work_area =

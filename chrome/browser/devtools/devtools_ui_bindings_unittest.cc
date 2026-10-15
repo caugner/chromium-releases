@@ -299,8 +299,16 @@ TEST_F(DevToolsUIBindingsTest, SanitizeFrontendURL) {
        "devtools://devtools/?panel=sources"},
       {"devtools://devtools/?panel=resources",
        "devtools://devtools/?panel=resources"},
-      {"devtools://devtools/?panel=performance",
-       "devtools://devtools/?panel=performance"},
+      {"devtools://devtools/?panel=timeline",
+       "devtools://devtools/?panel=timeline"},
+      {"devtools://devtools/?panel=heap-profiler",
+       "devtools://devtools/?panel=heap-profiler"},
+      {"devtools://devtools/?panel=lighthouse",
+       "devtools://devtools/?panel=lighthouse"},
+      {"devtools://devtools/?panel=security",
+       "devtools://devtools/?panel=security"},
+      {"devtools://devtools/?panel=chrome-recorder",
+       "devtools://devtools/?panel=chrome-recorder"},
       {"devtools://devtools/?panel=unsupported", "devtools://devtools/"},
   };
 
@@ -949,11 +957,16 @@ TEST_F(DevToolsUIBindingsHostConfigTest, GetHostConfigWithFeatures) {
   ASSERT_TRUE(initial_freestyler);
   EXPECT_TRUE(initial_freestyler->FindBool("enabled").value_or(false));
 
+  const base::DictValue* initial_aiv2_arch =
+      initial_config.FindDict("devToolsAiV2Architecture");
+  ASSERT_TRUE(initial_aiv2_arch);
+  EXPECT_FALSE(initial_aiv2_arch->FindBool("enabled").value_or(true));
+
   // Enable features.
   base::test::ScopedFeatureList scoped_feature_list;
   scoped_feature_list.InitWithFeatures(
       {::features::kDevToolsGreenDevUi, ::features::kDevToolsProtocolMonitor,
-       ::features::kDevToolsFreestyler},
+       ::features::kDevToolsFreestyler, ::features::kDevToolsAiV2Architecture},
       {});
 
   // Verify state of features after enabling them.
@@ -972,6 +985,38 @@ TEST_F(DevToolsUIBindingsHostConfigTest, GetHostConfigWithFeatures) {
   const base::DictValue* freestyler = result.FindDict("devToolsFreestyler");
   ASSERT_TRUE(freestyler);
   EXPECT_TRUE(freestyler->FindBool("enabled").value_or(false));
+
+  const base::DictValue* aiv2_arch =
+      result.FindDict("devToolsAiV2Architecture");
+  ASSERT_TRUE(aiv2_arch);
+  EXPECT_TRUE(aiv2_arch->FindBool("enabled").value_or(false));
+}
+
+TEST_F(DevToolsUIBindingsHostConfigTest, GetHostConfigGdpProfiles) {
+  base::DictValue config =
+      DevToolsUIBindings::GetHostConfigDictionary(profile_.get());
+
+  const base::DictValue* gdp_profiles = config.FindDict("devToolsGdpProfiles");
+  ASSERT_TRUE(gdp_profiles);
+  std::optional<bool> gdp_enabled = gdp_profiles->FindBool("enabled");
+  ASSERT_TRUE(gdp_enabled.has_value());
+#if BUILDFLAG(IS_ANDROID)
+  EXPECT_FALSE(*gdp_enabled);
+#else
+  EXPECT_TRUE(*gdp_enabled);
+#endif
+
+  const base::DictValue* gdp_profiles_availability =
+      config.FindDict("devToolsGdpProfilesAvailability");
+  ASSERT_TRUE(gdp_profiles_availability);
+  std::optional<bool> availability_enabled =
+      gdp_profiles_availability->FindBool("enabled");
+  ASSERT_TRUE(availability_enabled.has_value());
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING) && !BUILDFLAG(IS_ANDROID)
+  EXPECT_TRUE(*availability_enabled);
+#else
+  EXPECT_FALSE(*availability_enabled);
+#endif
 }
 
 TEST_F(DevToolsUIBindingsHostConfigTest, SetChromeFlag) {

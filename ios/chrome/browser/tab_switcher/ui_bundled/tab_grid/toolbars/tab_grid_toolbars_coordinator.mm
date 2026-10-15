@@ -11,6 +11,8 @@
 #import "ios/chrome/browser/bubble/ui_bundled/bubble_view_controller_presenter.h"
 #import "ios/chrome/browser/feature_engagement/model/tracker_factory.h"
 #import "ios/chrome/browser/first_run/guided_tour/coordinator/guided_tour_coordinator.h"
+#import "ios/chrome/browser/shared/coordinator/layout_guide/layout_guide_util.h"
+#import "ios/chrome/browser/shared/coordinator/scene/scene_state.h"
 #import "ios/chrome/browser/shared/model/browser/browser.h"
 #import "ios/chrome/browser/shared/model/profile/profile_ios.h"
 #import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
@@ -25,8 +27,7 @@
 #import "ios/chrome/grit/ios_strings.h"
 #import "ui/base/l10n/l10n_util_mac.h"
 
-@interface TabGridToolbarsCoordinator () <GuidedTourCoordinatorDelegate,
-                                          TabGridToolbarCommands>
+@interface TabGridToolbarsCoordinator () <TabGridToolbarCommands>
 @end
 
 @implementation TabGridToolbarsCoordinator {
@@ -34,7 +35,6 @@
   TabGridToolbarsMediator* _mediator;
   // Coordinator for the first step of the guided tour.
   GuidedTourCoordinator* _guidedTourCoordinator;
-  ProceduralBlock _guidedTourCompletionBlock;
 }
 
 - (void)start {
@@ -62,6 +62,8 @@
 
   [_guidedTourCoordinator stop];
   _guidedTourCoordinator = nil;
+
+  [self.browser->GetCommandDispatcher() stopDispatchingToTarget:self];
 }
 
 #pragma mark - Property Implementation.
@@ -117,48 +119,50 @@
 - (void)showGuidedTourIncognitoStepWithDismissalCompletion:
     (ProceduralBlock)completion {
   [self.topToolbar highlightPageControlItem:TabGridPageIncognitoTabs];
+  __weak __typeof(self) weakSelf = self;
+  ProceduralBlock completionBlock = ^{
+    [weakSelf guidedTourStepCompletedForCompletion:completion];
+  };
   _guidedTourCoordinator = [[GuidedTourCoordinator alloc]
             initWithStep:GuidedTourStep::kTabGridIncognito
       baseViewController:self.baseViewController
                  browser:self.browser
-                delegate:self];
+         completionBlock:completionBlock];
   [_guidedTourCoordinator start];
-  _guidedTourCompletionBlock = completion;
 }
 
 - (void)showGuidedTourTabGroupStepWithDismissalCompletion:
     (ProceduralBlock)completion {
   [self.topToolbar highlightPageControlItem:TabGridPageTabGroups];
+  __weak __typeof(self) weakSelf = self;
+  ProceduralBlock completionBlock = ^{
+    [weakSelf guidedTourStepCompletedForCompletion:completion];
+  };
   _guidedTourCoordinator = [[GuidedTourCoordinator alloc]
             initWithStep:GuidedTourStep::kTabGridTabGroup
       baseViewController:self.baseViewController
                  browser:self.browser
-                delegate:self];
+         completionBlock:completionBlock];
   [_guidedTourCoordinator start];
-  _guidedTourCompletionBlock = completion;
 }
 
 - (void)hideTabGridToolbarGuidedTour {
   [self.topToolbar resetLastPageControlHighlight];
-  _guidedTourCompletionBlock = nil;
   [_guidedTourCoordinator stop];
   _guidedTourCoordinator = nil;
-}
-
-#pragma mark - GuidedTourCoordinatorDelegate
-
-- (void)nextTappedForStep:(GuidedTourStep)step {
-  [self.topToolbar resetLastPageControlHighlight];
-}
-
-// Indicates to the delegate that the `step` was dismissed.
-- (void)stepCompleted:(GuidedTourStep)step {
-  [_guidedTourCoordinator stop];
-  _guidedTourCoordinator = nil;
-  _guidedTourCompletionBlock();
 }
 
 #pragma mark - Private
+
+// Handles the completion of a guided tour step.
+- (void)guidedTourStepCompletedForCompletion:(ProceduralBlock)completion {
+  [self.topToolbar resetLastPageControlHighlight];
+  [_guidedTourCoordinator stop];
+  _guidedTourCoordinator = nil;
+  if (completion) {
+    completion();
+  }
+}
 
 // Callback for when the saved tab group IPH is dismissed.
 - (void)savedTabGroupIPHDismissed {
@@ -172,8 +176,8 @@
 - (void)setupTopToolbar {
   // In iOS 13+, constraints break if the UIToolbar is initialized with a null
   // or zero rect frame. An arbitrary non-zero frame fixes this issue.
-  TabGridTopToolbar* topToolbar =
-      [[TabGridTopToolbar alloc] initWithFrame:CGRectMake(0, 0, 100, 100)];
+  TabGridTopToolbar* topToolbar = [[TabGridTopToolbar alloc]
+      initWithLayoutGuideCenter:LayoutGuideCenterForScene(self.sceneState)];
   self.topToolbar = topToolbar;
   topToolbar.translatesAutoresizingMaskIntoConstraints = NO;
   [topToolbar setSearchBarDelegate:self.searchDelegate];
@@ -192,6 +196,7 @@
 
 - (void)setupBottomToolbar {
   TabGridBottomToolbar* bottomToolbar = [[TabGridBottomToolbar alloc] init];
+  bottomToolbar.layoutState = self.sceneState.layoutState;
   self.bottomToolbar = bottomToolbar;
   bottomToolbar.translatesAutoresizingMaskIntoConstraints = NO;
 }

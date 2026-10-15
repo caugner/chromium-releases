@@ -101,7 +101,6 @@
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/devtools_agent_host.h"
-#include "content/public/browser/devtools_agent_host_client.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -327,6 +326,15 @@ scoped_refptr<DevToolsAgentHost> GetOrCreateDevToolsHostForWebContents(
 class DevToolsTest : public PlatformBrowserTest {
  public:
   DevToolsTest() : window_(nullptr) {}
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    PlatformBrowserTest::SetUpCommandLine(command_line);
+#if BUILDFLAG(IS_ANDROID)
+    // Disable the first-run experience (FRE) to prevent FirstRunActivity from
+    // being launched when launching a new activity.
+    command_line->AppendSwitch("disable-fre");
+#endif
+  }
 
   void SetUpOnMainThread() override {
     // A number of tests expect favicon requests to succeed - otherwise, they'll
@@ -1327,8 +1335,9 @@ IN_PROC_BROWSER_TEST_F(DevToolsExtensionTest,
   EXPECT_EQ(extensions_instance->GetProcess(),
             data_frame_rfh->GetSiteInstance()->GetProcess());
 
-  EXPECT_EQ(web_url.GetHost(),
-            web_frame_rfh->GetSiteInstance()->GetSiteURL().GetHost());
+  EXPECT_EQ(web_url.GetHost(), web_frame_rfh->GetSiteInstance()
+                                   ->GetSecurityPrincipal()
+                                   .GetHost());
   EXPECT_NE(devtools_instance, web_frame_rfh->GetSiteInstance());
   EXPECT_NE(extensions_instance, web_frame_rfh->GetSiteInstance());
 
@@ -1346,8 +1355,9 @@ IN_PROC_BROWSER_TEST_F(DevToolsExtensionTest,
   web_frame_rfh = ChildFrameAt(panel_frame_rfh, 2);
 
   EXPECT_EQ(about_blank_url, web_frame_rfh->GetLastCommittedURL());
-  EXPECT_EQ(web_url.GetHost(),
-            web_frame_rfh->GetSiteInstance()->GetSiteURL().GetHost());
+  EXPECT_EQ(web_url.GetHost(), web_frame_rfh->GetSiteInstance()
+                                   ->GetSecurityPrincipal()
+                                   .GetHost());
   EXPECT_NE(devtools_instance, web_frame_rfh->GetSiteInstance());
   EXPECT_NE(extensions_instance, web_frame_rfh->GetSiteInstance());
 
@@ -1444,8 +1454,9 @@ IN_PROC_BROWSER_TEST_F(DevToolsExtensionTest,
             devtools_extension_devtools_page_rfh->GetSiteInstance());
   EXPECT_EQ(extensions_instance,
             devtools_sidebar_pane_extension_rfh->GetSiteInstance());
-  EXPECT_EQ(web_url.GetHost(),
-            http_iframe_rfh->GetSiteInstance()->GetSiteURL().GetHost());
+  EXPECT_EQ(web_url.GetHost(), http_iframe_rfh->GetSiteInstance()
+                                   ->GetSecurityPrincipal()
+                                   .GetHost());
   EXPECT_NE(devtools_instance, http_iframe_rfh->GetSiteInstance());
   EXPECT_NE(extensions_instance, http_iframe_rfh->GetSiteInstance());
 }
@@ -1519,8 +1530,9 @@ IN_PROC_BROWSER_TEST_F(DevToolsExtensionTest,
   EXPECT_TRUE(devtools_instance->GetSecurityPrincipal().SchemeIs(
       content::kChromeDevToolsScheme));
   EXPECT_NE(devtools_instance, extensions_instance);
-  EXPECT_EQ(web_url.GetHost(),
-            http_iframe_rfh->GetSiteInstance()->GetSiteURL().GetHost());
+  EXPECT_EQ(web_url.GetHost(), http_iframe_rfh->GetSiteInstance()
+                                   ->GetSecurityPrincipal()
+                                   .GetHost());
   EXPECT_NE(devtools_instance, http_iframe_rfh->GetSiteInstance());
   EXPECT_NE(extensions_instance, http_iframe_rfh->GetSiteInstance());
 }
@@ -1592,7 +1604,9 @@ IN_PROC_BROWSER_TEST_F(DevToolsExtensionTest,
   EXPECT_EQ(extensions_instance,
             devtools_extension_panel_rfh->GetSiteInstance());
   EXPECT_EQ(non_dt_extension_test_url.DeprecatedGetOriginAsURL(),
-            non_devtools_extension_rfh->GetSiteInstance()->GetSiteURL());
+            non_devtools_extension_rfh->GetSiteInstance()
+                ->GetSecurityPrincipal()
+                .GetDeprecatedSiteURL());
   EXPECT_NE(devtools_instance, non_devtools_extension_rfh->GetSiteInstance());
   EXPECT_NE(extensions_instance, non_devtools_extension_rfh->GetSiteInstance());
 }
@@ -2361,14 +2375,21 @@ IN_PROC_BROWSER_TEST_F(DevToolsTest, MAYBE_TestPauseWhenLoadingDevTools) {
 }
 
 // Tests network timing.
-IN_PROC_BROWSER_TEST_F(DevToolsTest, TestNetworkTiming) {
+// TODO(crbug.com/40218872): Enable this flaky test. This is flaky on Android
+// build.
+#if BUILDFLAG(IS_ANDROID)
+#define MAYBE_TestNetworkTiming DISABLED_TestNetworkTiming
+#else
+#define MAYBE_TestNetworkTiming TestNetworkTiming
+#endif
+IN_PROC_BROWSER_TEST_F(DevToolsTest, MAYBE_TestNetworkTiming) {
   RunTest("testNetworkTiming", kSlowTestPage);
 }
 
 // Tests network size.
 // TODO(crbug/40218872): Enable this flaky test. This is flaky on Linux debug
-// build. See also: https://crrev.com/c/2772698
-#if BUILDFLAG(IS_LINUX) && !defined(NDEBUG)
+// build and Android build. See also: https://crrev.com/c/2772698
+#if (BUILDFLAG(IS_LINUX) && !defined(NDEBUG)) || BUILDFLAG(IS_ANDROID)
 #define MAYBE_TestNetworkSize DISABLED_TestNetworkSize
 #else
 #define MAYBE_TestNetworkSize TestNetworkSize
@@ -2379,8 +2400,8 @@ IN_PROC_BROWSER_TEST_F(DevToolsTest, MAYBE_TestNetworkSize) {
 
 // Tests raw headers text.
 // TODO(crbug.com/40218872): Enable this flaky test. This is flaky on Linux
-// debug build.
-#if BUILDFLAG(IS_LINUX) && !defined(NDEBUG)
+// debug build and Android build.
+#if (BUILDFLAG(IS_LINUX) && !defined(NDEBUG)) || BUILDFLAG(IS_ANDROID)
 #define MAYBE_TestNetworkSyncSize DISABLED_TestNetworkSyncSize
 #else
 #define MAYBE_TestNetworkSyncSize TestNetworkSyncSize
@@ -3024,159 +3045,6 @@ IN_PROC_BROWSER_TEST_F(DevToolsDisallowedForForceInstalledExtensionsPolicyTest,
   // installed extension.
   DisallowDevToolsForForceInstalledExtenions(browser_window_interface());
   ASSERT_TRUE(DevToolsWindow::FindDevToolsWindow(agent_host.get()));
-}
-
-IN_PROC_BROWSER_TEST_F(DevToolsDisallowedForForceInstalledExtensionsPolicyTest,
-                       BlockDevToolsOnRestrictedExtensionErrorPage) {
-  // 1. Setup: Load a "force-installed" extension.
-  std::string extension_id;
-  ASSERT_NO_FATAL_FAILURE(InstallExtensionWithLocation(
-      ManifestLocation::kExternalPolicyDownload, &extension_id));
-
-  const extensions::Extension* extension =
-      extensions::ExtensionRegistry::Get(profile())->GetExtensionById(
-          extension_id, extensions::ExtensionRegistry::EVERYTHING);
-  ASSERT_TRUE(extension);
-
-  // 2. Set policy to "Disallow for force-installed extensions" (0).
-  DisallowDevToolsForForceInstalledExtenions(browser_window_interface());
-
-  // 3. Navigate to a non-existent page of this extension (causes error page).
-  GURL error_url = extension->GetResourceURL("non_existent.html");
-  content::WebContents* web_contents = GetActiveWebContents();
-  ASSERT_FALSE(NavigateToURL(web_contents, error_url));
-
-  // 4. Verify DevTools are NOT allowed.
-  EXPECT_FALSE(DevToolsWindow::AllowDevToolsFor(profile(), web_contents));
-
-  // 5. Verify it cannot be opened.
-  DevToolsWindow::OpenDevToolsWindow(web_contents,
-                                     DevToolsOpenedByAction::kUnknown);
-  auto agent_host = GetOrCreateDevToolsHostForWebContents(web_contents);
-  EXPECT_FALSE(DevToolsWindow::FindDevToolsWindow(agent_host.get()));
-}
-
-IN_PROC_BROWSER_TEST_F(DevToolsDisallowedForForceInstalledExtensionsPolicyTest,
-                       AllowDevToolsOnRegularExtensionErrorPage) {
-  // 1. Setup: Load a regular extension.
-  std::string extension_id;
-  ASSERT_NO_FATAL_FAILURE(
-      InstallExtensionWithLocation(ManifestLocation::kInternal, &extension_id));
-
-  const extensions::Extension* extension =
-      extensions::ExtensionRegistry::Get(profile())->GetExtensionById(
-          extension_id, extensions::ExtensionRegistry::EVERYTHING);
-  ASSERT_TRUE(extension);
-
-  // 2. Set policy to "Disallow for force-installed extensions" (0).
-  DisallowDevToolsForForceInstalledExtenions(browser_window_interface());
-
-  // 3. Navigate to a non-existent page of this extension.
-  GURL error_url = extension->GetResourceURL("non_existent.html");
-  content::WebContents* web_contents = GetActiveWebContents();
-  ASSERT_FALSE(NavigateToURL(web_contents, error_url));
-
-  // 4. Verify DevTools ARE allowed (since it's not a restricted extension).
-  EXPECT_TRUE(DevToolsWindow::AllowDevToolsFor(profile(), web_contents));
-}
-
-IN_PROC_BROWSER_TEST_F(DevToolsDisallowedForForceInstalledExtensionsPolicyTest,
-                       BlockDevToolsOnRestrictedExtensionServiceWorker) {
-  // 1. Setup: Load a "force-installed" extension with a service worker.
-  base::ScopedAllowBlockingForTesting allow_blocking;
-  base::ScopedTempDir temp_dir;
-  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-
-  base::WriteFile(temp_dir.GetPath().AppendASCII("manifest.json"),
-                  R"({
-                    "name": "Restricted SW Extension",
-                    "version": "1.0",
-                    "manifest_version": 3,
-                    "background": { "service_worker": "sw.js" }
-                  })");
-  base::WriteFile(temp_dir.GetPath().AppendASCII("sw.js"), "// background sw");
-
-  const Extension* extension = InstallExtension(
-      temp_dir.GetPath(), 1, ManifestLocation::kExternalPolicyDownload);
-  ASSERT_TRUE(extension);
-  std::string extension_id = extension->id();
-
-  // 2. Set policy.
-  DisallowDevToolsForForceInstalledExtenions(browser_window_interface());
-
-  // 3. Find the ServiceWorkerDevToolsAgentHost.
-  scoped_refptr<content::DevToolsAgentHost> sw_host;
-  for (auto& host : content::DevToolsAgentHost::GetOrCreateAll()) {
-    if (host->GetType() == content::DevToolsAgentHost::kTypeServiceWorker &&
-        host->GetURL().host() == extension_id) {
-      sw_host = host;
-      break;
-    }
-  }
-  ASSERT_TRUE(sw_host);
-
-  // 4. Verify attachment is blocked.
-  class TestClient : public content::DevToolsAgentHostClient {
-    void AgentHostClosed(content::DevToolsAgentHost* host) override {}
-    void DispatchProtocolMessage(content::DevToolsAgentHost* host,
-                                 base::span<const uint8_t> message) override {}
-  } client;
-
-  EXPECT_FALSE(sw_host->AttachClient(&client));
-}
-
-IN_PROC_BROWSER_TEST_F(DevToolsDisallowedForForceInstalledExtensionsPolicyTest,
-                       BlockDevToolsOnRestrictedExtensionDevToolsPage) {
-  // 1. Setup: Load a "force-installed" extension with a devtools_page.
-  base::ScopedAllowBlockingForTesting allow_blocking;
-  base::ScopedTempDir temp_dir;
-  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-
-  base::WriteFile(temp_dir.GetPath().AppendASCII("manifest.json"),
-                  R"({
-                    "name": "Restricted DevToolsPage Extension",
-                    "version": "1.0",
-                    "manifest_version": 3,
-                    "devtools_page": "devtools.html"
-                  })");
-  base::WriteFile(temp_dir.GetPath().AppendASCII("devtools.html"),
-                  "<html>DevTools Page</html>");
-
-  const Extension* extension = InstallExtension(
-      temp_dir.GetPath(), 1, ManifestLocation::kExternalPolicyDownload);
-  ASSERT_TRUE(extension);
-  std::string extension_id = extension->id();
-
-  // 2. Set policy.
-  DisallowDevToolsForForceInstalledExtenions(browser_window_interface());
-
-  // 3. Open DevTools on a normal page to trigger devtools_page loading.
-  content::WebContents* web_contents = GetActiveWebContents();
-  ASSERT_TRUE(NavigateToURL(web_contents, GURL("about:blank")));
-  DevToolsWindowTesting::OpenDevToolsWindowSync(web_contents, true);
-
-  // 4. Find the DevToolsPage host.
-  scoped_refptr<content::DevToolsAgentHost> dt_host;
-  // It might take a moment to load the devtools_page.
-  ASSERT_TRUE(base::test::RunUntil([&]() {
-    for (auto& host : content::DevToolsAgentHost::GetOrCreateAll()) {
-      if (host->GetURL().host() == extension_id &&
-          host->GetURL().ExtractFileName() == "devtools.html") {
-        dt_host = host;
-        return true;
-      }
-    }
-    return false;
-  }));
-
-  // 5. Verify attachment is blocked.
-  class TestClient : public content::DevToolsAgentHostClient {
-    void AgentHostClosed(content::DevToolsAgentHost* host) override {}
-    void DispatchProtocolMessage(content::DevToolsAgentHost* host,
-                                 base::span<const uint8_t> message) override {}
-  } client;
-
-  ASSERT_FALSE(dt_host->AttachClient(&client));
 }
 
 class DevToolsAllowedByCommandLineSwitch

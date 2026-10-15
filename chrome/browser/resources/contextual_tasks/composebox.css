@@ -37,6 +37,7 @@
   --composebox-submit-container-inline-end:
       var(--composebox-last-icon-inline-end);
   --composebox-last-icon-inline-end: 12px;
+  --cr-composebox-entrypoint-icon-animation-delay: 750ms;
   --cr-composebox-tool-chip-animation: none;
   --cr-composebox-tool-chip-height: var(--icon-menu-button-size);
   --cr-searchbox-height: 52px;
@@ -623,7 +624,8 @@
 }
 
 /* Lens is only shown in side panel, so adjust spacing. */
-:host([is-side-panel]) #composebox[submit-enabled]::part(voice-icon) {
+:host([is-side-panel][show-lens-button])
+    #composebox[submit-enabled]::part(voice-icon) {
   inset-inline-end: calc(var(--composebox-submit-container-size)
       + var(--icon-menu-button-size)
       + 2 * var(--icon-menu-spacing)
@@ -644,7 +646,7 @@
 }
 
 /* Lens is only shown in side panel, so adjust spacing. */
-:host([is-side-panel]) #composebox::part(voice-icon) {
+:host([is-side-panel][show-lens-button]) #composebox::part(voice-icon) {
   inset-inline-end: calc(
       var(--icon-menu-button-size)
       + var(--icon-menu-spacing)

@@ -45,6 +45,7 @@
 #include "chrome/browser/ui/views/autofill/popup/popup_bnpl_footnote_view.h"
 #include "chrome/browser/ui/views/autofill/popup/popup_loading_view.h"
 #include "chrome/browser/ui/views/autofill/popup/popup_no_suggestions_view.h"
+#include "chrome/browser/ui/views/autofill/popup/popup_personal_context_notice_view.h"
 #include "chrome/browser/ui/views/autofill/popup/popup_row_factory_utils.h"
 #include "chrome/browser/ui/views/autofill/popup/popup_row_view.h"
 #include "chrome/browser/ui/views/autofill/popup/popup_search_bar_view.h"
@@ -759,8 +760,7 @@ bool PopupViewViews::AcceptSelectedContentOrCreditCardCell(
     return false;
   }
 
-  controller_->AcceptSuggestion(index->first, accept_method);
-  return true;
+  return GetPopupRowViewAt(index->first).Accept(accept_method);
 }
 
 bool PopupViewViews::RemoveSelectedCell() {
@@ -1351,6 +1351,10 @@ void PopupViewViews::CreateSuggestionViews() {
           std::make_unique<PopupBnplFootnoteView>(
               controller(), /*a11y_selection_delegate=*/*this,
               base::BindRepeating(&DefaultA11yAnnouncer))));
+    } else if (suggestions[current_line_number].type ==
+               SuggestionType::kPersonalContextNotice) {
+      rows_.push_back(footer_container_->AddChildView(
+          std::make_unique<PopupPersonalContextNoticeView>()));
     } else {
       rows_.push_back(footer_container_->AddChildView(CreatePopupRowView(
           controller(), /*a11y_selection_delegate=*/*this,
@@ -1533,27 +1537,9 @@ bool PopupViewViews::DoUpdateBoundsAndRedrawPopup(bool prefer_prev_arrow_side) {
       element_bounds, visible_content_area_bounds, preferred_size,
       preferred_popup_sides);
 
-  if (BoundsOverlapWithAnyOpenPrompt(popup_bounds,
-                                     controller_->GetWebContents())) {
+  if (OverlapsWithAnotherPrompt(popup_bounds)) {
     controller_->Hide(SuggestionHidingReason::kOverlappingWithAnotherPrompt);
     return false;
-  }
-  // On Windows, due to platform-specific implementation details, the previous
-  // check isn't reliable, and fails to detect open prompts. Since the most
-  // critical bubble is the permission bubble, we check for that specifically.
-  if (BoundsOverlapWithOpenPermissionsPrompt(popup_bounds,
-                                             controller_->GetWebContents())) {
-    controller_->Hide(SuggestionHidingReason::kOverlappingWithAnotherPrompt);
-    return false;
-  }
-
-  if (base::FeatureList::IsEnabled(
-          features::kAutofillPopupCheckHtmlFormPopupOverlap)) {
-    if (BoundsOverlapWithHtmlFormPopup(popup_bounds,
-                                       controller_->GetWebContents())) {
-      controller_->Hide(SuggestionHidingReason::kOverlappingWithAnotherPrompt);
-      return false;
-    }
   }
 
   // The pip surface is given the most preference while rendering. So, the

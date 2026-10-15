@@ -25,6 +25,7 @@ import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ApplicationStatus.ActivityStateListener;
 import org.chromium.base.Callback;
 import org.chromium.base.ContextUtils;
+import org.chromium.base.DeviceInfo;
 import org.chromium.base.Log;
 import org.chromium.base.TimeUtils;
 import org.chromium.base.metrics.RecordHistogram;
@@ -445,6 +446,15 @@ class MultiInstanceManagerApi31 extends MultiInstanceManagerImpl
             }
 
             boolean instanceExists = ChromeMultiInstancePersistentStore.hasInstance(i);
+            if (instanceExists
+                    && (DeviceInfo.isDesktop()
+                            && ChromeFeatureList.sOnStartupWindowPolicy.isEnabled())) {
+                // This supports updated default id allocation / startup behavior where a newly
+                // created activity will refrain from using existing instance state and will be
+                // created as a brand-new window instead.
+                continue;
+            }
+
             if (id == INVALID_WINDOW_ID
                     || ChromeMultiInstancePersistentStore.readLastAccessedTime(i)
                             > ChromeMultiInstancePersistentStore.readLastAccessedTime(id)) {
@@ -461,7 +471,7 @@ class MultiInstanceManagerApi31 extends MultiInstanceManagerImpl
                     continue;
                 }
                 id = i;
-                newInstanceIdAllocated = !ChromeMultiInstancePersistentStore.hasInstance(i);
+                newInstanceIdAllocated = !instanceExists;
                 allocationType =
                         newInstanceIdAllocated
                                 ? InstanceAllocationType.NEW_INSTANCE_NEW_TASK
@@ -588,10 +598,15 @@ class MultiInstanceManagerApi31 extends MultiInstanceManagerImpl
     public void initialize(int instanceId, int taskId, @SupportedProfileType int profileType) {
         super.initialize(instanceId, taskId, profileType);
         mInstanceId = instanceId;
+
+        // Ensure we have instance info entry for the current one before writing other fields.
+        ChromeMultiInstancePersistentStore.writeLastAccessedTime(mInstanceId);
+
         ChromeMultiInstancePersistentStore.writeTaskId(instanceId, taskId);
         ChromeMultiInstancePersistentStore.writeProfileType(instanceId, profileType);
         ChromeMultiInstancePersistentStore.writeMarkedForDeletion(
                 instanceId, /* markedForDeletion= */ false);
+        ChromeMultiInstancePersistentStore.writeIsRecoverable(instanceId, true);
         installTabModelObserver();
         recordInstanceCountHistogram();
         recordActivityCountHistogram();
@@ -807,9 +822,6 @@ class MultiInstanceManagerApi31 extends MultiInstanceManagerImpl
     }
 
     private void recordInstanceCountHistogram() {
-        // Ensure we have instance info entry for the current one.
-        ChromeMultiInstancePersistentStore.writeLastAccessedTime(mInstanceId);
-
         RecordHistogram.recordExactLinearHistogram(
                 "Android.MultiInstance.NumInstances",
                 MultiWindowUtils.getInstanceCount(PersistedInstanceType.ANY),
@@ -929,6 +941,7 @@ class MultiInstanceManagerApi31 extends MultiInstanceManagerImpl
         } else {
             ChromeMultiInstancePersistentStore.writeMarkedForDeletion(
                     instanceId, /* markedForDeletion= */ true);
+            ChromeMultiInstancePersistentStore.writeIsRecoverable(instanceId, false);
             ChromeMultiInstancePersistentStore.writeClosureTime(instanceId);
             ChromeMultiInstancePersistentStore.removeTaskId(instanceId);
         }
@@ -1050,6 +1063,7 @@ class MultiInstanceManagerApi31 extends MultiInstanceManagerImpl
             ChromeMultiInstancePersistentStore.writeClosureTime(mInstanceId);
         }
         if (mActivity.isFinishing()) {
+            ChromeMultiInstancePersistentStore.writeIsRecoverable(mInstanceId, false);
             // Notify Recent Tabs page that the instance is closing.
             notifyInstancesClosed(Collections.singletonList(mInstanceId), isPermanentDeletion);
         }
@@ -1094,6 +1108,9 @@ class MultiInstanceManagerApi31 extends MultiInstanceManagerImpl
         // We persist last closed time when the activity is stopped as a fallback for when
         // #onDestroy() is not called for a finishing activity.
         ChromeMultiInstancePersistentStore.writeClosureTime(mInstanceId);
+        if (mActivity.isFinishing()) {
+            ChromeMultiInstancePersistentStore.writeIsRecoverable(mInstanceId, false);
+        }
     }
 
     @Override

@@ -5,16 +5,20 @@
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 #include <GLES2/gl2extchromium.h>
+#include <GLES3/gl3.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include <array>
 #include <cmath>
 #include <memory>
+#include <string_view>
+#include <vector>
 
 #include "base/bit_cast.h"
 #include "base/compiler_specific.h"
 #include "base/containers/heap_array.h"
+#include "base/containers/span.h"
 #include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/run_loop.h"
@@ -22,6 +26,7 @@
 #include "build/build_config.h"
 #include "gpu/command_buffer/tests/gl_manager.h"
 #include "gpu/command_buffer/tests/gl_test_utils.h"
+#include "gpu/config/gpu_test_config.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -77,14 +82,18 @@ TEST_F(GLReadbackTest, ReadPixelsWithPBOAndQuery) {
   WaitForQuery(q);
 
   // TODO(hubbe): Check that glMapBufferCHROMIUM does not block here.
-  unsigned char *data = static_cast<unsigned char *>(
-      glMapBufferCHROMIUM(
-          GL_PIXEL_PACK_TRANSFER_BUFFER_CHROMIUM,
-          GL_READ_ONLY));
+  const unsigned char* data =
+      static_cast<const unsigned char*>(glMapBufferCHROMIUM(
+          GL_PIXEL_PACK_TRANSFER_BUFFER_CHROMIUM, GL_READ_ONLY));
   EXPECT_TRUE(data);
-  EXPECT_EQ(data[0], 0);   // red
-  UNSAFE_TODO(EXPECT_EQ(data[1], 0));    // green
-  UNSAFE_TODO(EXPECT_EQ(data[2], 255));  // blue
+  // SAFETY: The mapped read-only PBO is guaranteed to be large enough to
+  // contain the mapped pixels, meaning it holds at least `kWidth * kHeight *
+  // kBytesPerPixel` bytes.
+  auto data_span = UNSAFE_BUFFERS(
+      base::span(data, static_cast<size_t>(kWidth * kHeight * kBytesPerPixel)));
+  EXPECT_EQ(data_span[0], 0);    // red
+  EXPECT_EQ(data_span[1], 0);    // green
+  EXPECT_EQ(data_span[2], 255);  // blue
   glUnmapBufferCHROMIUM(GL_PIXEL_PACK_TRANSFER_BUFFER_CHROMIUM);
   glBindBuffer(GL_PIXEL_PACK_TRANSFER_BUFFER_CHROMIUM, 0);
   glDeleteBuffers(1, &b);
@@ -163,23 +172,18 @@ TEST_F(GLReadbackTest, MAYBE_ReadPixelsFloat) {
     GLint type;
     uint32_t comp_count;
   };
-  std::array<TestFormat, 4> test_formats;
-  size_t test_count = 0;
-  const char *extensions = reinterpret_cast<const char*>(
-      glGetString(GL_EXTENSIONS));
-  if (UNSAFE_TODO(strstr(extensions, "GL_OES_texture_half_float")) != nullptr) {
-    TestFormat rgb16f = {GL_RGB, GL_HALF_FLOAT_OES, 3};
-    test_formats[test_count++] = rgb16f;
-
-    TestFormat rgba16f = {GL_RGBA, GL_HALF_FLOAT_OES, 4};
-    test_formats[test_count++] = rgba16f;
+  std::vector<TestFormat> test_formats;
+  test_formats.reserve(4);
+  const char* extensions_cstr =
+      reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
+  std::string_view extensions(extensions_cstr ? extensions_cstr : "");
+  if (extensions.find("GL_OES_texture_half_float") != std::string_view::npos) {
+    test_formats.push_back({GL_RGB, GL_HALF_FLOAT_OES, 3});
+    test_formats.push_back({GL_RGBA, GL_HALF_FLOAT_OES, 4});
   }
-  if (UNSAFE_TODO(strstr(extensions, "GL_OES_texture_float")) != nullptr) {
-    TestFormat rgb32f = {GL_RGB, GL_FLOAT, 3};
-    test_formats[test_count++] = rgb32f;
-
-    TestFormat rgba32f = {GL_RGBA, GL_FLOAT, 4};
-    test_formats[test_count++] = rgba32f;
+  if (extensions.find("GL_OES_texture_float") != std::string_view::npos) {
+    test_formats.push_back({GL_RGB, GL_FLOAT, 3});
+    test_formats.push_back({GL_RGBA, GL_FLOAT, 4});
   }
 
   const char *vs_source =
@@ -229,9 +233,8 @@ TEST_F(GLReadbackTest, MAYBE_ReadPixelsFloat) {
   GLuint vertex_buffer;
   glGenBuffers(1, &vertex_buffer);
   glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
-  glBufferData(
-      GL_ARRAY_BUFFER, sizeof(quad_vertices),
-      reinterpret_cast<void*>(quad_vertices), GL_STATIC_DRAW);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(quad_vertices), quad_vertices,
+               GL_STATIC_DRAW);
 
   GLint position_location = glGetAttribLocation(program, "a_position");
   glVertexAttribPointer(position_location, 2, GL_FLOAT, GL_FALSE,
@@ -243,13 +246,13 @@ TEST_F(GLReadbackTest, MAYBE_ReadPixelsFloat) {
 
   EXPECT_EQ(glGetError(), GLenum(GL_NO_ERROR));
 
-  for (size_t ii = 0; ii < test_count; ++ii) {
+  for (const auto& test_format : test_formats) {
     GLuint texture_id = 0;
     glGenTextures(1, &texture_id);
     glBindTexture(GL_TEXTURE_2D, texture_id);
-    glTexImage2D(GL_TEXTURE_2D, 0, test_formats[ii].format, kTextureSize,
-                 kTextureSize, 0, test_formats[ii].format,
-                 test_formats[ii].type, nullptr);
+    glTexImage2D(GL_TEXTURE_2D, 0, test_format.format, kTextureSize,
+                 kTextureSize, 0, test_format.format, test_format.type,
+                 nullptr);
 
     GLuint framebuffer = 0;
     glGenFramebuffers(1, &framebuffer);
@@ -271,7 +274,7 @@ TEST_F(GLReadbackTest, MAYBE_ReadPixelsFloat) {
       EXPECT_EQ(glGetError(), GLenum(GL_NO_ERROR));
 
       if ((read_format == GL_RGB || read_format == GL_RGBA) &&
-          read_type == test_formats[ii].type) {
+          read_type == test_format.type) {
         glClear(GL_COLOR_BUFFER_BIT);
         glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 
@@ -292,12 +295,17 @@ TEST_F(GLReadbackTest, MAYBE_ReadPixelsFloat) {
             glReadPixels(0, 0, kTextureSize, kTextureSize, read_format,
                          read_type, buf.data());
             EXPECT_EQ(glGetError(), GLenum(GL_NO_ERROR));
+            base::span<const GLushort> buf_span = buf;
             for (uint32_t jj = 0; jj < kTextureSize * kTextureSize; ++jj) {
-              for (uint32_t kk = 0; kk < test_formats[ii].comp_count; ++kk) {
-                EXPECT_LE(
-                    std::abs(HalfToFloat32(buf[jj * read_comp_count + kk]) -
-                        kDrawColor[kk]),
-                    std::abs(kDrawColor[kk] * kEpsilon));
+              auto pixel =
+                  buf_span.subspan(jj * read_comp_count, read_comp_count);
+              // Only compare components that exist in both the texture and the
+              // read-back format.
+              for (uint32_t kk = 0;
+                   kk < std::min(test_format.comp_count, read_comp_count);
+                   ++kk) {
+                EXPECT_LE(std::abs(HalfToFloat32(pixel[kk]) - kDrawColor[kk]),
+                          std::abs(kDrawColor[kk] * kEpsilon));
               }
             }
             break;
@@ -308,11 +316,17 @@ TEST_F(GLReadbackTest, MAYBE_ReadPixelsFloat) {
             glReadPixels(0, 0, kTextureSize, kTextureSize, read_format,
                          read_type, buf.data());
             EXPECT_EQ(glGetError(), GLenum(GL_NO_ERROR));
+            base::span<const GLfloat> buf_span = buf;
             for (uint32_t jj = 0; jj < kTextureSize * kTextureSize; ++jj) {
-              for (uint32_t kk = 0; kk < test_formats[ii].comp_count; ++kk) {
-                EXPECT_LE(
-                    std::abs(buf[jj * read_comp_count + kk] - kDrawColor[kk]),
-                    std::abs(kDrawColor[kk] * kEpsilon));
+              auto pixel =
+                  buf_span.subspan(jj * read_comp_count, read_comp_count);
+              // Only compare components that exist in both the texture and the
+              // read-back format.
+              for (uint32_t kk = 0;
+                   kk < std::min(test_format.comp_count, read_comp_count);
+                   ++kk) {
+                EXPECT_LE(std::abs(pixel[kk] - kDrawColor[kk]),
+                          std::abs(kDrawColor[kk] * kEpsilon));
               }
             }
             break;
@@ -327,6 +341,78 @@ TEST_F(GLReadbackTest, MAYBE_ReadPixelsFloat) {
 
   glDeleteBuffers(1, &vertex_buffer);
   glDeleteProgram(program);
+}
+
+TEST_F(GLReadbackTest, PackLargeRowLengthSeparatelyPackBuffer) {
+  // Test fails on these configurations due to underlying driver or ANGLE
+  // implementation bugs.
+#if BUILDFLAG(IS_ANDROID) && defined(ARCH_CPU_X86_FAMILY)
+  return;
+#else
+#if BUILDFLAG(IS_MAC)
+  if (GPUTestBotConfig::CurrentConfigMatches("Intel") ||
+      GPUTestBotConfig::CurrentConfigMatches("AMD")) {
+    return;
+  }
+#endif
+
+  GLManager::Options options;
+  options.context_type = CONTEXT_TYPE_OPENGLES3;
+  GpuDriverBugWorkarounds workarounds;
+  workarounds.pack_large_row_length_separately_pack_buffer = true;
+  gl_.Destroy();
+  gl_.InitializeWithWorkarounds(options, workarounds);
+
+  if (!gl_.IsInitialized()) {
+    return;
+  }
+
+  const uint8_t kExpectedColor[4] = {65, 128, 192, 255};
+  constexpr GLint kLargeRowLength = 0x7fffffc;
+  constexpr GLsizeiptr kByteOffsetToVerify = 0x1ffffff0;
+  constexpr GLsizeiptr kBufferSize = kByteOffsetToVerify + 256;
+
+  GLuint pbo = 0;
+  glGenBuffers(1, &pbo);
+  glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
+  glBufferData(GL_PIXEL_PACK_BUFFER, kBufferSize, nullptr, GL_STREAM_READ);
+  if (glGetError() == GL_OUT_OF_MEMORY) {
+    glDeleteBuffers(1, &pbo);
+    return;
+  }
+  EXPECT_EQ(static_cast<GLenum>(GL_NO_ERROR), glGetError());
+
+  glClearColor(kExpectedColor[0] / 255.0f, kExpectedColor[1] / 255.0f,
+               kExpectedColor[2] / 255.0f, kExpectedColor[3] / 255.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+
+  glPixelStorei(GL_PACK_ROW_LENGTH, kLargeRowLength);
+  glPixelStorei(GL_PACK_ALIGNMENT, 4);
+  glReadPixels(0, 0, 1, 2, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+  EXPECT_EQ(static_cast<GLenum>(GL_NO_ERROR), glGetError());
+
+  uint8_t actualColorRow0[4] = {0};
+  uint8_t actualColorRow1[4] = {0};
+
+  glGetBufferSubDataCHROMIUM(GL_PIXEL_PACK_BUFFER, 0, sizeof(actualColorRow0),
+                             actualColorRow0);
+  glGetBufferSubDataCHROMIUM(GL_PIXEL_PACK_BUFFER, kByteOffsetToVerify,
+                             sizeof(actualColorRow1), actualColorRow1);
+  EXPECT_EQ(static_cast<GLenum>(GL_NO_ERROR), glGetError());
+
+  glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+  glDeleteBuffers(1, &pbo);
+
+  EXPECT_EQ(kExpectedColor[0], actualColorRow0[0]);
+  EXPECT_EQ(kExpectedColor[1], actualColorRow0[1]);
+  EXPECT_EQ(kExpectedColor[2], actualColorRow0[2]);
+  EXPECT_EQ(kExpectedColor[3], actualColorRow0[3]);
+
+  EXPECT_EQ(kExpectedColor[0], actualColorRow1[0]);
+  EXPECT_EQ(kExpectedColor[1], actualColorRow1[1]);
+  EXPECT_EQ(kExpectedColor[2], actualColorRow1[2]);
+  EXPECT_EQ(kExpectedColor[3], actualColorRow1[3]);
+#endif
 }
 
 }  // namespace gpu

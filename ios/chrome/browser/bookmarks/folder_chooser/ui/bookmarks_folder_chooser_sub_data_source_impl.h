@@ -30,7 +30,7 @@ class BookmarkNode;
 // Called before all the bookmark nodes in the model are deleted.
 - (void)bookmarkModelWillRemoveAllNodes;
 // The set of nodes that are being considered for a move by folder chooser.
-- (std::set<const bookmarks::BookmarkNode*>)movedNodes;
+- (const std::set<const bookmarks::BookmarkNode*>&)editedNodes;
 
 @end
 

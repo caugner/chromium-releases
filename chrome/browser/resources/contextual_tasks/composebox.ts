@@ -2,10 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import './contextual_tasks_inner_composebox.js';
 import '//resources/cr_components/composebox/composebox_dropdown.js';
 import '//resources/cr_components/composebox/composebox.js';
 import '//resources/cr_components/localized_link/localized_link.js';
 
+import {GlifAnimationState} from '//resources/cr_components/composebox/common.js';
 import type {ComposeboxElement} from '//resources/cr_components/composebox/composebox.js';
 import type {PageHandlerRemote} from '//resources/cr_components/composebox/composebox.mojom-webui.js';
 import {LensOverlayDismissalSource} from '//resources/cr_components/composebox/composebox.mojom-webui.js';
@@ -35,6 +37,7 @@ const ICON_TYPE_TO_NAME: {[id: number]: string} = {
   [IconType.kAdd]: 'add',
   [IconType.kFormatQuoteFilled]: 'quoteFilled',
   [IconType.kImage]: 'image',
+  [IconType.kFollowUp]: 'followUp',
   [IconType.kDrivePdf]: 'drivePdf',
   [IconType.kCheck]: 'check',
   [IconType.kInvertedFormatQuoteFilled]: 'invertedQuoteFilled',
@@ -148,8 +151,11 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
       lensButtonDisabled_: {type: Boolean},
       caretAnimationsEnabled_: {type: Boolean},
       usePecApi_: {type: Boolean},
+      useFork_: {type: Boolean},
+      smartTabSharingVisible_: {type: Boolean},
       energyEffectEnabled_: {type: Boolean, reflect: true},
       energyEffectAnimationEnabled_: {type: Boolean, reflect: true},
+      glifAnimationState_: {type: String},
     };
   }
   accessor enableNativeZeroStateSuggestions: boolean = false;
@@ -209,6 +215,10 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
       loadTimeData.getBoolean('caretAnimationEnabled');
   protected accessor usePecApi_: boolean =
       loadTimeData.getBoolean('contextualMenuUsePecApi');
+  protected accessor useFork_: boolean =
+      loadTimeData.getBoolean('useContextualTasksComposeboxFork');
+  protected accessor smartTabSharingVisible_: boolean =
+      loadTimeData.getBoolean('composeboxSmartTabSharingVisible');
   protected accessor energyEffectEnabled_: boolean =
       loadTimeData.getBoolean('energyEffectEnabled');
   // The use of energyEffectEnabled to set energyEffectAnimationEnabled_ is
@@ -216,6 +226,8 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
   // across all surfaces (= Nextbox, Omnibox, and Realbox).
   protected accessor energyEffectAnimationEnabled_: boolean =
       loadTimeData.getBoolean('energyEffectEnabled');
+  protected accessor glifAnimationState_: GlifAnimationState =
+      GlifAnimationState.INELIGIBLE;
 
   constructor() {
     super();
@@ -238,6 +250,7 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
       // Do not play the glow animation if opening on a thread.
       if (!this.isZeroState) {
         composebox.animationState = GlowAnimationState.NONE;
+        this.glifAnimationState_ = GlifAnimationState.INELIGIBLE;
       }
       this.eventTracker_.add(
           composebox, 'can-submit-files-and-input-changed',
@@ -265,11 +278,13 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
         if (this.isZeroState || this.forceSkipSubmitGlifAnimation_) {
           this.forceSkipSubmitGlifAnimation_ = false;
           composebox.animationState = GlowAnimationState.NONE;
+          this.glifAnimationState_ = GlifAnimationState.INELIGIBLE;
           this.clearInputAndFocus(/* querySubmitted= */ true);
           return;
         }
         // Force animation to replay visibly on subsequent submissions.
         composebox.animationState = GlowAnimationState.NONE;
+        this.glifAnimationState_ = GlifAnimationState.INELIGIBLE;
         requestAnimationFrame(() => {
           composebox.animationState = GlowAnimationState.SUBMITTING;
         });
@@ -353,12 +368,28 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
   // Must have `$` access in updated to avoid violating Lit contract since
   // `willUpdate` runs before `render`, which will cause `$` to not be
   // populated yet.
-  override updated(changedProperties: PropertyValues<this>) {
+  override async updated(changedProperties: PropertyValues<this>) {
     super.updated(changedProperties);
     if (changedProperties.has('isZeroState')) {
       if (this.isZeroState) {
         // Opening zero state triggers animation.
         this.$.composebox.animationState = GlowAnimationState.SUBMITTING;
+        const limitingEnabled =
+            loadTimeData.getBoolean('contextMenuAnimationLimitingEnabled');
+        if (limitingEnabled) {
+          const {canShow: allowed} =
+              await this.pageHandler_.canShowNextboxAnimation();
+          if (allowed) {
+            this.glifAnimationState_ = GlifAnimationState.STARTED;
+            this.pageHandler_.recordNextboxAnimationImpression();
+          } else {
+            this.glifAnimationState_ = GlifAnimationState.INELIGIBLE;
+          }
+        } else {
+          this.glifAnimationState_ = GlifAnimationState.STARTED;
+        }
+      } else {
+        this.glifAnimationState_ = GlifAnimationState.INELIGIBLE;
       }
       if (this.isZeroState && !this.isSidePanel) {
         // Get zero state autocomplete matches. In the side panel, we wait for
@@ -366,6 +397,9 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
         // autocomplete.
         this.$.composebox.queryAutocomplete(/*clearMatches=*/ false);
       }
+    }
+    if (changedProperties.has('isSidePanel')) {
+      this.toggleAttribute('show-lens-button', this.shouldShowLensButton_());
     }
   }
 
@@ -386,7 +420,8 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
   }
 
   protected shouldShowLensButton_() {
-    return this.isSidePanel;
+    return this.isSidePanel &&
+        loadTimeData.getBoolean('supportsLensButtonInComposebox');
   }
 
   get inputState() {

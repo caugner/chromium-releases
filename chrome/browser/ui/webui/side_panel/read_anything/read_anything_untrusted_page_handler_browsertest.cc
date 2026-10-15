@@ -565,7 +565,7 @@ IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
   const read_anything::mojom::LineFocus kLineFocus =
       read_anything::mojom::LineFocus::kSmallCursorWindow;
   handler_ = CreateHandler();
-  handler_->OnLineFocusChanged(kLineFocus);
+  handler_->OnLineFocusChanged(kLineFocus, kLineFocus);
 
 #if BUILDFLAG(IS_CHROMEOS)
   extension_wrapper_ptr_ = nullptr;
@@ -710,12 +710,12 @@ IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
       read_anything::mojom::LineFocus::kOff;
   handler_ = CreateHandler();
 
-  handler_->OnLineFocusChanged(kLineFocus1);
+  handler_->OnLineFocusChanged(kLineFocus1, kLineFocus1);
   const int LineFocus1 = browser()->profile()->GetPrefs()->GetInteger(
       prefs::kAccessibilityReadAnythingLineFocus);
   ASSERT_EQ(LineFocus1, static_cast<int>(kLineFocus1));
 
-  handler_->OnLineFocusChanged(kLineFocus2);
+  handler_->OnLineFocusChanged(kLineFocus2, kLineFocus1);
   const int LineFocus2 = browser()->profile()->GetPrefs()->GetInteger(
       prefs::kAccessibilityReadAnythingLineFocus);
   ASSERT_EQ(LineFocus2, static_cast<int>(kLineFocus2));
@@ -729,13 +729,13 @@ IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
       read_anything::mojom::LineFocus::kOff;
   handler_ = CreateHandler();
 
-  handler_->OnLineFocusChanged(kLineFocus1);
+  handler_->OnLineFocusChanged(kLineFocus1, kLineFocus1);
   const int LineFocus1 = browser()->profile()->GetPrefs()->GetInteger(
       prefs::kAccessibilityReadAnythingLastNonDisabledLineFocus);
   ASSERT_EQ(LineFocus1, static_cast<int>(kLineFocus1));
 
   // When line focus changes to off, enabled mode should not change
-  handler_->OnLineFocusChanged(kLineFocus2);
+  handler_->OnLineFocusChanged(kLineFocus2, kLineFocus1);
   const int LineFocus2 = browser()->profile()->GetPrefs()->GetInteger(
       prefs::kAccessibilityReadAnythingLastNonDisabledLineFocus);
   ASSERT_EQ(LineFocus2, static_cast<int>(kLineFocus1));
@@ -2236,6 +2236,24 @@ IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerDistillerTest,
         .Times(2);
   }
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), GURL("about:blank")));
+}
+
+IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerDistillerTest,
+                       RequestReadabilityDistillation_TriggersDistillation) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  handler_ = CreateHandler();
+
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), GURL(embedded_test_server()->GetURL("/simple.html")),
+      WindowOpenDisposition::CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
+
+  EXPECT_CALL(page_, OnReadabilityDistillationStateChanged(
+                         read_anything::mojom::ReadAnythingDistillationState::
+                             kDistillationInProgress))
+      .Times(testing::AtLeast(1));
+
+  handler_->RequestReadabilityDistillation();
 }
 
 // In order to test that Readability isn't used in automated tests,

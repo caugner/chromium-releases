@@ -8,7 +8,6 @@
 #include <string>
 #include <vector>
 
-#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/child_process_id.h"
 #include "extensions/buildflags/buildflags.h"
@@ -52,6 +51,8 @@ bool CanBeIncognitoEnabled(const Extension* extension);
 
 // Returns true if `extension_id` can run in an incognito window.
 bool IsIncognitoEnabled(const ExtensionId& extension_id,
+                        content::BrowserContext* context);
+bool IsIncognitoEnabled(const Extension* extension,
                         content::BrowserContext* context);
 
 // Returns true if `extension` can see events and data from another sub-profile
@@ -182,6 +183,16 @@ bool AnyCurrentlyInstalledExtensionIsFromWebstore(
 // Returns true if this is an extension download. This also considers user
 // scripts to be extension downloads, since we convert those automatically.
 bool IsExtensionDownload(const download::DownloadItem& download_item);
+
+// Returns the last committed `GURL` of `rfh` for extension permission and
+// authorization checks. Returns an empty `GURL` if:
+// - `rfh` is null,
+// - `rfh` has an empty committed `GURL`, or
+// - `rfh` is displaying an error document.
+//
+// For tab-level or `content::WebContents`-level checks, pass the primary main
+// frame (e.g. `web_contents->GetPrimaryMainFrame()`).
+const GURL& GetURLForExtensionPermissionCheck(content::RenderFrameHost* rfh);
 
 }  // namespace util
 }  // namespace extensions

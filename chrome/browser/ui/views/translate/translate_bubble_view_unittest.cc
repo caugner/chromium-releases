@@ -12,9 +12,17 @@
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/translate/translate_bubble_model.h"
+#include "chrome/browser/ui/views/controls/hover_button.h"
+#include "chrome/browser/ui/views/translate/translate_language_search_view.h"
 #include "chrome/grit/generated_resources.h"
+#include "chrome/test/base/testing_profile.h"
 #include "chrome/test/views/chrome_views_test_base.h"
+#include "components/strings/grit/components_strings.h"
 #include "components/translate/core/browser/translate_prefs.h"
+#include "components/translate/core/common/translate_features.h"
+#include "content/public/test/test_renderer_host.h"
+#include "content/public/test/web_contents_tester.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/events/event_constants.h"
@@ -26,8 +34,12 @@
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/combobox/combobox.h"
+#include "ui/views/controls/scroll_view.h"
 #include "ui/views/controls/styled_label.h"
+#include "ui/views/controls/textfield/textfield.h"
+#include "ui/views/layout/box_layout_view.h"
 #include "ui/views/test/button_test_api.h"
+#include "ui/views/view_utils.h"
 #include "ui/views/widget/widget.h"
 
 namespace {
@@ -62,11 +74,23 @@ class MockTranslateBubbleModel : public TranslateBubbleModel {
   }
 
   std::u16string GetTargetLanguageNameAt(int index) const override {
+    if (index == 10) {
+      return u"Spanish";
+    }
+    if (index == 20) {
+      return u"French";
+    }
     return u"English";
   }
 
   std::optional<size_t> GetTargetLanguageIndexForCode(
       const std::string& language_code) const override {
+    if (language_code == "es") {
+      return 10;
+    }
+    if (language_code == "fr") {
+      return 20;
+    }
     return 1;
   }
 
@@ -171,6 +195,44 @@ class MockTranslateBubbleModel : public TranslateBubbleModel {
   bool can_add_site_to_never_prompt_list = true;
 };
 
+views::Textfield* GetSearchField(views::View* search_view) {
+  if (search_view->children().empty()) {
+    return nullptr;
+  }
+  views::View* search_container = search_view->children()[0];
+  for (views::View* child : search_container->children()) {
+    if (views::IsViewClass<views::Textfield>(child)) {
+      return static_cast<views::Textfield*>(child);
+    }
+  }
+  return nullptr;
+}
+
+views::BoxLayoutView* GetListView(views::View* search_view) {
+  if (search_view->children().size() < 2) {
+    return nullptr;
+  }
+  views::View* scroll_view = search_view->children()[1];
+  if (views::IsViewClass<views::ScrollView>(scroll_view)) {
+    return views::AsViewClass<views::BoxLayoutView>(
+        static_cast<views::ScrollView*>(scroll_view)->contents());
+  }
+  return nullptr;
+}
+
+views::TabbedPane* GetTabbedPane(views::View* view) {
+  if (views::IsViewClass<views::TabbedPane>(view)) {
+    return static_cast<views::TabbedPane*>(view);
+  }
+  for (views::View* child : view->children()) {
+    views::TabbedPane* tabbed_pane = GetTabbedPane(child);
+    if (tabbed_pane) {
+      return tabbed_pane;
+    }
+  }
+  return nullptr;
+}
+
 }  // namespace
 
 class TranslateBubbleViewTest : public ChromeViewsTestBase {
@@ -186,6 +248,8 @@ class TranslateBubbleViewTest : public ChromeViewsTestBase {
         CreateTestWidget(views::Widget::InitParams::CLIENT_OWNS_WIDGET,
                          views::Widget::InitParams::TYPE_WINDOW);
     anchor_widget_->Show();
+    web_contents_ =
+        content::WebContentsTester::CreateTestWebContents(&profile_, nullptr);
 
     mock_model_ = new MockTranslateBubbleModel(
         TranslateBubbleModel::VIEW_STATE_BEFORE_TRANSLATE);
@@ -195,7 +259,7 @@ class TranslateBubbleViewTest : public ChromeViewsTestBase {
     std::unique_ptr<TranslateBubbleModel> model(mock_model_);
     bubble_ = new TranslateBubbleView(
         views::BubbleAnchor(anchor_widget_->GetContentsView()),
-        std::move(model), translate::TranslateErrors::NONE, nullptr,
+        std::move(model), translate::TranslateErrors::NONE, web_contents_.get(),
         base::DoNothing());
     views::BubbleDialogDelegateView::CreateBubble(bubble_)->Show();
   }
@@ -228,6 +292,17 @@ class TranslateBubbleViewTest : public ChromeViewsTestBase {
     return bubble_->options_menu_model_.get();
   }
 
+  void SwitchView(TranslateBubbleModel::ViewState view_state) {
+    bubble_->SwitchView(view_state);
+  }
+
+  TranslateLanguageSearchView* translate_language_search_view() {
+    return bubble_->translate_language_search_view_;
+  }
+
+  TestingProfile profile_;
+  content::RenderViewHostTestEnabler test_render_host_factories_;
+  std::unique_ptr<content::WebContents> web_contents_;
   std::unique_ptr<views::Widget> anchor_widget_;
   raw_ptr<MockTranslateBubbleModel> mock_model_ = nullptr;
   raw_ptr<TranslateBubbleView> bubble_ = nullptr;
@@ -392,6 +467,7 @@ TEST_F(TranslateBubbleViewTest, TargetResetButton) {
   // Press the reset button. Language should change back to initial selection.
   PressButton(TranslateBubbleView::BUTTON_ID_RESET);
   EXPECT_EQ(2u, bubble_->target_language_combobox_->GetSelectedIndex());
+  EXPECT_FALSE(bubble_->advanced_reset_button_target_->GetEnabled());
 }
 
 TEST_F(TranslateBubbleViewTest, SourceDoneButton) {
@@ -499,7 +575,7 @@ TEST_F(TranslateBubbleViewTest, MenuOptionsHiddenOnUnknownSource) {
   EXPECT_TRUE(
       bubble_->options_menu_model_
           ->GetIndexOfCommandId(static_cast<int>(
-              TranslateBubbleView::OptionsMenuItem::kChangeTargetLanguage))
+              TranslateBubbleView::OptionsMenuItem::kChangeSourceLanguage))
           .has_value());
 }
 
@@ -605,4 +681,216 @@ TEST_F(TranslateBubbleViewTest, SourceLanguageTabUpdatesViewState) {
   bubble_->TabSelectedAt(0);
   EXPECT_EQ(TranslateBubbleModel::VIEW_STATE_BEFORE_TRANSLATE,
             bubble_->GetViewState());
+}
+
+TEST_F(TranslateBubbleViewTest, ChangeTargetLanguageMenuHiddenWhenButtonShown) {
+  base::test::ScopedFeatureList features;
+  features.InitAndEnableFeature(translate::kTranslateLanguageSearchUI);
+
+  // Ensure the "Always Translate" checkbox is not shown.
+  mock_model_->SetShouldShowAlwaysTranslateShortcut(false);
+  CreateAndShowBubble();
+  TriggerOptionsMenu();
+
+  // The option should be removed from the three dot menu.
+  EXPECT_FALSE(
+      options_menu_model()
+          ->GetIndexOfCommandId(static_cast<int>(
+              TranslateBubbleView::OptionsMenuItem::kChangeTargetLanguage))
+          .has_value());
+}
+
+TEST_F(TranslateBubbleViewTest,
+       ChangeTargetLanguageMenuRetainedWhenCheckboxShown) {
+  base::test::ScopedFeatureList features;
+  features.InitAndEnableFeature(translate::kTranslateLanguageSearchUI);
+
+  // Force the "Always Translate" checkbox to be shown.
+  mock_model_->SetShouldShowAlwaysTranslateShortcut(true);
+  CreateAndShowBubble();
+  TriggerOptionsMenu();
+
+  // The option should appear in the three dot menu.
+  EXPECT_TRUE(
+      options_menu_model()
+          ->GetIndexOfCommandId(static_cast<int>(
+              TranslateBubbleView::OptionsMenuItem::kChangeTargetLanguage))
+          .has_value());
+}
+
+TEST_F(TranslateBubbleViewTest, RecentLanguagesShowUpInSearchView) {
+  base::test::ScopedFeatureList features(translate::kTranslateLanguageSearchUI);
+  // Mock some recent languages in prefs.
+  std::unique_ptr<translate::TranslatePrefs> translate_prefs =
+      std::make_unique<translate::TranslatePrefs>(profile_.GetPrefs());
+  translate_prefs->SetRecentTargetLanguage("es");
+  translate_prefs->SetRecentTargetLanguage("fr");
+
+  CreateAndShowBubble();
+  // Switch to target language view (which creates the search view).
+  SwitchView(TranslateBubbleModel::VIEW_STATE_TARGET_LANGUAGE);
+
+  TranslateLanguageSearchView* search_view = translate_language_search_view();
+  ASSERT_TRUE(search_view);
+
+  views::BoxLayoutView* list_view = GetListView(search_view);
+  ASSERT_TRUE(list_view);
+  // Verify that the list view contains the recent languages.
+  std::vector<std::u16string> button_texts;
+  for (views::View* child : list_view->children()) {
+    if (views::IsViewClass<HoverButton>(child)) {
+      button_texts.emplace_back(static_cast<HoverButton*>(child)->GetText());
+    }
+  }
+
+  EXPECT_THAT(button_texts, testing::IsSupersetOf({u"French", u"Spanish"}));
+}
+
+TEST_F(TranslateBubbleViewTest, NoResultsMessageShowsWhenQueryHasNoMatches) {
+  base::test::ScopedFeatureList features(translate::kTranslateLanguageSearchUI);
+  CreateAndShowBubble();
+  SwitchView(TranslateBubbleModel::VIEW_STATE_TARGET_LANGUAGE);
+
+  TranslateLanguageSearchView* search_view = translate_language_search_view();
+  ASSERT_TRUE(search_view);
+
+  views::Textfield* search_field = GetSearchField(search_view);
+  ASSERT_TRUE(search_field);
+
+  // Set the search field text to a query with no matches.
+  search_field->SetText(u"invalid_language_name");
+  search_view->ContentsChanged(search_field,
+                               std::u16string(search_field->GetText()));
+
+  views::BoxLayoutView* list_view = GetListView(search_view);
+  ASSERT_TRUE(list_view);
+
+  // Verify that there are no HoverButtons.
+  for (views::View* child : list_view->children()) {
+    EXPECT_FALSE(views::IsViewClass<HoverButton>(child));
+  }
+
+  // Verify that the "No Results Found" label is shown.
+  ASSERT_EQ(list_view->children().size(), 1u);
+  views::Label* label =
+      static_cast<views::Label*>(list_view->children().front());
+  EXPECT_EQ(label->GetText(),
+            l10n_util::GetStringUTF16(IDS_TRANSLATE_BUBBLE_NO_RESULTS));
+}
+
+TEST_F(TranslateBubbleViewTest,
+       ClickingLanguageClearsListViewWithoutNoResults) {
+  base::test::ScopedFeatureList features(translate::kTranslateLanguageSearchUI);
+  CreateAndShowBubble();
+  SwitchView(TranslateBubbleModel::VIEW_STATE_TARGET_LANGUAGE);
+
+  TranslateLanguageSearchView* search_view = translate_language_search_view();
+  ASSERT_TRUE(search_view);
+
+  views::BoxLayoutView* list_view = GetListView(search_view);
+  ASSERT_TRUE(list_view);
+
+  // Get the first HoverButton in the list view.
+  ASSERT_FALSE(list_view->children().empty());
+  HoverButton* button_to_click =
+      views::AsViewClass<HoverButton>(list_view->children().front());
+  ASSERT_TRUE(button_to_click);
+
+  // Click the button.
+  views::test::ButtonTestApi(button_to_click)
+      .NotifyClick(ui::KeyEvent(ui::EventType::kKeyPressed, ui::VKEY_RETURN,
+                                ui::DomCode::ENTER, ui::EF_NONE));
+
+  // Verify that the list view is now empty.
+  EXPECT_TRUE(list_view->children().empty());
+}
+
+// TODO(crbug.com/527306844): Re-enable this test.
+#if BUILDFLAG(IS_WIN) && !defined(NDEBUG)
+#define MAYBE_ListShowsUpAgainWhenTypingAfterLanguageSelection \
+  DISABLED_ListShowsUpAgainWhenTypingAfterLanguageSelection
+#else
+#define MAYBE_ListShowsUpAgainWhenTypingAfterLanguageSelection \
+  ListShowsUpAgainWhenTypingAfterLanguageSelection
+#endif
+TEST_F(TranslateBubbleViewTest,
+       MAYBE_ListShowsUpAgainWhenTypingAfterLanguageSelection) {
+  base::test::ScopedFeatureList features(translate::kTranslateLanguageSearchUI);
+  CreateAndShowBubble();
+  SwitchView(TranslateBubbleModel::VIEW_STATE_TARGET_LANGUAGE);
+
+  TranslateLanguageSearchView* search_view = translate_language_search_view();
+  ASSERT_TRUE(search_view);
+
+  views::Textfield* search_field = GetSearchField(search_view);
+  ASSERT_TRUE(search_field);
+
+  views::BoxLayoutView* list_view = GetListView(search_view);
+  ASSERT_TRUE(list_view);
+
+  // 1. Click on a language button.
+  ASSERT_FALSE(list_view->children().empty());
+  HoverButton* button_to_click =
+      views::AsViewClass<HoverButton>(list_view->children().front());
+  ASSERT_TRUE(button_to_click);
+  std::u16string language_name = std::u16string(button_to_click->GetText());
+
+  views::test::ButtonTestApi(button_to_click)
+      .NotifyClick(ui::KeyEvent(ui::EventType::kKeyPressed, ui::VKEY_RETURN,
+                                ui::DomCode::ENTER, ui::EF_NONE));
+
+  // Verify list is empty.
+  EXPECT_TRUE(list_view->children().empty());
+
+  // 2. Simulate user typing (deleting characters) in the search field.
+  ASSERT_GT(language_name.length(), 2u);
+  std::u16string partial_query =
+      language_name.substr(0, language_name.length() - 2);
+  search_field->SetText(partial_query);
+  search_view->ContentsChanged(search_field,
+                               std::u16string(search_field->GetText()));
+
+  // Verify the list shows up again with matching language buttons.
+  std::vector<std::u16string> button_texts;
+  for (views::View* child : list_view->children()) {
+    if (views::IsViewClass<HoverButton>(child)) {
+      button_texts.emplace_back(static_cast<HoverButton*>(child)->GetText());
+    }
+  }
+  EXPECT_FALSE(button_texts.empty());
+  EXPECT_THAT(button_texts, testing::Contains(language_name));
+}
+
+TEST_F(TranslateBubbleViewTest, SearchNoResultsMessage) {
+  base::test::ScopedFeatureList features(translate::kTranslateLanguageSearchUI);
+  CreateAndShowBubble();
+  SwitchView(TranslateBubbleModel::VIEW_STATE_TARGET_LANGUAGE);
+
+  TranslateLanguageSearchView* search_view = translate_language_search_view();
+  ASSERT_TRUE(search_view);
+
+  // Type a query that matches no languages (e.g. "xyz").
+  search_view->ContentsChanged(nullptr, u"xyz");
+
+  views::BoxLayoutView* list_view = GetListView(search_view);
+  ASSERT_TRUE(list_view);
+
+  // Verify that the list view only contains the "No Results Found" label.
+  ASSERT_EQ(1u, list_view->children().size());
+  views::View* child = list_view->children().front();
+  ASSERT_TRUE(views::IsViewClass<views::Label>(child));
+  EXPECT_EQ(l10n_util::GetStringUTF16(IDS_TRANSLATE_BUBBLE_NO_RESULTS),
+            static_cast<views::Label*>(child)->GetText());
+}
+
+TEST_F(TranslateBubbleViewTest, InitialFocus) {
+  base::test::ScopedFeatureList features(translate::kTranslateLanguageSearchUI);
+  CreateAndShowBubble();
+
+  // The initially focused view should be the selected tab (index 0).
+  views::View* initially_focused = bubble_->GetInitiallyFocusedView();
+  ASSERT_TRUE(initially_focused);
+  views::TabbedPane* tabbed_pane = GetTabbedPane(bubble_);
+  ASSERT_TRUE(tabbed_pane);
+  EXPECT_EQ(tabbed_pane->GetTabAt(0), initially_focused);
 }

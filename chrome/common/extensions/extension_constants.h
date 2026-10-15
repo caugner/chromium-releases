@@ -66,6 +66,10 @@ inline constexpr char kTextEditorAppId[] = "mmfbcljfglbokpmkimbfghdkjmjhdgbg";
 inline constexpr char kInAppPaymentsSupportAppId[] =
     "nmmhkkegccagdldgiimedpiccmgmieda";
 
+// The extension id of Perfetto UI extension.
+inline constexpr char kPerfettoUIExtensionId[] =
+    "lfmkphfpdbjijhpomgecfikhfohaoine";
+
 // The extension id of virtual keyboard extension.
 inline constexpr char kKeyboardExtensionId[] =
     "mppnpdlheglhdfmldimlhpnegondlapf";
@@ -79,6 +83,17 @@ inline constexpr char kGlicPublicKey[] =
     "2Xoi8htu1qh4M1o4V0Q8GiqJ2nU2xJ9dJYxpMQff9OtNJ3giNman1xodSImQEWtm+"
     "YVUWJKu8V5ZyGWRJTtyo0tQiyNOx/kf3/"
     "f43CtsAKtsbFqJy9i9ux7JmF+KoORP1fjBJs0zpOGXWHbqIQIDAQAB";
+
+// The extension ID of the Contextual Tasks extension.
+inline constexpr char kContextualTasksExtensionId[] =
+    "glbjnfimcajjenihimblfaponejbkoph";
+
+// The public key of the Contextual Tasks extension.
+inline constexpr char kContextualTasksPublicKey[] =
+    "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC8ZtnRT6hXtjtG5XM7TcKakx9J+"
+    "37WuK1g1cx2IOh9enerA5VlQBcoHSpGOx5xzebQLxzUtURmNQXSrhOac/"
+    "z9SVUhHrXrtnBS4ftIUfagTDroowh1b23pIusQaLKprhkS8iFr0nw887BV+"
+    "yh9LQ7J90qDNzukXn0ss6ZVMxgcaQIDAQAB";
 
 // The extension id of the Gemini testing extension.
 inline constexpr char kGlicTestExtensionId[] =
@@ -192,9 +207,7 @@ inline constexpr char kGnubbyV3ExtensionId[] =
     "lfboplenmmjcmpbkeemecobbadnmpfhi";
 // The extension id of the GCSE.
 inline constexpr char kGCSEExtensionId[] = "cfmgaohenjcikllcgjpepfadgbflcjof";
-// The extension id of the Contact Center Insights chrome component extension.
-inline constexpr char kContactCenterInsightsExtensionId[] =
-    "oebfonohdfogiaaaelfmjlkjbgdbaahf";
+
 // The extension id of the Desk API chrome component extension.
 inline constexpr char kDeskApiExtensionId[] =
     "kflgdebkpepnpjobkdfeeipcjdahoomc";
@@ -203,9 +216,6 @@ inline constexpr char kBruSecurityKeyForwarderExtensionId[] =
     "lcooaekmckohjjnpaaokodoepajbnill";
 // The extension id of the OneDrive FS external component extension.
 inline constexpr char kODFSExtensionId[] = "gnnndjlaomemikopnjhhnoombakkkkdg";
-// The extension id of Perfetto UI extension.
-inline constexpr char kPerfettoUIExtensionId[] =
-    "lfmkphfpdbjijhpomgecfikhfohaoine";
 // The extension id of the Accessibility Common extension.
 inline constexpr char kAccessibilityCommonExtensionId[] =
     "egfdjlfmgnehecnclamagfafdccgfndp";

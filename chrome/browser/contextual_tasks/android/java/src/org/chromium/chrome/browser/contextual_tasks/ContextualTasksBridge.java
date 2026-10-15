@@ -13,20 +13,31 @@ import org.jni_zero.JniType;
 import org.jni_zero.NativeMethods;
 
 import org.chromium.base.ContextUtils;
+import org.chromium.base.UnownedUserDataKey;
+import org.chromium.base.supplier.MonotonicObservableSupplier;
+import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.contextual_tasks.fusebox.ContextualTasksFuseboxManager;
 import org.chromium.chrome.browser.feedback.HelpAndFeedbackLauncherFactory;
+import org.chromium.chrome.browser.omnibox.voice.VoiceRecognitionIntentHandler;
+import org.chromium.chrome.browser.omnibox.voice.VoiceRecognitionIntentHandler.VoiceInteractionSource;
+import org.chromium.chrome.browser.omnibox.voice.VoiceRecognitionIntentHandler.VoiceResult;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.ui.browser_window.ChromeAndroidTaskFeature;
+import org.chromium.chrome.browser.ui.browser_window.ChromeAndroidTaskFeature.InitInfo;
 import org.chromium.chrome.browser.ui.messages.snackbar.Snackbar;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager.SnackbarController;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManagerProvider;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.ActivityWindowAndroid;
+import org.chromium.ui.base.WindowAndroid;
 import org.chromium.url.GURL;
+
+import java.util.List;
 
 /**
  * Java bridge for Contextual Tasks. Owned by the activity's TabbedRootUiCoordinator. Owns its
@@ -35,6 +46,10 @@ import org.chromium.url.GURL;
 @JNINamespace("contextual_tasks")
 @NullMarked
 public class ContextualTasksBridge implements ChromeAndroidTaskFeature {
+    private static final UnownedUserDataKey<
+                    SettableMonotonicObservableSupplier<ContextualTasksBridge>>
+            SUPPLIER_KEY = new UnownedUserDataKey<>();
+
     private final Profile mProfile;
     private final ActivityWindowAndroid mWindowAndroid;
     private long mNativeContextualTasksBridge;
@@ -54,11 +69,32 @@ public class ContextualTasksBridge implements ChromeAndroidTaskFeature {
         mWindowAndroid = windowAndroid;
     }
 
+    /**
+     * Returns the {@link MonotonicObservableSupplier} for {@link ContextualTasksBridge} from the
+     * given {@link WindowAndroid}.
+     */
+    public static MonotonicObservableSupplier<ContextualTasksBridge> getSupplier(
+            WindowAndroid windowAndroid) {
+        SettableMonotonicObservableSupplier<ContextualTasksBridge> supplier =
+                SUPPLIER_KEY.retrieveDataFromHost(windowAndroid.getUnownedUserDataHost());
+        if (supplier == null) {
+            supplier = ObservableSuppliers.createMonotonic();
+            SUPPLIER_KEY.attachToHost(windowAndroid.getUnownedUserDataHost(), supplier);
+        }
+        return supplier;
+    }
+
     @Override
-    public void onAddedToTask(long nativeBrowserWindowPtr) {
+    public void onAddedToTask(InitInfo initInfo) {
+        long nativeBrowserWindowPtr = initInfo.nativeBrowserWindowPtr;
         if (nativeBrowserWindowPtr == 0) return;
         mNativeContextualTasksBridge =
                 ContextualTasksBridgeJni.get().init(this, nativeBrowserWindowPtr, mProfile);
+
+        SettableMonotonicObservableSupplier<ContextualTasksBridge> supplier =
+                (SettableMonotonicObservableSupplier<ContextualTasksBridge>)
+                        getSupplier(mWindowAndroid);
+        supplier.set(this);
     }
 
     @Override
@@ -104,6 +140,31 @@ public class ContextualTasksBridge implements ChromeAndroidTaskFeature {
                 ContextualTasksFuseboxManager.from(mWindowAndroid);
         if (fuseboxManager == null) return;
         fuseboxManager.onTaskChanged(oldTaskId, newTaskId);
+    }
+
+    @CalledByNative
+    void startVoiceRecognition() {
+        if (mWindowAndroid == null) return;
+
+        VoiceRecognitionIntentHandler handler = new VoiceRecognitionIntentHandler(mWindowAndroid);
+        handler.startVoiceRecognition(
+                VoiceInteractionSource.COMPOSEBOX,
+                new VoiceRecognitionIntentHandler.RecognitionCallback() {
+                    @Override
+                    public void onCompleted(List<VoiceResult> results) {
+                        if (results.isEmpty()) return;
+                        String query = results.get(0).getMatch();
+                        if (mNativeContextualTasksBridge == 0) return;
+                        ContextualTasksBridgeJni.get()
+                                .onVoiceTranscribed(mNativeContextualTasksBridge, query);
+                    }
+
+                    @Override
+                    public void onCanceled() {}
+
+                    @Override
+                    public void onAvailabilityImpacted() {}
+                });
     }
 
     @CalledByNative
@@ -153,6 +214,9 @@ public class ContextualTasksBridge implements ChromeAndroidTaskFeature {
         void destroy(long nativeContextualTasksBridge);
 
         void undoClose(long nativeContextualTasksBridge);
+
+        void onVoiceTranscribed(
+                long nativeContextualTasksBridge, @JniType("std::string") String query);
 
         @JniType("std::string")
         String getTaskIdForTab(@JniType("content::WebContents*") WebContents webContents);

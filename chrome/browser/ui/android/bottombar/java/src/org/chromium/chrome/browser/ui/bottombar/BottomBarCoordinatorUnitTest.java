@@ -9,14 +9,18 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import android.app.Activity;
-import android.content.res.ColorStateList;
 import android.view.View;
+import android.widget.Button;
 import android.widget.FrameLayout;
 
 import androidx.test.ext.junit.rules.ActivityScenarioRule;
@@ -35,7 +39,10 @@ import org.chromium.base.supplier.SettableNonNullObservableSupplier;
 import org.chromium.base.supplier.SettableNullableObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Features.EnableFeatures;
+import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.glic.GlicEnabling;
+import org.chromium.chrome.browser.glic.GlicEnablingJni;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.theme.ThemeColorProvider;
@@ -43,14 +50,18 @@ import org.chromium.chrome.browser.ui.actions.ActionId;
 import org.chromium.chrome.browser.ui.actions.ActionProperties;
 import org.chromium.chrome.browser.ui.actions.ActionRegistry;
 import org.chromium.chrome.browser.ui.theme.BrandedColorScheme;
+import org.chromium.components.feature_engagement.FeatureConstants;
+import org.chromium.components.feature_engagement.Tracker;
 import org.chromium.ui.base.TestActivity;
+import org.chromium.ui.modaldialog.ModalDialogManager;
 import org.chromium.ui.modelutil.PropertyModel;
+import org.chromium.url.JUnitTestGURLs;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Unit tests for {@link BottomBarCoordinator}. */
 @RunWith(BaseRobolectricTestRunner.class)
-@EnableFeatures(ChromeFeatureList.GLIC)
+@EnableFeatures({ChromeFeatureList.GLIC, ChromeFeatureList.ANDROID_BOTTOM_BAR})
 public class BottomBarCoordinatorUnitTest {
     @Rule public final MockitoRule mMockitoRule = MockitoJUnit.rule();
 
@@ -62,6 +73,9 @@ public class BottomBarCoordinatorUnitTest {
     @Mock private ThemeColorProvider mThemeColorProvider;
     @Mock private BottomBarMediator.VisibilityDelegate mVisibilityDelegate;
     @Mock private Profile mProfile;
+    @Mock private ModalDialogManager mModalDialogManager;
+    @Mock private Tracker mTracker;
+    @Mock private Tab mTab;
 
     private final SettableNullableObservableSupplier<Tab> mTabSupplier =
             ObservableSuppliers.createNullable();
@@ -81,10 +95,13 @@ public class BottomBarCoordinatorUnitTest {
     private Activity mActivity;
     private FrameLayout mParent;
     private SettableNonNullObservableSupplier<Boolean> mHomepageEnabledSupplier;
+    private SettableNonNullObservableSupplier<Boolean> mOmniboxFocusStateSupplier;
+    private SettableNonNullObservableSupplier<ModalDialogManager> mModalDialogManagerSupplier;
     private BottomBarCoordinator mCoordinator;
 
     @Before
     public void setUp() {
+        TrackerFactory.setTrackerForTests(mTracker);
         when(mActionRegistry.get(ActionId.NEW_TAB)).thenReturn(mActionSupplier);
         when(mActionRegistry.get(ActionId.HOME_BUTTON)).thenReturn(mHomeActionSupplier);
         when(mActionRegistry.get(ActionId.APP_MENU)).thenReturn(mMenuActionSupplier);
@@ -98,6 +115,8 @@ public class BottomBarCoordinatorUnitTest {
         mActivity = activity;
         mParent = new FrameLayout(mActivity);
         mHomepageEnabledSupplier = ObservableSuppliers.createNonNull(true);
+        mOmniboxFocusStateSupplier = ObservableSuppliers.createNonNull(false);
+        mModalDialogManagerSupplier = ObservableSuppliers.createNonNull(mModalDialogManager);
         mProfileSupplier.set(mProfile);
         mCoordinator =
                 new BottomBarCoordinator(
@@ -107,14 +126,16 @@ public class BottomBarCoordinatorUnitTest {
                         mTabSupplier,
                         mHomepageEnabledSupplier,
                         mVisibilityDelegate,
-                        mProfileSupplier);
+                        mProfileSupplier,
+                        mOmniboxFocusStateSupplier,
+                        mModalDialogManagerSupplier);
     }
 
     @Test
     public void testInitialization_bindsAction() {
         assertNotNull(mCoordinator);
         verify(mActionRegistry, times(2)).get(ActionId.NEW_TAB);
-        verify(mActionRegistry, times(2)).get(ActionId.TAB_SWITCHER);
+        verify(mActionRegistry, times(1)).get(ActionId.TAB_SWITCHER);
     }
 
     @Test
@@ -149,7 +170,7 @@ public class BottomBarCoordinatorUnitTest {
     @Test
     @EnableFeatures(ChromeFeatureList.ANDROID_BOTTOM_BAR + ":keep_home_button_in_toolbar/false")
     public void testInitialization_withHomeButton_bindsHomeButton() {
-        verify(mActionRegistry, times(2)).get(ActionId.HOME_BUTTON);
+        verify(mActionRegistry, times(1)).get(ActionId.HOME_BUTTON);
 
         View homeButton = mCoordinator.getView().findViewById(R.id.home_button);
         assertNotNull(homeButton);
@@ -170,10 +191,25 @@ public class BottomBarCoordinatorUnitTest {
     @Test
     @EnableFeatures(ChromeFeatureList.ANDROID_BOTTOM_BAR + ":keep_app_menu_in_toolbar/false")
     public void testInitialization_withAppMenu_bindsAppMenu() {
-        verify(mActionRegistry, times(2)).get(ActionId.APP_MENU);
+        verify(mActionRegistry, times(1)).get(ActionId.APP_MENU);
 
         View menuButton = mCoordinator.getView().findViewById(R.id.app_menu_button);
         assertNotNull(menuButton);
+        assertEquals(true, menuButton.getTag(R.id.is_bottom_bar_menu_anchor));
+    }
+
+    @Test
+    @EnableFeatures({
+        ChromeFeatureList.ANDROID_BOTTOM_BAR + ":keep_app_menu_in_toolbar/false",
+        ChromeFeatureList.ANDROID_BOTTOM_BAR + ":show_update_badge/true"
+    })
+    public void testInitialization_withAppMenuAndBadge_accessibilityClassName() {
+        verify(mActionRegistry, times(1)).get(ActionId.APP_MENU);
+
+        View menuButton = mCoordinator.getView().findViewById(R.id.app_menu_button);
+        assertNotNull(menuButton);
+        assertTrue(menuButton instanceof BottomBarAppMenu);
+        assertEquals(Button.class.getName(), menuButton.getAccessibilityClassName().toString());
     }
 
     @Test
@@ -194,24 +230,67 @@ public class BottomBarCoordinatorUnitTest {
     }
 
     @Test
-    public void testUpdateIconColors() {
-        PropertyModel actionModel = new PropertyModel.Builder(ActionProperties.ALL_KEYS).build();
-        mActionSupplier.set(actionModel);
-        mCoordinator =
-                new BottomBarCoordinator(
-                        mParent,
-                        mActionRegistry,
-                        mThemeColorProvider,
-                        mTabSupplier,
-                        mHomepageEnabledSupplier,
-                        mVisibilityDelegate,
-                        mProfileSupplier);
+    public void testOmniboxFocusHidesBottomBar() {
+        // Initially not focused, should be visible.
+        verify(mVisibilityDelegate).onVisibilityChanged(true);
 
-        ColorStateList expectedTint =
-                BottomBarUtils.getIconColorStateList(mActivity, BrandedColorScheme.APP_DEFAULT);
+        // Focus omnibox, should hide.
+        mOmniboxFocusStateSupplier.set(true);
+        verify(mVisibilityDelegate).onVisibilityChanged(false);
 
-        assertEquals(
-                String.valueOf(expectedTint),
-                String.valueOf(actionModel.get(ActionProperties.ICON_TINT)));
+        // Unfocus omnibox, should show again.
+        mOmniboxFocusStateSupplier.set(false);
+        verify(mVisibilityDelegate, times(2)).onVisibilityChanged(true);
+    }
+
+    @Test
+    public void testMaybeShowPromoDialog_Visible() {
+        when(mTab.getUrl()).thenReturn(JUnitTestGURLs.EXAMPLE_URL);
+        when(mTab.isIncognito()).thenReturn(false);
+        mTabSupplier.set(mTab);
+
+        when(mTracker.shouldTriggerHelpUi(FeatureConstants.ANDROID_BOTTOM_BAR_PROMO_DIALOG))
+                .thenReturn(true);
+        GlicEnabling.Natives glicEnablingMock = mock(GlicEnabling.Natives.class);
+        GlicEnablingJni.setInstanceForTesting(glicEnablingMock);
+        when(glicEnablingMock.isEnabledForProfile(any())).thenReturn(true);
+        when(mProfile.getOriginalProfile()).thenReturn(mProfile);
+
+        assertTrue(mCoordinator.maybeShowPromoDialog(mProfile));
+        verify(mModalDialogManager).showDialog(any(), anyInt(), anyBoolean());
+    }
+
+    @Test
+    public void testMaybeShowPromoDialog_NtpDisabled() {
+        when(mTab.getUrl()).thenReturn(JUnitTestGURLs.NTP_URL);
+        when(mTab.isIncognito()).thenReturn(false);
+        mTabSupplier.set(mTab);
+
+        when(mTracker.shouldTriggerHelpUi(FeatureConstants.ANDROID_BOTTOM_BAR_PROMO_DIALOG))
+                .thenReturn(true);
+        GlicEnabling.Natives glicEnablingMock = mock(GlicEnabling.Natives.class);
+        GlicEnablingJni.setInstanceForTesting(glicEnablingMock);
+        when(glicEnablingMock.isEnabledForProfile(any())).thenReturn(true);
+        when(mProfile.getOriginalProfile()).thenReturn(mProfile);
+
+        assertFalse(mCoordinator.maybeShowPromoDialog(mProfile));
+        verify(mModalDialogManager, never()).showDialog(any(), anyInt(), anyBoolean());
+    }
+
+    @Test
+    public void testMaybeShowPromoDialog_Incognito() {
+        when(mTab.getUrl()).thenReturn(JUnitTestGURLs.EXAMPLE_URL);
+        when(mTab.isIncognito()).thenReturn(true);
+        mTabSupplier.set(mTab);
+
+        when(mTracker.shouldTriggerHelpUi(FeatureConstants.ANDROID_BOTTOM_BAR_PROMO_DIALOG))
+                .thenReturn(true);
+        GlicEnabling.Natives glicEnablingMock = mock(GlicEnabling.Natives.class);
+        GlicEnablingJni.setInstanceForTesting(glicEnablingMock);
+        when(glicEnablingMock.isEnabledForProfile(any())).thenReturn(true);
+        when(mProfile.getOriginalProfile()).thenReturn(mProfile);
+
+        assertFalse(mCoordinator.maybeShowPromoDialog(mProfile));
+        verify(mModalDialogManager, never()).showDialog(any(), anyInt(), anyBoolean());
     }
 }

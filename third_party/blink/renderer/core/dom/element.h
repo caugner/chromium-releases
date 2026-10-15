@@ -27,6 +27,7 @@
 
 #include "base/check_op.h"
 #include "base/dcheck_is_on.h"
+#include "base/functional/function_ref.h"
 #include "base/types/pass_key.h"
 #include "third_party/blink/public/common/input/pointer_id.h"
 #include "third_party/blink/public/common/metrics/document_update_reason.h"
@@ -203,8 +204,9 @@ enum class ElementFlags {
   kContainsPersistentVideo = 1 << 5,
   kIsEligibleForElementCapture = 1 << 6,
   kHasCheckedElementCaptureEligibility = 1 << 7,
+  kIsUnboundedElementActive = 1 << 8,
 
-  kNumberOfElementFlags = 8,  // Size of bitfield used to store the flags.
+  kNumberOfElementFlags = 9,  // Size of bitfield used to store the flags.
 };
 
 enum class ShadowRootMode;
@@ -267,8 +269,6 @@ enum class CommandEventType {
   kToggleMuted,
   // Menu
   kToggleMenu,
-  kHideMenu,
-  kShowMenu,
   // Scroll
   kPageUp,
   kPageDown,
@@ -409,7 +409,21 @@ class CORE_EXPORT Element : public ContainerNode {
   Element* GetElementAttributeResolvingReferenceTarget(
       const QualifiedName& name) const;
   void SetElementAttribute(const QualifiedName&, Element*);
+  // GetAttrAssociatedElements returns the result of the 'get the
+  // attr-associated elements' algorithm [1]. It returns null if and only if the
+  // IDL attribute's explicitly set elements [2] is null and the content
+  // attribute is not set. GetAttrAssociatedElementsResolvingReferenceTarget
+  // returns null under the same conditions. It returns the result of resolving
+  // the reference target [3] on each member of the result of
+  // GetAttrAssociatedElements, discarding the values for which resolving the
+  // reference target returns null.
+  // [1] https://html.spec.whatwg.org/#attr-associated-elements
+  // [2] https://html.spec.whatwg.org/#explicitly-set-attr-elements
+  // [3] https://github.com/whatwg/html/pull/10995
   GCedHeapVector<Member<Element>>* GetAttrAssociatedElements(
+      const QualifiedName& name) const;
+  GCedHeapVector<Member<Element>>*
+  GetAttrAssociatedElementsResolvingReferenceTarget(
       const QualifiedName& name) const;
 
   // If treescope_element is connected, then we will search treescope_element's
@@ -520,8 +534,8 @@ class CORE_EXPORT Element : public ContainerNode {
   AtomicStringTable::WeakResult WeakLowercaseIfNecessary(
       const AtomicString&) const;
 
-  // NoncedElement implementation: this is only used by HTMLElement and
-  // SVGElement, but putting the implementation here allows us to use
+  // NoncedElement implementation: this is only used by HTMLElement, SVGElement
+  // and MathMLElement but putting the implementation here allows us to use
   // ElementRareData to hold the data.
   const AtomicString& nonce() const;
   void setNonce(const AtomicString&);
@@ -800,13 +814,23 @@ class CORE_EXPORT Element : public ContainerNode {
     const AttributeModificationReason reason;
   };
 
-  // |attributeChanged| is called whenever an attribute is added, changed or
+  // |AttributeChanged| is called whenever an attribute is added, changed or
   // removed. It handles very common attributes such as id, class, name, style,
   // and slot.
   //
   // While the owner document is parsed, this function is called after all
   // attributes in a start tag were added to the element.
+  //
+  // Most callers should use AttributeChangedWithInvalidations() instead,
+  // which additionally performs cache invalidation and change propagation.
+  // Direct calls to AttributeChanged() should be reserved for batch
+  // operations (e.g., ParserSetAttributes) that handle invalidation
+  // separately.
   virtual void AttributeChanged(const AttributeModificationParams&);
+
+  // Calls AttributeChanged() and additionally increments the DOM tree version,
+  // invalidates node list caches in ancestors, and notifies accessibility.
+  void AttributeChangedWithInvalidations(const AttributeModificationParams&);
 
   // |ParseAttribute()| is called by |AttributeChanged()|. If an element
   // implementation needs to check an attribute update, override this function.
@@ -1112,7 +1136,7 @@ class CORE_EXPORT Element : public ContainerNode {
     return HasElementFlag(ElementFlags::kIsCanvasOrInCanvasSubtree);
   }
   // Called when `IsCanvasOrInCanvasSubtree()` has changed.
-  virtual void DidChangeIsCanvasOrInCanvasSubtree() {}
+  virtual void DidChangeIsCanvasOrInCanvasSubtree();
   // Like `IsCanvasOrInCanvasSubtree()`, but excludes the outermost <canvas>.
   bool IsInCanvasSubtree() const;
 
@@ -1517,6 +1541,8 @@ class CORE_EXPORT Element : public ContainerNode {
 
   bool PseudoElementStylesDependOnFontMetrics() const;
   bool PseudoElementStylesDependOnAttr() const;
+  bool PseudoElementStylesDependOnFunc(
+      base::FunctionRef<bool(const ComputedStyle&)> func) const;
 
   // Retrieve the ComputedStyle (if any) corresponding to the provided
   // PseudoId from cache, calculating the ComputedStyle on-demand if it's
@@ -1564,6 +1590,7 @@ class CORE_EXPORT Element : public ContainerNode {
   virtual bool MatchesReadOnlyPseudoClass() const { return false; }
   virtual bool MatchesReadWritePseudoClass() const { return false; }
   virtual bool MatchesValidityPseudoClasses() const { return false; }
+  bool MatchesOverscrollOpen() const;
 
   virtual bool MayTriggerVirtualKeyboard() const;
 
@@ -1578,6 +1605,8 @@ class CORE_EXPORT Element : public ContainerNode {
   virtual bool ShouldAppearIndeterminate() const { return false; }
 
   DOMTokenList& classList();
+
+  DOMTokenList& focusGroup();
 
   DOMStringMap& dataset();
 
@@ -1619,7 +1648,13 @@ class CORE_EXPORT Element : public ContainerNode {
   CustomElementDefinition* GetCustomElementDefinition() const;
 
   // Scoped Custom Elements
-  CustomElementRegistry* customElementRegistry() const;
+  //
+  // Returns the custom element registry associated with this element.
+  // See TreeScope::customElementRegistry() for the rule about when to
+  // pass `script_state` (in short: any caller that will hand the registry
+  // to script must pass it).
+  CustomElementRegistry* customElementRegistry(
+      ScriptState* script_state = nullptr) const;
   // When it comes to storing an element's custom element registry, we have an
   // optimization where if the registry to be set is the same as element's tree
   // scope's registry, we don't store it in the element itself and rely on tree
@@ -1981,7 +2016,7 @@ class CORE_EXPORT Element : public ContainerNode {
   // 2) The Element is part of the active document.
   // See https://github.com/whatwg/html/pull/2373
   //
-  // This applies to the element of the HTML and SVG namespaces.
+  // This applies to the element of the HTML, SVG and MathML namespaces.
   //
   // This function clears the "nonce" attribute whenever conditions (1) and (2)
   // are met.
@@ -2062,6 +2097,22 @@ class CORE_EXPORT Element : public ContainerNode {
   void SetHasBeenHeuristicCustomPasswordCSS();
 
  protected:
+  // Returns true if this element is a native password field or has been
+  // identified as a custom password field via CSS or JS heuristics.
+  virtual bool IsNativeOrHeuristicPassword() const;
+
+  // Returns true if the element's coordinates should currently be tracked
+  // by the compositor for redaction purposes.
+  virtual bool ShouldTrackPassword() const;
+
+  // Updates the TrackedElementSubRect on feature `kPasswordTracking` for this
+  // element.
+  void UpdatePasswordTracking();
+
+  bool HasElementFlag(ElementFlags mask) const;
+  void SetElementFlag(ElementFlags, bool value = true);
+  void ClearElementFlag(ElementFlags);
+
   bool HasElementData() const { return static_cast<bool>(element_data_); }
   const ElementData* GetElementData() const { return element_data_.Get(); }
   UniqueElementData& EnsureUniqueElementData();
@@ -2186,8 +2237,6 @@ class CORE_EXPORT Element : public ContainerNode {
 
   ShadowRoot* GetShadowRootInternal() const;
 
-  template <typename Functor>
-  bool PseudoElementStylesDependOnFunc(Functor& func) const;
 
   // Returns true if the element satisfies conditions for focusability for
   // spatial navigation, even if the spatial navigation is not currently
@@ -2209,10 +2258,6 @@ class CORE_EXPORT Element : public ContainerNode {
   bool ScrollLayoutBoxTo(const ScrollToOptions*, ScrollPromiseResolver*);
   bool ScrollFrameBy(const ScrollToOptions*, ScrollPromiseResolver*);
   bool ScrollFrameTo(const ScrollToOptions*, ScrollPromiseResolver*);
-
-  bool HasElementFlag(ElementFlags mask) const;
-  void SetElementFlag(ElementFlags, bool value = true);
-  void ClearElementFlag(ElementFlags);
 
   void ClearPseudoElement(PseudoId,
                           const AtomicString& pseudo_argument = g_null_atom);
@@ -2381,9 +2426,9 @@ class CORE_EXPORT Element : public ContainerNode {
   }
 
   void AttachSucceedingPseudoElements(AttachContext& context) {
-    AttachPseudoElement(kPseudoIdPickerIcon, context);
-    AttachPseudoElement(kPseudoIdExpandIcon, context);
     AttachPseudoElement(kPseudoIdAfter, context);
+    AttachPseudoElement(kPseudoIdExpandIcon, context);
+    AttachPseudoElement(kPseudoIdPickerIcon, context);
     AttachPseudoElement(kPseudoIdInterestButton, context);
     AttachDocumentElementSucceedingPseudoElements(context);
     AttachPseudoElement(kPseudoIdBackdrop, context);
@@ -2419,9 +2464,9 @@ class CORE_EXPORT Element : public ContainerNode {
   }
 
   void DetachSucceedingPseudoElements(bool performing_reattach) {
-    DetachPseudoElement(kPseudoIdPickerIcon, performing_reattach);
-    DetachPseudoElement(kPseudoIdExpandIcon, performing_reattach);
     DetachPseudoElement(kPseudoIdAfter, performing_reattach);
+    DetachPseudoElement(kPseudoIdExpandIcon, performing_reattach);
+    DetachPseudoElement(kPseudoIdPickerIcon, performing_reattach);
     DetachPseudoElement(kPseudoIdInterestButton, performing_reattach);
     DetachPseudoElement(kPseudoIdScrollButtonBlockStart, performing_reattach);
     DetachPseudoElement(kPseudoIdScrollButtonInlineStart, performing_reattach);
@@ -2730,28 +2775,33 @@ inline const AtomicString& Element::FastGetAttribute(
       << TagQName().ToString().Utf8() << "/@" << name.ToString().Utf8();
 #endif
   if (CouldHaveAttribute(name) && HasElementData()) {
-    if (const Attribute* attribute = GetElementData()->Attributes().Find(name))
+    if (const Attribute* attribute =
+            GetElementData()->Attributes().Find(name)) {
       return attribute->Value();
+    }
   }
   return g_null_atom;
 }
 
 inline AttributeCollection Element::Attributes() const {
-  if (!HasElementData())
+  if (!HasElementData()) {
     return AttributeCollection();
+  }
   SynchronizeAllAttributes();
   return GetElementData()->Attributes();
 }
 
 inline AttributeCollection Element::AttributesWithoutUpdate() const {
-  if (!HasElementData())
+  if (!HasElementData()) {
     return AttributeCollection();
+  }
   return GetElementData()->Attributes();
 }
 
 inline AttributeCollection Element::AttributesWithoutStyleUpdate() const {
-  if (!HasElementData())
+  if (!HasElementData()) {
     return AttributeCollection();
+  }
   SynchronizeAllAttributesExceptStyle();
   return GetElementData()->Attributes();
 }
@@ -2774,10 +2824,12 @@ inline const AtomicString& Element::GetNameAttribute() const {
 }
 
 inline const AtomicString& Element::GetClassAttribute() const {
-  if (!HasClass())
+  if (!HasClass()) {
     return g_null_atom;
-  if (IsSVGElement())
+  }
+  if (IsSVGElement()) {
     return getAttribute(html_names::kClassAttr);
+  }
   return FastGetAttribute(html_names::kClassAttr);
 }
 
@@ -2805,16 +2857,19 @@ inline bool Element::HasClass() const {
 }
 
 inline UniqueElementData& Element::EnsureUniqueElementData() {
-  if (!HasElementData() || !GetElementData()->IsUnique())
+  if (!HasElementData() || !GetElementData()->IsUnique()) {
     CreateUniqueElementData();
+  }
   return To<UniqueElementData>(*element_data_);
 }
 
 inline const CSSPropertyValueSet* Element::PresentationAttributeStyle() {
-  if (!HasElementData())
+  if (!HasElementData()) {
     return nullptr;
-  if (GetElementData()->presentation_attribute_style_is_dirty())
+  }
+  if (GetElementData()->presentation_attribute_style_is_dirty()) {
     UpdatePresentationAttributeStyle();
+  }
   // Need to call elementData() again since updatePresentationAttributeStyle()
   // might swap it with a UniqueElementData.
   return GetElementData()->PresentationAttributeStyle();

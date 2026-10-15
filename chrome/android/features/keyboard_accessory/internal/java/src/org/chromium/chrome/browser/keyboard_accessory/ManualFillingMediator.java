@@ -72,6 +72,8 @@ import org.chromium.chrome.browser.ui.edge_to_edge.EdgeToEdgeController;
 import org.chromium.chrome.browser.util.ChromeAccessibilityUtil;
 import org.chromium.components.autofill.AutofillDelegate;
 import org.chromium.components.autofill.AutofillSuggestion;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetContent;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetContent.ContentPriority;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetController.SheetState;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetObserver;
@@ -85,7 +87,6 @@ import org.chromium.components.browser_ui.widget.gesture.BackPressHandler;
 import org.chromium.content_public.browser.NavigationHandle;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsAccessibility;
-import org.chromium.ui.base.DeviceInput;
 import org.chromium.ui.base.ViewUtils;
 import org.chromium.ui.base.ViewportInsets;
 import org.chromium.ui.base.WindowAndroid;
@@ -112,9 +113,6 @@ class ManualFillingMediator
                 BackPressHandler {
     private static final int MINIMAL_AVAILABLE_VERTICAL_SPACE = 128; // in DP.
     private static final int MINIMAL_AVAILABLE_HORIZONTAL_SPACE = 180; // in DP.
-    private static final int MIN_WINDOW_HEIGHT_FOR_UNDOCKED_BAR_DP = 480;
-    private static final int MIN_WINDOW_WIDTH_FOR_UNDOCKED_BAR_DP = 600;
-    private static final int EXPANDED_WINDOW_WIDTH_FOR_UNDOCKED_BAR_DP = 840;
     private static final float MAXIMUM_BAR_WIDTH_PERCENTAGE = 0.7f;
 
     private final SparseArray<AccessorySheetTabCoordinator> mSheets = new SparseArray<>();
@@ -123,6 +121,8 @@ class ManualFillingMediator
     private NonNullObservableSupplier<ViewportInsets> mApplicationViewportInsetTracker;
     private final SettableNonNullObservableSupplier<Integer> mBottomInsetSupplier =
             ObservableSuppliers.createNonNull(0);
+    private final SettableNonNullObservableSupplier<Boolean> mIsAccessoryRequestedSupplier =
+            ObservableSuppliers.createNonNull(false);
     private final ManualFillingStateCache mStateCache = new ManualFillingStateCache();
     private final HashSet<Tab> mObservedTabs = new HashSet<>();
     private KeyboardAccessoryCoordinator mKeyboardAccessory;
@@ -203,7 +203,19 @@ class ManualFillingMediator
             new EmptyBottomSheetObserver() {
                 @Override
                 public void onSheetStateChanged(@SheetState int newState, int reason) {
-                    mModel.set(SUPPRESSED_BY_BOTTOM_SHEET, newState != SheetState.HIDDEN);
+                    @Nullable BottomSheetContent currentContent =
+                            mBottomSheetController.getCurrentSheetContent();
+                    // TODO(crbug.com/505050661): Remove COBROWSE condition once modes is
+                    // implemented.
+                    boolean isCoBrowse =
+                            currentContent != null
+                                    && currentContent.getPriority() == ContentPriority.COBROWSE;
+
+                    // Only suppress the accessory if the sheet is open AND it is not a Co-Browse
+                    // sheet.
+                    mModel.set(
+                            SUPPRESSED_BY_BOTTOM_SHEET,
+                            newState != SheetState.HIDDEN && !isCoBrowse);
                 }
             };
 
@@ -284,6 +296,10 @@ class ManualFillingMediator
 
     NonNullObservableSupplier<Integer> getBottomInsetSupplier() {
         return mBottomInsetSupplier;
+    }
+
+    NonNullObservableSupplier<Boolean> getIsAccessoryRequestedSupplier() {
+        return mIsAccessoryRequestedSupplier;
     }
 
     @Override
@@ -530,6 +546,7 @@ class ManualFillingMediator
                     "ManualFillingMediator$KeyboardExtensionState",
                     getNameForState(mModel.get(KEYBOARD_EXTENSION_STATE)));
             transitionIntoState(mModel.get(KEYBOARD_EXTENSION_STATE));
+            mIsAccessoryRequestedSupplier.set(mModel.get(KEYBOARD_EXTENSION_STATE) != HIDDEN);
             return;
         } else if (property == SUPPRESSED_BY_BOTTOM_SHEET) {
             if (isInitialized() && mModel.get(SUPPRESSED_BY_BOTTOM_SHEET)) {
@@ -663,20 +680,8 @@ class ManualFillingMediator
     }
 
     public boolean isLargeFormFactor() {
-        int windowWidthDp = mActivity.getResources().getConfiguration().screenWidthDp;
-        int windowHeightDp = mActivity.getResources().getConfiguration().screenHeightDp;
-        boolean isPhysicalKeyboardConnected =
-                DeviceInput.supportsAlphabeticKeyboard()
-                        && !isSoftKeyboardShowing(getContentView());
-
-        if (windowWidthDp > EXPANDED_WINDOW_WIDTH_FOR_UNDOCKED_BAR_DP) {
-            return windowHeightDp > MIN_WINDOW_HEIGHT_FOR_UNDOCKED_BAR_DP
-                    || isPhysicalKeyboardConnected;
-        }
-
-        return windowWidthDp > MIN_WINDOW_WIDTH_FOR_UNDOCKED_BAR_DP
-                && windowHeightDp > MIN_WINDOW_HEIGHT_FOR_UNDOCKED_BAR_DP
-                && isPhysicalKeyboardConnected;
+        return KeyboardAccessoryUtils.isLargeFormFactor(
+                mActivity, mWindowAndroid.getKeyboardDelegate());
     }
 
     private void enforceStateProperties(@KeyboardExtensionState int extensionState) {
@@ -804,12 +809,13 @@ class ManualFillingMediator
             Runnable declinedCallback) {
         mConfirmationDialogDismissHandler =
                 mActionConfirmationDialog.show(
-                        new ConfirmationDialogParams(mActivity)
+                        new ConfirmationDialogParams.Builder(mActivity)
                                 .withTitle(title)
                                 .withDescription(message)
                                 .withPositiveButton(confirmButtonText)
                                 .withNegativeButton(R.string.cancel)
-                                .withSupportStopShowing(false),
+                                .withSupportStopShowing(false)
+                                .build(),
                         (handler, result, stopShowing) ->
                                 onConfirmationDialogInteracted(
                                         result, confirmedCallback, declinedCallback));
@@ -861,7 +867,7 @@ class ManualFillingMediator
 
     private @Px int getBarWithNotchHeightPx() {
         Resources resources = mActivity.getResources();
-        return resources.getDimensionPixelSize(R.dimen.keyboard_accessory_height_redesign)
+        return resources.getDimensionPixelSize(R.dimen.keyboard_accessory_height)
                 + resources.getDimensionPixelSize(R.dimen.keyboard_accessory_notch_height);
     }
 
@@ -1243,15 +1249,13 @@ class ManualFillingMediator
     }
 
     private @Px int getBarHeightWithoutShadow() {
-        return mActivity
-                .getResources()
-                .getDimensionPixelSize(R.dimen.keyboard_accessory_height_redesign);
+        return mActivity.getResources().getDimensionPixelSize(R.dimen.keyboard_accessory_height);
     }
 
     private @Px int getHeaderHeight() {
         return mActivity
                 .getResources()
-                .getDimensionPixelSize(R.dimen.keyboard_accessory_height_with_shadow_redesign);
+                .getDimensionPixelSize(R.dimen.keyboard_accessory_height_with_shadow);
     }
 
     private @Px int getIdealSheetHeight() {

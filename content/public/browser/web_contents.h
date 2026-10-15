@@ -24,7 +24,9 @@
 #include "base/process/kill.h"
 #include "base/supports_user_data.h"
 #include "base/time/time.h"
+#include "base/types/strong_alias.h"
 #include "base/types/token_type.h"
+#include "base/unguessable_token.h"
 #include "build/build_config.h"
 #include "cc/input/browser_controls_state.h"
 #include "content/common/content_export.h"
@@ -60,6 +62,7 @@
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/native_ui_types.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 #if BUILDFLAG(IS_ANDROID)
 #include "content/public/browser/android/child_process_importance.h"
@@ -179,6 +182,7 @@ class WebContents : public PageNavigator, public base::SupportsUserData {
 
  public:
   using UniqueToken = base::TokenType<class WebContentsTokenTag>;
+  using DragId = base::StrongAlias<class DragIdTag, base::UnguessableToken>;
 
   struct CONTENT_EXPORT CreateParams {
     explicit CreateParams(
@@ -419,6 +423,12 @@ class WebContents : public PageNavigator, public base::SupportsUserData {
   CONTENT_EXPORT static WebContents* FromFrameTreeNodeId(
       FrameTreeNodeId frame_tree_node_id);
 
+  // Returns the WebContents associated with the given drag ID, provided the
+  // drag originated from the given BrowserContext. Returns nullptr if the drag
+  // is not found or originated from a different BrowserContext.
+  CONTENT_EXPORT static WebContents* FromDragId(BrowserContext* browser_context,
+                                                const DragId& drag_id);
+
   // A callback that returns a pointer to a WebContents. The callback can
   // always be used, but it may return nullptr: if the info used to
   // instantiate the callback can no longer be used to return a WebContents,
@@ -489,6 +499,16 @@ class WebContents : public PageNavigator, public base::SupportsUserData {
   // See also GetVisibleURL above, which may differ from this URL. Note that
   // this might return an empty GURL if no navigation has committed in the
   // WebContents' main frame.
+  //
+  // Note: When a navigation fails and commits an error page (e.g.
+  // `chrome-error://chromewebdata/`), `GetLastCommittedURL()` continues to
+  // return the failed destination target URL rather than an error URL.
+  // Therefore, this should not be used directly for security, authorization,
+  // or permission checks without verifying that the primary main frame is not
+  // an error document (`!GetPrimaryMainFrame()->IsErrorDocument()`).
+  // Higher-level layers (such as extensions) should use their dedicated
+  // permission-check URL helper (e.g.,
+  // `extensions::util::GetURLForExtensionPermissionCheck()`).
   virtual const GURL& GetLastCommittedURL() const = 0;
 
   // Returns the primary main frame for the currently active page. Always
@@ -1577,9 +1597,6 @@ class WebContents : public PageNavigator, public base::SupportsUserData {
   // tree when they are created as well. Also the subframe importance will be
   // set to subframes when they are restored (e.g. from BFCache) to the primary
   // frame tree.
-  //
-  // SubframeImportance feature is required to set subframe importance to other
-  // than NORMAL.
   //
   // The subframe_importance must be less than or equal to the
   // main_frame_importance.

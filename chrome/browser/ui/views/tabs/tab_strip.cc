@@ -566,7 +566,7 @@ class TabStrip::TabDragContextImpl : public TabDragContext,
       return 0;
     }
 
-    std::optional<int> first_dragged_tab_model_index = std::nullopt;
+    std::optional<int> first_dragged_tab_model_index;
     bool can_insert_into_groups = true;
     for (TabSlotView* tab_slot_view : dragged_views) {
       const bool is_tab =
@@ -1288,7 +1288,7 @@ void TabStrip::AddTabsAt(const std::vector<AddTabData>& tabs_data) {
     drag_context_->TabWasAdded();
   }
 
-  if (base::FeatureList::IsEnabled(features::kTabStripDeclutter) &&
+  if (features::IsTabStripDeclutterEnabled() &&
       old_tab_count < TabStyle::kTabStripDeclutterMinTabsForSeparatorHide &&
       GetTabCount() >= TabStyle::kTabStripDeclutterMinTabsForSeparatorHide) {
     tab_container_->SchedulePaint();
@@ -1348,7 +1348,7 @@ void TabStrip::RemoveTabAt(content::WebContents* contents,
     observer_->OnTabRemoved(model_index);
   }
 
-  if (base::FeatureList::IsEnabled(features::kTabStripDeclutter) &&
+  if (features::IsTabStripDeclutterEnabled() &&
       old_tab_count >= TabStyle::kTabStripDeclutterMinTabsForSeparatorHide &&
       GetTabCount() < TabStyle::kTabStripDeclutterMinTabsForSeparatorHide) {
     tab_container_->SchedulePaint();
@@ -2440,7 +2440,9 @@ void TabStrip::OnWidgetActivationChanged(views::Widget* widget, bool active) {
     return;
   }
 
-  if (active && selected_tabs_.active().has_value()) {
+  if (active && selected_tabs_.active().has_value() &&
+      !base::FeatureList::IsEnabled(
+          features::kTabStripSkipSelectionEventOnActivation)) {
     // When the browser window is activated, set the accessible selection and
     // fire a selection event on the currently active tab, to help enable
     // per-tab modes in assistive technologies.

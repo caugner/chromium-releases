@@ -12,7 +12,6 @@
 #include "chrome/browser/autocomplete/aim_eligibility_service_factory.h"
 #include "chrome/browser/contextual_search/contextual_search_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/omnibox/omnibox_next_features.h"
@@ -24,6 +23,7 @@
 #include "chrome/browser/ui/webui/omnibox_popup/omnibox_popup_aim_handler.h"
 #include "chrome/browser/ui/webui/omnibox_popup/omnibox_popup_handler.h"
 #include "chrome/browser/ui/webui/omnibox_popup/omnibox_popup_web_contents_helper.h"
+#include "chrome/browser/ui/webui/plural_string_handler.h"
 #include "chrome/browser/ui/webui/sanitized_image/sanitized_image_source.h"
 #include "chrome/browser/ui/webui/searchbox/omnibox_composebox_handler.h"
 #include "chrome/browser/ui/webui/searchbox/webui_omnibox_handler.h"
@@ -40,6 +40,7 @@
 #include "components/omnibox/common/omnibox_features.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/pointer/touch_ui_controller.h"
 #include "ui/webui/webui_util.h"
 
 namespace {
@@ -93,6 +94,7 @@ OmniboxPopupUI::OmniboxPopupUI(content::WebUI* web_ui)
        .session_allows_drag_and_drop = session_allows_drag_and_drop}));
 
   source->AddBoolean("isTopChromeSearchbox", true);
+  source->AddBoolean("isTouchUi", ui::TouchUiController::Get()->touch_ui());
   source->AddBoolean("omniboxAimPopupEnabled",
                      omnibox::IsAimPopupFeatureEnabled());
   source->AddBoolean("omniboxShowContextButtonSuggestionLabel",
@@ -144,10 +146,6 @@ OmniboxPopupUI::OmniboxPopupUI(content::WebUI* web_ui)
   source->AddBoolean("composeboxShowLensSearchChip",
                      omnibox::IsAimPopupEnabled(profile_) &&
                          omnibox::kShowLensSearchChip.Get());
-  source->AddBoolean("addTabUploadDelayOnRecentTabChipClick",
-                     omnibox::kAddTabUploadDelayOnRecentTabChipClick.Get());
-  source->AddBoolean("composeboxShowRecentTabChip",
-                     omnibox::kShowRecentTabChip.Get());
   source->AddBoolean("composeboxShowTypedSuggest",
                      omnibox::kShowComposeboxTypedSuggest.Get());
   source->AddBoolean("composeboxShowZps", omnibox::kShowComposeboxZps.Get());
@@ -164,8 +162,13 @@ OmniboxPopupUI::OmniboxPopupUI(content::WebUI* web_ui)
                      omnibox::kUseComposeboxFork.Get());
   source->AddBoolean(
       "contextManagementInComposeboxEnabled",
-      base::FeatureList::IsEnabled(omnibox::kContextManagementInComposebox));
-  source->AddBoolean("tabFaviconChipsToCoinsEnabled", false);
+      base::FeatureList::IsEnabled(omnibox::kContextManagementInComposebox) &&
+          base::FeatureList::IsEnabled(omnibox::kContextManagementInOmnibox));
+  source->AddBoolean(
+      "tabFaviconChipsToCoinsEnabled",
+      base::FeatureList::IsEnabled(omnibox::kContextManagementInComposebox) &&
+          base::FeatureList::IsEnabled(omnibox::kContextManagementInOmnibox) &&
+          base::FeatureList::IsEnabled(omnibox::kTabFaviconChipsToCoins));
   auto searchbox_layout_mode = AddContextButtonVariantToSearchboxLayoutMode(
       omnibox::kWebUIOmniboxAimPopupAddContextButtonVariantParam.Get());
   source->AddString("searchboxLayoutMode", searchbox_layout_mode);
@@ -183,6 +186,9 @@ OmniboxPopupUI::OmniboxPopupUI(content::WebUI* web_ui)
   source->AddBoolean(
       "energyEffectEnabled",
       base::FeatureList::IsEnabled(omnibox::kEnergyEffectInOmnibox));
+  source->AddBoolean(
+      "energyEffectAnimationEnabled",
+      base::FeatureList::IsEnabled(omnibox::kEnergyEffectInOmnibox));
   source->AddBoolean("contextButtonShapeIsOblong",
                      omnibox::kContextButtonShapeIsOblong.Get());
 
@@ -191,6 +197,12 @@ OmniboxPopupUI::OmniboxPopupUI(content::WebUI* web_ui)
                                   ? IDR_OMNIBOX_POPUP_OMNIBOX_POPUP_FULL_HTML
                                   : IDR_OMNIBOX_POPUP_OMNIBOX_POPUP_HTML);
   webui::EnableTrustedTypesCSP(source);
+
+  // Add a handler to provide pluralized strings.
+  auto plural_string_handler = std::make_unique<PluralStringHandler>();
+  plural_string_handler->AddLocalizedString("sharingTabs",
+                                            IDS_COMPOSE_SHARING_TABS);
+  web_ui->AddMessageHandler(std::move(plural_string_handler));
 
   content::URLDataSource::Add(profile_,
                               std::make_unique<SanitizedImageSource>(profile_));
@@ -241,8 +253,8 @@ void OmniboxPopupUI::BindInterface(
 void OmniboxPopupUI::CreatePageHandler(
     mojo::PendingRemote<omnibox_popup::mojom::Page> page,
     mojo::PendingReceiver<omnibox_popup::mojom::PageHandler> receiver) {
-  popup_handler_ = std::make_unique<OmniboxPopupHandler>(std::move(receiver),
-                                                         std::move(page));
+  popup_handler_ = std::make_unique<OmniboxPopupHandler>(
+      std::move(receiver), std::move(page), web_ui()->GetWebContents());
   popup_handler_->set_embedder(embedder());
 }
 

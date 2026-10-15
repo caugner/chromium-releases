@@ -31,12 +31,14 @@
 <translation id="1828808367831369073">បានដាក់ <ph name="TABS_COUNT_ONE" /> ផ្ទាំងជាក្រុម</translation>
 <translation id="1844381456014878100">បន្ទាប់ពី​អសកម្ម​រយៈពេល 7 ថ្ងៃ</translation>
 <translation id="1869137256605757565">{TABS_COUNT,plural, =1{ផ្ទាំង <ph name="TABS_COUNT_ONE" />}other{ផ្ទាំង <ph name="TABS_COUNT_MANY" />}}</translation>
+<translation id="1894429470045525403">{TAB_COUNT,plural, =1{បញ្ចូលផ្ទាំងទៅក្នុងបញ្ជីអាន}other{បញ្ចូលផ្ទាំងទៅក្នុងបញ្ជីអាន}}</translation>
 <translation id="1909810060368225529">ចំណាំ៖ អ្នកគ្រប់គ្នាអាចមើលឃើញការផ្លាស់ប្ដូរចំពោះក្រុមផ្ទាំងដែលបានចែករំលែកនេះ។ អ្នក​គ្រប់គ្នា​អាច​ធ្វើការ​ផ្លាស់ប្ដូរ​ចំពោះ​ក្រុមផ្ទាំង​ដែលអ្នក​បានចែករំលែក</translation>
 <translation id="1925363809167540686">{TAB_COUNT,plural, =1{ខ្ទាស់​ផ្ទាំង}other{ខ្ទាស់​ផ្ទាំង}}</translation>
 <translation id="1982637982196732906">ផ្លាស់ទី​ទៅកាន់​ផ្នែក​អសកម្ម</translation>
 <translation id="2050597508048557928">{TABS_COUNT,plural, =1{ចំណាំ​ផ្ទាំង​ដែល​បាន​ជ្រើសរើស <ph name="TABS_COUNT_ONE" />}other{ចំណាំ​ផ្ទាំង​ដែល​បាន​ជ្រើសរើស <ph name="TABS_COUNT_MANY" />}}</translation>
 <translation id="2055057176188061528">ជ្រើសរើស​ក្រុមផ្ទាំង ឬ​បង្កើត​ក្រុមផ្ទាំង​ថ្មី</translation>
 <translation id="2074527029802029717">ដកការដៅផ្ទាំង</translation>
+<translation id="2111670510994270194">ផ្ទាំងថ្មី​ទៅខាង​ស្ដាំ</translation>
 <translation id="2118649612461486615">ព័ត៌មានអំពីហាង</translation>
 <translation id="2123073051266141035">{INCOGNITO_TABS_COUNT,plural, =1{ផ្ទាំង និងក្រុមដែលអ្នកបានបិទអាចត្រូវបានបើកឡើងវិញពីផ្នែកផ្ទាំងថ្មីៗ និងផ្នែកក្រុមផ្ទាំង។ នឹងមិនមានផ្ទាំងឯកជន​របស់អ្នកទេ។}other{ផ្ទាំង និងក្រុមដែលអ្នកបានបិទអាចត្រូវបានបើកឡើងវិញពីផ្នែកផ្ទាំងថ្មីៗ និងផ្នែកក្រុមផ្ទាំង។ នឹងមិនមានផ្ទាំង​ឯកជន​ចំនួន # របស់អ្នក​ទេ។}}</translation>
 <translation id="2153899164605463849">{TAB_COUNT,plural, =1{បើកសំឡេង​គេហទំព័រ}other{បើកសំឡេង​គេហទំព័រ}}</translation>
@@ -75,6 +77,8 @@
 <translation id="3052964831964880138">ធ្លាក់ថ្លៃ <ph name="PRICE_DROP" /> សម្រាប់ <ph name="PRODUCT_NAME" /></translation>
 <translation id="3078350928901129212">រូបពណ៌​ក្រុមផ្ទាំង<ph name="COLOR_NAME" /></translation>
 <translation id="311432875115153175">បានបិទ​បញ្ជី​ក្រុមផ្ទាំង</translation>
+<translation id="3152596030350326139">បង្ហាញផ្ទាំងផ្ដេក</translation>
+<translation id="31806439105337256">បង្ហាញផ្ទាំងបញ្ឈរ</translation>
 <translation id="3194464645767632461">ការវាយតម្លៃដោយដាក់ផ្កាយ</translation>
 <translation id="3269930881809501915">{TABS_COUNT,plural, =1{បញ្ចូល <ph name="TABS_COUNT_ONE" /> ផ្ទាំងទៅក្រុម}other{បញ្ចូល <ph name="TABS_COUNT_MANY" /> ផ្ទាំងទៅក្រុម}}</translation>
 <translation id="3328308545011660196">ការណែនាំ៖ ផ្ទាំង <ph name="NUMBER_OF_TABS" /> ហាក់ដូចជាពាក់ព័ន្ធគ្នា។ បញ្ចូលផ្ទាំងទាំងនេះទៅក្នុងក្រុមឬ?</translation>

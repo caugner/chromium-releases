@@ -81,12 +81,12 @@ void SetPath(const CSSProperty& property,
     case CSSPropertyID::kOffsetPath:
       // TODO(sakhapov): handle coord box.
       builder.SetOffsetPath(MakeGarbageCollected<ShapeOffsetPathOperation>(
-          path, CoordBox::kBorderBox));
+          *path, CoordBox::kBorderBox));
       return;
     case CSSPropertyID::kClipPath:
       // TODO(pdr): Handle geometry box.
       builder.SetClipPath(MakeGarbageCollected<ShapeClipPathOperation>(
-          path, GeometryBox::kBorderBox));
+          *path, GeometryBox::kBorderBox));
       return;
     case CSSPropertyID::kShapeOutside:
       builder.SetShapeOutside(MakeGarbageCollected<ShapeValue>(
@@ -106,7 +106,7 @@ void CSSPathInterpolationType::ApplyStandardPropertyValue(
   CHECK(non_interpolable_value);
   SetPath(CssProperty(), state.StyleBuilder(),
           PathInterpolationFunctions::AppliedValue(interpolable_value,
-                                                   non_interpolable_value),
+                                                   *non_interpolable_value),
           PathInterpolationFunctions::GetCssBox(*non_interpolable_value));
 }
 

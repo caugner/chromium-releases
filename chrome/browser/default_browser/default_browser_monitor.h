@@ -23,14 +23,14 @@ namespace default_browser {
 class DefaultBrowserMonitor {
  public:
   DefaultBrowserMonitor();
-  ~DefaultBrowserMonitor();
+  virtual ~DefaultBrowserMonitor();
 
   DefaultBrowserMonitor(const DefaultBrowserMonitor&) = delete;
   const DefaultBrowserMonitor& operator=(const DefaultBrowserMonitor&) = delete;
 
   // Starts the monitoring process. The implementation will be platform
   // specific.
-  void StartMonitor();
+  virtual void StartMonitor();
 
   // Registers a callback to be run on the DefaultBrowserManager thread when a
   // change is detected.

@@ -326,12 +326,13 @@ void ChromeContentBrowserClient::RegisterBrowserInterfaceBindersForFrame(
     return;
   }
 
-  const GURL& site = render_frame_host->GetSiteInstance()->GetSiteURL();
   content::BrowserContext* browser_context =
       render_frame_host->GetProcess()->GetBrowserContext();
   auto* extension = extensions::ExtensionRegistry::Get(browser_context)
                         ->enabled_extensions()
-                        .GetByID(site.GetHost());
+                        .GetByID(render_frame_host->GetSiteInstance()
+                                     ->GetSecurityPrincipal()
+                                     .GetHost());
   if (!extension)
     return;
   extensions::ExtensionsBrowserClient::Get()

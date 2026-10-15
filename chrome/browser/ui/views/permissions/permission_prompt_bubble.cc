@@ -6,13 +6,10 @@
 
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
-#include "chrome/browser/ui/browser_window/public/browser_window_features.h"
-#include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
-#include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
-#include "chrome/browser/ui/views/permissions/embedded_permission_prompt_observer.h"
 #include "chrome/browser/ui/views/permissions/permission_prompt_bubble_base_view.h"
 #include "chrome/browser/ui/views/permissions/permission_prompt_bubble_view_factory.h"
+#include "chrome/browser/ui/views/permissions/permission_prompt_observer.h"
 #include "chrome/browser/ui/views/permissions/permission_prompt_style.h"
 #include "components/permissions/features.h"
 #include "content/public/browser/web_contents.h"
@@ -41,19 +38,12 @@ PermissionPromptBubble::~PermissionPromptBubble() {
 }
 
 void PermissionPromptBubble::ShowBubble() {
-  FullscreenController* fullscreen_controller = browser()
-                                                    ->GetFeatures()
-                                                    .exclusive_access_manager()
-                                                    ->fullscreen_controller();
-  CHECK(fullscreen_controller);
-  if (fullscreen_controller->IsTabFullscreen()) {
     auto blocker =
         web_contents()->ForSecurityDropFullscreen(display::kInvalidDisplayId);
     if (!blocker) {
       return;
     }
     fullscreen_blocker_ = std::move(*blocker);
-  }
 
   raw_ptr<PermissionPromptBubbleBaseView> prompt_bubble =
       CreatePermissionPromptBubbleView(browser(), delegate()->GetWeakPtr(),
@@ -68,21 +58,19 @@ void PermissionPromptBubble::ShowBubble() {
       web_contents()->CreateDisallowCustomCursorScope(
           /*max_dimension_dips=*/0);
 
-  auto* observer =
-      EmbeddedPermissionPromptObserver::FromWebContents(web_contents());
+  auto* observer = PermissionPromptObserver::FromWebContents(web_contents());
   if (observer) {
     // Notify it is showing, but there is no minimum height/width.
-    observer->NotifyEmbeddedPermissionPromptChanged(
+    observer->NotifyPermissionPromptChanged(
         /*is_showing=*/true, gfx::Size());
   }
 }
 
 void PermissionPromptBubble::CleanUpPromptBubble() {
   if (GetPromptBubble()) {
-    auto* observer =
-        EmbeddedPermissionPromptObserver::FromWebContents(web_contents());
+    auto* observer = PermissionPromptObserver::FromWebContents(web_contents());
     if (observer) {
-      observer->NotifyEmbeddedPermissionPromptChanged(
+      observer->NotifyPermissionPromptChanged(
           /*is_showing=*/false, gfx::Size());
     }
 
@@ -95,10 +83,9 @@ void PermissionPromptBubble::CleanUpPromptBubble() {
 }
 
 void PermissionPromptBubble::OnWidgetDestroying(views::Widget* widget) {
-  auto* observer =
-      EmbeddedPermissionPromptObserver::FromWebContents(web_contents());
+  auto* observer = PermissionPromptObserver::FromWebContents(web_contents());
   if (observer) {
-    observer->NotifyEmbeddedPermissionPromptChanged(
+    observer->NotifyPermissionPromptChanged(
         /*is_showing=*/false, gfx::Size());
   }
 

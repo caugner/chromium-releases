@@ -23,6 +23,7 @@
 #include "net/http/http_status_code.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/simple_url_loader.h"
+#include "services/network/public/mojom/fetch_api.mojom-shared.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
 #include "url/gurl.h"
@@ -187,8 +188,10 @@ projector::mojom::XhrResponsePtr CreateXhrResposne(
 }  // namespace
 
 ProjectorXhrSender::ProjectorXhrSender(
+    signin::IdentityManager* identity_manager,
     network::mojom::URLLoaderFactory* url_loader_factory)
-    : url_loader_factory_(url_loader_factory) {}
+    : oauth_token_fetcher_(identity_manager),
+      url_loader_factory_(url_loader_factory) {}
 ProjectorXhrSender::~ProjectorXhrSender() = default;
 
 void ProjectorXhrSender::Send(
@@ -233,10 +236,7 @@ void ProjectorXhrSender::Send(
   if (account_email.has_value() && !account_email->empty()) {
     email = *account_email;
   } else {
-    email = ProjectorAppClient::Get()
-                ->GetIdentityManager()
-                ->GetPrimaryAccountInfo(signin::ConsentLevel::kSignin)
-                .email;
+    email = oauth_token_fetcher_.GetPrimaryAccountInfo().email;
   }
 
   // Fetch OAuth token for authorizing the request.
@@ -280,6 +280,12 @@ void ProjectorXhrSender::SendRequest(
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = url;
   resource_request->method = RequestTypeToString(method);
+  // Projector will not navigate to any additional URLs outside of Drive so
+  // we disable redirects of any kind.
+  resource_request->redirect_mode = network::mojom::RedirectMode::kError;
+  resource_request->credentials_mode =
+      allow_cookie ? network::mojom::CredentialsMode::kInclude
+                   : network::mojom::CredentialsMode::kOmit;
   // The OAuth token will be empty if the request is using end user credentials
   // for authorization.
   if (!token.empty()) {

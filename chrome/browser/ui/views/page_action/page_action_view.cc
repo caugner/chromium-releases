@@ -13,9 +13,9 @@
 #include "base/memory/ptr_util.h"
 #include "base/task/sequenced_task_runner.h"
 #include "chrome/browser/ui/layout_constants.h"
-#include "chrome/browser/ui/page_actions/page_action_controller.h"
-#include "chrome/browser/ui/page_actions/page_action_model.h"
-#include "chrome/browser/ui/page_actions/page_action_triggers.h"
+#include "chrome/browser/ui/page_action/page_action_controller.h"
+#include "chrome/browser/ui/page_action/page_action_model.h"
+#include "chrome/browser/ui/page_action/page_action_triggers.h"
 #include "chrome/browser/ui/views/location_bar/icon_label_bubble_view.h"
 #include "chrome/browser/ui/views/page_action/page_action_view_params.h"
 #include "ui/actions/actions.h"
@@ -29,6 +29,7 @@
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/animation/ink_drop.h"
+#include "ui/views/controls/button/single_animated_image_container.h"
 #include "ui/views/view_class_properties.h"
 #include "ui/views/widget/widget_delegate.h"
 
@@ -104,6 +105,11 @@ void PageActionView::SetIsChipShowingChangedCallback(
   last_notified_is_chip_showing_.reset();
 }
 
+void PageActionView::SetImageAnimationStartedCallback(
+    ImageAnimationStartedCallback callback) {
+  image_animation_started_callback_ = std::move(callback);
+}
+
 void PageActionView::SetAnchoredMessageCloseCallback(
     base::RepeatingClosure callback) {
   anchored_message_close_callback_ = std::move(callback);
@@ -114,14 +120,14 @@ void PageActionView::SetClickCallback(
   click_callback_ = std::move(callback);
 }
 
-void PageActionView::SetAnchoredMessagePauseCallback(
+void PageActionView::SetAnchoredMessageExpandCallback(
     base::RepeatingClosure callback) {
-  anchored_message_pause_callback_ = std::move(callback);
+  anchored_message_expand_callback_ = std::move(callback);
 }
 
-void PageActionView::SetAnchoredMessageResumeCallback(
+void PageActionView::SetAnchoredMessageCollapseCallback(
     base::RepeatingClosure callback) {
-  anchored_message_resume_callback_ = std::move(callback);
+  anchored_message_collapse_callback_ = std::move(callback);
 }
 
 void PageActionView::OnNewActiveController(PageActionController* controller) {
@@ -248,6 +254,10 @@ bool PageActionView::ShouldUpdateInkDropOnClickCanceled() const {
 }
 
 void PageActionView::NotifyClick(const ui::Event& event) {
+  if (IsAnchoredMessageVisible()) {
+    return;
+  }
+
   PageActionTrigger trigger_source;
   if (event.IsMouseEvent()) {
     trigger_source = PageActionTrigger::kMouse;
@@ -270,6 +280,10 @@ void PageActionView::NotifyClick(const ui::Event& event) {
           .SetProperty(kPageActionTriggerKey,
                        static_cast<std::underlying_type_t<PageActionTrigger>>(
                            trigger_source))
+          .SetProperty(
+              kPageActionEntryPointKey,
+              static_cast<std::underlying_type_t<PageActionEntryPoint>>(
+                  PageActionEntryPoint::kSuggestionChip))
           .Build());
 }
 
@@ -289,6 +303,14 @@ void PageActionView::UpdateIconImage() {
                                      PageActionColorSource::kForeground
                                  ? GetForegroundColor()
                                  : views::GetCascadingAccentColor(this);
+
+  if (observation_.GetSource()->GetShouldAnimateImage()) {
+    std::optional<page_actions::PageActionAnimationParams> params =
+        observation_.GetSource()->GetImageAnimationParameters();
+    CHECK(params.has_value());
+    AnimateImage(params.value(), icon_color);
+  }
+
   // If image does not have a vector icon, set it directly.
   if (icon_image.IsVectorIcon()) {
     SetImageModel(ui::ImageModel::FromVectorIcon(
@@ -300,6 +322,26 @@ void PageActionView::UpdateIconImage() {
     // set on instantiation and does not need to be updated again.
     UpdateBorder();
   }
+}
+
+void PageActionView::AnimateImage(
+    const page_actions::PageActionAnimationParams& params,
+    SkColor icon_color) {
+  views::SingleAnimatedImageContainer::AnimationConfig config{
+      .tween = params.tween,
+      .duration = params.duration};
+
+  if (params.start_offset != 0.0f || params.end_offset != 1.0f) {
+    config.boundary = views::SingleAnimatedImageContainer::AnimationBoundary{
+        .start_offset = params.start_offset, .end_offset = params.end_offset};
+  }
+
+  animated_image_container().PlayAnimation(
+      {params.resource_id, icon_color,
+       views::SingleAnimatedImageContainer::AnimationDirection::kForward,
+       views::SingleAnimatedImageContainer::AnimationEndBehavior::kReset},
+      config);
+  image_animation_started_callback_.Run();
 }
 
 const gfx::Insets PageActionView::GetInsetsForNonVectorIcon() const {
@@ -347,6 +389,10 @@ bool PageActionView::IsBubbleShowing() const {
 }
 
 bool PageActionView::IsTriggerableEvent(const ui::Event& event) {
+  if (IsAnchoredMessageVisible()) {
+    return false;
+  }
+
   // Returns whether the bubble should be shown given the event. Only trigger an
   // action when action UI isn't already showing (managed at the
   // IconLabelBubbleView level), and if mouse input, when event is a left button
@@ -414,7 +460,9 @@ void PageActionView::CreateAndShowAnchoredMessage(
     anchored_message_widget_->MakeCloseSynchronous(
         base::BindOnce(&PageActionView::OnAnchoredMessageWidgetClose,
                        weak_factory_.GetWeakPtr()));
-    anchored_message_widget_->Show();
+
+    // Don't steal focus when shown
+    anchored_message_widget_->ShowInactive();
   } else {
     anchored_message_ = nullptr;
   }
@@ -426,7 +474,7 @@ void PageActionView::OnAnchoredMessageWidgetClose(
   CHECK(anchored_message_);
   CHECK(anchored_message_widget_);
   anchored_message_ = nullptr;
-  anchored_message_widget_ = nullptr;
+  anchored_message_widget_.reset();
   anchored_message_visibility_changed_callbacks_.Notify(this);
 }
 
@@ -438,6 +486,10 @@ void PageActionView::AnchoredMessageChipClick() {
           .SetProperty(kPageActionTriggerKey,
                        static_cast<std::underlying_type_t<PageActionTrigger>>(
                            PageActionTrigger::kMouse))
+          .SetProperty(
+              kPageActionEntryPointKey,
+              static_cast<std::underlying_type_t<PageActionEntryPoint>>(
+                  PageActionEntryPoint::kAnchoredMessage))
           .Build());
   anchored_message_close_callback_.Run();
 }
@@ -446,12 +498,12 @@ void PageActionView::CloseAnchoredMessage() {
   anchored_message_close_callback_.Run();
 }
 
-void PageActionView::PauseAnchoredMessageTimeout() {
-  anchored_message_pause_callback_.Run();
+void PageActionView::AnchoredMessageExpanded() {
+  anchored_message_expand_callback_.Run();
 }
 
-void PageActionView::ResumeAnchoredMessageTimeout() {
-  anchored_message_resume_callback_.Run();
+void PageActionView::AnchoredMessageCollapsed() {
+  anchored_message_collapse_callback_.Run();
 }
 
 AnchoredMessageBubbleView* PageActionView::GetAnchoredMessageForTesting() {

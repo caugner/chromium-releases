@@ -177,6 +177,18 @@ const char kConfigNetworkDiscoveryConfig[] = "networkDiscoveryConfig";
 // content/shell/browser/layout_test/devtools_protocol_test_bindings.cc.
 const size_t kMaxMessageChunkSize = IPC::mojom::kChannelMaximumMessageSize / 4;
 
+// DevTools Google Developer Profiles are not supported on Android.
+// If enabled, the underlying OAuth token request for the
+// "devprofiles.full_control" scope fails with a RestrictedClient error, which
+// can sign the user out of Chrome.
+bool IsDevToolsGdpProfilesSupported() {
+#if BUILDFLAG(IS_ANDROID)
+  return false;
+#else
+  return true;
+#endif
+}
+
 base::DictValue CreateFileSystemValue(
     DevToolsFileHelper::FileSystem file_system) {
   base::DictValue file_system_value;
@@ -427,7 +439,9 @@ std::string SanitizeFrontendQueryParam(const std::string& key,
 
   if (key == "panel" &&
       (value == "elements" || value == "console" || value == "sources" ||
-       value == "network" || value == "resources" || value == "performance")) {
+       value == "network" || value == "resources" || value == "timeline" ||
+       value == "chrome-recorder" || value == "heap-profiler" ||
+         value == "lighthouse" || value == "security" )) {
     return value;
   }
 
@@ -533,6 +547,12 @@ void StreamWrite(DevToolsUIBindings* bindings,
                              base::Value(stream_id), std::move(chunkValue),
                              base::Value(encoded));
 }
+
+enum class DevToolsFrontendLocation {
+  kLocal = 0,
+  kRemote = 1,
+  kMaxValue = kRemote,
+};
 
 bool IsLocalDevToolsFrontendURL(const GURL& url) {
   if (!url.is_valid() || url.IsAboutBlank() ||
@@ -1392,6 +1412,9 @@ void DevToolsUIBindings::OpenSearchResultsInNewTab(const std::string& query) {
 void DevToolsUIBindings::ShowItemInFolder(const std::string& file_system_path) {
   CHECK(IsValidFrontendURL(web_contents_->GetLastCommittedURL()) &&
         frontend_host_);
+  if (!file_helper_.IsFileInFileSystem(file_system_path)) {
+    return;
+  }
   file_helper_.ShowItemInFolder(file_system_path);
 }
 
@@ -1968,6 +1991,11 @@ base::DictValue DevToolsUIBindings::GetHostConfigDictionary(Profile* profile) {
                         "enabled", base::FeatureList::IsEnabled(
                                        ::features::kDevToolsAiAssistanceV2)));
 
+  response_dict.Set("devToolsAiV2Architecture",
+                    base::DictValue().Set(
+                        "enabled", base::FeatureList::IsEnabled(
+                                       ::features::kDevToolsAiV2Architecture)));
+
   if (base::FeatureList::IsEnabled(::features::kDevToolsAiCodeCompletion)) {
     base::DictValue ai_code_completion_dict;
     ai_code_completion_dict.Set(
@@ -2117,8 +2145,7 @@ base::DictValue DevToolsUIBindings::GetHostConfigDictionary(Profile* profile) {
   // default, this dict can be removed.
   if (base::FeatureList::IsEnabled(::features::kDevToolsGdpProfiles)) {
     base::DictValue gdp_profiles_dict;
-    gdp_profiles_dict.Set("enabled", base::FeatureList::IsEnabled(
-                                         ::features::kDevToolsGdpProfiles));
+    gdp_profiles_dict.Set("enabled", IsDevToolsGdpProfilesSupported());
     gdp_profiles_dict.Set("badgesEnabled",
                           features::kDevToolsGdpProfilesBadgesEnabled.Get());
     gdp_profiles_dict.Set(
@@ -2134,7 +2161,8 @@ base::DictValue DevToolsUIBindings::GetHostConfigDictionary(Profile* profile) {
 
   base::DictValue gdp_profiles_availability_dict;
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
-  gdp_profiles_availability_dict.Set("enabled", true);
+  gdp_profiles_availability_dict.Set("enabled",
+                                     IsDevToolsGdpProfilesSupported());
 #else
   gdp_profiles_availability_dict.Set("enabled", false);
 #endif
@@ -2193,6 +2221,17 @@ base::DictValue DevToolsUIBindings::GetHostConfigDictionary(Profile* profile) {
       base::DictValue().Set("enabled",
                             base::FeatureList::IsEnabled(
                                 blink::features::kDevToolsWebMCPSupport)));
+
+  response_dict.Set("devToolsAdsPanel",
+                    base::DictValue().Set(
+                        "enabled", base::FeatureList::IsEnabled(
+                                       blink::features::kDevToolsAdsPanel)));
+
+  response_dict.Set(
+      "devToolsPlusButton",
+      base::DictValue().Set(
+          "enabled",
+          base::FeatureList::IsEnabled(::features::kDevToolsPlusButton)));
 
   return response_dict;
 }
@@ -2416,6 +2455,14 @@ void DevToolsUIBindings::MaybeStartLogging() {
     if (!remote_debugging_enabled) {
       session_tags |= SessionTags::kDevToolsRemoteDebuggingDisabled;
     }
+
+    // Log the frontend location explicitly
+    GURL frontend_url = web_contents_->GetVisibleURL();
+    DevToolsFrontendLocation location = IsLocalDevToolsFrontendURL(frontend_url)
+                                            ? DevToolsFrontendLocation::kLocal
+                                            : DevToolsFrontendLocation::kRemote;
+    base::UmaHistogramEnumeration("DevTools.FrontendLocation", location);
+
     metrics::structured::StructuredMetricsClient::Record(
         metrics::structured::events::v2::dev_tools::SessionStart()
             .SetTags(session_tags)

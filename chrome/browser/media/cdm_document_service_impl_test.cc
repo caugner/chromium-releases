@@ -34,6 +34,16 @@
 #include "url/gurl.h"
 #include "url/origin.h"
 
+#if BUILDFLAG(IS_WIN)
+#include <windows.h>
+
+#include <aclapi.h>
+
+#include "base/win/security_util.h"
+#include "base/win/sid.h"
+#include "sandbox/policy/win/lpac_capability.h"
+#endif  // BUILDFLAG(IS_WIN)
+
 using testing::_;
 using testing::DoAll;
 using testing::SaveArg;
@@ -365,5 +375,161 @@ TEST_F(CdmDocumentServiceImplTest, ClearCdmPreferenceDataNullFilter) {
   new_origin_id = GetMediaFoundationCdmData()->origin_id;
   ASSERT_NE(origin_id_1, new_origin_id);
 }
+
+#if BUILDFLAG(IS_WIN)
+bool HasListDirectoryPermission(const base::FilePath& path,
+                                const std::vector<base::win::Sid>& sids) {
+  PACL dacl = nullptr;
+  PSECURITY_DESCRIPTOR sd = nullptr;
+  // Manually retrieve the Discretionary Access Control List (DACL) to inspect
+  // its entries directly.
+  if (::GetNamedSecurityInfo(path.value().c_str(), SE_FILE_OBJECT,
+                             DACL_SECURITY_INFORMATION, nullptr, nullptr, &dacl,
+                             nullptr, &sd) != ERROR_SUCCESS) {
+    return false;
+  }
+  bool has_list_directory = false;
+  if (dacl) {
+    // Iterate over each Access Control Entry (ACE) in the DACL.
+    for (DWORD i = 0; i < dacl->AceCount; ++i) {
+      PVOID ace_ptr = nullptr;
+      if (::GetAce(dacl, i, &ace_ptr)) {
+        PACE_HEADER ace_header = static_cast<PACE_HEADER>(ace_ptr);
+        // We only care about ACEs that grant access and are not marked as
+        // "inherit only". INHERIT_ONLY_ACEs apply to child objects, not the
+        // directory itself.
+        if (ace_header->AceType == ACCESS_ALLOWED_ACE_TYPE &&
+            !(ace_header->AceFlags & INHERIT_ONLY_ACE)) {
+          PACCESS_ALLOWED_ACE allowed_ace =
+              static_cast<PACCESS_ALLOWED_ACE>(ace_ptr);
+          // Check if this ACE grants the FILE_LIST_DIRECTORY permission.
+          if (allowed_ace->Mask & FILE_LIST_DIRECTORY) {
+            PSID ace_sid = reinterpret_cast<PSID>(&allowed_ace->SidStart);
+            // Check if the SID in the ACE matches our LPAC SID.
+            for (const auto& sid : sids) {
+              if (::EqualSid(ace_sid, sid.GetPSID())) {
+                has_list_directory = true;
+                break;
+              }
+            }
+          }
+        }
+      }
+      if (has_list_directory) {
+        break;
+      }
+    }
+  }
+  ::LocalFree(sd);
+  return has_list_directory;
+}
+
+TEST_F(CdmDocumentServiceImplTest, VerifyCdmStorePathRootAcl) {
+  NavigateToUrlAndCreateCdmDocumentService(GURL(kTestOrigin));
+  auto data = GetMediaFoundationCdmData();
+
+  auto sids = base::win::Sid::FromNamedCapabilityVector(
+      {sandbox::policy::kMediaFoundationCdmData});
+  ASSERT_FALSE(sids.empty());
+
+  // The root path should have traverse permissions.
+  EXPECT_TRUE(base::win::HasAccessToPath(data->cdm_store_path_root, sids,
+                                         FILE_TRAVERSE, NO_INHERITANCE));
+
+  // The root path should NOT have list directory permissions to prevent
+  // cross-origin enumeration. base::win::HasAccessToPath cannot be used here
+  // because it matches inherit-only ACEs when querying with NO_INHERITANCE.
+  EXPECT_FALSE(HasListDirectoryPermission(data->cdm_store_path_root, sids));
+
+  // And the inherited permissions should grant full access to subdirectories.
+  // (Note: HasAccessToPath requires the exact inheritance flags to match the
+  // ACE).
+  EXPECT_TRUE(base::win::HasAccessToPath(
+      data->cdm_store_path_root, sids,
+      FILE_GENERIC_READ | FILE_GENERIC_WRITE | DELETE,
+      CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE | INHERIT_ONLY_ACE));
+}
+
+TEST_F(CdmDocumentServiceImplTest, MigrateCdmStorePathRootAcl) {
+  NavigateToUrlAndCreateCdmDocumentService(GURL(kTestOrigin));
+  auto data = GetMediaFoundationCdmData();
+
+  auto sids = base::win::Sid::FromNamedCapabilityVector(
+      {sandbox::policy::kMediaFoundationCdmData});
+  ASSERT_FALSE(sids.empty());
+
+  // Manually apply the old vulnerable ACL to simulate a pre-existing root.
+  ASSERT_TRUE(base::win::GrantAccessToPath(
+      data->cdm_store_path_root, sids,
+      FILE_GENERIC_READ | FILE_GENERIC_WRITE | GENERIC_EXECUTE | DELETE,
+      CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE));
+
+  // Verify the vulnerable ACL is actually applied.
+  EXPECT_TRUE(HasListDirectoryPermission(data->cdm_store_path_root, sids));
+
+  // Trigger the creation/migration logic again.
+  auto data2 = GetMediaFoundationCdmData();
+
+  // Verify the vulnerable ACL is removed.
+  EXPECT_FALSE(HasListDirectoryPermission(data2->cdm_store_path_root, sids));
+
+  // And the intended ACLs are restored.
+  EXPECT_TRUE(base::win::HasAccessToPath(data2->cdm_store_path_root, sids,
+                                         FILE_TRAVERSE, NO_INHERITANCE));
+  EXPECT_TRUE(base::win::HasAccessToPath(
+      data2->cdm_store_path_root, sids,
+      FILE_GENERIC_READ | FILE_GENERIC_WRITE | DELETE,
+      CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE | INHERIT_ONLY_ACE));
+}
+
+// Verifies that an existing per-origin subdirectory still grants the
+// lpacMediaFoundationCdmData SID effective read/write/delete access after the
+// CDM store root's ACL is re-applied on a subsequent call to
+// GetMediaFoundationCdmData().
+//
+// The first call creates the root with the inherit-only broad ACE and
+// pre-creates <origin_id>/, which inherits (I)(OI)(CI)(R,W,D) for the SID at
+// creation time. The second call sees the root already exists and runs the
+// migration path, which revokes the SID's ACEs on the root (cascading the
+// removal through NTFS auto-inheritance onto existing children) and then
+// re-applies the inherit-only broad ACE. The final re-apply must propagate
+// the new ACE onto existing <origin_id>/ subdirectories so the LPAC retains
+// access to per-origin CDM state created in an earlier session.
+TEST_F(CdmDocumentServiceImplTest, MigrationPreservesAccessOnExistingSubdirs) {
+  NavigateToUrlAndCreateCdmDocumentService(GURL(kTestOrigin));
+
+  // Session 1: creates the root and pre-creates the per-origin subdir.
+  auto data1 = GetMediaFoundationCdmData();
+  ASSERT_TRUE(data1);
+  base::FilePath origin_subdir =
+      data1->cdm_store_path_root.AppendASCII(data1->origin_id.ToString());
+  ASSERT_TRUE(base::PathExists(origin_subdir));
+
+  auto sids = base::win::Sid::FromNamedCapabilityVector(
+      {sandbox::policy::kMediaFoundationCdmData});
+  ASSERT_FALSE(sids.empty());
+
+  // After session 1, the per-origin subdir should have inherited the broad
+  // ACE from the root (effective on the subdir itself, not just inherit-only).
+  EXPECT_TRUE(base::win::HasAccessToPath(
+      origin_subdir, sids, FILE_GENERIC_READ | FILE_GENERIC_WRITE | DELETE,
+      CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE))
+      << "Newly-created per-origin subdir should inherit the LPAC ACE.";
+
+  // Session 2: same origin, root already exists -> migration path runs.
+  auto data2 = GetMediaFoundationCdmData();
+  ASSERT_TRUE(data2);
+  ASSERT_EQ(data1->origin_id, data2->origin_id);
+  ASSERT_TRUE(base::PathExists(origin_subdir));
+
+  // After migration, the same per-origin subdir must still grant the LPAC SID
+  // effective FILE_GENERIC_READ | FILE_GENERIC_WRITE | DELETE.
+  EXPECT_TRUE(base::win::HasAccessToPath(
+      origin_subdir, sids, FILE_GENERIC_READ | FILE_GENERIC_WRITE | DELETE,
+      CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE))
+      << "After migration, per-origin subdir lost effective LPAC access; the "
+         "inherit-only ACE on the root did not propagate to existing children.";
+}
+#endif  // BUILDFLAG(IS_WIN)
 
 }  // namespace content

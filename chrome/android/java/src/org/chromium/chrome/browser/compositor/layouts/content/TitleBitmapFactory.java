@@ -19,7 +19,6 @@ import android.view.InflateException;
 import androidx.annotation.ColorInt;
 import androidx.annotation.Px;
 import androidx.annotation.VisibleForTesting;
-import androidx.appcompat.content.res.AppCompatResources;
 
 import org.chromium.base.Log;
 import org.chromium.base.Token;
@@ -30,7 +29,7 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.compositor.overlays.strip.StripLayoutGroupTitle;
 import org.chromium.chrome.browser.compositor.overlays.strip.StripLayoutTrailingButtonsCoordinator;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
-import org.chromium.chrome.browser.tabmodel.TabGroupModelFilter;
+import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.components.tab_groups.TabGroupColorId;
 import org.chromium.components.tab_groups.TabGroupColorPickerUtils;
 import org.chromium.ui.util.StyleUtils;
@@ -40,7 +39,6 @@ import org.chromium.ui.util.StyleUtils;
 public class TitleBitmapFactory {
     private static final String TAG = "TitleBitmapFactory";
 
-    private static final float TITLE_WIDTH_PERCENTAGE = 1.f;
     // Canvas#drawText() seems to fail when trying to draw 4100 or more characters.
     // See https://crbug.com/40432863/ for more details.
     private static final int MAX_NUM_TITLE_CHAR = 1000;
@@ -49,9 +47,9 @@ public class TitleBitmapFactory {
     // with a smaller limit.
     private static final int SMALLER_MAX_NUM_TITLE_CHAR = 100;
 
-    private final int mMaxWidth;
+    private final int mMaxTitleWidth;
     private final int mViewHeight;
-    private int mFaviconDimension;
+    private final int mFaviconDimension;
     private final boolean mIncognito;
 
     private final TextPaint mTabTextPaint;
@@ -82,8 +80,7 @@ public class TitleBitmapFactory {
         mTabTextPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         if (mIncognito) {
             int incognitoTabTextColor =
-                    AppCompatResources.getColorStateList(
-                                    context, R.color.compositor_tab_title_bar_text_incognito)
+                    context.getColorStateList(R.color.compositor_tab_title_bar_text_incognito)
                             .getDefaultColor();
             mTabTextPaint.setColor(incognitoTabTextColor);
         }
@@ -108,7 +105,7 @@ public class TitleBitmapFactory {
                 context,
                 mGroupTextPaint,
                 R.style.TextAppearance_TextSmall_Primary,
-                /* applyFontFamily */ true,
+                /* applyFontFamily= */ true,
                 /* applyTextSize= */ true,
                 /* applyTextColor= */ false);
         mGroupTextPaint.setFakeBoldText(fakeBoldText);
@@ -146,11 +143,7 @@ public class TitleBitmapFactory {
         // Favicon properties
         mFaviconDimension = res.getDimensionPixelSize(R.dimen.compositor_tab_title_favicon_size);
         mViewHeight = (int) Math.max(mFaviconDimension, mTabTextHeight);
-
-        int width = res.getDisplayMetrics().widthPixels;
-        int height = res.getDisplayMetrics().heightPixels;
-        mMaxWidth = (int) (TITLE_WIDTH_PERCENTAGE * Math.max(width, height));
-        mFaviconDimension = Math.min(mMaxWidth, mFaviconDimension);
+        mMaxTitleWidth = res.getDimensionPixelSize(R.dimen.compositor_tab_title_max_width);
     }
 
     /**
@@ -211,16 +204,16 @@ public class TitleBitmapFactory {
     /**
      * Generates the group title bitmap.
      *
-     * @param filter To fetch tab information from.
+     * @param tabModel To fetch tab information from.
      * @param context The current Android's context.
      * @param groupId The group ID.
      * @param title The title of the group.
      * @return The Bitmap with the title. {@code null} if it cannot be generated.
      */
     public @Nullable Bitmap getGroupTitleBitmap(
-            TabGroupModelFilter filter, Context context, Token groupId, String title) {
-        if (!filter.tabGroupExists(groupId)) return null;
-        @TabGroupColorId int colorId = filter.getTabGroupColor(groupId);
+            TabModel tabModel, Context context, Token groupId, String title) {
+        if (!tabModel.tabGroupExists(groupId)) return null;
+        @TabGroupColorId int colorId = tabModel.getTabGroupColor(groupId);
         @ColorInt
         int color =
                 TabGroupColorPickerUtils.getTabGroupColorPickerItemTextColor(
@@ -254,7 +247,7 @@ public class TitleBitmapFactory {
             // when textWidth == 0.
             Bitmap b =
                     Bitmap.createBitmap(
-                            Math.max(Math.min(mMaxWidth, textWidth), 1),
+                            Math.max(Math.min(mMaxTitleWidth, textWidth), 1),
                             mViewHeight,
                             Bitmap.Config.ARGB_8888);
             Canvas c = new Canvas(b);

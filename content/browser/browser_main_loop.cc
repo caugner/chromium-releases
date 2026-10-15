@@ -97,7 +97,6 @@
 #include "content/browser/speech/tts_controller_impl.h"
 #include "content/browser/startup_data_impl.h"
 #include "content/browser/startup_task_runner.h"
-#include "content/browser/tracing/background_tracing_manager_impl.h"
 #include "content/browser/tracing/tracing_controller_impl.h"
 #include "content/browser/webrtc/webrtc_internals.h"
 #include "content/browser/webui/content_web_ui_configs.h"
@@ -108,7 +107,7 @@
 #include "content/common/skia_utils.h"
 #include "content/common/thread_pool_util.h"
 #include "content/public/browser/audio_service.h"
-#include "content/public/browser/background_tracing_manager.h"
+#include "content/public/browser/background_tracing.h"
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -147,9 +146,12 @@
 #include "services/audio/service.h"
 #include "services/data_decoder/public/cpp/service_provider.h"
 #include "services/data_decoder/public/mojom/data_decoder_service.mojom.h"
+#include "services/network/public/cpp/features.h"
 #include "services/network/public/cpp/network_switches.h"
+#include "services/network/public/cpp/simple_url_loader.h"
 #include "services/network/public/mojom/network_service.mojom.h"
 #include "services/network/transitional_url_loader_factory_owner.h"
+#include "services/tracing/public/cpp/background_tracing/background_tracing_manager.h"
 #include "services/tracing/public/cpp/startup_tracing_controller.h"
 #include "services/tracing/public/cpp/trace_startup_config.h"
 #include "services/video_capture/public/cpp/features.h"
@@ -768,8 +770,8 @@ int BrowserMainLoop::PreCreateThreads() {
   // ChromeBrowserMainParts::PreCreateThreads() because it's used in
   // BackgroundTracingMetricsProvider.
   tracing_controller_ = std::make_unique<TracingControllerImpl>();
-  background_tracing_manager_ = BackgroundTracingManagerImpl::CreateInstance(
-      tracing_controller_->tracing_delegate());
+  background_tracing_manager_ =
+      CreateBackgroundTracingManager(tracing_controller_->tracing_delegate());
 
   // Make sure no accidental call to initialize GpuDataManager earlier.
   DCHECK(!GpuDataManagerImpl::Initialized());
@@ -824,6 +826,24 @@ int BrowserMainLoop::PreCreateThreads() {
   if (parsed_command_line_->HasSwitch(switches::kSingleProcess))
     RenderProcessHost::SetRunRendererInProcess(true);
 #endif
+
+  // Set up the callbacks used by the network layer to track and validate
+  // file access for browser-initiated uploads.
+  if (base::FeatureList::IsEnabled(
+          network::features::kBrowserInitiatedFileUploadValidation)) {
+    network::SimpleURLLoader::FileUploadEventCallbacks callbacks;
+    callbacks.register_callback = base::BindRepeating(
+        [](const base::UnguessableToken& token, const base::FilePath& path) {
+          ChildProcessSecurityPolicyImpl::GetInstance()
+              ->GrantFileForBrowserUpload(token, path);
+        });
+    callbacks.revoke_callback =
+        base::BindRepeating([](const base::UnguessableToken& token) {
+          ChildProcessSecurityPolicyImpl::GetInstance()
+              ->RevokeFileForBrowserUpload(token);
+        });
+    network::SimpleURLLoader::SetFileUploadEventCallbacks(callbacks);
+  }
 
   // Initialize origins that require process isolation.  Must be done
   // after base::FeatureList is initialized, but before any navigations can

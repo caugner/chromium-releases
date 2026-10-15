@@ -246,6 +246,8 @@ class CONTENT_EXPORT DedicatedWorkerHost final
     return service_worker_handle_.get();
   }
 
+  bool file_url_support() const { return file_url_support_; }
+
 #if BUILDFLAG(ENABLE_COMPUTE_PRESSURE)
   PressureServiceForDedicatedWorker* pressure_service() {
     return pressure_service_.get();
@@ -309,7 +311,7 @@ class CONTENT_EXPORT DedicatedWorkerHost final
   void RenderProcessHostDestroyed(RenderProcessHost* host) override;
 
   // LockObserver
-  void OnLockContention() override;
+  bool OnLockContention() override;
 
   // Called from `WorkerScriptFetcher`. Continues starting the dedicated worker
   // in the renderer process.

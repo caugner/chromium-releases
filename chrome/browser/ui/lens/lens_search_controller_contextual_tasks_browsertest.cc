@@ -20,6 +20,7 @@
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service_factory.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_utils.h"
+#include "chrome/browser/contextual_tasks/mock_contextual_tasks_ui_service_delegate.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
@@ -73,7 +74,8 @@ class TestingContextualTasksUiService
       AimEligibilityService* aim_eligibility_service)
       : ContextualTasksUiService(
             profile,
-            /*delegate=*/nullptr,
+            std::make_unique<testing::NiceMock<
+                contextual_tasks::MockContextualTasksUiServiceDelegate>>(),
             contextual_tasks_service,
             identity_manager,
             aim_eligibility_service,
@@ -102,7 +104,8 @@ class TestingContextualTasksUiService
       tabs::TabInterface* tab_interface,
       const GURL& url,
       std::unique_ptr<contextual_search::ContextualSearchSessionHandle>
-          session_handle) override {
+          session_handle,
+      omnibox::ChromeAimEntryPoint entry_point) override {
     is_panel_open_ = true;
     if (!stub_web_contents_) {
       content::WebContents::CreateParams params(profile_);
@@ -125,7 +128,8 @@ class TestingContextualTasksUiService
       BrowserWindowInterface* browser_window_interface,
       tabs::TabInterface* tab_interface,
       std::unique_ptr<contextual_search::ContextualSearchSessionHandle>
-          session_handle) override {
+          session_handle,
+      omnibox::ChromeAimEntryPoint entry_point) override {
     is_panel_open_ = true;
     session_handle_ = std::move(session_handle);
 

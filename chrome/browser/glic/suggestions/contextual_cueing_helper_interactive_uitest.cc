@@ -53,18 +53,8 @@
 
 class FakeGlicNudgeDelegate : public glic::GlicNudgeDelegate {
  public:
-  void OnTriggerGlicNudgeUI(std::string label) override {
-    last_nudge_label_ = label;
-    if (!last_nudge_label_.empty()) {
-      is_showing_nudge_ = true;
-      future_.SetValue();
-    }
-  }
-  void OnTriggerAnchoredMessage(
-      std::string label,
-      std::string anchored_message_text,
-      std::optional<std::string> prompt_suggestion) override {
-    last_nudge_label_ = label;
+  void OnTriggerGlicNudgeUI(glic::NudgeParams params) override {
+    last_nudge_label_ = params.label;
     if (!last_nudge_label_.empty()) {
       is_showing_nudge_ = true;
       future_.SetValue();
@@ -151,7 +141,7 @@ class ContextualCueingHelperBrowserTest
          {page_content_annotations::features::kAnnotatedPageContentExtraction,
           {}},
          {contextual_tasks::kContextualTasks, {}}},
-        {contextual_cueing::kContextualCueingV2});
+        {contextual_cueing::kContextualCueingV2, glic::kUseAnchoredMessage});
   }
 };
 
@@ -870,7 +860,7 @@ IN_PROC_BROWSER_TEST_F(ContextualCueingBypassNudgeCapsTest,
   // kAutoOpenGlicForPdf + auto_open_eligible should open the panel.
   auto* glic_service = glic::GlicKeyedService::Get(browser()->profile());
   ASSERT_TRUE(glic_service);
-  EXPECT_TRUE(glic_service->IsWindowShowing());
+  EXPECT_TRUE(glic_service->instance_coordinator().IsAnyPanelShowing());
 }
 
 // Verify that the auto-open is blocked by the instance-scoped cooldown
@@ -889,7 +879,7 @@ IN_PROC_BROWSER_TEST_F(ContextualCueingBypassNudgeCapsTest,
 
   auto* glic_service = glic::GlicKeyedService::Get(browser()->profile());
   ASSERT_TRUE(glic_service);
-  EXPECT_TRUE(glic_service->IsWindowShowing());
+  EXPECT_TRUE(glic_service->instance_coordinator().IsAnyPanelShowing());
 
   // Retrieve the active tab and its associated GlicInstance.
   auto* tab_interface = tabs::TabInterface::GetFromContents(
@@ -913,8 +903,9 @@ IN_PROC_BROWSER_TEST_F(ContextualCueingBypassNudgeCapsTest,
   auto* coordinator = glic::GlicSidePanelCoordinator::GetForTab(tab_interface);
   ASSERT_TRUE(coordinator);
   coordinator->Close();
-  EXPECT_TRUE(
-      base::test::RunUntil([&]() { return !glic_service->IsWindowShowing(); }));
+  EXPECT_TRUE(base::test::RunUntil([&]() {
+    return !glic_service->instance_coordinator().IsAnyPanelShowing();
+  }));
 
   // Navigate again to trigger auto-open
   ASSERT_TRUE(ui_test_utils::NavigateToURL(
@@ -923,7 +914,7 @@ IN_PROC_BROWSER_TEST_F(ContextualCueingBypassNudgeCapsTest,
 
   // Verify that the Glic panel is still closed (and suppressed by the
   // cooldown).
-  EXPECT_FALSE(glic_service->IsWindowShowing());
+  EXPECT_FALSE(glic_service->instance_coordinator().IsAnyPanelShowing());
   histogram_tester.ExpectBucketCount(
       "ContextualCueing.GlicAutoOpen.Result",
       glic::GlicAutoOpenResult::kPreventedFromCooldown, 1);
@@ -1002,7 +993,7 @@ IN_PROC_BROWSER_TEST_F(ContextualCueingAutoOpenCooldownTest,
 
   auto* glic_service = glic::GlicKeyedService::Get(browser()->profile());
   ASSERT_TRUE(glic_service);
-  EXPECT_TRUE(glic_service->IsWindowShowing());
+  EXPECT_TRUE(glic_service->instance_coordinator().IsAnyPanelShowing());
 
   // 2. Retrieve the active tab and its associated GlicInstance.
   auto* tab_interface = tabs::TabInterface::GetFromContents(
@@ -1026,8 +1017,9 @@ IN_PROC_BROWSER_TEST_F(ContextualCueingAutoOpenCooldownTest,
   auto* coordinator = glic::GlicSidePanelCoordinator::GetForTab(tab_interface);
   ASSERT_TRUE(coordinator);
   coordinator->Close();
-  EXPECT_TRUE(
-      base::test::RunUntil([&]() { return !glic_service->IsWindowShowing(); }));
+  EXPECT_TRUE(base::test::RunUntil([&]() {
+    return !glic_service->instance_coordinator().IsAnyPanelShowing();
+  }));
 
   // 5. Wait 3 seconds for the 2-second cooldown to expire safely.
   base::RunLoop run_loop;
@@ -1041,7 +1033,7 @@ IN_PROC_BROWSER_TEST_F(ContextualCueingAutoOpenCooldownTest,
       https_server_.GetURL("autoopen.com", "/optimization_guide/hello.html")));
 
   // 7. Verify that Glic DOES auto-open this time (since the cooldown expired).
-  EXPECT_TRUE(glic_service->IsWindowShowing());
+  EXPECT_TRUE(glic_service->instance_coordinator().IsAnyPanelShowing());
   histogram_tester.ExpectBucketCount("ContextualCueing.GlicAutoOpen.Result",
                                      glic::GlicAutoOpenResult::kSuccess, 2);
 }

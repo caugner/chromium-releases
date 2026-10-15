@@ -682,6 +682,7 @@ BOOL ExtractInteractionState(NSData* data, NSData** interactionState) {
           responseHTMLString:(NSString*)responseHTMLString {
   NSURLRequest* request =
       [[NSURLRequest alloc] initWithURL:net::NSURLWithGURL(URL)];
+  [self ensureWebViewCreated];
   [self.webView loadSimulatedRequest:request
                   responseHTMLString:responseHTMLString];
 }
@@ -696,7 +697,7 @@ BOOL ExtractInteractionState(NSData* data, NSData** interactionState) {
                                 MIMEType:MIMEType
                    expectedContentLength:responseData.length
                         textEncodingName:nil];
-
+  [self ensureWebViewCreated];
   [self.webView loadSimulatedRequest:request
                             response:response
                         responseData:responseData];
@@ -1246,6 +1247,11 @@ BOOL ExtractInteractionState(NSData* data, NSData** interactionState) {
   // crash. Add a custom drop interaction alongside the default drop
   // interaction.
   [self addCustomURLDropInteractionIfNeeded];
+
+  if ([_containerView webViewContentView] && self.webStateImpl) {
+    [_containerView webViewContentView].mimeType =
+        base::SysUTF8ToNSString(self.webStateImpl->GetContentsMimeType());
+  }
 }
 
 - (void)loadCompleteWithSuccess:(BOOL)loadSuccess
@@ -1879,6 +1885,7 @@ CrFullscreenState CrFullscreenStateFromWKFullscreenState(
 
 - (void)navigationHandlerDidStartLoading:
     (CRWWKNavigationHandler*)navigationHandler {
+  [_containerView.webViewContentView setObscuredInsets:UIEdgeInsetsZero];
   [self didStartLoading];
 }
 

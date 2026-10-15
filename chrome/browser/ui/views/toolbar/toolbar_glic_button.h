@@ -22,8 +22,6 @@ class ToolbarGlicButton : public GlicButton<ToolbarButton> {
  public:
   explicit ToolbarGlicButton(
       BrowserWindowInterface* browser_window_interface,
-      base::RepeatingClosure hovered_callback,
-      base::RepeatingClosure mouse_down_callback,
       base::RepeatingClosure expansion_animation_done_callback,
       const std::u16string& tooltip,
       PressedCallback pressed_callback);
@@ -35,8 +33,10 @@ class ToolbarGlicButton : public GlicButton<ToolbarButton> {
       const views::SizeBounds& available_size) const override;
   gfx::Size GetMinimumSize() const override;
 
+  // GlicButton:
   void SetCloseButtonFocusBehavior(
       views::View::FocusBehavior focus_behavior) override;
+  void SetLabelMargins() override;
 
   bool IsWidgetAlive() const;
   void AddedToWidget() override;

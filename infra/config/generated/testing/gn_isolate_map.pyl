@@ -142,11 +142,6 @@
     "module_scheme": "gtest",
     "skip_usage_check": True,
   },
-  "app_shell_unittests": {
-    "label": "//extensions/shell:app_shell_unittests",
-    "type": "windowed_test_launcher",
-    "module_scheme": "gtest",
-  },
   "ash_components_unittests": {
     "label": "//chromeos/ash/experiences:ash_components_unittests",
     "type": "windowed_test_launcher",
@@ -841,6 +836,13 @@
     "module_scheme": "single",
     "script": "//testing/scripts/content_shell_crash_test.py",
   },
+  "content_shell_freeze_test": {
+    "label": "//content/shell:content_shell_freeze_test",
+    "type": "script",
+    "module_scheme": "single",
+    "script": "//content/shell/tools/aaudio_freezer_integration_test.py",
+    "skip_usage_check": True,
+  },
   "content_shell_test_apk": {
     "label": "//content/shell/android:content_shell_test_apk",
     "type": "console_test_launcher",
@@ -1206,6 +1208,12 @@
       "../../tools/grit/grit/test_suite_all.py",
     ],
   },
+  "gtk_unittests": {
+    "label": "//ui/gtk:gtk_unittests",
+    "type": "windowed_test_launcher",
+    "module_scheme": "gtest",
+    "skip_usage_check": True,
+  },
   "gwp_asan_unittests": {
     "label": "//components/gwp_asan:gwp_asan_unittests",
     "type": "console_test_launcher",
@@ -1443,6 +1451,11 @@
   },
   "litert_e2e_tests": {
     "label": "//components/optimization_guide/internal/testing:litert_e2e_tests",
+    "type": "generated_script",
+    "module_scheme": "flat",
+  },
+  "litert_lm_advanced_main_legacy_tests": {
+    "label": "//components/optimization_guide/internal/testing:litert_lm_advanced_main_legacy_tests",
     "type": "generated_script",
     "module_scheme": "flat",
   },
@@ -1804,6 +1817,11 @@
     "type": "console_test_launcher",
     "module_scheme": "gtest",
   },
+  "puffin_unittests": {
+    "label": "//third_party/puffin:puffin_unittests",
+    "type": "console_test_launcher",
+    "module_scheme": "gtest",
+  },
   "push_apps_to_background_apk": {
     "label": "//tools/android/push_apps_to_background:push_apps_to_background_apk",
     "type": "additional_compile_target",
@@ -2119,6 +2137,12 @@
     "label": "//chrome/test:unit_tests",
     "type": "windowed_test_launcher",
     "module_scheme": "gtest",
+  },
+  "updater_fuzztests": {
+    "label": "//chrome/updater:updater_fuzztests",
+    "type": "console_test_launcher",
+    "module_scheme": "gtest",
+    "skip_usage_check": True,
   },
   "updater_tests": {
     "label": "//chrome/updater:updater_tests",

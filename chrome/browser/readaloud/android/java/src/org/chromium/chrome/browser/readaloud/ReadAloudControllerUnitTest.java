@@ -64,6 +64,7 @@ import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.base.test.util.HistogramWatcher;
 import org.chromium.base.test.util.UserActionTester;
+import org.chromium.chrome.browser.actor.ui.ActorUiTabController;
 import org.chromium.chrome.browser.browser_controls.BottomControlsStacker;
 import org.chromium.chrome.browser.device.DeviceConditions;
 import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
@@ -134,7 +135,7 @@ import java.util.Locale;
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
 @EnableFeatures({ChromeFeatureList.READALOUD_PLAYBACK})
-@DisableFeatures({ChromeFeatureList.READALOUD_AUDIO_OVERVIEWS})
+@DisableFeatures({ChromeFeatureList.READALOUD_AUDIO_OVERVIEWS, ChromeFeatureList.GLIC})
 public class ReadAloudControllerUnitTest {
     private static final GURL sTestGURL = JUnitTestGURLs.EXAMPLE_URL;
     private static final GURL sTestRedirectGURL = JUnitTestGURLs.URL_1_WITH_PATH;
@@ -193,6 +194,7 @@ public class ReadAloudControllerUnitTest {
     @Mock private ReadAloudFeatures.Natives mReadAloudFeaturesNatives;
     @Mock private UserPrefsJni mUserPrefsNatives;
     @Mock private PrefService mPrefService;
+    @Mock private ActorUiTabController mActorUiTabController;
     @Mock private TemplateUrlService mTemplateUrlService;
     @Mock private ActivityWindowAndroid mActivityWindowAndroid;
     @Mock private ActivityLifecycleDispatcher mActivityLifecycleDispatcher;
@@ -206,6 +208,7 @@ public class ReadAloudControllerUnitTest {
     @Captor ArgumentCaptor<LayoutStateObserver> mLayoutStateObserver;
     @Captor ArgumentCaptor<FullscreenManager.Observer> mFullscreenObserver;
     @Captor ArgumentCaptor<BottomSheetObserver> mBottomSheetObserverCaptor;
+    @Captor ArgumentCaptor<Callback<Boolean>> mGlicCallbackCaptor;
 
     @Mock private Playback mPlayback;
     @Mock private Playback.Metadata mMetadata;
@@ -311,6 +314,7 @@ public class ReadAloudControllerUnitTest {
         mTab = mTabModelSelector.getCurrentTab();
         mTab.setGurlOverrideForTesting(sTestGURL);
         mTab.setWebContentsOverrideForTesting(mWebContents);
+        mTab.getUserDataHost().setUserData(ActorUiTabController.class, mActorUiTabController);
 
         TapToSeekSelectionManager.setSmartSelectionClient(mSelectionClient);
         TapToSeekSelectionManager.setSelectionPopupController(mSelectionPopupController);
@@ -1015,6 +1019,74 @@ public class ReadAloudControllerUnitTest {
         mController.playTab(newTab, ReadAloudController.Entrypoint.MAGIC_TOOLBAR);
         resolvePromises();
         verify(mPlayback, times(1)).release();
+    }
+
+    @Test
+    @EnableFeatures(ChromeFeatureList.GLIC)
+    public void testPlayTab_WithGlicActive_Confirm() {
+        when(mActorUiTabController.isActorActive()).thenReturn(true);
+        when(mActorUiTabController.showTaskAbortConfirmationDialog(any()))
+                .thenAnswer(
+                        invocation -> {
+                            Callback<Boolean> callback = invocation.getArgument(0);
+                            callback.onResult(true);
+                            return true;
+                        });
+
+        mFakeTranslateBridge.setCurrentLanguage("en");
+        mTab.setGurlOverrideForTesting(new GURL("https://en.wikipedia.org/wiki/Google"));
+
+        mController.playTab(mTab, ReadAloudController.Entrypoint.MAGIC_TOOLBAR);
+        resolvePromises();
+
+        verify(mActorUiTabController).showTaskAbortConfirmationDialog(any());
+        verify(mPlaybackHooks).createPlayback(any(), any());
+    }
+
+    @Test
+    @EnableFeatures(ChromeFeatureList.GLIC)
+    public void testPlayTab_WithGlicActive_Cancel() {
+        when(mActorUiTabController.isActorActive()).thenReturn(true);
+        when(mActorUiTabController.showTaskAbortConfirmationDialog(any())).thenReturn(true);
+
+        mFakeTranslateBridge.setCurrentLanguage("en");
+        mTab.setGurlOverrideForTesting(new GURL("https://en.wikipedia.org/wiki/Google"));
+
+        mController.playTab(mTab, ReadAloudController.Entrypoint.MAGIC_TOOLBAR);
+        resolvePromises();
+
+        verify(mActorUiTabController).showTaskAbortConfirmationDialog(any());
+        verify(mPlaybackHooks, never()).createPlayback(any(), any());
+    }
+
+    @Test
+    @EnableFeatures(ChromeFeatureList.GLIC)
+    public void testPlayTab_WithGlicActive_Confirm_AfterDestroy() {
+        // Setup: Mock active Glic task and capture dialogue confirm callback
+        when(mActorUiTabController.isActorActive()).thenReturn(true);
+        when(mActorUiTabController.showTaskAbortConfirmationDialog(mGlicCallbackCaptor.capture()))
+                .thenReturn(true);
+
+        mFakeTranslateBridge.setCurrentLanguage("en");
+        mTab.setGurlOverrideForTesting(new GURL("https://en.wikipedia.org/wiki/Google"));
+
+        // Action 1: Call playTab to show the prompt and capture the callback
+        mController.playTab(mTab, ReadAloudController.Entrypoint.MAGIC_TOOLBAR);
+        resolvePromises();
+
+        // Action 2: Destroy the controller simulating background tab closing
+        mController.destroy();
+
+        // Action 3: Trigger the captured callback simulating clicking Confirm on stale prompt
+        // dialog
+        mGlicCallbackCaptor.getValue().onResult(true);
+        resolvePromises();
+
+        // Verification: Assert showTaskAbortConfirmationDialog was called,
+        // but verify createPlayback was NEVER called (proving the cancelable wrapper blocked
+        // execution successfully after destroy).
+        verify(mActorUiTabController).showTaskAbortConfirmationDialog(any());
+        verify(mPlaybackHooks, never()).createPlayback(any(), any());
     }
 
     @Test

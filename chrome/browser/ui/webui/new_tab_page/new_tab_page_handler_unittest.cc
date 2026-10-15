@@ -13,6 +13,7 @@
 
 #include "base/hash/hash.h"
 #include "base/json/json_writer.h"
+#include "base/json/values_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/raw_ref.h"
 #include "base/memory/ref_counted_memory.h"
@@ -22,6 +23,7 @@
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/mock_callback.h"
 #include "base/test/scoped_feature_list.h"
+#include "base/test/test_future.h"
 #include "base/token.h"
 #include "chrome/browser/desktop_to_mobile_promos/promos_pref_names.h"
 #include "chrome/browser/new_tab_page/microsoft_auth/microsoft_auth_service.h"
@@ -37,7 +39,6 @@
 #include "chrome/browser/optimization_guide/mock_optimization_guide_keyed_service.h"
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service_factory.h"
 #include "chrome/browser/search/background/ntp_custom_background_service.h"
-#include "chrome/browser/search/background/ntp_custom_background_service_observer.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/themes/theme_helper.h"
 #include "chrome/browser/themes/theme_properties.h"
@@ -73,6 +74,7 @@
 #include "components/sync/test/test_sync_service.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "components/themes/ntp_background_data.h"
+#include "components/themes/ntp_custom_background_service_observer.h"
 #include "components/user_education/common/feature_promo/feature_promo_controller.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_task_environment.h"
@@ -1932,4 +1934,119 @@ TEST_F(NewTabPageHandlerHaTSTest, InteractedModuleDoesNotTriggerIgnoredHaTS) {
       kSampleIgnoreCriteriaThreshold,
       GetDictPrefKeyCount(profile_.get(), prefs::kNtpModulesLoadedCountDict,
                           NewTabPageHandlerHaTSTest::kSampleModuleId));
+}
+
+TEST_F(NewTabPageHandlerTest, RealboxContextMenuAnimation) {
+  PrefService* prefs = profile_->GetPrefs();
+
+  // 1. Initially allowed, counts are 0.
+  {
+    base::test::TestFuture<bool> future;
+    handler_->CanShowRealboxContextMenuAnimation(future.GetCallback());
+    EXPECT_TRUE(future.Take());
+
+    const base::DictValue& dict =
+        prefs->GetDict(prefs::kContextMenuAnimationState);
+    EXPECT_EQ(std::nullopt, dict.FindInt("realbox_daily_count"));
+    EXPECT_EQ(std::nullopt, dict.FindInt("realbox_lifetime_count"));
+  }
+
+  // 2. Record 1st impression.
+  {
+    handler_->RecordRealboxContextMenuAnimationImpression();
+
+    const base::DictValue& dict =
+        prefs->GetDict(prefs::kContextMenuAnimationState);
+    EXPECT_THAT(dict.FindInt("realbox_daily_count"), testing::Optional(1));
+    EXPECT_THAT(dict.FindInt("realbox_lifetime_count"), testing::Optional(1));
+  }
+
+  // 3. Play 4 more times (total 5 daily impressions recorded).
+  for (int i = 0; i < 4; ++i) {
+    base::test::TestFuture<bool> future;
+    handler_->CanShowRealboxContextMenuAnimation(future.GetCallback());
+    EXPECT_TRUE(future.Take());
+    handler_->RecordRealboxContextMenuAnimationImpression();
+  }
+
+  // Verify counts are now 5 daily and 5 lifetime.
+  {
+    const base::DictValue& dict =
+        prefs->GetDict(prefs::kContextMenuAnimationState);
+    EXPECT_THAT(dict.FindInt("realbox_daily_count"), testing::Optional(5));
+    EXPECT_THAT(dict.FindInt("realbox_lifetime_count"), testing::Optional(5));
+  }
+
+  // 4. The 6th time, it should not be allowed and record should do nothing.
+  {
+    base::test::TestFuture<bool> future;
+    handler_->CanShowRealboxContextMenuAnimation(future.GetCallback());
+    EXPECT_FALSE(future.Take());
+
+    handler_->RecordRealboxContextMenuAnimationImpression();
+
+    const base::DictValue& dict =
+        prefs->GetDict(prefs::kContextMenuAnimationState);
+    EXPECT_THAT(dict.FindInt("realbox_daily_count"), testing::Optional(5));
+    EXPECT_THAT(dict.FindInt("realbox_lifetime_count"), testing::Optional(5));
+  }
+
+  // 5. Simulate a new day (change the date string in prefs).
+  {
+    ScopedDictPrefUpdate update(profile_->GetPrefs(),
+                                prefs::kContextMenuAnimationState);
+    update->Set("realbox_last_impression_time",
+                base::TimeToValue(base::Time::Now() - base::Days(1)));
+  }
+
+  // 6. Requesting now should reset daily count and allow more impressions.
+  {
+    base::test::TestFuture<bool> future;
+    handler_->CanShowRealboxContextMenuAnimation(future.GetCallback());
+    EXPECT_TRUE(future.Take());
+
+    handler_->RecordRealboxContextMenuAnimationImpression();
+
+    const base::DictValue& dict =
+        prefs->GetDict(prefs::kContextMenuAnimationState);
+    EXPECT_THAT(dict.FindInt("realbox_daily_count"), testing::Optional(1));
+    EXPECT_THAT(dict.FindInt("realbox_lifetime_count"), testing::Optional(6));
+  }
+
+  // 7. Bring lifetime count to 19 and verify it caps after 20.
+  {
+    ScopedDictPrefUpdate update(profile_->GetPrefs(),
+                                prefs::kContextMenuAnimationState);
+    update->Set("realbox_lifetime_count", 19);
+    update->Set("realbox_daily_count",
+                0);  // Reset daily for today so we don't hit daily cap.
+  }
+
+  // 20th lifetime impression should still play.
+  {
+    base::test::TestFuture<bool> future;
+    handler_->CanShowRealboxContextMenuAnimation(future.GetCallback());
+    EXPECT_TRUE(future.Take());
+
+    handler_->RecordRealboxContextMenuAnimationImpression();
+
+    const base::DictValue& dict =
+        prefs->GetDict(prefs::kContextMenuAnimationState);
+    EXPECT_THAT(dict.FindInt("realbox_daily_count"), testing::Optional(1));
+    EXPECT_THAT(dict.FindInt("realbox_lifetime_count"), testing::Optional(20));
+  }
+
+  // 21st lifetime impression should be blocked.
+  {
+    base::test::TestFuture<bool> future;
+    handler_->CanShowRealboxContextMenuAnimation(future.GetCallback());
+    EXPECT_FALSE(future.Take());
+
+    handler_->RecordRealboxContextMenuAnimationImpression();
+
+    const base::DictValue& dict =
+        prefs->GetDict(prefs::kContextMenuAnimationState);
+    EXPECT_THAT(dict.FindInt("realbox_daily_count"), testing::Optional(1));
+    EXPECT_THAT(dict.FindInt("realbox_lifetime_count"), testing::Optional(20));
+  }
 }

@@ -20,7 +20,7 @@ namespace auction_worklet {
 DeprecatedUrlLazyFiller::DeprecatedUrlLazyFiller(AuctionV8Helper* v8_helper,
                                                  const GURL* url,
                                                  const char* warning)
-    : LazyFiller(v8_helper),
+    : LazyFiller(v8_helper, kTag),
       v8_logger_(nullptr),
       url_(url),
       warning_(warning) {}

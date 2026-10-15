@@ -45,7 +45,6 @@
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/webui_url_constants.h"
-#include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/testing_profile.h"
@@ -858,7 +857,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewViewsTest, AccessiblePopup) {
   OmniboxPopupView* popup_view =
       BrowserView::GetBrowserViewForBrowser(browser())
           ->GetLocationBarView()
-          ->GetOmniboxPopupViewForTesting();
+          ->GetOmniboxPopupView();
   ui::AXNodeData popup_node_data_1;
   popup_view->GetPopupAccessibleNodeData(&popup_node_data_1);
   EXPECT_FALSE(popup_node_data_1.HasState(ax::mojom::State::kExpanded));
@@ -1788,6 +1787,30 @@ class OmniboxViewViewsPlaceholderTest : public InProcessBrowserTest {
         {});
   }
 
+  void SetUpInProcessBrowserTestFixture() override {
+    create_services_subscription_ =
+        BrowserContextDependencyManager::GetInstance()
+            ->RegisterCreateServicesCallbackForTesting(
+                base::BindRepeating(&OmniboxViewViewsPlaceholderTest::
+                                        OnWillCreateBrowserContextServices,
+                                    base::Unretained(this)));
+  }
+
+  virtual void OnWillCreateBrowserContextServices(
+      content::BrowserContext* context) {
+    AimEligibilityServiceFactory::GetInstance()->SetTestingFactory(
+        context, base::BindRepeating([](content::BrowserContext* context)
+                                         -> std::unique_ptr<KeyedService> {
+          auto service =
+              std::make_unique<testing::NiceMock<MockAimEligibilityService>>(
+                  *Profile::FromBrowserContext(context)->GetPrefs(), nullptr,
+                  nullptr, nullptr);
+          ON_CALL(*service, IsAimEligible())
+              .WillByDefault(testing::Return(true));
+          return service;
+        }));
+  }
+
  protected:
   OmniboxViewViews* omnibox_view() {
     return static_cast<OmniboxViewViews*>(
@@ -1800,6 +1823,7 @@ class OmniboxViewViewsPlaceholderTest : public InProcessBrowserTest {
 
  private:
   base::test::ScopedFeatureList scoped_feature_list_;
+  base::CallbackListSubscription create_services_subscription_;
 };
 
 IN_PROC_BROWSER_TEST_F(OmniboxViewViewsPlaceholderTest,
@@ -1981,7 +2005,6 @@ class OmniboxViewViewsDumpAccessibilityEventsTest
 IN_PROC_BROWSER_TEST_P(OmniboxViewViewsDumpAccessibilityEventsTest,
                        OmniboxPopupOpenClose) {
   SetFilters(R"(
-    @UIA-WIN-DENY:*
     @UIA-WIN-ALLOW:ControllerFor*
   )");
 

@@ -24,6 +24,7 @@
 #include "base/i18n/rtl.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_string_value_serializer.h"
+#include "base/json/values_util.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
@@ -71,7 +72,6 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
 #include "components/feature_engagement/public/event_constants.h"
 #include "components/feature_engagement/public/feature_constants.h"
@@ -111,11 +111,11 @@
 
 #if !BUILDFLAG(IS_ANDROID)
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "components/user_education/webui/help_bubble_handler.h"
-#include "components/user_education/webui/tracked_element_help_bubble_webui_anchor.h"
+#include "ui/webui/tracked_element/tracked_element_handler.h"
+#include "ui/webui/tracked_element/tracked_element_web_ui.h"
 #endif
 
 namespace {
@@ -124,15 +124,18 @@ const int64_t kMaxDownloadBytes = 1024 * 1024;
 
 constexpr char kDisableInteraction[] = "disable";
 constexpr char kDismissInteraction[] = "dismiss";
+#if !BUILDFLAG(IS_ANDROID)
 constexpr char kIgnoreInteraction[] = "ignore";
+#endif
 constexpr char kUseInteraction[] = "use";
+
+// TODO(b/502297163): Implement for Android.
+#if !BUILDFLAG(IS_ANDROID)
 constexpr auto kModuleInteractionNames =
     base::MakeFixedFlatSet<std::string_view>(
         {kDisableInteraction, kDismissInteraction, kIgnoreInteraction,
          kUseInteraction});
 
-// TODO(b/502297163): Implement for Android.
-#if !BUILDFLAG(IS_ANDROID)
 // Returns a list of module IDs that are eligible for HATS.
 std::vector<std::string> GetSurveyEligibleModuleIds() {
   return base::SplitString(
@@ -453,11 +456,9 @@ new_tab_page::mojom::PromoPtr MakePromo(const PromoData& data) {
   return promo;
 }
 
-base::DictValue MakeModuleInteractionTriggerIdDictionary() {
 // TODO(b/502297163): Implement for Android.
-#if BUILDFLAG(IS_ANDROID)
-  return base::DictValue();
-#else
+#if !BUILDFLAG(IS_ANDROID)
+base::DictValue MakeModuleInteractionTriggerIdDictionary() {
   const auto data = base::GetFieldTrialParamValueByFeature(
       features::kHappinessTrackingSurveysForDesktopNtpModules,
       ntp_features::kNtpModulesInteractionBasedSurveyEligibleIdsParam);
@@ -485,8 +486,8 @@ base::DictValue MakeModuleInteractionTriggerIdDictionary() {
   }
 
   return std::move(*value_with_error).TakeDict();
-#endif  // !BUILDFLAG(IS_ANDROID)
 }
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 }  // namespace
 
@@ -512,12 +513,9 @@ NewTabPageHandler::NewTabPageHandler(
     const std::vector<ntp::ModuleIdDetail>* module_id_details)
     : SettingsEnabledObserver(
           optimization_guide::UserVisibleFeatureKey::kWallpaperSearch),
-// TODO(b/502297163): Implement for Android.
-#if !BUILDFLAG(IS_ANDROID)
       logger_(profile,
               chrome::ChromeUINewTabPageURLAsGURL(),
               ntp_navigation_start_time),
-#endif
       ntp_custom_background_service_(ntp_custom_background_service),
       logo_service_(logo_service),
 // TODO(b/502297163): Implement for Android.
@@ -537,17 +535,13 @@ NewTabPageHandler::NewTabPageHandler(
 #endif
       ntp_navigation_start_time_(ntp_navigation_start_time),
       module_id_details_(module_id_details),
-// TODO(b/502297163): Implement for Android.
-#if BUILDFLAG(IS_ANDROID)
-      promo_service_(nullptr),
-      microsoft_auth_service_(nullptr),
-#else
       promo_service_(PromoServiceFactory::GetForProfile(profile)),
       microsoft_auth_service_(
           MicrosoftAuthServiceFactory::GetForProfile(profile)),
-#endif
+#if !BUILDFLAG(IS_ANDROID)
       interaction_module_id_trigger_dict_(
           MakeModuleInteractionTriggerIdDictionary()),
+#endif
       browser_window_changed_subscription_(
           webui::RegisterBrowserWindowInterfaceChanged(
               web_contents_,
@@ -559,19 +553,20 @@ NewTabPageHandler::NewTabPageHandler(
   CHECK(ntp_custom_background_service_);
   CHECK(logo_service_);
   CHECK(web_contents_);
-// TODO(b/502297163): Implement for Android.
+  CHECK(promo_service_);
 #if !BUILDFLAG(IS_ANDROID)
   CHECK(theme_service_);
-  CHECK(promo_service_);
   CHECK(feature_promo_helper_);
   theme_service_observation_.Observe(theme_service_.get());
 #endif  // !BUILDFLAG(IS_ANDROID)
   native_theme_observation_.Observe(ui::NativeTheme::GetInstanceForNativeUi());
   ntp_custom_background_service_observation_.Observe(
       ntp_custom_background_service_.get());
-// TODO(b/502297163): Implement for Android.
-#if !BUILDFLAG(IS_ANDROID)
   promo_service_observation_.Observe(promo_service_.get());
+  if (microsoft_auth_service_) {
+    microsoft_auth_service_->AddObserver(this);
+  }
+#if !BUILDFLAG(IS_ANDROID)
   if (customize_chrome::IsWallpaperSearchEnabledForProfile(profile_)) {
     optimization_guide_keyed_service_ =
         OptimizationGuideKeyedServiceFactory::GetForProfile(profile_);
@@ -579,10 +574,6 @@ NewTabPageHandler::NewTabPageHandler(
       optimization_guide_keyed_service_
           ->AddModelExecutionSettingsEnabledObserver(this);
     }
-  }
-
-  if (microsoft_auth_service_) {
-    microsoft_auth_service_->AddObserver(this);
   }
 #endif  // !BUILDFLAG(IS_ANDROID)
 
@@ -596,8 +587,6 @@ NewTabPageHandler::NewTabPageHandler(
   }
 
   pref_change_registrar_.Init(profile_->GetPrefs());
-// TODO(b/502297163): Implement for Android.
-#if !BUILDFLAG(IS_ANDROID)
   pref_change_registrar_.Add(
       prefs::kNtpModulesVisible,
       base::BindRepeating(&NewTabPageHandler::UpdateDisabledModules,
@@ -621,6 +610,8 @@ NewTabPageHandler::NewTabPageHandler(
       base::BindRepeating(&NewTabPageHandler::UpdateActionChipsVisibility,
                           base::Unretained(this)));
 
+// TODO(b/502297163): Implement for Android.
+#if !BUILDFLAG(IS_ANDROID)
   if (base::FeatureList::IsEnabled(
           feature_engagement::kIPHDesktopRealboxContextualSearchFeature)) {
     searchbox_shown_subscription_ =
@@ -651,8 +642,6 @@ NewTabPageHandler::~NewTabPageHandler() {
 // static
 void NewTabPageHandler::RegisterProfilePrefs(PrefRegistrySimple* registry) {
   registry->RegisterIntegerPref(prefs::kNtpComposeButtonShownCountPrefName, 0);
-// TODO(b/502297163): Implement for Android.
-#if !BUILDFLAG(IS_ANDROID)
   registry->RegisterListPref(prefs::kNtpDisabledModules);
   registry->RegisterListPref(prefs::kNtpHiddenModules);
   registry->RegisterListPref(prefs::kNtpModulesOrder);
@@ -668,6 +657,8 @@ void NewTabPageHandler::RegisterProfilePrefs(PrefRegistrySimple* registry) {
       prefs::kNtpCustomizeChromeSidePanelAutoOpeningsCount, 0);
   registry->RegisterBooleanPref(prefs::kNtpCustomizeChromeExplicitlyClosed,
                                 false);
+// TODO(b/502297163): Implement for Android.
+#if !BUILDFLAG(IS_ANDROID)
   registry->RegisterBooleanPref(prefs::kNtpCustomizeChromeIPHAutoOpened, false);
 #endif  // !BUILDFLAG(IS_ANDROID)
 }
@@ -750,10 +741,7 @@ void NewTabPageHandler::OnRestoreModule(const std::string& module_id) {
 }
 
 void NewTabPageHandler::SetModulesVisible(bool visible) {
-// TODO(b/502297163): Implement for Android.
-#if !BUILDFLAG(IS_ANDROID)
   DisableModuleAutoRemoval(profile_, ntp_modules::kAllModulesId);
-#endif
   profile_->GetPrefs()->SetBoolean(prefs::kNtpModulesVisible, visible);
 }
 
@@ -777,10 +765,7 @@ void NewTabPageHandler::SetModulesDisabled(
     }
   }
 
-// TODO(b/502297163): Implement for Android.
-#if !BUILDFLAG(IS_ANDROID)
   DisableModuleListAutoRemoval(profile_, module_ids);
-#endif
 
   // We're not recording a user interaction if the modules were disabled due to
   // feature optimization auto removal.
@@ -823,14 +808,14 @@ void NewTabPageHandler::UpdateDisabledModules() {
 
 void NewTabPageHandler::OnModulesLoadedWithData(
     const std::vector<std::string>& module_ids) {
-// TODO(b/502297163): Implement for Android.
-#if !BUILDFLAG(IS_ANDROID)
   UpdateModulesStaleness(profile_, module_ids);
 
   for (const auto& module_id : module_ids) {
     IncrementDictPrefKeyCount(prefs::kNtpModulesLoadedCountDict, module_id);
   }
 
+// TODO(b/502297163): Implement for Android.
+#if !BUILDFLAG(IS_ANDROID)
   std::vector<std::string> survey_eligible_module_ids =
       GetSurveyEligibleModuleIds();
   if (std::any_of(module_ids.begin(), module_ids.end(),
@@ -1188,6 +1173,62 @@ void NewTabPageHandler::IncrementComposeButtonShownCount() {
                                    shown_count + 1);
 }
 
+void NewTabPageHandler::CanShowRealboxContextMenuAnimation(
+    CanShowRealboxContextMenuAnimationCallback callback) {
+  PrefService* prefs = profile_->GetPrefs();
+  const base::DictValue& state_dict =
+      prefs->GetDict(prefs::kContextMenuAnimationState);
+
+  int lifetime_count = state_dict.FindInt("realbox_lifetime_count").value_or(0);
+  if (lifetime_count >= 20) {
+    std::move(callback).Run(false);
+    return;
+  }
+
+  base::Time last_impression_time =
+      base::ValueToTime(state_dict.Find("realbox_last_impression_time"))
+          .value_or(base::Time());
+  int daily_count = state_dict.FindInt("realbox_daily_count").value_or(0);
+
+  base::Time today_time = base::Time::Now().LocalMidnight();
+
+  if (last_impression_time != today_time) {
+    daily_count = 0;
+  }
+
+  bool can_show = daily_count < 5;
+  std::move(callback).Run(can_show);
+}
+
+void NewTabPageHandler::RecordRealboxContextMenuAnimationImpression() {
+  PrefService* prefs = profile_->GetPrefs();
+  const base::DictValue& state_dict =
+      prefs->GetDict(prefs::kContextMenuAnimationState);
+
+  base::Time last_impression_time =
+      base::ValueToTime(state_dict.Find("realbox_last_impression_time"))
+          .value_or(base::Time());
+  int daily_count = state_dict.FindInt("realbox_daily_count").value_or(0);
+  int lifetime_count = state_dict.FindInt("realbox_lifetime_count").value_or(0);
+
+  base::Time today_time = base::Time::Now().LocalMidnight();
+
+  if (last_impression_time != today_time) {
+    daily_count = 0;
+  }
+
+  if (lifetime_count < 20 && daily_count < 5) {
+    daily_count++;
+    lifetime_count++;
+
+    ScopedDictPrefUpdate update(profile_->GetPrefs(),
+                                prefs::kContextMenuAnimationState);
+    update->Set("realbox_last_impression_time", base::TimeToValue(today_time));
+    update->Set("realbox_daily_count", daily_count);
+    update->Set("realbox_lifetime_count", lifetime_count);
+  }
+}
+
 void NewTabPageHandler::OnNativeThemeUpdated(ui::NativeTheme* observed_theme) {
   OnThemeChanged();
 }
@@ -1488,10 +1529,7 @@ void NewTabPageHandler::MaybeShowWebstoreToast() {
 }
 
 void NewTabPageHandler::RecordModuleInteraction(const std::string& module_id) {
-// TODO(b/502297163): Implement for Android.
-#if !BUILDFLAG(IS_ANDROID)
   DisableModuleAutoRemoval(profile_, module_id);
-#endif
   IncrementDictPrefKeyCount(prefs::kNtpModulesInteractedCountDict, module_id);
 }
 
@@ -1506,6 +1544,8 @@ void NewTabPageHandler::IncrementDictPrefKeyCount(const std::string& pref_name,
                   : 1);
 }
 
+// TODO(b/502297163): Implement for Android.
+#if !BUILDFLAG(IS_ANDROID)
 const std::string& NewTabPageHandler::GetSurveyTriggerIdForModuleAndInteraction(
     std::string_view interaction,
     const std::string& module_id) {
@@ -1523,6 +1563,7 @@ const std::string& NewTabPageHandler::GetSurveyTriggerIdForModuleAndInteraction(
 
   return kNoTriggerId;
 }
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 void NewTabPageHandler::SetModuleHidden(const std::string& module_id,
                                         bool hidden) {
@@ -1576,14 +1617,12 @@ bool NewTabPageHandler::SyncMicrosoftModulesWithAuth() {
 #if !BUILDFLAG(IS_ANDROID)
 void NewTabPageHandler::TryShowRealboxContextualMenuIPH(
     ui::TrackedElement* element) {
-  if (!element ||
-      !element->IsA<user_education::TrackedElementHelpBubbleWebUIAnchor>()) {
+  if (!element || !element->IsA<ui::TrackedElementWebUI>()) {
     return;
   }
 
-  auto* anchor =
-      element->AsA<user_education::TrackedElementHelpBubbleWebUIAnchor>();
-  if (anchor->handler()->GetWebContents() != web_contents_) {
+  auto* anchor = element->AsA<ui::TrackedElementWebUI>();
+  if (anchor->handler()->web_contents() != web_contents_) {
     return;
   }
 

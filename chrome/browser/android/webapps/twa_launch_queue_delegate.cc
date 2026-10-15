@@ -12,6 +12,7 @@ namespace webapps {
 
 bool TwaLaunchQueueDelegate::IsValidLaunchParams(
     const webapps::LaunchParams& launch_params) const {
+  // Launch param validation for TWAs is implemented in WebAppLaunchHandler.java
   return true;
 }
 

@@ -1762,6 +1762,9 @@ bool Texture::CanRenderTo(const FeatureInfo* feature_info, GLint level) const {
   if (face_infos_.size() == 6 && !cube_complete())
     return false;
   DCHECK(level >= 0 && level < static_cast<GLint>(MaxValidMipLevel()));
+  if (level < base_level_) {
+    return false;
+  }
   if (level > base_level_ && !texture_complete()) {
     return false;
   }
@@ -2527,12 +2530,6 @@ bool TextureManager::ValidateTexImage(ContextState* state,
   }
   Buffer* buffer = state->bound_pixel_unpack_buffer.get();
   if (buffer) {
-    if (buffer->GetMappedRange()) {
-      ERRORSTATE_SET_GL_ERROR(
-          error_state, GL_INVALID_OPERATION, function_name,
-          "pixel unpack buffer should not be mapped to client memory");
-      return false;
-    }
     if (buffer->IsBoundForTransformFeedbackAndOther()) {
       ERRORSTATE_SET_GL_ERROR(
           error_state, GL_INVALID_OPERATION, function_name,
@@ -2813,12 +2810,6 @@ bool TextureManager::ValidateTexSubImage(ContextState* state,
 
   Buffer* buffer = state->bound_pixel_unpack_buffer.get();
   if (buffer) {
-    if (buffer->GetMappedRange()) {
-      ERRORSTATE_SET_GL_ERROR(
-          error_state, GL_INVALID_OPERATION, function_name,
-          "pixel unpack buffer should not be mapped to client memory");
-      return false;
-    }
     if (buffer->IsBoundForTransformFeedbackAndOther()) {
       ERRORSTATE_SET_GL_ERROR(
           error_state, GL_INVALID_OPERATION, function_name,

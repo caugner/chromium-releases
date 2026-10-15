@@ -49,6 +49,7 @@ ConfiguredProxyResolutionRequest::ConfiguredProxyResolutionRequest(
     const GURL& url,
     const std::string& method,
     const NetworkAnonymizationKey& network_anonymization_key,
+    handles::NetworkHandle target_network,
     ProxyInfo* results,
     CompletionOnceCallback user_callback,
     const NetLogWithSource& net_log,
@@ -59,6 +60,7 @@ ConfiguredProxyResolutionRequest::ConfiguredProxyResolutionRequest(
       url_(url),
       method_(method),
       network_anonymization_key_(network_anonymization_key),
+      target_network_(target_network),
       net_log_(net_log),
       priority_(priority),
       creation_time_(base::TimeTicks::Now()) {
@@ -214,12 +216,16 @@ LoadState ConfiguredProxyResolutionRequest::GetLoadState() const {
 
 // Callback for when the ProxyResolver request has completed.
 void ConfiguredProxyResolutionRequest::QueryComplete(int result_code) {
+  CHECK(!was_completed());
+
+  // Remove `this` from the service before notifying it of completion to
+  // prevent re-entrant dispatch if the service re-initializes synchronously.
+  service_->RemovePendingRequest(this);
+
   result_code = QueryDidComplete(result_code);
+  service_ = nullptr;
 
   CompletionOnceCallback callback = std::move(user_callback_);
-
-  service_->RemovePendingRequest(this);
-  service_ = nullptr;
   user_callback_.Reset();
   std::move(callback).Run(result_code);
 }

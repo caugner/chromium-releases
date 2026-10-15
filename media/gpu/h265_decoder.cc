@@ -148,6 +148,12 @@ H265Decoder::~H265Decoder() = default;
 void H265Decoder::SetStream(int32_t id,
                             scoped_refptr<DecoderBuffer> decoder_buffer) {
   CHECK(decoder_buffer);
+  curr_nalu_.reset();
+  curr_slice_hdr_.reset();
+  last_slice_hdr_.reset();
+  // Keep the old buffer alive until the end of this function to ensure
+  // that any active spans in the parser are cleared before the memory is freed.
+  auto outgoing_decoder_buffer = std::move(decoder_buffer_);
   decoder_buffer_ = std::move(decoder_buffer);
   const DecryptConfig* decrypt_config = decoder_buffer_->decrypt_config();
 
@@ -684,6 +690,10 @@ H265Decoder::H265Accelerator::Status H265Decoder::PreprocessCurrentSlice() {
       return result;
 
     DCHECK(!curr_pic_);
+  } else if (!curr_pic_) {
+    DVLOG(1) << "Received slice segment with first_slice_segment_in_pic_flag "
+             << "equal to 0 without an active picture";
+    return H265Accelerator::Status::kFail;
   }
 
   return H265Accelerator::Status::kOk;

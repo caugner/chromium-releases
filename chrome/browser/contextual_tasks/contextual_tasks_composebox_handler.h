@@ -82,10 +82,14 @@ class ContextualTasksComposeboxHandler
   void AddTabContext(int32_t tab_id,
                      bool delay_upload,
                      AddTabContextCallback callback) override;
+  void StartPlatformVoiceRecognition() override;
 
   // We override this method to inject an existing `InputStateModel` if one is
   // provided by the ContextualTasksUI via the `take_input_model_callback_`.
   void InitializeInputStateModel() override;
+
+  void SetAimThreadRestoredTabs(
+      std::vector<searchbox::mojom::TabInfoPtr> tabs) override;
 
   void AddFileContextFromBrowser(
       searchbox::mojom::SelectedFileInfoPtr file_info,
@@ -109,13 +113,17 @@ class ContextualTasksComposeboxHandler
       const contextual_tasks::SuggestedTabInfo* suggested_tab) override;
   void OnTaskChanged() override;
 
+  std::vector<int32_t> GetSelectedTabIds() const override;
+
   void ClearFiles(bool should_block_auto_suggested_tabs) override;
+#if !BUILDFLAG(IS_ANDROID)
   void HandleLensButtonClick() override;
   void OnLensThumbnailCreated(const std::string& thumbnail_data);
   virtual void CloseLensOverlay(
       lens::LensOverlayDismissalSource dismissal_source);
   void CloseLensOverlayFromWebUI(
       composebox::mojom::LensOverlayDismissalSource dismissal_source) override;
+#endif
 
   // Callbacks for QueryContextualizer:
 
@@ -132,6 +140,8 @@ class ContextualTasksComposeboxHandler
   }
   // ui::SelectFileDialog::Listener:
   void FileSelected(const ui::SelectedFileInfo& file, int index) override;
+  void MultiFilesSelected(
+      const std::vector<ui::SelectedFileInfo>& files) override;
   void FileSelectionCanceled() override;
   void OnFileRead(std::unique_ptr<FileData> file_data);
 
@@ -146,7 +156,9 @@ class ContextualTasksComposeboxHandler
 
  protected:
   virtual contextual_tasks::ContextualTasksService* GetContextualTasksService();
+#if !BUILDFLAG(IS_ANDROID)
   virtual std::optional<base::UnguessableToken> GetLensOverlayToken();
+#endif
 
  private:
   // Returns the context ID for the active tab, if any.
@@ -168,12 +180,14 @@ class ContextualTasksComposeboxHandler
       std::optional<base::UnguessableToken> overlay_token,
       bool is_voice_search);
 
+#if !BUILDFLAG(IS_ANDROID)
   void OnVisualSelectionAdded(
       base::UnguessableToken overlay_token,
       base::expected<base::UnguessableToken,
                      contextual_search::ContextUploadErrorType> token);
 
   virtual LensSearchController* GetLensSearchController() const;
+#endif  // !BUILDFLAG(IS_ANDROID)
 
   // Called when a non-delayed context upload (file or tab) has finished.
   // Potentially submits query if no other context is uploading.
@@ -227,6 +241,7 @@ class ContextualTasksComposeboxHandler
   // Number of recontextualization flows currently in progress.
   int recontextualization_pending_count_ = 0;
 
+#if !BUILDFLAG(IS_ANDROID)
   // The token associated with the visual selection. This does not actually
   // correspond to a real file upload, but is used to represent the visual
   // selection in the UI and in the event that the user submits a query with
@@ -239,6 +254,7 @@ class ContextualTasksComposeboxHandler
   // reset or closed, but the visual selection should still be associated with
   // the overlay token that created it.
   std::optional<base::UnguessableToken> visual_selection_overlay_token_;
+#endif
   base::WeakPtrFactory<ContextualTasksComposeboxHandler> weak_factory_{this};
 };
 

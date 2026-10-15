@@ -187,8 +187,11 @@ class MEDIA_GPU_EXPORT MediaFoundationVideoEncodeAccelerator
   // Set the encoder state to |state|.
   void SetState(State state);
 
+  void SendOutputBuffer(const BitstreamBufferMetadata& metadata,
+                        base::span<uint8_t> output_buffer_span);
+
   // Processes the input video frame for the encoder.
-  HRESULT ProcessInput(const PendingInput& input);
+  HRESULT ProcessInput(const PendingInput& input, bool& is_drop_frame);
 
   // Feed as many frames from |pending_input_queue_| to ProcessInput()
   // as possible.
@@ -258,6 +261,9 @@ class MEDIA_GPU_EXPORT MediaFoundationVideoEncodeAccelerator
 
   std::unique_ptr<MediaLog> media_log_;
 
+  // Helper for accessing shared textures
+  scoped_refptr<CommandBufferHelper> command_buffer_helper_;
+
   // Bitstream buffers ready to be used to return encoded output as a FIFO.
   base::circular_deque<std::unique_ptr<BitstreamBufferRef>>
       bitstream_buffer_queue_;
@@ -306,6 +312,10 @@ class MEDIA_GPU_EXPORT MediaFoundationVideoEncodeAccelerator
 
   // Type of content being encoded.
   Config::ContentType content_type_ = Config::ContentType::kCamera;
+
+  // Frame drop threshold percentage. When > 0, the SW BRC is allowed to drop
+  // frames and has_trusted_rate_controller is set to true.
+  uint8_t drop_frame_thresh_percentage_ = 0;
 
   // Vendor of the active video encoder.
   DriverVendor vendor_ = DriverVendor::kOther;
@@ -362,9 +372,6 @@ class MEDIA_GPU_EXPORT MediaFoundationVideoEncodeAccelerator
 
   // Preferred adapter for DXGIDeviceManager.
   const CHROME_LUID luid_;
-
-  // Helper for accessing shared textures
-  scoped_refptr<CommandBufferHelper> command_buffer_helper_;
 
   // Used for frame format conversion.
   VideoFrameConverter frame_converter_;

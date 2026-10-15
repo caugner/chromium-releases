@@ -302,6 +302,28 @@ TEST_F(CRWWebControllerTest, WebViewCreatedAfterEnsureWebViewCreated) {
       web_view.customUserAgent);
 }
 
+// Tests that loadSimulatedRequest automatically creates and sets up a standard
+// WKWebView if none exists.
+TEST_F(CRWWebControllerTest, EnsureWebViewCreatedDuringLoadSimulatedRequest) {
+  // Remove the injected mock web view first so the controller has no active
+  // WKWebView.
+  [web_controller() removeWebView];
+
+  CRWWebControllerContainerView* container_view =
+      base::apple::ObjCCastStrict<CRWWebControllerContainerView>(
+          web_controller().view);
+  ASSERT_EQ(nil, container_view.webViewContentView.webView);
+
+  GURL simulated_url("http://simulated.test");
+  [web_controller() loadSimulatedRequest:simulated_url
+                      responseHTMLString:@"<html><body>Content</body></html>"];
+
+  // Verify that a real WKWebView has been created.
+  UIView* web_view = container_view.webViewContentView.webView;
+  ASSERT_NE(nil, web_view);
+  EXPECT_TRUE([web_view isKindOfClass:[WKWebView class]]);
+}
+
 // Tests that setting UserAgentOverride is reflected in WKWebView during
 // navigation.
 TEST_F(CRWWebControllerTest, UserAgentOverrideUsedInNavigation) {
@@ -444,6 +466,7 @@ class JavaScriptDialogPresenterTest : public WebTestWithWebController {
   JavaScriptDialogPresenterTest() : page_url_("https://chromium.test/") {}
   void SetUp() override {
     WebTestWithWebState::SetUp();
+    web_state()->WasShown();
     LoadHtml(@"<html><body></body></html>", page_url_);
     web_state()->SetDelegate(&web_state_delegate_);
   }
@@ -572,6 +595,24 @@ TEST_F(JavaScriptDialogPresenterTest, DifferentVisibleUrl) {
   web_controller().webStateImpl->SetIsLoading(true);
   ASSERT_NE(page_origin().GetURL(),
             web_state()->GetVisibleURL().DeprecatedGetOriginAsURL());
+
+  ExecuteJavaScript(@"alert('test')");
+  ASSERT_TRUE(requested_alert_dialogs().empty());
+
+  EXPECT_NSEQ(@NO, ExecuteJavaScript(@"confirm('test')"));
+  ASSERT_TRUE(requested_confirm_dialogs().empty());
+
+  EXPECT_NSEQ([NSNull null], ExecuteJavaScript(@"prompt('Yes?', 'No')"));
+  ASSERT_TRUE(requested_prompt_dialogs().empty());
+}
+
+// Tests that window.alert, window.confirm and window.prompt dialogs are not
+// shown if the WebState is not visible.
+TEST_F(JavaScriptDialogPresenterTest, InvisibleWebState) {
+  ASSERT_FALSE(JSDialogPresenterHasDialogs());
+
+  web_state()->WasHidden();
+  ASSERT_FALSE(web_state()->IsVisible());
 
   ExecuteJavaScript(@"alert('test')");
   ASSERT_TRUE(requested_alert_dialogs().empty());

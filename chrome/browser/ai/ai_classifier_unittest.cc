@@ -9,6 +9,7 @@
 #include "base/run_loop.h"
 #include "base/test/bind.h"
 #include "base/test/gmock_expected_support.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/mock_callback.h"
 #include "base/test/protobuf_matchers.h"
 #include "base/test/scoped_feature_list.h"
@@ -29,6 +30,7 @@
 #include "services/on_device_model/public/cpp/features.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/features_generated.h"
 #include "third_party/blink/public/mojom/ai/ai_classifier.mojom.h"
 #include "third_party/blink/public/mojom/ai/ai_manager.mojom.h"
 #include "third_party/blink/public/mojom/ai/model_streaming_responder.mojom.h"
@@ -93,6 +95,12 @@ blink::mojom::AIClassifierCreateOptionsPtr GetDefaultOptions() {
 }
 
 class AIClassifierTest : public AITestUtils::AITestBase {
+ public:
+  AIClassifierTest() {
+    scoped_feature_list_.InitAndEnableFeature(
+        blink::features::kAIClassifierAPI);
+  }
+
  protected:
   optimization_guide::proto::OnDeviceModelExecutionFeatureConfig CreateConfig()
       override {
@@ -119,8 +127,8 @@ class AIClassifierTest : public AITestUtils::AITestBase {
           GetDefaultOptions()) {
     TestCreateClassifierClient create_classifier_client;
     GetAIManagerRemote()->CreateClassifier(
-        create_classifier_client.BindNewPipeAndPassRemote(),
-        std::move(options));
+        create_classifier_client.BindNewPipeAndPassRemote(), std::move(options),
+        /*monitor=*/mojo::NullRemote());
 
     CreateClassifierResult result = create_classifier_client.result().Take();
     EXPECT_OK(result);
@@ -139,10 +147,14 @@ class AIClassifierTest : public AITestUtils::AITestBase {
   void EnsureModelIsReady() {
     TestCreateClassifierClient classifier_client;
     GetAIManagerRemote()->CreateClassifier(
-        classifier_client.BindNewPipeAndPassRemote(), GetDefaultOptions());
+        classifier_client.BindNewPipeAndPassRemote(), GetDefaultOptions(),
+        mojo::NullRemote());
     auto result = classifier_client.result().Take();
     EXPECT_TRUE(result.has_value());
   }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 TEST_F(AIClassifierTest, Classify) {
@@ -156,6 +168,24 @@ TEST_F(AIClassifierTest, Classify) {
   // The FakeBaseModelAsset/FakeService prepends "CPU backend".
   EXPECT_THAT(Classify(*classifier_remote, kInputString, kContextString),
               ElementsAreArray({"CPU backend", "Classified result"}));
+}
+
+TEST_F(AIClassifierTest, ClassifierTelemetry) {
+  base::HistogramTester histogram_tester;
+  EXPECT_CALL(*mock_optimization_guide_keyed_service_,
+              GetOnDeviceModelEligibility(
+                  optimization_guide::mojom::OnDeviceFeature::kClassifier))
+      .WillRepeatedly(testing::Return(
+          optimization_guide::OnDeviceModelEligibilityReason::kSuccess));
+  fake_broker_->InstallClassifierModel(
+      std::make_unique<optimization_guide::FakeBaseModelAsset>());
+  EnsureModelIsReady();
+  GetAIClassifierRemote();
+
+  histogram_tester.ExpectUniqueSample(
+      "OptimizationGuide.ModelExecution."
+      "OnDeviceModelEligibilityReason.Classifier",
+      optimization_guide::OnDeviceModelEligibilityReason::kSuccess, 2);
 }
 
 TEST_F(AIClassifierTest, CanCreateDefaultOptions) {
@@ -192,7 +222,8 @@ TEST_F(AIClassifierTest, CreateBuiltInAIAPIsEnterprisePolicyDisabled) {
   mojo::test::BadMessageObserver observer;
   TestCreateClassifierClient create_classifier_client;
   GetAIManagerRemote()->CreateClassifier(
-      create_classifier_client.BindNewPipeAndPassRemote(), GetDefaultOptions());
+      create_classifier_client.BindNewPipeAndPassRemote(), GetDefaultOptions(),
+      mojo::NullRemote());
   EXPECT_EQ(observer.WaitForBadMessage(), "Policy or user setting disabled");
   SetBuiltInAIAPIsEnterprisePolicy(true);
 }
@@ -208,7 +239,8 @@ TEST_F(AIClassifierTest, CreateGenAILocalEnterprisePolicyDisabled) {
   mojo::test::BadMessageObserver observer;
   TestCreateClassifierClient create_classifier_client;
   GetAIManagerRemote()->CreateClassifier(
-      create_classifier_client.BindNewPipeAndPassRemote(), GetDefaultOptions());
+      create_classifier_client.BindNewPipeAndPassRemote(), GetDefaultOptions(),
+      mojo::NullRemote());
   EXPECT_EQ(observer.WaitForBadMessage(), "Policy or user setting disabled");
   SetGenAILocalEnterprisePolicy(true);
 }
@@ -224,7 +256,8 @@ TEST_F(AIClassifierTest, CreateOnDeviceAiUserSettingDisabled) {
   mojo::test::BadMessageObserver observer;
   TestCreateClassifierClient create_classifier_client;
   GetAIManagerRemote()->CreateClassifier(
-      create_classifier_client.BindNewPipeAndPassRemote(), GetDefaultOptions());
+      create_classifier_client.BindNewPipeAndPassRemote(), GetDefaultOptions(),
+      mojo::NullRemote());
   EXPECT_EQ(observer.WaitForBadMessage(), "Policy or user setting disabled");
   SetOnDeviceAiUserSetting(true);
 }

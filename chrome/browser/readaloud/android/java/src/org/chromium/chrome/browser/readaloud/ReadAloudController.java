@@ -51,6 +51,7 @@ import org.chromium.build.annotations.Contract;
 import org.chromium.build.annotations.EnsuresNonNullIf;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
+import org.chromium.chrome.browser.actor.ui.ActorUiTabController;
 import org.chromium.chrome.browser.browser_controls.BottomControlsStacker;
 import org.chromium.chrome.browser.device.DeviceConditions;
 import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
@@ -1078,6 +1079,24 @@ public class ReadAloudController
      * @param tab Tab to play.
      */
     public void playTab(Tab tab, @Entrypoint int entrypoint) {
+        Callback<Boolean> playTabImplCallback =
+                (confirmed) -> {
+                    if (confirmed) {
+                        playTabImpl(tab, entrypoint);
+                    }
+                };
+        if (mCallbackController != null) {
+            playTabImplCallback = mCallbackController.makeCancelable(playTabImplCallback);
+        }
+
+        ActorUiTabController controller = ActorUiTabController.from(tab);
+        if (controller == null
+                || !controller.showTaskAbortConfirmationDialog(playTabImplCallback)) {
+            playTabImplCallback.onResult(true);
+        }
+    }
+
+    private void playTabImpl(Tab tab, @Entrypoint int entrypoint) {
         if (!isReadable(tab)) {
             ReadAloudMetrics.recordPlaybackWithoutReadabilityCheck(
                     entrypoint, Entrypoint.NUM_ENTRIES);
@@ -1085,6 +1104,7 @@ public class ReadAloudController
                 ReadAloudMetrics.recordEmptyURLPlayback(entrypoint, Entrypoint.NUM_ENTRIES);
             }
         }
+
         // Should rarely ever happen since the profile has to be established for a readability check
         // to show the entrypoint.
         if (mProfileSupplier.get() == null) {

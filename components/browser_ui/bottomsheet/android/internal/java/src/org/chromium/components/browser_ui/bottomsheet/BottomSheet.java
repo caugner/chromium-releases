@@ -477,7 +477,11 @@ class BottomSheet extends FrameLayout
         mInsetObserver.addWindowInsetsAnimationListener(
                 new WindowInsetsAnimationListener() {
                     @Override
-                    public void onPrepare(WindowInsetsAnimationCompat animation) {}
+                    public void onPrepare(WindowInsetsAnimationCompat animation) {
+                        for (BottomSheetObserver obs : mObservers) {
+                            obs.beforeInsetAnimationStart();
+                        }
+                    }
 
                     @Override
                     public void onStart(
@@ -495,6 +499,9 @@ class BottomSheet extends FrameLayout
                     @Override
                     public void onEnd(WindowInsetsAnimationCompat animation) {
                         onInsetChanged();
+                        for (BottomSheetObserver obs : mObservers) {
+                            obs.onInsetAnimationEnd();
+                        }
                     }
                 });
 
@@ -995,12 +1002,20 @@ class BottomSheet extends FrameLayout
             assert mSheetContent.getPeekHeight() != HeightMode.WRAP_CONTENT
                     : "The peek mode can't wrap content.";
             int peekHeight = mSheetContent.getPeekHeight();
-            assert peekHeight > 0 && peekHeight <= mContainerHeight
-                    : "Custom peek height must be in the range of (0, mContainerHeight]."
-                            + " mContainerHeight: "
-                            + mContainerHeight
-                            + " peekHeight :"
-                            + peekHeight;
+            assert peekHeight > 0 : "Custom peek height must be positive.";
+            // If the container height is smaller than the custom peek height (e.g. when entering
+            // Picture-in-Picture mode where the window shrinks dynamically), we cap the peek height
+            // to the container height instead of throwing an AssertionError. This gracefully allows
+            // the bottom sheet to occupy the full tiny window rather than crashing the app.
+            if (peekHeight > mContainerHeight) {
+                Log.w(
+                        TAG,
+                        "Custom peek height (%d) exceeds container height (%d), capping to"
+                                + " container height.",
+                        peekHeight,
+                        mContainerHeight);
+                peekHeight = mContainerHeight;
+            }
             return peekHeight;
         }
 
@@ -1681,11 +1696,25 @@ class BottomSheet extends FrameLayout
         }
     }
 
-    void setBottomMargin(int bottomMargin) {
+    @Px
+    int getContainerBottomMargin() {
+        return mBottomMargin;
+    }
+
+    void setBottomMargin(@Px int bottomMargin) {
+        // TODO(crbug.com/521433079): Should early return if this doesn't change. Leaving for now to
+        // ensure we don't introduce subtle client regressions.
+        boolean bottomMarginChanged = mBottomMargin != bottomMargin;
+
         mBottomMargin = bottomMargin;
         MarginLayoutParams layoutParams = (MarginLayoutParams) mSheetContainer.getLayoutParams();
         layoutParams.bottomMargin = mBottomMargin;
         mSheetContainer.setLayoutParams(layoutParams);
+
+        if (!bottomMarginChanged) return;
+        for (BottomSheetObserver obs : mObservers) {
+            obs.onContainerBottomMarginChanged(bottomMargin);
+        }
     }
 
     void onSheetBackgroundColorOverrideChanged() {
@@ -1781,9 +1810,7 @@ class BottomSheet extends FrameLayout
     }
 
     private void updateA11yPaneTitle(CharSequence msg) {
-        // Set the pane title for the container. The bottom sheet view is not always accessible
-        // e.g. when sheet is dismissed.
-        ViewCompat.setAccessibilityPaneTitle(mSheetContainer, msg);
+        ViewCompat.setAccessibilityPaneTitle(this, msg);
     }
 
     private void resetCachedKeyboardState() {

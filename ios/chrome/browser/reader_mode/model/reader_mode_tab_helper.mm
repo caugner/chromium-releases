@@ -341,8 +341,12 @@ void ReaderModeTabHelper::ReaderModeContentDidLoadData(
   WebViewProxyTabHelper* tab_helper =
       WebViewProxyTabHelper::FromWebState(web_state_);
   if (tab_helper) {
-    tab_helper->SetOverridingWebViewProxy(
-        reader_mode_web_state_->GetWebViewProxy());
+    id<CRWWebViewProxy> reader_mode_web_view_proxy =
+        reader_mode_web_state_->GetWebViewProxy();
+    // Ensure the web view ignores the obscured insets, as the Reader mode web
+    // view is instead constrained to the content area.
+    reader_mode_web_view_proxy.ignoreObscuredInsets = YES;
+    tab_helper->SetOverridingWebViewProxy(reader_mode_web_view_proxy);
   }
   metrics_helper_.RecordReaderShown();
 
@@ -378,9 +382,10 @@ void ReaderModeTabHelper::ReaderModeContentDidCancelRequest(
   if (referrer_value) {
     NSURL* referrer_url = [NSURL URLWithString:referrer_value];
     params.referrer.url = net::GURLWithNSURL(referrer_url);
-    params.referrer.policy = web::ReferrerPolicyDefault;
+    params.referrer.policy = web::ReferrerPolicyStrictOriginWhenCrossOrigin;
   }
   params.transition_type = request_info.transition_type;
+  params.is_renderer_initiated = true;
   web_state_->GetNavigationManager()->LoadURLWithParams(params);
 }
 

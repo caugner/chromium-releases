@@ -153,7 +153,7 @@ std::optional<GURL> PermissionsClient::GetCanonicalOriginOverride(
 
 std::optional<GURL> PermissionsClient::GetEmbeddingOriginOverride(
     const GURL& requesting_origin,
-    content::WebContents* web_contents) {
+    content::RenderFrameHost* render_frame_host) {
   return std::nullopt;
 }
 
@@ -198,7 +198,7 @@ bool PermissionsClient::IsDseOrigin(content::BrowserContext* browser_context,
 std::unique_ptr<PermissionsClient::PermissionMessageDelegate>
 PermissionsClient::MaybeCreateMessageUI(
     content::WebContents* web_contents,
-    ContentSettingsType type,
+    const PermissionRequest& request,
     base::WeakPtr<PermissionPromptAndroid> prompt) {
   return nullptr;
 }

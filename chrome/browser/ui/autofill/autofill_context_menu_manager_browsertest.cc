@@ -32,7 +32,6 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "components/accessibility_annotator/core/accessibility_annotator_types.h"
 #include "components/autofill/content/browser/test_autofill_client_injector.h"
 #include "components/autofill/content/browser/test_autofill_driver_injector.h"
 #include "components/autofill/content/browser/test_content_autofill_client.h"
@@ -48,6 +47,7 @@
 #include "components/password_manager/core/browser/manage_passwords_referrer.h"
 #include "components/password_manager/core/browser/password_form.h"
 #include "components/password_manager/core/browser/password_manager_test_utils.h"
+#include "components/password_manager/core/browser/password_store/password_form_converters.h"
 #include "components/password_manager/core/browser/password_store/password_store_interface.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/plus_addresses/core/browser/grit/plus_addresses_strings.h"
@@ -60,8 +60,12 @@
 #include "components/sync/test/test_sync_service.h"
 #include "components/user_manager/user_names.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/render_frame_host.h"
+#include "content/public/test/back_forward_cache_util.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
+#include "content/public/test/test_utils.h"
+#include "net/dns/mock_host_resolver.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/menu_model.h"
@@ -209,8 +213,15 @@ class BaseAutofillContextMenuManagerTest : public InProcessBrowserTest {
       const BaseAutofillContextMenuManagerTest&) = delete;
 
   void SetUpOnMainThread() override {
-    ASSERT_TRUE(
-        ui_test_utils::NavigateToURL(browser(), GURL("http://test.com")));
+    // Map all hosts to 127.0.0.1 so that we can use hostnames like "a.com" and
+    // "b.com" with EmbeddedTestServer. This is necessary to force cross-site
+    // navigations during tests.
+    host_resolver()->AddRule("*", "127.0.0.1");
+    if (!embedded_test_server()->Started()) {
+      ASSERT_TRUE(embedded_test_server()->Start());
+    }
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(
+        browser(), embedded_test_server()->GetURL("a.com", "/empty.html")));
 
     menu_model_ = std::make_unique<ui::SimpleMenuModel>(nullptr);
     render_view_context_menu_ = std::make_unique<TestRenderViewContextMenu>(
@@ -507,7 +518,7 @@ IN_PROC_BROWSER_TEST_P(PasswordManualFallbackTest,
   existing_form.password_value = u"password";
   existing_form.signon_realm = "http://test.com";
   existing_form.url = GURL(existing_form.signon_realm);
-  password_store->AddLogin(existing_form);
+  password_store->AddLogin(password_manager::FromPasswordForm(existing_form));
   add_waiter.WaitOrReturn();
 
   autofill_context_menu_manager()->AppendItems();
@@ -677,7 +688,7 @@ class PasswordsFallbackWithPasswordDatabaseEntriesTest
     }
 
     password_manager::PasswordStoreWaiter add_waiter(password_store);
-    password_store->AddLogin(password_form);
+    password_store->AddLogin(password_manager::FromPasswordForm(password_form));
     add_waiter.WaitOrReturn();
   }
 
@@ -772,9 +783,14 @@ class PasswordsFallbackWithGuestProfileTest : public PasswordsFallbackTestBase {
   }
 #else
   void SetUpOnMainThread() override {
+    host_resolver()->AddRule("*", "127.0.0.1");
     guest_browser_ = CreateGuestBrowser();
-    ASSERT_TRUE(
-        ui_test_utils::NavigateToURL(guest_browser_, GURL("http://test.com")));
+    if (!embedded_test_server()->Started()) {
+      ASSERT_TRUE(embedded_test_server()->Start());
+    }
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(
+        guest_browser_,
+        embedded_test_server()->GetURL("a.com", "/empty.html")));
     PasswordsFallbackTestBase::SetUpOnMainThread();
   }
 
@@ -821,6 +837,14 @@ class SelectPasswordFallbackMetricsTest
           SelectPasswordFallbackMetricsTestParams> {
  public:
   void SetUpOnMainThread() override {
+    // Disable BackForwardCache because the manual fallback metrics are emitted
+    // in the destructor of `PasswordManualFallbackMetricsRecorder` (owned by
+    // `PasswordAutofillManager` which is tied to the RFH lifecycle). If
+    // BackForwardCache is enabled, navigating away from the page will cache it
+    // instead of destroying the RFH, delaying metrics emission until after the
+    // test has finished.
+    content::DisableBackForwardCacheForTesting(
+        web_contents(), content::BackForwardCache::TEST_REQUIRES_NO_CACHING);
     BaseAutofillContextMenuManagerTest::SetUpOnMainThread();
     // Add a saved password so the manual fallback option shows.
     password_manager::PasswordStoreInterface* password_store =
@@ -833,7 +857,7 @@ class SelectPasswordFallbackMetricsTest
     form.password_value = u"password";
     form.signon_realm = "http://example.com";
     form.url = GURL(form.signon_realm);
-    password_store->AddLogin(form);
+    password_store->AddLogin(password_manager::FromPasswordForm(form));
     add_waiter.WaitOrReturn();
   }
 
@@ -869,9 +893,13 @@ IN_PROC_BROWSER_TEST_P(SelectPasswordFallbackMetricsTest,
   base::HistogramTester histogram_tester;
   // Trigger navigation so that metrics are emitted. On navigation, the
   // `PasswordAutofillManager` destroys the passwords metrics recorder. The
-  // destructors of the metrics recorder emit metrics.
-  ASSERT_TRUE(
-      ui_test_utils::NavigateToURL(browser(), GURL("http://navigation.com")));
+  // destructors of the metrics recorder emit metrics. We wait for the old
+  // render frame host to be deleted to ensure that the metrics have been
+  // emitted.
+  content::RenderFrameHostWrapper rfh_wrapper(main_rfh());
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
+      browser(), embedded_test_server()->GetURL("b.com", "/empty.html")));
+  ASSERT_TRUE(rfh_wrapper.WaitUntilRenderFrameDeleted());
 
   histogram_tester.ExpectUniqueSample(GetExplicitlyTriggeredMetricName(),
                                       params.option_accepted, 1);
@@ -945,9 +973,8 @@ IN_PROC_BROWSER_TEST_F(AtMemoryContextMenuManagerTest, AddAtMemoryFallback) {
 // AtMemory fallback is dropped.
 IN_PROC_BROWSER_TEST_F(AtMemoryContextMenuManagerTest,
                        AtMemoryFallbackDroppedWhenProfileNotEligible) {
-  autofill_client()->set_accessibility_annotator_enablement_state(
-      accessibility_annotator::RemoteAnnotatorEnablementState::
-          kDisabledNotEligible);
+  autofill_client()->set_personal_context_enablement_state(
+      personal_context::PersonalContextEnablementState::kDisabledNotEligible);
 
   autofill_context_menu_manager()->AppendItems();
   ASSERT_FALSE(ContainsAtMemoryFallback(*menu_model()));

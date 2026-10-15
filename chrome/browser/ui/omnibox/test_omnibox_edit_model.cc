@@ -6,14 +6,23 @@
 
 #include <algorithm>
 #include <memory>
+#include <string>
 
+#include "base/time/time.h"
+#include "chrome/browser/ui/omnibox/omnibox_controller.h"
+#include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
+#include "components/omnibox/browser/autocomplete_enums.h"
+#include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/test_omnibox_client.h"
+#include "components/prefs/pref_service.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/base/window_open_disposition.h"
+#include "url/gurl.h"
 
 TestOmniboxEditModel::TestOmniboxEditModel(
     OmniboxController* omnibox_controller,
     PrefService* pref_service)
-    : OmniboxEditModel(omnibox_controller),
-      pref_service_(pref_service) {}
+    : OmniboxEditModel(omnibox_controller), pref_service_(pref_service) {}
 
 TestOmniboxEditModel::~TestOmniboxEditModel() = default;
 
@@ -54,18 +63,28 @@ void TestOmniboxEditModel::SetCurrentMatchForTest(
   override_current_match_ = std::make_unique<AutocompleteMatch>(match);
 }
 
+void TestOmniboxEditModel::
+    NavigateToAiModeWithContextualizerOnContextualizationCompleteForTesting(
+        const std::u16string& query_text,
+        WindowOpenDisposition disposition,
+        base::WeakPtr<contextual_search::ContextualSearchSessionHandle>
+            session_handle) {
+  NavigateToAiModeWithContextualizerOnContextualizationComplete(
+      query_text, disposition, session_handle);
+}
+
 void TestOmniboxEditModel::OnPopupDataChanged(
     const std::u16string& temporary_text,
     bool is_temporary_text,
     const std::u16string& inline_autocompletion,
     const std::u16string& keyword,
     const std::u16string& keyword_placeholder,
-    bool is_keyword_hint,
+    KeywordState keyword_state,
     const std::u16string& additional_text,
     const AutocompleteMatch& match) {
   OmniboxEditModel::OnPopupDataChanged(
       temporary_text, is_temporary_text, inline_autocompletion, keyword,
-      keyword_placeholder, is_keyword_hint, additional_text, match);
+      keyword_placeholder, keyword_state, additional_text, match);
   text_ = is_temporary_text ? temporary_text : inline_autocompletion;
   is_temporary_text_ = is_temporary_text;
 }
