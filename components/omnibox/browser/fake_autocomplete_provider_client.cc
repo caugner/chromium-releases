@@ -24,12 +24,10 @@ FakeAutocompleteProviderClient::FakeAutocompleteProviderClient() {
           /*identity_manager=*/nullptr,
           /*url_loader_factory=*/nullptr);
 
-#if BUILDFLAG(BUILD_WITH_TFLITE_LIB)
   on_device_tail_model_service_ =
       std::make_unique<FakeOnDeviceTailModelService>();
   scoring_model_service_ =
       std::make_unique<FakeAutocompleteScoringModelService>();
-#endif  // BUILDFLAG(BUILD_WITH_TFLITE_LIB)
 
   fake_tab_group_sync_service_ =
       std::make_unique<tab_groups::FakeTabGroupSyncService>();
@@ -40,8 +38,7 @@ FakeAutocompleteProviderClient::FakeAutocompleteProviderClient() {
       search_engines_test_enviroment_.pref_service(),
       search_engines_test_enviroment_.template_url_service(),
       /*url_loader_factory=*/nullptr,
-      /*identity_manager=*/nullptr,
-      AimEligibilityService::Configuration{.is_off_the_record = false});
+      /*identity_manager=*/nullptr, AimEligibilityService::Configuration());
 }
 
 FakeAutocompleteProviderClient::~FakeAutocompleteProviderClient() {
@@ -129,7 +126,6 @@ std::string FakeAutocompleteProviderClient::ProfileUserName() const {
   return "goodEmail@gmail.com";
 }
 
-#if BUILDFLAG(BUILD_WITH_TFLITE_LIB)
 OnDeviceTailModelService*
 FakeAutocompleteProviderClient::GetOnDeviceTailModelService() const {
   return on_device_tail_model_service_.get();
@@ -144,5 +140,3 @@ AimEligibilityService*
 FakeAutocompleteProviderClient::GetAimEligibilityService() const {
   return mock_aim_eligibility_service_.get();
 }
-
-#endif  // BUILDFLAG(BUILD_WITH_TFLITE_LIB)

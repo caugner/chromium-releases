@@ -15,6 +15,7 @@
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/core/browser/foundations/autofill_client.h"
 #include "components/autofill/core/browser/foundations/autofill_manager.h"
+#include "components/autofill/core/browser/metrics/autofill_metrics.h"
 #include "components/autofill/core/browser/metrics/autofill_metrics_utils.h"
 #include "components/autofill/core/browser/suggestions/suggestion_util.h"
 #include "components/autofill/core/common/dense_set.h"
@@ -99,9 +100,8 @@ void ActorKeyMetricsRecorder::OnFillOrPreviewForm(
       filled_field_ids.begin(), filled_field_ids.end());
 }
 
-void ActorKeyMetricsRecorder::RecordKeyMetrics(
-    AutofillManager& manager,
-    const FormStructure& form) {
+void ActorKeyMetricsRecorder::RecordKeyMetrics(AutofillManager& manager,
+                                               const FormStructure& form) {
   DenseSet<FormType> form_types =
       form.GetFormTypes(GetAcUnrecognizedBehavior(manager.client()));
 
@@ -141,6 +141,8 @@ void ActorKeyMetricsRecorder::RecordKeyMetrics(
                                 .GetCreditCards()
                                 .empty());
   }
+
+  RecordEditedAutofilledFieldAtSubmission(form);
 }
 
 void ActorKeyMetricsRecorder::RecordFillingAssistance(
@@ -193,23 +195,13 @@ void ActorKeyMetricsRecorder::RecordPerfectFillingMetric(
     return;
   }
 
-  // Checks if a specific field was filled by an actor.
-  auto is_filled_by_actor = [&](FieldGlobalId field_id) {
-    return std::ranges::any_of(states_, [&form, field_id](
-                                            const ProductState& product_state) {
-      const base::flat_set<FieldGlobalId>* fields = base::FindOrNull(
-          product_state.actor_filled_fields, form.global_id());
-      return fields && fields->contains(field_id);
-    });
-  };
-
   bool perfect_filling = std::ranges::none_of(
       form.fields(),
-      [&is_filled_by_actor](const std::unique_ptr<AutofillField>& field) {
+      [this, &form](const std::unique_ptr<AutofillField>& field) {
         // This is a close approximation, since theoretically a user could edit
         // then autofill a field that was filled by the actor, but that should
         // be a very rare case.
-        if (is_filled_by_actor(field->global_id())) {
+        if (WasFieldFilledByActor(form, field->global_id())) {
           return field->all_modifiers().contains(FieldModifier::kUser) &&
                  field->last_modifier() != FieldModifier::kAutofill;
         }
@@ -224,6 +216,27 @@ void ActorKeyMetricsRecorder::RecordPerfectFillingMetric(
       base::StrCat(
           {"Autofill.Actor.PerfectFilling.", FillingProductToString(product)}),
       perfect_filling);
+}
+
+void ActorKeyMetricsRecorder::RecordEditedAutofilledFieldAtSubmission(
+    const FormStructure& form) {
+  for (const std::unique_ptr<AutofillField>& field : form) {
+    if (!WasFieldFilledByActor(form, field->global_id())) {
+      continue;
+    }
+    // TODO(crbug.com/393114125): After launching`kAutofillFixIsAutofilled` this
+    // should instead check that the last modifier is not `kAutofill`.
+    AutofillMetrics::AutofilledFieldUserEditingStatusMetric editing_metric =
+        field->last_modifier() == FieldModifier::kAutofill
+            ? AutofillMetrics::AutofilledFieldUserEditingStatusMetric::
+                  AUTOFILLED_FIELD_WAS_NOT_EDITED
+            : AutofillMetrics::AutofilledFieldUserEditingStatusMetric::
+                  AUTOFILLED_FIELD_WAS_EDITED;
+
+    base::UmaHistogramEnumeration(
+        "Autofill.Actor.EditedAutofilledFieldAtSubmission.Aggregate",
+        editing_metric);
+  }
 }
 
 bool ActorKeyMetricsRecorder::HasFilledFieldOfProduct(

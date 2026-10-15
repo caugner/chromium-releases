@@ -190,6 +190,13 @@ export declare interface GlicWebClient {
    */
   stopMicrophone?(): Promise<void>;
 
+  /**
+   * Returns the list of capabilities of the glic web client.
+   * This will be called by Chrome once, prior to initialize(),
+   * and the result will be cached for the lifetime of the web client.
+   */
+  getClientCapabilities?(): Set<ClientCapabilities>;
+
   // !!! ATTENTION !!!
   // Avoid adding new methods to this interface! Instead, to push information to
   // the web client it's much more preferable to add new functions to
@@ -410,8 +417,11 @@ export declare interface GlicBrowserHost {
    * Interrupting is different than pausing. Interrupting changes the state
    * indicating the task is waiting for user input but does not pause the
    * task.
+   *
+   * @param interruptReason The reason for why the interrupt was initiated.
    */
-  interruptActorTask?(taskId: number): void;
+  interruptActorTask?
+      (taskId: number, interruptReason?: ActorTaskInterruptReason): void;
 
   /**
    * Indicates a task is no longer interrupted with the given ID in the browser
@@ -447,6 +457,18 @@ export declare interface GlicBrowserHost {
    * not found with the given ID.
    */
   getTabById?(tabId: string): ObservableValue<TabData>;
+
+  /**
+   * Returns an observable of the favicon for the given tab.
+   *
+   * New in March 2026. This will replace favicon access from TabData.
+   * This is the only favicon access that works on Android.
+   *
+   * The returned observable is completed when the tab is destroyed, or one is
+   * not found with the given ID. If the tab has no favicon, the observable
+   * will emit undefined.
+   */
+  getTabFaviconById?(tabId: string): ObservableValue<Blob|undefined>;
 
   /**
    * Makes the given tab the active tab in its window and activates its window.
@@ -649,6 +671,13 @@ export declare interface GlicBrowserHost {
    * returned observable will be updated when the global setting changes.
    */
   getDefaultTabContextPermissionState?(): ObservableValue<boolean>;
+
+  /**
+   * Returns the zoom level of the Glic webview.
+   * The client should subscribe to this to be notified of zoom level changes.
+   * The value is a float representing the zoom factor (e.g., 1.5 for 150%).
+   */
+  getZoomLevel?(): ObservableValue<number>;
 
   /**
    * Set the state of the microphone permission in settings. Returns a promise
@@ -871,6 +900,10 @@ export declare interface GlicBrowserHost {
    */
   showManageSkillsUi?(): void;
 
+  /**
+   * Requests that the browser open skill browsing UI.
+   */
+  showBrowseSkillsUi?(): void;
 
   /**
    * Logs metrics for UI interactions and state transitions specific to the
@@ -902,7 +935,8 @@ export declare interface GlicBrowserHost {
   getSkillToInvoke?(): ObservableValue<Skill>;
 
   /**
-   * Returns the list of capabilities of the glic host.
+   * Returns the list of capabilities of the glic host. The returned set of
+   * capabilities will not change during the lifetime of the web client.
    */
   getHostCapabilities?(): Set<HostCapability>;
 
@@ -1147,8 +1181,19 @@ export declare interface CreateActorTabOptions {
  * intentionally no constraints on when or how often they are called.
  */
 export declare interface GlicBrowserHostMetrics {
+  /** Called when the opt-in CTA is shown. */
+  onOptinImpression?(): void;
+
   /** Called when the user has submitted input via the web client. */
   onUserInputSubmitted?(mode: WebClientMode): void;
+
+  /**
+   * Called when the web client sends a browser actuation result over the
+   * network. This is used to track metrics for model responses. For a single
+   * actuation, this may be called multiple times if retries occur.
+   * @param isRetry Whether this request is a retry of a previous attempt.
+   */
+  onPerformActionResultSubmitted?(isRetry?: boolean): void;
 
   /**
    * Called after user input is submitted, but before a response starts,
@@ -1427,7 +1472,7 @@ export declare interface PanelOpeningData {
    *
    * - The web client will load the requested `conversationInfo.conversationId`.
    * - If `conversationInfo.conversationId` is empty, it indicates a new
-   * conversation is being started.
+   *   conversation is being started.
    * - The object may contain `clientData` if it was provided in the
    *   `registerConversation` or `switchConversation` calls.
    */
@@ -1683,13 +1728,17 @@ export declare interface TabData {
    * Returns the favicon for the tab, encoded as a PNG image. An image is
    * returned only if the page is loaded enough for it to be available and the
    * page specifies a favicon.
+   *
+   * @deprecated Use `getTabFaviconById` instead. This does not work on Android.
+   * Favicons may be omitted if the client capability
+   * `IGNORES_TAB_DATA_FAVICONS` is present on this instance.
    */
   favicon?(): Promise<Blob|undefined>;
   /**
    * The favicon URL. Only available if the page is loaded enough and it
    * specifies a favicon.
    *
-   * @todo Investigate render performance of data urls. crbug.com/429237829
+   * @deprecated Should no longer be used, will be removed in the future.
    */
   faviconUrl?: string;
   /**
@@ -1808,6 +1857,10 @@ export declare interface TaskOptions {
    * A user-facing string that describes the task.
    */
   title?: string;
+  /**
+   * The expected duration of the the task.
+   */
+  duration?: TaskDuration;
 }
 
 /** Maps the ErrorWithReason.reasonType to the type of reason. */
@@ -2159,6 +2212,8 @@ export declare interface SkillPreview {
   description?: string;
   /** The image URL to show when rendering this skill. */
   image_url?: string;
+  /** The name of the curator for this skill. */
+  curated_by?: string;
   /** Whether the skill is contextually relevant to the current tab. */
   isContextual?: boolean;
 }
@@ -2477,6 +2532,9 @@ export enum CreateTaskErrorReason {
   EXISTING_ACTIVE_TASK = 2,
   // The user's browser policy or account settings prevent creating actor tasks.
   BLOCKED_BY_POLICY = 3,
+  // CreateTask was called on a Glic instance which does not have a registered
+  // conversation.
+  CONVERSATION_NOT_REGISTERED = 4,
 }
 
 ///////////////////////////////////////////////
@@ -2518,6 +2576,27 @@ export enum ActorTaskStopReason {
   USER_STARTED_NEW_CHAT = 3,
   // Actor task was stopped by choosing a previous conversation.
   USER_LOADED_PREVIOUS_CHAT = 4,
+}
+
+///////////////////////////////////////////////
+// WARNING - GENERATED FROM MOJOM, DO NOT EDIT.
+// The reason/source of why an actor task was interrupted.
+export enum ActorTaskInterruptReason {
+  // Actor task is interrupted for an unknown reason.
+  UNKNOWN_REASON = 0,
+  // Actor task is complete.
+  TASK_COMPLETE = 1,
+  // Actor task was waiting for user input.
+  WAITING_USER_INPUT = 2,
+  // Actor task was waiting for user to provide clarifications on the current
+  // task.
+  WAITING_USER_CLARIFICATION = 3,
+  // Actor task was waiting for user to confirm an action.
+  WAITING_USER_CONFIRMATION = 4,
+  // Actor task was waiting for user to take over.
+  WAITING_USER_TAKE_OVER = 5,
+  // Actor task was waiting for irrelevant user input.
+  WAITING_IRRELEVANT_USER_INPUT = 6,
 }
 
 ///////////////////////////////////////////////
@@ -2645,9 +2724,9 @@ export enum SkillsWebClientEvent {
   USED_DERIVED_FIRST_PARTY_SKILL = 3,
   // User typed '/' or triggered the skills menu.
   OPENED_MENU = 4,
-  // User clicked the button to open the full skills management UI.
+  // User clicked the 'Manage skills' button from the slash menu.
   CLICKED_MANAGE_FROM_MENU = 5,
-  // User clicked the generic '+' button to create a new empty skill.
+  // User clicked the 'Add skill' button from the slash menu.
   CLICKED_ADD_FROM_MENU = 6,
   // User clicked the edit button on an existing skill preview.
   CLICKED_EDIT_FROM_MENU = 7,
@@ -2657,6 +2736,21 @@ export enum SkillsWebClientEvent {
   CLICKED_SAVE_AS_SKILL_HOVER_CHIP = 9,
   // User clicked the 'Edit Skill' chip that appears on hover.
   CLICKED_EDIT_SKILL_HOVER_CHIP = 10,
+  // User clicked the 'Browse skills' button from the plus menu.
+  CLICKED_BROWSE_SKILL_FROM_PLUS_MENU = 11,
+  // User clicked a skill from the plus menu.
+  CLICKED_SKILL_FROM_PLUS_MENU = 12,
+  // User clicked the 'Manage skills' button from the plus menu.
+  CLICKED_MANAGE_SKILL_FROM_PLUS_MENU = 13,
+  // User clicked the 'More' button from the slash menu.
+  CLICKED_MORE_FROM_MENU = 14,
+  // User clicked the 'Manage skills' button from the slash skills submenu.
+  // Deprecated. Use kClickedManageFromMenu instead.
+  CLICKED_MANAGE_SKILL_FROM_MENU = 15,
+  // User clicked a skill from the slash menu.
+  CLICKED_SKILL_FROM_MENU = 16,
+  // User clicked the 'Browse skills' button from the slash menu.
+  CLICKED_BROWSE_SKILLS_FROM_MENU = 17,
   // Skill Builder Step 1: User clicked the promo chip to start the flow.
   SKILL_BUILDER_CLICKED_PROMO_CHIP = 20,
   // Skill Builder Step 2: A draft skill was successfully generated by the AI.
@@ -2806,6 +2900,12 @@ export enum InvocationSource {
   ANCHORED_CONTEXTUAL_CUE = 22,
   // From the context menu.
   WEB_CONTENTS_CONTEXT_MENU = 23,
+  // User clicked on text selection nudge.
+  TEXT_SELECTION_NUDGE = 24,
+  // User clicked on text selection widget.
+  TEXT_SELECTION_WIDGET = 25,
+  // Automatic summarization upon opening.
+  ZERO_STATE_AUTO_SUMMARIZE = 26,
 }
 
 ///////////////////////////////////////////////
@@ -2919,6 +3019,35 @@ export enum HostCapability {
   PDF_ZERO_STATE = 7,
   // Indicates that the host supports the invoke mechanism.
   INVOKE = 8,
+  // Indicates that the host does not support Live Mode.
+  NO_LIVE_MODE = 9,
+  // Indicates that the host supports auto browse attempting login using Sign in
+  // with Google.
+  AUTO_LOGIN_SIGN_IN_WITH_GOOGLE = 10,
+}
+
+///////////////////////////////////////////////
+// WARNING - GENERATED FROM MOJOM, DO NOT EDIT.
+// Lists capabilities that the glic web client may support.
+export enum ClientCapabilities {
+  // The glic web client does not use favicons in TabData, so they can
+  // be omitted from TabData.
+  IGNORES_TAB_DATA_FAVICONS = 0,
+}
+
+///////////////////////////////////////////////
+// WARNING - GENERATED FROM MOJOM, DO NOT EDIT.
+//
+// Place the mojom structs that require Javascript bindings here.
+//
+// Describes the duration of the actions in the task.  This is used by the actor
+// to customize the task UI.
+export enum TaskDuration {
+  // The task has actions that permit user observation and intervention in the
+  // browser.
+  DEFAULT = 1,
+  // The task has fast actions that do not permit observation and intervention.
+  TRANSIENT = 2,
 }
 
 ///////////////////////////////////////////////

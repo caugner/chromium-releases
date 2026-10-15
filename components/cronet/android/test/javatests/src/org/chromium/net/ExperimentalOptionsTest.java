@@ -39,7 +39,6 @@ import org.chromium.net.CronetTestRule.BoolFlag;
 import org.chromium.net.CronetTestRule.DisableAutomaticNetLog;
 import org.chromium.net.CronetTestRule.Flags;
 import org.chromium.net.CronetTestRule.IgnoreFor;
-import org.chromium.net.CronetTestRule.RequiresMinAndroidApi;
 import org.chromium.net.CronetTestRule.StringFlag;
 import org.chromium.net.impl.CronetUrlRequestContext;
 
@@ -306,7 +305,6 @@ public class ExperimentalOptionsTest {
     @Test
     @SmallTest
     @Flags(boolFlags = {@BoolFlag(name = OVERRIDE_CLIENT_CONNECTION_OPTIONS, value = false)})
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testFetchingClientConnectionOptionsWithFlagDisabledHasNoEffect() {
         mTestRule
                 .getTestFramework()
@@ -327,7 +325,6 @@ public class ExperimentalOptionsTest {
     @Flags(
             stringFlags = {@StringFlag(name = CLIENT_CONNECTION_OPTIONS_VALUE_ON, value = "WXYZ")},
             boolFlags = {@BoolFlag(name = OVERRIDE_CLIENT_CONNECTION_OPTIONS, value = false)})
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testFetchingClientConnectionOptionsWithFlagDisabledButValuesEnabledHasNoEffect() {
         mTestRule
                 .getTestFramework()
@@ -348,7 +345,6 @@ public class ExperimentalOptionsTest {
     @Flags(
             stringFlags = {@StringFlag(name = CONNECTION_OPTIONS_VALUE_ON, value = "WXYZ")},
             boolFlags = {@BoolFlag(name = OVERRIDE_CONNECTION_OPTIONS, value = true)})
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testFetchingConnectionOptionsWithForceValueOnShouldHaveEffect() {
         mTestRule
                 .getTestFramework()
@@ -369,7 +365,6 @@ public class ExperimentalOptionsTest {
                 @StringFlag(name = CLIENT_CONNECTION_OPTIONS_VALUE_ON, value = "WXYZ,1234")
             },
             boolFlags = {@BoolFlag(name = OVERRIDE_CLIENT_CONNECTION_OPTIONS, value = true)})
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void
             testFetchingClientConnectionOptionsWithNoDeclaredFlagsForceValueOnShouldHaveEffect() {
         mTestRule
@@ -388,7 +383,6 @@ public class ExperimentalOptionsTest {
     @Flags(
             stringFlags = {@StringFlag(name = CONNECTION_OPTIONS_VALUE_ON, value = "WXYZ,1234")},
             boolFlags = {@BoolFlag(name = OVERRIDE_CONNECTION_OPTIONS, value = true)})
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testFetchingConnectionOptionsWithNoDeclaredFlagsForceValueOnShouldHaveEffect() {
         mTestRule
                 .getTestFramework()
@@ -406,7 +400,6 @@ public class ExperimentalOptionsTest {
     @Flags(
             stringFlags = {@StringFlag(name = CONNECTION_OPTIONS_VALUE_OFF, value = "ABCD")},
             boolFlags = {@BoolFlag(name = OVERRIDE_CONNECTION_OPTIONS, value = true)})
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testFetchingConnectionOptionsWithForceValueOffShouldHaveEffect() {
         mTestRule
                 .getTestFramework()
@@ -425,7 +418,6 @@ public class ExperimentalOptionsTest {
     @Flags(
             stringFlags = {@StringFlag(name = CONNECTION_OPTIONS_VALUE_OFF, value = "WXYZ,1234")},
             boolFlags = {@BoolFlag(name = OVERRIDE_CONNECTION_OPTIONS, value = true)})
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testFetchingConnectionOptionsWithForceValueOffDoesNotChangeOrder() {
         mTestRule
                 .getTestFramework()
@@ -446,7 +438,6 @@ public class ExperimentalOptionsTest {
     @Flags(
             stringFlags = {@StringFlag(name = CLIENT_CONNECTION_OPTIONS_VALUE_ON, value = "WXYZ")},
             boolFlags = {@BoolFlag(name = OVERRIDE_CLIENT_CONNECTION_OPTIONS, value = true)})
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testFetchingClientConnectionOptionsWithFlagEnabledAffectsFinalTags() {
         mTestRule
                 .getTestFramework()
@@ -467,7 +458,6 @@ public class ExperimentalOptionsTest {
     @Flags(
             stringFlags = {@StringFlag(name = CONNECTION_OPTIONS_VALUE_ON, value = "WXYZ")},
             boolFlags = {@BoolFlag(name = OVERRIDE_CONNECTION_OPTIONS, value = false)})
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testFetchingConnectionOptionsWithFlagDisabledHasNoEffect() {
         mTestRule
                 .getTestFramework()
@@ -486,7 +476,6 @@ public class ExperimentalOptionsTest {
     @Flags(
             stringFlags = {@StringFlag(name = CONNECTION_OPTIONS_VALUE_ON, value = "WXYZ")},
             boolFlags = {@BoolFlag(name = OVERRIDE_CONNECTION_OPTIONS, value = true)})
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testFetchingConnectionOptionsWithFlagEnabledHasEffect() {
         mTestRule
                 .getTestFramework()
@@ -505,7 +494,6 @@ public class ExperimentalOptionsTest {
     @Flags(
             stringFlags = {@StringFlag(name = CONNECTION_OPTIONS_VALUE_OFF, value = "ABCD")},
             boolFlags = {@BoolFlag(name = OVERRIDE_CONNECTION_OPTIONS, value = true)})
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testFetchingConnectionOptionsWithForceOffHasEffect() {
         mTestRule
                 .getTestFramework()
@@ -527,7 +515,6 @@ public class ExperimentalOptionsTest {
                 @StringFlag(name = CONNECTION_OPTIONS_VALUE_ON, value = "1234,5678")
             },
             boolFlags = {@BoolFlag(name = OVERRIDE_CONNECTION_OPTIONS, value = true)})
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testFetchingConnectionOptionsWithForceOnAndOffHasEffect() {
         mTestRule
                 .getTestFramework()
@@ -549,7 +536,6 @@ public class ExperimentalOptionsTest {
                 @StringFlag(name = CONNECTION_OPTIONS_VALUE_ON, value = "ABCD")
             },
             boolFlags = {@BoolFlag(name = OVERRIDE_CONNECTION_OPTIONS, value = true)})
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testFetchingConnectionOptionsForceOffOverridesForceOn() {
         mTestRule
                 .getTestFramework()

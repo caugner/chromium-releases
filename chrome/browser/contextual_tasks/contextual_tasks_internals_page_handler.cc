@@ -20,6 +20,7 @@
 #include "chrome/browser/contextual_tasks/entry_point_eligibility_manager.h"
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search/search.h"
 #include "components/contextual_tasks/public/contextual_tasks_service.h"
 #include "components/contextual_tasks/public/features.h"
 #include "components/omnibox/browser/aim_eligibility_service.h"
@@ -62,23 +63,24 @@ void ContextualTasksInternalsPageHandler::GetRelevantContext(
     return;
   }
 
+  contextual_tasks::TabSelectionOptions options;
+  options.tab_selection_mode = request->tab_selection_mode;
+  options.min_model_score = request->min_model_score;
   context_service_->GetRelevantTabsForQuery(
-      {
-          .tab_selection_mode = request->tab_selection_mode,
-          .min_model_score = request->min_model_score,
-      },
-      request->query,
+      options, request->query,
       /*explicit_urls=*/{},
       base::BindOnce(
           [](GetRelevantContextCallback callback,
-             std::vector<content::WebContents*> relevant_tabs) {
+             std::vector<base::WeakPtr<content::WebContents>> relevant_tabs) {
             auto result = contextual_tasks_internals::mojom::
                 GetRelevantContextResponse::New();
-            for (content::WebContents* web_contents : relevant_tabs) {
-              auto tab = contextual_tasks_internals::mojom::Tab::New();
-              tab->title = base::UTF16ToUTF8(web_contents->GetTitle());
-              tab->url = web_contents->GetLastCommittedURL();
-              result->relevant_tabs.push_back(std::move(tab));
+            for (const auto& web_contents : relevant_tabs) {
+              if (web_contents) {
+                auto tab = contextual_tasks_internals::mojom::Tab::New();
+                tab->title = base::UTF16ToUTF8(web_contents->GetTitle());
+                tab->url = web_contents->GetLastCommittedURL();
+                result->relevant_tabs.push_back(std::move(tab));
+              }
             }
             std::move(callback).Run(std::move(result));
           },
@@ -154,6 +156,9 @@ void ContextualTasksInternalsPageHandler::GetEligibilityState(
           contextual_tasks_service->GetFeatureEligibility()
               .context_sharing_enabled;
     }
+
+    state->is_default_search_engine_google =
+        search::DefaultSearchProviderIsGoogle(profile_);
 
     state->is_eligible =
         contextual_tasks::EntryPointEligibilityManager::IsEligible(profile_);

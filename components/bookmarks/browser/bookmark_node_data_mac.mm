@@ -13,24 +13,12 @@
 
 namespace bookmarks {
 
-#if defined(TOOLKIT_VIEWS)
-
 // static
-const ui::ClipboardFormatType& BookmarkNodeData::GetBookmarkFormatType() {
-  static const base::NoDestructor<ui::ClipboardFormatType> format(
-      ui::ClipboardFormatType::CustomPlatformType(
-          base::SysNSStringToUTF8(kUTTypeChromiumBookmarkDictionaryList)));
-
-  return *format;
-}
-
-#endif  // TOOLKIT_VIEWS
-
-// static
-bool BookmarkNodeData::ClipboardContainsBookmarks() {
+void BookmarkNodeData::ClipboardContainsBookmarks(
+    base::OnceCallback<void(bool)> callback) {
   NSPasteboard* pb =
       ui::clipboard_util::PasteboardFromBuffer(ui::ClipboardBuffer::kCopyPaste);
-  return PasteboardContainsBookmarks(pb);
+  std::move(callback).Run(PasteboardContainsBookmarks(pb));
 }
 
 void BookmarkNodeData::WriteToClipboard(bool is_off_the_record) {

@@ -218,7 +218,9 @@ class BASE_EXPORT Histogram : public HistogramBase {
     kRangeSwapped,
     kRangeTooBig,
     kTooManyBuckets,
-    kBucketsInvalid,
+    kBucketsInvalidMinMaxSame,
+    kBucketsInvalidMinMaxCount,
+    kBucketsInvalidMax,
   };
 
   // Validates histogram construction arguments, return kOK if they are valid.
@@ -287,7 +289,7 @@ class BASE_EXPORT Histogram : public HistogramBase {
   friend class StatisticsRecorder;  // To allow it to delete duplicates.
   friend class StatisticsRecorderTest;
 
-  friend BASE_EXPORT HistogramBase* DeserializeHistogramInfo(
+  friend HistogramBase* HistogramBase::DeserializeInfo(
       base::PickleIterator* iter,
       NameMapper mapper);
   static HistogramBase* DeserializeInfoImpl(base::PickleIterator* iter,
@@ -420,7 +422,7 @@ class BASE_EXPORT LinearHistogram : public Histogram {
                   HistogramSamples::Metadata* logged_meta);
 
  private:
-  friend BASE_EXPORT HistogramBase* DeserializeHistogramInfo(
+  friend HistogramBase* HistogramBase::DeserializeInfo(
       base::PickleIterator* iter,
       NameMapper mapper);
   static HistogramBase* DeserializeInfoImpl(base::PickleIterator* iter,
@@ -548,7 +550,7 @@ class BASE_EXPORT BooleanHistogram : public LinearHistogram {
                    HistogramSamples::Metadata* meta,
                    HistogramSamples::Metadata* logged_meta);
 
-  friend BASE_EXPORT HistogramBase* DeserializeHistogramInfo(
+  friend HistogramBase* HistogramBase::DeserializeInfo(
       base::PickleIterator* iter,
       NameMapper mapper);
   static HistogramBase* DeserializeInfoImpl(base::PickleIterator* iter,
@@ -617,7 +619,7 @@ class BASE_EXPORT CustomHistogram : public Histogram {
   void SerializeInfoImpl(base::Pickle* pickle) const override;
 
  private:
-  friend BASE_EXPORT HistogramBase* DeserializeHistogramInfo(
+  friend HistogramBase* HistogramBase::DeserializeInfo(
       base::PickleIterator* iter,
       NameMapper mapper);
   static HistogramBase* DeserializeInfoImpl(base::PickleIterator* iter,

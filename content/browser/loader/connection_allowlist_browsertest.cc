@@ -27,10 +27,13 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
+#include "net/test/embedded_test_server/install_default_websocket_handlers.h"
+#include "services/network/public/cpp/connection_allowlist_metrics.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/abseil-cpp/absl/container/flat_hash_map.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/loader/resource_load_info.mojom-shared.h"
 #include "url/gurl.h"
 
@@ -47,14 +50,28 @@ struct ResponseEntry {
   absl::flat_hash_map<std::string, std::string> headers;
 };
 
+class ConnectionAllowlistContentBrowserClient
+    : public ContentBrowserTestContentBrowserClient {
+ public:
+  MOCK_METHOD(void,
+              LogWebFeatureForCurrentPage,
+              (content::RenderFrameHost*, blink::mojom::WebFeature),
+              (override));
+};
+
 // TODO(crbug.com/486121443): Once the test flakiness due to the issue in
 // WebPrescientNetworkingImpl is resolved, add a test covering preconnect from
 // the link header response.
 class ConnectionAllowlistTest : public ContentBrowserTest {
  public:
-  ConnectionAllowlistTest()
-      : scoped_feature_list_(network::features::kConnectionAllowlists) {}
-  ~ConnectionAllowlistTest() override = default;
+  ConnectionAllowlistTest() {
+    scoped_feature_list_.InitWithFeatures(
+        /*enabled_features=*/{network::features::kConnectionAllowlists,
+                              blink::features::
+                                  kOverrideConnectionAllowlistOriginTrial},
+        /*disabled_features=*/{});
+  }
+  ~ConnectionAllowlistTest() override { content_browser_client_.reset(); }
 
   void SetUpOnMainThread() override {
     ContentBrowserTest::SetUpOnMainThread();
@@ -63,8 +80,13 @@ class ConnectionAllowlistTest : public ContentBrowserTest {
     embedded_https_test_server().SetSSLConfig(
         net::EmbeddedTestServer::CERT_TEST_NAMES);
     SetupCrossSiteRedirector(&embedded_https_test_server());
+    net::test_server::InstallDefaultWebSocketHandlers(
+        &embedded_https_test_server());
     embedded_https_test_server().RegisterRequestHandler(base::BindRepeating(
         &ConnectionAllowlistTest::ServeResponses, base::Unretained(this)));
+
+    content_browser_client_ =
+        std::make_unique<ConnectionAllowlistContentBrowserClient>();
   }
 
   void RegisterResponse(const std::string& relative_url,
@@ -72,7 +94,7 @@ class ConnectionAllowlistTest : public ContentBrowserTest {
     response_map_[relative_url] = std::move(entry);
   }
 
- private:
+ protected:
   std::unique_ptr<net::test_server::HttpResponse> ServeResponses(
       const net::test_server::HttpRequest& request) {
     if (auto it = response_map_.find(request.relative_url);
@@ -80,7 +102,11 @@ class ConnectionAllowlistTest : public ContentBrowserTest {
       auto response = std::make_unique<net::test_server::BasicHttpResponse>();
       response->set_content(it->second.content);
       for (const auto& [key, value] : it->second.headers) {
-        response->AddCustomHeader(key, value);
+        if (key == "Content-Type") {
+          response->set_content_type(value);
+        } else {
+          response->AddCustomHeader(key, value);
+        }
       }
 
       return response;
@@ -91,6 +117,8 @@ class ConnectionAllowlistTest : public ContentBrowserTest {
 
   base::test::ScopedFeatureList scoped_feature_list_;
   absl::flat_hash_map<std::string, ResponseEntry> response_map_;
+  std::unique_ptr<ConnectionAllowlistContentBrowserClient>
+      content_browser_client_;
 };
 
 IN_PROC_BROWSER_TEST_F(ConnectionAllowlistTest, LinkPrefetch) {
@@ -552,6 +580,196 @@ IN_PROC_BROWSER_TEST_F(ConnectionAllowlistTest, LinkPreconnect) {
 
   connection_tracker.WaitForAcceptedConnections(1u);
   EXPECT_EQ(1u, connection_tracker.GetAcceptedSocketCount());
+}
+
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistTest, EnforceHistogramForDocument) {
+  base::HistogramTester histogram_tester;
+  RegisterResponse(
+      kSameOriginAllowlistedPage,
+      ResponseEntry("<html><body>Hello</body></html>",
+                    {{"Connection-Allowlist", "(response-origin)"}}));
+  ASSERT_TRUE(embedded_https_test_server().Start());
+
+  GURL main_url =
+      embedded_https_test_server().GetURL("a.test", kSameOriginAllowlistedPage);
+  EXPECT_TRUE(NavigateToURL(shell(), main_url));
+
+  histogram_tester.ExpectTotalCount(network::kConnectionAllowlistTypeHistogram,
+                                    1);
+  histogram_tester.ExpectBucketCount(
+      network::kConnectionAllowlistTypeHistogram,
+      network::ConnectionAllowlistType::kEnforced, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistTest,
+                       ReportOnlyHistogramForDocument) {
+  base::HistogramTester histogram_tester;
+  RegisterResponse(kSameOriginAllowlistedPage,
+                   ResponseEntry("<html><body>Hello</body></html>",
+                                 {{"Connection-Allowlist-Report-Only",
+                                   "(response-origin)"}}));
+  ASSERT_TRUE(embedded_https_test_server().Start());
+
+  GURL main_url =
+      embedded_https_test_server().GetURL("a.test", kSameOriginAllowlistedPage);
+  EXPECT_TRUE(NavigateToURL(shell(), main_url));
+
+  histogram_tester.ExpectTotalCount(network::kConnectionAllowlistTypeHistogram,
+                                    1);
+  histogram_tester.ExpectBucketCount(
+      network::kConnectionAllowlistTypeHistogram,
+      network::ConnectionAllowlistType::kReportOnly, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistTest, EnforceHistogramForWorker) {
+  base::HistogramTester histogram_tester;
+  RegisterResponse(
+      "/worker.js",
+      ResponseEntry("onmessage = async (e) => { postMessage('end'); }",
+                    {{"Connection-Allowlist", "(response-origin)"},
+                     {"Content-Type", "text/javascript"}}));
+  RegisterResponse(kSameOriginAllowlistedPage,
+                   ResponseEntry(R"(<html><body>Hello</body></html>)", {}));
+  ASSERT_TRUE(embedded_https_test_server().Start());
+
+  GURL main_url =
+      embedded_https_test_server().GetURL("a.test", kSameOriginAllowlistedPage);
+  EXPECT_TRUE(NavigateToURL(shell(), main_url));
+
+  // To ensure that fetching the worker (and its separate Connection-Allowlist)
+  // completes, we create a Promise that only resolves when the worker is
+  // running.
+  EXPECT_TRUE(ExecJs(shell()->web_contents()->GetPrimaryMainFrame(),
+                     R"(
+            (async () => {
+              await new Promise((resolve) => {
+                window.myworker = new Worker('../worker.js', { type: 'module'});
+                window.myworker.onmessage = async (e) => {
+                  resolve();
+                };
+                window.myworker.postMessage('start');
+              });
+            })();
+          )"));
+
+  histogram_tester.ExpectTotalCount(network::kConnectionAllowlistTypeHistogram,
+                                    1);
+  histogram_tester.ExpectBucketCount(
+      network::kConnectionAllowlistTypeHistogram,
+      network::ConnectionAllowlistType::kEnforced, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistTest, ReportOnlyHistogramForWorker) {
+  base::HistogramTester histogram_tester;
+  RegisterResponse(
+      "/worker.js",
+      ResponseEntry("onmessage = async (e) => { postMessage('end'); }",
+                    {{"Connection-Allowlist-Report-Only", "(response-origin)"},
+                     {"Content-Type", "text/javascript"}}));
+  RegisterResponse(kSameOriginAllowlistedPage,
+                   ResponseEntry(R"(<html><body>Hello</body></html>)", {}));
+  ASSERT_TRUE(embedded_https_test_server().Start());
+
+  GURL main_url =
+      embedded_https_test_server().GetURL("a.test", kSameOriginAllowlistedPage);
+  EXPECT_TRUE(NavigateToURL(shell(), main_url));
+
+  // To ensure that fetching the worker (and its separate
+  // Connection-Allowlist-Report-Only) completes, we create a Promise that only
+  // resolves when the worker is running.
+  EXPECT_TRUE(ExecJs(shell()->web_contents()->GetPrimaryMainFrame(),
+                     R"(
+            (async () => {
+              await new Promise((resolve) => {
+                window.myworker = new Worker('../worker.js', { type: 'module'});
+                window.myworker.onmessage = async (e) => {
+                  resolve();
+                };
+                window.myworker.postMessage('start');
+              });
+            })();
+          )"));
+
+  histogram_tester.ExpectTotalCount(network::kConnectionAllowlistTypeHistogram,
+                                    1);
+  histogram_tester.ExpectBucketCount(
+      network::kConnectionAllowlistTypeHistogram,
+      network::ConnectionAllowlistType::kReportOnly, 1);
+}
+
+// Verifies that WebSocket connections are subject to Connection-Allowlist
+// enforcement. A cross-origin WebSocket should be blocked when the page is
+// served with Connection-Allowlist: (response-origin).
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistTest, WebSocketBlocked) {
+  RegisterResponse(
+      kSameOriginAllowlistedPage,
+      ResponseEntry("<html><body>Hello</body></html>",
+                    {{"Connection-Allowlist", "(response-origin)"}}));
+  ASSERT_TRUE(embedded_https_test_server().Start());
+
+  GURL main_url =
+      embedded_https_test_server().GetURL("a.test", kSameOriginAllowlistedPage);
+  EXPECT_TRUE(NavigateToURL(shell(), main_url));
+
+  // Same-origin WebSocket should be allowed.
+  GURL allowed_ws_url = net::test_server::GetWebSocketURL(
+      embedded_https_test_server(), "a.test", "/echo-with-no-extension");
+  EXPECT_EQ("open", EvalJs(shell()->web_contents(), JsReplace(R"(
+    new Promise(resolve => {
+      const ws = new WebSocket($1);
+      ws.onopen = () => { ws.close(); resolve('open'); };
+      ws.onerror = () => resolve('error');
+    });
+  )",
+                                                              allowed_ws_url)));
+
+  // Cross-origin WebSocket should be blocked by Connection-Allowlist.
+  GURL denied_ws_url = net::test_server::GetWebSocketURL(
+      embedded_https_test_server(), "b.test", "/echo-with-no-extension");
+  EXPECT_EQ("error", EvalJs(shell()->web_contents(), JsReplace(R"(
+    new Promise(resolve => {
+      const ws = new WebSocket($1);
+      ws.onopen = () => { ws.close(); resolve('open'); };
+      ws.onerror = () => resolve('error');
+    });
+  )",
+                                                               denied_ws_url)));
+}
+
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistTest, UseCounterForWorker) {
+  RegisterResponse(
+      "/worker.js",
+      ResponseEntry("onmessage = async (e) => { postMessage('end'); }",
+                    {{"Connection-Allowlist", "(response-origin)"},
+                     {"Content-Type", "text/javascript"}}));
+  RegisterResponse(kSameOriginAllowlistedPage,
+                   ResponseEntry(R"(<html><body>Hello</body></html>)", {}));
+  ASSERT_TRUE(embedded_https_test_server().Start());
+
+  GURL main_url =
+      embedded_https_test_server().GetURL("a.test", kSameOriginAllowlistedPage);
+  EXPECT_TRUE(NavigateToURL(shell(), main_url));
+
+  EXPECT_CALL(*content_browser_client_,
+              LogWebFeatureForCurrentPage(
+                  shell()->web_contents()->GetPrimaryMainFrame(),
+                  blink::mojom::WebFeature::kConnectionAllowlist));
+
+  // To ensure that fetching the worker (and its separate Connection-Allowlist)
+  // completes, we create a Promise that only resolves when the worker is
+  // running.
+  EXPECT_TRUE(ExecJs(shell()->web_contents()->GetPrimaryMainFrame(),
+                     R"(
+            (async () => {
+              await new Promise((resolve) => {
+                window.myworker = new Worker('../worker.js', { type: 'module'});
+                window.myworker.onmessage = async (e) => {
+                  resolve();
+                };
+                window.myworker.postMessage('start');
+              });
+            })();
+          )"));
 }
 
 }  // namespace content

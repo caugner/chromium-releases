@@ -861,8 +861,7 @@ TEST_F(AutocompleteControllerTest, UpdateResult_ZPSEnabledAndShownInSession) {
 
 // Android and iOS aren't ready for ML and won't pass this test because they
 // have their own grouping code.
-#if BUILDFLAG(BUILD_WITH_TFLITE_LIB) && !BUILDFLAG(IS_ANDROID) && \
-    !BUILDFLAG(IS_IOS)
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
 TEST_F(AutocompleteControllerTest, MlRanking) {
   OmniboxFieldTrial::ScopedMLConfigForTesting scoped_ml_config;
   scoped_ml_config.GetMLConfig().ml_url_scoring = true;
@@ -1788,8 +1787,7 @@ TEST_F(AutocompleteControllerTest, UpdateResult_MLRanking_AllMatches) {
           "history 800 .2",
       }));
 }
-#endif  //  BUILDFLAG(BUILD_WITH_TFLITE_LIB) && !BUILDFLAG(IS_ANDROID) &&
-        //  !BUILDFLAG(IS_IOS)
+#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
 
 TEST_F(AutocompleteControllerTest, UpdateResult_NotifyingAndTimers) {
   {
@@ -3276,3 +3274,91 @@ TEST_F(AutocompleteControllerTest, SmartComposeClearedWithNewResults) {
   ASSERT_TRUE(controller_.internal_result_.smart_compose_inline_hint().empty());
 }
 #endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+
+TEST_F(AutocompleteControllerTest,
+       UpdateMatchDestinationURLWithInvocationSource) {
+  controller_.input_ =
+      AutocompleteInput(u"a", 1u, metrics::OmniboxEventProto::NTP_REALBOX,
+                        TestSchemeClassifier());
+
+  // Setup default search provider keyword.
+  std::u16string default_keyword =
+      controller_.template_url_service_->GetDefaultSearchProvider()->keyword();
+
+  AutocompleteMatch search_match = CreateSearchMatch(u"search term");
+  search_match.destination_url =
+      GURL("https://google.com/search?q=search+term");
+  search_match.search_terms_args =
+      std::make_unique<TemplateURLRef::SearchTermsArgs>(u"search term");
+  search_match.keyword = default_keyword;
+
+  AutocompleteMatch url_match = CreateHistoryURLMatch("https://example.com/");
+  url_match.destination_url = GURL("https://example.com/");
+
+  controller_.UpdateMatchDestinationURLWithInvocationSource(&search_match);
+  controller_.UpdateMatchDestinationURLWithInvocationSource(&url_match);
+
+  EXPECT_EQ(search_match.destination_url.spec(),
+            "https://google.com/search?q=search+term&source=chrome.rb");
+
+  // URL match shouldn't be affected because it's not a search match.
+  EXPECT_EQ(url_match.destination_url.spec(), "https://example.com/");
+
+  // Now test Omnibox
+  controller_.input_ = AutocompleteInput(
+      u"a", 1u, metrics::OmniboxEventProto::NTP, TestSchemeClassifier());
+
+  AutocompleteMatch search_match2 = CreateSearchMatch(u"search term");
+  search_match2.destination_url =
+      GURL("https://google.com/search?q=search+term");
+  search_match2.search_terms_args =
+      std::make_unique<TemplateURLRef::SearchTermsArgs>(u"search term");
+  search_match2.keyword = default_keyword;
+  controller_.UpdateMatchDestinationURLWithInvocationSource(&search_match2);
+
+  EXPECT_EQ(search_match2.destination_url.spec(),
+            "https://google.com/search?q=search+term&source=chrome.ob");
+
+  // Keyword match to a NON-DSE site shouldn't be affected.
+  AutocompleteMatch keyword_match = CreateSearchMatch(u"search term");
+  keyword_match.destination_url =
+      GURL("https://wikipedia.org/search?q=search+term");
+  keyword_match.search_terms_args =
+      std::make_unique<TemplateURLRef::SearchTermsArgs>(u"search term");
+  keyword_match.keyword = u"wikipedia";
+
+  TemplateURLData wiki_data;
+  wiki_data.SetShortName(u"Wikipedia");
+  wiki_data.SetKeyword(u"wikipedia");
+  wiki_data.SetURL("https://wikipedia.org/search?q={searchTerms}");
+  controller_.template_url_service_->Add(
+      std::make_unique<TemplateURL>(wiki_data));
+
+  controller_.UpdateMatchDestinationURLWithInvocationSource(&keyword_match);
+
+  EXPECT_EQ(keyword_match.destination_url.spec(),
+            "https://wikipedia.org/search?q=search+term");
+}
+
+TEST_F(AutocompleteControllerTest,
+       UpdateMatchDestinationURLWithInvocationSource_DoesNotAttachToWebsites) {
+  // Check across both Omnibox and Realbox contexts to ensure site navigations
+  // are safe.
+  std::vector<metrics::OmniboxEventProto::PageClassification> classifications =
+      {metrics::OmniboxEventProto::NTP_REALBOX,
+       metrics::OmniboxEventProto::NTP};
+
+  for (auto classification : classifications) {
+    controller_.input_ =
+        AutocompleteInput(u"a", 1u, classification, TestSchemeClassifier());
+
+    // Use a NON-search match type (e.g. history URL navigation).
+    AutocompleteMatch url_match = CreateHistoryURLMatch("https://example.com/");
+    url_match.destination_url = GURL("https://example.com/");
+
+    controller_.UpdateMatchDestinationURLWithInvocationSource(&url_match);
+
+    // The destination URL must remain unmodified.
+    EXPECT_EQ(url_match.destination_url.spec(), "https://example.com/");
+  }
+}

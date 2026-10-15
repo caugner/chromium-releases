@@ -207,23 +207,28 @@ enum class LayoutConstant {
   // content when in the uncollapsed state.
   kVerticalTabStripUncollapsedPadding,
 
-  // The padding between the sides/bottom of the vertical tab strip and its
+  // The padding between the sides of the vertical tab strip and its
   // content when in the collapsed state.
-  kVerticalTabStripCollapsedPadding,
+  kVerticalTabStripCollapsedHorizontalPadding,
 
-  // The width of the separator in the vertical tab strip when collapsed.
-  kVerticalTabStripCollapsedSeparatorWidth,
+  // The padding between the top/bottom of the vertical tab strip and its
+  // content when in the collapsed state.
+  kVerticalTabStripCollapsedVerticalPadding,
 
-  // The icon size of top buttons in the vertical tab strip.
-  kVerticalTabStripTopButtonIconSize,
+  // The padding between the sides of the vertical tab strip and the separator
+  // in the vertical tab strip when collapsed.
+  kVerticalTabStripCollapsedSeparatorPadding,
+
+  // The icon size of the combo buttons in the vertical tab strip.
+  kVerticalTabStripComboButtonIconSize,
+
+  // The icon size of the collapse and new tab button in the vertical tab strip.
+  kVerticalTabStripButtonIconSize,
 
   // The padding between the buttons in the top container of the vertical tab
   // strip. When it is collapsed, this is vertical padding. When it is
   // uncollapsed and expanded, this is horizontal padding.
   kVerticalTabStripTopButtonPadding,
-
-  // The icon size of bottom buttons in the vertical tab strip.
-  kVerticalTabStripBottomButtonIconSize,
 
   // The vertical or horizontal padding between two buttons (tab groups and tab
   // search) that have flat edges in the top container of the vertical tab
@@ -237,6 +242,9 @@ enum class LayoutConstant {
   // The default height and width of the new tab button for the vertical tab
   // strip.
   kVerticalTabStripNewTabButtonSize,
+
+  // The height and width of the collapse button for the vertical tab strip.
+  kVerticalTabStripCollapseButtonSize,
 
   // The default height and width of the tab groups and tab search buttons for
   // the vertical tab strip.

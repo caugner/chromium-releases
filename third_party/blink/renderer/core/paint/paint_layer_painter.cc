@@ -150,8 +150,9 @@ bool PaintLayerPainter::PaintedOutputInvisible(const ComputedStyle& style) {
   // Always paint when 'will-change: opacity' is present. Reduces jank for
   // common animation implementation approaches, for example, an element that
   // starts with opacity zero and later begins to animate.
-  if (style.HasWillChangeOpacityHint())
+  if (style.HasWillChangeProperty(CSSPropertyID::kOpacity)) {
     return false;
+  }
 
   if (style.HasCurrentOpacityAnimation())
     return false;
@@ -602,7 +603,8 @@ PaintResult PaintLayerPainter::PaintChildren(
   bool painting_canvas_child = false;
   auto* canvas = DynamicTo<HTMLCanvasElement>(layout_object.GetNode());
   if (canvas) {
-    if (RuntimeEnabledFeatures::CanvasDrawElementEnabled() &&
+    if (RuntimeEnabledFeatures::CanvasDrawElementEnabled(
+            canvas->GetExecutionContext()) &&
         canvas->layoutSubtree()) {
       // We need to paint the children for later use by drawElementImage, but
       // make sure we enforce privacy-preserving paint behavior.

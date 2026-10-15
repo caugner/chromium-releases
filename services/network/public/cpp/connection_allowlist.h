@@ -10,9 +10,9 @@
 #include <vector>
 
 #include "base/component_export.h"
+#include "base/unguessable_token.h"
 #include "services/network/public/mojom/connection_allowlist.mojom-shared.h"
-
-class GURL;
+#include "url/gurl.h"
 
 namespace network {
 
@@ -70,8 +70,10 @@ struct COMPONENT_EXPORT(NETWORK_CPP_CONNECTION_ALLOWLIST) ConnectionAllowlists {
 
   bool operator==(const ConnectionAllowlists&) const;
 
+  GURL response_url;
   std::optional<ConnectionAllowlist> enforced;
   std::optional<ConnectionAllowlist> report_only;
+  std::optional<base::UnguessableToken> reporting_source;
 };
 
 }  // namespace network

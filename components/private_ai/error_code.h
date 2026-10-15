@@ -39,7 +39,12 @@ enum class ErrorCode {
   kClientAttestationFailed = 11,
   // The client is being destroyed before the response is received.
   kDestroyed = 12,
-  kMaxValue = kDestroyed,
+  // The connection is being closed because it has been unused for too long
+  // after creation.
+  kUnusedConnection = 13,
+  // Failed to create proxy config.
+  kProxyConfigFailed = 14,
+  kMaxValue = kProxyConfigFailed,
 };
 // LINT.ThenChange(//tools/metrics/histograms/enums.xml:PrivateAiErrorCode)
 

@@ -158,11 +158,13 @@ _CONFIG = [
             'base::ScopedFD',
             'base::Seconds',
             'base::sequence_manager::TaskTimeObserver',
+            'base::sequence_manager::SequenceManager',
             'base::SequencedTaskRunner',
             'base::SingleThreadTaskRunner',
             'base::span',
             'base::span(_with_nul)?_from_cstring',
             'base::Span(OrSize|Reader|Writer)',
+            'base::subtle::reinterpret_span',
             'base::StringPiece',
             'base::StrongAlias',
             'base::SubstringSetMatcher',
@@ -181,6 +183,7 @@ _CONFIG = [
             'base::ToString',
             'base::TrackEvent',
             'base::trace_event::.*',
+            'base::unchecked',
             'base::unexpected',
             'base::UnguessableToken',
             'base::UnguessableTokenHash',
@@ -391,7 +394,10 @@ _CONFIG = [
         ],
     },
     {
-        'paths': ['third_party/blink/common/context_menu_data/'],
+        'paths': [
+            'third_party/blink/common/context_menu_data/',
+            'third_party/blink/common/input/',
+        ],
         'allowed': [
             'ui::mojom::MenuSourceType',
         ],
@@ -467,6 +473,16 @@ _CONFIG = [
     {
         'paths': ['third_party/blink/common/manifest/manifest_util.cc'],
         'allowed': ['base::EqualsCaseInsensitiveASCII'],
+    },
+    {
+        'paths': [
+            'third_party/blink/common/page/content_to_visible_time_reporter.cc',
+        ],
+        'allowed': [
+            # Used from both Blink and non-Blink code.
+            'base::BindOnce',
+            'viz::FrameTimingDetails',
+        ],
     },
     {
         'paths': [
@@ -699,6 +715,7 @@ _CONFIG = [
             'cc::THUMB',
             'cc::TRACK_BUTTONS_TICKMARKS',
             'cc::VERTICAL',
+            'viz::TrackedElementFeature',
 
             # Animation
             "cc::PropertyChangeForcesCommitCriteria",
@@ -775,6 +792,7 @@ _CONFIG = [
 
             # Standalone utility libraries that only depend on //base
             'skia::.+',
+            'skhdr::.+',
             'url::.+',
 
             # Nested namespaces under the blink namespace
@@ -1078,6 +1096,14 @@ _CONFIG = [
         ['third_party/blink/renderer/controller/oom_intervention_impl.cc'],
         'allowed': [
             'base::BindOnce',
+        ],
+    },
+    {
+        'paths': [
+            'third_party/blink/renderer/controller/memory_usage_monitor_posix.cc',
+        ],
+        'allowed': [
+            'base::StringToUint64',
         ],
     },
     {
@@ -1405,6 +1431,7 @@ _CONFIG = [
             # and must use the regular variants.
             'mojom::.+',
             'network::mojom::.+',
+            'ui::mojom::MenuSourceType',
             'ui::mojom::WindowShowState',
             'ui::mojom::WindowShowState::.+',
 
@@ -1430,6 +1457,9 @@ _CONFIG = [
             # In blink-internal code we use blink::PersistentLocation but
             # we don't expose that in the public API.
             'cppgc::SourceLocation',
+
+            # Needed to set the stack marker from outside Blink.
+            'cppgc::StackStartMarker',
         ],
     },
     {
@@ -1545,6 +1575,26 @@ _CONFIG = [
             'third_party/blink/public/web/web_dom_activity_logger.h',
         ],
         'allowed': [
+            'v8::Local',
+            'v8::Value',
+        ],
+    },
+    {
+        'paths': [
+            'third_party/blink/public/web/web_node.h',
+        ],
+        'allowed': [
+            # Explicit ::blink qualifier is needed to disambiguate from member
+            # function named `To`.
+            'blink::To',
+        ],
+    },
+    {
+        'paths': [
+            'third_party/blink/public/web/web_serialized_script_value.h',
+        ],
+        'allowed': [
+            'v8::Isolate',
             'v8::Local',
             'v8::Value',
         ],
@@ -2263,6 +2313,15 @@ _CONFIG = [
     },
     {
         'paths': [
+            'third_party/blink/renderer/modules/storage/cached_storage_area.cc',
+            'third_party/blink/renderer/modules/storage/cached_storage_area.h',
+        ],
+        'allowed': [
+            'absl::flat_hash_map',
+        ],
+    },
+    {
+        'paths': [
             'third_party/blink/renderer/modules/animationworklet/',
         ],
         'allowed': [
@@ -2534,6 +2593,7 @@ _CONFIG = [
         'allowed': [
             'base::BindOnce',
             'cc::TextureLayerClient',
+            'gpu::SHARED_IMAGE_USAGE_.+',
             'viz::ReleaseCallback',
             'viz::SharedImageFormat',
             'viz::SinglePlaneFormat',
@@ -2677,8 +2737,8 @@ _CONFIG = [
     },
     {
         'paths': [
-            'third_party/blink/renderer/core/frame/ad_tracker.cc',
-            'third_party/blink/renderer/core/frame/ad_tracker.h',
+            'third_party/blink/renderer/core/ad_tracker/ad_tracker.cc',
+            'third_party/blink/renderer/core/ad_tracker/ad_tracker.h',
         ],
         'allowed': [
             'subresource_filter::ScopedRule',
@@ -2776,6 +2836,15 @@ _CONFIG = [
     },
     {
         'paths': [
+            "third_party/blink/renderer/modules/ml/webnn/webnn_introspection_impl.cc",
+        ],
+        'allowed': [
+            'base::BindOnce',
+            'base::Unretained',
+        ]
+    },
+    {
+        'paths': [
             "third_party/blink/renderer/modules/ml/webnn/ml_graph_transform/utils/ml_graph_dump.h",
             "third_party/blink/renderer/modules/ml/webnn/ml_graph_transform/utils/ml_graph_dump.cc",
         ],
@@ -2840,6 +2909,7 @@ _CONFIG = [
             'cc::PaintCanvas',
             'cc::PaintFlags',
             'media::.+',
+            'viz::FrameSinkId',
         ]
     },
     {
@@ -2906,16 +2976,6 @@ _CONFIG = [
             'GURL',
             'network::GetClientHintToPolicyFeatureMap',
             'network::PermissionsPolicy',
-        ]
-    },
-    {
-        # TODO(crbug.com/418169222): Remove this entry once the device
-        # bound session credentials origin trial is complete.
-        'paths': [
-            'third_party/blink/common/loader/throttling_url_loader.cc',
-        ],
-        'allowed': [
-            'mojom::OriginTrialFeature',
         ]
     },
     {
@@ -3006,6 +3066,18 @@ _CONFIG = [
             'third_party/blink/public/common/use_counter/webdx_feature_maps.h',
         ],
         'allowed': ['base::NoDestructor', 'base::flat_map']
+    },
+    {
+        'paths': [
+            'third_party/blink/common/scheduler/web_scheduler_tracked_feature.cc',
+        ],
+        'allowed': ['base::NoDestructor']
+    },
+    {
+        'paths': [
+            'third_party/blink/public/platform/web_surface_layer_bridge.h',
+        ],
+        'allowed': ['viz::FrameSinkId'],
     },
 ]
 

@@ -20,7 +20,6 @@ import org.chromium.build.annotations.Initializer;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.components.metrics.OmniboxEventProtos.OmniboxEventProto.PageClassification;
-import org.chromium.components.omnibox.ToolModeProto.ToolMode;
 import org.chromium.url.GURL;
 
 import java.lang.annotation.Retention;
@@ -87,8 +86,6 @@ public class AutocompleteInput implements UserData {
     private final SettableNonNullObservableSupplier<@AutocompleteRequestType Integer>
             mRequestTypeSupplier =
                     ObservableSuppliers.createNonNull(AutocompleteRequestType.SEARCH);
-    private final SettableNonNullObservableSupplier</* ToolMode */ Integer> mToolModeSupplier =
-            ObservableSuppliers.createNonNull(ToolMode.TOOL_MODE_UNSPECIFIED_VALUE);
     private final SettableNullableObservableSupplier<SiteSearchData> mSiteSearchData =
             ObservableSuppliers.createNullable();
 
@@ -134,7 +131,6 @@ public class AutocompleteInput implements UserData {
         mAllowUserTextAutocompletion.set(other.mAllowUserTextAutocompletion.get());
         mInitialUserText = other.mInitialUserText;
         mRequestTypeSupplier.set(other.mRequestTypeSupplier.get());
-        mToolModeSupplier.set(other.mToolModeSupplier.get());
         mSiteSearchData.set(other.mSiteSearchData.get());
     }
 
@@ -176,11 +172,9 @@ public class AutocompleteInput implements UserData {
 
     /** Returns the current page classification. */
     public int getPageClassification() {
-        return switch (mRequestTypeSupplier.get()) {
-            case AutocompleteRequestType.AI_MODE, AutocompleteRequestType.IMAGE_GENERATION ->
-                    getComposeboxEquivalentOfPageClassification();
-            default -> mPageClassification;
-        };
+        return ToolModeUtils.isAimRequest(mRequestTypeSupplier.get())
+                ? getComposeboxEquivalentOfPageClassification()
+                : mPageClassification;
     }
 
     /**
@@ -229,7 +223,6 @@ public class AutocompleteInput implements UserData {
     /** Set the AutocompleteRequestType */
     public AutocompleteInput setRequestType(@AutocompleteRequestType int type) {
         mRequestTypeSupplier.set(type);
-        updateToolMode();
         return this;
     }
 
@@ -282,9 +275,9 @@ public class AutocompleteInput implements UserData {
         return mRequestTypeSupplier.get() == AutocompleteRequestType.SEARCH;
     }
 
-    /** Returns a supplier for the Autocomplete Tool that is currently selected. */
-    public NonNullObservableSupplier</* ToolMode */ Integer> getToolModeSupplier() {
-        return mToolModeSupplier;
+    /** Returns the Autocomplete Tool that is currently selected. */
+    public int getToolMode() {
+        return ToolModeUtils.getToolModeForRequestType(getRequestType(), mHasAttachments);
     }
 
     /**
@@ -320,7 +313,7 @@ public class AutocompleteInput implements UserData {
     }
 
     /**
-     * Set the Initial Input - the one the session started with.
+     * Set the Initial Input - the default value to fall back to if the input is reset.
      *
      * <p>This is the default "revert-to" value.
      */
@@ -329,6 +322,7 @@ public class AutocompleteInput implements UserData {
         return this;
     }
 
+    /** Returns the Initial Input - the default value to fall back to if the input is reset. */
     public String getInitialUserText() {
         return mInitialUserText;
     }
@@ -403,9 +397,10 @@ public class AutocompleteInput implements UserData {
         return mAllowUserTextAutocompletion;
     }
 
-    /** Returns whether current context represents zero-prefix context. */
+    /** Returns whether the current context includes user-typed text. */
     public boolean isInZeroPrefixContext() {
-        return TextUtils.isEmpty(mUserText.get());
+        return TextUtils.isEmpty(mUserText.get())
+                || TextUtils.equals(mUserText.get(), mInitialUserText);
     }
 
     /** Returns whether current context enables suggestions caching. */
@@ -431,7 +426,6 @@ public class AutocompleteInput implements UserData {
 
     public void setHasAttachments(boolean hasAttachments) {
         mHasAttachments = hasAttachments;
-        updateToolMode();
     }
 
     public AutocompleteInput setSelection(int rangeStart, int rangeEnd) {
@@ -480,7 +474,6 @@ public class AutocompleteInput implements UserData {
         mUrlFocusTime = 0;
         mSuggestionsListScrolled = false;
         mSuppressAutomaticSuggestionsUntilUserStartsTyping = false;
-        updateToolMode();
 
         return this;
     }
@@ -530,11 +523,5 @@ public class AutocompleteInput implements UserData {
     /** Sets the ModelMode that should be used. */
     public void setModelMode(int modelMode) {
         mModelMode = modelMode;
-    }
-
-    private void updateToolMode() {
-        mToolModeSupplier.set(
-                ToolModeUtils.getToolModeForRequestType(
-                        mRequestTypeSupplier.get(), mHasAttachments));
     }
 }

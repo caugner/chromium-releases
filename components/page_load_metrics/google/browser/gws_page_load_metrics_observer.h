@@ -30,13 +30,33 @@ extern const char kHistogramGWSNavigationStartToFirstLoaderCallback[];
 extern const char kHistogramGWSNavigationStartToOnComplete[];
 extern const char kHistogramGWSAcceptCHFrameReceived[];
 extern const char kHistogramGWSOnConnectedCalled[];
+extern const char kHistogramGWSMaxStreamLimitPendingDelay[];
 
 extern const char kHistogramGWSConnectTimingFirstRequestDomainLookupDelay[];
+extern const char
+    kHistogramGWSConnectTimingFirstRequestDomainLookupDelaySecureDns[];
+extern const char
+    kHistogramGWSConnectTimingFirstRequestDomainLookupDelayInsecureDns[];
 extern const char kHistogramGWSConnectTimingFirstRequestConnectDelay[];
 extern const char kHistogramGWSConnectTimingFirstRequestSslDelay[];
 extern const char kHistogramGWSConnectTimingFinalRequestDomainLookupDelay[];
 extern const char kHistogramGWSConnectTimingFinalRequestConnectDelay[];
 extern const char kHistogramGWSConnectTimingFinalRequestSslDelay[];
+
+extern const char kHistogramGWSInteractionToActualNavigationStart[];
+extern const char kHistogramGWSInteractionToNavigationStart[];
+extern const char kHistogramGWSNavigationStartToNavigationCommitSent[];
+extern const char kHistogramGWSNavigationCommitSentToParseStart[];
+extern const char kHistogramGWSParseStartToFirstContentfulPaint[];
+extern const char kHistogramGWSParseStartToDOMContentLoaded[];
+extern const char kHistogramGWSParseStartToLargestContentfulPaint[];
+
+extern const char kHistogramGWSActualNavigationStartToNavigationStart[];
+extern const char kHistogramGWSActualNavigationStartToNavigationCommitSent[];
+extern const char kHistogramGWSActualNavigationStartToParseStart[];
+extern const char kHistogramGWSActualNavigationStartToFirstContentfulPaint[];
+extern const char kHistogramGWSActualNavigationStartToDOMContentLoaded[];
+extern const char kHistogramGWSActualNavigationStartToLargestContentfulPaint[];
 
 extern const char kHistogramGWSAFTEnd[];
 extern const char kHistogramGWSAFTStart[];
@@ -47,6 +67,7 @@ extern const char kHistogramGWSParseStart[];
 extern const char kHistogramGWSConnectStart[];
 extern const char kHistogramGWSDomainLookupStart[];
 extern const char kHistogramGWSDomainLookupEnd[];
+extern const char kHistogramGWSBeforeUnloadExecutionMode[];
 
 extern const char kHistogramServiceWorkerParseStartSearch[];
 extern const char kHistogramServiceWorkerFirstContentfulPaintSearch[];
@@ -180,7 +201,8 @@ class GWSPageLoadMetricsObserver
         timing_member;
   };
 
-  void LogMetricsOnComplete();
+  void LogMetricsOnComplete(
+      const page_load_metrics::mojom::PageLoadTiming& main_frame_timing);
   void RecordNavigationTimingHistograms();
   void RecordLatencyHistograms(base::TimeTicks response_start_time);
   void RecordSessionDetails(

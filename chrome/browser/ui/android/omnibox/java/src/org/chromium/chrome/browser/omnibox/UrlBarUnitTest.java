@@ -15,7 +15,6 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyFloat;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.anyInt;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
@@ -117,6 +116,7 @@ public class UrlBarUnitTest {
     private final String mLongPath =
             "/" + TextUtils.join("", Collections.nCopies(MIN_LENGTH_FOR_TRUNCATION, "a"));
     private final String mShortDomain = "www.a.com";
+    private final String mShortSubdomain = "www.a.com.foo";
     private final String mLongDomain =
             "www."
                     + TextUtils.join("", Collections.nCopies(MIN_LENGTH_FOR_TRUNCATION, "a"))
@@ -218,6 +218,7 @@ public class UrlBarUnitTest {
 
     @Test
     public void onCreateInputConnection_ensureNoAutocorrect() {
+        mUrlBar.onFocusChanged(true, 0, null);
         var info = new EditorInfo();
         mUrlBar.onCreateInputConnection(info);
         assertEquals(
@@ -230,6 +231,7 @@ public class UrlBarUnitTest {
     public void onCreateInputConnection_disallowKeyboardLearningPassedToIme() {
         doReturn(true).when(mUrlBarDelegate).allowKeyboardLearning();
 
+        mUrlBar.onFocusChanged(true, 0, null);
         var info = new EditorInfo();
         mUrlBar.onCreateInputConnection(info);
         assertEquals(0, info.imeOptions & EditorInfoCompat.IME_FLAG_NO_PERSONALIZED_LEARNING);
@@ -239,6 +241,7 @@ public class UrlBarUnitTest {
     public void onCreateInputConnection_allowKeyboardLearningPassedToIme() {
         doReturn(false).when(mUrlBarDelegate).allowKeyboardLearning();
 
+        mUrlBar.onFocusChanged(true, 0, null);
         var info = new EditorInfo();
         mUrlBar.onCreateInputConnection(info);
         assertEquals(
@@ -250,6 +253,7 @@ public class UrlBarUnitTest {
     public void onCreateInputConnection_setDefaultsWhenDelegateNotPresent() {
         mUrlBar.setDelegate(null);
 
+        mUrlBar.onFocusChanged(true, 0, null);
         var info = new EditorInfo();
         mUrlBar.onCreateInputConnection(info);
 
@@ -469,7 +473,7 @@ public class UrlBarUnitTest {
         // As long as layouts are not available, no action should be taken.
         // This is typically the case when the text view or content is manipulated in some way and
         // has not yet completed the full measure/layout cycle.
-        mUrlBar.scrollDisplayText(UrlBar.ScrollType.SCROLL_TO_BEGINNING);
+        mUrlBar.scrollDisplayText(UrlBar.ScrollType.SCROLL_TO_BEGINNING, false);
         verify(mUrlBar, never()).scrollTo(anyInt(), anyInt());
         assertTrue(mUrlBar.hasPendingDisplayTextScrollForTesting());
         clearInvocations(mUrlBar);
@@ -482,7 +486,7 @@ public class UrlBarUnitTest {
 
         // Simulate request to update scroll type with no changes of scroll type, text, or view
         // size. This should avoid recalculations and simply re-set the scroll position.
-        mUrlBar.scrollDisplayText(UrlBar.ScrollType.SCROLL_TO_BEGINNING);
+        mUrlBar.scrollDisplayText(UrlBar.ScrollType.SCROLL_TO_BEGINNING, false);
         verify(mUrlBar, never()).scrollToTLD();
         verify(mUrlBar, never()).scrollToBeginning();
         verify(mUrlBar).scrollTo(0, 0);
@@ -500,7 +504,7 @@ public class UrlBarUnitTest {
         // As long as layouts are not available, no action should be taken.
         // This is typically the case when the text view or content is manipulated in some way and
         // has not yet completed the full measure/layout cycle.
-        mUrlBar.scrollDisplayText(UrlBar.ScrollType.SCROLL_TO_BEGINNING);
+        mUrlBar.scrollDisplayText(UrlBar.ScrollType.SCROLL_TO_BEGINNING, false);
         verify(mUrlBar, never()).scrollTo(anyInt(), anyInt());
         assertTrue(mUrlBar.hasPendingDisplayTextScrollForTesting());
         clearInvocations(mUrlBar);
@@ -513,7 +517,7 @@ public class UrlBarUnitTest {
 
         // Simulate request to update scroll type with no changes of scroll type, text, or view
         // size. This should avoid recalculations and simply re-set the scroll position.
-        mUrlBar.scrollDisplayText(UrlBar.ScrollType.SCROLL_TO_BEGINNING);
+        mUrlBar.scrollDisplayText(UrlBar.ScrollType.SCROLL_TO_BEGINNING, false);
         verify(mUrlBar, never()).scrollToTLD();
         verify(mUrlBar, never()).scrollToBeginning();
         verify(mUrlBar).scrollTo(0, 0);
@@ -531,7 +535,7 @@ public class UrlBarUnitTest {
         // As long as layouts are not available, no action should be taken.
         // This is typically the case when the text view or content is manipulated in some way and
         // has not yet completed the full measure/layout cycle.
-        mUrlBar.scrollDisplayText(UrlBar.ScrollType.SCROLL_TO_BEGINNING);
+        mUrlBar.scrollDisplayText(UrlBar.ScrollType.SCROLL_TO_BEGINNING, false);
         verify(mUrlBar, never()).scrollTo(anyInt(), anyInt());
         assertTrue(mUrlBar.hasPendingDisplayTextScrollForTesting());
         clearInvocations(mUrlBar);
@@ -545,7 +549,7 @@ public class UrlBarUnitTest {
 
         // Simulate request to update scroll type with no changes of scroll type, text, or view
         // size. This should avoid recalculations and simply re-set the scroll position.
-        mUrlBar.scrollDisplayText(UrlBar.ScrollType.SCROLL_TO_BEGINNING);
+        mUrlBar.scrollDisplayText(UrlBar.ScrollType.SCROLL_TO_BEGINNING, false);
         verify(mUrlBar, never()).scrollToTLD();
         verify(mUrlBar, never()).scrollToBeginning();
         verify(mUrlBar).scrollTo(0, 0);
@@ -563,7 +567,7 @@ public class UrlBarUnitTest {
         // As long as layouts are not available, no action should be taken.
         // This is typically the case when the text view or content is manipulated in some way and
         // has not yet completed the full measure/layout cycle.
-        mUrlBar.scrollDisplayText(UrlBar.ScrollType.SCROLL_TO_BEGINNING);
+        mUrlBar.scrollDisplayText(UrlBar.ScrollType.SCROLL_TO_BEGINNING, false);
         verify(mUrlBar, never()).scrollTo(anyInt(), anyInt());
         assertTrue(mUrlBar.hasPendingDisplayTextScrollForTesting());
         clearInvocations(mUrlBar);
@@ -576,7 +580,7 @@ public class UrlBarUnitTest {
 
         // Simulate request to update scroll type with no changes of scroll type, text, or view
         // size. This should avoid recalculations and simply re-set the scroll position.
-        mUrlBar.scrollDisplayText(UrlBar.ScrollType.SCROLL_TO_BEGINNING);
+        mUrlBar.scrollDisplayText(UrlBar.ScrollType.SCROLL_TO_BEGINNING, false);
         verify(mUrlBar, never()).scrollToTLD();
         verify(mUrlBar, never()).scrollToBeginning();
         verify(mUrlBar).scrollTo(not(eq(0)), eq(0));
@@ -586,7 +590,7 @@ public class UrlBarUnitTest {
     public void layout_noScrollWithNoSizeChanges() {
         // Initialize the URL bar. Verify test conditions.
         mUrlBar.setText(mShortDomain);
-        mUrlBar.scrollDisplayText(UrlBar.ScrollType.SCROLL_TO_BEGINNING);
+        mUrlBar.scrollDisplayText(UrlBar.ScrollType.SCROLL_TO_BEGINNING, false);
         measureAndLayoutUrlBar();
         assertFalse(mUrlBar.hasPendingDisplayTextScrollForTesting());
         clearInvocations(mUrlBar);
@@ -594,14 +598,14 @@ public class UrlBarUnitTest {
         // Simulate layout re-entry.
         // We know the url bar has no pending scroll request, and we apply the same size.
         measureAndLayoutUrlBar();
-        verify(mUrlBar, never()).scrollDisplayText(anyInt());
+        verify(mUrlBar, never()).scrollDisplayText(anyInt(), anyBoolean());
     }
 
     @Test
     public void layout_noScrollWhenHeightChanges() {
         // Initialize the URL bar. Verify test conditions.
         mUrlBar.setText(mShortDomain);
-        mUrlBar.scrollDisplayText(UrlBar.ScrollType.SCROLL_TO_BEGINNING);
+        mUrlBar.scrollDisplayText(UrlBar.ScrollType.SCROLL_TO_BEGINNING, false);
         measureAndLayoutUrlBar();
         assertFalse(mUrlBar.hasPendingDisplayTextScrollForTesting());
         clearInvocations(mUrlBar);
@@ -609,14 +613,14 @@ public class UrlBarUnitTest {
         // Simulate layout re-entry.
         // We change the height of the view which should not affect scroll position.
         measureAndLayoutUrlBarForSize(URL_BAR_WIDTH, URL_BAR_HEIGHT + 1);
-        verify(mUrlBar, never()).scrollDisplayText(anyInt());
+        verify(mUrlBar, never()).scrollDisplayText(anyInt(), anyBoolean());
     }
 
     @Test
     public void layout_updateScrollWhenWidthChanges() {
         // Initialize the URL bar. Verify test conditions.
         mUrlBar.setText(mShortDomain);
-        mUrlBar.scrollDisplayText(UrlBar.ScrollType.SCROLL_TO_BEGINNING);
+        mUrlBar.scrollDisplayText(UrlBar.ScrollType.SCROLL_TO_BEGINNING, false);
         measureAndLayoutUrlBar();
         assertFalse(mUrlBar.hasPendingDisplayTextScrollForTesting());
         clearInvocations(mUrlBar);
@@ -624,7 +628,23 @@ public class UrlBarUnitTest {
         // Simulate layout re-entry.
         // We change the width, which may impact scroll position.
         measureAndLayoutUrlBarForSize(URL_BAR_WIDTH + 1, URL_BAR_HEIGHT);
-        verify(mUrlBar).scrollDisplayText(anyInt());
+        verify(mUrlBar).scrollDisplayText(anyInt(), anyBoolean());
+    }
+
+    @Test
+    public void scrollWhenOriginChanges() {
+        // Initialize the URL bar. Verify test conditions.
+        mUrlBar.setText(mShortDomain);
+        mUrlBar.setScrollState(UrlBar.ScrollType.SCROLL_TO_TLD, mShortDomain.length(), false);
+        measureAndLayoutUrlBar();
+        assertFalse(mUrlBar.hasPendingDisplayTextScrollForTesting());
+        ArgumentCaptor<Integer> xCaptor = ArgumentCaptor.forClass(Integer.class);
+        verify(mUrlBar).scrollToTLD();
+        mUrlBar.setVisibleTextPrefixHintForTesting(mShortDomain);
+
+        mUrlBar.setText(mShortSubdomain);
+        mUrlBar.setScrollState(UrlBar.ScrollType.SCROLL_TO_TLD, mShortSubdomain.length(), true);
+        verify(mUrlBar, times(2)).scrollToTLD();
     }
 
     @Test
@@ -641,7 +661,7 @@ public class UrlBarUnitTest {
                         + TextUtils.join(
                                 "", Collections.nCopies(NUMBER_OF_VISIBLE_CHARACTERS, "a"));
         mUrlBar.setText(url);
-        mUrlBar.setScrollState(UrlBar.ScrollType.SCROLL_TO_TLD, mShortDomain.length());
+        mUrlBar.setScrollState(UrlBar.ScrollType.SCROLL_TO_TLD, mShortDomain.length(), false);
         verify(mUrlBar, times(0)).calculateVisibleHint();
 
         // Keep domain the same, but change the path.
@@ -651,7 +671,7 @@ public class UrlBarUnitTest {
                         + TextUtils.join(
                                 "", Collections.nCopies(NUMBER_OF_VISIBLE_CHARACTERS, "b"));
         mUrlBar.setText(url2);
-        mUrlBar.setScrollState(UrlBar.ScrollType.SCROLL_TO_TLD, mShortDomain.length());
+        mUrlBar.setScrollState(UrlBar.ScrollType.SCROLL_TO_TLD, mShortDomain.length(), false);
         verify(mUrlBar, times(1)).calculateVisibleHint();
         String visibleHint = mUrlBar.getVisibleTextPrefixHint().toString();
         assertEquals(url2.substring(0, NUMBER_OF_VISIBLE_CHARACTERS + 1), visibleHint);
@@ -670,7 +690,7 @@ public class UrlBarUnitTest {
                         + TextUtils.join(
                                 "", Collections.nCopies(NUMBER_OF_VISIBLE_CHARACTERS, "a"));
         mUrlBar.setText(url);
-        mUrlBar.setScrollState(UrlBar.ScrollType.SCROLL_TO_TLD, mShortDomain.length());
+        mUrlBar.setScrollState(UrlBar.ScrollType.SCROLL_TO_TLD, mShortDomain.length(), false);
         verify(mUrlBar, times(0)).calculateVisibleHint();
 
         // Change the domain, but keep the path the same.
@@ -679,7 +699,7 @@ public class UrlBarUnitTest {
                         + TextUtils.join(
                                 "", Collections.nCopies(NUMBER_OF_VISIBLE_CHARACTERS, "a"));
         mUrlBar.setText(url2);
-        mUrlBar.setScrollState(UrlBar.ScrollType.SCROLL_TO_TLD, mShortDomain.length());
+        mUrlBar.setScrollState(UrlBar.ScrollType.SCROLL_TO_TLD, mShortDomain.length(), false);
         verify(mUrlBar, times(0)).calculateVisibleHint();
         assertNull(mUrlBar.getVisibleTextPrefixHint());
     }
@@ -778,6 +798,32 @@ public class UrlBarUnitTest {
 
             clearInvocations(listener, mUrlBar);
         }
+    }
+
+    /** Verifies that {@link UrlBar#dispatchKeyEvent} intercepts and handles the TAB key. */
+    @Test
+    public void dispatchKeyEvent_tabInterceptionByKeyDownListener() {
+        var event = new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_TAB);
+
+        var listener = mock(View.OnKeyListener.class);
+        mUrlBar.setKeyDownListener(listener);
+
+        // Scenario 1: Listener consumes the TAB event.
+        // We verify that dispatchKeyEvent returns true and the listener is called.
+        doReturn(true).when(listener).onKey(any(), anyInt(), any());
+        assertTrue(mUrlBar.dispatchKeyEvent(event));
+        verify(listener).onKey(mUrlBar, KeyEvent.KEYCODE_TAB, event);
+
+        clearInvocations(listener, mUrlBar);
+
+        // Scenario 2: Listener does NOT consume the TAB event.
+        // We verify that dispatchKeyEvent returns false, and the event falls through to standard
+        // key handling (which might call the listener again in onKeyDown).
+        doReturn(false).when(listener).onKey(any(), anyInt(), any());
+        assertFalse(mUrlBar.dispatchKeyEvent(event));
+        // It gets called once in dispatchKeyEvent, and once in onKeyDown (via
+        // super.dispatchKeyEvent).
+        verify(listener, times(2)).onKey(mUrlBar, KeyEvent.KEYCODE_TAB, event);
     }
 
     @Test

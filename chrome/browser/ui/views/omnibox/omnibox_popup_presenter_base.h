@@ -10,6 +10,7 @@
 #include <string_view>
 
 #include "base/memory/raw_ptr.h"
+#include "base/memory/raw_ref.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "chrome/browser/ui/webui/searchbox/webui_omnibox_handler.h"
@@ -20,9 +21,15 @@
 #include "ui/views/view_observer.h"
 #include "ui/views/widget/widget.h"
 
-class LocationBarView;
+class LocationBar;
 class OmniboxPopupWebUIBaseContent;
+class OmniboxPopupPresenterDelegate;
 class RoundedOmniboxResultsFrame;
+class OmniboxController;
+
+namespace content {
+class WebContents;
+}  // namespace content
 
 namespace omnibox {
 extern const void* kOmniboxWebUIPopupWidgetId;
@@ -37,7 +44,11 @@ extern const void* kOmniboxWebUIPopupWidgetId;
 class OmniboxPopupPresenterBase {
  public:
   DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kRoundedResultsFrame);
-  explicit OmniboxPopupPresenterBase(LocationBarView* location_bar_view);
+  // Arguments must outlast this.
+  explicit OmniboxPopupPresenterBase(
+      LocationBar* location_bar,
+      OmniboxPopupPresenterDelegate& presenter_delegate,
+      OmniboxController* controller);
   OmniboxPopupPresenterBase(const OmniboxPopupPresenterBase&) = delete;
   OmniboxPopupPresenterBase& operator=(const OmniboxPopupPresenterBase&) =
       delete;
@@ -64,7 +75,16 @@ class OmniboxPopupPresenterBase {
 
   virtual std::string_view GetPopupMetricPrefix() const = 0;
 
+  OmniboxPopupPresenterDelegate& delegate() const {
+    return *presenter_delegate_;
+  }
+
  protected:
+  inline static constexpr std::string_view kWebUIPopupMetricPrefix =
+      "Omnibox.Popup.WebUI";
+  inline static constexpr std::string_view kAimPopupMetricPrefix =
+      "Omnibox.Popup.Aim";
+
   // The container for the WebUI WebView.
   views::View* GetUIContainer() const;
 
@@ -83,11 +103,11 @@ class OmniboxPopupPresenterBase {
   // Returns whether the WebUI content view receive focus.
   virtual bool ShouldReceiveFocus() const;
 
-  LocationBarView* location_bar_view() const {
-    return location_bar_view_.get();
-  }
+  LocationBar* location_bar() const { return location_bar_.get(); }
 
   views::Widget* GetWidget() const { return widget_.get(); }
+
+  OmniboxController* controller() const;
 
   // The height of the popup content. Can be 0 if not specified.
   int content_height_ = 0;
@@ -110,6 +130,14 @@ class OmniboxPopupPresenterBase {
                           bool from_fallback,
                           bool success);
 
+  // Callback for when the visual state is ready.
+  // This is specifically for metrics logging and is distinct from the
+  // OnVisualStateReady deferral callback.
+  void OnVisualStateReadyForMetrics(base::TimeTicks result_ready_time,
+                                    bool success);
+
+  void LogResultToContentReadyMetric(content::WebContents* web_contents);
+
   // Remove observation and reset widget, optionally requesting it to close.
   void ReleaseWidget();
 
@@ -117,8 +145,10 @@ class OmniboxPopupPresenterBase {
   // created
   RoundedOmniboxResultsFrame* GetResultsFrame() const;
 
-  // The location bar view that owns `this`.
-  const raw_ptr<LocationBarView> location_bar_view_;
+  // The location bar that owns `this`.
+  const raw_ptr<LocationBar> location_bar_;
+
+  const raw_ref<OmniboxPopupPresenterDelegate> presenter_delegate_;
 
   // The container for both the WebUI suggestions list and other WebUI
   // containers
@@ -131,9 +161,19 @@ class OmniboxPopupPresenterBase {
   // owned and destroyed by the OS.
   std::unique_ptr<views::Widget> widget_;
 
+  const raw_ptr<OmniboxController> controller_;
+
   // True if `ShowWidget()` execution is currently being deferred until the
   // WebUI has produced a new frame.
   bool is_deferred_ = false;
+
+  // Whether the first content ready metric of the popup has been logged.
+  bool has_logged_first_content_ready_ = false;
+
+  // Whether the content ready metric has been logged since the popup was
+  // opened.
+  // This should be reset at the beginning of the Show() method.
+  bool has_logged_content_ready_since_open_ = false;
 
   base::WeakPtrFactory<OmniboxPopupPresenterBase> weak_factory_{this};
 };

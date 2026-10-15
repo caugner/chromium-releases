@@ -14,17 +14,20 @@ import '../../icons.html.js';
 import '../../controls/settings_toggle_button.js';
 import '../../settings_page/settings_section.js';
 import '../../settings_page/settings_subpage.js';
+import '../../simple_confirmation_dialog.js';
 import './security_page_feature_row.js';
 import './secure_dns.js';
 import './secure_dns_v2.js';
 
 import {PrefsMixin} from '/shared/settings/prefs/prefs_mixin.js';
 import {CrSettingsPrefs} from '/shared/settings/prefs/prefs_types.js';
-import {SecureDnsMode} from '/shared/settings/privacy_page/privacy_page_browser_proxy.js';
+import type {SecureDnsSetting, SecurityPageBrowserProxy} from '/shared/settings/security_page/security_page_browser_proxy.js';
+import {SecureDnsMode, SecureDnsUiManagementMode, SecurityPageBrowserProxyImpl} from '/shared/settings/security_page/security_page_browser_proxy.js';
 import type {CrButtonElement} from 'chrome://resources/cr_elements/cr_button/cr_button.js';
 import {WebUiListenerMixin} from 'chrome://resources/cr_elements/web_ui_listener_mixin.js';
-import {assertNotReachedCase} from 'chrome://resources/js/assert.js';
+import {assert, assertNotReachedCase} from 'chrome://resources/js/assert.js';
 import {EventTracker} from 'chrome://resources/js/event_tracker.js';
+import {focusWithoutInk} from 'chrome://resources/js/focus_without_ink.js';
 import {OpenWindowProxyImpl} from 'chrome://resources/js/open_window_proxy.js';
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
@@ -33,7 +36,7 @@ import type {SettingsRadioGroupElement} from '../../controls/settings_radio_grou
 import type {SettingsToggleButtonElement} from '../../controls/settings_toggle_button.js';
 import {loadTimeData} from '../../i18n_setup.js';
 import type {MetricsBrowserProxy} from '../../metrics_browser_proxy.js';
-import {MetricsBrowserProxyImpl, PrivacyElementInteractions} from '../../metrics_browser_proxy.js';
+import {MetricsBrowserProxyImpl, PrivacyElementInteractions, SafeBrowsingInteractions} from '../../metrics_browser_proxy.js';
 import {routes} from '../../route.js';
 import type {Route} from '../../router.js';
 import {RouteObserverMixin, Router} from '../../router.js';
@@ -72,6 +75,7 @@ export interface SettingsSecurityPageV2Element {
     blockForAllSites: ControlledRadioButtonElement,
     blockForUnfamiliarSites: ControlledRadioButtonElement,
     bundlesRadioGroup: SettingsRadioGroupElement,
+    enhancedProtectionButton: ControlledRadioButtonElement,
     httpsFirstModeEnabledBalanced: ControlledRadioButtonElement,
     httpsFirstModeEnabledStrict: ControlledRadioButtonElement,
     httpsFirstModeRadioGroup: SettingsRadioGroupElement,
@@ -86,6 +90,7 @@ export interface SettingsSecurityPageV2Element {
     safeBrowsingRadioGroup: SettingsRadioGroupElement,
     safeBrowsingRow: SecurityPageFeatureRowElement,
     secureDnsV2Row: SettingsSecureDnsV2Element,
+    standardProtectionButton: ControlledRadioButtonElement,
   };
 }
 
@@ -208,14 +213,27 @@ export class SettingsSecurityPageV2Element extends
         value: JavascriptOptimizerSetting,
       },
 
+      isSecureDnsManagedByProxy_: {
+        type: Boolean,
+        value: false,
+      },
+
       shouldHideBundles_: {
         type: Boolean,
         computed: 'computeShouldHideBundles_(' +
             'prefs.generated.safe_browsing.*, ' +
             'prefs.dns_over_https.mode.*, ' +
             'prefs.generated.javascript_optimizer.*, ' +
-            'enableBundledSecuritySettingsSecureDnsV2_)',
+            'enableBundledSecuritySettingsSecureDnsV2_, ' +
+            'isSecureDnsManagedByProxy_)',
       },
+
+      showDisableSafebrowsingDialog_: {
+        type: Boolean,
+        value: false,
+      },
+
+      currentSafeBrowsingSetting_: SafeBrowsingSetting,
     };
   }
 
@@ -237,6 +255,7 @@ export class SettingsSecurityPageV2Element extends
   }
 
   // Keep in alphabetical order.
+  declare private currentSafeBrowsingSetting_: SafeBrowsingSetting;
   declare private enableBundledSecuritySettingsSecureDnsV2_: boolean;
   declare private enableSecurityKeysSubpage_: boolean;
   declare private httpsFirstModeUncheckedValues_: HttpsFirstModeSetting[];
@@ -250,7 +269,9 @@ export class SettingsSecurityPageV2Element extends
   declare private javascriptGuardrailsStateTextMap_: Object;
   declare private safeBrowsingOff_: SafeBrowsingSetting[];
   declare private safeBrowsingStateTextMap_: Object;
+  declare private isSecureDnsManagedByProxy_: boolean;
   declare private shouldHideBundles_: boolean;
+  declare private showDisableSafebrowsingDialog_: boolean;
 
   private lastFocusTime_: number|undefined;
   private totalTimeInFocus_: number = 0;
@@ -259,10 +280,23 @@ export class SettingsSecurityPageV2Element extends
   private securitySettingsBundleStateOnOpen_: SecuritySettingsBundleSetting;
   private isRouteSecurity_: boolean = true;
   private eventTracker_: EventTracker = new EventTracker();
+  private browserProxy_: SecurityPageBrowserProxy =
+      SecurityPageBrowserProxyImpl.getInstance();
   private hatsBrowserProxy_: HatsBrowserProxy =
       HatsBrowserProxyImpl.getInstance();
   private metricsBrowserProxy_: MetricsBrowserProxy =
       MetricsBrowserProxyImpl.getInstance();
+
+  override connectedCallback() {
+    super.connectedCallback();
+
+    this.browserProxy_.getSecureDnsSetting().then(
+        (setting: SecureDnsSetting) => this.onSecureDnsPrefsChanged_(setting));
+
+    this.addWebUiListener(
+        'secure-dns-setting-changed',
+        (setting: SecureDnsSetting) => this.onSecureDnsPrefsChanged_(setting));
+  }
 
   override ready() {
     super.ready();
@@ -297,6 +331,8 @@ export class SettingsSecurityPageV2Element extends
     CrSettingsPrefs.initialized.then(() => {
       this.safeBrowsingStateOnOpen_ =
           this.getPref('generated.safe_browsing').value;
+      this.currentSafeBrowsingSetting_ =
+          this.getPref('generated.safe_browsing').value;
       this.securitySettingsBundleStateOnOpen_ =
           this.getPref('generated.security_settings_bundle').value;
     });
@@ -326,6 +362,11 @@ export class SettingsSecurityPageV2Element extends
    */
   private onFocus_() {
     this.lastFocusTime_ = this.hatsBrowserProxy_.now();
+  }
+
+  private onSecureDnsPrefsChanged_(setting: SecureDnsSetting) {
+    this.isSecureDnsManagedByProxy_ =
+        setting.managementMode !== SecureDnsUiManagementMode.NO_OVERRIDE;
   }
 
   /**
@@ -372,6 +413,7 @@ export class SettingsSecurityPageV2Element extends
     if (!this.isSafeBrowsingEnabled_) {
       this.metricsBrowserProxy_.recordAction(
           'SafeBrowsing.Settings.DisableSafeBrowsingClicked');
+      this.showDisableSafebrowsingDialog_ = true;
     }
   }
 
@@ -387,12 +429,49 @@ export class SettingsSecurityPageV2Element extends
           SecurityPageV2Interaction.STANDARD_SAFE_BROWSING_RADIO_BUTTON_CLICK);
       this.metricsBrowserProxy_.recordAction(
           'SafeBrowsing.Settings.StandardProtectionClicked');
+      this.currentSafeBrowsingSetting_ = SafeBrowsingSetting.STANDARD;
     } else if (selected === SafeBrowsingSetting.ENHANCED) {
       this.interactions_.add(
           SecurityPageV2Interaction.ENHANCED_SAFE_BROWSING_RADIO_BUTTON_CLICK);
       this.metricsBrowserProxy_.recordAction(
           'SafeBrowsing.Settings.EnhancedProtectionClicked');
+      this.currentSafeBrowsingSetting_ = SafeBrowsingSetting.ENHANCED;
     }
+  }
+
+  /**
+   * Handles the closure of the disable safebrowsing dialog, reselects the
+   * appropriate radio button if the user cancels the dialog, and puts focus on
+   * the safebrowsing row.
+   */
+  private onDisableSafebrowsingDialogClose_() {
+    const dialog =
+        this.shadowRoot!.querySelector('settings-simple-confirmation-dialog');
+    assert(dialog);
+    const confirmed = dialog.wasConfirmed();
+    // Check if the dialog was confirmed before closing it.
+    if (confirmed) {
+      this.metricsBrowserProxy_.recordAction(
+          'SafeBrowsing.Settings.DisableSafeBrowsingDialogConfirmed');
+      this.metricsBrowserProxy_.recordSafeBrowsingInteractionHistogram(
+          SafeBrowsingInteractions
+              .SAFE_BROWSING_DISABLE_SAFE_BROWSING_DIALOG_CONFIRMED);
+    } else {
+      // Reset SafeBrowsing setting to previously selected option.
+      this.setPrefValue(
+          'generated.safe_browsing', this.currentSafeBrowsingSetting_);
+      this.metricsBrowserProxy_.recordAction(
+          'SafeBrowsing.Settings.DisableSafeBrowsingDialogDenied');
+      this.metricsBrowserProxy_.recordSafeBrowsingInteractionHistogram(
+          SafeBrowsingInteractions
+              .SAFE_BROWSING_DISABLE_SAFE_BROWSING_DIALOG_DENIED);
+    }
+
+    this.showDisableSafebrowsingDialog_ = false;
+
+    // Set focus back to the row regardless of user interaction
+    // with the dialog, as it was the entry point to the dialog.
+    focusWithoutInk(this.$.safeBrowsingRow);
   }
 
   private onSecureDnsRowExpandedChange_(e: CustomEvent<{value: boolean}>) {
@@ -517,6 +596,8 @@ export class SettingsSecurityPageV2Element extends
     this.setPrefValue(
         'generated.safe_browsing',
         this.getDefaultSafeBrowsingValue_(bundleSetting));
+    this.currentSafeBrowsingSetting_ =
+        this.getDefaultSafeBrowsingValue_(bundleSetting);
     this.setPrefValue(
         'generated.javascript_optimizer',
         this.getDefaultJsGuardrailsValue_(bundleSetting));
@@ -647,10 +728,12 @@ export class SettingsSecurityPageV2Element extends
       return true;
     }
 
-    if (this.enableBundledSecuritySettingsSecureDnsV2_ &&
-        this.getPref('dns_over_https.mode').enforcement ===
-            chrome.settingsPrivate.Enforcement.ENFORCED) {
-      return true;
+    if (this.enableBundledSecuritySettingsSecureDnsV2_) {
+      if (this.getPref('dns_over_https.mode').enforcement ===
+              chrome.settingsPrivate.Enforcement.ENFORCED ||
+          this.isSecureDnsManagedByProxy_) {
+        return true;
+      }
     }
 
     if (this.getPref('generated.javascript_optimizer').enforcement ===

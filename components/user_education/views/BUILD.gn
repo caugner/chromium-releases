@@ -115,5 +115,6 @@ source_set("unit_tests") {
     "//ui/gfx",
     "//ui/views",
     "//ui/views:test_support",
+    "//ui/views/interaction:test_support",
   ]
 }

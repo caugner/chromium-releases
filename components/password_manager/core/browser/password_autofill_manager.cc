@@ -240,7 +240,8 @@ PasswordAutofillManager::GetDriver() {
 void PasswordAutofillManager::OnSuggestionsShown(
     base::span<const Suggestion> suggestions) {}
 
-void PasswordAutofillManager::OnSuggestionsHidden() {
+void PasswordAutofillManager::OnSuggestionsHidden(
+    autofill::SuggestionHidingReason reason) {
   password_client_->GetUndoPasswordChangeController()->OnSuggestionsHidden();
   metrics_util::LogPasswordDropdownHidden();
 }
@@ -446,6 +447,12 @@ autofill::FillingProduct PasswordAutofillManager::GetMainFillingProduct()
   return autofill::FillingProduct::kPassword;
 }
 
+void PasswordAutofillManager::OnTabSelected(
+    autofill::TabbedPaneTabType tab_type) {
+  // Tabbed panes do not currently exist for passwords.
+  NOTREACHED();
+}
+
 void PasswordAutofillManager::OnAddPasswordFillData(
     const autofill::PasswordFormFillData& fill_data) {
   if (!autofill::IsValidPasswordFormFillData(fill_data)) {
@@ -508,7 +515,7 @@ void PasswordAutofillManager::ShowSuggestions(
               password_client_->GetProfilePasswordStore(),
               password_client_->GetAccountPasswordStore()));
     }
-    manual_fallback_flow_->RunFlow(field.element_id, GetBounds(field),
+    manual_fallback_flow_->RunFlow(field.element_id, field.bounds,
                                    field.text_direction);
     return;
   }
@@ -589,7 +596,7 @@ void PasswordAutofillManager::OnPasskeysReady(
 void PasswordAutofillManager::ContinueShowingSuggestions(
     const autofill::TriggeringField& field) {
   bool autofill_available = ShowPopup(
-      GetBounds(field), field.text_direction,
+      field.bounds, field.text_direction,
       GetSuggestions(field.typed_username, OffersGeneration(false),
                      ShowPasswordSuggestions(true),
                      ShowWebAuthnCredentials(field.show_webauthn_credentials),
@@ -690,13 +697,17 @@ bool PasswordAutofillManager::ShowPopup(
         autofill::AutofillSuggestionTriggerSource::kPasswordManager,
         /*form_control_ax_id=*/0, autofill::PopupAnchorType::kField);
   }
-  autofill_client_->ShowAutofillSuggestions(last_popup_open_args_,
-                                            weak_ptr_factory_.GetWeakPtr());
+  last_session_id_ = autofill_client_->ShowAutofillSuggestions(
+      last_popup_open_args_, weak_ptr_factory_.GetWeakPtr());
   return true;
 }
 
 void PasswordAutofillManager::UpdatePopup(std::vector<Suggestion> suggestions) {
   if (!password_manager_driver_->CanShowAutofillUi()) {
+    return;
+  }
+  if (last_session_id_ !=
+      autofill_client_->GetSessionIdForCurrentAutofillSuggestions()) {
     return;
   }
   if (!ContainsOtherThanManagePasswords(suggestions)) {
@@ -905,15 +916,6 @@ std::vector<autofill::Suggestion> PasswordAutofillManager::GetSuggestions(
       page_favicon_, username_filter, offers_generation,
       show_password_suggestions, show_webauthn_credentials,
       show_identity_credentials);
-}
-
-gfx::RectF PasswordAutofillManager::GetBounds(
-    const autofill::TriggeringField& field) {
-  return base::FeatureList::IsEnabled(
-             autofill::features::kAutofillAndPasswordsInSameSurface)
-             ? field.bounds  // Already transformed in ContentAutofillDriver.
-             : password_manager_driver_->TransformToRootCoordinates(
-                   field.bounds);
 }
 
 }  //  namespace password_manager

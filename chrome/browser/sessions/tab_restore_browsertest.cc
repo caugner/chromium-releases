@@ -14,6 +14,7 @@
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/current_thread.h"
 #include "base/test/test_timeouts.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -37,6 +38,7 @@
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
 #include "chrome/browser/ui/tabs/features.h"
+#include "chrome/browser/ui/tabs/saved_tab_groups/saved_tab_group_utils.h"
 #include "chrome/browser/ui/tabs/saved_tab_groups/tab_group_action_context_desktop.h"
 #include "chrome/browser/ui/tabs/tab_enums.h"
 #include "chrome/browser/ui/tabs/tab_group_model.h"
@@ -53,6 +55,8 @@
 #include "components/javascript_dialogs/app_modal_dialog_view.h"
 #include "components/keep_alive_registry/keep_alive_types.h"
 #include "components/keep_alive_registry/scoped_keep_alive.h"
+#include "components/os_crypt/async/browser/os_crypt_async.h"
+#include "components/os_crypt/async/browser/test_utils.h"
 #include "components/saved_tab_groups/internal/saved_tab_group_model.h"
 #include "components/saved_tab_groups/public/features.h"
 #include "components/saved_tab_groups/public/saved_tab_group_tab.h"
@@ -95,6 +99,7 @@ class TabRestoreTest : public InProcessBrowserTest {
     url2_ = chrome_test_utils::GetTestUrl(
         base::FilePath().AppendASCII("session_history"),
         base::FilePath().AppendASCII("bot2.html"));
+    os_crypt_async_ = os_crypt_async::GetTestOSCryptAsyncForTesting(true);
   }
 
   TabRestoreTest(const TabRestoreTest&) = delete;
@@ -290,6 +295,8 @@ class TabRestoreTest : public InProcessBrowserTest {
 
   GURL url1_;
   GURL url2_;
+
+  std::unique_ptr<os_crypt_async::OSCryptAsync> os_crypt_async_;
 
  private:
   gfx::AnimationTestApi::RenderModeResetter animation_mode_reset_;
@@ -672,7 +679,7 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest,
   // Create a tab entry with a group and add it to TabRestoreService directly.
   auto service = std::make_unique<sessions::TabRestoreServiceImpl>(
       std::make_unique<ChromeTabRestoreServiceClient>(app_browser->profile()),
-      app_browser->profile()->GetPrefs(), nullptr);
+      app_browser->profile()->GetPrefs(), nullptr, os_crypt_async_.get());
 
   tab_groups::TabGroupId group_id = tab_groups::TabGroupId::GenerateNew();
   std::unique_ptr<sessions::tab_restore::Tab> tab =
@@ -2393,6 +2400,84 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest, RestoreEntireGroupInWindow) {
   EXPECT_EQ(1u, window_entry->tabs.size());
 }
 
+// Ensure that restore of a tab group from a closed window doesn't crash the
+// browser if another tab group from that windows is already open in a separate
+// window (see crbug.com/503013373).
+IN_PROC_BROWSER_TEST_F(TabRestoreTest, RestoreTabGroupFromClosedWindow) {
+  ASSERT_TRUE(browser()->tab_strip_model()->SupportsTabGroups());
+
+  sessions::TabRestoreService* service =
+      TabRestoreServiceFactory::GetForProfile(browser()->profile());
+  tab_groups::TabGroupSyncService* sync_service =
+      tab_groups::TabGroupSyncServiceFactory::GetForProfile(
+          browser()->profile());
+
+  // Window A
+  AddHTTPSSchemeTabs(browser(), 3);
+  ASSERT_EQ(4, browser()->tab_strip_model()->count());
+
+  // Create 2 tab groups (1 and 2) in window A
+  const tab_groups::TabGroupId group_1 =
+      browser()->tab_strip_model()->AddToNewGroup({1, 2});
+  const tab_groups::TabGroupId group_2 =
+      browser()->tab_strip_model()->AddToNewGroup({3});
+
+  ASSERT_TRUE(sync_service->GetGroup(group_1));
+  base::Uuid saved_guid_1 = sync_service->GetGroup(group_1)->saved_guid();
+
+  // Window B
+  Browser* browser_b = CreateBrowser(browser()->profile());
+  // Window C
+  Browser* browser_c = CreateBrowser(browser()->profile());
+
+  ASSERT_EQ(3u, chrome::GetTotalBrowserCount());
+
+  // Close window A
+  CloseBrowserSynchronously(browser());
+  ASSERT_EQ(2u, chrome::GetTotalBrowserCount());
+
+  // Check that the TabRestoreService has the contents of the closed window.
+  const sessions::TabRestoreService::Entries& entries = service->entries();
+  ASSERT_GE(entries.size(), 1u);
+  ASSERT_EQ(sessions::tab_restore::Type::WINDOW, entries.front()->type);
+
+  auto* window_entry =
+      static_cast<sessions::tab_restore::Window*>(entries.front().get());
+  ASSERT_TRUE(window_entry->tab_groups.contains(group_1));
+  ASSERT_TRUE(window_entry->tab_groups.contains(group_2));
+
+  // Get the SessionID for group 2.
+  SessionID group_2_sid = window_entry->tab_groups.at(group_2)->id;
+
+  // 3. In window B open group 1 normally (not restored)
+  tab_groups::SavedTabGroupUtils::OpenSavedTabGroup(
+      browser_b, saved_guid_1, tab_groups::OpeningSource::kOpenedFromRevisitUi);
+
+  // 4. In window C restore group 2
+  service->RestoreEntryById(browser_c->GetFeatures().live_tab_context(),
+                            group_2_sid,
+                            WindowOpenDisposition::NEW_FOREGROUND_TAB);
+
+  // Checks:
+  // 1. group 1 is open in window B
+  auto groups_b = browser_b->tab_strip_model()->group_model()->ListTabGroups();
+  ASSERT_EQ(1u, groups_b.size());
+  EXPECT_EQ(2u, browser_b->tab_strip_model()
+                    ->group_model()
+                    ->GetTabGroup(groups_b[0])
+                    ->ListTabs()
+                    .length());
+
+  // 2. group 2 is open in window C
+  auto groups_c = browser_c->tab_strip_model()->group_model()->ListTabGroups();
+  ASSERT_EQ(1u, groups_c.size());
+  EXPECT_EQ(1u, browser_c->tab_strip_model()
+                    ->group_model()
+                    ->GetTabGroup(groups_c[0])
+                    ->ListTabs()
+                    .length());
+}
+
 class SoftNavigationTabRestoreTest : public TabRestoreTest {
  public:
   void SetUpCommandLine(base::CommandLine* command_line) override {
@@ -3127,8 +3212,10 @@ IN_PROC_BROWSER_TEST_F(TabRestoreVerticalTabsTest,
 
   auto* state_controller =
       tabs::VerticalTabStripStateController::From(browser());
-  state_controller->SetCollapsed(kIsCollapsed);
+  state_controller->RequestCollapse(kIsCollapsed);
   state_controller->SetUncollapsedWidth(kUncollapsedWidth);
+  ASSERT_TRUE(base::test::RunUntil(
+      [&]() { return state_controller->IsCollapsed() == kIsCollapsed; }));
 
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), GURL(chrome::kChromeUINewTabURL),

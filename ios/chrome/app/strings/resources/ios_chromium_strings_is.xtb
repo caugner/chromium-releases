@@ -2,6 +2,7 @@
 <!DOCTYPE translationbundle>
 <translationbundle lang="is">
 <translation id="1000436330784933699">Hér geturðu opnað Linsu.</translation>
+<translation id="1005291068154454184">Vídeó á öllum skjánum um hvernig á að stilla Chromium sem sjálfgefinn vafra</translation>
 <translation id="1042296835509784301">Opnar Aðgangsorðastjórnun í Chromium.</translation>
 <translation id="1047130070405668746">Veldu Chromium</translation>
 <translation id="1091252999271033193">Þetta þýðir að Chromium biður alltaf um snjalltækjaútgáfu vefsvæðis.</translation>
@@ -70,9 +71,6 @@ Ekki er hægt að vista ný bókamerki á reikningnum þínum fyrr en þú eyði
 <translation id="2313870531055795960">Ber vefslóðir saman við lista yfir óörugg vefsvæði sem er vistaður í Chromium. Ef vefsvæði reynir að stela aðgangsorðinu þínu, eða ef þú sækir skaðlega skrá, gæti Chromium einnig sent vefslóðir í Örugga vefskoðun, þar á meðal hluta af innihaldi síðna.</translation>
 <translation id="2314220608288760290">Chromium opnar YouTube-huliðstengla sjálfkrafa í huliðsstillingu.</translation>
 <translation id="231828342043114302">Til að fá sérsniðið innihald byggt á þínum áhugamálum skaltu skrá þig inn á Chromium.</translation>
-<translation id="2326738825692478496">Einhver Chromium-gögn hafa ekki enn verið vistuð á Google-reikningnum þínum.
-
-Prófaðu að bíða í nokkrar mínútur áður en þú skráir þig út. Ef þú skráir þig út núna verður þessum gögnum eytt.</translation>
 <translation id="2334943301233020675">Eftirfarandi aðgangslyklar voru ekki fluttir inn í Aðgangsorðastjórnun því þeir uppfylla ekki skilyrðin.</translation>
 <translation id="2337722506862731008">Deila Chromium</translation>
 <translation id="2340423701577464731">Bæta leslistaatriði við Chromium</translation>
@@ -103,7 +101,6 @@ Prófaðu að bíða í nokkrar mínútur áður en þú skráir þig út. Ef þ
 Til að skoða fleiri stillingar sem nota gögn til að bæta Chromium-upplifunina þína skaltu fara í <ph name="BEGIN_LINK" />Google-þjónustur<ph name="END_LINK" />.</translation>
 <translation id="2832168932648876507">Leita með röddinni í Chromium.</translation>
 <translation id="2843571538056574338">Nota Chromium til sjálfvirkrar útfyllingar</translation>
-<translation id="2899085719655668655">Leiðbeiningar í mynd í mynd-vídeói um hvernig á að stilla Chromium sem sjálfgefinn vafra</translation>
 <translation id="2918709798697875261">Fyrirtækið þitt krefst þess að þú skráir þig ekki inn í Chromium.</translation>
 <translation id="2942241131342758843">Notaðu Chromium sem sjálfgefinn valkost til að opna tengla, leita í græjum og til sjálfvirkrar útfyllingar aðgangsorða í öðrum forritum</translation>
 <translation id="2977470724722393594">Chromium er uppfært</translation>
@@ -137,6 +134,7 @@ Prófaðu að bíða í nokkrar mínútur áður en þú skiptir um reikning. Ef
 <translation id="377649297473651452">Stækkað yfirlit yfir sjálfvirka útfyllingu í Chromium</translation>
 <translation id="3780779443901618967">Varar þig við hættulegum vefsvæðum, jafnvel þeim sem Google hafði enga vitneskju um, með því að greina fleiri gögn frá vefsvæðum en hefðbundin vörn. Þú getur valið að sleppa Chromium-viðvörunum.</translation>
 <translation id="3805899903892079518">Chromium hefur ekki aðgang að myndunum þínum eða myndskeiðum. Veittu aðgang í iOS Settings &gt; Privacy &gt; Photos.</translation>
+<translation id="3809591243528646631">Til að fá aðgang að öryggiseiginleikum fyrir börn geturðu annaðhvort notað Google-reikning sem er settur upp fyrir barn eða notað Chromium án reiknings. <ph name="BEGIN_LINK" />Nánar<ph name="END_LINK" /></translation>
 <translation id="3816686541346279443">Chromium býðst til að vista aðgangsorðið þitt.</translation>
 <translation id="3827545470516145620">Þú er með staðlaða öryggisvörn í þessu tæki</translation>
 <translation id="3833326979834193417">Chromium keyrir öryggisathugun sjálfkrafa daglega til að verja þig gegn öryggisbrotum, ótraustum vefsvæðum og fleiru. Þú færð frekari upplýsingar um öryggisathugun í stillingunum.</translation>
@@ -172,6 +170,7 @@ Gögnin þín eru dulkóðuð með aðgangsorði. Sláðu það inn til að nota
 Til að breyta þessari stillingu skaltu <ph name="BEGIN_LINK" />eyða Chromium-gögnunum á reikningnum þínum<ph name="END_LINK" />.</translation>
 <translation id="4578500311756617174">Ábending frá Chromium: Notaðu Chromium sem sjálfgefinn vafra</translation>
 <translation id="458786853569524949">Núna getur þú notað Chromium hvenær sem þú ýtir á tengil í tölvupóstum, skjölum og öðrum forritum.</translation>
+<translation id="4625730353066900738">Kynntu þér grunnatriði Chromium til að hefjast handa</translation>
 <translation id="4633738821577273991">Fáðu „Enn öruggari vefskoðun“ fyrir þennan Chromium-prófíl líka</translation>
 <translation id="4654936625574199632">Chromium sendir notkunar- og hrunskýrslur til Google til að bæta forritið. <ph name="BEGIN_LINK" />Stjórna<ph name="END_LINK" /></translation>
 <translation id="4681781466797808448">Kveiktu á Chromium skanna</translation>
@@ -182,7 +181,6 @@ Til að breyta þessari stillingu skaltu <ph name="BEGIN_LINK" />eyða Chromium-
 <translation id="4856138222358683580">Chromium-aðgerðir</translation>
 <translation id="4869706986935301458">Opnaðu Chromium samstundis þegar þú ert í iPhone</translation>
 <translation id="4904452304169763785">Viðvaranir varðandi öll persónuverndar- eða öryggismál sem Chromium greinir fyrir þig.</translation>
-<translation id="4908570938463711775">Kynntu þér grunnatriði Chromium til að hefjast handa</translation>
 <translation id="4962295957157529683">Ljúktu því sem þú ert að gera í öðrum opnum Chromium-glugga.</translation>
 <translation id="4985291216379576555">Ótengt, Chromium getur ekki leitað að uppfærslum.</translation>
 <translation id="4996471330284142407">Komdu meiru í verk með einfaldari, öruggari og hraðari Chromium.</translation>
@@ -358,6 +356,7 @@ Aðeins einstaklingar sem eru með aðgangsorðið þitt geta lesið dulkóðuð
 <translation id="8900052431807804054">Fáðu hámarksöryggi Chromium</translation>
 <translation id="8908791447256515663">Opnaðu Chromium hraðar úr iPad-dokkunni þinni.</translation>
 <translation id="8925569192291721236">Fáðu tilkynningar um verðrakningu og ábendingar frá Chromium til að vera með á nótunum.</translation>
+<translation id="8939412301975414416">Til að fá aðgang að öryggiseiginleikum fyrir börn í Chromium geturðu annaðhvort notað Google-reikning sem er settur upp fyrir barn eða notað Chromium án reiknings.</translation>
 <translation id="8950326149985259075">{THRESHOLD,plural, =1{Þetta gerist þegar Chromium er ekki í notkun í {THRESHOLD} mín.}one{Þetta gerist þegar Chromium er ekki í notkun í {THRESHOLD} mín.}other{Þetta gerist þegar Chromium er ekki í notkun í {THRESHOLD} mín.}}</translation>
 <translation id="8963279154877372067">Leyfa Chromium-tilkynningar til að fá tilkynningar um verðlækkanir</translation>
 <translation id="8975812008711371178">Leita með röddinni í Chromium</translation>

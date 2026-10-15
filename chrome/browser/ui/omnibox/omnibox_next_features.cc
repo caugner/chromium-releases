@@ -29,6 +29,9 @@ namespace omnibox {
 
 namespace internal {
 
+// If enabled, shows the omnibox suggestions in the popup in WebUI.
+BASE_FEATURE(kWebUIOmniboxPopup, DISABLED);
+
 // If enabled, Omnibox popup will transition to AI-Mode with the compose-box
 // panel taking up the whole of the popup, covering the location bar completely.
 BASE_FEATURE(kWebUIOmniboxAimPopup, DISABLED);
@@ -38,14 +41,14 @@ BASE_FEATURE(kWebUIOmniboxAimPopup, DISABLED);
 constexpr base::FeatureParam<AddContextButtonVariant>::Option
     kAddContextButtonVariantOptions[] = {
         {AddContextButtonVariant::kBelowResults, "below_results"},
-        {AddContextButtonVariant::kAboveResults, "above_results"},
         {AddContextButtonVariant::kInline, "inline"}};
 
 // Configures the placement of the "Add Context" button in the Omnibox popup.
 const base::FeatureParam<AddContextButtonVariant>
     kWebUIOmniboxAimPopupAddContextButtonVariantParam{
         &internal::kWebUIOmniboxAimPopup, "Omnibox_AddContextButtonVariant",
-        AddContextButtonVariant::kBelowResults, &kAddContextButtonVariantOptions};
+        AddContextButtonVariant::kBelowResults,
+        &kAddContextButtonVariantOptions};
 // If true, hides the "Add Context" button in the "classic" popup.
 const base::FeatureParam<bool> kHideClassicContextButton{
     &internal::kWebUIOmniboxAimPopup, "Omnibox_HideClassicContextButton",
@@ -63,8 +66,6 @@ BASE_FEATURE(kWebUIOmniboxAimPopupDisableAnimation, DISABLED);
 // If enabled, removes the cutout for the location bar and fills the entire
 // popup content with the WebUI WebView.
 BASE_FEATURE(kWebUIOmniboxFullPopup, DISABLED);
-// If enabled, shows the omnibox suggestions in the popup in WebUI.
-BASE_FEATURE(kWebUIOmniboxPopup, DISABLED);
 // Enables the WebUI for omnibox suggestions without modifying the popup UI.
 BASE_FEATURE(kWebUIOmniboxPopupDebug, DISABLED);
 // Enables side-by-side comparison omnibox suggestions in WebUI and Views.
@@ -73,6 +74,12 @@ const base::FeatureParam<bool> kWebUIOmniboxPopupDebugSxSParam{
 // If enabled, the WebUIOmniboxPopup controls its own selection state instead of
 // following that of the OmniboxEditModel.
 BASE_FEATURE(kWebUIOmniboxPopupSelectionControl, DISABLED);
+
+// If enabled, animates the caret in the omnibox.
+BASE_FEATURE(kOmniboxAnimatedCaret, ENABLED);
+
+// If enabled, enables energy effect in the omnibox.
+BASE_FEATURE(kEnergyEffectInOmnibox, ENABLED);
 
 // Decodes a proto object from its serialized Base64 string representation.
 // Returns true if decoding and parsing succeed, false otherwise.
@@ -190,6 +197,10 @@ bool ShouldShowAimContextMenuOption(Profile* profile) {
       omnibox::IsAimPopupEnabled(profile);
 
   return is_aim_context_entrypoint_enabled;
+}
+
+bool IsWebUIOmniboxPopupEnabled() {
+  return base::FeatureList::IsEnabled(internal::kWebUIOmniboxPopup);
 }
 
 bool IsAimPopupFeatureEnabled() {
@@ -318,12 +329,10 @@ const base::FeatureParam<bool> kShowContextMenuHeaders(
     &internal::kWebUIOmniboxAimPopup,
     "Omnibox_ShowContextMenuHeaders",
     true);
-// TODO(b/481079194): Remove `kAutoSubmitVoiceSearchQuery` and the code that
-// respects its disabled state.
-const base::FeatureParam<bool> kAutoSubmitVoiceSearchQuery(
+const base::FeatureParam<bool> kUseComposeboxFork(
     &internal::kWebUIOmniboxAimPopup,
-    "Omnibox_AutoSubmitVoiceSearchQuery",
-    true);
+    "Omnibox_UseComposeboxFork",
+    false);
 
 FeatureConfig::FeatureConfig() : config(GetNTPComposeboxConfig()) {}
 

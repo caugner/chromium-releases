@@ -64,6 +64,7 @@
 <translation id="2213327331203157297">如要停用 Chrome 的鎖定模式，請在 iPhone 上將該模式關閉。</translation>
 <translation id="2242467532204595597">隨時可以使用 Chrome 開啟訊息、文件和其他應用程式中的連結。</translation>
 <translation id="2256384876478573507">用 iPhone 上網時，可以更快開啟 Chrome。</translation>
+<translation id="2270691132923135296">Chrome 基本操作一次上手</translation>
 <translation id="2311240109311056604">開啟 Chrome 恐龍遊戲。</translation>
 <translation id="2339201583852607431">密碼會儲存至你的 Google 帳戶 (<ph name="EMAIL" />)。</translation>
 <translation id="2342919707875585281">Chrome 會與你允許的網站分享位置資訊。</translation>
@@ -81,9 +82,6 @@
 <translation id="2703746758996815929">如要取得 Chrome 的實用提示，請在 iOS 設定中開啟通知功能。</translation>
 <translation id="2728851697704606655">透過 Google 智慧鏡頭翻譯</translation>
 <translation id="2736805085127235148">目前未在裝置設定中開啟 Chrome 通知。</translation>
-<translation id="2754428955276778271">部分 Chrome 資料尚未儲存到 Google 帳戶，
-
-請稍待幾分鐘後再嘗試登出。如果現在登出，系統將刪除這類資料。</translation>
 <translation id="2767464022270041271">尚未儲存任何密碼。你必須先儲存密碼，才能使用 Google 密碼管理工具的檢查功能。</translation>
 <translation id="2788811701191021538">使用 Chrome 開啟「付款方式設定」頁面。</translation>
 <translation id="2876628302275096482">進一步瞭解 <ph name="BEGIN_LINK" />Chrome 如何保護你的資料隱私<ph name="END_LINK" /></translation>
@@ -110,7 +108,7 @@
 <translation id="322254490661677575">如要將 Chrome 的資料儲存到 Google 帳戶及使用這類資料，請輸入通關密語。</translation>
 <translation id="3303503998967553377">在 iOS 上使用 Chrome 快捷操作</translation>
 <translation id="3348862487678490430">將閱讀清單項目加入 Chrome</translation>
-<translation id="3357827134511189025">使用 Chrome 做為自動填寫來源，可從任何應用程式使用已儲存的密碼和通行密鑰登入</translation>
+<translation id="3357827134511189025">使用 Chrome 做為自動填寫來源，可從任何應用程式使用已儲存的密碼和密碼金鑰登入</translation>
 <translation id="3360031466389132716">{THRESHOLD,plural, =1{如果 Chrome 閒置 {THRESHOLD} 分鐘，就會執行這些動作}other{如果 Chrome 閒置 {THRESHOLD} 分鐘，就會執行這些動作}}</translation>
 <translation id="3367797402528056312">完成 Chrome 設定</translation>
 <translation id="3371064404604898522">將 Chrome 設為預設瀏覽器</translation>
@@ -151,7 +149,6 @@
 <translation id="4693084815234024320">目前使用 Chrome 無痕模式</translation>
 <translation id="4708857722625759026">從 iPad Dock 更快存取 Chrome。</translation>
 <translation id="4713740144985377441">返回 Chrome 上傳檔案</translation>
-<translation id="4713907610796204963">瞭解 Chrome 的基本實用功能，協助你快速上手</translation>
 <translation id="4724297637870447613">在所有裝置上使用 Chrome</translation>
 <translation id="4738647308035481133">Google Chrome 頁面</translation>
 <translation id="4742795653798179840">已刪除 Chrome 資料</translation>
@@ -186,6 +183,7 @@
 <translation id="5395376160638294582">確保你隨時可以使用 Google 帳戶中的 Chrome 資料</translation>
 <translation id="5404252374083197467">要將 Chrome 設為預設瀏覽器嗎？</translation>
 <translation id="5439191312780166229">這項防護機制分析的網站資料比標準防護來得多，因此即使是 Google 不知道的網站，這項防護機制也能提供危險網站警告。你可以選擇略過 Chrome 的警告。</translation>
+<translation id="5453077102022695084">全螢幕影片，說明如何將 Chrome 設為預設瀏覽器</translation>
 <translation id="5460571915754665838">4. 選取「Chrome」</translation>
 <translation id="5492504007368565877">Google 密碼管理工具無法檢查你的密碼。</translation>
 <translation id="5525095647255982834">如要將這個分頁傳送到另一部裝置，請在該裝置上登入 Chrome。</translation>
@@ -296,6 +294,7 @@
 <translation id="7599894504325210080">Chrome 的自動填入檢視畫面已展開</translation>
 <translation id="7617512710641355143">Chrome 是受管理的應用程式</translation>
 <translation id="7626032353295482388">歡迎使用 Chrome</translation>
+<translation id="7634397654061173327">如要在 Chrome 中使用兒童安全功能，可以使用為孩子設定的 Google 帳戶，也可以不登入帳戶直接使用 Chrome。</translation>
 <translation id="7641448682796883218">Chrome 提示：安全瀏覽強化防護功能</translation>
 <translation id="7642373780953416937">接收 Chrome 自動偵測到的任何隱私權或安全性問題警示。</translation>
 <translation id="7660356333829433649">歡迎返回這裡查看更多實用提示，瞭解如何充分發揮 Chrome 的效用。</translation>
@@ -329,6 +328,7 @@
 <translation id="8245080522851805544">關閉 Chrome 時進行裝置驗證，確保瀏覽活動不外洩</translation>
 <translation id="8248887045858762645">Chrome 實用訣竅</translation>
 <translation id="8265730590513812063">開啟 Chrome 選單</translation>
+<translation id="8284376267694582021">如要使用兒童安全功能，可以使用為孩子設定的 Google 帳戶，也可以不登入帳戶直接使用 Chrome。<ph name="BEGIN_LINK" />瞭解詳情<ph name="END_LINK" /></translation>
 <translation id="8317674518145175158">系統不會加密保護付款方式和地址，也不會同步處理 Chrome 中的瀏覽記錄。
 
 只有知道通關密語的人才能讀取你的加密資料。系統不會將通關密語傳送給 Google，Google 也不會儲存通關密語。如果忘記通關密語或想變更這項設定，請<ph name="BEGIN_LINK" />刪除帳戶中的 Chrome 資料<ph name="END_LINK" />。</translation>
@@ -373,7 +373,6 @@
 <translation id="9176561303811134420">在 Chrome 中管理付款方式</translation>
 <translation id="9181628561061032322">開啟最近使用 Chrome 開啟的分頁。</translation>
 <translation id="924447568950697217">將 Chrome 設為預設瀏覽器</translation>
-<translation id="93622496651329736">子母畫面影片說明：如何將 Chrome 設為預設瀏覽器</translation>
 <translation id="948597495737267756">開啟 Chrome 歷史記錄頁面。</translation>
 <translation id="954347330803595209">匯入資料即可在 Chrome 中使用密碼、歷史記錄、書籤和信用卡</translation>
 <translation id="97300214378190234">隨時可以使用 Chrome 開啟其他應用程式中的連結。</translation>

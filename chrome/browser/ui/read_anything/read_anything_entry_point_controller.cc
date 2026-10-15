@@ -188,8 +188,8 @@ void OnOptimizationGuideDecision(
     case optimization_guide::OptimizationGuideDecision::kFalse:
       // Optimization guide decided no, so immediately callback with a negative
       // result, bypassing the Readability check.
-      LogDecision(ReadAnythingOmniboxChipDecision::kHideOptimizationGuide);
       std::move(result_callback).Run(false);
+      LogDecision(ReadAnythingOmniboxChipDecision::kHideOptimizationGuide);
       break;
     case optimization_guide::OptimizationGuideDecision::kTrue:
     case optimization_guide::OptimizationGuideDecision::kUnknown:
@@ -276,7 +276,7 @@ void ReadAnythingEntryPointController::ShowUI(
     if (tabs::TabInterface* tab = bwi->GetActiveTabInterface()) {
       auto* controller = ReadAnythingController::From(tab);
       CHECK(controller);
-      controller->ShowImmersiveUI(open_trigger);
+      controller->ShowInPreferredUI(open_trigger);
     }
   } else {
     SidePanelOpenTrigger side_panel_open_trigger =
@@ -411,10 +411,6 @@ bool ReadAnythingEntryPointController::CheckIfShouldSuggestReadingModeNaive(
 // static
 void ReadAnythingEntryPointController::RegisterForSuggestReadingMode(
     Profile* profile) {
-  if (!features::IsReadAnythingOmniboxChipEnabled()) {
-    return;
-  }
-
   if (auto* optimization_guide_decider =
           OptimizationGuideKeyedServiceFactory::GetForProfile(profile)) {
     optimization_guide_decider->RegisterOptimizationTypes(
@@ -480,6 +476,16 @@ void ReadAnythingEntryPointController::OnPageActionIgnored(
     page_action_controller->HideSuggestionChip(
         kActionSidePanelShowReadAnything);
   }
+}
+
+// static
+int ReadAnythingEntryPointController::CheckCountForTesting() {
+  return check_count_;
+}
+
+// static
+void ReadAnythingEntryPointController::ResetCheckCountForTesting() {
+  check_count_ = 0;
 }
 
 }  // namespace read_anything

@@ -15,10 +15,12 @@ SaveEntityParams::SaveEntityParams(
     EntityInstance new_entity,
     std::optional<EntityInstance> old_entity,
     std::u16string user_email,
+    bool save_is_synchronous,
     AutofillClient::EntityImportPromptResultCallback callback)
     : new_entity(std::move(new_entity)),
       old_entity(std::move(old_entity)),
       user_email(std::move(user_email)),
+      save_is_synchronous(save_is_synchronous),
       callback(std::move(callback)) {}
 
 SaveEntityParams::SaveEntityParams(SaveEntityParams&&) = default;
@@ -30,32 +32,34 @@ std::u16string SaveEntityParams::GetTitleText() const {
     case EntityTypeName::kDriversLicense:
       return l10n_util::GetStringUTF16(
           IsUpdate()
-              ? IDS_AUTOFILL_AI_UPDATE_DRIVERS_LICENSE_ENTITY_DIALOG_TITLE
-              : IDS_AUTOFILL_AI_SAVE_DRIVERS_LICENSE_ENTITY_DIALOG_TITLE);
+              ? IDS_IOS_AUTOFILL_AI_UPDATE_DRIVERS_LICENSE_ENTITY_DIALOG_TITLE
+              : IDS_IOS_AUTOFILL_AI_SAVE_DRIVERS_LICENSE_ENTITY_DIALOG_TITLE);
     case EntityTypeName::kNationalIdCard:
       return l10n_util::GetStringUTF16(
           IsUpdate()
-              ? IDS_AUTOFILL_AI_UPDATE_NATIONAL_ID_CARD_ENTITY_DIALOG_TITLE
-              : IDS_AUTOFILL_AI_SAVE_NATIONAL_ID_CARD_ENTITY_DIALOG_TITLE);
+              ? IDS_IOS_AUTOFILL_AI_UPDATE_NATIONAL_ID_CARD_ENTITY_DIALOG_TITLE
+              : IDS_IOS_AUTOFILL_AI_SAVE_NATIONAL_ID_CARD_ENTITY_DIALOG_TITLE);
     case EntityTypeName::kPassport:
       return l10n_util::GetStringUTF16(
-          IsUpdate() ? IDS_AUTOFILL_AI_UPDATE_PASSPORT_ENTITY_DIALOG_TITLE
-                     : IDS_AUTOFILL_AI_SAVE_PASSPORT_ENTITY_DIALOG_TITLE);
+          IsUpdate() ? IDS_IOS_AUTOFILL_AI_UPDATE_PASSPORT_ENTITY_DIALOG_TITLE
+                     : IDS_IOS_AUTOFILL_AI_SAVE_PASSPORT_ENTITY_DIALOG_TITLE);
     case EntityTypeName::kVehicle:
       return l10n_util::GetStringUTF16(
-          IsUpdate() ? IDS_AUTOFILL_AI_UPDATE_VEHICLE_ENTITY_DIALOG_TITLE
-                     : IDS_AUTOFILL_AI_SAVE_VEHICLE_ENTITY_DIALOG_TITLE);
+          IsUpdate() ? IDS_IOS_AUTOFILL_AI_UPDATE_VEHICLE_ENTITY_DIALOG_TITLE
+                     : IDS_IOS_AUTOFILL_AI_SAVE_VEHICLE_ENTITY_DIALOG_TITLE);
     case EntityTypeName::kKnownTravelerNumber:
       return l10n_util::GetStringUTF16(
           IsUpdate()
-              ? IDS_AUTOFILL_AI_UPDATE_KNOWN_TRAVELER_NUMBER_ENTITY_DIALOG_TITLE
-              : IDS_AUTOFILL_AI_SAVE_KNOWN_TRAVELER_NUMBER_ENTITY_DIALOG_TITLE);
+              ? IDS_IOS_AUTOFILL_AI_UPDATE_KNOWN_TRAVELER_NUMBER_ENTITY_DIALOG_TITLE
+              : IDS_IOS_AUTOFILL_AI_SAVE_KNOWN_TRAVELER_NUMBER_ENTITY_DIALOG_TITLE);
     case EntityTypeName::kRedressNumber:
       return l10n_util::GetStringUTF16(
-          IsUpdate() ? IDS_AUTOFILL_AI_UPDATE_REDRESS_NUMBER_ENTITY_DIALOG_TITLE
-                     : IDS_AUTOFILL_AI_SAVE_REDRESS_NUMBER_ENTITY_DIALOG_TITLE);
+          IsUpdate()
+              ? IDS_IOS_AUTOFILL_AI_UPDATE_REDRESS_NUMBER_ENTITY_DIALOG_TITLE
+              : IDS_IOS_AUTOFILL_AI_SAVE_REDRESS_NUMBER_ENTITY_DIALOG_TITLE);
     case EntityTypeName::kFlightReservation:
     case EntityTypeName::kOrder:
+    case EntityTypeName::kShipment:
       return l10n_util::GetStringFUTF16(IsUpdate()
                                             ? IDS_IOS_AUTOFILL_AI_UPDATE_PROMPT
                                             : IDS_IOS_AUTOFILL_AI_SAVE_PROMPT,

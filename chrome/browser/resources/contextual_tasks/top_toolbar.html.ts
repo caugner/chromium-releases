@@ -27,6 +27,14 @@ export function getHtml(this: TopToolbarElement) {
     ${this.title}
   </div>
   <div class="top-toolbar-action-buttons">
+    <cr-icon-button id="pinButton"
+        @click="${this.onPinClick_}"
+        iron-icon="${this.isPinned ?
+            'contextual_tasks:keep' : 'contextual_tasks:keep_off'}"
+        title="${this.getPinButtonTooltip_()}"
+        aria-label="${this.getPinButtonTooltip_()}"
+        ?hidden="${!this.shouldShowPinButton_()}">
+    </cr-icon-button>
     <cr-icon-button id="newThreadButton"
         @click="${this.onNewThreadClick_}"
         iron-icon="contextual_tasks:edit_square"
@@ -94,7 +102,7 @@ export function getHtml(this: TopToolbarElement) {
 </if>
         $i18n{myActivity}
       </button>
-      <button class="dropdown-item" @click="${this.onHelpClick_}">
+      <button class="dropdown-item" @click="${this.onFeedbackClick_}">
         <cr-icon icon="contextual_tasks:feedback"></cr-icon>
         $i18n{feedback}
       </button>

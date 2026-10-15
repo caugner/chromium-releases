@@ -26,6 +26,7 @@
 #include "base/types/pass_key.h"
 #include "base/values.h"
 #include "base/version.h"
+#include "components/optimization_guide/core/model_execution/on_device_features.h"
 #include "components/optimization_guide/core/model_execution/performance_class.h"
 #include "components/optimization_guide/core/model_execution/usage_tracker.h"
 #include "components/optimization_guide/core/optimization_guide_enums.h"
@@ -282,9 +283,19 @@ class OnDeviceModelComponentStateManager final : public UsageTracker::Observer {
     }
 
     bool should_uninstall() const {
-      return (is_already_installing &&
-              (is_running_out_of_disk_space() || out_of_retention ||
-               !enabled_by_enterprise_policy || !enabled_by_user_setting));
+      if (!is_already_installing) {
+        return false;
+      }
+      if (is_running_out_of_disk_space() || !enabled_by_enterprise_policy ||
+          !enabled_by_user_setting) {
+        return true;
+      }
+      if (out_of_retention &&
+          !base::FeatureList::IsEnabled(
+              features::kOnDeviceModelBackgroundDownload)) {
+        return true;
+      }
+      return false;
     }
   };
 
@@ -307,7 +318,8 @@ class OnDeviceModelComponentStateManager final : public UsageTracker::Observer {
       PrefService* local_state,
       base::SafeRef<PerformanceClassifier> performance_classifier,
       UsageTracker& usage_tracker,
-      std::unique_ptr<Delegate> delegate);
+      std::unique_ptr<Delegate> delegate,
+      OnDeviceModelType model_type);
   ~OnDeviceModelComponentStateManager() override;
 
   // Returns whether the component installation is valid.
@@ -375,7 +387,8 @@ class OnDeviceModelComponentStateManager final : public UsageTracker::Observer {
   void OnGenAILocalFoundationalModelUserSettingChanged();
 
   // UsageTracker::Observer:
-  void OnDeviceEligibleFeatureUsed(mojom::OnDeviceFeature feature) override;
+  void OnDeviceEligibleUseCaseUsed(const std::string& use_case_name,
+                                   bool is_first_usage) override;
 
   // Installs the component installer if it needs installed.
   void BeginUpdateRegistration();
@@ -423,6 +436,9 @@ class OnDeviceModelComponentStateManager final : public UsageTracker::Observer {
       usage_tracker_observation_{this};
 
   SEQUENCE_CHECKER(sequence_checker_);
+
+  // The model type managed by this state manager.
+  const OnDeviceModelType model_type_;
 
   base::WeakPtrFactory<OnDeviceModelComponentStateManager> weak_ptr_factory_{
       this};

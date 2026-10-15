@@ -18,6 +18,7 @@
 #include "cc/layers/nine_patch_layer_impl.h"
 #include "cc/layers/nine_patch_thumb_scrollbar_layer_impl.h"
 #include "cc/layers/painted_scrollbar_layer_impl.h"
+#include "cc/layers/render_surface_impl.h"
 #include "cc/layers/solid_color_scrollbar_layer_impl.h"
 #include "cc/layers/surface_layer_impl.h"
 #include "cc/layers/texture_layer_impl.h"
@@ -1954,7 +1955,7 @@ TEST_F(LayerContextImplUpdateDisplayTreeTileDisplayLayerPropertiesTest,
   auto* tile_display_layer_impl =
       static_cast<cc::TileDisplayLayerImpl*>(layer_impl_base);
 
-  EXPECT_FALSE(tile_display_layer_impl->nearest_neighbor());
+  EXPECT_FALSE(tile_display_layer_impl->GetNearestNeighbor());
 
   // Second update: Set nearest_neighbor to true.
   auto update2 = CreateDefaultUpdate();
@@ -1969,7 +1970,7 @@ TEST_F(LayerContextImplUpdateDisplayTreeTileDisplayLayerPropertiesTest,
   EXPECT_TRUE(
       layer_context_impl_->DoUpdateDisplayTree(std::move(update2)).has_value());
 
-  EXPECT_TRUE(tile_display_layer_impl->nearest_neighbor());
+  EXPECT_TRUE(tile_display_layer_impl->GetNearestNeighbor());
 
   // Third update: Set nearest_neighbor to false.
   auto update3 = CreateDefaultUpdate();
@@ -1984,7 +1985,7 @@ TEST_F(LayerContextImplUpdateDisplayTreeTileDisplayLayerPropertiesTest,
   EXPECT_TRUE(
       layer_context_impl_->DoUpdateDisplayTree(std::move(update3)).has_value());
 
-  EXPECT_FALSE(tile_display_layer_impl->nearest_neighbor());
+  EXPECT_FALSE(tile_display_layer_impl->GetNearestNeighbor());
 }
 
 TEST_F(LayerContextImplUpdateDisplayTreeTileDisplayLayerPropertiesTest,
@@ -2168,8 +2169,8 @@ TEST_F(LayerContextImplUpdateDisplayTreeTilingTest, TilingAndTileLifecycle) {
   EXPECT_EQ(tiling_impl1->tile_size(), kTileSize1);
   EXPECT_EQ(tiling_impl1->tiling_rect(), kTilingRect1);
   ASSERT_NE(nullptr, tiling_impl1->TileAt(kTileIndex1));
-  EXPECT_TRUE(tiling_impl1->TileAt(kTileIndex1)->solid_color().has_value());
-  EXPECT_EQ(tiling_impl1->TileAt(kTileIndex1)->solid_color().value(),
+  EXPECT_TRUE(tiling_impl1->TileAt(kTileIndex1)->GetSolidColor().has_value());
+  EXPECT_EQ(tiling_impl1->TileAt(kTileIndex1)->GetSolidColor().value(),
             SkColors::kMagenta);
 
   // Test Case 2: Update existing Tiling (tile_size) and add a Resource Tile.
@@ -2294,7 +2295,7 @@ TEST_F(LayerContextImplUpdateDisplayTreeTilingTest, TilingAndTileLifecycle) {
   tiling_impl1 = tile_display_layer_impl->GetTilingForTesting(kScaleKey1);
   ASSERT_NE(nullptr, tiling_impl1);
   ASSERT_NE(nullptr, tiling_impl1->TileAt(kTileIndex1));
-  EXPECT_TRUE(tiling_impl1->TileAt(kTileIndex1)->solid_color().has_value());
+  EXPECT_TRUE(tiling_impl1->TileAt(kTileIndex1)->GetSolidColor().has_value());
 
   // Now, update that tile to be a resource tile.
   auto update_change_tile_type = CreateDefaultUpdate();
@@ -2319,7 +2320,7 @@ TEST_F(LayerContextImplUpdateDisplayTreeTilingTest, TilingAndTileLifecycle) {
                   ->DoUpdateDisplayTree(std::move(update_change_tile_type))
                   .has_value());
   ASSERT_NE(nullptr, tiling_impl1->TileAt(kTileIndex1));
-  EXPECT_FALSE(tiling_impl1->TileAt(kTileIndex1)->solid_color().has_value());
+  EXPECT_FALSE(tiling_impl1->TileAt(kTileIndex1)->GetSolidColor().has_value());
   EXPECT_TRUE(tiling_impl1->TileAt(kTileIndex1)->resource().has_value());
 
   // Test Case 7: Attempt to add a tile with an invalid resource ID.
@@ -4023,6 +4024,40 @@ TEST_F(LayerContextImplUpdateDisplayTreeMirrorLayerTest,
   EXPECT_EQ(layer_impl->mirrored_layer_id(), kMirroredLayerId2);
 }
 
+TEST_F(LayerContextImplUpdateDisplayTreeMirrorLayerTest,
+       UpdateMirroredLayerIdWithInvalidIdFails) {
+  constexpr int kMirrorLayerId = 2;
+  constexpr int kInvalidMirroredLayerId = 999;
+
+  // Initial update: Create MirrorLayer with default mirrored_layer_id (0).
+  auto update1 = CreateDefaultUpdate();
+  AddDefaultLayerToUpdate(update1.get(), cc::mojom::LayerType::kMirror,
+                          kMirrorLayerId);
+  EXPECT_TRUE(
+      layer_context_impl_->DoUpdateDisplayTree(std::move(update1)).has_value());
+
+  cc::MirrorLayerImpl* layer_impl =
+      GetMirrorLayerFromActiveTree(kMirrorLayerId);
+  ASSERT_NE(nullptr, layer_impl);
+  EXPECT_EQ(layer_impl->mirrored_layer_id(), 0);
+
+  // Second update: Try to mirror a non-existent layer.
+  auto update2 = CreateDefaultUpdate();
+  auto layer_props2 =
+      CreateManualLayer(kMirrorLayerId, cc::mojom::LayerType::kMirror);
+  auto& mirror_extra2 =
+      GetLayerExtra(layer_props2.get())->get_mirror_layer_extra();
+  mirror_extra2->mirrored_layer_id = kInvalidMirroredLayerId;
+  update2->layers.push_back(std::move(layer_props2));
+
+  auto result = layer_context_impl_->DoUpdateDisplayTree(std::move(update2));
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(), "Invalid mirrored_layer_id");
+
+  // Verify the property remains unchanged.
+  EXPECT_EQ(layer_impl->mirrored_layer_id(), 0);
+}
+
 // Test fixture for ViewTransitionContentLayerImpl specific property updates.
 class LayerContextImplUpdateDisplayTreeViewTransitionContentLayerTest
     : public LayerContextImplLayerLifecycleTest {
@@ -4182,13 +4217,12 @@ TEST_F(LayerContextImplUpdateDisplayTreeViewTransitionContentLayerTest,
             kDefaultViewTransitionContentLayerMaxExtentsRect);
 }
 
-TEST_F(LayerContextImplTest, UpdateDisplayTreeWithTargetLocalSurfaceId) {
-  auto update = CreateDefaultUpdate();
+TEST_F(LayerContextImplTest, SetTargetLocalSurfaceId) {
   const LocalSurfaceId target_local_surface_id(
       1, base::UnguessableToken::CreateForTesting(2, 3));
-  update->target_local_surface_id = target_local_surface_id;
 
-  auto result = layer_context_impl_->DoUpdateDisplayTree(std::move(update));
+  auto result =
+      layer_context_impl_->DoSetTargetLocalSurfaceId(target_local_surface_id);
   EXPECT_TRUE(result.has_value());
   EXPECT_EQ(layer_context_impl_->host_impl()->target_local_surface_id(),
             target_local_surface_id);
@@ -4387,8 +4421,7 @@ INSTANTIATE_TEST_SUITE_P(
     LayerContextImplUpdateDisplayTreeInvalidBrowserControlsTest,
     ::testing::Values(std::numeric_limits<float>::infinity(),
                       -std::numeric_limits<float>::infinity(),
-                      std::numeric_limits<float>::quiet_NaN(),
-                      -1.0f),
+                      std::numeric_limits<float>::quiet_NaN()),
     [](const testing::TestParamInfo<
         LayerContextImplUpdateDisplayTreeInvalidBrowserControlsTest::ParamType>&
            info) {
@@ -4398,28 +4431,47 @@ INSTANTIATE_TEST_SUITE_P(
       if (std::isnan(info.param)) {
         return "NaN";
       }
-      if (info.param < 0.0f) {
-        return "Negative";
-      }
       return "Other";
     });
 
-TEST_F(LayerContextImplTest, InvalidMinMaxBrowserControlsHeight) {
+TEST_F(LayerContextImplTest, ClampedMinMaxBrowserControlsHeight) {
   auto update = CreateDefaultUpdate();
   update->browser_controls_params.top_controls_height = 10.f;
   update->browser_controls_params.top_controls_min_height = 20.f;
 
   auto result = layer_context_impl_->DoUpdateDisplayTree(std::move(update));
-  ASSERT_FALSE(result.has_value());
-  EXPECT_EQ(result.error(), "Invalid browser controls params");
+  ASSERT_TRUE(result.has_value());
+  const auto& params = layer_context_impl_->host_impl()
+                           ->active_tree()
+                           ->browser_controls_params();
+  EXPECT_EQ(params.top_controls_height, 10.f);
+  EXPECT_EQ(params.top_controls_min_height, 10.f);
 
   update = CreateDefaultUpdate();
   update->browser_controls_params.bottom_controls_height = 10.f;
   update->browser_controls_params.bottom_controls_min_height = 20.f;
 
   result = layer_context_impl_->DoUpdateDisplayTree(std::move(update));
-  ASSERT_FALSE(result.has_value());
-  EXPECT_EQ(result.error(), "Invalid browser controls params");
+  ASSERT_TRUE(result.has_value());
+  const auto& params2 = layer_context_impl_->host_impl()
+                            ->active_tree()
+                            ->browser_controls_params();
+  EXPECT_EQ(params2.bottom_controls_height, 10.f);
+  EXPECT_EQ(params2.bottom_controls_min_height, 10.f);
+}
+
+TEST_F(LayerContextImplTest, NegativeBrowserControlsHeight) {
+  auto update = CreateDefaultUpdate();
+  update->browser_controls_params.top_controls_height = -10.f;
+  update->browser_controls_params.top_controls_min_height = -5.f;
+
+  auto result = layer_context_impl_->DoUpdateDisplayTree(std::move(update));
+  ASSERT_TRUE(result.has_value());
+  const auto& params = layer_context_impl_->host_impl()
+                           ->active_tree()
+                           ->browser_controls_params();
+  EXPECT_EQ(params.top_controls_height, 0.f);
+  EXPECT_EQ(params.top_controls_min_height, 0.f);
 }
 
 class LayerContextImplUpdateDisplayTreeInvalidElasticOverscrollTest
@@ -4584,6 +4636,191 @@ INSTANTIATE_TEST_SUITE_P(
       }
       return "Other";
     });
+
+TEST_F(LayerContextImplTest, UpdateTransformTreeRootWithValidParentFails) {
+  auto update = CreateDefaultUpdate();
+  auto node = mojom::TransformNode::New();
+  node->id = cc::kRootPropertyNodeId;
+  node->parent_id = cc::kSecondaryRootPropertyNodeId;
+  update->transform_nodes[0] = std::move(node);
+  auto result = layer_context_impl_->DoUpdateDisplayTree(std::move(update));
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(),
+            "Root property node must have an invalid parent ID");
+}
+
+TEST_F(LayerContextImplTest, UpdateClipTreeRootWithValidParentFails) {
+  auto update = CreateDefaultUpdate();
+  auto node = mojom::ClipNode::New();
+  node->id = cc::kRootPropertyNodeId;
+  node->parent_id = cc::kSecondaryRootPropertyNodeId;
+  node->transform_id = cc::kRootPropertyNodeId;
+  update->clip_nodes[0] = std::move(node);
+  auto result = layer_context_impl_->DoUpdateDisplayTree(std::move(update));
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(),
+            "Root property node must have an invalid parent ID");
+}
+
+TEST_F(LayerContextImplTest, UpdateEffectTreeRootWithValidParentFails) {
+  auto update = CreateDefaultUpdate();
+  auto node = mojom::EffectNode::New();
+  node->id = cc::kRootPropertyNodeId;
+  node->parent_id = cc::kSecondaryRootPropertyNodeId;
+  node->transform_id = cc::kRootPropertyNodeId;
+  node->clip_id = cc::kRootPropertyNodeId;
+  node->target_id = cc::kRootPropertyNodeId;
+  update->effect_nodes[0] = std::move(node);
+  auto result = layer_context_impl_->DoUpdateDisplayTree(std::move(update));
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(),
+            "Root property node must have an invalid parent ID");
+}
+
+TEST_F(LayerContextImplTest, UpdateScrollTreeRootWithValidParentFails) {
+  auto update = CreateDefaultUpdate();
+  auto node = mojom::ScrollNode::New();
+  node->id = cc::kRootPropertyNodeId;
+  node->parent_id = cc::kSecondaryRootPropertyNodeId;
+  node->transform_id = cc::kRootPropertyNodeId;
+  update->scroll_nodes[0] = std::move(node);
+  auto result = layer_context_impl_->DoUpdateDisplayTree(std::move(update));
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(),
+            "Root property node must have an invalid parent ID");
+}
+
+TEST_F(LayerContextImplTest, EmptyTransformTreeSucceeds) {
+  auto update = CreateDefaultUpdate();
+  // Clear all trees.
+  update->num_transform_nodes = 0;
+  update->transform_nodes.clear();
+  update->num_clip_nodes = 0;
+  update->clip_nodes.clear();
+  update->num_effect_nodes = 0;
+  update->effect_nodes.clear();
+  update->num_scroll_nodes = 0;
+  update->scroll_nodes.clear();
+
+  // Clear all layers to avoid references to property trees.
+  update->layers.clear();
+  update->layer_order = std::vector<int>();
+
+  // We also need to clear viewport property ids because they index
+  // transform/scroll nodes.
+  update->overscroll_elasticity_transform = cc::kInvalidPropertyNodeId;
+  update->page_scale_transform = cc::kInvalidPropertyNodeId;
+  update->inner_scroll = cc::kInvalidPropertyNodeId;
+  update->outer_clip = cc::kInvalidPropertyNodeId;
+  update->outer_scroll = cc::kInvalidPropertyNodeId;
+
+  auto result = layer_context_impl_->DoUpdateDisplayTree(std::move(update));
+  EXPECT_TRUE(result.has_value()) << (result.has_value() ? "" : result.error());
+}
+
+TEST_F(LayerContextImplTest, EmptyClipTreeSucceeds) {
+  auto update = CreateDefaultUpdate();
+  // Transform tree has nodes from CreateDefaultUpdate.
+  update->num_clip_nodes = 0;
+  update->clip_nodes.clear();
+  // Clear other dependent trees.
+  update->num_effect_nodes = 0;
+  update->effect_nodes.clear();
+  update->num_scroll_nodes = 0;
+  update->scroll_nodes.clear();
+
+  // Clear all layers.
+  update->layers.clear();
+  update->layer_order = std::vector<int>();
+
+  update->outer_clip = cc::kInvalidPropertyNodeId;
+  // scroll tree also cleared, so clear its viewport property ids.
+  update->inner_scroll = cc::kInvalidPropertyNodeId;
+  update->outer_scroll = cc::kInvalidPropertyNodeId;
+
+  auto result = layer_context_impl_->DoUpdateDisplayTree(std::move(update));
+  EXPECT_TRUE(result.has_value()) << (result.has_value() ? "" : result.error());
+}
+
+TEST_F(LayerContextImplTest, EmptyEffectTreeSucceeds) {
+  auto update = CreateDefaultUpdate();
+  // Effect tree MUST have at least one node.
+  update->num_effect_nodes = 0;
+  update->effect_nodes.clear();
+  // Clear clip tree too, because clip root node references transform node.
+  update->num_clip_nodes = 0;
+  update->clip_nodes.clear();
+  update->outer_clip = cc::kInvalidPropertyNodeId;
+  // Clear scroll tree.
+  update->num_scroll_nodes = 0;
+  update->scroll_nodes.clear();
+
+  // Clear all layers.
+  update->layers.clear();
+  update->layer_order = std::vector<int>();
+
+  // scroll tree also cleared, so clear its viewport property ids.
+  update->inner_scroll = cc::kInvalidPropertyNodeId;
+  update->outer_scroll = cc::kInvalidPropertyNodeId;
+
+  auto result = layer_context_impl_->DoUpdateDisplayTree(std::move(update));
+  EXPECT_TRUE(result.has_value()) << (result.has_value() ? "" : result.error());
+}
+
+TEST_F(LayerContextImplTest, EmptyScrollTreeSucceeds) {
+  auto update = CreateDefaultUpdate();
+  // All other trees have root nodes from CreateDefaultUpdate.
+  update->num_scroll_nodes = 0;
+  update->scroll_nodes.clear();
+
+  // Clear all layers.
+  update->layers.clear();
+  update->layer_order = std::vector<int>();
+
+  update->inner_scroll = cc::kInvalidPropertyNodeId;
+  update->outer_scroll = cc::kInvalidPropertyNodeId;
+
+  auto result = layer_context_impl_->DoUpdateDisplayTree(std::move(update));
+  EXPECT_TRUE(result.has_value()) << (result.has_value() ? "" : result.error());
+}
+
+TEST_F(LayerContextImplTest, DoUpdateDisplayTreeEarlyReturnUAF) {
+  // 1. Initial valid update to set up the tree and populate
+  // render_surface_list_.
+  auto update = CreateDefaultUpdate();
+  // The secondary root effect node created in ResetTestState() already has
+  // kRoot reason.
+
+  auto result = layer_context_impl_->DoUpdateDisplayTree(std::move(update));
+  ASSERT_TRUE(result.has_value());
+
+  // Trigger a draw to populate render_surface_list_.
+  layer_context_impl_->host_impl()->active_tree()->UpdateDrawProperties(
+      /*update_tiles=*/true, /*update_image_animation_controller=*/true);
+
+  const auto& render_surface_list =
+      layer_context_impl_->host_impl()->active_tree()->GetRenderSurfaceList();
+  ASSERT_FALSE(render_surface_list.empty());
+
+  // 2. A failing update that returns early in DoUpdateDisplayTree after
+  // TakeRenderSurfaces.
+  auto update2 = CreateDefaultUpdate();
+  // We can make UpdateTransformTreeProperties fail by setting an invalid
+  // page_scale_factor.
+  update2->transform_tree_update = mojom::TransformTreeUpdate::New();
+  update2->transform_tree_update->page_scale_factor = -1.0f;
+
+  auto result2 = layer_context_impl_->DoUpdateDisplayTree(std::move(update2));
+  ASSERT_FALSE(result2.has_value());
+  EXPECT_EQ(result2.error(), "Invalid page_scale_factor");
+
+  // 3. Check if needs_update_draw_properties() is true.
+  // If it's false, we have a UAF potential because render_surface_list still
+  // has pointers to freed surfaces.
+  EXPECT_TRUE(layer_context_impl_->host_impl()
+                  ->active_tree()
+                  ->needs_update_draw_properties());
+}
 
 }  // namespace
 }  // namespace viz

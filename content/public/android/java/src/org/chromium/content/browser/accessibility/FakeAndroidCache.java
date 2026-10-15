@@ -10,6 +10,7 @@ import android.os.Parcel;
 import androidx.annotation.Nullable;
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat;
 
+import org.jni_zero.CalledByNative;
 import org.jni_zero.JNINamespace;
 
 import org.chromium.build.annotations.NullMarked;
@@ -69,11 +70,15 @@ public class FakeAndroidCache {
     }
 
     // Validate accessibility node info throughout the fake android cache.
-    public void validateAccessibility() {
+    @CalledByNative
+    public void validateAccessibilityForExperiment() {
         if (mHistogramRecorder != null) {
             // We must first calculate the total number of nodes.
-            mHistogramRecorder.setTotalNodesCount(
-                    mWebContentsAccessibilityImpl.getAccessibilityTreeSizeForExperiment());
+            long treeSize = mWebContentsAccessibilityImpl.getAccessibilityTreeSizeForExperiment();
+            if (treeSize == 0) {
+                return;
+            }
+            mHistogramRecorder.setTotalNodesCount(treeSize);
             // Then the total number of nodes in the fake cache.
             mHistogramRecorder.setTotalFakeCacheNodesCount(mCache.size());
         }
@@ -170,6 +175,17 @@ public class FakeAndroidCache {
                 clear();
             }
         }
+    }
+
+    /**
+     * Checks if cache holds a node.
+     *
+     * @param virtualViewId The virtual view id of the node.
+     * @return If the cache either holds it or not.
+     */
+    @CalledByNative
+    private boolean isNodeLikelyKnownByAndroidFrameworkForExperiment(int virtualViewId) {
+        return mCache.containsKey(virtualViewId);
     }
 
     /**

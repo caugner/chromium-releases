@@ -180,6 +180,7 @@ class PLATFORM_EXPORT WebMediaPlayerImpl
 
   // Playback controls.
   void Play() override;
+  void UnlockBackgroundPlayback() override;
   void Pause(PauseReason pause_reason) override;
   void Seek(double seconds) override;
   void SetRate(double rate) override;
@@ -333,6 +334,8 @@ class PLATFORM_EXPORT WebMediaPlayerImpl
   base::WeakPtr<WebMediaPlayer> AsWeakPtr() override;
   void RegisterFrameSinkHierarchy() override;
   void UnregisterFrameSinkHierarchy() override;
+  void ReparentFrameSinkHierarchy(
+      const viz::FrameSinkId& new_parent_frame_sink_id) override;
 
   void RecordVideoOcclusionState(std::string_view occlusion_state) override;
   void SetVisibilityRatioAtPlaybackStart(double ratio) override;
@@ -482,8 +485,8 @@ class PLATFORM_EXPORT WebMediaPlayerImpl
   // Called after synchronous or asynchronous MemoryDataSource initialization.
   void MemoryDataSourceInitialized(bool success, size_t data_size);
 
-  // Called if the |MultiBufferDataSource| is redirected.
-  void OnDataSourceRedirected();
+  // Called if the data source becomes CORS tainted.
+  void OnDataSourceTainted(const media::DataSource* data_source);
 
   // Called when the data source is downloading or paused.
   void NotifyDownloading(bool is_downloading);
@@ -829,6 +832,11 @@ class PLATFORM_EXPORT WebMediaPlayerImpl
   CorsMode cors_mode_ = kCorsModeUnspecified;
   bool is_cache_disabled_ = false;
 
+  // Flag for shortcutting the WouldTaintOrigin check. When this is true, there
+  // is no reason to ask the data source vis-a-vis the demuxer manager. Once
+  // this flag is set, it may never be unset.
+  bool is_origin_tainted_ = false;
+
   raw_ptr<MediaPlayerClient> client_ = nullptr;
   raw_ptr<WebMediaPlayerEncryptedMediaClient> encrypted_client_ = nullptr;
 
@@ -1020,7 +1028,7 @@ class PLATFORM_EXPORT WebMediaPlayerImpl
 
   // Whether the video requires a user gesture to resume after it was paused in
   // the background. Affects the value of ShouldPausePlaybackWhenHidden().
-  bool video_locked_when_paused_when_hidden_ = false;
+  bool allow_background_video_playback_ = true;
 
   // Whether embedded media experience is currently enabled.
   bool embedded_media_experience_enabled_ = false;

@@ -34,7 +34,10 @@ SoftNavigationContext::SoftNavigationContext(
   CHECK(initial_event_timing_->IsKnownToBeAnInteraction());
 
   TRACE_EVENT_BEGIN("loading", "SoftNavigation",
-                    perfetto::Track::FromPointer(this));
+                    perfetto::Track::FromPointer(this), TimeOrigin());
+
+  TRACE_EVENT_INSTANT("loading", "SoftNavigationContextCreated",
+                      perfetto::Track::FromPointer(this), "context", *this);
 
   GetSoftNavigationHeuristics()->ForEachInteractionEffectsMonitor(
       [&](InteractionEffectsMonitor& monitor) {
@@ -276,10 +279,23 @@ void SoftNavigationContext::EmitSoftNavigation() {
   was_emitted_ = true;
 
   if (base::FeatureList::IsEnabled(kSoftNavigationTraceEvents)) {
+    // This trace event reports the TimeOrigin() value which we already report
+    // as part of the umbrella "SoftNavigation" trace, as an instant event.
+    // However, that other event reports all new *potential* soft navs, while
+    // this event only reports actually *emitted* soft navs.
+    // This is used by DevTools performance profiler to mark the perf timeline.
     TRACE_EVENT_INSTANT(
         "scheduler,devtools.timeline,loading", "SoftNavigationStart",
         perfetto::Track::FromPointer(this), TimeOrigin(), "context", *this,
         "frame", GetFrameIdForTracing(window_->GetFrame()));
+
+    // This trace event reports the when the soft nav heuristics were observerd,
+    // and thus when the new navigationId was created, and when the performance
+    // timeline is logically "sliced" into soft-nav sub-timelines.
+    TRACE_EVENT_INSTANT("scheduler,devtools.timeline,loading",
+                        "SoftNavigationEmitted",
+                        perfetto::Track::FromPointer(this),
+                        soft_navigation_slicing_time_, "context", *this);
   }
 
   if (!RuntimeEnabledFeatures::SoftNavigationHeuristicsEnabled(window_)) {
@@ -328,7 +344,8 @@ void SoftNavigationContext::EmitLcpPerformanceEntry(
           TimeOrigin()),
       /*render_time=*/paint_timing_info.presentation_time, paint_size,
       performance->MonotonicTimeToDOMHighResTimeStamp(load_time), id, url,
-      element, window_, navigation_id_, initial_event_timing_->interactionId());
+      element, window_, performance->NavigationId(),
+      initial_event_timing_->interactionId());
   entry->SetPaintTimingInfo(paint_timing_info);
   performance->OnInteractionContentfulPaintUpdated(entry);
 

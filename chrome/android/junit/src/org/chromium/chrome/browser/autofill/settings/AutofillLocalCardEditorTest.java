@@ -28,7 +28,6 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
-import android.widget.Spinner;
 
 import androidx.annotation.DrawableRes;
 import androidx.test.core.app.ActivityScenario;
@@ -57,6 +56,8 @@ import org.chromium.base.test.util.HistogramWatcher;
 import org.chromium.base.test.util.UserActionTester;
 import org.chromium.build.NullUtil;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.actor.ActorKeyedService;
+import org.chromium.chrome.browser.actor.ActorKeyedServiceFactory;
 import org.chromium.chrome.browser.autofill.AutofillTestHelper;
 import org.chromium.chrome.browser.autofill.CreditCardScanner;
 import org.chromium.chrome.browser.autofill.PersonalDataManager;
@@ -83,7 +84,6 @@ import java.util.List;
 /** Unit tests for {@link AutofillLocalCardEditorTest}. */
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
-@EnableFeatures({ChromeFeatureList.AUTOFILL_ENABLE_CVC_STORAGE})
 @DisableFeatures(ChromeFeatureList.SETTINGS_MULTI_COLUMN)
 public class AutofillLocalCardEditorTest {
     // This is a non-amex card without a CVC code.
@@ -180,6 +180,7 @@ public class AutofillLocalCardEditorTest {
     @Mock private CreditCardScanner mMockScanner;
     @Mock private CreditCardScannerManager mMockScannerManager;
     @Mock private ProfileManagerUtilsJni mMockProfileManagerUtilsJni;
+    @Mock private ActorKeyedService mMockActorKeyedService;
 
     private UserActionTester mActionTester;
 
@@ -188,8 +189,6 @@ public class AutofillLocalCardEditorTest {
     private EditText mNicknameText;
     private TextInputLayout mNicknameLabel;
 
-    private Spinner mExpirationMonth;
-    private Spinner mExpirationYear;
     private EditText mExpirationDate;
     private EditText mCvc;
 
@@ -231,6 +230,7 @@ public class AutofillLocalCardEditorTest {
         ProfileManagerUtilsJni.setInstanceForTesting(mMockProfileManagerUtilsJni);
         ChromeBrowserInitializer.setForTesting(mMockInitializer);
         ProfileManager.setLastUsedProfileForTesting(mMockProfile);
+        ActorKeyedServiceFactory.setForTesting(mMockActorKeyedService);
         mActionTester = new UserActionTester();
 
         CreditCardScanner.setFactory(delegate -> mMockScanner);
@@ -272,10 +272,6 @@ public class AutofillLocalCardEditorTest {
         mNicknameLabel = mSettingsActivity.findViewById(R.id.credit_card_nickname_label);
         mNicknameInvalidError =
                 mSettingsActivity.getString(R.string.autofill_credit_card_editor_invalid_nickname);
-        mExpirationMonth =
-                mSettingsActivity.findViewById(R.id.autofill_credit_card_editor_month_spinner);
-        mExpirationYear =
-                mSettingsActivity.findViewById(R.id.autofill_credit_card_editor_year_spinner);
         mExpirationDate = mSettingsActivity.findViewById(R.id.expiration_month_and_year);
 
         View cvcLegacyContainer = mSettingsActivity.findViewById(R.id.cvc_legacy_container);
@@ -370,39 +366,6 @@ public class AutofillLocalCardEditorTest {
 
     @Test
     @MediumTest
-    @DisableFeatures({ChromeFeatureList.AUTOFILL_ENABLE_CVC_STORAGE})
-    public void testErrorMessageHiddenAfterNicknameIsEditedFromInvalidToValid() {
-        initFragment(getSampleLocalCard());
-        // "Nickname 123" is an incorrect nickname because it contains digits.
-        mNicknameText.setText("Nickname 123");
-
-        assertThat(mNicknameLabel.getError()).isEqualTo(mNicknameInvalidError);
-
-        // Set the nickname to valid one.
-        mNicknameText.setText("Valid Nickname");
-        assertThat(mNicknameLabel.getError()).isNull();
-        assertTrue(mCardEditor.validateFormAndUpdateErrorAndFocusErrorField());
-    }
-
-    @Test
-    @MediumTest
-    @DisableFeatures({ChromeFeatureList.AUTOFILL_ENABLE_CVC_STORAGE})
-    public void testErrorMessageHiddenAfterNicknameIsEditedFromInvalidToEmpty() {
-        initFragment(getSampleLocalCard());
-        // "Nickname 123" is an incorrect nickname because it contains digits.
-        mNicknameText.setText("Nickname 123");
-
-        assertThat(mNicknameLabel.getError()).isEqualTo(mNicknameInvalidError);
-
-        // Set the nickname to null.
-        mNicknameText.setText(null);
-
-        assertThat(mNicknameLabel.getError()).isNull();
-        assertTrue(mCardEditor.validateFormAndUpdateErrorAndFocusErrorField());
-    }
-
-    @Test
-    @MediumTest
     public void testNicknameLengthCappedAt25Characters() {
         initFragment(getSampleLocalCard());
         String veryLongNickname = "This is a very very long nickname";
@@ -414,37 +377,15 @@ public class AutofillLocalCardEditorTest {
 
     @Test
     @MediumTest
-    @DisableFeatures({ChromeFeatureList.AUTOFILL_ENABLE_CVC_STORAGE})
-    public void testExpirationDateSpinnerAreShownWhenCvcFlagOff() {
-        initFragment(getSampleLocalCardWithCvc());
-
-        // When the flag is off, month and year fields should be visible.
-        assertThat(mExpirationMonth.getVisibility()).isEqualTo(View.VISIBLE);
-        assertThat(mExpirationYear.getVisibility()).isEqualTo(View.VISIBLE);
-
-        assertTrue(mExpirationMonth.isShown());
-        assertTrue(mExpirationYear.isShown());
-
-        // The expiration date and the cvc fields should not be shown to the user.
-        assertFalse(mExpirationDate.isShown());
-        assertFalse(mCvc.isShown());
-    }
-
-    @Test
-    @MediumTest
     public void testExpirationDateAndSecurityCodeFieldsAreShown() {
         initFragment(getSampleLocalCardWithCvc());
 
-        // When the flag is on, expiration date and cvc fields should be visible.
+        // Expiration date and cvc fields should be visible.
         assertThat(mExpirationDate.getVisibility()).isEqualTo(View.VISIBLE);
         assertThat(mCvc.getVisibility()).isEqualTo(View.VISIBLE);
 
         assertTrue(mExpirationDate.isShown());
         assertTrue(mCvc.isShown());
-
-        // When the flag is on, month and year fields shouldn't be visible.
-        assertFalse(mExpirationMonth.isShown());
-        assertFalse(mExpirationYear.isShown());
     }
 
     @Test
@@ -708,30 +649,6 @@ public class AutofillLocalCardEditorTest {
 
         // Verify the card entry is deleted.
         verify(mMockPersonalDataManager).deleteCreditCard(card.getGUID());
-    }
-
-    @Test
-    @MediumTest
-    @DisableFeatures({ChromeFeatureList.AUTOFILL_ENABLE_CVC_STORAGE})
-    public void testRecordHistogram_whenNewCreditCardIsAddedWithoutCvc() {
-        initFragment(null);
-        // Mock that there are already 4 cards saved.
-        when(mMockPersonalDataManager.getCreditCardCountForSettings()).thenReturn(4);
-
-        // Expect histogram to record 4 for 4 existing cards.
-        HistogramWatcher saveCardCountHistogram =
-                HistogramWatcher.newBuilder()
-                        .expectIntRecord(
-                                AutofillLocalCardEditor.CARD_COUNT_BEFORE_ADDING_NEW_CARD_HISTOGRAM,
-                                4)
-                        .build();
-
-        mNumberText.setText(NON_AMEX_CARD_NUMBER);
-        mExpirationMonth.setSelection(/* monthSelection= */ 1);
-        mExpirationYear.setSelection(/* yearSelection= */ 1);
-        mDoneButton.performClick();
-
-        saveCardCountHistogram.assertExpected();
     }
 
     @Test
@@ -1032,21 +949,6 @@ public class AutofillLocalCardEditorTest {
 
         assertThat(mExpirationDate.getText().toString())
                 .isEqualTo(String.format("%s/%s", card.getMonth(), card.getYear().substring(2)));
-    }
-
-    @Test
-    @MediumTest
-    @DisableFeatures({
-        ChromeFeatureList.AUTOFILL_ENABLE_CVC_STORAGE
-    }) // Feature disabled to allow saving cards without expiration dates.
-    public void onCardSave_scannerManagerLogScanResultIsCalled() {
-        initFragment(null);
-        mCardEditor.setCreditCardScannerManagerForTesting(mMockScannerManager);
-        mNumberText.setText(NON_AMEX_CARD_NUMBER);
-
-        mDoneButton.performClick();
-
-        verify(mMockScannerManager).logScanResult();
     }
 
     @Test

@@ -240,7 +240,9 @@
 # this API is shared with the Android Support Library.
 # Note that we only 'keep' the package org.chromium.support_lib_boundary itself,
 # any sub-packages of that package can still be obfuscated.
--keep public class org.chromium.support_lib_boundary.* { public *; }
+# The "allowcodereplacement" is necessary to prevent R8 from making assumptions
+# about the implementations of these interfaces (b/503109544).
+-keep,allowcodereplacement public class org.chromium.support_lib_boundary.* { public *; }
 
 # File: ../../android_webview/nonembedded/java/proguard.flags
 # Copyright 2016 The Chromium Authors
@@ -297,6 +299,18 @@
     java.nio.channels.FileLock sExclusiveFileLock;
     java.io.RandomAccessFile sLockFile;
 }
+
+# Keep the chromium implementation names deobfuscated. These classes'
+# names are used by CTS to verify compatibility with the androidx.webkit
+# library.
+-keep,allowshrinking class com.android.webview.chromium.CookieManagerAdapter
+-keep,allowshrinking class com.android.webview.chromium.ContentSettingsAdapter
+-keep,allowshrinking class com.android.webview.chromium.WebMessagePortAdapter
+-keep,allowshrinking class com.android.webview.chromium.WebStorageAdapter
+-keep,allowshrinking class com.android.webview.chromium.ServiceWorkerSettingsAdapter
+-keep,allowshrinking class com.android.webview.chromium.WebResourceRequestAdapter
+-keep,allowshrinking class com.android.webview.chromium.WebResourceErrorAdapter
+-keep,allowshrinking class com.android.webview.chromium.SafeBrowsingResponseAdapter
 
 # File: ../../third_party/jni_zero/proguard.flags
 # Copyright 2023 The Chromium Authors

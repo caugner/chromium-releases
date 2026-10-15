@@ -86,7 +86,8 @@ class BaseAutofillAiTest : public testing::Test {
     scoped_feature_list_.InitWithFeatures(
         /*enabled_features=*/{features::kAutofillAiWithDataSchema,
                               features::kAutofillAiWalletFlightReservation,
-                              features::kAutofillUseAccessibilityAnnotator},
+                              features::kAutofillAiOrder,
+                              features::kAutofillAiShipment},
         /*disabled_features=*/{});
     autofill_client().set_entity_data_manager(
         std::make_unique<EntityDataManager>(
@@ -96,7 +97,7 @@ class BaseAutofillAiTest : public testing::Test {
             webdata_helper_.autofill_webdata_service(),
             /*history_service=*/nullptr,
             /*strike_database=*/nullptr,
-            /*accessibility_annotator_data_adapter=*/nullptr,
+            /*accessibility_annotator_service=*/nullptr,
             /*variation_country_code=*/GeoIpCountryCode("US")));
     RecreateManager();
     autofill_client().SetUpPrefsAndIdentityForAutofillAi();
@@ -181,16 +182,22 @@ class BaseAutofillAiTest : public testing::Test {
     return CreateFormStructure(
         {NAME_FULL, FLIGHT_RESERVATION_FLIGHT_NUMBER,
          FLIGHT_RESERVATION_TICKET_NUMBER, FLIGHT_RESERVATION_CONFIRMATION_CODE,
-         FLIGHT_RESERVATION_ARRIVAL_AIRPORT,
-         FLIGHT_RESERVATION_DEPARTURE_AIRPORT},
+         UNKNOWN_TYPE, UNKNOWN_TYPE},
         std::move(url));
   }
 
   [[nodiscard]] std::unique_ptr<FormStructure> CreateOrderForm(
       std::string url = std::string(kDefaultUrl)) {
+    return CreateFormStructure({UNKNOWN_TYPE, ORDER_DATE, UNKNOWN_TYPE,
+                                ORDER_ID, UNKNOWN_TYPE, ORDER_MERCHANT_NAME},
+                               std::move(url));
+  }
+
+  [[nodiscard]] std::unique_ptr<FormStructure> CreateShipmentForm(
+      std::string url = std::string(kDefaultUrl)) {
     return CreateFormStructure(
-        {ORDER_ACCOUNT, ORDER_DATE, ORDER_GRAND_TOTAL, ORDER_ID,
-         ORDER_MERCHANT_DOMAIN, ORDER_MERCHANT_NAME, ORDER_PRODUCT_NAMES},
+        {UNKNOWN_TYPE, UNKNOWN_TYPE, SHIPMENT_TRACKING_NUMBER, UNKNOWN_TYPE,
+         UNKNOWN_TYPE, UNKNOWN_TYPE, UNKNOWN_TYPE},
         std::move(url));
   }
 
@@ -237,6 +244,8 @@ class BaseAutofillAiTest : public testing::Test {
         return CreateFlightReservationForm();
       case EntityTypeName::kOrder:
         return CreateOrderForm();
+      case EntityTypeName::kShipment:
+        return CreateShipmentForm();
     }
     NOTREACHED();
   }
@@ -266,6 +275,8 @@ class BaseAutofillAiTest : public testing::Test {
               {.record_type = record_type});
         case EntityTypeName::kOrder:
           return test::GetOrderEntityInstance({.record_type = record_type});
+        case EntityTypeName::kShipment:
+          return test::GetShipmentEntityInstance({.record_type = record_type});
       }
       NOTREACHED();
     }();

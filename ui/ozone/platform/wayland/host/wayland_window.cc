@@ -15,6 +15,7 @@
 #include "base/auto_reset.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
+#include "base/logging.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/notimplemented.h"
 #include "base/notreached.h"
@@ -197,11 +198,17 @@ void WaylandWindow::RemoveBubble(WaylandBubble* window) {
   if (active_bubble_ == window) {
     active_bubble_ = nullptr;
     if (IsActive()) {
+      auto weak_this = AsWeakPtr();
       delegate()->OnActivationChanged(true);
+      if (!weak_this) {
+        return;
+      }
     }
   }
-  child_bubbles_.erase(
-      std::find(child_bubbles_.begin(), child_bubbles_.end(), window));
+  auto it = std::find(child_bubbles_.begin(), child_bubbles_.end(), window);
+  if (it != child_bubbles_.end()) {
+    child_bubbles_.erase(it);
+  }
 }
 
 void WaylandWindow::ActivateBubble(WaylandBubble* window) {
@@ -211,15 +218,35 @@ void WaylandWindow::ActivateBubble(WaylandBubble* window) {
   if (active_bubble_ == window) {
     return;
   }
+
+  base::WeakPtr<WaylandWindow> weak_window =
+      window ? window->AsWeakPtr() : nullptr;
+
   if (active_bubble_) {
+    auto weak_this = AsWeakPtr();
     active_bubble_->delegate()->OnActivationChanged(false);
+    if (!weak_this) {
+      return;
+    }
   }
+
+  if (window && !weak_window) {
+    return;
+  }
+
   active_bubble_ = window;
 
   if (active_bubble_) {
+    auto weak_this = AsWeakPtr();
     delegate()->OnActivationChanged(false);
-    active_bubble_->delegate()->OnActivationChanged(true);
+    if (!weak_this) {
+      return;
+    }
+    if (active_bubble_) {
+      active_bubble_->delegate()->OnActivationChanged(true);
+    }
   } else {
+    auto weak_this = AsWeakPtr();
     delegate()->OnActivationChanged(IsActive());
   }
 }
@@ -1315,7 +1342,13 @@ void WaylandWindow::ProcessPendingConfigureState(uint32_t serial) {
     }
   }
 
+  // RequestStateFromServer transitively calls delegate()->OnStateUpdate(),
+  // which may synchronously delete |this|.
+  auto weak_this = AsWeakPtr();
   RequestStateFromServer(state, serial);
+  if (!weak_this) {
+    return;
+  }
 
   // Reset values.
   pending_configure_state_ = PendingConfigureState();

@@ -81,6 +81,8 @@ class ContextualSearchContextController {
         ContextUploadStatus context_upload_status,
         const std::optional<ContextUploadErrorType>& error_type) = 0;
 
+    virtual void OnControllerDestroyed() {}
+
    protected:
     ~ContextUploadStatusObserver() override = default;
   };
@@ -182,6 +184,9 @@ class ContextualSearchContextController {
   // Called when a UI is associated with the context controller.
   virtual void InitializeIfNeeded() = 0;
 
+  // Triggers a fetch for the sticky cluster info if needed.
+  virtual void TriggerFetchClusterInfo() = 0;
+
   // Set whether or not the context controller is backgrounded.
   virtual void SetIsBackgrounded(bool backgrounded) = 0;
 
@@ -222,11 +227,6 @@ class ContextualSearchContextController {
 
   // Return the file infos for all files in the request.
   virtual std::vector<const FileInfo*> GetFileInfoList() = 0;
-
-  // Search the file infos for an injected input with the given id, and return
-  // the file token if present.
-  virtual std::optional<base::UnguessableToken> FindTokenForInjectedInput(
-      const std::string& id) = 0;
 
   // Returns a weak pointer to the context controller.
   virtual base::WeakPtr<ContextualSearchContextController> AsWeakPtr() = 0;

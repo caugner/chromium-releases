@@ -22,6 +22,7 @@
 #import "components/favicon_base/favicon_types.h"
 #import "crypto/hash.h"
 #import "ios/chrome/app/spotlight/spotlight_logger.h"
+#import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/grit/ios_strings.h"
 #import "net/base/apple/url_conversions.h"
 #import "skia/ext/skia_utils_ios.h"
@@ -40,11 +41,39 @@ const CGFloat kFallbackIconSize = 180;
 // Radius of the rounded corner of the fallback icon.
 const CGFloat kFallbackRoundedCorner = 8;
 
-// Create an image with a rounded square with color `backgroundColor` and
-// `string` centered in color `textColor`.
-UIImage* GetFallbackImageWithStringAndColor(NSString* string,
-                                            UIColor* backgroundColor,
-                                            UIColor* textColor) {
+UIImage* CreateFallbackImageWithStringAndColorViaGraphicsImageRenderer(
+    NSString* string,
+    UIColor* backgroundColor,
+    UIColor* textColor) {
+  CGRect rect = CGRectMake(0, 0, kFallbackIconSize, kFallbackIconSize);
+  UIGraphicsImageRenderer* renderer =
+      [[UIGraphicsImageRenderer alloc] initWithSize:rect.size];
+  return [renderer imageWithActions:^(UIGraphicsImageRendererContext* ctx) {
+    [backgroundColor setFill];
+    UIBezierPath* rounded =
+        [UIBezierPath bezierPathWithRoundedRect:rect
+                                   cornerRadius:kFallbackRoundedCorner];
+    [rounded fill];
+    UIFont* font = [UIFont systemFontOfSize:(kFallbackIconSize / 2)
+                                     weight:UIFontWeightRegular];
+    CGRect textRect = CGRectMake(0, (kFallbackIconSize - [font lineHeight]) / 2,
+                                 kFallbackIconSize, [font lineHeight]);
+    NSMutableParagraphStyle* paragraphStyle =
+        [[NSMutableParagraphStyle alloc] init];
+    [paragraphStyle setAlignment:NSTextAlignmentCenter];
+    NSDictionary* attributes = @{
+      NSFontAttributeName : font,
+      NSForegroundColorAttributeName : textColor,
+      NSParagraphStyleAttributeName : paragraphStyle
+    };
+    [string drawInRect:textRect withAttributes:attributes];
+  }];
+}
+
+UIImage* CreateFallbackImageWithStringAndColorViaLegacyCGContext(
+    NSString* string,
+    UIColor* backgroundColor,
+    UIColor* textColor) {
   CGRect rect = CGRectMake(0, 0, kFallbackIconSize, kFallbackIconSize);
   UIGraphicsBeginImageContext(rect.size);
   CGContextRef context = UIGraphicsGetCurrentContext();
@@ -70,6 +99,21 @@ UIImage* GetFallbackImageWithStringAndColor(NSString* string,
   UIImage* image = UIGraphicsGetImageFromCurrentImageContext();
   UIGraphicsEndImageContext();
   return image;
+}
+
+// Create an image with a rounded square with color `backgroundColor` and
+// `string` centered in color `textColor`.
+UIImage* GetFallbackImageWithStringAndColor(NSString* string,
+                                            UIColor* backgroundColor,
+                                            UIColor* textColor) {
+  if (base::FeatureList::IsEnabled(
+          kUseUIGraphicsImageRendererForFallbackIcons)) {
+    return CreateFallbackImageWithStringAndColorViaGraphicsImageRenderer(
+        string, backgroundColor, textColor);
+  } else {
+    return CreateFallbackImageWithStringAndColorViaLegacyCGContext(
+        string, backgroundColor, textColor);
+  }
 }
 
 }  // namespace

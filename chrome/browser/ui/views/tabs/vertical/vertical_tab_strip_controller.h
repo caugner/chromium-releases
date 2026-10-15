@@ -14,8 +14,10 @@
 #include "chrome/browser/ui/views/tabs/tab_strip_types.h"
 #include "chrome/browser/ui/views/tabs/vertical/vertical_tab_drag_handler.h"
 #include "components/tab_groups/tab_group_id.h"
+#include "ui/base/models/list_selection_model.h"
 
 class BrowserView;
+class ExpandOnHoverLock;
 class TabCollectionNode;
 class TabGroup;
 class TabHoverCardController;
@@ -65,21 +67,24 @@ class VerticalTabStripController : public TabContextMenuController::Delegate {
   void ToggleSelected(const tabs::TabInterface* tab_interface);
   void AddSelectionFromAnchorTo(const tabs::TabInterface* tab_interface);
   void ExtendSelectionTo(const tabs::TabInterface* tab_interface);
+  const ui::ListSelectionModel& GetSelectionModel() const;
   void ToggleTabGroupCollapsedState(const TabGroup* group,
                                     ToggleTabGroupCollapsedStateOrigin origin);
   void ShowGroupEditorBubble(const TabCollectionNode* group_node);
   views::Widget* ShowGroupEditorBubble(const tab_groups::TabGroupId& group_id,
                                        views::View* anchor_view,
                                        bool stop_context_menu_propagation);
-  bool IsCollapsed() const;
 
   tab_groups::TabGroupSyncService* GetTabGroupSyncService();
 
   tabs::VerticalTabStripStateController* GetStateController();
+  const tabs::VerticalTabStripStateController* GetStateController() const;
 
   TabContextMenuController* GetTabContextMenuController() {
     return context_menu_controller_.get();
   }
+
+  BrowserView* GetBrowserView() const { return browser_view_; }
 
   VerticalTabDragHandler& GetDragHandler() { return drag_handler_.get(); }
   const VerticalTabDragHandler& GetDragHandler() const {
@@ -115,6 +120,8 @@ class VerticalTabStripController : public TabContextMenuController::Delegate {
   bool GetContextMenuAccelerator(int command_id,
                                  ui::Accelerator* accelerator) override;
 
+  void OnTabContextMenuClosed();
+
   void RecordMetricsOnTabSelectionChange(
       std::optional<tab_groups::TabGroupId> group);
 
@@ -126,6 +133,7 @@ class VerticalTabStripController : public TabContextMenuController::Delegate {
 
   std::unique_ptr<TabContextMenuController> context_menu_controller_;
   std::unique_ptr<TabMenuModelFactory> menu_model_factory_;
+  std::unique_ptr<ExpandOnHoverLock> expand_on_hover_lock_;
 
   raw_ptr<TabStripModel> model_;
   raw_ptr<BrowserView> browser_view_;

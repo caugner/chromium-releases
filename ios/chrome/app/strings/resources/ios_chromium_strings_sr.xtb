@@ -2,6 +2,7 @@
 <!DOCTYPE translationbundle>
 <translationbundle lang="sr">
 <translation id="1000436330784933699">Овде можете да отворите Објектив.</translation>
+<translation id="1005291068154454184">Видео преко целог екрана о томе како да подесите Chromium као подразумевани прегледач</translation>
 <translation id="1042296835509784301">Отвара Менаџер лозинки у Chromium-у.</translation>
 <translation id="1047130070405668746">Изаберите Chromium</translation>
 <translation id="1091252999271033193">То значи да ће Chromium сваки пут захтевати мобилни сајт.</translation>
@@ -70,9 +71,6 @@
 <translation id="2313870531055795960">Проверава URL-ове са листом небезбедних сајтова који се чувају у Chromium-у. Ако неки сајт покуша да украде вашу лозинку или пробате да преузмете штетну датотеку, Chromium може да пошаље URL-ове, укључујући делове садржаја странице, у Безбедно прегледање.</translation>
 <translation id="2314220608288760290">Chromium аутоматски отвара YouTube линкове без архивирања у режиму без архивирања.</translation>
 <translation id="231828342043114302">Да бисте добијали персонализовани садржај на основу интересовања, пријавите се у Chromium.</translation>
-<translation id="2326738825692478496">Неки Chromium подаци још нису сачувани на Google налогу.
-
-Сачекајте неколико минута пре него што се одјавите. Ако се одјавите одмах, ови подаци ће бити избрисани.</translation>
 <translation id="2334943301233020675">Следећи приступни кључеви нису увезени у Менаџер лозинки јер не испуњавају услове.</translation>
 <translation id="2337722506862731008">Дели Chromium</translation>
 <translation id="2340423701577464731">Додавање ставке листе за читање у Chromium</translation>
@@ -103,7 +101,6 @@
 Још подешавања која користе податке за побољшање доживљаја Chromium-а потражите у <ph name="BEGIN_LINK" />Google услугама<ph name="END_LINK" />.</translation>
 <translation id="2832168932648876507">Претражујте гласом у Chromium-у.</translation>
 <translation id="2843571538056574338">Користите Chromium за аутоматско попуњавање</translation>
-<translation id="2899085719655668655">Видео упутства у режиму слике у слици о томе како да подесите Chromium као подразумевани прегледач</translation>
 <translation id="2918709798697875261">Организација захтева да останете одјављени са Chromium-а.</translation>
 <translation id="2942241131342758843">Подразумевано користите Chromium да бисте отварали линкове, претраживали из виџета и аутоматски попуњавали лозинке у другим апликацијама</translation>
 <translation id="2977470724722393594">Chromium је ажуриран</translation>
@@ -137,6 +134,7 @@
 <translation id="377649297473651452">Проширени приказ Chromium аутоматског попуњавања</translation>
 <translation id="3780779443901618967">Упозорава вас на опасне сајтове, чак и на оне за које Google раније није знао, анализирајући више података са сајтова него стандардна заштита. Можете да изаберете да прескочите упозорења Chromium-а.</translation>
 <translation id="3805899903892079518">Chromium не може да приступа сликама или видеима. Омогућите приступ у iOS Settings (Подешавања iOS-а) &gt; Privacy (Приватност) &gt; Photos (Слике).</translation>
+<translation id="3809591243528646631">Да бисте добили функције за безбедност деце, можете да користите Google налог који је подешен за дете или да користите Chromium без налога. <ph name="BEGIN_LINK" />Сазнајте више<ph name="END_LINK" /></translation>
 <translation id="3816686541346279443">Chromium ће вам понудити да сачува лозинку.</translation>
 <translation id="3827545470516145620">Добијате стандардну безбедносну заштиту на овом уређају</translation>
 <translation id="3833326979834193417">Chromium аутоматски покреће Проверу безбедности сваког дана да би вас заштитио од повреде података, небезбедних веб-сајтова и другог. Више о Провери безбедности можете да пронађете у Подешавањима.</translation>
@@ -172,6 +170,7 @@
 Да бисте променили ово подешавање, <ph name="BEGIN_LINK" />избришите Chromium податке на налогу<ph name="END_LINK" />.</translation>
 <translation id="4578500311756617174">Chromium савет: Подразумевано користите Chromium</translation>
 <translation id="458786853569524949">Сада можете да користите Chromium сваки пут када додирнете линкове у имејловима, документима и другим апликацијама.</translation>
+<translation id="4625730353066900738">Сазнајте корисне основе Chromium-а да бисте започели</translation>
 <translation id="4633738821577273991">Набавите побољшано безбедно прегледање и за овај Chromium профил</translation>
 <translation id="4654936625574199632">Chromium шаље податке о коришћењу и отказивању Google-у ради побољшања апликације. <ph name="BEGIN_LINK" />Управљајте<ph name="END_LINK" /></translation>
 <translation id="4681781466797808448">Укључите Chromium скенер</translation>
@@ -182,7 +181,6 @@
 <translation id="4856138222358683580">Chromium радње</translation>
 <translation id="4869706986935301458">Одмах отворите Chromium када сте на iPhone-у</translation>
 <translation id="4904452304169763785">Обавештења о свим проблемима у вези са приватношћу или безбедношћу које Chromium открије за вас.</translation>
-<translation id="4908570938463711775">Сазнајте корисне основe Chromium-а да бисте започели</translation>
 <translation id="4962295957157529683">Завршите оно што сте радили у другом отвореном Chromium прозору.</translation>
 <translation id="4985291216379576555">Офлајн сте. Chromium не може да тражи ажурирања.</translation>
 <translation id="4996471330284142407">Урадите више помоћу још једноставнијег, безбеднијег и бржег Chromium-а.</translation>
@@ -358,6 +356,7 @@
 <translation id="8900052431807804054">Набавите најјачу Chromium заштиту</translation>
 <translation id="8908791447256515663">Брже приступајте Chromium-у са траке с апликацијама на iPad-у.</translation>
 <translation id="8925569192291721236">Будите у току са новостима о праћењу цена и саветима за Chromium.</translation>
+<translation id="8939412301975414416">Да бисте добили функције за безбедност деце у Chromium-у, можете да користите Google налог који је подешен за дете или да користите Chromium без налога.</translation>
 <translation id="8950326149985259075">{THRESHOLD,plural, =1{То се дешава када се Chromium не користи {THRESHOLD} минут}one{То се дешава када се Chromium не користи {THRESHOLD} минут}few{То се дешава када се Chromium не користи {THRESHOLD} минута}other{То се дешава када се Chromium не користи {THRESHOLD} минута}}</translation>
 <translation id="8963279154877372067">Дозволите Chromium обавештења да бисте добијали обавештења о снижењима</translation>
 <translation id="8975812008711371178">Претраживање гласом у Chromium-у</translation>

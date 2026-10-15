@@ -569,6 +569,15 @@ bool SVGImage::MaybeAnimated() {
   return HasSmilAnimations(document) || document.Timeline().HasPendingUpdates();
 }
 
+bool SVGImage::HasSVGForeignObject() const {
+  SVGSVGElement* root_element = RootElement();
+  if (!root_element) {
+    return false;
+  }
+  return root_element->GetDocument().IsUseCounted(
+      WebFeature::kSVGForeignObjectElement);
+}
+
 void SVGImage::ServiceAnimations(
     base::TimeTicks monotonic_animation_start_time) {
   if (!GetImageObserver())
@@ -645,6 +654,10 @@ void SVGImage::UpdateUseCountersAfterLoad(const Document& document) const {
     if (HasSmilAnimations(root_element->GetDocument())) {
       document.CountUse(WebFeature::kSVGSMILAnimationInImageRegardlessOfCache);
     }
+    if (root_element->GetDocument().IsUseCounted(
+            WebFeature::kSVGForeignObjectElement)) {
+      document.CountUse(WebFeature::kSVGForeignObjectInImage);
+    }
   }
 
   if (did_encounter_xsl_) {
@@ -661,11 +674,25 @@ void SVGImage::MaybeRecordSvgImageProcessingTime(const Document& document) {
   }
 }
 
-Element* SVGImage::GetResourceElement(const AtomicString& id) const {
+Element* SVGImage::GetResourceElement(
+    base::PassKey<ExternalSVGResourceImageContent>,
+    const AtomicString& id) const {
   if (!document_host_) {
     return nullptr;
   }
   return GetFrame()->GetDocument()->getElementById(id);
+}
+
+void SVGImage::UpdateLifecycleForUse(
+    base::PassKey<ExternalSVGResourceImageContent>) {
+  if (!document_host_) {
+    return;
+  }
+  // Temporarily disable change notifications triggered by the lifecycle
+  // update.
+  ImageObserverDisabler disable_image_observer(this);
+  GetFrame()->View()->UpdateAllLifecyclePhasesExceptPaint(
+      DocumentUpdateReason::kSVGImage);
 }
 
 void SVGImage::NotifyAsyncLoadCompleted() {

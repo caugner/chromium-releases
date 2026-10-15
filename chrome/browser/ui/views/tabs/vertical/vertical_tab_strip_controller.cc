@@ -26,9 +26,9 @@
 #include "chrome/browser/ui/views/event_utils.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h"
+#include "chrome/browser/ui/views/tabs/groups/tab_group_accessibility.h"
+#include "chrome/browser/ui/views/tabs/groups/tab_group_editor_bubble_view.h"
 #include "chrome/browser/ui/views/tabs/tab/tab_context_menu_controller.h"
-#include "chrome/browser/ui/views/tabs/tab_group_accessibility.h"
-#include "chrome/browser/ui/views/tabs/tab_group_editor_bubble_view.h"
 #include "chrome/browser/ui/views/tabs/vertical/root_tab_collection_node.h"
 #include "chrome/browser/ui/views/tabs/vertical/tab_collection_node.h"
 #include "chrome/browser/ui/views/tabs/vertical/vertical_tab_drag_handler.h"
@@ -94,7 +94,18 @@ void VerticalTabStripController::ShowContextMenuForNode(
       browser_view_->browser()->GetFeatures().tab_menu_model_delegate(), model_,
       tab_index.value());
 
-  context_menu_controller_->LoadModel(std::move(model));
+  CHECK(browser_view_->tab_strip_view());
+  expand_on_hover_lock_ = browser_view_->tab_strip_view()->GetExpandOnHoverLock(
+      ExpandOnHoverLockType::kKeepExpanded);
+
+  // `base::Unretained(this)` is safe because `context_menu_controller_` is
+  // owned by `this`, ensuring the callback cannot outlive `this`.
+  auto on_menu_closed =
+      base::BindRepeating(&VerticalTabStripController::OnTabContextMenuClosed,
+                          base::Unretained(this));
+
+  context_menu_controller_->LoadModel(std::move(model),
+                                      std::move(on_menu_closed));
 
   context_menu_controller_->RunMenuAt(point, source_type, source->GetWidget());
 }
@@ -260,6 +271,11 @@ void VerticalTabStripController::ExtendSelectionTo(
   model_->ExtendSelectionTo(tab_index.value());
 }
 
+const ui::ListSelectionModel& VerticalTabStripController::GetSelectionModel()
+    const {
+  return model_->selection_model().GetListSelectionModel();
+}
+
 void VerticalTabStripController::ToggleTabGroupCollapsedState(
     const TabGroup* group,
     ToggleTabGroupCollapsedStateOrigin origin) {
@@ -360,12 +376,6 @@ views::Widget* VerticalTabStripController::ShowGroupEditorBubble(
       /*stop_context_menu_propagation=*/stop_context_menu_propagation);
 }
 
-bool VerticalTabStripController::IsCollapsed() const {
-  const tabs::VerticalTabStripStateController* state_controller =
-      tabs::VerticalTabStripStateController::From(browser_view_->browser());
-  return state_controller && state_controller->IsCollapsed();
-}
-
 tab_groups::TabGroupSyncService*
 VerticalTabStripController::GetTabGroupSyncService() {
   return tab_groups::TabGroupSyncServiceFactory::GetForProfile(
@@ -374,6 +384,12 @@ VerticalTabStripController::GetTabGroupSyncService() {
 
 tabs::VerticalTabStripStateController*
 VerticalTabStripController::GetStateController() {
+  return const_cast<tabs::VerticalTabStripStateController*>(
+      std::as_const(*this).GetStateController());
+}
+
+const tabs::VerticalTabStripStateController*
+VerticalTabStripController::GetStateController() const {
   return tabs::VerticalTabStripStateController::From(browser_view_->browser());
 }
 
@@ -422,6 +438,10 @@ bool VerticalTabStripController::GetContextMenuAccelerator(
   return TabStripModel::ContextMenuCommandToBrowserCommand(command_id,
                                                            &browser_cmd) &&
          browser_view_->GetWidget()->GetAccelerator(browser_cmd, accelerator);
+}
+
+void VerticalTabStripController::OnTabContextMenuClosed() {
+  expand_on_hover_lock_.reset();
 }
 
 void VerticalTabStripController::TabGroupFocusChanged(

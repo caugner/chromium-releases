@@ -12,6 +12,8 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/frame/contents_capture_border_view.h"
+#include "chrome/browser/ui/views/frame/contents_container_view.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/compositor/layer.h"
@@ -47,15 +49,12 @@ float ClampAndInterpolate(gfx::Tween::Type type,
 gfx::Insets GetContentsBorderInsets(BrowserView& browser_view,
                                     content::WebContents* web_contents) {
   gfx::Insets insets_for_contents_border;
-  auto* const contents_border =
+  auto* const contents_border_view =
       browser_view.GetContentsContainerViewFor(web_contents)
-          ->capture_contents_border_widget();
-  if (contents_border && contents_border->IsVisible()) {
-    auto* contents_border_view = contents_border->GetContentsView();
-    if (contents_border_view && contents_border_view->GetBorder()) {
-      insets_for_contents_border =
-          contents_border_view->GetBorder()->GetInsets();
-    }
+          ->capture_contents_border_view();
+  if (contents_border_view && contents_border_view->GetVisible() &&
+      contents_border_view->GetBorder()) {
+    insets_for_contents_border = contents_border_view->GetBorder()->GetInsets();
   }
   return insets_for_contents_border;
 }
@@ -283,21 +282,10 @@ gfx::RoundedCornersF ContextSharingBorderView::GetContentBorderRadius() const {
     return corner_radius_;
   }
 
-  // If GlicMultiInstance is enabled, have all corners be rounded.
   // TODO(https://crbug.com/457452232): Update rounded corner radiuses for
   // different OS's.
-  if (controller_->IsSidePanelOpen()) {
-    return gfx::RoundedCornersF(kCornerRadius, kCornerRadius, kCornerRadius,
-                                kCornerRadius);
-  }
-
-#if BUILDFLAG(IS_MAC)
-  if (!browser_->GetBrowserView().IsFullscreen()) {
-    return gfx::RoundedCornersF(0.0f, 0.0f, kCornerRadius, kCornerRadius);
-  }
-#endif
-
-  return gfx::RoundedCornersF();
+  return gfx::RoundedCornersF(kCornerRadius, kCornerRadius, kCornerRadius,
+                              kCornerRadius);
 }
 
 BEGIN_METADATA(ContextSharingBorderView)

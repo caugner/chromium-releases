@@ -14,11 +14,13 @@
 #include "base/memory/raw_ptr.h"
 #include "base/scoped_observation.h"
 #include "base/types/expected.h"
+#include "chrome/browser/glic/glic_enums.h"
 #include "chrome/browser/glic/glic_user_status_fetcher.h"
 #include "chrome/browser/subscription_eligibility/subscription_eligibility_service.h"
 #include "components/optimization_guide/core/optimization_guide_features.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
+#include "content/public/browser/web_contents.h"
 
 class Profile;
 class ProfileAttributesStorage;
@@ -77,13 +79,16 @@ class GlicGlobalEnabling {
   explicit GlicGlobalEnabling(Delegate& delegate);
   ~GlicGlobalEnabling();
   bool IsEnabledByFlags();
+  bool IsSystemRequirementMet() const;
+  bool IsLocaleEnabled() const { return locale_enablement_.value_or(true); }
+  bool IsCountryEnabled() const { return country_enablement_.value_or(true); }
 
  private:
   std::optional<bool> locale_enablement_;
   std::optional<bool> country_enablement_;
 };
 
-// This class provides a central location for checking if GLIC is enabled. It
+// This class provides a central location for checking if Glic is enabled. It
 // allows for future expansion to include other ways the feature may be disabled
 // such as based on user preferences or system settings.
 //
@@ -111,11 +116,16 @@ class GlicEnabling : public signin::IdentityManager::Observer,
   // will not change at runtime.
   static bool IsEnabledByFlags();
 
-  // Some profiles - such as incognito, guest, system profile, etc. - are never
-  // eligible to use Glic. This function returns true if a profile is eligible
-  // for Glic, that is, it can potentially be enabled, regardless of whether it
-  // is currently enabled or not. Always returns false if IsEnabledByFlags is
-  // off. This will never change for a given profile.
+  // Returns true if a profile is eligible for Glic. Some profiles - such as
+  // incognito, guest, system profile, etc. - are never eligible. An eligible
+  // profile is one where Glic could potentially be enabled, regardless of
+  // whether it is currently enabled or not.
+  //
+  // This is a foundational, static check that does not change at runtime. It
+  // controls whether Glic infrastructure (e.g., `GlicKeyedService`, UI
+  // controllers) is created for the profile.
+  //
+  // Always returns false if `IsEnabledByFlags()` is off.
   static bool IsProfileEligible(const Profile* profile);
 
   // This is a convenience method for code outside of //chrome/browser/glic.
@@ -142,8 +152,11 @@ class GlicEnabling : public signin::IdentityManager::Observer,
   // Same as IsReadyForProfile, but returns a more detailed state.
   static mojom::ProfileReadyState GetProfileReadyState(Profile* profile);
 
-  // Whether the profile is in the glic tiered rollout population.
+  // Whether the profile is in the Glic tiered rollout population.
   static bool IsEligibleForGlicTieredRollout(Profile* profile);
+
+  // Whether the glic internals page is enabled.
+  static bool IsInternalsWebUIEnabled(Profile* profile);
 
   // The settings page is shown when:
   // * Flags are enabled
@@ -151,9 +164,6 @@ class GlicEnabling : public signin::IdentityManager::Observer,
   // * The profile has model execution privileges
   // * The profile has completed the first run experience
   static bool ShouldShowSettingsPage(Profile* profile);
-
-  // Whether the FRE screen is displayed in the same window as the chat app.
-  static bool IsUnifiedFreEnabled(Profile* profile);
 
   // Whether the Trust-First Onboarding flow should be shown.
   static bool IsTrustFirstOnboardingEnabledForProfile(Profile* profile);
@@ -164,34 +174,20 @@ class GlicEnabling : public signin::IdentityManager::Observer,
   // Whether the tab web contents contextual menu item is enabled.
   static bool IsContextualMenuItemEnabled(Profile* profile);
 
-  // Whether the required feature flags for multi-instance - kGlicMultiInstance,
-  // kGlicMultiTab, and kGlicMultitabUnderlines - are enabled. When calling, be
-  // sure that IsMultiInstanceEnabled() should not be used instead.
+  // Deprecated, Multi-instance is always enabled.
   static bool IsMultiInstanceEnabledByFlags();
 
-  // Returns true if glic is enabled for the profile, the feature is enabled,
-  // and the account is non-enterprise (or for glic dev).
+  // Whether the selection prompt is enabled.
+  static bool IsSelectionPromptEnabledForProfile(Profile* profile);
+
+  // Returns true if Glic is enabled for the profile, the feature is enabled,
+  // and the account is non-enterprise (or for Glic dev).
   static bool IsShareImageEnabledForProfile(Profile* profile);
 
-  // Whether the required feature flags for multi-instance are enabled, or
-  // multi-instance should be enabled due to subscription tier. This serves as
-  // the default enablement check for the multi-instance feature and should be
-  // used in most cases.
+  // Whether the required feature flags for multi-instance are enabled. This
+  // serves as the default enablement check for the multi-instance feature and
+  // should be used in most cases.
   static bool IsMultiInstanceEnabled();
-
-  // Whether the result of
-  // `GetAndUpdateEligibilityForGlicMultiInstanceTieredRollout` was true the
-  // first time this function was called during the current run of Chrome.
-  static bool IsEligibleForGlicMultiInstanceTieredRolloutThisRun();
-
-  // Whether any loaded profile is, or has ever been, of a subscription tier
-  // that should enable multi-instance. `additional_profile` may be provided by
-  // the caller in case it has not been fully loaded.
-  // NOTE: new usages of this API should be extremely limited. Checking the
-  // feature enablement of multi-instance should go through
-  // IsMultiInstanceEnabled() instead. Please contact @cuianthony before using.
-  static bool GetAndUpdateEligibilityForGlicMultiInstanceTieredRollout(
-      Profile* additional_profile);
 
   struct ProfileEnablement {
     ProfileEnablement();
@@ -212,11 +208,34 @@ class GlicEnabling : public signin::IdentityManager::Observer,
     bool disallowed_by_remote_other : 1 = false;
     bool not_consented : 1 = false;
 
+    // Whether disallowed by country filtering.
+    bool disallowed_by_country_filter : 1 = false;
+
+    // Whether disallowed by locale filtering.
+    bool disallowed_by_locale_filter : 1 = false;
+
+    // Whether the Glic feature flag is disabled.
+    bool feature_flag_disabled : 1 = false;
+
+    // Whether system requirements (relevant to ChromeOS only) for Glic are not
+    // met.
+    bool system_requirement_not_met : 1 = false;
+
     // Whether live (audio) functionality is disallowed for this account type.
     bool live_disallowed : 1 = false;
 
     // Whether share image functionality is disallowed for this account type.
     bool share_image_disallowed : 1 = false;
+
+    // LINT.IfChange(FeatureDisabledReason)
+    enum class FeatureDisabledReason {
+      kFeatureFlagDisabled = 0,
+      kCountryDisabled = 1,
+      kLocaleDisabled = 2,
+      kSystemRequirementNotMet = 3,
+      kMaxValue = kSystemRequirementNotMet,
+    };
+    // LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:GlicFeatureDisabledReason)
 
     enum class Reason {
       kFeatureDisabled = 0,
@@ -233,7 +252,6 @@ class GlicEnabling : public signin::IdentityManager::Observer,
     void RecordStartupMetrics() const { RecordMetrics("Startup"); }
     void RecordSteadyStateMetrics() const { RecordMetrics("SteadyState"); }
 
-   public:
     bool IsProfileEligible() const {
       return !feature_disabled && !not_regular_profile;
     }
@@ -241,7 +259,8 @@ class GlicEnabling : public signin::IdentityManager::Observer,
     bool IsEnabled() const {
       return IsProfileEligible() && !not_rolled_out &&
              !primary_account_not_capable && !DisallowedByAdmin() &&
-             !disallowed_by_remote_other;
+             !disallowed_by_remote_other && !disallowed_by_country_filter &&
+             !disallowed_by_locale_filter;
     }
 
     bool IsEnabledAndConsented() const { return IsEnabled() && !not_consented; }
@@ -277,6 +296,7 @@ class GlicEnabling : public signin::IdentityManager::Observer,
    private:
     // `suffix` should be either "Startup" or "SteadyState".
     void RecordMetrics(const std::string& suffix) const;
+    void RecordFeatureDisabledReason(const std::string& suffix) const;
   };
   static ProfileEnablement EnablementForProfile(Profile* profile);
 
@@ -284,22 +304,29 @@ class GlicEnabling : public signin::IdentityManager::Observer,
                         ProfileAttributesStorage* profile_attributes_storage);
   ~GlicEnabling() override;
 
-  // Returns true if the given profile is allowed to use glic. This means that
-  // IsProfileEligible() returns true and:
+  // Returns true if the given profile is allowed to use Glic. This is the
+  // primary check to determine if Glic can be opened at all (i.e. entrypoints
+  // are available). Being "allowed" to use Glic means:
+  //   * `IsProfileEligible()` returns true
   //   * the profile is signed in
   //   * can_use_model_execution is true
-  //   * glic is allowed by enterprise policy.
-  // This value can change at runtime.
+  //   * Glic is allowed by enterprise policy.
+  // This value can change at runtime. If this returns false, all entry points
+  // should be hidden or disabled and Glic is functionally disabled.
   //
-  // Once a profile is allowed to run glic, there are several more checks that
-  // are required to use glic although many callsites may not care about all
-  // of these:
+  // Note that once a profile is allowed to run Glic, there are several more
+  // requirements for actually using Glic (i.e. opening the UI and not being
+  // blocked on an error state):
   //   * FRE has been passed. There is no way to permanently decline FRE, as
-  //     it's only invoked on user interaction with glic entry points.
-  //   * Entry point specific flags (e.g. kGlicPinnedToTabstrip).
+  //     it's only invoked on user interaction with Glic entry points.
   //   * Profile is not paused.
-  // If all entry-points have been disabled, then glic is functionally
-  // disabled.
+  // There are also settings that affect entry points:
+  //   * The tab strip GlicButton can be unpinned in settings; this state is
+  //     tracked by the `kGlicPinnedToTabstrip` preference.
+  //   * The OS-level entry point can be disabled in settings; this state is
+  //     tracked by the `kGlicLauncherEnabled` preference. It also cannot be
+  //     enabled without FRE completion.
+  // Many callsites do not care about all of these additional conditions.
   bool IsAllowed();
 
   // Returns true if the given profile has completed the FRE and false

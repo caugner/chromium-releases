@@ -8,12 +8,16 @@
 #include "chrome/browser/glic/browser_ui/glic_vector_icon_manager.h"
 #include "chrome/browser/glic/fre/glic_fre_controller.h"
 #include "chrome/browser/glic/glic_pref_names.h"
+#include "chrome/browser/glic/public/features.h"
 #include "chrome/browser/glic/public/glic_enabling.h"
 #include "chrome/browser/glic/public/glic_keyed_service.h"
-#include "chrome/browser/glic/widget/glic_window_controller.h"
+#include "chrome/browser/glic/public/service/glic_instance_coordinator.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/tab_list/tab_list_interface.h"
 #include "components/feature_engagement/public/feature_list.h"
+#include "components/pdf/common/constants.h"
 #include "components/prefs/pref_service.h"
+#include "content/public/browser/web_contents.h"
 #include "ui/views/widget/widget.h"
 
 namespace glic {
@@ -33,6 +37,9 @@ GlicButtonController::GlicButtonController(
   CHECK(toolbar_glic_controller_delegate_);
   CHECK(glic_keyed_service_);
 
+  tab_strip_glic_controller_delegate_->SetButtonController(this);
+  toolbar_glic_controller_delegate_->SetButtonController(this);
+
   // Set initial button state.
   UpdateButton();
 
@@ -46,7 +53,7 @@ GlicButtonController::GlicButtonController(
   subscriptions_.push_back(
       glic_keyed_service_->enabling().RegisterAllowedChanged(update_callback));
   subscriptions_.push_back(
-      glic_keyed_service_->window_controller().AddGlobalShowHideCallback(
+      glic_keyed_service_->instance_coordinator().AddGlobalShowHideCallback(
           update_callback));
   subscriptions_.push_back(
       glic_keyed_service_->fre_controller().AddWebUiStateChangedCallback(
@@ -54,7 +61,14 @@ GlicButtonController::GlicButtonController(
                               base::Unretained(this))));
 }
 
-GlicButtonController::~GlicButtonController() = default;
+GlicButtonController::~GlicButtonController() {
+  if (tab_strip_glic_controller_delegate_) {
+    tab_strip_glic_controller_delegate_->SetButtonController(nullptr);
+  }
+  if (toolbar_glic_controller_delegate_) {
+    toolbar_glic_controller_delegate_->SetButtonController(nullptr);
+  }
+}
 
 void GlicButtonController::UpdateButton() {
   // Attempt to record startup metrics when the button controller is first
@@ -79,9 +93,6 @@ void GlicButtonController::UpdateButton() {
   tab_strip_glic_controller_delegate_->SetGlicShowState(true);
   toolbar_glic_controller_delegate_->SetGlicShowState(true);
 
-  // Try preloading since we know the button is visible.
-  glic_keyed_service_->TryPreload();
-
   bool is_glic_panel_open =
       glic_keyed_service_->IsFreShowing() ||
       glic_keyed_service_->IsPanelShowingForBrowser(*browser_);
@@ -91,6 +102,32 @@ void GlicButtonController::UpdateButton() {
 
 void GlicButtonController::OnFreStateChanged(mojom::FreWebUiState) {
   UpdateButton();
+}
+
+bool GlicButtonController::ShouldAutoSummarize() const {
+  if (!base::FeatureList::IsEnabled(features::kGlicButtonAutoSummarize) ||
+      !browser_->GetActiveTabInterface()) {
+    return false;
+  }
+
+  content::WebContents* web_contents =
+      browser_->GetActiveTabInterface()->GetContents();
+  if (!web_contents) {
+    return false;
+  }
+
+  return web_contents->GetContentsMimeType() == pdf::kPDFMimeType;
+}
+
+mojom::InvocationSource GlicButtonController::GetInvocationSource(
+    bool is_showing_nudge) const {
+  if (is_showing_nudge) {
+    return mojom::InvocationSource::kNudge;
+  } else if (ShouldAutoSummarize()) {
+    return mojom::InvocationSource::kZeroStateAutoSummarize;
+  }
+
+  return mojom::InvocationSource::kTopChromeButton;
 }
 
 }  // namespace glic

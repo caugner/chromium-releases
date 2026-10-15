@@ -19,6 +19,7 @@ enum class EntryPoint;
 enum class FloatyUpdateSource;
 enum class ImageActionButtonType;
 enum class InputPlateAttachmentOption;
+enum class FREState;
 // Encapsulates a set of ineligibility reasons computed during a single Gemini
 // eligibility check.
 struct IneligibilityReasons {
@@ -42,6 +43,9 @@ enum class GeminiViewState;
 
 // UMA histogram key for IOS.Gemini.Eligibility.
 extern const char kEligibilityHistogram[];
+
+// UMA histogram key for IOS.Gemini.FRE.State.
+extern const char kGeminiFREStateHistogram[];
 
 // UMA histogram key for IOS.Gemini.EntryPoint.
 extern const char kEntryPointHistogram[];
@@ -480,6 +484,9 @@ void RecordFloatyMinimizedTime(base::TimeTicks elapsed_minimized_floaty_time);
 // Records whether a Gemini eligibility check was successful.
 void RecordGeminiEligibility(bool eligible);
 
+// Records the FRE state for Gemini.
+void RecordGeminiFREState(gemini::FREState state);
+
 // Records all of the Gemini ineligibility reasons. One record will be sent at
 // most per associated value of IOSGeminiIneligibilityReason.
 void RecordGeminiIneligibilityReasons(gemini::IneligibilityReasons reasons);
@@ -536,17 +543,8 @@ void RecordGeminiCameraFlowBegan();
 void RecordGeminiCameraFlowOSCameraAuthorizationInitialStatus(
     IOSGeminiOSCameraAuthorizationInitialStatus authorization_status);
 
-// Records the result of an OS-level camera authorization request.
-void RecordGeminiCameraFlowOSAuthorizationResult(bool granted);
-
-// Records the result of the alert directing users to OS settings.
-void RecordGeminiCameraFlowGoToOSSettingsAlertResult(bool accepted);
-
 // Records the initial Gemini camera permission value.
 void RecordGeminiCameraFlowGeminiCameraPermissionInitialValue(bool enabled);
-
-// Records the result of the Gemini camera permission alert.
-void RecordGeminiCameraFlowGeminiCameraPermissionAlertResult(bool accepted);
 
 // Records that the camera picker was presented.
 void RecordGeminiCameraFlowPresentCameraPicker();

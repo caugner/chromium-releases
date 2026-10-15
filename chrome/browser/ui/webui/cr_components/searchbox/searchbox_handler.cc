@@ -9,7 +9,6 @@
 #include "base/containers/fixed_flat_map.h"
 #include "base/feature_list.h"
 #include "base/metrics/histogram_functions.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
@@ -302,25 +301,42 @@ BASE_FEATURE(kDropMismatchedSelections, base::FEATURE_ENABLED_BY_DEFAULT);
 }  // namespace
 
 // static
-void SearchboxHandler::SetupWebUIDataSource(content::WebUIDataSource* source,
-                                            Profile* profile,
-                                            bool enable_voice_search,
-                                            bool enable_lens_search,
-                                            bool session_allows_drag_and_drop) {
+// Enables a unified voice search system and metric tracking system in new tab
+// page, co-browsing, and omnibox composebox.
+BASE_FEATURE(SearchboxHandler::kVoiceSearchCoherence,
+             "VoiceSearchCoherence",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+// Enables a new recording animation that matches across all surfaces.
+const base::FeatureParam<bool> SearchboxHandler::kVoiceSearchRecordingAnimation{
+    &SearchboxHandler::kVoiceSearchCoherence, "VoiceSearchRecordingAnimation",
+    false};
+
+// static
+base::DictValue SearchboxHandler::GetWebUIDataSourceDict(Profile* profile) {
+  return GetWebUIDataSourceDict(profile, WebUIDataSourceOptions{});
+}
+
+// static
+base::DictValue SearchboxHandler::GetWebUIDataSourceDict(
+    Profile* profile,
+    WebUIDataSourceOptions options) {
+  base::DictValue dict;
+
   // The WebUI Omnibox code will override this to `true` to adjust various
   // color and layout options.
-  source->AddBoolean("isTopChromeSearchbox", false);
+  dict.Set("isTopChromeSearchbox", false);
   // The lens searchboxes overrides this to true to adjust various color and
   // layout options.
-  source->AddBoolean("isLensSearchbox", false);
+  dict.Set("isLensSearchbox", false);
 
-  source->AddBoolean("reportMetrics", false);
-  source->AddString("charTypedToPaintMetricName", "");
-  source->AddString("resultChangedToPaintMetricName", "");
+  dict.Set("reportMetrics", false);
+  dict.Set("charTypedToPaintMetricName", "");
+  dict.Set("resultChangedToPaintMetricName", "");
 
-  source->AddBoolean("forceHideEllipsis", false);
-  source->AddBoolean("enableThumbnailSizingTweaks", false);
-  source->AddBoolean("enableCsbMotionTweaks", false);
+  dict.Set("forceHideEllipsis", false);
+  dict.Set("enableThumbnailSizingTweaks", false);
+  dict.Set("enableCsbMotionTweaks", false);
 
   static constexpr webui::LocalizedString kStrings[] = {
       {"lensSearchButtonLabel", IDS_TOOLTIP_LENS_SEARCH},
@@ -336,11 +352,10 @@ void SearchboxHandler::SetupWebUIDataSource(content::WebUIDataSource* source,
       {"addContext", IDS_NTP_COMPOSE_ADD_CONTEXTS},
       {"addContextTitle", IDS_NTP_COMPOSE_ADD_CONTEXT_TITLE},
       {"addImage", IDS_NTP_COMPOSE_ADD_IMAGE},
+      {"addDriveFile", IDS_NTP_COMPOSE_ADD_DRIVE},
       {"addTab", IDS_NTP_COMPOSEBOX_TAB_PICKER_ADD_TABS_TITLE},
       {"dismissButton", IDS_NTP_DISMISS},
-      // TODO(b/467036804): Update the value of `lensSearchAriaLabel`.
-      {"lensSearchAriaLabel", IDS_CONTENT_CONTEXT_LENS_OVERLAY},
-      {"lensSearchLabel", IDS_CONTENT_CONTEXT_LENS_OVERLAY},
+      {"lensSearchLabel", IDS_WEBUI_OMNIBOX_COMPOSE_LENS_OVERLAY},
       {"searchboxComposeButtonText", IDS_NTP_COMPOSE_ENTRYPOINT},
       {"searchboxComposeButtonTitle", IDS_NTP_COMPOSE_ENTRYPOINT_A11Y_LABEL},
       {"composeboxCancelButtonTitle", IDS_NTP_COMPOSE_CANCEL_BUTTON_A11Y_LABEL},
@@ -390,6 +405,13 @@ void SearchboxHandler::SetupWebUIDataSource(content::WebUIDataSource* source,
       {"voiceDetails", IDS_NEW_TAB_VOICE_DETAILS},
       {"voiceListening", IDS_NEW_TAB_VOICE_LISTENING},
       {"voicePermissionError", IDS_NEW_TAB_VOICE_PERMISSION_ERROR},
+      {"audioError", IDS_NEW_TAB_VOICE_AUDIO_ERROR},
+      {"languageError", IDS_NEW_TAB_VOICE_LANGUAGE_ERROR},
+      {"networkError", IDS_NEW_TAB_VOICE_NETWORK_ERROR},
+      {"noTranslation", IDS_NEW_TAB_VOICE_NO_TRANSLATION},
+      {"noVoice", IDS_NEW_TAB_VOICE_NO_VOICE},
+      {"otherError", IDS_NEW_TAB_VOICE_OTHER_ERROR},
+      {"tryAgain", IDS_NEW_TAB_VOICE_TRY_AGAIN},
       {"composeboxContextMenuMostRecentTabs",
        IDS_CONTEXTUAL_TASKS_CONTEXT_MENU_MOST_RECENT_TABS},
       {"composeboxContextMenuGeminiModels",
@@ -406,29 +428,29 @@ void SearchboxHandler::SetupWebUIDataSource(content::WebUIDataSource* source,
       {"composeboxHintTextAskAboutThisDoc",
        IDS_COMPOSE_HINT_TEXT_ASK_ABOUT_THIS_DOC},
   };
-  source->AddLocalizedStrings(kStrings);
-  source->AddString("searchboxComposePlaceholder",
-                    ntp_composebox::FeatureConfig::Get()
-                        .config.composebox()
-                        .input_placeholder_text());
-  source->AddString(
+  for (const auto& entry : kStrings) {
+    dict.Set(entry.name, l10n_util::GetStringUTF16(entry.id));
+  }
+
+  dict.Set("searchboxComposePlaceholder", ntp_composebox::FeatureConfig::Get()
+                                              .config.composebox()
+                                              .input_placeholder_text());
+  dict.Set(
       "suggestionActivityLink",
       l10n_util::GetStringFUTF16(IDS_NTP_COMPOSE_SUGGESTIONS_INFO,
                                  u"https://myactivity.google.com/"
                                  u"activitycontrols?settings=search&utm_source="
                                  u"aim&utm_campaign=aim_str"));
-
   DefineChromeRefreshRealboxIcons();
-  source->AddString("searchboxDefaultIcon", kSearchIconResourceName);
+  dict.Set("searchboxDefaultIcon", kSearchIconResourceName);
 
-  source->AddBoolean("searchboxVoiceSearch", enable_voice_search);
-  source->AddBoolean("searchboxLensSearch", enable_lens_search);
-  source->AddString("searchboxLensVariations", GetBase64UrlVariations(profile));
-  source->AddBoolean(
-      "searchboxCr23Theming",
-      base::FeatureList::IsEnabled(ntp_features::kRealboxCr23Theming));
-  source->AddBoolean("searchboxCr23SteadyStateShadow",
-                     ntp_features::kNtpRealboxCr23SteadyStateShadow.Get());
+  dict.Set("searchboxVoiceSearch", options.enable_voice_search);
+  dict.Set("searchboxLensSearch", options.enable_lens_search);
+  dict.Set("searchboxLensVariations", GetBase64UrlVariations(profile));
+  dict.Set("searchboxCr23Theming",
+           base::FeatureList::IsEnabled(ntp_features::kRealboxCr23Theming));
+  dict.Set("searchboxCr23SteadyStateShadow",
+           ntp_features::kNtpRealboxCr23SteadyStateShadow.Get());
 
   int max_files = 10;
   int max_images = max_files;
@@ -447,41 +469,38 @@ void SearchboxHandler::SetupWebUIDataSource(content::WebUIDataSource* source,
       }
     }
   }
-  source->AddInteger("composeboxFileMaxCount", max_files);
-  source->AddString("composeboxDragAndDropHint",
-                    l10n_util::GetPluralStringFUTF16(
-                        IDS_NTP_COMPOSE_DRAG_AND_DROP_HINT, max_files));
-  source->AddString("maxFilesReachedError",
-                    l10n_util::GetPluralStringFUTF16(
-                        IDS_NTP_COMPOSE_MAX_FILES_REACHED_ERROR, max_files));
-  source->AddString("maxImagesReachedError",
-                    l10n_util::GetPluralStringFUTF16(
-                        IDS_NTP_COMPOSE_MAX_IMAGES_REACHED_ERROR, max_images));
-  source->AddString("maxPdfsReachedError",
-                    l10n_util::GetPluralStringFUTF16(
-                        IDS_NTP_COMPOSE_MAX_PDFS_REACHED_ERROR, max_pdfs));
+  dict.Set("composeboxFileMaxCount", max_files);
+  dict.Set("composeboxDragAndDropHint",
+           l10n_util::GetPluralStringFUTF16(IDS_NTP_COMPOSE_DRAG_AND_DROP_HINT,
+                                            max_files));
+  dict.Set("maxFilesReachedError",
+           l10n_util::GetPluralStringFUTF16(
+               IDS_NTP_COMPOSE_MAX_FILES_REACHED_ERROR, max_files));
+  dict.Set("maxImagesReachedError",
+           l10n_util::GetPluralStringFUTF16(
+               IDS_NTP_COMPOSE_MAX_IMAGES_REACHED_ERROR, max_images));
+  dict.Set("maxPdfsReachedError",
+           l10n_util::GetPluralStringFUTF16(
+               IDS_NTP_COMPOSE_MAX_PDFS_REACHED_ERROR, max_pdfs));
 
-  source->AddBoolean("composeboxContextDragAndDropEnabled",
-                     session_allows_drag_and_drop);
-
-  // TODO(b/477969358): Consolidate voice search booleans.
-  source->AddBoolean("steadyComposeboxShowVoiceSearch", enable_voice_search);
-  source->AddBoolean("expandedComposeboxShowVoiceSearch", enable_voice_search);
+  dict.Set("composeboxContextDragAndDropEnabled",
+           options.session_allows_drag_and_drop);
+  dict.Set("composeboxShowVoiceSearch", options.enable_voice_search);
 
   // TODO(b/481663895): Remove "ConfigParam" from Next studies.
   auto composebox_config = ntp_composebox::FeatureConfig::Get().config;
-  source->AddBoolean(
-      "searchboxShowComposeAnimation",
-      profile->GetPrefs()->GetInteger(
-          prefs::kNtpComposeButtonShownCountPrefName) <
-          composebox_config.entry_point().num_page_load_animations());
-  source->AddBoolean("contextualMenuUsePecApi",
-                     base::FeatureList::IsEnabled(omnibox::kAimUsePecApi));
-  source->AddBoolean("ShowContextMenuHeaders",
-                     ntp_composebox::kShowContextMenuHeaders.Get());
-  source->AddBoolean(
-      "thinkingModelIconUpdate",
-      base::FeatureList::IsEnabled(omnibox::kThinkingModelIconUpdate));
+  dict.Set("searchboxShowComposeAnimation",
+           profile->GetPrefs()->GetInteger(
+               prefs::kNtpComposeButtonShownCountPrefName) <
+               composebox_config.entry_point().num_page_load_animations());
+  dict.Set("contextualMenuUsePecApi",
+           base::FeatureList::IsEnabled(omnibox::kAimUsePecApi));
+  dict.Set("ShowContextMenuHeaders",
+           ntp_composebox::kShowContextMenuHeaders.Get());
+  dict.Set("thinkingModelIconUpdate",
+           base::FeatureList::IsEnabled(omnibox::kThinkingModelIconUpdate));
+
+  return dict;
 }
 
 std::string SearchboxHandler::AutocompleteIconToResourceName(
@@ -848,14 +867,19 @@ SearchboxHandler::CreateAutocompleteMatch(
 
 SearchboxHandler::SearchboxHandler(
     mojo::PendingReceiver<searchbox::mojom::PageHandler> pending_page_handler,
+    mojo::PendingRemote<searchbox::mojom::Page> pending_page,
     Profile* profile,
     content::WebContents* web_contents,
     std::unique_ptr<OmniboxController> controller)
     : profile_(profile),
       web_contents_(web_contents),
       owned_controller_(std::move(controller)),
-      page_handler_(this, std::move(pending_page_handler)) {
+      page_handler_(this, std::move(pending_page_handler)),
+      page_(std::move(pending_page)) {
   controller_ = owned_controller_.get();
+  if (page_is_bound_callback_for_testing_) {
+    std::move(page_is_bound_callback_for_testing_).Run();
+  }
 }
 
 SearchboxHandler::~SearchboxHandler() {
@@ -863,6 +887,9 @@ SearchboxHandler::~SearchboxHandler() {
   controller_ = nullptr;
 }
 
+// TODO(crbug.com/500739761): Remove this check since searchbox.mojom uses
+// factory pattern for instantiation making the remote and receiver bound
+// at the same time.
 bool SearchboxHandler::IsRemoteBound() const {
   return page_.is_bound();
 }
@@ -881,14 +908,6 @@ void SearchboxHandler::OnContextualInputStatusChanged(
     std::optional<contextual_search::ContextUploadErrorType> error_type) {
   if (page_ && IsRemoteBound()) {
     page_->OnContextualInputStatusChanged(token, status, error_type);
-  }
-}
-
-void SearchboxHandler::SetPage(
-    mojo::PendingRemote<searchbox::mojom::Page> pending_page) {
-  page_.Bind(std::move(pending_page));
-  if (page_is_bound_callback_for_testing_) {
-    std::move(page_is_bound_callback_for_testing_).Run();
   }
 }
 
@@ -1165,6 +1184,12 @@ void SearchboxHandler::GetPlaceholderConfig(
         placeholders.emplace_back(l10n_util::GetStringUTF16(it->second));
       }
     }
+
+    // If no tools are eligible, clear the placeholders to disable cycling and
+    // fall back to the static placeholder text.
+    if (placeholders.size() <= 1) {
+      placeholders.clear();
+    }
   }
 
   const auto placeholder_config = ntp_composebox::FeatureConfig::Get()
@@ -1249,6 +1274,13 @@ omnibox::InputState SearchboxHandler::GetInputState() const {
   return omnibox::InputState();
 }
 
+void SearchboxHandler::ShouldShowDriveDisclaimer(
+    ShouldShowDriveDisclaimerCallback callback) {
+  std::move(callback).Run(false);
+}
+
+void SearchboxHandler::OnDriveDisclaimerAccepted() {}
+
 OmniboxController* SearchboxHandler::omnibox_controller() const {
   return controller_;
 }
@@ -1268,4 +1300,13 @@ void SearchboxHandler::set_page_is_bound_callback_for_testing(
 
 OmniboxEditModel* SearchboxHandler::edit_model() const {
   return omnibox_controller()->edit_model();
+}
+
+void SearchboxHandler::GetPageClassification(
+    GetPageClassificationCallback callback) {
+  metrics::OmniboxEventProto::PageClassification classification_enum =
+      omnibox_controller()->client()->GetPageClassification(
+          /*is_prefetch=*/false);
+  std::move(callback).Run(::metrics::OmniboxEventProto::PageClassification_Name(
+      classification_enum));
 }

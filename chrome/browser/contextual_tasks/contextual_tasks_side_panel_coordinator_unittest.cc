@@ -11,6 +11,7 @@
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "chrome/browser/contextual_tasks/active_task_context_provider.h"
+#include "chrome/browser/contextual_tasks/contextual_tasks_cookie_synchronizer.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_service_factory.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service_factory.h"
@@ -53,7 +54,12 @@ namespace {
 class MockContextualTasksUiService : public ContextualTasksUiService {
  public:
   explicit MockContextualTasksUiService(ContextualTasksService* controller)
-      : ContextualTasksUiService(nullptr, controller, nullptr, nullptr) {}
+      : ContextualTasksUiService(nullptr,
+                                 nullptr,
+                                 controller,
+                                 nullptr,
+                                 nullptr,
+                                 /*cookie_synchronizer=*/nullptr) {}
   ~MockContextualTasksUiService() override = default;
 
   MOCK_METHOD(GURL,
@@ -291,32 +297,6 @@ TEST_F(ContextualTasksSidePanelCoordinatorTest,
 }
 
 TEST_F(ContextualTasksSidePanelCoordinatorTest,
-       ShowSidePanelLaunchesSurveyArm2) {
-  feature_list_.InitAndEnableFeatureWithParameters(
-      kContextualTasks,
-      {{"ContextualTasksExpandButtonOptions", "side-panel-expand-button"},
-       {"ContextualTasksOpenSidePanelOnLinkClicked", "false"}});
-  base::test::ScopedFeatureList survey_feature_list;
-  survey_feature_list.InitAndEnableFeature(
-      features::kHappinessTrackingSurveysForDesktopNextPanel);
-  profile_->GetPrefs()->SetInteger(prefs::kContextualTasksNextPanelOpenCount,
-                                   1);
-
-  auto* mock_hats_service = static_cast<MockHatsService*>(
-      HatsServiceFactory::GetForProfile(profile_.get(), true));
-
-  EXPECT_CALL(*mock_hats_service,
-              LaunchDelayedSurvey(
-                  kHatsSurveyTriggerNextPanel, 90000, testing::_,
-                  testing::Contains(testing::Pair("Experiment ID", "Arm 2"))))
-      .Times(1);
-
-  coordinator_->Show(
-      false,
-      omnibox::ChromeAimEntryPoint::DESKTOP_CHROME_COBROWSE_TOOLBAR_BUTTON);
-}
-
-TEST_F(ContextualTasksSidePanelCoordinatorTest,
        ShowSidePanelLaunchesSurveyArm5) {
   feature_list_.InitAndEnableFeatureWithParameters(
       kContextualTasks,
@@ -382,38 +362,6 @@ TEST_F(ContextualTasksSidePanelCoordinatorTest, CleanUpUnusedWebContents) {
 
   // 2. task_id2 should STILL be there because it's active.
   EXPECT_EQ(1u, GetNumberOfActiveTasksForTesting(task_id2));
-}
-
-TEST_F(ContextualTasksSidePanelCoordinatorTest,
-       OnActiveTabChangedSuppressesPanelIfIsPanelSuppressedIsTrue) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeatureWithParameters(
-      kContextualTasks, {{"ContextualTasksTaskScopedSidePanel", "false"}});
-
-  // Ensure the coordinator knows the panel should be open for the active tab.
-  tabs::TabInterface* active_tab = tab_strip_model_->GetActiveTab();
-  SessionID active_tab_id =
-      sessions::SessionTabHelper::IdForTab(active_tab->GetContents());
-  base::Uuid task_id = base::Uuid::GenerateRandomV4();
-  EXPECT_CALL(*mock_controller_, GetContextualTaskForTab(active_tab_id))
-      .WillRepeatedly(Return(ContextualTask(task_id)));
-  EXPECT_CALL(*mock_controller_, GetTabsAssociatedWithTask(task_id))
-      .WillRepeatedly(Return(std::vector<SessionID>{active_tab_id}));
-
-  // Set the panel to be open initially.
-  EXPECT_CALL(*mock_panel_host_, IsPanelOpenForContextualTask())
-      .WillRepeatedly(Return(true));
-
-  // Mock IsPanelSuppressed to return true.
-  EXPECT_CALL(*mock_panel_host_, IsPanelSuppressed()).WillOnce(Return(true));
-
-  // Verify that the panel is closed.
-  EXPECT_CALL(*mock_panel_host_,
-              Close(ContextualTasksPanelHost::AnimationStyle::kNoAnimation))
-      .Times(1);
-
-  // Trigger OnActiveTabChanged.
-  coordinator_->OnActiveTabChanged(*tab_list_bridge_, active_tab);
 }
 
 }  // namespace contextual_tasks

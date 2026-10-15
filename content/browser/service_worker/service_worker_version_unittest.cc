@@ -18,7 +18,6 @@
 #include "base/run_loop.h"
 #include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
-#include "base/test/scoped_feature_list.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "base/time/time.h"
 #include "base/uuid.h"
@@ -32,7 +31,6 @@
 #include "content/browser/service_worker/service_worker_ping_controller.h"
 #include "content/browser/service_worker/service_worker_registration.h"
 #include "content/browser/service_worker/service_worker_test_utils.h"
-#include "content/public/common/content_features.h"
 #include "content/public/test/browser_task_environment.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_browser_context.h"
@@ -160,6 +158,14 @@ class ServiceWorkerVersionTest
     return version->ping_controller_.IsActivated();
   }
 
+  void StopTimeoutTimer(ServiceWorkerVersion* version) const {
+    version->StopTimeoutTimer();
+  }
+
+  void ResetWorkerHost(ServiceWorkerVersion* version) const {
+    version->worker_host_.reset();
+  }
+
   void NotifyScriptEvaluationStart(ServiceWorkerVersion* version) {
     version->OnScriptEvaluationStart();
   }
@@ -185,6 +191,37 @@ class ServiceWorkerVersionTest
     EXPECT_TRUE(version_->FinishRequest(request_id, /*was_handled=*/true));
   }
 
+  // Like SimulateDispatchEvent, but uses the functional event code path:
+  // RunAfterStartWorkerForFunctionalEvent (step 5) and
+  // StartRequestForFunctionalEvent (step 8).
+  void SimulateDispatchFunctionalEvent(
+      ServiceWorkerMetrics::EventType event_type,
+      bool was_handled = true) {
+    std::optional<blink::ServiceWorkerStatusCode> status;
+    base::RunLoop run_loop;
+
+    // Start worker via the functional event entrance.
+    version_->RunAfterStartWorkerForFunctionalEvent(
+        event_type,
+        ReceiveServiceWorkerStatus(&status, run_loop.QuitClosure()));
+    run_loop.Run();
+    EXPECT_EQ(blink::ServiceWorkerStatusCode::kOk, status.value());
+    EXPECT_EQ(blink::EmbeddedWorkerStatus::kRunning,
+              version_->running_status());
+
+    // Start request with soft_update_on_completion flag.
+    int request_id =
+        version_->StartRequestForFunctionalEvent(event_type, base::DoNothing());
+
+    // And finish request, as if a response to the event was received.
+    EXPECT_TRUE(version_->FinishRequest(request_id, was_handled));
+  }
+
+  // Accessors for private members — needed because TEST_P generates subclasses
+  // and friend access doesn't inherit in C++.
+  bool is_update_scheduled() const { return version_->is_update_scheduled_; }
+  bool IsRegistrationStale() { return version_->IsRegistrationStale(); }
+
   void SetupTestTickClock() { version_->SetTickClockForTesting(&tick_clock_); }
 
   virtual std::optional<ServiceWorkerVersion::FetchHandlerType>
@@ -198,12 +235,12 @@ class ServiceWorkerVersionTest
       bool in_different_process = false) {
     version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
     registration_->SetActiveVersion(version_);
-    int controllee_process_id = ChildProcessHost::kInvalidUniqueID;
+    ChildProcessId controllee_process_id;
 
     if (in_different_process) {
       auto client_render_process_host =
           std::make_unique<MockRenderProcessHost>(helper_->browser_context());
-      controllee_process_id = client_render_process_host->GetDeprecatedID();
+      controllee_process_id = client_render_process_host->GetID();
       client_render_process_hosts_.push_back(
           std::move(client_render_process_host));
     } else {
@@ -2208,6 +2245,207 @@ TEST_P(ServiceWorkerVersionTest, GetInfoCustomNavigationPreloadState) {
   ServiceWorkerVersionInfo info = version_->GetInfo();
   EXPECT_TRUE(info.navigation_preload_state.enabled);
   EXPECT_EQ("custom-header-value", info.navigation_preload_state.header);
+}
+
+// Test that soft update is triggered after a functional event completes
+// when the registration is stale (step 8).
+TEST_P(ServiceWorkerVersionTest, SoftUpdate_StaleRegistration) {
+  version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
+  registration_->SetActiveVersion(version_);
+  registration_->set_last_update_check(GetYesterday());
+
+  SimulateDispatchFunctionalEvent(ServiceWorkerMetrics::EventType::PUSH);
+
+  EXPECT_TRUE(is_update_scheduled());
+}
+
+// Test that soft update is NOT triggered when the registration is fresh.
+TEST_P(ServiceWorkerVersionTest, SoftUpdate_FreshRegistration) {
+  version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
+  registration_->SetActiveVersion(version_);
+  registration_->set_last_update_check(base::Time::Now());
+
+  SimulateDispatchFunctionalEvent(ServiceWorkerMetrics::EventType::PUSH);
+
+  EXPECT_FALSE(is_update_scheduled());
+}
+
+// Test that soft update is NOT triggered for non-functional events.
+TEST_P(ServiceWorkerVersionTest, SoftUpdate_NonFunctionalEvent) {
+  version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
+  registration_->SetActiveVersion(version_);
+  registration_->set_last_update_check(GetYesterday());
+
+  SimulateDispatchEvent(ServiceWorkerMetrics::EventType::FETCH_MAIN_FRAME);
+
+  EXPECT_FALSE(is_update_scheduled());
+}
+
+// Test that soft update is NOT triggered when an installing version is present.
+TEST_P(ServiceWorkerVersionTest, SoftUpdate_InstallingVersionPresent) {
+  version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
+  registration_->SetActiveVersion(version_);
+  registration_->set_last_update_check(GetYesterday());
+
+  // Create and set an installing version.
+  scoped_refptr<ServiceWorkerVersion> installing_version =
+      CreateNewServiceWorkerVersion(
+          helper_->context()->registry(), registration_.get(),
+          GURL("https://www.example.com/test/service_worker2.js"),
+          blink::mojom::ScriptType::kClassic);
+  registration_->SetInstallingVersion(installing_version);
+
+  SimulateDispatchFunctionalEvent(ServiceWorkerMetrics::EventType::PUSH);
+
+  EXPECT_FALSE(is_update_scheduled());
+}
+
+// Test that soft update is still triggered when was_handled is false (the spec
+// says soft update is unconditional on handled status).
+TEST_P(ServiceWorkerVersionTest, SoftUpdate_NotHandled) {
+  version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
+  registration_->SetActiveVersion(version_);
+  registration_->set_last_update_check(GetYesterday());
+
+  SimulateDispatchFunctionalEvent(ServiceWorkerMetrics::EventType::PUSH,
+                                  /*was_handled=*/false);
+
+  EXPECT_TRUE(is_update_scheduled());
+}
+
+// Test that IsRegistrationStale doesn't crash when context_ is null.
+TEST_P(ServiceWorkerVersionTest, SoftUpdate_NullContext) {
+  version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
+  registration_->SetActiveVersion(version_);
+  registration_->set_last_update_check(GetYesterday());
+
+  // Simulate null context by clearing it.
+  StopServiceWorker(version_.get());
+  helper_.reset();
+
+  // Should not crash, and should return false (no context).
+  EXPECT_FALSE(IsRegistrationStale());
+}
+
+// Test that RunAfterStartWorkerForFunctionalEvent triggers soft update on
+// worker start failure when the registration is stale (step 5).
+TEST_P(ServiceWorkerVersionTest,
+       RunAfterStartWorkerForFunctionalEvent_WorkerStartFailure_StaleRegistration) {
+  version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
+  registration_->SetActiveVersion(version_);
+  registration_->set_last_update_check(GetYesterday());
+
+  // Set up the worker to fail to start.
+  helper_->AddPendingInstanceClient(
+      std::make_unique<FailStartInstanceClient>(helper_.get()));
+
+  std::optional<blink::ServiceWorkerStatusCode> status;
+  base::RunLoop run_loop;
+  version_->RunAfterStartWorkerForFunctionalEvent(
+      ServiceWorkerMetrics::EventType::PUSH,
+      ReceiveServiceWorkerStatus(&status, run_loop.QuitClosure()));
+  run_loop.Run();
+
+  EXPECT_NE(blink::ServiceWorkerStatusCode::kOk, status.value());
+  EXPECT_TRUE(is_update_scheduled());
+}
+
+// Test that RunAfterStartWorkerForFunctionalEvent does NOT trigger soft update
+// on worker start failure when the registration is fresh.
+TEST_P(ServiceWorkerVersionTest,
+       RunAfterStartWorkerForFunctionalEvent_WorkerStartFailure_FreshRegistration) {
+  version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
+  registration_->SetActiveVersion(version_);
+  registration_->set_last_update_check(base::Time::Now());
+
+  // Set up the worker to fail to start.
+  helper_->AddPendingInstanceClient(
+      std::make_unique<FailStartInstanceClient>(helper_.get()));
+
+  std::optional<blink::ServiceWorkerStatusCode> status;
+  base::RunLoop run_loop;
+  version_->RunAfterStartWorkerForFunctionalEvent(
+      ServiceWorkerMetrics::EventType::PUSH,
+      ReceiveServiceWorkerStatus(&status, run_loop.QuitClosure()));
+  run_loop.Run();
+
+  EXPECT_NE(blink::ServiceWorkerStatusCode::kOk, status.value());
+  EXPECT_FALSE(is_update_scheduled());
+}
+
+// A synchronous observer that checks whether the `ServiceWorkerVersion` is
+// still discoverable in `ServiceWorkerContextCore` while `OnStoppedSync()` is
+// executing. Part of the regression test for https://crbug.com/513424000.
+class SyncObserverForTest : public ServiceWorkerContextObserverSynchronous {
+ public:
+  SyncObserverForTest(ServiceWorkerContextWrapper* wrapper,
+                      int64_t expected_version_id)
+      : wrapper_(wrapper), expected_version_id_(expected_version_id) {}
+
+  void OnStoppedSync(
+      int64_t version_id,
+      const GURL& scope,
+      const blink::ServiceWorkerToken& service_worker_token) override {
+    if (version_id != expected_version_id_) {
+      return;
+    }
+
+    called_ = true;
+    // Verify that the version is erased from `live_versions_` before observers
+    // are notified. If it were still in the map, looking it up would wrap a raw
+    // pointer undergoing destruction into a new `scoped_refptr`, causing a
+    // double free.
+    EXPECT_FALSE(wrapper_->GetLiveVersion(version_id));
+  }
+
+  bool called() const { return called_; }
+
+ private:
+  raw_ptr<ServiceWorkerContextWrapper> wrapper_;
+  int64_t expected_version_id_;
+  bool called_ = false;
+};
+
+// Verifies that during the destruction of a `ServiceWorkerVersion`, synchronous
+// observers notified via `OnStoppedSync()` cannot re-acquire a reference to the
+// version being destroyed (e.g. via `GetLiveVersion()`). This ensures the
+// version is erased from the live map prior to observer notifications,
+// preventing double-free and use-after-free vulnerabilities.
+// Regression test for https://crbug.com/513424000.
+TEST_P(ServiceWorkerVersionTest, RemoveLiveVersion_NoResurrection) {
+  // Ensure the version starts with exactly 1 reference, representing the sole
+  // reference held by `version_`.
+  EXPECT_TRUE(version_->HasOneRef());
+
+  // Initiate starting the worker. This transitions `running_status` to
+  // `kStarting`, which ensures that when the version is destroyed,
+  // `RemoveLiveVersion()` will notify `OnStoppedSync()` observers.
+  version_->StartWorker(ServiceWorkerMetrics::EventType::UNKNOWN,
+                        base::DoNothing());
+  EXPECT_EQ(blink::EmbeddedWorkerStatus::kStarting, version_->running_status());
+
+  // Attach a synchronous observer to intercept `OnStoppedSync()`.
+  SyncObserverForTest sync_observer(helper_->context_wrapper(),
+                                    version_->version_id());
+  helper_->context_wrapper()->AddSyncObserver(&sync_observer);
+
+  // Drop all internal references (e.g., pending timer callbacks and worker
+  // hosts) that were created by `StartWorker()`, so that `version_` remains the
+  // only reference.
+  StopTimeoutTimer(version_.get());
+  ResetWorkerHost(version_.get());
+  registration_.reset();
+  EXPECT_TRUE(version_->HasOneRef());
+
+  // Trigger destruction of the version. As part of destruction,
+  // `RemoveLiveVersion()` is invoked. The observer verifies that the version is
+  // erased from the live map prior to the observer notification.
+  version_.reset();
+  EXPECT_TRUE(sync_observer.called());
+
+  // Unregister the observer before it goes out of scope to prevent dangling
+  // pointer crashes during fixture teardown.
+  helper_->context_wrapper()->RemoveSyncObserver(&sync_observer);
 }
 
 }  // namespace service_worker_version_unittest

@@ -47,6 +47,7 @@
 #include "services/viz/privileged/mojom/gl/gpu_service.mojom.h"
 #include "services/viz/privileged/mojom/viz_main.mojom.h"
 #include "services/webnn/public/mojom/webnn_context_provider.mojom.h"
+#include "services/webnn/public/mojom/webnn_service_introspection.mojom.h"
 #include "skia/buildflags.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "ui/gfx/gpu_extra_info.h"
@@ -163,6 +164,7 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl
                            uint64_t client_tracing_id,
                            bool is_gpu_host,
                            bool enable_extra_handles_validation,
+                           mojo::ScopedMessagePipeHandle channel_handle,
                            EstablishGpuChannelCallback callback) override;
   void SetChannelClientPid(int32_t client_id,
                            base::ProcessId client_pid) override;
@@ -203,6 +205,10 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl
       int client_id,
       uint64_t client_tracing_id,
       bool is_incognito) override;
+
+  void BindWebNNServiceIntrospection(
+      mojo::PendingReceiver<webnn::mojom::WebNNServiceIntrospection>
+          pending_receiver) override;
 
   void GetVideoMemoryUsageStats(
       GetVideoMemoryUsageStatsCallback callback) override;
@@ -434,6 +440,8 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl
 #if BUILDFLAG(IS_LINUX)
   bool IsGMBNV12Supported();
 #endif
+
+  void CreateWebNNContextProviderIfNeeded();
 
   scoped_refptr<base::SingleThreadTaskRunner> main_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> io_runner_;

@@ -57,7 +57,8 @@ std::string GetStringForInputItemType(ComposeboxInputItemType type) {
       return "Tab";
     case ComposeboxInputItemType::kComposeboxInputItemTypeImage:
       return "Image";
-    case ComposeboxInputItemType::kComposeboxInputItemTypeFile:
+    case ComposeboxInputItemType::kComposeboxInputItemTypeRawFile:
+    case ComposeboxInputItemType::kComposeboxInputItemTypePDF:
       return "File";
   }
 }

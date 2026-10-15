@@ -209,6 +209,10 @@ void LogManualFallbackEntryThroughExpandIcon(ManualFillDataType data_type,
   [self resetAnimated:YES];
 }
 
+- (void)resetLoadingStates {
+  [self.formSuggestionView setActivityIndicatorEnabled:NO];
+}
+
 #pragma mark - FormInputAccessoryConsumer
 
 - (void)showAccessorySuggestions:(NSArray<FormSuggestion*>*)suggestions {
@@ -543,14 +547,15 @@ UIImage* GetManualFillSymbol() {
             suggestionCount);
         break;
       case FillingProduct::kAutofillAi:
-        // TODO(crbug.com/480933607): Reusing the Autocomplete announcement for
-        // AutofillAi. Add an AutofillAi specific accessibility announcement.
         if (!base::FeatureList::IsEnabled(
                 autofill::features::kAutofillAiWithDataSchema)) {
           // Only allow kAutofillAi if the associated feature is enabled.
           NOTREACHED();
         }
-        [[fallthrough]];
+        mainFillingProductString = l10n_util::GetPluralStringFUTF16(
+            IDS_IOS_AUTOFILL_OPTIONS_AVAILABLE_ACCESSIBILITY_ANNOUNCEMENT,
+            suggestionCount);
+        break;
       case FillingProduct::kAutocomplete:
         mainFillingProductString = l10n_util::GetPluralStringFUTF16(
             IDS_IOS_AUTOFILL_AUTOCOMPLETE_OPTIONS_AVAILABLE_ACCESSIBILITY_ANNOUNCEMENT,
@@ -644,12 +649,27 @@ UIImage* GetManualFillSymbol() {
   }
 }
 
+- (BOOL)isSuggestionAutofillAsync:(FormSuggestion*)formSuggestion {
+  return [self.formInputAccessoryViewControllerDelegate
+      formInputAccessoryViewController:self
+             isSuggestionAutofillAsync:formSuggestion];
+}
+
 #pragma mark - FormSuggestionViewDelegate
 
 - (void)formSuggestionView:(FormSuggestionView*)formSuggestionView
        didAcceptSuggestion:(FormSuggestion*)suggestion
                    atIndex:(NSInteger)index {
-  [self.formSuggestionClient didSelectSuggestion:suggestion atIndex:index];
+  if ([self isSuggestionAutofillAsync:suggestion]) {
+    [formSuggestionView setActivityIndicatorEnabled:YES];
+  }
+  __weak FormSuggestionView* weakFormSuggestionView = formSuggestionView;
+  [self.formSuggestionClient
+      didSelectSuggestion:suggestion
+                  atIndex:index
+               completion:^{
+                 [weakFormSuggestionView setActivityIndicatorEnabled:NO];
+               }];
 }
 
 @end

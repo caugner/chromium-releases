@@ -103,12 +103,12 @@ std::u16string AutofillAiSaveUpdateEntityPromptController::GetSourceNotice()
   if (!account) {
     return std::u16string();
   }
-
   const std::u16string google_wallet_text =
       l10n_util::GetStringUTF16(IDS_AUTOFILL_GOOGLE_WALLET_TITLE);
   return l10n_util::GetStringFUTF16(
       IDS_AUTOFILL_AI_SAVE_OR_UPDATE_ENTITY_IN_WALLET_SOURCE_NOTICE,
-      google_wallet_text, base::UTF8ToUTF16(account->email));
+      google_wallet_text, google_wallet_text,
+      base::UTF8ToUTF16(account->email));
 }
 
 bool AutofillAiSaveUpdateEntityPromptController::IsWalletableEntity() const {
@@ -125,8 +125,14 @@ AutofillAiSaveUpdateEntityPromptController::GetJavaObject() const {
   return base::android::ScopedJavaLocalRef<jobject>(java_object_);
 }
 
-void AutofillAiSaveUpdateEntityPromptController::OpenManagePasses(JNIEnv* env) {
-  ShowGoogleWalletPassesPage(*web_contents_);
+void AutofillAiSaveUpdateEntityPromptController::OnWalletLinkClicked(
+    JNIEnv* env) {
+  if (IsMaskedStorageSupported(entity_instance_.type(),
+                               EntityInstance::RecordType::kServerWallet)) {
+    ShowGoogleWallePrivatePassesHelpCenterPageInCct(*web_contents_);
+  } else {
+    ShowGoogleWalletPassesPage(*web_contents_);
+  }
 }
 
 void AutofillAiSaveUpdateEntityPromptController::OnUserAccepted(JNIEnv* env) {
@@ -148,7 +154,8 @@ void AutofillAiSaveUpdateEntityPromptController::OnPromptDismissed(
 void AutofillAiSaveUpdateEntityPromptController::RunPromptClosedCallback(
     AutofillClient::AutofillAiBubbleResult result) {
   if (prompt_result_callback_) {
-    std::move(prompt_result_callback_).Run(result);
+    // TODO(crbug.com/489354073): Pass the correct UI context.
+    std::move(prompt_result_callback_).Run(result, {});
   }
 }
 

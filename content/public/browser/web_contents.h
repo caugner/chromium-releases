@@ -26,6 +26,7 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "cc/input/browser_controls_state.h"
+#include "components/surface_embed/buildflags/buildflags.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/frame_tree_node_id.h"
 #include "content/public/browser/invalidate_type.h"
@@ -142,6 +143,10 @@ class PreloadingAttempt;
 #if BUILDFLAG(IS_ANDROID)
 class SelectionPopupDelegate;
 #endif
+
+#if BUILDFLAG(ENABLE_SURFACE_EMBED)
+class SurfaceEmbedConnector;
+#endif  // BUILDFLAG(ENABLE_SURFACE_EMBED)
 
 // WebContents is the core class in content/. A WebContents renders web content
 // (usually HTML) in a rectangular area.
@@ -436,6 +441,12 @@ class WebContents : public PageNavigator, public base::SupportsUserData {
   // Gets/Sets the delegate.
   virtual WebContentsDelegate* GetDelegate() = 0;
   virtual void SetDelegate(WebContentsDelegate* delegate) = 0;
+
+#if BUILDFLAG(ENABLE_SURFACE_EMBED)
+  // Gets the SurfaceEmbedConnector for this WebContents, or nullptr if this
+  // WebContents is not embedded with SurfaceEmbed.
+  virtual SurfaceEmbedConnector* GetSurfaceEmbedConnector() const = 0;
+#endif  // BUILDFLAG(ENABLE_SURFACE_EMBED)
 
   // Gets the NavigationController for primary frame tree of this WebContents.
   // See comments on NavigationController for more details.
@@ -1191,6 +1202,14 @@ class WebContents : public PageNavigator, public base::SupportsUserData {
   // is true when using Shift-Tab).
   virtual void FocusThroughTabTraversal(bool reverse) = 0;
 
+  // When multiple WebContents are present within a tab or window, a single one
+  // is focused and will route keyboard events in most cases to a RenderWidget
+  // contained within it.
+
+  // Returns true if |this| is the focused WebContents or an ancestor of the
+  // focused WebContents.
+  virtual bool ContainsOrIsFocusedWebContents() = 0;
+
   // Misc state & callbacks ----------------------------------------------------
 
   // Check whether we can do the saving page operation this page given its MIME
@@ -1464,21 +1483,27 @@ class WebContents : public PageNavigator, public base::SupportsUserData {
   // confusion if taken while in fullscreen. If this WebContents or any outer
   // WebContents is in fullscreen, drop it.
   //
-  // Returns a ScopedClosureRunner, and for the lifetime of that closure, this
-  // (and other related) WebContentses will not enter fullscreen. If the action
-  // should cause a one-time dropping of fullscreen (e.g. a UI element not
-  // attached to the WebContents), invoke RunAndReset() on the returned
-  // base::ScopedClosureRunner to release the fullscreen block immediately.
-  // Otherwise, if the action should cause fullscreen to be prohibited for a
-  // span of time (e.g. a UI element attached to the WebContents), keep the
-  // closure alive for that duration.
+  // Returns a ScopedClosureRunner (wrapped in std::optional), and for the
+  // lifetime of that closure, this (and other related) WebContentses will not
+  // enter fullscreen. If the action should cause a one-time dropping of
+  // fullscreen (e.g. a UI element not attached to the WebContents), the block
+  // can be released immediately by letting the returned optional go out of
+  // scope (e.g. `if (!ForSecurityDropFullscreen(...)) return;`), which
+  // automatically runs the closure upon temporary destruction. Alternatively,
+  // invoke RunAndReset() on the returned runner. Otherwise, if the action
+  // should cause fullscreen to be prohibited for a span of time (e.g. a UI
+  // element attached to the WebContents), keep the closure alive for that
+  // duration.
+  //
+  // If `this` WebContents is destroyed during the call (e.g. if exiting
+  // fullscreen triggers destruction), returns `std::nullopt`.
   //
   // If |display_id| is valid, only WebContentses on that specific screen will
   // exit fullscreen; the scoped prohibition will still apply to all displays.
   // This supports sites using cross-screen window placement capabilities to
   // retain fullscreen and open or place a window on another screen.
-  [[nodiscard]] virtual base::ScopedClosureRunner ForSecurityDropFullscreen(
-      int64_t display_id) = 0;
+  [[nodiscard]] virtual std::optional<base::ScopedClosureRunner>
+  ForSecurityDropFullscreen(int64_t display_id) = 0;
 
   // Unblocks requests from renderer for a newly created window. This is
   // used in showCreatedWindow() or sometimes later in cases where
@@ -1592,27 +1617,13 @@ class WebContents : public PageNavigator, public base::SupportsUserData {
   // ui::Events will be always ignored without asking the callback. The given
   // callback will be invoked only while the returned ScopedIgnoreInputEvents
   // alives.
-  // By default, this also blocks all interactive accessibility actions,
-  // treating them as standard user input, while still permitting hit testing
-  // for screenreaders.
+  // This also blocks all interactive accessibility actions, treating them as
+  // standard user input, while still permitting hit testing for screenreaders.
   using WebInputEventAuditCallback =
       base::RepeatingCallback<bool(const blink::WebInputEvent&)>;
-  [[nodiscard]] inline ScopedIgnoreInputEvents IgnoreInputEvents(
-      std::optional<WebInputEventAuditCallback> audit_callback) {
-    return IgnoreInputEvents(std::move(audit_callback),
-                             /*should_ignore_a11y_input=*/true);
-  }
-  // If `should_ignore_a11y_input` is true, this also blocks all
-  // accessibility actions from interacting with the WebContents, other than the
-  // hit test.
-  // TODO(crbug.com/452693512): Remove this overloaded method and the
-  // `should_ignore_a11y_input` parameter once all callers have been migrated to
-  // the 1-argument version.
   [[nodiscard]] virtual ScopedIgnoreInputEvents IgnoreInputEvents(
-      std::optional<WebInputEventAuditCallback> audit_callback,
-      bool should_ignore_a11y_input) = 0;
+      std::optional<WebInputEventAuditCallback> audit_callback) = 0;
   virtual bool ShouldIgnoreInputEventsForTesting() = 0;
-  virtual bool ShouldIgnoreA11yInputEventsForTesting() = 0;
 
   // Returns the group id for all audio streams that correspond to a single
   // WebContents. This can be used to determine if a AudioOutputStream was
@@ -1852,6 +1863,9 @@ inline content::WebContents* FromJniType<content::WebContents*>(
 template <>
 inline ScopedJavaLocalRef<jobject> ToJniType(JNIEnv* env,
                                              content::WebContents* obj) {
+  if (!obj) {
+    return nullptr;
+  }
   return obj->GetJavaWebContents();
 }
 

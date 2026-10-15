@@ -40,20 +40,42 @@ public class EntityEditorCoordinator {
          * @param entityInstance the initial entity instance with no user changes.
          */
         default void onDelete(EntityInstance entityInstance) {}
+
+        /**
+         * The user clicked the "manage your info" link in the source notice to open either the
+         * Google Wallet passes page (when the entity is a public pass) or the help center article
+         * (when the entity is a private pass).
+         */
+        default void onOpenGoogleWallet(boolean isPrivateEntity) {}
     }
 
+    /**
+     * Creates a new {@link EntityEditorCoordinator}.
+     *
+     * @param activity The activity for this component.
+     * @param delegate The delegate to be notified of editor events.
+     * @param profile The user's profile.
+     * @param entityInstance The entity instance to be edited.
+     */
     public EntityEditorCoordinator(
             Activity activity, Delegate delegate, Profile profile, EntityInstance entityInstance) {
         mMediator =
                 new EntityEditorMediator(
                         activity,
                         delegate,
+                        profile,
                         assumeNonNull(IdentityServicesProvider.get().getIdentityManager(profile)),
                         PersonalDataManagerFactory.getForProfile(profile),
                         entityInstance);
         mEditorView = new EntityEditorView(activity);
     }
 
+    /** Notifies underlying view that device configuration has changed. */
+    public void onConfigurationChanged() {
+        mEditorView.onConfigurationChanged();
+    }
+
+    /** Initializes the editor's MCP and shows the dialog. */
     public void showEditorDialog() {
         mEditorModel = mMediator.getEditorModel();
         PropertyModelChangeProcessor.create(

@@ -747,3 +747,130 @@ IN_PROC_BROWSER_TEST_P(ChromeMimeHandlerViewTest, FrameIterationBeforeAttach) {
   EXPECT_EQ(expected_outermost_rfh,
             guest_main_frame->GetOutermostMainFrameOrEmbedder());
 }
+
+// Regression test for crbug.com/506375731.
+// PostMessageSupport::SetActive() would flush pending messages by iterating
+// over a member vector. Malicious JavaScript execution during this flush could
+// synchronously detach the frame and delete the PostMessageSupport instance,
+// leading to a Use-After-Free during iteration.
+IN_PROC_BROWSER_TEST_P(ChromeMimeHandlerViewTest, SetActiveUAF) {
+  TestGuestViewManager* manager = GetGuestViewManager();
+  TestMimeHandlerViewGuest::RegisterTestGuestViewType(manager);
+  ASSERT_TRUE(LoadTestExtension());
+
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
+      browser(), embedded_test_server()->GetURL("/title1.html")));
+
+  auto* web_contents = GetEmbedderWebContents();
+
+  // 1. Create a "keeper" embed to keep MimeHandlerViewContainerManager alive.
+  // 2. Create a "victim" embed.
+  // 3. Queue messages with a malicious getter that detaches the victim.
+  // 4. When SetActive() flushes the queue, the first message detaches the
+  //    frame, which synchronously deletes the PostMessageSupport instance.
+  //    Subsequent messages would then access freed memory without the fix.
+  // We keep 'e' in window.e to avoid immediate destruction and potential
+  // DCHECKs in ~HTMLPlugInElement during the test, focusing on the UAF in
+  // PostMessageSupport.
+  const char kReproScript[] = R"(
+    (async () => {
+      const keeper = document.createElement('embed');
+      keeper.type = 'text/csv';
+      keeper.src = 'testEmbedded.csv';
+      document.body.appendChild(keeper);
+
+      const e = document.createElement('embed');
+      window.e = e;
+      e.type = 'text/csv';
+      e.src = 'testEmbedded.csv';
+      document.body.appendChild(e);
+
+      while (typeof e.postMessage !== 'function') {
+        await new Promise(r => requestAnimationFrame(r));
+      }
+
+      e.postMessage({
+        get a() {
+          window.e.remove();
+          return 1;
+        }
+      });
+      e.postMessage(1);
+      e.postMessage(2);
+      e.postMessage(3);
+    })();
+  )";
+
+  ASSERT_TRUE(content::ExecJs(web_contents, kReproScript));
+
+  // We expect at least the keeper guest view to be created and loaded.
+  guest_view::GuestViewBase* keeper_guest = manager->WaitForNextGuestViewCreated();
+  ASSERT_TRUE(keeper_guest);
+  ASSERT_TRUE(manager->WaitUntilAttachedAndLoaded(keeper_guest));
+
+  // The victim guest's creation and SetActive() call happen asynchronously.
+  // If the fix for crbug.com/506375731 is missing, the renderer will crash
+  // with a Use-After-Free during the message flush. If fixed, it returns
+  // safely.
+  ASSERT_TRUE(content::ExecJs(web_contents, "true"));
+}
+
+IN_PROC_BROWSER_TEST_P(ChromeMimeHandlerViewTest, PostMessageGetterOverwrite) {
+  TestGuestViewManager* manager = GetGuestViewManager();
+  TestMimeHandlerViewGuest::RegisterTestGuestViewType(manager);
+  ASSERT_TRUE(LoadTestExtension());
+
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
+      browser(), embedded_test_server()->GetURL("/title1.html")));
+
+  auto* web_contents = GetEmbedderWebContents();
+
+  const char kSetupScript[] = R"(
+    (() => {
+      const iframe = document.createElement('iframe');
+      iframe.src = 'testEmbedded.csv';
+      document.body.appendChild(iframe);
+    })();
+  )";
+
+  ASSERT_TRUE(content::ExecJs(web_contents, kSetupScript));
+
+  guest_view::GuestViewBase* guest = manager->WaitForNextGuestViewCreated();
+  ASSERT_TRUE(guest);
+  ASSERT_TRUE(manager->WaitUntilAttachedAndLoaded(guest));
+
+  // This replaces the internal embed element with our own frame of the same
+  // name. The new frame has a custom getter for the postMessage property, which
+  // destroys the parent iframe when accessed. Then we trigger a postMessage.
+  // The implementation should be robust to this manipulation.
+  // See https://crbug.com/516910450
+  const char kReproScript[] = R"(
+    (async () => {
+      const iframe = document.querySelector('iframe');
+      while (typeof iframe.contentDocument.querySelector('embed')?.postMessage
+                 !== 'function') {
+        await new Promise(r => setTimeout(r));
+      }
+      let innerEmbed = iframe.contentDocument.querySelector('embed');
+      let internalid = innerEmbed.getAttribute('internalid');
+      let savedPostMessage = innerEmbed.postMessage;
+
+      innerEmbed.remove();
+      let evilFrame = iframe.contentDocument.createElement('iframe');
+      evilFrame.name = internalid;
+      iframe.contentDocument.body.appendChild(evilFrame);
+
+      Object.defineProperty(evilFrame.contentWindow, 'postMessage', {
+        configurable: true,
+        get() {
+          iframe.remove();
+          return function() {};
+        }
+      });
+
+      savedPostMessage({});
+    })();
+  )";
+
+  ASSERT_TRUE(content::ExecJs(web_contents, kReproScript));
+}

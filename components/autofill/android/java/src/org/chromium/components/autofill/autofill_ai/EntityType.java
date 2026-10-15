@@ -29,6 +29,11 @@ public class EntityType {
     private final boolean mIsEnabled;
     // Used to sort entity types and groups and as title of each entity group in the list of
     // entities.
+    // Whether this entity type can be stored in Google Wallet.
+    // Note, this is currently behind `kAutofillAiWalletPrivatePasses` feature flag.
+    private final boolean mIsEligibleForWalletStorage;
+    // Whether this entity type supports masked storage.
+    private final boolean mIsMaskedStorageSupported;
     private final String mTypeNameAsString;
     // Used for histogram recording.
     private final String mTypeNameAsMetricsString;
@@ -48,6 +53,8 @@ public class EntityType {
             @EntityTypeName int typeName,
             boolean isReadOnly,
             boolean isEnabled,
+            boolean isEligibleForWalletStorage,
+            boolean isMaskedStorageSupported,
             @JniType("std::u16string") String typeNameAsString,
             @JniType("std::string") String typeNameAsMetricsString,
             @JniType("std::string") String addEntityTypeString,
@@ -60,6 +67,8 @@ public class EntityType {
         mTypeName = typeName;
         mIsReadOnly = isReadOnly;
         mIsEnabled = isEnabled;
+        mIsEligibleForWalletStorage = isEligibleForWalletStorage;
+        mIsMaskedStorageSupported = isMaskedStorageSupported;
         mTypeNameAsString = typeNameAsString;
         mTypeNameAsMetricsString = typeNameAsMetricsString;
         mAddEntityTypeString = addEntityTypeString;
@@ -82,6 +91,16 @@ public class EntityType {
     @CalledByNative
     public boolean isEnabled() {
         return mIsEnabled;
+    }
+
+    @CalledByNative
+    public boolean isEligibleForWalletStorage() {
+        return mIsEligibleForWalletStorage;
+    }
+
+    @CalledByNative
+    public boolean isMaskedStorageSupported() {
+        return mIsMaskedStorageSupported;
     }
 
     public String getTypeNameAsString() {

@@ -6,6 +6,7 @@
 
 #import "base/apple/foundation_util.h"
 #import "base/functional/callback_helpers.h"
+#import "base/notimplemented.h"
 #import "base/strings/sys_string_conversions.h"
 #import "base/strings/utf_string_conversions.h"
 #import "components/embedder_support/ios/delegate/color_chooser/color_chooser_ios.h"
@@ -35,6 +36,7 @@
 #import "net/cert/x509_util_apple.h"
 #import "services/network/public/mojom/referrer_policy.mojom-shared.h"
 #import "skia/ext/skia_utils_ios.h"
+#import "third_party/blink/public/common/user_agent/user_agent_metadata.h"
 #import "third_party/blink/public/mojom/favicon/favicon_url.mojom.h"
 #import "third_party/blink/public/mojom/page/page_visibility_state.mojom.h"
 #import "ui/display/display.h"
@@ -365,6 +367,24 @@ void ContentWebState::Stop() {
   web_contents_->Stop();
 }
 
+std::optional<std::string> ContentWebState::GetUserAgentOverride() const {
+  DCHECK(web_contents_);
+  const std::string& ua_override =
+      web_contents_->GetUserAgentOverride().ua_string_override;
+  // `web_contents_` uses empty string to indicate "no override". The
+  // distinction between `std::nullopt` and `std::optional("")` is lost.
+  return ua_override.empty() ? std::nullopt : std::make_optional(ua_override);
+}
+
+void ContentWebState::SetUserAgentOverride(
+    std::optional<std::string> ua_override) {
+  DCHECK(web_contents_);
+  // `web_contents_` expects an empty string when there is no override.
+  web_contents_->SetUserAgentOverride(
+      blink::UserAgentOverride::UserAgentOnly(ua_override.value_or("")),
+      /*override_in_new_tabs=*/false);
+}
+
 const NavigationManager* ContentWebState::GetNavigationManager() const {
   return navigation_manager_.get();
 }
@@ -548,6 +568,15 @@ id<CRWFindInteraction> ContentWebState::GetFindInteraction() {
 
 id ContentWebState::GetActivityItem() {
   return nil;
+}
+
+bool ContentWebState::IsCustomOpenPanelSupported() const {
+  NOTIMPLEMENTED();
+  return false;
+}
+
+void ContentWebState::SetCustomOpenPanelSupported(bool supports) {
+  NOTIMPLEMENTED();
 }
 
 UIColor* ContentWebState::GetThemeColor() {

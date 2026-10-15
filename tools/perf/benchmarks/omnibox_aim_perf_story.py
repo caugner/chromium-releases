@@ -153,7 +153,8 @@ class OmniboxPerf(perf_benchmark.PerfBenchmark):
         'WebUIOmniboxAimPopup:AddContextButtonVariant/below_results,'
         'AiModeOmniboxEntryPoint')
     options.AppendExtraBrowserArgs(
-        '--disable-features=AimServerEligibilityEnabled')
+        '--disable-features=AimServerEligibilityEnabled,'
+        'AimFuseboxEligibilityCheckEnabled')
 
   @classmethod
   def Name(cls):

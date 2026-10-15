@@ -25,11 +25,7 @@ base::LazyInstance<base::android::ScopedJavaGlobalRef<jobject>>::
 /* static */ void JNI_OmniboxActionFactory_SetFactory(
     JNIEnv* env,
     const base::android::JavaRef<jobject>& factory) {
-  if (factory) {
-    g_java_factory.Get().Reset(factory);
-  } else {
-    g_java_factory.Get().Reset(nullptr);
-  }
+  g_java_factory.Get().Reset(env, factory);
 }
 
 base::android::ScopedJavaGlobalRef<jobject> BuildOmniboxPedal(
@@ -66,14 +62,14 @@ base::android::ScopedJavaGlobalRef<jobject> BuildOmniboxActionInSuggest(
     int action_type,
     const std::string& action_uri,
     int tab_id,
-    bool show_as_action_button) {
+    ActionPresentationMode presentation_mode) {
   return base::android::ScopedJavaGlobalRef<jobject>(
       Java_OmniboxActionFactory_buildActionInSuggest(
           env, g_java_factory.Get(), instance,
           base::android::ConvertUTF16ToJavaString(env, hint),
           base::android::ConvertUTF16ToJavaString(env, accessibility_hint),
           action_type, base::android::ConvertUTF8ToJavaString(env, action_uri),
-          tab_id, show_as_action_button));
+          tab_id, static_cast<int>(presentation_mode)));
 }
 
 // Convert a vector of OmniboxActions to Java counterpart.

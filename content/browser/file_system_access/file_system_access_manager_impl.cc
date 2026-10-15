@@ -19,6 +19,7 @@
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
 #include "base/i18n/file_util_icu.h"
+#include "base/memory/raw_ptr.h"
 #include "base/notreached.h"
 #include "base/strings/string_util.h"
 #include "base/strings/string_view_util.h"
@@ -48,6 +49,7 @@
 #include "content/browser/renderer_host/frame_tree_node.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
@@ -92,6 +94,40 @@ using storage::FileSystemContext;
 using HandleType = FileSystemAccessPermissionContext::HandleType;
 
 namespace {
+
+// Holds resolved and validated frame objects. All pointers are guaranteed to be
+// non-null and active if this struct is returned.
+struct ResolvedFrame {
+  raw_ptr<RenderFrameHost> rfh;
+  raw_ptr<WebContents> web_contents;
+  raw_ptr<RenderFrameHost> outermost_rfh;
+};
+
+// Resolves `frame_id` to its corresponding `RenderFrameHost`, `WebContents`,
+// and outermost `RenderFrameHost`, and validates that they are all non-null
+// and active.
+// Returns a `ResolvedFrame` struct if ALL resolved objects are valid and
+// active, i.e. non-null; otherwise, returns `std::nullopt`.
+//
+// This check is critical because intermediate operations, like permission
+// checks or security prompts, can run nested message loops during which the
+// calling frame or WebContents can be destroyed or navigated.
+std::optional<ResolvedFrame> ResolveAndValidateFrame(
+    GlobalRenderFrameHostId frame_id) {
+  RenderFrameHost* rfh = RenderFrameHost::FromID(frame_id);
+  if (!rfh || !rfh->IsActive()) {
+    return std::nullopt;
+  }
+  WebContents* web_contents = WebContents::FromRenderFrameHost(rfh);
+  if (!web_contents) {
+    return std::nullopt;
+  }
+  RenderFrameHost* outermost_rfh = rfh->GetOutermostMainFrame();
+  if (!outermost_rfh || !outermost_rfh->IsActive()) {
+    return std::nullopt;
+  }
+  return ResolvedFrame{rfh, web_contents, outermost_rfh};
+}
 
 #if BUILDFLAG(IS_ANDROID)
 // Adaptor between FileSystemChooser::ResultCallback and FileSelectListener
@@ -201,6 +237,18 @@ void ShowFilePickerOnUIThread(
                           {});
                       return;
                     });
+    // `CanShowFilePicker()` runs nested message loops during which the frame
+    // could be destroyed or navigated. Re-resolve and re-validate the frame.
+    auto re_resolved = ResolveAndValidateFrame(frame_id);
+    if (!re_resolved) {
+      std::move(callback).Run(file_system_access_error::FromStatus(
+                                  FileSystemAccessStatus::kOperationAborted),
+                              {});
+      return;
+    }
+    rfh = re_resolved->rfh;
+    web_contents = re_resolved->web_contents;
+    outermost_rfh = re_resolved->outermost_rfh;
   }
 
 #if BUILDFLAG(IS_ANDROID)
@@ -239,10 +287,17 @@ void ShowFilePickerOnUIThread(
   }
 #endif
 
+  auto blocker =
+      web_contents->ForSecurityDropFullscreen(display::kInvalidDisplayId);
+  if (!blocker) {
+    std::move(callback).Run(file_system_access_error::FromStatus(
+                                FileSystemAccessStatus::kOperationAborted),
+                            {});
+    return;
+  }
+
   FileSystemChooser::ScopedObjects scoped_objects(
-      // Drop fullscreen mode so that the user sees the URL bar.
-      /*fullscreen_block=*/web_contents->ForSecurityDropFullscreen(
-          display::kInvalidDisplayId),
+      /*fullscreen_block=*/std::move(*blocker),
       // Maybe tuck the pip window so that it would not block the file picker
       // UI.
       /*pip_tucker=*/GetContentClient()
@@ -502,6 +557,14 @@ void FileSystemAccessManagerImpl::GetSandboxedFileSystem(
     const std::vector<std::string>& directory_path_components,
     GetSandboxedFileSystemCallback callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  if (!ChildProcessSecurityPolicy::GetInstance()->CanAccessDataForOrigin(
+          binding_context.process_id(), binding_context.storage_key.origin())) {
+    std::move(callback).Run(file_system_access_error::FromFileError(
+                                base::File::FILE_ERROR_SECURITY),
+                            mojo::NullRemote());
+    return;
+  }
 
   auto response_callback = base::BindOnce(
       [](base::WeakPtr<FileSystemAccessManagerImpl> manager,

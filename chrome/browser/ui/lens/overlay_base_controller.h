@@ -23,6 +23,7 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/color/color_id.h"
 #include "ui/views/view.h"
 #include "ui/views/view_observer.h"
 #include "ui/views/widget/widget.h"
@@ -31,6 +32,10 @@
 namespace views {
 class WebView;
 }  // namespace views
+
+namespace gfx {
+struct VectorIcon;
+}  // namespace gfx
 
 class PrefService;
 
@@ -234,6 +239,18 @@ class OverlayBaseController : public content::WebContentsDelegate,
   // Notification that the tab was foregrounded.
   virtual void NotifyTabWillEnterBackground() = 0;
 
+  struct PreselectionUIConfig {
+    int message_string_id = -1;
+    bool show_cancel_button = false;
+    // Only read if show_cancel_button is true.
+    std::optional<ui::ColorId> cancel_button_color = std::nullopt;
+    ui::ColorId bubble_background_color = ui::kUiColorsLast;
+    raw_ptr<const gfx::VectorIcon> icon = nullptr;
+  };
+
+  // Returns the resources for the preselection bubble.
+  virtual PreselectionUIConfig GetPreselectionBubbleConfig() = 0;
+
   // Returns if the overlay view can be shared between multiple tabs.
   virtual bool IsOverlayViewShared() const = 0;
 
@@ -251,6 +268,10 @@ class OverlayBaseController : public content::WebContentsDelegate,
   // on the live page. The callee should call `ReshowScreenshot` when the
   // screenshot is ready.
   virtual void ReshowOverlay();
+
+  // Show preselection toast bubble. Creates a preselection bubble if it does
+  // not exist.
+  virtual void ShowPreselectionBubble();
 
   // This is callwed when the webUI acknowledges the intent to reshow the
   // overlay. Since it already is showing an old screenshot the opacity is set
@@ -316,10 +337,6 @@ class OverlayBaseController : public content::WebContentsDelegate,
   // is determined by checking if any of the children of the overlay view are
   // visible.
   void MaybeHideSharedOverlayView();
-
-  // Show preselection toast bubble. Creates a preselection bubble if it does
-  // not exist.
-  void ShowPreselectionBubble();
 
   // Closes the preselection bubble and reopens it. Used to prevent UI conflicts
   // between the preselection bubble and top chrome in fullscreen.

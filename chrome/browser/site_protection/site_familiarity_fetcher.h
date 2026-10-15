@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_SITE_PROTECTION_SITE_FAMILIARITY_FETCHER_H_
 #define CHROME_BROWSER_SITE_PROTECTION_SITE_FAMILIARITY_FETCHER_H_
 
+#include "base/feature_list.h"
 #include "base/functional/callback_forward.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -18,6 +19,8 @@
 class Profile;
 
 namespace site_protection {
+
+BASE_DECLARE_FEATURE(kSkipSiteFamiliarityDeferralForDefaultSearchEngine);
 
 // The minimum site engagement score that a site must have in order to be
 // considered familiar.
@@ -44,6 +47,14 @@ class SiteFamiliarityFetcher {
 
   // The GURL for which site familiarity is being computed.
   const GURL& fetch_url() { return fetch_url_; }
+
+  // Set a URL as familiar for testing purposes.
+  static void SetUrlFamiliarForTesting(const GURL& url);
+
+  // Clears the set of URLs explicitly marked as familiar for testing.
+  // Should be called during test TearDown to prevent cross-test pollution.
+  // TODO: crbug.com/493200120 - Rewrite this using an RAII scoped helper.
+  static void ResetFamiliarUrlsForTesting();
 
  private:
   // Initiates safe-browsing-high-confidence-allowlist request.

@@ -38,6 +38,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
       user_prefs::PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF);
   registry->RegisterIntegerPref(
       kGlicCompletedFre, static_cast<int>(prefs::FreStatus::kNotStarted));
+  registry->RegisterIntegerPref(prefs::kGlicZoomLevel, 100);
   registry->RegisterTimePref(kGlicWindowLastDismissedTime, base::Time());
 
   // The default value is not used. If not set the default position is
@@ -55,6 +56,10 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
 
   // Boolean pref for the daisy chain new tabs setting.
   registry->RegisterBooleanPref(prefs::kGlicKeepSidepanelOpenOnNewTabsEnabled,
+                                true);
+
+  // Boolean pref that enables or disables experimental triggering.
+  registry->RegisterBooleanPref(prefs::kGlicExperimentalTriggeringEnabled,
                                 true);
 
   registry->RegisterIntegerPref(
@@ -82,12 +87,12 @@ void RegisterLocalStatePrefs(PrefRegistrySimple* registry) {
       ui::Command::AcceleratorToString(
           LocalHotkeyManager::GetDefaultAccelerator(
               LocalHotkeyManager::Hotkey::kFocusToggle)));
-  registry->RegisterBooleanPref(
-      prefs::kGlicMultiInstanceEnabledBySubscriptionTier, false);
   registry->RegisterStringPref(prefs::kGlicGuestUrlPresetAutopush, "");
   registry->RegisterStringPref(prefs::kGlicGuestUrlPresetStaging, "");
   registry->RegisterStringPref(prefs::kGlicGuestUrlPresetPreprod, "");
   registry->RegisterStringPref(prefs::kGlicGuestUrlPresetProd, "");
+  registry->RegisterStringPref(
+      prefs::kGlicWebContinuityOriginatingHostUrlPreset, "");
 }
 
 }  // namespace glic::prefs

@@ -8,13 +8,13 @@ import android.content.Context;
 import android.net.http.HttpResponseCache;
 import android.os.Process;
 import android.os.SystemClock;
-import android.util.Log;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.VisibleForTesting;
 
 import org.json.JSONObject;
 
+import org.chromium.base.Log;
 import org.chromium.base.metrics.ScopedSysTraceEvent;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.net.impl.CronetLogger;
@@ -534,10 +534,11 @@ public abstract class CronetEngine {
          *     BiridirectionalStream} and connections established by the {@link CronetEngine}
          *     created by this builder.
          * @return the builder to facilitate chaining.
+         * @throws UnsupportedOperationException if the Cronet implementation being used is too old
+         *     to support ProxyOptions.
          */
-        @ProxyOptions.Experimental
         public Builder setProxyOptions(@NonNull ProxyOptions proxyOptions) {
-            mBuilderDelegate.setProxyOptions(Objects.requireNonNull(proxyOptions));
+            mBuilderDelegate.setProxyOptionsV2(Objects.requireNonNull(proxyOptions));
             return this;
         }
 

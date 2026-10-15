@@ -17,7 +17,6 @@ import android.text.format.DateUtils;
 
 import androidx.annotation.IntDef;
 
-import org.chromium.base.DeviceInfo;
 import org.chromium.base.IntentUtils;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.build.annotations.NullMarked;
@@ -26,8 +25,8 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeInactivityTracker;
 import org.chromium.chrome.browser.app.ChromeActivity;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
-import org.chromium.chrome.browser.magic_stack.HomeModulesMetricsUtils;
 import org.chromium.chrome.browser.ntp.NewTabPage;
+import org.chromium.chrome.browser.ntp_customization.NtpCustomizationUtils;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabLaunchType;
@@ -47,7 +46,6 @@ import org.chromium.content_public.browser.LoadUrlParams;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
-import java.util.Locale;
 
 /**
  * This is a utility class for managing features related to returning to Chrome after haven't used
@@ -131,7 +129,7 @@ public final class ReturnToChromeUtil {
             PersistableBundle persistableBundle,
             ChromeInactivityTracker inactivityTracker) {
         // If the device is android desktop, don't show a NTP homepage.
-        if (ChromeFeatureList.sNtpSimplification.isEnabled() && DeviceInfo.isDesktop()) {
+        if (NtpCustomizationUtils.isNtpSimplificationEnabledOnDesktop()) {
             return false;
         }
 
@@ -209,16 +207,6 @@ public final class ReturnToChromeUtil {
                         public void willAddTab(Tab tab, int type) {
                             boolean isTabExpected =
                                     TextUtils.equals(lastActiveTabUrl, tab.getUrl().getSpec());
-                            assert isTabExpected
-                                    : String.format(
-                                            Locale.ENGLISH,
-                                            "The URL of first Tab restored doesn't match the URL of"
-                                                + " the last active Tab read from the Tab state"
-                                                + " metadata file! Existing Tab count = %d. Last"
-                                                + " active tab = %s. First tab = %s.",
-                                            tabModelSelector.getModel(false).getCount(),
-                                            lastActiveTabUrl,
-                                            tab.getUrl().getSpec());
                             if (!isTabExpected) {
                                 return;
                             }
@@ -369,11 +357,7 @@ public final class ReturnToChromeUtil {
         // This cast is now guaranteed to succeed to a non-null value.
         NewTabPage newTabPage = (NewTabPage) nativePage;
         homeSurfaceTracker.updateHomeSurfaceAndTrackingTabs(ntpTab, lastActiveTab);
-        if (HomeModulesMetricsUtils.useMagicStack()) {
-            newTabPage.showMagicStack(lastActiveTab);
-        } else {
-            newTabPage.showHomeSurfaceUi(lastActiveTab);
-        }
+        newTabPage.showHomeSurfaceUiOnNtp(lastActiveTab);
     }
 
     // TODO(crbug.com/40270227): Removes this histogram once we understand the root cause of

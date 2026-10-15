@@ -176,6 +176,10 @@ class WebContentsAndroid;
 class SelectionPopupDelegate;
 #endif
 
+#if BUILDFLAG(ENABLE_SURFACE_EMBED)
+class SurfaceEmbedConnectorImpl;
+#endif  // BUILDFLAG(ENABLE_SURFACE_EMBED)
+
 // CreatedWindow holds the WebContentsImpl and target url between IPC calls to
 // CreateNewWindow and ShowCreatedWindow.
 struct CONTENT_EXPORT CreatedWindow {
@@ -222,7 +226,7 @@ class CONTENT_EXPORT WebContentsImpl
       const WebContents::CreateParams& params,
       RenderFrameHostImpl* opener_rfh);
 
-  static std::vector<WebContentsImpl*> GetAllWebContents();
+  static std::vector<raw_ptr<WebContentsImpl>> GetAllWebContents();
 
   static WebContentsImpl* FromFrameTreeNode(
       const FrameTreeNode* frame_tree_node);
@@ -387,6 +391,9 @@ class CONTENT_EXPORT WebContentsImpl
   // WebContents ------------------------------------------------------
   WebContentsDelegate* GetDelegate() final;
   void SetDelegate(WebContentsDelegate* delegate) override;
+#if BUILDFLAG(ENABLE_SURFACE_EMBED)
+  SurfaceEmbedConnector* GetSurfaceEmbedConnector() const override;
+#endif  // BUILDFLAG(ENABLE_SURFACE_EMBED)
   NavigationControllerImpl& GetController() override;
   const NavigationControllerImpl& GetController() const override;
   BrowserContext* GetBrowserContext() override;
@@ -539,6 +546,7 @@ class CONTENT_EXPORT WebContentsImpl
   void StoreFocus() override;
   void RestoreFocus() override;
   void FocusThroughTabTraversal(bool reverse) override;
+  bool ContainsOrIsFocusedWebContents() override;
   bool IsSavable() override;
   void OnSavePage() override;
   bool SavePage(const base::FilePath& main_file,
@@ -608,8 +616,8 @@ class CONTENT_EXPORT WebContentsImpl
   bool IsFullscreen() override;
   bool ShouldShowStaleContentOnEviction() override;
   void ExitFullscreen(bool will_cause_resize) override;
-  [[nodiscard]] base::ScopedClosureRunner ForSecurityDropFullscreen(
-      int64_t display_id) override;
+  [[nodiscard]] std::optional<base::ScopedClosureRunner>
+  ForSecurityDropFullscreen(int64_t display_id) override;
   void ResumeLoadingCreatedWebContents() override;
   void SetIsOverlayContent(bool is_overlay_content) override;
   bool IsFocusedElementEditable() override;
@@ -644,14 +652,9 @@ class CONTENT_EXPORT WebContentsImpl
 #endif
   bool HasRecentInteraction() override;
   base::TimeTicks GetLastInteractionTimeTicks() override;
-  // TODO(crbug.com/452693512): Remove this 'using' declaration when the
-  // 1-argument IgnoreInputEvents helper is removed from the base class.
-  using WebContents::IgnoreInputEvents;
   [[nodiscard]] ScopedIgnoreInputEvents IgnoreInputEvents(
-      std::optional<WebInputEventAuditCallback> audit_callback,
-      bool should_ignore_a11y_input) override;
+      std::optional<WebInputEventAuditCallback> audit_callback) override;
   bool ShouldIgnoreInputEventsForTesting() override;
-  bool ShouldIgnoreA11yInputEventsForTesting() override;
   bool HasActiveEffectivelyFullscreenVideo() override;
   void WriteIntoTrace(perfetto::TracedValue context) override;
   const base::Location& GetCreatorLocation() override;
@@ -746,7 +749,6 @@ class CONTENT_EXPORT WebContentsImpl
   void SetCaptureHandleConfig(
       blink::mojom::CaptureHandleConfigPtr config) override;
   ui::AXMode GetAccessibilityMode() override;
-  bool ShouldIgnoreA11yInputEvents() override;
   // Broadcasts the mode change to all frames.
   void ResetAccessibility() override;
   void AXTreeIDForMainFrameHasChanged() override;
@@ -912,8 +914,8 @@ class CONTENT_EXPORT WebContentsImpl
           blink_popup_widget_host,
       mojo::PendingAssociatedReceiver<blink::mojom::WidgetHost>
           blink_widget_host,
-      mojo::PendingAssociatedRemote<blink::mojom::Widget> blink_widget)
-      override;
+      mojo::PendingAssociatedRemote<blink::mojom::Widget> blink_widget,
+      GlobalRenderFrameHostId creator_frame_id) override;
   void DidLoadResourceFromMemoryCache(
       RenderFrameHostImpl* source,
       const GURL& url,
@@ -1300,6 +1302,7 @@ class CONTENT_EXPORT WebContentsImpl
 
   //  RenderWidgetHostInputEventRouter::Delegate -------------------------------
   input::TouchEmulator* GetTouchEmulator(bool create_if_necessary) override;
+  void CancelAutoscroll(input::RenderWidgetHostViewInput* view) override;
 
   // Invoked before a form repost warning is shown.
   void NotifyBeforeFormRepostWarningShow() override;
@@ -1620,6 +1623,21 @@ class CONTENT_EXPORT WebContentsImpl
   bool IsPopup() const override;
 
   WebContents* GetDocumentPictureInPictureOpener();
+
+#if BUILDFLAG(ENABLE_SURFACE_EMBED)
+  // SetSurfaceEmbedConnector and ClearSurfaceEmbedConnector are used in WebUI
+  // browser to embed a WebContents into a SurfaceEmbed plugin. The
+  // SurfaceEmbedConnector is used to connect the WebContents to the plugin and
+  // manage the communication between them. See
+  // components/surface_embed/README.md for more details.
+  // Sets the SurfaceEmbedConnector for this WebContents. Called when the
+  // WebContents is being attached into a SurfaceEmbed plugin via the connector.
+  void SetSurfaceEmbedConnector(
+      std::unique_ptr<content::SurfaceEmbedConnectorImpl> connector);
+  // Clears the SurfaceEmbedConnector for this WebContents. Called when the
+  // WebContents is being detached from a SurfaceEmbed plugin.
+  void ClearSurfaceEmbedConnector();
+#endif  // BUILDFLAG(ENABLE_SURFACE_EMBED)
 
  private:
   using FrameTreeIterationCallback = base::FunctionRef<void(FrameTree&)>;
@@ -1962,16 +1980,6 @@ class CONTENT_EXPORT WebContentsImpl
   void RecursivelyRegisterRenderWidgetHostViews();
   void RecursivelyUnregisterRenderWidgetHostViews();
 
-  // When multiple WebContents are present within a tab or window, a single one
-  // is focused and will route keyboard events in most cases to a RenderWidget
-  // contained within it. |GetFocusedWebContents()|'s main frame widget will
-  // receive page focus and blur events when the containing window changes focus
-  // state.
-
-  // Returns true if |this| is the focused WebContents or an ancestor of the
-  // focused WebContents.
-  bool ContainsOrIsFocusedWebContents();
-
   // Internal implementation of AttachInnerWebContents() and
   // AttachUnownedInnerWebContents().
   void AttachInnerWebContentsImpl(WebContents* inner_web_contents,
@@ -2308,6 +2316,12 @@ class CONTENT_EXPORT WebContentsImpl
   // NULL otherwise.
   std::unique_ptr<BrowserPluginGuest> browser_plugin_guest_;
 
+#if BUILDFLAG(ENABLE_SURFACE_EMBED)
+  // Helps connect to embedder when embedded in a SurfaceEmbed plugin.
+  // nullptr if not embedded.
+  std::unique_ptr<SurfaceEmbedConnectorImpl> surface_embed_connector_;
+#endif  // BUILDFLAG(ENABLE_SURFACE_EMBED)
+
   // Helper classes ------------------------------------------------------------
 
   // Contains information about the WebContents tree structure.
@@ -2407,9 +2421,6 @@ class CONTENT_EXPORT WebContentsImpl
   // Counts the number of outstanding requests to ignore input events. They will
   // not be sent when this is greater than zero.
   int ignore_input_events_count_ = 0;
-  // Counts the number of outstanding requests to ignore a11y input events. They
-  // will not be sent when this is greater than zero.
-  int ignore_a11y_input_count_ = 0;
   uint64_t next_web_input_event_audit_callback_id_ = 0;
   base::flat_map<uint64_t, WebInputEventAuditCallback>
       web_input_event_audit_callbacks_;

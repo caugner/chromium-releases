@@ -5,6 +5,7 @@
 #import "ios/chrome/browser/composebox/coordinator/composebox_input_plate_mediator.h"
 
 #import <PDFKit/PDFKit.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #import <memory>
 #import <queue>
@@ -36,6 +37,7 @@
 #import "components/contextual_search/input_state_model.h"
 #import "components/contextual_search/internal/ios/composebox_context_upload_observer_bridge.h"
 #import "components/contextual_search/internal/ios/composebox_query_controller_ios.h"
+#import "components/contextual_tasks/public/query_contextualizer.h"
 #import "components/lens/contextual_input.h"
 #import "components/lens/lens_bitmap_processing.h"
 #import "components/lens/lens_overlay_mime_type.h"
@@ -49,6 +51,9 @@
 #import "components/search/search.h"
 #import "components/search_engines/template_url_service.h"
 #import "components/search_engines/util.h"
+#import "ios/chrome/browser/cobrowse/model/cobrowse_browser_agent.h"
+#import "ios/chrome/browser/cobrowse/model/cobrowse_context.h"
+#import "ios/chrome/browser/cobrowse/model/ios_contextual_tasks_service_factory.h"
 #import "ios/chrome/browser/composebox/coordinator/composebox_constants.h"
 #import "ios/chrome/browser/composebox/coordinator/composebox_url_loader.h"
 #import "ios/chrome/browser/composebox/coordinator/web_state_deferred_executor.h"
@@ -67,9 +72,12 @@
 #import "ios/chrome/browser/lens/ui_bundled/lens_availability.h"
 #import "ios/chrome/browser/lens/ui_bundled/lens_entrypoint.h"
 #import "ios/chrome/browser/search_engines/model/search_engine_observer_bridge.h"
+#import "ios/chrome/browser/shared/model/profile/profile_ios.h"
 #import "ios/chrome/browser/shared/model/url/url_util.h"
 #import "ios/chrome/browser/shared/model/utils/mime_type_util.h"
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list.h"
+#import "ios/chrome/browser/shared/public/commands/browser_coordinator_commands.h"
+#import "ios/chrome/browser/shared/public/commands/scene_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/shared/public/features/system_flags.h"
 #import "ios/chrome/browser/snapshots/model/snapshot_tab_helper.h"
@@ -271,13 +279,91 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
   return types;
 }
 
+// Returns the default image encoding options.
+// TODO(crbug.com/40280872): Plumb encoding options from a central config.
+lens::ImageEncodingOptions GetDefaultImageEncodingOptions() {
+  lens::ImageEncodingOptions image_options;
+  image_options.max_width = 1024;
+  image_options.max_height = 1024;
+  image_options.compression_quality = 80;
+  return image_options;
+}
+
 }  // namespace
 
 @interface ComposeboxInputPlateMediator () <
     SearchEngineObserving,
     ComposeboxInputItemCollectionDelegate,
     WebStateDeferredExecutorDelegate>
+
+// Delegate methods for QueryContextualizer.
+- (GURL)GetTabUrl:(contextual_tasks::QueryContextualizer::TabId)id;
+- (SessionID)GetTabSessionId:(contextual_tasks::QueryContextualizer::TabId)id;
+- (void)GetPageContext:(contextual_tasks::QueryContextualizer::TabId)id
+              callback:
+                  (base::OnceCallback<void(
+                       std::unique_ptr<lens::ContextualInputData>)>)callback;
+- (bool)IsTabValid:(contextual_tasks::QueryContextualizer::TabId)id;
+- (std::optional<lens::ImageEncodingOptions>)
+    GetTabViewportEncodingOptionsForQueryContextualizer;
+- (contextual_search::ContextualSearchSessionHandle*)
+    GetOrCreateSessionHandleForQueryContextualizer;
+
 @end
+
+namespace {
+
+class QueryContextualizerDelegateBridge
+    : public contextual_tasks::QueryContextualizer::Delegate {
+ public:
+  explicit QueryContextualizerDelegateBridge(
+      ComposeboxInputPlateMediator* mediator)
+      : mediator_(mediator) {}
+
+  GURL GetTabUrl(contextual_tasks::QueryContextualizer::TabId id) override {
+    return [mediator_ GetTabUrl:id];
+  }
+
+  SessionID GetTabSessionId(
+      contextual_tasks::QueryContextualizer::TabId id) override {
+    return [mediator_ GetTabSessionId:id];
+  }
+
+  void GetPageContext(
+      contextual_tasks::QueryContextualizer::TabId id,
+      base::OnceCallback<void(std::unique_ptr<lens::ContextualInputData>)>
+          callback) override {
+    [mediator_ GetPageContext:id callback:std::move(callback)];
+  }
+
+  bool IsTabValid(contextual_tasks::QueryContextualizer::TabId id) override {
+    return [mediator_ IsTabValid:id];
+  }
+
+  std::optional<lens::ImageEncodingOptions>
+  GetTabViewportEncodingOptionsForQueryContextualizer() override {
+    return [mediator_ GetTabViewportEncodingOptionsForQueryContextualizer];
+  }
+
+  contextual_search::ContextualSearchSessionHandle*
+  GetOrCreateSessionHandleForQueryContextualizer() override {
+    return [mediator_ GetOrCreateSessionHandleForQueryContextualizer];
+  }
+
+  void GetRelevantTabsForQuery(
+      const std::string& query_text,
+      const std::vector<GURL>& attached_context_urls,
+      base::OnceCallback<void(
+          std::vector<contextual_tasks::QueryContextualizer::TabId>)> callback)
+      override {
+    std::move(callback).Run({});
+  }
+
+ private:
+  __weak ComposeboxInputPlateMediator* mediator_;
+};
+
+}  // namespace
 
 @implementation ComposeboxInputPlateMediator {
   // The ordered list of items for display.
@@ -304,6 +390,10 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
   raw_ptr<AimEligibilityService> _aimEligibilityService;
   // The preference service.
   raw_ptr<PrefService> _prefService;
+  // The profile.
+  raw_ptr<ProfileIOS> _profile;
+  // Browser agent to manage the cobrowse context.
+  raw_ptr<CobrowseBrowserAgent> _cobrowseBrowserAgent;
 
   // Stores the page context wrappers for the duration of the APC retrieval.
   std::unordered_map<web::WebStateID, PageContextWrapper*> _pageContextWrappers;
@@ -311,6 +401,12 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
                      web::WebStateID,
                      base::UnguessableTokenHash>
       _latestTabSelectionMapping;
+
+  // Delegate for the query contextualizer.
+  std::unique_ptr<QueryContextualizerDelegateBridge>
+      _queryContextualizerDelegate;
+  // Orchestrator to contextualize tabs before search.
+  std::unique_ptr<contextual_tasks::QueryContextualizer> _queryContextualizer;
 
   // Utilitary to delay execution until the web state is loaded.
   WebStateDeferredExecutor* _webStateDeferredExecutor;
@@ -335,6 +431,8 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
   BOOL _hasText;
   // Whether a successful navigation has started.
   BOOL _inNavigation;
+  // Whether the omnibox is focused.
+  BOOL _omniboxFocused;
   // Used to count the number of images added in the session.
   int _imageUploadCount;
   // The currrent choice of model.
@@ -345,6 +443,12 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
   contextual_search::InputState _inputState;
   // The subscription for updates on the input state.
   base::CallbackListSubscription _inputStateSubscription;
+  // Handler for browser coordinator commands.
+  __weak id<BrowserCoordinatorCommands> _browserCoordinatorHandler;
+  // Handler for scene commands.
+  __weak id<SceneCommands> _sceneHandler;
+  // The entrypoint from which the composebox was invoked.
+  ComposeboxEntrypoint _entrypoint;
   // The previously observed mode of the composebox.
   ComposeboxMode _previousMode;
 }
@@ -362,10 +466,21 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
                  templateURLService:(TemplateURLService*)templateURLService
               aimEligibilityService:
                   (AimEligibilityService*)aimEligibilityService
-                        prefService:(PrefService*)prefService {
+                        prefService:(PrefService*)prefService
+                            profile:(ProfileIOS*)profile
+               cobrowseBrowserAgent:(CobrowseBrowserAgent*)cobrowseBrowserAgent
+          browserCoordinatorHandler:
+              (id<BrowserCoordinatorCommands>)browserCoordinatorHandler
+                       sceneHandler:(id<SceneCommands>)sceneHandler
+                         entrypoint:(ComposeboxEntrypoint)entrypoint {
   self = [super init];
   if (self) {
+    _entrypoint = entrypoint;
+    _browserCoordinatorHandler = browserCoordinatorHandler;
+    _sceneHandler = sceneHandler;
     _prefService = prefService;
+    _profile = profile;
+    _cobrowseBrowserAgent = cobrowseBrowserAgent;
     _contextualSearchSession = std::move(contextualSearchSession);
     if (_contextualSearchSession) {
       _contextualSearchSession->NotifySessionStarted();
@@ -399,6 +514,15 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
     _aimEligibilityService = aimEligibilityService;
     _items = [[ComposeboxInputItemCollection alloc] init];
     _items.delegate = self;
+    contextual_tasks::ContextualTasksService* tasksService =
+        IOSContextualTasksServiceFactory::GetForProfile(_profile);
+    if (tasksService) {
+      _queryContextualizerDelegate =
+          std::make_unique<QueryContextualizerDelegateBridge>(self);
+      _queryContextualizer =
+          std::make_unique<contextual_tasks::QueryContextualizer>(
+              tasksService, _queryContextualizerDelegate.get());
+    }
   }
   return self;
 }
@@ -415,7 +539,10 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
   _templateURLService = nullptr;
   [self invalidateInputStateSubscription];
   _aimEligibilityService = nullptr;
+  _cobrowseBrowserAgent = nullptr;
   _inputStateModel = nullptr;
+  _queryContextualizer.reset();
+  _queryContextualizerDelegate.reset();
   _composeboxObserverBridge.reset();
   if (_contextualSearchSession) {
     if (!_inNavigation) {
@@ -429,6 +556,7 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
   _URLLoader = nil;
   _consumer = nil;
   _prefService = nullptr;
+  _profile = nullptr;
   [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
@@ -569,8 +697,26 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
         [weakSelf didCreateSearchURL:URL];
       }));
 
-  _contextualSearchSession->CreateSearchUrl(std::move(search_url_request_info),
-                                            std::move(callback));
+  auto createSearchUrlCallback = base::BindOnce(
+      &contextual_search::ContextualSearchSessionHandle::CreateSearchUrl,
+      _contextualSearchSession->AsWeakPtr(), std::move(search_url_request_info),
+      std::move(callback));
+
+  if (_queryContextualizer) {
+    _queryContextualizer->Contextualize(
+        /*task_id=*/std::nullopt, base::SysNSStringToUTF8(text),
+        /*tabs_to_recontextualize=*/{}, /*tabs_to_force_contextualize=*/{},
+        /*on_ineligible_callback=*/base::DoNothing(),
+        /*on_processed_callback=*/base::DoNothing(),
+        base::BindOnce(
+            [](base::OnceClosure closure,
+               base::WeakPtr<contextual_search::ContextualSearchSessionHandle>
+                   ignored_handle) { std::move(closure).Run(); },
+            std::move(createSearchUrlCallback)),
+        /*enable_smart_tab_selection=*/false);
+  } else {
+    std::move(createSearchUrlCallback).Run();
+  }
 }
 
 - (void)processTab:(web::WebState*)webState
@@ -593,29 +739,44 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
   [self.delegate refineWithText:text];
 }
 
-- (void)processPDFFileURL:(GURL)PDFFileURL {
+- (void)processFileURL:(GURL)fileURL isPDF:(BOOL)isPDF {
+  [self processFileURL:fileURL isPDF:isPDF completion:nil];
+}
+
+- (void)processFileURL:(GURL)fileURL
+                 isPDF:(BOOL)isPDF
+            completion:(void (^)(void))completion {
   DCHECK_CALLED_ON_VALID_SEQUENCE(_sequenceChecker);
-  NSString* assetID = base::SysUTF8ToNSString(PDFFileURL.spec());
+  NSString* assetID = base::SysUTF8ToNSString(fileURL.spec());
   if ([_items assetAlreadyLoaded:assetID]) {
+    if (completion) {
+      completion();
+    }
     return;
   }
 
   // Check file size.
-  NSURL* nsURL = net::NSURLWithGURL(PDFFileURL);
+  NSURL* nsURL = net::NSURLWithGURL(fileURL);
   NSError* error = nil;
   NSNumber* fileSize =
       [[nsURL resourceValuesForKeys:@[ NSURLFileSizeKey ]
                               error:&error] objectForKey:NSURLFileSizeKey];
-  if (fileSize && [fileSize unsignedLongLongValue] > kMaxPDFFileSize) {
+  if (fileSize && [fileSize unsignedLongLongValue] > kMaxFileAttachmentSize) {
     [self.delegate showSnackbarForItemUploadDidFail];
+    if (completion) {
+      completion();
+    }
     return;
   }
 
-  ComposeboxInputItem* item = [[ComposeboxInputItem alloc]
-      initWithComposeboxInputItemType:ComposeboxInputItemType::
-                                          kComposeboxInputItemTypeFile
-                              assetID:assetID];
-  item.title = base::SysUTF8ToNSString(PDFFileURL.ExtractFileName());
+  ComposeboxInputItemType itemType =
+      isPDF ? ComposeboxInputItemType::kComposeboxInputItemTypePDF
+            : ComposeboxInputItemType::kComposeboxInputItemTypeRawFile;
+
+  ComposeboxInputItem* item =
+      [[ComposeboxInputItem alloc] initWithComposeboxInputItemType:itemType
+                                                           assetID:assetID];
+  item.title = base::SysUTF8ToNSString(fileURL.ExtractFileName());
   [self addItem:item];
   base::UnguessableToken identifier = item.identifier;
 
@@ -623,16 +784,25 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
   __weak __typeof(self) weakSelf = self;
   base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
-      base::BindOnce(&ReadDataFromURL, PDFFileURL),
+      base::BindOnce(&ReadDataFromURL, fileURL),
       base::BindOnce(^(NSData* data) {
         [weakSelf onDataReadForItemWithIdentifier:identifier
-                                          fromURL:PDFFileURL
+                                          fromURL:fileURL
                                          withData:data];
+        if (completion) {
+          completion();
+        }
       }));
 }
 
 - (void)processImageItemProvider:(NSItemProvider*)itemProvider
                          assetID:(NSString*)assetID {
+  [self processImageItemProvider:itemProvider assetID:assetID completion:nil];
+}
+
+- (void)processImageItemProvider:(NSItemProvider*)itemProvider
+                         assetID:(NSString*)assetID
+                      completion:(void (^)(void))completion {
   DCHECK_CALLED_ON_VALID_SEQUENCE(_sequenceChecker);
 
   BOOL unableToLoadUIImage =
@@ -640,6 +810,9 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
 
   BOOL assetAlreadyLoaded = [_items assetAlreadyLoaded:assetID];
   if (unableToLoadUIImage || assetAlreadyLoaded) {
+    if (completion) {
+      completion();
+    }
     return;
   }
 
@@ -650,6 +823,7 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
   [self addItem:item];
   __block base::UnguessableToken identifier = item.identifier;
 
+  __block int requiredNumberOfLoads = 2;
   __weak __typeof(self) weakSelf = self;
   // Load the preview image.
   [itemProvider
@@ -658,6 +832,10 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
                   dispatch_async(dispatch_get_main_queue(), ^{
                     [weakSelf didLoadPreviewImage:previewImage
                             forItemWithIdentifier:identifier];
+                    requiredNumberOfLoads--;
+                    if (requiredNumberOfLoads == 0 && completion) {
+                      completion();
+                    }
                   });
                 }];
 
@@ -668,6 +846,10 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
                   dispatch_async(dispatch_get_main_queue(), ^{
                     [weakSelf didLoadFullImage:(UIImage*)object
                          forItemWithIdentifier:identifier];
+                    requiredNumberOfLoads--;
+                    if (requiredNumberOfLoads == 0 && completion) {
+                      completion();
+                    }
                   });
                 }];
 }
@@ -767,6 +949,14 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
   }
 
   [self commitUIUpdates];
+}
+
+- (void)setOmniboxFocused:(bool)focused {
+  if (_omniboxFocused == focused) {
+    return;
+  }
+  _omniboxFocused = focused;
+  [self requestUIRefresh];
 }
 
 - (void)changeModeForInputState:
@@ -1060,15 +1250,9 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
     item.serverToken = serverToken;
   }
 
-  // TODO(crbug.com/40280872): Plumb encoding options from a central config.
-  lens::ImageEncodingOptions image_options;
-  image_options.max_width = 1024;
-  image_options.max_height = 1024;
-  image_options.compression_quality = 80;
-
   if (_contextualSearchSession) {
     _contextualSearchSession->StartTabContextUploadFlow(
-        serverToken, std::move(inputData), image_options);
+        serverToken, std::move(inputData), GetDefaultImageEncodingOptions());
   }
 
   [self notifyContextChanged];
@@ -1203,6 +1387,35 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
 
 #pragma mark - Private
 
+// Sends a Cobrowse text followup.
+- (void)sendAIMFollowup:(NSString*)text {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(_sequenceChecker);
+  if (!_contextualSearchSession) {
+    return;
+  }
+
+  std::unique_ptr<contextual_search::ContextualSearchContextController::
+                      CreateClientToAimRequestInfo>
+      request_info = std::make_unique<
+          contextual_search::ContextualSearchContextController::
+              CreateClientToAimRequestInfo>();
+  request_info->query_text = base::SysNSStringToUTF8(text);
+  request_info->query_start_time = base::Time::Now();
+  request_info->file_tokens =
+      _contextualSearchSession->GetSubmittedContextTokens();
+
+  if (_inputStateModel) {
+    request_info->active_tool = _inputStateModel->GetInputState().active_tool;
+    request_info->active_model = _inputStateModel->GetInputState().active_model;
+  }
+
+  lens::ClientToAimMessage message =
+      _contextualSearchSession->CreateClientToAimRequest(
+          std::move(request_info));
+
+  [self.URLLoader prepareLoadForQueryText:text clientToAimMessage:message];
+}
+
 // Updates the tool mode when in image generation mode.
 - (void)updateImageGenerationToolMode {
   if (_modeHolder.mode != ComposeboxMode::kImageGeneration) {
@@ -1278,7 +1491,8 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
   switch (item.type) {
     case ComposeboxInputItemType::kComposeboxInputItemTypeImage:
       return composebox_debugger::AttachmentType::kImage;
-    case ComposeboxInputItemType::kComposeboxInputItemTypeFile:
+    case ComposeboxInputItemType::kComposeboxInputItemTypeRawFile:
+    case ComposeboxInputItemType::kComposeboxInputItemTypePDF:
       return composebox_debugger::AttachmentType::kFile;
     case ComposeboxInputItemType::kComposeboxInputItemTypeTab:
       return composebox_debugger::AttachmentType::kTab;
@@ -1378,6 +1592,23 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
   }
 }
 
+// Returns YES if the currently active web state is attached to the composebox.
+- (BOOL)isActiveTabAttached {
+  if (!_webStateList) {
+    return NO;
+  }
+
+  web::WebState* webState = _webStateList->GetActiveWebState();
+
+  if (!webState) {
+    return NO;
+  }
+  return [self attachedWebStateIDsInCurrentContext].contains(
+      webState->GetUniqueIdentifier());
+}
+
+// Loads the aim query once the URL is generated by the Contextual search
+// session.
 - (void)didCreateSearchURL:(GURL)URL {
   DCHECK_CALLED_ON_VALID_SEQUENCE(_sequenceChecker);
   [self recordNavigationInitiated];
@@ -1385,6 +1616,21 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
   // TODO(crbug.com/40280872): Handle AIM enabled in the query controller.
   if ([_modeHolder isRegularSearch]) {
     URL = net::AppendOrReplaceQueryParameter(URL, "udm", "24");
+  } else if (_modeHolder.mode == ComposeboxMode::kAIM) {
+    // If the active tab is attached to the composebox, an AIM query should
+    // invoke the Assistant directly using the query URL instead of routing
+    // through the standard search navigation flow.
+    if (IsAimCobrowseEnabled() && [self isActiveTabAttached]) {
+      CobrowseContext* context = [[CobrowseContext alloc] initWithURL:URL];
+      context.attachedItems = _items.containedItems;
+      if (_cobrowseBrowserAgent) {
+        _cobrowseBrowserAgent->SetCobrowseContext(context);
+        _cobrowseBrowserAgent->SetSessionActive(true);
+      }
+      [_browserCoordinatorHandler hideComposebox];
+      [_sceneHandler showAssistant];
+      return;
+    }
   }
 
   UrlLoadParams params = CreateOmniboxUrlLoadParams(
@@ -1428,16 +1674,20 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
       recordAttachCountAtSubmission:_items.imagesCount
                             forType:ComposeboxInputItemType::
                                         kComposeboxInputItemTypeImage];
+  // Raw file is used as the metric type is the same for raw files and PDFs.
   [self.metricsRecorder
       recordAttachCountAtSubmission:_items.filesCount
                             forType:ComposeboxInputItemType::
-                                        kComposeboxInputItemTypeFile];
+                                        kComposeboxInputItemTypeRawFile];
   contextual_search::ContextualSearchMetricsRecorder* recorder =
       _contextualSearchSession ? _contextualSearchSession->GetMetricsRecorder()
                                : nullptr;
   if (recorder) {
-    recorder->RecordModesOnSubmission(_inputState.active_tool,
-                                      _inputState.active_model);
+    std::vector<omnibox::InputType> active_input_types =
+        contextual_search::InputStateModel::GetCurrentInputTypes(
+            _contextualSearchSession.get());
+    recorder->RecordModesOnSubmission(
+        _inputState.active_tool, _inputState.active_model, active_input_types);
   }
 }
 
@@ -1655,12 +1905,6 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
     return;
   }
 
-  // TODO(crbug.com/40280872): Plumb encoding options from a central config.
-  lens::ImageEncodingOptions image_options;
-  image_options.max_width = 1024;
-  image_options.max_height = 1024;
-  image_options.compression_quality = 80;
-
   // UIImagePNGRepresentation is an expensive operation. We execute this on a
   // background thread to prevent blocking the UI, especially during batch
   // processing.
@@ -1671,25 +1915,48 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
       base::BindOnce(^(NSData* data) {
         [weakSelf handleImageUploadWithData:data
                           forItemIdentifier:identifier
-                                    options:image_options];
+                                    options:GetDefaultImageEncodingOptions()];
       }));
 }
 
 // Handles uploading the context after the snapshot is generated.
 - (void)didRetrieveColorSnapshot:(UIImage*)image
-                       inputData:(std::unique_ptr<lens::ContextualInputData>)
-                                     input_data
+                       inputData:
+                           (std::unique_ptr<lens::ContextualInputData>)inputData
                       identifier:(base::UnguessableToken)identifier {
   DCHECK_CALLED_ON_VALID_SEQUENCE(_sequenceChecker);
-  if (image) {
-    NSData* data = UIImagePNGRepresentation(image);
-    std::vector<uint8_t> image_vector_data([data length]);
-    [data getBytes:image_vector_data.data() length:[data length]];
-    input_data->viewport_screenshot_bytes = std::move(image_vector_data);
-  }
   [self didLoadPreviewImage:image forItemWithIdentifier:identifier];
 
-  [self uploadTabForIdentifier:identifier inputData:std::move(input_data)];
+  if (!image) {
+    [self uploadTabForIdentifier:identifier inputData:std::move(inputData)];
+    return;
+  }
+
+  __block std::unique_ptr<lens::ContextualInputData> blockInputData =
+      std::move(inputData);
+  __weak __typeof(self) weakSelf = self;
+  base::ThreadPool::PostTaskAndReplyWithResult(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
+      base::BindOnce(&UIImagePNGRepresentation, image),
+      base::BindOnce(^(NSData* data) {
+        [weakSelf handleTabUploadWithPNGData:data
+                                   inputData:std::move(blockInputData)
+                                  identifier:identifier];
+      }));
+}
+
+// Handles the tab data after it has been converted, and uploads it.
+- (void)handleTabUploadWithPNGData:(NSData*)data
+                         inputData:(std::unique_ptr<lens::ContextualInputData>)
+                                       inputData
+                        identifier:(base::UnguessableToken)identifier {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(_sequenceChecker);
+  if (data) {
+    std::vector<uint8_t> image_vector_data([data length]);
+    [data getBytes:image_vector_data.data() length:[data length]];
+    inputData->viewport_screenshot_bytes = std::move(image_vector_data);
+  }
+  [self uploadTabForIdentifier:identifier inputData:std::move(inputData)];
 }
 
 // Handles the read `data` from the given `url` for the item with the given
@@ -1721,10 +1988,25 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
     // that it can listen to all file upload events.
     [self onFileContextAdded:serverToken forIdentifier:identifier];
     std::string fileName = base::SysNSStringToUTF8(item.title);
+    std::string mimeType;
+    if (item.type == ComposeboxInputItemType::kComposeboxInputItemTypeRawFile) {
+      mimeType = "application/octet-stream";
+      NSURL* nsURL = net::NSURLWithGURL(url);
+      if (nsURL) {
+        UTType* contentType = nil;
+        [nsURL getResourceValue:&contentType
+                                forKey:NSURLContentTypeKey
+                                 error:nil];
+        if (contentType.preferredMIMEType) {
+          mimeType = base::SysNSStringToUTF8(contentType.preferredMIMEType);
+        }
+      }
+    } else {
+      mimeType = kAdobePortableDocumentFormatMimeType;
+    }
     _contextualSearchSession->StartFileContextUploadFlow(
-        serverToken, fileName, kAdobePortableDocumentFormatMimeType,
-        std::move(buffer),
-        /*image_options=*/std::nullopt);
+        serverToken, fileName, mimeType, std::move(buffer),
+        GetDefaultImageEncodingOptions());
     [self notifyContextChanged];
   }
 
@@ -2078,12 +2360,23 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
   if (!IsComposeboxCompactModeEnabled()) {
     return NO;
   }
+
+  BOOL forceExpansionOnFocus =
+      _entrypoint == ComposeboxEntrypoint::kCobrowse && _omniboxFocused;
+  if (forceExpansionOnFocus) {
+    return NO;
+  }
+
   BOOL requiresExpansion =
       _isMultiline || _modeHolder.mode != ComposeboxMode::kRegularSearch;
   return !requiresExpansion;
 }
 
 #pragma mark - ComposeboxOmniboxClientDelegate
+
+- (web::WebState*)webState {
+  return _webStateList->GetActiveWebState();
+}
 
 - (contextual_search::InputState)inputState {
   return _inputState;
@@ -2101,6 +2394,22 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
                URLLoadParams:(const UrlLoadParams&)URLLoadParams
                 isSearchType:(BOOL)isSearchType {
   DCHECK_CALLED_ON_VALID_SEQUENCE(_sequenceChecker);
+
+  if (![self isActiveTabAttached] &&
+      _entrypoint != ComposeboxEntrypoint::kCobrowse) {
+    // If we are initiating a new navigation while the active tab is not
+    // attached to the composebox, hide the tab-specific assistant sheet.
+    [_sceneHandler hideAssistant];
+  }
+
+  BOOL isAimFollowup = IsAimCobrowseEnabled() &&
+                       (_entrypoint == ComposeboxEntrypoint::kCobrowse);
+
+  if (isAimFollowup) {
+    [self sendAIMFollowup:[NSString cr_fromString16:text]];
+    return;
+  }
+
   switch (_modeHolder.mode) {
     case ComposeboxMode::kRegularSearch:
       [self recordNavigationInitiated];
@@ -2217,7 +2526,10 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
   BOOL eligibleToAIM = [self isEligibleToAIM];
   BOOL lensAvailable = lens_availability::CheckAvailabilityForLensEntryPoint(
       LensEntrypoint::Composebox, [self isDSEGoogle]);
-  BOOL allowsMultimodalActions = dseGoogle && eligibleToAIM;
+  BOOL isCobrowse = _entrypoint == ComposeboxEntrypoint::kCobrowse;
+  BOOL compactInCobrowse = compactMode && isCobrowse;
+  BOOL allowsMultimodalActions =
+      dseGoogle && eligibleToAIM && !compactInCobrowse;
   BOOL canSend = hasContent && !compactMode && allowsMultimodalActions;
   BOOL showShortcuts =
       !hasContent && !canSend &&
@@ -2226,7 +2538,7 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
   // plus button is hidden, the user can still use multimodal actions from other
   // sources such as drag and drop.
   BOOL hidePlusButton = NO;
-  if (IsComposeboxConditionalPlusButtonEnabled() &&
+  if (IsComposeboxConditionalPlusButtonEnabled() && !isCobrowse &&
       _modeHolder.isRegularSearch && compactMode) {
     BOOL isPreEditURL = !_userInputInProgress && _hasText;
     BOOL isURLQuery = _userInputInProgress && _hasText && !_isSearchQuery;
@@ -2237,8 +2549,10 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
       hidePlusButton = YES;
     }
   }
+
   BOOL showLeadingImage =
-      !compactMode || !allowsMultimodalActions || hidePlusButton;
+      !isCobrowse &&
+      (!compactMode || !allowsMultimodalActions || hidePlusButton);
   BOOL shouldPersistAIMButton =
       IsComposeboxAIMNudgeEnabled() && !compactMode && allowsMultimodalActions;
 
@@ -2559,6 +2873,49 @@ std::vector<lens::MimeType> MimeTypesFromCollection(
 
 - (void)voiceSearchDidReceiveSearchQuery:(NSString*)query {
   [self sendText:query];
+}
+
+#pragma mark - contextual_tasks::QueryContextualizer::Delegate
+
+- (GURL)GetTabUrl:(contextual_tasks::QueryContextualizer::TabId)id {
+  // No-op. Recontextualization is only needed for the contextual-tasks
+  // composebox handler.
+  return GURL();
+}
+
+- (SessionID)GetTabSessionId:(contextual_tasks::QueryContextualizer::TabId)id {
+  // No-op. Recontextualization is only needed for the contextual-tasks
+  // composebox handler.
+  return SessionID::InvalidValue();
+}
+
+- (void)GetPageContext:(contextual_tasks::QueryContextualizer::TabId)id
+              callback:
+                  (base::OnceCallback<void(
+                       std::unique_ptr<lens::ContextualInputData>)>)callback {
+  // No-op. Recontextualization is only needed for the contextual-tasks
+  // composebox handler.
+  if (callback) {
+    std::move(callback).Run(nullptr);
+  }
+}
+
+- (bool)IsTabValid:(contextual_tasks::QueryContextualizer::TabId)id {
+  // No-op. Recontextualization is only needed for the contextual-tasks
+  // composebox handler.
+  return false;
+}
+
+- (std::optional<lens::ImageEncodingOptions>)
+    GetTabViewportEncodingOptionsForQueryContextualizer {
+  // No-op. Recontextualization is only needed for the contextual-tasks
+  // composebox handler.
+  return std::nullopt;
+}
+
+- (contextual_search::ContextualSearchSessionHandle*)
+    GetOrCreateSessionHandleForQueryContextualizer {
+  return _contextualSearchSession.get();
 }
 
 #pragma mark - WebStateDeferredExecutorDelegate

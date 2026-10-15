@@ -17,11 +17,9 @@
 #include "components/signin/public/base/oauth_consumer_id.h"
 #include "components/signin/public/identity_manager/access_token_info.h"
 #include "components/signin/public/identity_manager/primary_account_access_token_fetcher.h"
-#include "content/public/browser/network_service_instance.h"
 #include "content/public/browser/storage_partition.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/mojom/network_context.mojom.h"
-#include "services/network/public/mojom/network_service.mojom.h"
 
 namespace private_ai {
 
@@ -43,22 +41,21 @@ PrivateAiService::PrivateAiService(
 
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  logger_ = std::make_unique<PrivateAiLogger>();
   auto url_loader_factory = profile_->GetDefaultStoragePartition()
                                 ->GetURLLoaderFactoryForBrowserProcess();
   auto bsa = bsa_factory_->CreateBlindSignAuth(url_loader_factory->Clone());
   auto token_fetcher = std::make_unique<phosphor::TokenFetcherImpl>(
-      this, std::move(bsa), logger_.get());
+      this, std::move(bsa), &logger_);
   token_fetcher_ = token_fetcher.get();
   token_manager_ = std::make_unique<phosphor::TokenManagerImpl>(
-      std::move(token_fetcher), logger_.get());
+      std::move(token_fetcher), &logger_);
 
   client_ = Client::Create(
       kPrivateAiUrl.Get(), kPrivateAiApiKey.Get(),
       kPrivateAiProxyServerUrl.Get(),
       base::FeatureList::IsEnabled(kPrivateAiUseTokenAttestation),
       profile_->GetDefaultStoragePartition()->GetNetworkContext(),
-      token_manager_.get(), content::GetNetworkService(), logger_.get());
+      token_manager_.get(), &logger_);
 }
 
 PrivateAiService::~PrivateAiService() {
@@ -82,6 +79,11 @@ Client* PrivateAiService::GetClient() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   CHECK(client_);
   return client_.get();
+}
+
+PrivateAiLogger* PrivateAiService::GetLogger() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return &logger_;
 }
 
 void PrivateAiService::SetClientForTesting(std::unique_ptr<Client> client) {

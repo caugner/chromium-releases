@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/compiler_specific.h"
+#include "base/i18n/rtl.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory_test_util.h"
@@ -22,10 +23,10 @@
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_data.h"
 #include "components/search_engines/template_url_service.h"
+#include "components/search_engines/template_url_service_observer.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/base/models/table_model_observer.h"
 
 using base::ASCIIToUTF16;
 
@@ -38,7 +39,7 @@ static const std::u16string kManaged(u"managed");
 // Base class for keyword editor tests. Creates a profile containing an
 // empty TemplateURLService.
 class KeywordEditorControllerTest : public testing::Test,
-                                    public ui::TableModelObserver {
+                                    public TemplateURLServiceObserver {
  public:
   KeywordEditorControllerTest()
       : util_(&profile_),
@@ -58,23 +59,17 @@ class KeywordEditorControllerTest : public testing::Test,
     }
 
     controller_ = std::make_unique<KeywordEditorController>(&profile_);
-    controller_->table_model()->SetObserver(this);
+    scoped_url_service_observation_.Observe(util_.model());
   }
 
   void TearDown() override { controller_.reset(); }
-
-  void OnModelChanged() override { model_changed_count_++; }
-
-  void OnItemsChanged(size_t start, size_t length) override {}
-
-  void OnItemsAdded(size_t start, size_t length) override {}
-
-  void OnItemsRemoved(size_t start, size_t length) override {}
 
   void VerifyChanged() {
     ASSERT_EQ(1, model_changed_count_);
     ClearChangeCount();
   }
+
+  void VerifyNotChanged() { ASSERT_EQ(0, model_changed_count_); }
 
   void ClearChangeCount() { model_changed_count_ = 0; }
 
@@ -93,6 +88,14 @@ class KeywordEditorControllerTest : public testing::Test,
                                                  &profile_);
   }
 
+  // TemplateURLServiceObserver implementation. The controller would usually be
+  // notified by the search engines handler. For the sake of testing, simulate
+  // this linking.
+  void OnTemplateURLServiceChanged() override {
+    model_changed_count_++;
+    controller()->UpdateIdToTemplateURLMapping();
+  }
+
   TemplateURLTableModel* table_model() { return controller_->table_model(); }
   KeywordEditorController* controller() { return controller_.get(); }
   const TemplateURLServiceFactoryTestUtil* util() const { return &util_; }
@@ -104,6 +107,8 @@ class KeywordEditorControllerTest : public testing::Test,
   std::unique_ptr<KeywordEditorController> controller_;
   TemplateURLServiceFactoryTestUtil util_;
   bool simulate_load_failure_;
+  base::ScopedObservation<TemplateURLService, TemplateURLServiceObserver>
+      scoped_url_service_observation_{this};
 
   int model_changed_count_;
 };
@@ -165,6 +170,30 @@ TEST_F(KeywordEditorControllerTest, Modify) {
   EXPECT_TRUE(overridden_keywords.empty());
 }
 
+// Regression test for crbug.com/499223471.
+TEST_F(KeywordEditorControllerTest, ModifyWithoutChange) {
+  const TemplateURLID turl_id =
+      controller()->AddTemplateURL(kA, kB, "c1.com/?s=%s");
+  ClearChangeCount();
+
+  // Trigger a modification, but the URL is the same as the original one, only
+  // in a fixed up format.
+  TemplateURL* turl = controller()->GetTemplateURL(turl_id);
+  controller()->ModifyTemplateURL(turl, kA, kB,
+                                  "http://c1.com/?s={searchTerms}");
+
+  // Make sure it was not updated.
+  VerifyNotChanged();
+  EXPECT_EQ(u"a", turl->short_name());
+  EXPECT_EQ(u"b", turl->keyword());
+  EXPECT_EQ("c1.com/?s=%s", turl->url());
+
+  // Verify preference was not updated.
+  const base::ListValue& overridden_keywords = profile().GetPrefs()->GetList(
+      EnterpriseSearchManager::kSiteSearchSettingsOverriddenKeywordsPrefName);
+  EXPECT_TRUE(overridden_keywords.empty());
+}
+
 // Tests modifying a SiteSearch TemplateURL.
 TEST_F(KeywordEditorControllerTest, Modify_SiteSearchPolicyEngine) {
   // Create an entry from Site Search policy.
@@ -199,12 +228,12 @@ TEST_F(KeywordEditorControllerTest, Modify_SiteSearchPolicyEngine) {
 
 // Tests removing a TemplateURL.
 TEST_F(KeywordEditorControllerTest, Remove) {
-  int index = controller()->AddTemplateURL(kA, kB, "http://c");
+  TemplateURLID id = controller()->AddTemplateURL(kA, kB, "http://c");
   auto original_size = util()->model()->GetTemplateURLs().size();
   ClearChangeCount();
 
   // Remove the entry.
-  controller()->RemoveTemplateURL(index);
+  controller()->RemoveTemplateURL(id);
 
   // Make sure it was deleted appropriately.
   VerifyChanged();
@@ -230,8 +259,7 @@ TEST_F(KeywordEditorControllerTest, Remove_SiteSearchPolicyEngine) {
   ClearChangeCount();
 
   // Remove the entry.
-  int index = table_model()->IndexOfTemplateURL(turl).value();
-  controller()->RemoveTemplateURL(index);
+  controller()->RemoveTemplateURL(turl->id());
 
   // Make sure it was deleted appropriately.
   VerifyChanged();
@@ -252,12 +280,13 @@ TEST_F(KeywordEditorControllerTest, Remove_SiteSearchPolicyEngine) {
 
 // Tests making a TemplateURL the default search provider.
 TEST_F(KeywordEditorControllerTest, MakeDefault) {
-  int index = controller()->AddTemplateURL(kA, kB, "http://c{searchTerms}");
+  TemplateURLID id =
+      controller()->AddTemplateURL(kA, kB, "http://c{searchTerms}");
   ClearChangeCount();
 
   const TemplateURL* turl = util()->model()->GetTemplateURLForKeyword(kB);
   controller()->MakeDefaultTemplateURL(
-      index, search_engines::ChoiceMadeLocation::kOther);
+      id, search_engines::ChoiceMadeLocation::kOther);
   // Making an item the default sends a handful of changes. Which are sent isn't
   // important, what is important is 'something' is sent.
   VerifyChanged();
@@ -265,7 +294,7 @@ TEST_F(KeywordEditorControllerTest, MakeDefault) {
 
   // Making it default a second time should fail.
   controller()->MakeDefaultTemplateURL(
-      index, search_engines::ChoiceMadeLocation::kOther);
+      id, search_engines::ChoiceMadeLocation::kOther);
   EXPECT_EQ(turl, util()->model()->GetDefaultSearchProvider());
 }
 
@@ -315,7 +344,8 @@ TEST_F(KeywordEditorControllerManagedDSPTest, SetDefaultWhileRecommended) {
   EXPECT_FALSE(
       controller()->IsManaged(util()->model()->GetDefaultSearchProvider()));
 
-  int index = controller()->AddTemplateURL(kA1, kB1, "http://d{searchTerms}");
+  TemplateURLID id =
+      controller()->AddTemplateURL(kA1, kB1, "http://d{searchTerms}");
   ClearChangeCount();
   const TemplateURL* turl2 = util()->model()->GetTemplateURLForKeyword(kB1);
   ASSERT_NE(turl2, nullptr);
@@ -324,7 +354,7 @@ TEST_F(KeywordEditorControllerManagedDSPTest, SetDefaultWhileRecommended) {
   // Update the default search provider.
   EXPECT_NE(turl2, util()->model()->GetDefaultSearchProvider());
   controller()->MakeDefaultTemplateURL(
-      index, search_engines::ChoiceMadeLocation::kOther);
+      id, search_engines::ChoiceMadeLocation::kOther);
   VerifyChanged();
   EXPECT_EQ(turl2, util()->model()->GetDefaultSearchProvider());
 
@@ -437,12 +467,13 @@ TEST_F(KeywordEditorControllerManagedDSPTest, EditRecommendedDefault) {
 }
 
 TEST_F(KeywordEditorControllerNoWebDataTest, MakeDefaultNoWebData) {
-  int index = controller()->AddTemplateURL(kA, kB, "http://c{searchTerms}");
+  TemplateURLID id =
+      controller()->AddTemplateURL(kA, kB, "http://c{searchTerms}");
   ClearChangeCount();
 
   // This should not result in a crash.
   controller()->MakeDefaultTemplateURL(
-      index, search_engines::ChoiceMadeLocation::kOther);
+      id, search_engines::ChoiceMadeLocation::kOther);
   const TemplateURL* turl = util()->model()->GetTemplateURLForKeyword(kB);
   EXPECT_EQ(turl, util()->model()->GetDefaultSearchProvider());
 }
@@ -457,7 +488,7 @@ TEST_F(KeywordEditorControllerTest, MutateTemplateURLService) {
   data.SetKeyword(u"a");
   TemplateURL* turl = util()->model()->Add(std::make_unique<TemplateURL>(data));
 
-  // Table model should have updated.
+  // TemplateURLService should have updated.
   VerifyChanged();
 
   // And should contain the newly added TemplateURL.
@@ -534,7 +565,7 @@ TEST_F(KeywordEditorControllerTest, EnginesSortedByName) {
   for (SearchEngineOrderingTestCase test_case : kTestCases) {
     engines.push_back(
         util()->model()->Add(CreateTemplateUrlForSortingTest(test_case)));
-    // Table model should have updated.
+    // TemplateURLService should have updated.
     VerifyChanged();
   }
 
@@ -594,7 +625,7 @@ TEST_F(KeywordEditorControllerTest, EnginesSortedByNameWithManagedSiteSearch) {
   for (SearchEngineOrderingTestCase test_case : kTestCases) {
     engines.push_back(
         util()->model()->Add(CreateTemplateUrlForSortingTest(test_case)));
-    // Table model should have updated.
+    // TemplateURLService should have updated.
     VerifyChanged();
   }
 
@@ -616,7 +647,8 @@ void CheckKeywordsToDisplay(
     const std::vector<std::u16string>& kExpectedShortNamesOrder,
     const std::vector<std::u16string>& kExpectedKeywordsToDisplay,
     size_t numExpectedKeywords,
-    TemplateURLTableModel* table_model) {
+    TemplateURLTableModel* table_model,
+    KeywordEditorController* controller) {
   ASSERT_TRUE(table_model);
   ASSERT_EQ(table_model->last_active_engine_index(),
             table_model->last_search_engine_index() + numExpectedKeywords);
@@ -628,9 +660,9 @@ void CheckKeywordsToDisplay(
     const TemplateURL* template_url = table_model->GetTemplateURL(row);
     ASSERT_TRUE(template_url);
     EXPECT_EQ(template_url->short_name(), kExpectedShortNamesOrder[i]);
-    EXPECT_EQ(
-        table_model->GetText(row, IDS_SEARCH_ENGINES_EDITOR_KEYWORD_COLUMN),
-        kExpectedKeywordsToDisplay[i]);
+    EXPECT_EQ(base::i18n::GetDisplayStringInLTRDirectionality(
+                  template_url->keyword()),
+              kExpectedKeywordsToDisplay[i]);
   }
 }
 
@@ -676,7 +708,7 @@ TEST_F(KeywordEditorControllerTest, FeaturedEnterpriseSiteSearch) {
   for (SearchEngineOrderingTestCase test_case : kTestCases) {
     engines.push_back(
         util()->model()->Add(CreateTemplateUrlForSortingTest(test_case)));
-    // Table model should have updated.
+    // TemplateURLService should have updated.
     VerifyChanged();
   }
 
@@ -697,7 +729,7 @@ TEST_F(KeywordEditorControllerTest, FeaturedEnterpriseSiteSearch) {
 
   size_t numExpectedKeywords = kExpectedShortNamesOrder.size();
   CheckKeywordsToDisplay(kExpectedShortNamesOrder, kExpectedKeywordsToDisplay,
-                         numExpectedKeywords, table_model());
+                         numExpectedKeywords, table_model(), controller());
 }
 
 TEST_F(KeywordEditorControllerTest,
@@ -767,7 +799,7 @@ TEST_F(KeywordEditorControllerTest,
   for (SearchEngineOrderingTestCase test_case : kTestCases) {
     engines.push_back(
         util()->model()->Add(CreateTemplateUrlForSortingTest(test_case)));
-    // Table model should have updated.
+    // TemplateURLService should have updated.
     VerifyChanged();
   }
 
@@ -786,7 +818,7 @@ TEST_F(KeywordEditorControllerTest,
 
   size_t numExpectedKeywords = std::size(kExpectedShortNamesOrder);
   CheckKeywordsToDisplay(kExpectedShortNamesOrder, kExpectedKeywordsToDisplay,
-                         numExpectedKeywords, table_model());
+                         numExpectedKeywords, table_model(), controller());
 }
 
 TEST_F(KeywordEditorControllerTest, EnterpriseSearchAggregator) {
@@ -818,7 +850,7 @@ TEST_F(KeywordEditorControllerTest, EnterpriseSearchAggregator) {
   for (SearchEngineOrderingTestCase test_case : kTestCases) {
     engines.push_back(
         util()->model()->Add(CreateTemplateUrlForSortingTest(test_case)));
-    // Table model should have updated.
+    // TemplateURLService should have updated.
     VerifyChanged();
   }
 
@@ -829,7 +861,7 @@ TEST_F(KeywordEditorControllerTest, EnterpriseSearchAggregator) {
 
   size_t numExpectedKeywords = kExpectedShortNamesOrder.size();
   CheckKeywordsToDisplay(kExpectedShortNamesOrder, kExpectedKeywordsToDisplay,
-                         numExpectedKeywords, table_model());
+                         numExpectedKeywords, table_model(), controller());
 }
 
 TEST_F(KeywordEditorControllerTest,
@@ -885,7 +917,7 @@ TEST_F(KeywordEditorControllerTest,
   for (SearchEngineOrderingTestCase test_case : kTestCases) {
     engines.push_back(
         util()->model()->Add(CreateTemplateUrlForSortingTest(test_case)));
-    // Table model should have updated.
+    // TemplateURLService should have updated.
     VerifyChanged();
   }
 
@@ -897,7 +929,7 @@ TEST_F(KeywordEditorControllerTest,
 
   size_t numExpectedKeywords = kExpectedShortNamesOrder.size();
   CheckKeywordsToDisplay(kExpectedShortNamesOrder, kExpectedKeywordsToDisplay,
-                         numExpectedKeywords, table_model());
+                         numExpectedKeywords, table_model(), controller());
 }
 
 TEST_F(KeywordEditorControllerTest, EnterpriseSiteSearchAndSearchAggregator) {
@@ -943,7 +975,7 @@ TEST_F(KeywordEditorControllerTest, EnterpriseSiteSearchAndSearchAggregator) {
   for (SearchEngineOrderingTestCase test_case : kTestCases) {
     engines.push_back(
         util()->model()->Add(CreateTemplateUrlForSortingTest(test_case)));
-    // Table model should have updated.
+    // TemplateURLService should have updated.
     VerifyChanged();
   }
 
@@ -955,5 +987,5 @@ TEST_F(KeywordEditorControllerTest, EnterpriseSiteSearchAndSearchAggregator) {
 
   size_t numExpectedKeywords = kExpectedShortNamesOrder.size();
   CheckKeywordsToDisplay(kExpectedShortNamesOrder, kExpectedKeywordsToDisplay,
-                         numExpectedKeywords, table_model());
+                         numExpectedKeywords, table_model(), controller());
 }

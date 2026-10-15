@@ -162,7 +162,7 @@ CustomizeChromeUI::CustomizeChromeUI(content::WebUI* web_ui)
       {"showFooterToggleTitle", IDS_NTP_CUSTOMIZE_SHOW_FOOTER_LABEL},
       // Required by <managed-dialog>.
       {"controlledSettingPolicy", IDS_CONTROLLED_SETTING_POLICY},
-      {"close", IDS_NEW_TAB_VOICE_CLOSE_TOOLTIP},
+      {"close", IDS_NTP_CLOSE},
       {"ok", IDS_OK},
       // CustomizeColorSchemeMode strings.
       {"colorSchemeModeLabel",
@@ -289,6 +289,8 @@ CustomizeChromeUI::CustomizeChromeUI(content::WebUI* web_ui)
       "ntpNextFeaturesEnabled",
       ntp_realbox::IsNtpRealboxNextEnabled(profile_) &&
           base::FeatureList::IsEnabled(ntp_features::kNtpNextFeatures));
+  source->AddBoolean("ntpNextDisablementEnabled",
+                     ntp_features::kNtpNextDisablementParam.Get());
   source->AddBoolean("wallpaperSearchEnabled", wallpaper_search_enabled);
   source->AddBoolean(
       "wallpaperSearchInspirationCardEnabled",
@@ -314,10 +316,6 @@ CustomizeChromeUI::CustomizeChromeUI(content::WebUI* web_ui)
 
   source->AddBoolean("footerEnabled",
                      base::FeatureList::IsEnabled(ntp_features::kNtpFooter));
-  source->AddBoolean(
-      "ntpEnterpriseShortcutsMixingAllowed",
-      base::FeatureList::IsEnabled(ntp_tiles::kNtpEnterpriseShortcuts) &&
-          ntp_tiles::kNtpEnterpriseShortcutsAllowMixingParam.Get());
 
   webui::SetupWebUIDataSource(
       source, kSidePanelCustomizeChromeResources,

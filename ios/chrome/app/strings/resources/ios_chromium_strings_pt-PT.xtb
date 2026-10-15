@@ -2,6 +2,7 @@
 <!DOCTYPE translationbundle>
 <translationbundle lang="pt-PT">
 <translation id="1000436330784933699">Pode abrir o Lens aqui.</translation>
+<translation id="1005291068154454184">Vídeo em ecrã inteiro sobre como definir o Chromium como predefinição</translation>
 <translation id="1042296835509784301">Abre o Gestor de Palavras-passe no Chromium.</translation>
 <translation id="1047130070405668746">Selecione o Chromium</translation>
 <translation id="1091252999271033193">Isto significa que o Chromium irá pedir sempre o site para dispositivos móveis.</translation>
@@ -70,9 +71,6 @@ Não é possível guardar novos marcadores na sua conta até eliminar alguns. Se
 <translation id="2313870531055795960">Verifica os URLs com base numa lista de sites inseguros armazenada no Chromium. Se um site tentar roubar a sua palavra-passe, ou quando transferir um ficheiro prejudicial, o Chromium também pode enviar URLs, incluindo bits de conteúdo das páginas, para a Navegação segura.</translation>
 <translation id="2314220608288760290">O Chromium abre automaticamente links de Navegação anónima do YouTube na Navegação anónima.</translation>
 <translation id="231828342043114302">Para receber conteúdo personalizado com base nos seus interesses, inicie sessão no Chromium.</translation>
-<translation id="2326738825692478496">Alguns dos seus dados do Chromium ainda não foram guardados na sua Conta Google.
-
-Experimente aguardar alguns minutos antes de terminar sessão. Se terminar sessão agora, estes dados vão ser eliminados.</translation>
 <translation id="2334943301233020675">As seguintes chaves de acesso não foram importadas para o Gestor de Palavras-passe porque não correspondem aos requisitos.</translation>
 <translation id="2337722506862731008">Partilhar Chromium</translation>
 <translation id="2340423701577464731">Adicione o item da Lista de leitura ao Chromium</translation>
@@ -103,7 +101,6 @@ Experimente aguardar alguns minutos antes de terminar sessão. Se terminar sess�
 Para ver mais definições que usam dados para melhorar a sua experiência do Chromium, aceda aos <ph name="BEGIN_LINK" />serviços Google<ph name="END_LINK" />.</translation>
 <translation id="2832168932648876507">Pesquise com a voz no Chromium.</translation>
 <translation id="2843571538056574338">Use o Chromium para o preenchimento automático</translation>
-<translation id="2899085719655668655">Instruções de vídeo no modo ecrã no ecrã sobre como definir o Chromium como predefinição</translation>
 <translation id="2918709798697875261">A sua entidade requer que se mantenha sem sessão iniciada no Chromium.</translation>
 <translation id="2942241131342758843">Utilize o Chromium por predefinição para abrir links, pesquisar a partir de widgets e preencher automaticamente palavras-passe noutras apps</translation>
 <translation id="2977470724722393594">O Chromium está atualizado</translation>
@@ -137,6 +134,7 @@ Experimente aguardar alguns minutos antes de mudar de conta. Se mudar de conta a
 <translation id="377649297473651452">Vista expandida do preenchimento automático do Chromium</translation>
 <translation id="3780779443901618967">Envia-lhe avisos sobre sites perigosos, mesmo aqueles que a Google desconhecia, ao analisar mais dados de sites do que a Proteção padrão. Pode optar por ignorar os avisos do Chromium.</translation>
 <translation id="3805899903892079518">O Chromium não tem acesso aos seus vídeos ou fotos. Ative o acesso nas Definições do iOS &gt; Privacidade &gt; Fotos.</translation>
+<translation id="3809591243528646631">Para aceder às funcionalidades de segurança para crianças, pode usar uma Conta Google configurada para crianças ou usar o Chromium sem uma conta. <ph name="BEGIN_LINK" />Saiba mais<ph name="END_LINK" /></translation>
 <translation id="3816686541346279443">O Chromium vai oferecer a opção de guardar a sua palavra-passe.</translation>
 <translation id="3827545470516145620">Vai obter a proteção de segurança padrão neste dispositivo</translation>
 <translation id="3833326979834193417">O Chromium executa automaticamente a verificação de segurança todos os dias para lhe oferecer proteção contra violações de dados, Websites inseguros e muito mais. Pode encontrar mais informações sobre a verificação de segurança nas Definições.</translation>
@@ -172,6 +170,7 @@ Os seus dados estão encriptados com a sua frase de acesso. Introduza-a para usa
 Para alterar esta definição, <ph name="BEGIN_LINK" />elimine os dados do Chromium na sua conta<ph name="END_LINK" />.</translation>
 <translation id="4578500311756617174">Sugestão do Chromium: use o Chromium por predefinição</translation>
 <translation id="458786853569524949">Agora, pode usar o Chromium sempre que tocar em links de emails, documentos e outras apps.</translation>
+<translation id="4625730353066900738">Conheça as noções básicas do Chromium para começar</translation>
 <translation id="4633738821577273991">Obtenha também a Navegação segura melhorada para este perfil do Chromium</translation>
 <translation id="4654936625574199632">Para ajudar a melhorar a app, o Chromium envia relatórios de utilização e falhas para a Google. <ph name="BEGIN_LINK" />Faça a gestão<ph name="END_LINK" /></translation>
 <translation id="4681781466797808448">Ative o leitor do Chromium</translation>
@@ -182,7 +181,6 @@ Para alterar esta definição, <ph name="BEGIN_LINK" />elimine os dados do Chrom
 <translation id="4856138222358683580">Ações do Chromium</translation>
 <translation id="4869706986935301458">Abra o Chromium instantaneamente quando estiver no seu iPhone</translation>
 <translation id="4904452304169763785">Alertas sobre quaisquer problemas de privacidade ou segurança detetados pelo Chromium.</translation>
-<translation id="4908570938463711775">Conheça as noções básicas do Chromium para começar</translation>
 <translation id="4962295957157529683">Termine o que estava a fazer na outra janela do Chromium aberta.</translation>
 <translation id="4985291216379576555">Está offline. O Chromium não consegue verificar se existem atualizações.</translation>
 <translation id="4996471330284142407">Faça mais com um Chromium simples, seguro e mais rápido do que nunca.</translation>
@@ -358,6 +356,7 @@ Só alguém com a sua frase de acesso pode ler os dados encriptados. A Google n�
 <translation id="8900052431807804054">Tenha a segurança mais avançada do Chromium</translation>
 <translation id="8908791447256515663">Aceda ao Chromium mais rapidamente a partir da Dock do iPad.</translation>
 <translation id="8925569192291721236">Mantenha-se a par das atualizações de acompanhamento de preço e das dicas do Chromium.</translation>
+<translation id="8939412301975414416">Para aceder às funcionalidades de segurança para crianças no Chromium, pode usar uma Conta Google configurada para uma criança ou usar o Chromium sem uma conta.</translation>
 <translation id="8950326149985259075">{THRESHOLD,plural, =1{Isto acontece quando o Chromium não é usado durante {THRESHOLD} minuto}other{Isto acontece quando o Chromium não é usado durante {THRESHOLD} minutos}}</translation>
 <translation id="8963279154877372067">Permita que as notificações do Chromium recebam alertas de descida do preço</translation>
 <translation id="8975812008711371178">Pesquise com a voz no Chromium</translation>

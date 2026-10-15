@@ -60,10 +60,10 @@
 #include "content/public/test/navigation_simulator.h"
 #include "content/public/test/scoped_web_ui_controller_factory_registration.h"
 #include "content/public/test/test_browser_context.h"
+#include "content/public/test/test_content_browser_client.h"
+#include "content/public/test/test_content_client.h"
 #include "content/public/test/test_utils.h"
 #include "content/test/navigation_simulator_impl.h"
-#include "content/test/test_content_browser_client.h"
-#include "content/test/test_content_client.h"
 #include "content/test/test_page_broadcast.h"
 #include "content/test/test_render_frame_host.h"
 #include "content/test/test_render_view_host.h"
@@ -1666,8 +1666,13 @@ TEST_F(WebContentsImplTest,
                                                     GURL("http://a.com"));
   main_rfh = main_test_rfh();
 
-  // Create a subframe and navigate it.
-  TestRenderFrameHost* sub_rfh = main_rfh->AppendChild("subframe");
+  // Create a subframe with fullscreen Permissions Policy and navigate it.
+  TestRenderFrameHost* sub_rfh = main_rfh->AppendChildWithPolicy(
+      "subframe", {{network::mojom::PermissionsPolicyFeature::kFullscreen,
+                    /*allowed_origins=*/{},
+                    /*self_if_matches=*/std::nullopt,
+                    /*matches_all_origins=*/true,
+                    /*matches_opaque_src=*/false}});
   sub_rfh = static_cast<TestRenderFrameHost*>(
       NavigationSimulator::NavigateAndCommitFromDocument(GURL("http://b.com"),
                                                          sub_rfh));
@@ -1703,8 +1708,13 @@ TEST_F(WebContentsImplTest,
                                                     GURL("http://a.com"));
   main_rfh = main_test_rfh();
 
-  // Create a subframe and navigate it.
-  TestRenderFrameHost* sub_rfh = main_rfh->AppendChild("subframe");
+  // Create a subframe with fullscreen Permissions Policy and navigate it.
+  TestRenderFrameHost* sub_rfh = main_rfh->AppendChildWithPolicy(
+      "subframe", {{network::mojom::PermissionsPolicyFeature::kFullscreen,
+                    /*allowed_origins=*/{},
+                    /*self_if_matches=*/std::nullopt,
+                    /*matches_all_origins=*/true,
+                    /*matches_opaque_src=*/false}});
   sub_rfh = static_cast<TestRenderFrameHost*>(
       NavigationSimulator::NavigateAndCommitFromDocument(GURL("http://b.com"),
                                                          sub_rfh));
@@ -3668,9 +3678,9 @@ TEST_F(WebContentsImplTest, RequestMediaAccessPermissionNoDelegate) {
               blink::mojom::MediaStreamRequestResult result,
               std::unique_ptr<MediaStreamUI> ui) {
             EXPECT_TRUE(stream_devices_set.stream_devices.empty());
-            EXPECT_EQ(
-                result,
-                blink::mojom::MediaStreamRequestResult::FAILED_DUE_TO_SHUTDOWN);
+            EXPECT_EQ(result,
+                      blink::mojom::MediaStreamRequestResult::
+                          FAILED_DUE_TO_SHUTDOWN_WEB_CONTENTS_NO_DELEGATE);
             callback_run = true;
           }));
   ASSERT_TRUE(callback_run);
@@ -3679,28 +3689,23 @@ TEST_F(WebContentsImplTest, RequestMediaAccessPermissionNoDelegate) {
 TEST_F(WebContentsImplTest, IgnoreInputEvents) {
   // By default, input events should not be ignored.
   EXPECT_FALSE(contents()->ShouldIgnoreInputEvents());
-  EXPECT_FALSE(contents()->ShouldIgnoreA11yInputEvents());
 
   std::optional<WebContents::ScopedIgnoreInputEvents> ignore_1 =
       contents()->IgnoreInputEvents(std::nullopt);
   EXPECT_TRUE(contents()->ShouldIgnoreInputEvents());
-  EXPECT_TRUE(contents()->ShouldIgnoreA11yInputEvents());
 
   // A second request to ignore should continue to ignore events.
   WebContents::ScopedIgnoreInputEvents ignore_2 =
       contents()->IgnoreInputEvents(std::nullopt);
   EXPECT_TRUE(contents()->ShouldIgnoreInputEvents());
-  EXPECT_TRUE(contents()->ShouldIgnoreA11yInputEvents());
 
   // Releasing one of them should not change anything.
   ignore_1.reset();
   EXPECT_TRUE(contents()->ShouldIgnoreInputEvents());
-  EXPECT_TRUE(contents()->ShouldIgnoreA11yInputEvents());
 
   // Move construction should not allow input.
   WebContents::ScopedIgnoreInputEvents ignore_3(std::move(ignore_2));
   EXPECT_TRUE(contents()->ShouldIgnoreInputEvents());
-  EXPECT_TRUE(contents()->ShouldIgnoreA11yInputEvents());
 
   {
     // Cannot create an empty `ScopedIgnoreInputEvents`, so get a new one and
@@ -3709,48 +3714,11 @@ TEST_F(WebContentsImplTest, IgnoreInputEvents) {
         contents()->IgnoreInputEvents(std::nullopt);
     ignore_4 = std::move(ignore_3);
     EXPECT_TRUE(contents()->ShouldIgnoreInputEvents());
-    EXPECT_TRUE(contents()->ShouldIgnoreA11yInputEvents());
     // `ignore_4` goes out of scope.
   }
 
   // Now input should be allowed.
   EXPECT_FALSE(contents()->ShouldIgnoreInputEvents());
-  EXPECT_FALSE(contents()->ShouldIgnoreA11yInputEvents());
-}
-
-TEST_F(WebContentsImplTest, IgnoreInputEvents_IgnoreA11yInputEvents) {
-  // By default, input and a11y input events should not be ignored.
-  EXPECT_FALSE(contents()->ShouldIgnoreInputEvents());
-  EXPECT_FALSE(contents()->ShouldIgnoreA11yInputEvents());
-
-  // Create two requests with different a11y input settings.
-  // The default 1-argument call now ignores both regular input and a11y input.
-  std::optional<WebContents::ScopedIgnoreInputEvents>
-      ignore_input_and_a11y_input = contents()->IgnoreInputEvents(std::nullopt);
-
-  // To test ignoring ONLY regular input, we must explicitly pass false.
-  std::optional<WebContents::ScopedIgnoreInputEvents> ignore_input_only =
-      contents()->IgnoreInputEvents(std::nullopt,
-                                    /*should_ignore_a11y_input=*/false);
-
-  // With both requests active, both input and a11y input should be ignored.
-  EXPECT_TRUE(contents()->ShouldIgnoreInputEvents());
-  EXPECT_TRUE(contents()->ShouldIgnoreA11yInputEvents());
-
-  // Manually release the request that was ignoring a11y input events.
-  ignore_input_and_a11y_input.reset();
-
-  // Verify the state reverted: general input is still ignored by the first
-  // request, but a11y input events are now allowed.
-  EXPECT_TRUE(contents()->ShouldIgnoreInputEvents());
-  EXPECT_FALSE(contents()->ShouldIgnoreA11yInputEvents());
-
-  // Manually release the ignore input only request.
-  ignore_input_only.reset();
-
-  // Verify everything is back to the default state.
-  EXPECT_FALSE(contents()->ShouldIgnoreInputEvents());
-  EXPECT_FALSE(contents()->ShouldIgnoreA11yInputEvents());
 }
 
 TEST_F(WebContentsImplTest, OnColorProviderChangedTriggersPageBroadcast) {

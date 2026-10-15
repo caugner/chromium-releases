@@ -653,13 +653,14 @@ BookmarkNodeIDSet GetBookmarkNodeIDSet(
       base::apple::ObjCCastStrict<BookmarksHomeNodeItem>(item);
 
   // Start loading a favicon.
+  int64_t nodeId = node->id();
   __weak BookmarksHomeViewController* weakSelf = self;
   auto faviconLoadedBlock = ^(FaviconAttributes* attributes, bool cached) {
     [weakSelf didFetchFaviconAttributes:attributes
                                  cached:cached
                                    item:URLItem
                               indexPath:indexPath
-                                   node:node];
+                                 nodeId:nodeId];
   };
 
   GURL blockURL(node->url());
@@ -850,7 +851,7 @@ BookmarkNodeIDSet GetBookmarkNodeIDSet(
   DCHECK(!_folderChooserCoordinator);
   DCHECK(nodeIDs.size() > 0);
 
-  bookmark_utils_ios::NodeSet nodes;
+  std::set<raw_ptr<const bookmarks::BookmarkNode>> nodes;
   for (int64_t nodeID : nodeIDs) {
     const BookmarkNode* node = [self findNodeByID:nodeID];
     if (node) {
@@ -1278,7 +1279,7 @@ BookmarkNodeIDSet GetBookmarkNodeIDSet(
 
   // Copy the list of edited nodes from BookmarksFolderChooserCoordinator before
   // `stopFolderChooserCoordinator` sets `_folderChooserCoordinator` to nil.
-  std::set<const BookmarkNode*> editedNodesSet =
+  std::set<raw_ptr<const bookmarks::BookmarkNode>> editedNodesSet =
       _folderChooserCoordinator.editedNodes;
   CHECK_GE(editedNodesSet.size(), 1u, base::NotFatalUntil::M152);
 
@@ -1507,11 +1508,13 @@ BookmarkNodeIDSet GetBookmarkNodeIDSet(
                            cached:(bool)cached
                              item:(BookmarksHomeNodeItem*)item
                         indexPath:(NSIndexPath*)indexPath
-                             node:(const BookmarkNode*)node {
+                           nodeId:(int64_t)nodeId {
+  const BookmarkNode* node = [self hasItemAtIndexPath:indexPath]
+                                 ? [self nodeAtIndexPath:indexPath]
+                                 : nil;
   // Due to search filtering, we also need to validate the indexPath
   // requested versus what is in the table now.
-  if (![self hasItemAtIndexPath:indexPath] ||
-      [self nodeAtIndexPath:indexPath] != node) {
+  if (!node || node->id() != nodeId) {
     return;
   }
   item.faviconAttributes = attributes;

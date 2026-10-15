@@ -1643,16 +1643,33 @@ void ServiceWorkerGlobalScope::DispatchFetchEventForSubresource(
 
 void ServiceWorkerGlobalScope::Clone(
     mojo::PendingReceiver<mojom::blink::ControllerServiceWorker> receiver,
-    const network::CrossOriginEmbedderPolicy& cross_origin_embedder_policy,
-    mojo::PendingRemote<
-        network::mojom::blink::CrossOriginEmbedderPolicyReporter> coep_reporter,
-    const network::DocumentIsolationPolicy& document_isolation_policy,
-    mojo::PendingRemote<network::mojom::blink::DocumentIsolationPolicyReporter>
-        dip_reporter) {
+    mojom::blink::CrossOriginEmbedderPolicyInfoPtr
+        cross_origin_embedder_policy_info,
+    mojom::blink::DocumentIsolationPolicyInfoPtr
+        document_isolation_policy_info) {
   DCHECK(IsContextThread());
+  network::CrossOriginEmbedderPolicy cross_origin_embedder_policy;
+  mojo::PendingRemote<network::mojom::blink::CrossOriginEmbedderPolicyReporter>
+      cross_origin_embedder_policy_reporter;
+  if (cross_origin_embedder_policy_info) {
+    cross_origin_embedder_policy = cross_origin_embedder_policy_info->value;
+    cross_origin_embedder_policy_reporter =
+        std::move(cross_origin_embedder_policy_info->reporter);
+  }
+
+  network::DocumentIsolationPolicy document_isolation_policy;
+  mojo::PendingRemote<network::mojom::blink::DocumentIsolationPolicyReporter>
+      document_isolation_policy_reporter;
+  if (document_isolation_policy_info) {
+    document_isolation_policy = document_isolation_policy_info->value;
+    document_isolation_policy_reporter =
+        std::move(document_isolation_policy_info->reporter);
+  }
+
   auto checker = std::make_unique<CrossOriginResourcePolicyChecker>(
-      cross_origin_embedder_policy, std::move(coep_reporter),
-      document_isolation_policy, std::move(dip_reporter));
+      cross_origin_embedder_policy,
+      std::move(cross_origin_embedder_policy_reporter),
+      document_isolation_policy, std::move(document_isolation_policy_reporter));
 
   controller_receivers_.Add(
       std::move(receiver), std::move(checker),
@@ -2782,9 +2799,15 @@ void ServiceWorkerGlobalScope::InsertNewItemToRaceNetworkRequests(
   auto info = std::make_unique<RaceNetworkRequestInfo>(
       fetch_event_id, race_network_request_token,
       std::move(url_loader_factory));
-  race_network_request_fetch_event_ids_.insert(fetch_event_id, info.get());
+  RaceNetworkRequestInfo* info_raw = info.get();
   auto insert_result = race_network_requests_.insert(race_network_request_token,
                                                      std::move(info));
+  // WTF::HashMap::insert does not consume |info| on a duplicate key; in that
+  // case |info| (and |info_raw|) is freed at scope exit. Only publish the raw
+  // pointer into the secondary index after the owning insert succeeds.
+  if (insert_result.is_new_entry) {
+    race_network_request_fetch_event_ids_.insert(fetch_event_id, info_raw);
+  }
 
   // DumpWithoutCrashing if the token is empty, or not inserted as a new entry
   // to |race_network_request_loader_factories_|.

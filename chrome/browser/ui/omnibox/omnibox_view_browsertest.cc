@@ -21,11 +21,14 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/test/metrics/histogram_tester.h"
+#include "base/test/run_until.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/browser/contextual_search/contextual_search_web_contents_helper.h"
+#include "chrome/browser/contextual_tasks/contextual_tasks_service_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
@@ -51,7 +54,9 @@
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
+#include "components/contextual_tasks/public/mock_contextual_tasks_service.h"
 #include "components/history/core/browser/history_service.h"
+#include "components/lens/lens_features.h"
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/history_quick_provider.h"
@@ -184,6 +189,9 @@ class OmniboxViewTest : public InProcessBrowserTest {
   OmniboxViewTest& operator=(const OmniboxViewTest&) = delete;
 
  protected:
+  raw_ptr<contextual_tasks::MockContextualTasksService>
+      mock_contextual_tasks_service_ = nullptr;
+
   void SetUpOnMainThread() override {
     ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
     ASSERT_NO_FATAL_FAILURE(SetupComponents());
@@ -197,6 +205,11 @@ class OmniboxViewTest : public InProcessBrowserTest {
                                            signin::ConsentLevel::kSignin);
     identity_test_env()->SetRefreshTokenForPrimaryAccount();
     identity_test_env()->SetAutomaticIssueOfAccessTokens(true);
+  }
+
+  void TearDownOnMainThread() override {
+    mock_contextual_tasks_service_ = nullptr;
+    InProcessBrowserTest::TearDownOnMainThread();
   }
 
   void SetUp() override {
@@ -433,6 +446,18 @@ class OmniboxViewTest : public InProcessBrowserTest {
   void OnWillCreateBrowserContextServices(content::BrowserContext* context) {
     IdentityTestEnvironmentProfileAdaptor::
         SetIdentityTestEnvironmentFactoriesOnBrowserContext(context);
+    contextual_tasks::ContextualTasksServiceFactory::GetInstance()
+        ->SetTestingFactory(
+            context,
+            base::BindRepeating(
+                [](OmniboxViewTest* self,
+                   content::BrowserContext*) -> std::unique_ptr<KeyedService> {
+                  auto mock = std::make_unique<testing::NiceMock<
+                      contextual_tasks::MockContextualTasksService>>();
+                  self->mock_contextual_tasks_service_ = mock.get();
+                  return mock;
+                },
+                base::Unretained(this)));
   }
 
   policy::MockConfigurationPolicyProvider* policy_provider() {
@@ -1356,13 +1381,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, DoesNotUpdateAutocompleteOnBlur) {
             GetOmniboxController()->autocomplete_controller()->input_.text());
 }
 
-// TODO(crbug.com/492408135): Flaky on Windows.
-#if BUILDFLAG(IS_WIN)
-#define MAYBE_Paste DISABLED_Paste
-#else
-#define MAYBE_Paste Paste
-#endif
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_Paste) {
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, Paste) {
   OmniboxView* omnibox_view = nullptr;
   ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
   EXPECT_FALSE(GetOmniboxController()->IsPopupOpen());
@@ -1371,7 +1390,8 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_Paste) {
   SetClipboardText(kSearchText);
   ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_V, kCtrlOrCmdMask));
   ASSERT_NO_FATAL_FAILURE(WaitForAutocompleteControllerDone());
-  EXPECT_EQ(kSearchText, omnibox_view->GetText());
+  EXPECT_TRUE(base::test::RunUntil(
+      [&]() { return omnibox_view->GetText() == kSearchText; }));
   EXPECT_TRUE(GetOmniboxController()->IsPopupOpen());
 
   // Close the popup and select all.
@@ -1383,7 +1403,8 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_Paste) {
   ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_V, kCtrlOrCmdMask));
   ASSERT_NO_FATAL_FAILURE(WaitForAutocompleteControllerDone());
   EXPECT_EQ(kSearchText, omnibox_view->GetText());
-  EXPECT_TRUE(GetOmniboxController()->IsPopupOpen());
+  EXPECT_TRUE(base::test::RunUntil(
+      [&]() { return GetOmniboxController()->IsPopupOpen(); }));
   GetOmniboxPopupCloser()->CloseWithReason(omnibox::PopupCloseReason::kOther);
   EXPECT_FALSE(GetOmniboxController()->IsPopupOpen());
 
@@ -1391,7 +1412,8 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_Paste) {
   omnibox_view->SetWindowTextAndCaretPos(u"abcd", 2, false, false);
   SetClipboardText(u"123");
   ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_V, kCtrlOrCmdMask));
-  EXPECT_EQ(u"ab123cd", omnibox_view->GetText());
+  EXPECT_TRUE(base::test::RunUntil(
+      [&]() { return omnibox_view->GetText() == u"ab123cd"; }));
   EXPECT_TRUE(GetOmniboxController()->IsPopupOpen());
 
   // Ctrl/Cmd+Alt+V should not paste.
@@ -1702,6 +1724,52 @@ IN_PROC_BROWSER_TEST_P(SiteSearchPolicyOmniboxViewTest,
 INSTANTIATE_TEST_SUITE_P(All,
                          SiteSearchPolicyOmniboxViewTest,
                          ::testing::Values(std::nullopt, true, false));
+
+class OmniboxViewAiModeTest : public OmniboxViewTest {
+ public:
+  OmniboxViewAiModeTest() {
+    ai_mode_feature_list_.InitWithFeatures(
+        {omnibox::kAiModeOmniboxEntryPoint,
+         lens::features::kLensSendUrlsInComposeboxes},
+        {});
+  }
+
+ private:
+  base::test::ScopedFeatureList ai_mode_feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(OmniboxViewAiModeTest,
+                       OpenAiModeTriggersContextualization) {
+  OmniboxView* omnibox_view = nullptr;
+  ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
+
+  // Set text in the omnibox to be contextualized. Add a URL to trigger real
+  // extraction!
+  omnibox_view->SetUserText(u"test query http://example.com");
+
+  // Call OpenAiMode, which should trigger QueryContextualizer and navigation.
+  GetOmniboxEditModel()->OpenAiMode(/*via_keyboard=*/false,
+                                    /*via_context_menu=*/false);
+
+  // Wait for navigation to complete. We expect it to navigate to chess://aim/
+  // or similar URL.
+  content::TestNavigationObserver observer(
+      browser()->tab_strip_model()->GetActiveWebContents());
+  observer.Wait();
+
+  // Verify that the navigation occurred to an 'aim' URL and check session
+  // transfer.
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  GURL current_url = web_contents->GetLastCommittedURL();
+  EXPECT_TRUE(current_url.spec().find("q=test+query") != std::string::npos);
+
+  // Verify session handle propagation!
+  auto* helper =
+      ContextualSearchWebContentsHelper::FromWebContents(web_contents);
+  ASSERT_TRUE(helper);
+  EXPECT_NE(helper->session_handle(), nullptr);
+}
 
 class SearchAggregatorPolicyOmniboxViewTest : public OmniboxViewTest {
  public:

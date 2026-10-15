@@ -46,6 +46,7 @@
 #import "ios/web/web_state/ui/crw_web_view_navigation_proxy.h"
 #import "ios/web/webui/web_ui_ios_controller_factory_registry.h"
 #import "ios/web/webui/web_ui_ios_impl.h"
+#import "net/http/http_util.h"
 #import "url/gurl.h"
 #import "url/url_constants.h"
 
@@ -712,6 +713,22 @@ void WebStateImpl::RealizedWebState::Stop() {
   [web_controller_ stopLoading];
 }
 
+std::optional<std::string>
+WebStateImpl::RealizedWebState::GetUserAgentOverride() const {
+  return user_agent_override_;
+}
+
+void WebStateImpl::RealizedWebState::SetUserAgentOverride(
+    std::optional<std::string> ua_override) {
+  if (ua_override && !net::HttpUtil::IsValidHeaderValue(*ua_override)) {
+    return;
+  }
+  if (ua_override && ua_override->empty()) {
+    ua_override = std::nullopt;
+  }
+  user_agent_override_ = std::move(ua_override);
+}
+
 void WebStateImpl::RealizedWebState::LoadData(NSData* data,
                                               NSString* mime_type,
                                               const GURL& url) {
@@ -784,6 +801,23 @@ void WebStateImpl::RealizedWebState::SetFaviconStatus(
   if (NavigationItem* item = navigation_manager_->GetLastCommittedItem()) {
     item->SetFaviconStatus(favicon_status);
   }
+}
+
+bool WebStateImpl::RealizedWebState::IsCustomOpenPanelSupported() const {
+  return supports_custom_open_panel_;
+}
+
+void WebStateImpl::RealizedWebState::SetCustomOpenPanelSupported(
+    bool supports) {
+  if (supports_custom_open_panel_ == supports) {
+    return;
+  }
+  supports_custom_open_panel_ = supports;
+  // TODO(crbug.com/500705261): WebKit only checks the methods implemented in
+  // the UIDelegate when setting the delegate. Resetting the delegate forces
+  // WebKit to re-call respondToSelector: and check if a custom implementation
+  // of openPanel is provided.
+  [web_controller_ refreshUIDelegateMethodCache];
 }
 
 int WebStateImpl::RealizedWebState::GetNavigationItemCount() const {

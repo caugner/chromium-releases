@@ -53,12 +53,29 @@ class OmniboxPopupCloser;
 // objects under the hood).
 class OmniboxClient {
  public:
+  // The result of an extension-controlled search confirmation dialog.
+  enum class ExtensionControlledDialogResult {
+    // Accept the new extension's search provider.
+    kAccept,
+
+    // Reject the new extension's search provider, and disable the extension,
+    // and search with the previous provider.
+    kReject,
+
+    // Don't search at all.
+    kCancel,
+  };
+
   OmniboxClient() = default;
   virtual ~OmniboxClient() = default;
 
   // Returns an AutocompleteProviderClient specific to the embedder context.
   virtual std::unique_ptr<AutocompleteProviderClient>
   CreateAutocompleteProviderClient() = 0;
+
+  // Returns if the client is ChromeOmniboxClient. Useful for safe downcasting
+  // without RTTI.
+  virtual bool IsChromeOmniboxClient() const;
 
   // Returns whether there is any associated current page.  For example, during
   // startup or shutdown, the omnibox may exist but have no attached page.
@@ -95,7 +112,7 @@ class OmniboxClient {
   // |callback| is run when the dialog is closed.
   virtual bool ShowConfirmationDialogIfDefaultSearchExtensionControlled(
       const GURL& url,
-      base::OnceCallback<void(bool)> callback);
+      base::OnceCallback<void(ExtensionControlledDialogResult)> callback);
 
   // Called when the user changes the selected |index| in the result list via
   // mouse down or arrow key down. |match| is the suggestion corresponding to
@@ -220,10 +237,6 @@ class OmniboxClient {
   // Called to notify clients that the omnibox focus state has changed.
   virtual void OnFocusChanged(OmniboxFocusState state,
                               OmniboxFocusChangeReason reason) {}
-
-  // Called to notify clients when keyword mode is entered or exited.
-  virtual void OnKeywordModeChanged(bool entered,
-                                    const std::u16string& keyword) {}
 
   // Called to show HaTS survey if the proper criteria is met.
   virtual void MaybeShowOnFocusHatsSurvey(AutocompleteProviderClient* client) {}

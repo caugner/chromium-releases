@@ -7,9 +7,11 @@
 
 #include "base/component_export.h"
 #include "base/notreached.h"
+#include "mojo/public/cpp/base/unguessable_token_mojom_traits.h"
 #include "mojo/public/cpp/bindings/struct_traits.h"
 #include "services/network/public/cpp/connection_allowlist.h"
 #include "services/network/public/mojom/connection_allowlist.mojom-shared.h"
+#include "url/mojom/url_gurl_mojom_traits.h"
 
 namespace mojo {
 
@@ -69,6 +71,11 @@ template <>
 struct COMPONENT_EXPORT(NETWORK_CPP_CONNECTION_ALLOWLIST)
     StructTraits<network::mojom::ConnectionAllowlistsDataView,
                  network::ConnectionAllowlists> {
+  static const GURL& response_url(
+      const network::ConnectionAllowlists& allowlists) {
+    return allowlists.response_url;
+  }
+
   static const std::optional<network::ConnectionAllowlist>& enforced(
       const network::ConnectionAllowlists& allowlists) {
     return allowlists.enforced;
@@ -77,6 +84,11 @@ struct COMPONENT_EXPORT(NETWORK_CPP_CONNECTION_ALLOWLIST)
   static const std::optional<network::ConnectionAllowlist>& report_only(
       const network::ConnectionAllowlists& allowlists) {
     return allowlists.report_only;
+  }
+
+  static const std::optional<base::UnguessableToken>& reporting_source(
+      const network::ConnectionAllowlists& allowlists) {
+    return allowlists.reporting_source;
   }
 
   static bool Read(network::mojom::ConnectionAllowlistsDataView data,

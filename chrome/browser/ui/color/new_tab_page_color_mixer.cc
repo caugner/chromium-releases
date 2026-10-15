@@ -280,6 +280,9 @@ void AddSearchboxColors(ui::ColorMixer& mixer, const ui::ColorProviderKey& key) 
   mixer[kColorNewTabPageRealboxNextIconHover] = {
       kColorSysStateHoverOnSubtle_Light};
 
+  mixer[kColorNewTabPageComposeboxSubmitButtonBackground] = {
+      SkColorSetRGB(0x34, 0x6B, 0xF1)};
+
   mixer[kColorComposeboxBackground] = {SK_ColorWHITE};
   mixer[kColorComposeboxFileChipSpinner] = {kColorSysPrimary_Light};
   mixer[kColorComposeboxFont] = {
@@ -334,6 +337,14 @@ void AddSearchboxColors(ui::ColorMixer& mixer, const ui::ColorProviderKey& key) 
   mixer[kColorComposeboxContextEntrypointTextDisabled] = {
       SkColorSetARGB(0x60, 0x1F, 0x1F, 0x1F)};
   mixer[kColorComposeboxContextEntrypointHoverBackground] = {
+      SkColorSetARGB(0x06, 0x1F, 0x1F, 0x1F)};
+  mixer[kColorComposeboxContextEntrypointBackground] = {
+      SkColorSetARGB(0x06, 0x1F, 0x1F, 0x1F)};
+  mixer[kColorComposeboxToolChipBackground] = {
+      SkColorSetARGB(0x06, 0x1F, 0x1F, 0x1F)};
+  mixer[kColorComposeboxVoiceButtonHoverBackground] = {
+      SkColorSetARGB(0x06, 0x1F, 0x1F, 0x1F)};
+  mixer[kColorComposeboxLensButtonHoverBackground] = {
       SkColorSetARGB(0x06, 0x1F, 0x1F, 0x1F)};
   mixer[kColorComposeboxErrorScrimBackground] = {
       dark_mode ? ui::SetAlpha({ui::kColorRefNeutral0}, 0xE6)

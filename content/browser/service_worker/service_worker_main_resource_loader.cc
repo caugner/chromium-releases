@@ -25,7 +25,9 @@
 #include "base/trace_event/trace_event.h"
 #include "content/browser/loader/navigation_url_loader.h"
 #include "content/browser/loader/response_head_update_params.h"
+#include "content/browser/renderer_host/policy_container_host.h"
 #include "content/browser/service_worker/service_worker_client.h"
+#include "content/browser/service_worker/service_worker_container_host.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/browser/service_worker/service_worker_loader_helpers.h"
@@ -44,6 +46,8 @@
 #include "net/base/load_timing_info.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_status_code.h"
+#include "services/network/public/cpp/cross_origin_embedder_policy.h"
+#include "services/network/public/cpp/document_isolation_policy.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/cpp/timing_allow_origin_parser.h"
 #include "services/network/public/mojom/fetch_api.mojom.h"
@@ -109,12 +113,13 @@ void RecordHasSearchPrefetchCache(bool has_cache) {
 }
 
 void MaybeSetFetchHandlerBypassOptionForsyntheticResponse(
-    scoped_refptr<ServiceWorkerVersion> version,
+  ServiceWorkerClient* client,
     blink::mojom::ServiceWorkerFetchHandlerBypassOption option) {
+  CHECK(client);
   static const bool bypass_subresource(
       blink::features::kServiceWorkerSyntheticResponseBypassSubresource.Get());
   if (bypass_subresource) {
-    version->set_fetch_handler_bypass_option(option);
+    client->set_fetch_handler_bypass_option(option);
   }
 }
 
@@ -428,6 +433,7 @@ void ServiceWorkerMainResourceLoader::MaybeDispatchPreload(
     RaceNetworkRequestMode race_network_request_mode,
     scoped_refptr<ServiceWorkerContextWrapper> context_wrapper,
     scoped_refptr<ServiceWorkerVersion> version) {
+  CHECK(service_worker_client_);
   switch (race_network_request_mode) {
     case RaceNetworkRequestMode::kForced:
       if (StartRaceNetworkRequest(
@@ -526,16 +532,6 @@ bool ServiceWorkerMainResourceLoader::MaybeStartAutoPreload(
     SetCommitResponsibility(FetchResponseFrom::kServiceWorker);
   }
 
-  // If |enable_subresource_preload| feature param is true, preload requests
-  // are dispatched on any subresources, otherwise preload requests won't be
-  // dispatched for subresources.
-  version->set_fetch_handler_bypass_option(
-      base::GetFieldTrialParamByFeatureAsBool(
-          features::kServiceWorkerAutoPreload, "enable_subresource_preload",
-          /*default_value=*/false)
-          ? blink::mojom::ServiceWorkerFetchHandlerBypassOption::kAutoPreload
-          : blink::mojom::ServiceWorkerFetchHandlerBypassOption::kDefault);
-
   return result;
 }
 
@@ -545,7 +541,7 @@ bool ServiceWorkerMainResourceLoader::StartRaceNetworkRequest(
     base::OnceCallback<void()> clone_completed_for_fetch_handler_callback) {
   // Set fetch_handler_bypass_option to tell the renderer that
   // RaceNetworkRequest is enabled.
-  version->set_fetch_handler_bypass_option(
+  service_worker_client_->set_fetch_handler_bypass_option(
       blink::mojom::ServiceWorkerFetchHandlerBypassOption::kRaceNetworkRequest);
 
   // RaceNetworkRequest only supports GET method.
@@ -571,7 +567,8 @@ bool ServiceWorkerMainResourceLoader::StartRaceNetworkRequest(
       service_worker_client_->CreateNetworkURLLoaderFactory(
           ServiceWorkerClient::CreateNetworkURLLoaderFactoryType::
               kRaceNetworkRequest,
-          context->storage_partition(), resource_request_));
+          context->storage_partition(), resource_request_),
+      /*is_main_resource=*/true);
   CHECK(!race_network_request_url_loader_client_);
   race_network_request_url_loader_client_.emplace(
       resource_request_.url, AsWeakPtr(), std::move(forwarding_client),
@@ -915,6 +912,29 @@ void ServiceWorkerMainResourceLoader::DidDispatchFetchEvent(
         cache_matcher_->cache_lookup_start();
     response_head_->service_worker_router_info->cache_lookup_time =
         cache_matcher_->cache_lookup_duration();
+
+    // Block invalid responses from the static router.
+    if (response_head_->service_worker_router_info->matched_source_type ==
+        network::mojom::ServiceWorkerRouterSourceType::kCache) {
+      if (service_worker_client_ && service_worker_client_->container_host()) {
+        ServiceWorkerContainerHostForClient* container_host =
+            service_worker_client_->container_host();
+        if (!IsValidStaticRouterResponse(
+                resource_request_, response,
+                container_host->policy_container_policies()
+                    .cross_origin_embedder_policy,
+                container_host->cross_origin_embedder_policy_reporter().get(),
+                container_host->policy_container_policies()
+                    .document_isolation_policy,
+                container_host->document_isolation_policy_reporter().get()) &&
+            base::FeatureList::IsEnabled(
+                features::kServiceWorkerStaticRouterOpaqueCheck)) {
+          CommitCompleted(net::ERR_FAILED,
+                          "Invalid response from static router");
+          return;
+        }
+      }
+    }
   }
 
   // Record the timing of when the fetch event is dispatched on the worker
@@ -1074,6 +1094,12 @@ bool ServiceWorkerMainResourceLoader::MaybeStartSyntheticNetworkRequest(
         SyntheticResponseEligibility::kNotEligibleByIntercepted);
     CHECK(url_loader_client_.is_bound());
     CHECK(receiver_.is_bound());
+    // Set fetch handler bypass option here to let the renderer know that the
+    // service worker should not handle any subresources.
+    MaybeSetFetchHandlerBypassOptionForsyntheticResponse(
+        service_worker_client_.get(),
+        blink::mojom::ServiceWorkerFetchHandlerBypassOption::
+            kSyntheticResponse);
     std::move(handler.value())
         .Run(resource_request_, receiver_.Unbind(),
              url_loader_client_.Unbind());
@@ -1109,8 +1135,9 @@ bool ServiceWorkerMainResourceLoader::MaybeStartSyntheticNetworkRequest(
           SyntheticResponseEligibility::kNotEligibleByNoHeaderStored);
     }
     MaybeSetFetchHandlerBypassOptionForsyntheticResponse(
-        version, blink::mojom::ServiceWorkerFetchHandlerBypassOption::
-                     kSyntheticResponseDryRunMode);
+        service_worker_client_.get(),
+        blink::mojom::ServiceWorkerFetchHandlerBypassOption::
+            kSyntheticResponseDryRunMode);
 
     return false;
   }
@@ -1176,7 +1203,7 @@ bool ServiceWorkerMainResourceLoader::MaybeStartSyntheticNetworkRequest(
   }
 
   MaybeSetFetchHandlerBypassOptionForsyntheticResponse(
-      version,
+      service_worker_client_.get(),
       blink::mojom::ServiceWorkerFetchHandlerBypassOption::kSyntheticResponse);
 
   return true;
@@ -1243,7 +1270,7 @@ void ServiceWorkerMainResourceLoader::StartResponse(
         fetch_event_timing_->respond_with_settled_time;
   }
 
-  if (resource_request_.request_initiator &&
+  if (resource_request_.request_initiator && response_head_->parsed_headers &&
       (resource_request_.request_initiator->IsSameOriginWith(
            resource_request_.url) ||
        network::TimingAllowOriginCheck(

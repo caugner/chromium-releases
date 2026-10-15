@@ -183,6 +183,8 @@ class WebStateImpl::RealizedWebState final : public NavigationManagerDelegate {
   WebStateID GetUniqueIdentifier() const;
   void OpenURL(const WebState::OpenURLParams& params);
   void Stop();
+  std::optional<std::string> GetUserAgentOverride() const;
+  void SetUserAgentOverride(std::optional<std::string> ua_override);
   void LoadData(NSData* data, NSString* mime_type, const GURL& url);
   void ExecuteUserJavaScript(NSString* javaScript);
   const std::string& GetContentsMimeType() const;
@@ -196,6 +198,8 @@ class WebStateImpl::RealizedWebState final : public NavigationManagerDelegate {
   bool IsWebPageInFullscreenMode() const;
   const FaviconStatus& GetFaviconStatus() const;
   void SetFaviconStatus(const FaviconStatus& favicon_status);
+  bool IsCustomOpenPanelSupported() const;
+  void SetCustomOpenPanelSupported(bool supports);
   int GetNavigationItemCount() const;
   const GURL& GetVisibleURL() const;
   const GURL& GetLastCommittedURL() const;
@@ -323,6 +327,12 @@ class WebStateImpl::RealizedWebState final : public NavigationManagerDelegate {
 
   // The User-Agent type.
   UserAgentType user_agent_type_ = UserAgentType::AUTOMATIC;
+
+  // The potential User-Agent override string.
+  std::optional<std::string> user_agent_override_;
+
+  // Whether the WebState supports a custom open panel.
+  bool supports_custom_open_panel_ = false;
 
   // The unique identifier. Stable across application restarts.
   const WebStateID unique_identifier_;

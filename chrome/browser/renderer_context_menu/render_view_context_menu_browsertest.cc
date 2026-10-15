@@ -472,14 +472,15 @@ class ContextMenuBrowserTest
            features::kGlic,
            media::kContextMenuSaveVideoFrameAs,
            media::kContextMenuSearchForVideoFrame},
-          {omnibox::kWebUIOmniboxPopup});
+          {omnibox::internal::kWebUIOmniboxPopup});
     } else {
       scoped_feature_list_.InitWithFeatures(
           {
               features::kGlic,
               media::kContextMenuSaveVideoFrameAs,
               media::kContextMenuSearchForVideoFrame},
-          {blink::features::kLinkPreview, omnibox::kWebUIOmniboxPopup});
+          {blink::features::kLinkPreview,
+           omnibox::internal::kWebUIOmniboxPopup});
     }
   }
 
@@ -1023,9 +1024,7 @@ IN_PROC_BROWSER_TEST_F(
   // Wait for context menu to be visible.
   menu_observer.WaitForMenuOpenAndClose();
 
-  const std::string kSuggestedFilename("");
-  std::u16string suggested_filename = menu_observer.params().suggested_filename;
-  ASSERT_EQ(kSuggestedFilename, base::UTF16ToUTF8(suggested_filename).c_str());
+  ASSERT_EQ(u"", menu_observer.params().suggested_filename);
 }
 
 IN_PROC_BROWSER_TEST_F(
@@ -1065,9 +1064,7 @@ IN_PROC_BROWSER_TEST_F(
   // Wait for context menu to be visible.
   menu_observer.WaitForMenuOpenAndClose();
 
-  const std::string kSuggestedFilename("test_filename.png");
-  std::u16string suggested_filename = menu_observer.params().suggested_filename;
-  ASSERT_EQ(kSuggestedFilename, base::UTF16ToUTF8(suggested_filename).c_str());
+  ASSERT_EQ(u"test_filename.png", menu_observer.params().suggested_filename);
 }
 
 #if BUILDFLAG(IS_CHROMEOS)
@@ -1875,7 +1872,7 @@ IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest, OpenInNewTabReferrer) {
 
   // Set up referrer URL with fragment.
   const GURL kReferrerWithFragment("http://foo.com/test#fragment");
-  const std::string kCorrectReferrer("http://foo.com/");
+  static constexpr char kCorrectReferrer[] = "http://foo.com/";
 
   // Set up menu with link URL.
   content::ContextMenuParams params;
@@ -1945,7 +1942,6 @@ IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest, SuggestedFileName) {
   GURL url(embedded_test_server()->GetURL("/download-anchor-same-origin.html"));
 
   // Go to a page with a link having download attribute.
-  const std::string kSuggestedFilename("test_filename.png");
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
 
   // Open a context menu.
@@ -1971,8 +1967,7 @@ IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest, SuggestedFileName) {
   menu_observer.WaitForMenuOpenAndClose();
 
   // Compare filename.
-  std::u16string suggested_filename = menu_observer.params().suggested_filename;
-  ASSERT_EQ(kSuggestedFilename, base::UTF16ToUTF8(suggested_filename).c_str());
+  ASSERT_EQ(u"test_filename.png", menu_observer.params().suggested_filename);
 }
 
 // Check which commands are present after opening the context menu for the main
@@ -2566,9 +2561,7 @@ class LensBrowserBaseTest : public InProcessBrowserTest {
   }
 
   GURL GetLensURL() {
-    static const std::string kLensRegionSearchURL =
-        lens::features::GetHomepageURLForLens() + "upload";
-    return GURL(kLensRegionSearchURL);
+    return GURL(lens::features::GetHomepageURLForLens() + "upload");
   }
 
   GURL GetNonGoogleRegionSearchURL() {

@@ -15,6 +15,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/test/gtest_util.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
@@ -29,6 +30,7 @@
 #include "content/public/renderer/render_frame.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/strings/grit/services_strings.h"
+#include "third_party/blink/public/platform/scheduler/web_agent_group_scheduler.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "ui/accessibility/accessibility_features.h"
 #include "ui/accessibility/ax_enums.mojom-shared.h"
@@ -40,6 +42,7 @@
 #include "ui/accessibility/ax_tree_id.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
+#include "v8/include/v8-context.h"
 
 namespace {
 
@@ -150,6 +153,7 @@ class MockReadAnythingUntrustedPageHandler
               OnDistillationStateChanged,
               (read_anything::mojom::ReadAnythingDistillationState new_state),
               (override));
+  MOCK_METHOD(void, OnSpeechEngineStalled, (), (override));
 
   mojo::PendingRemote<read_anything::mojom::UntrustedPageHandler>
   BindNewPipeAndPassRemote() {
@@ -209,6 +213,15 @@ class ReadAnythingAppControllerTest : public ChromeRenderViewTest {
                                          false);
     controller().OnAXTreeDistilled(tree_id_, {});
     Mock::VerifyAndClearExpectations(distiller_);
+  }
+
+  void TearDown() override {
+    // `controller_` owns `distiller_` and RenderFrame (indirectly) owns
+    // `controller_`: it is a garbage-collected object owned by Oilpan and its
+    // lifetime is tied to the RenderFrame's lifetime.
+    controller_ = nullptr;
+    distiller_ = nullptr;
+    ChromeRenderViewTest::TearDown();
   }
 
   ReadAnythingAppController& controller() { return *controller_; }
@@ -382,13 +395,13 @@ class ReadAnythingAppControllerTest : public ChromeRenderViewTest {
   static constexpr ui::AXNodeID kId5 = 100;
 
   ui::AXTreeID tree_id_;
-  raw_ptr<MockAXTreeDistiller, DanglingUntriaged> distiller_ = nullptr;
+  raw_ptr<MockAXTreeDistiller> distiller_ = nullptr;
   testing::StrictMock<MockReadAnythingUntrustedPageHandler> page_handler_;
   base::test::ScopedFeatureList scoped_feature_list_;
 
   // ReadAnythingAppController constructor and destructor are protected so
   // it's not accessible by std::make_unique.
-  raw_ptr<ReadAnythingAppController, DanglingUntriaged> controller_ = nullptr;
+  raw_ptr<ReadAnythingAppController> controller_ = nullptr;
 };
 
 #if BUILDFLAG(IS_CHROMEOS)
@@ -2421,6 +2434,27 @@ TEST_F(ReadAnythingAppControllerTest, OnLinkClicked) {
   Mock::VerifyAndClearExpectations(distiller_);
 }
 
+TEST_F(ReadAnythingAppControllerTest, GetImageBitmap_ValidNode) {
+  ui::AXNodeData node;
+  node.id = 2;
+  node.role = ax::mojom::Role::kImage;
+  node.relative_bounds.bounds = gfx::RectF(0, 0, 100, 100);
+  SendUpdateWithNodes({std::move(node)});
+
+  SkBitmap bitmap;
+  bitmap.allocN32Pixels(10, 10);
+  controller().OnImageDataDownloaded(tree_id_, 2, bitmap);
+
+  v8::Isolate* isolate = GetMainFrame()->GetAgentGroupScheduler()->Isolate();
+  v8::HandleScope handle_scope(isolate);
+  v8::Local<v8::Context> context = GetMainFrame()->MainWorldScriptContext();
+  v8::Context::Scope context_scope(context);
+
+  v8::Local<v8::Value> result = controller().GetImageBitmap(2);
+  EXPECT_FALSE(result->IsUndefined());
+  EXPECT_TRUE(result->IsObject());
+}
+
 TEST_F(ReadAnythingAppControllerTest, RequestImageData) {
   base::test::ScopedFeatureList scoped_feature_list;
   scoped_feature_list.InitWithFeatures(
@@ -3113,6 +3147,28 @@ TEST_F(ReadAnythingAppControllerTest,
   EXPECT_CALL(page_handler_, OnImageDataRequested).Times(0);
 }
 
+TEST_F(ReadAnythingAppControllerTest,
+       OnStringAttributeChanged_ReadabilityFlagEnabled_DoesNothing) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitWithFeatures({features::kReadAnythingImagesViaAlgorithm,
+                                 features::kReadAnythingWithReadability},
+                                {});
+
+  // Create an image node with a placeholder "data:" URL, mimicking a
+  // lazy-loaded image.
+  static constexpr ui::AXNodeID kImageNodeId = 2;
+  std::string placeholder_src = "data:image/svg+xml,...";
+  ui::AXNodeData image_node = test::ImageNode(kImageNodeId, placeholder_src);
+  SendUpdateAndDistillNodes({std::move(image_node)});
+
+  // Now update with the actual image url.
+  std::string final_src = "https://example.com/real_image.png";
+  ui::AXNodeData updated_image_node = test::ImageNode(kImageNodeId, final_src);
+  SendUpdateAndDistillNodes({std::move(updated_image_node)});
+
+  EXPECT_CALL(page_handler_, OnImageDataRequested).Times(0);
+}
+
 TEST_F(ReadAnythingAppControllerTest, UpdateWordsSeen_ReplacesWordsSeen) {
   controller().UpdateWordsSeen(123);
   EXPECT_EQ(123, model().words_seen());
@@ -3300,6 +3356,14 @@ TEST_F(ReadAnythingAppControllerImmersiveTest,
 }
 
 TEST_F(ReadAnythingAppControllerImmersiveTest,
+       ReadingModeHidden_UpdateProcessingPaused) {
+  // Hide reading mode
+  controller().OnGetPresentationState(
+      read_anything::mojom::ReadAnythingPresentationState::kInactive);
+  EXPECT_TRUE(controller().IsUpdateProcessingPaused());
+}
+
+TEST_F(ReadAnythingAppControllerImmersiveTest,
        ImmersiveModeWithGoodDistillation_UpdateProcessingPaused) {
   // Set to Immersive.
   controller().OnGetPresentationState(
@@ -3450,7 +3514,7 @@ class ReadAnythingAppControllerV8SegmentationTest
     ReadAnythingAppControllerTest::SetUp();
     scoped_feature_list_.Reset();
     scoped_feature_list_.InitWithFeatures(
-        {}, {features::kReadAnythingReadAloudTSTextSegmentation});
+        {features::kReadAnythingReadAloudPhraseHighlighting}, {});
   }
 };
 
@@ -4927,7 +4991,6 @@ class ReadAnythingAppControllerReadabilityTest
   void SetUp() override {
     scoped_feature_list_.InitWithFeatures(
         {features::kReadAnythingWithReadability,
-         features::kReadAnythingReadAloudTSTextSegmentation,
          features::kReadAnythingWithReadabilityAllowLinks},
         {});
 

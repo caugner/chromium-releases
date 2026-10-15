@@ -368,7 +368,7 @@ String TrustedTypePolicyFactory::getPropertyType(
     const String& propertyName,
     const String& elementNS) const {
   return getTrustedTypeName(FindEntryInAttributeTypeVector(
-      GetPropertyTypeVector(), tagName.LowerASCII(), propertyName, elementNS,
+      GetPropertyTypeVector(), tagName.ToAsciiLower(), propertyName, elementNS,
       String()));
 }
 
@@ -378,8 +378,8 @@ String TrustedTypePolicyFactory::getAttributeType(
     const String& tagNS,
     const String& attributeNS) const {
   return getTrustedTypeName(FindEntryInAttributeTypeVector(
-      GetAttributeTypeVector(), tagName.LowerASCII(),
-      attributeName.LowerASCII(), tagNS, attributeNS));
+      GetAttributeTypeVector(), tagName.ToAsciiLower(),
+      attributeName.ToAsciiLower(), tagNS, attributeNS));
 }
 
 ScriptObject TrustedTypePolicyFactory::getTypeMapping(
@@ -484,6 +484,15 @@ void TrustedTypePolicyFactory::Trace(Visitor* visitor) const {
   visitor->Trace(empty_html_);
   visitor->Trace(empty_script_);
   visitor->Trace(policy_map_);
+}
+
+// Ensure that the qualified names are constructed on the main thread to avoid
+// race conditions in the QualifiedNameCache (crbug.com/503618702).
+// static
+void TrustedTypePolicyFactory::EagerlyInitializeOnMainThread() {
+  DCHECK(IsMainThread());
+  GetAttributeTypeVector();
+  GetPropertyTypeVector();
 }
 
 inline bool FindEventHandlerAttributeInTable(

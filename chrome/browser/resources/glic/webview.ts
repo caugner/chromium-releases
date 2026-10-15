@@ -10,9 +10,10 @@ import type {WebViewType} from '/shared/web_view_type.js';
 import type {ChromeEvent} from '/tools/typescript/definitions/chrome_event.js';
 // <if expr="not is_android">
 import {getInstance as getAnnouncerInstance} from 'chrome://resources/cr_elements/cr_a11y_announcer/cr_a11y_announcer.js';
+
 // </if>
 
-import type {BrowserProxyImpl} from './browser_proxy.js';
+import type {BrowserProxy} from './browser_proxy.js';
 import {ZoomAction} from './glic.mojom-webui.js';
 import type {Subscriber} from './glic_api/glic_api.js';
 import {DetailedWebClientState, GlicApiCommunicator, GlicApiHost, WebClientState} from './glic_api_impl/host/glic_api_host.js';
@@ -133,7 +134,7 @@ export class WebviewController {
 
   constructor(
       private readonly container: HTMLElement,
-      private browserProxy: BrowserProxyImpl,
+      private browserProxy: BrowserProxy,
       private delegate: WebviewDelegate,
       private hostEmbedder: ApiHostEmbedder,
       private persistentState: WebviewPersistentState,
@@ -181,11 +182,15 @@ export class WebviewController {
         this.webview, 'unresponsive', this.onUnresponsive.bind(this));
     this.eventTracker.add(this.webview, 'exit', this.onExit.bind(this));
     // <if expr="not is_android">
-    this.eventTracker.add(this.webview, 'zoomchange', (e: any) => {
-      const percentage = Math.round(e.newZoomFactor * 100);
-      const message = loadTimeData.getStringF('zoomLabel', percentage + '%');
-      getAnnouncerInstance().announce(message);
-    });
+    if (isFullWebView(this.webview)) {
+      this.eventTracker.add(this.webview, 'zoomchange', (e: any) => {
+        const percentage = Math.round(e.newZoomFactor * 100);
+        const message = loadTimeData.getStringF('zoomLabel', percentage + '%');
+        getAnnouncerInstance().announce(message);
+        this.browserProxy.pageHandler.onZoomLevelChange(e.newZoomFactor);
+        this.host?.onZoomLevelChanged(e.newZoomFactor);
+      });
+    }
     // </if>
     this.eventTracker.add(
         this.webview, 'loadstart', this.onLoadStart.bind(this));
@@ -206,6 +211,10 @@ export class WebviewController {
 
   getWebClientState(): ObservableValueReadOnly<WebClientState> {
     return this.webClientState;
+  }
+
+  focus(): void {
+    this.webview.focus();
   }
 
   destroy() {
@@ -248,7 +257,7 @@ export class WebviewController {
 
   zoom(zoomAction: ZoomAction) {
     // `WebViewType` is a union of `chrome.webviewTag.WebView` and
-    // `SlimWebViewElement`. Only full webviews support zoom.
+    // `SlimWebviewElement`. Only full webviews support zoom.
     if (!isFullWebView(this.webview)) {
       return;
     }
@@ -263,6 +272,8 @@ export class WebviewController {
       return;
     }
 
+    // Any changes to the range of supported zoom factors must be mirrored in
+    // GlicPageHandler.OnZoomLevelChange.
     const zoomFactors = [
       1.0,
       1.1,
@@ -317,7 +328,13 @@ export class WebviewController {
   }
 
   private onLoadStop(): void {
-    this.webview.focus();
+    // Focus the webview only if it is visible. When it is not visible, the
+    // focus will fail to focus the client page (document.hasFocus() is false).
+    // GlicAppController.showPanel() will make a separate call to focus the
+    // webview when the panel is shown.
+    if (this.webview.checkVisibility()) {
+      this.webview.focus();
+    }
   }
 
   private onNewWindow(e: chrome.webviewTag.NewWindowEvent): void {

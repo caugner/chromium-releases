@@ -42,9 +42,9 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/supervised_user/supervised_user_browser_utils.h"
-#include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/browser/ui/extensions/extensions_dialogs.h"
 #include "chrome/browser/ui/safety_hub/menu_notification_service_factory.h"
+#include "chrome/browser/ui/select_file_policy/chrome_select_file_policy.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
@@ -93,11 +93,11 @@
 #include "base/types/expected.h"
 #include "base/uuid.h"
 #include "chrome/browser/extensions/mv2_experiment_stage.h"
-#include "chrome/browser/extensions/shared_module_service.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/safety_hub/safety_hub_constants.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -631,22 +631,35 @@ DeveloperPrivateUpdateExtensionConfigurationFunction::Run() {
   }
 
   if (update.file_access) {
-    util::SetAllowFileAccess(extension->id(), browser_context(),
+    // `util::SetAllowFileAccess()` can synchronously reload the extension,
+    // invalidating the `extension` pointer. We pass `update.extension_id`
+    // to ensure the ID reference stays alive, and re-fetch the pointer after.
+    util::SetAllowFileAccess(update.extension_id, browser_context(),
                              *update.file_access);
+    extension = GetExtensionById(update.extension_id);
+    if (!extension) {
+      return RespondNow(LogNoSuchExtensionFoundAndReturn());
+    }
   }
   if (update.incognito_access) {
-    util::SetIsIncognitoEnabled(extension->id(), browser_context(),
+    // `util::SetIsIncognitoEnabled()` can also synchronously reload the
+    // extension.
+    util::SetIsIncognitoEnabled(update.extension_id, browser_context(),
                                 *update.incognito_access);
+    extension = GetExtensionById(update.extension_id);
+    if (!extension) {
+      return RespondNow(LogNoSuchExtensionFoundAndReturn());
+    }
   }
   if (update.user_scripts_access) {
     ExtensionSystem::Get(browser_context())
         ->user_script_manager()
-        ->SetUserScriptPrefEnabled(extension->id(),
+        ->SetUserScriptPrefEnabled(update.extension_id,
                                    *update.user_scripts_access);
   }
   if (update.error_collection) {
     ErrorConsole::Get(browser_context())
-        ->SetReportingAllForExtension(extension->id(),
+        ->SetReportingAllForExtension(update.extension_id,
                                       *update.error_collection);
   }
   if (update.host_access != developer::HostAccess::kNone) {
@@ -678,31 +691,31 @@ DeveloperPrivateUpdateExtensionConfigurationFunction::Run() {
       developer_private::SafetyCheckWarningReason::kNone) {
     ExtensionPrefs::Get(browser_context())
         ->SetIntegerPref(
-            extension->id(), kPrefAcknowledgeSafetyCheckWarningReason,
+            update.extension_id, kPrefAcknowledgeSafetyCheckWarningReason,
             static_cast<int>(update.acknowledge_safety_check_warning_reason));
     DeveloperPrivateEventRouter* event_router =
         DeveloperPrivateAPI::Get(browser_context())
             ->developer_private_event_router();
     if (event_router) {
-      event_router->OnExtensionConfigurationChanged(extension->id());
+      event_router->OnExtensionConfigurationChanged(update.extension_id);
     }
   }
   if (update.show_access_requests_in_toolbar) {
     SitePermissionsHelper(Profile::FromBrowserContext(browser_context()))
         .SetShowAccessRequestsInToolbar(
-            extension->id(), *update.show_access_requests_in_toolbar);
+            update.extension_id, *update.show_access_requests_in_toolbar);
   }
   if (update.pinned_to_toolbar) {
     ToolbarActionsModel* toolbar_actions_model = ToolbarActionsModel::Get(
         Profile::FromBrowserContext(browser_context()));
-    if (!toolbar_actions_model->HasAction(extension->id())) {
+    if (!toolbar_actions_model->HasAction(update.extension_id)) {
       return RespondNow(Error(kCannotSetPinnedWithoutAction));
     }
 
     bool is_action_pinned =
-        toolbar_actions_model->IsActionPinned(extension->id());
+        toolbar_actions_model->IsActionPinned(update.extension_id);
     if (is_action_pinned != *update.pinned_to_toolbar) {
-      toolbar_actions_model->SetActionVisibility(extension->id(),
+      toolbar_actions_model->SetActionVisibility(update.extension_id,
                                                  !is_action_pinned);
     }
   }
@@ -2113,16 +2126,17 @@ ExtensionFunction::ResponseAction DeveloperPrivateOpenDevToolsFunction::Run() {
   }
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   // Once we open the inspector, we focus on the appropriate tab...
-  Browser* browser = chrome::FindBrowserWithTab(web_contents);
+  BrowserWindowInterface* browser = chrome::FindBrowserWithTab(web_contents);
 
   // ... but some pages (popups and apps) don't have tabs, and some (background
   // pages) don't have an associated browser. For these, the inspector opens in
   // a new window, and our work is done.
-  if (!browser || !browser->is_type_normal()) {
+  if (!browser ||
+      browser->GetType() != BrowserWindowInterface::Type::TYPE_NORMAL) {
     return RespondNow(NoArguments());
   }
 
-  TabStripModel* tab_strip = browser->tab_strip_model();
+  TabStripModel* tab_strip = browser->GetTabStripModel();
   tab_strip->ActivateTabAt(tab_strip->GetIndexOfWebContents(
       web_contents));  // Not through direct user gesture.
 #endif                 // BUILDFLAG(ENABLE_EXTENSIONS)
@@ -2591,7 +2605,7 @@ DeveloperPrivateDismissMv2DeprecationNoticeForExtensionFunction::Run() {
         return AlreadyResponded();
       }
 
-      Browser* browser = chrome::FindLastActiveWithProfile(
+      BrowserWindowInterface* const browser = chrome::FindLastActiveWithProfile(
           Profile::FromBrowserContext(browser_context()));
       if (!browser) {
         return RespondNow(Error(kCouldNotFindWebContentsError));

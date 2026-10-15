@@ -34,12 +34,14 @@ static bool JNI_ClipboardAndroidTestSupport_NativeWriteHtml(
     clipboard_writer.WriteText(html_text);
   }
   auto* clipboard = Clipboard::GetForCurrentThread();
-  return clipboard->IsFormatAvailable(ClipboardFormatType::HtmlType(),
-                                      ClipboardBuffer::kCopyPaste,
-                                      /* data_dst = */ nullptr) &&
-         clipboard->IsFormatAvailable(ClipboardFormatType::PlainTextType(),
-                                      ClipboardBuffer::kCopyPaste,
-                                      /* data_dst = */ nullptr);
+  return clipboard_test_util::IsFormatAvailable(clipboard,
+                                                ClipboardFormatType::HtmlType(),
+                                                ClipboardBuffer::kCopyPaste,
+                                                /* data_dst = */ nullptr) &&
+         clipboard_test_util::IsFormatAvailable(
+             clipboard, ClipboardFormatType::PlainTextType(),
+             ClipboardBuffer::kCopyPaste,
+             /* data_dst = */ nullptr);
 }
 
 static bool JNI_ClipboardAndroidTestSupport_NativeClipboardContains(
@@ -49,16 +51,18 @@ static bool JNI_ClipboardAndroidTestSupport_NativeClipboardContains(
   // ClipboardManager. This should update the native side of the clipboard as
   // well as the Android side.
   auto* clipboard = Clipboard::GetForCurrentThread();
-  if (clipboard->IsFormatAvailable(ClipboardFormatType::HtmlType(),
-                                   ClipboardBuffer::kCopyPaste,
-                                   /* data_dst = */ nullptr)) {
+  if (clipboard_test_util::IsFormatAvailable(clipboard,
+                                             ClipboardFormatType::HtmlType(),
+                                             ClipboardBuffer::kCopyPaste,
+                                             /* data_dst = */ nullptr)) {
     LOG(ERROR) << "HTML still in clipboard.";
     return false;
   }
 
-  if (!clipboard->IsFormatAvailable(ClipboardFormatType::PlainTextType(),
-                                    ClipboardBuffer::kCopyPaste,
-                                    /* data_dst = */ nullptr)) {
+  if (!clipboard_test_util::IsFormatAvailable(
+          clipboard, ClipboardFormatType::PlainTextType(),
+          ClipboardBuffer::kCopyPaste,
+          /* data_dst = */ nullptr)) {
     LOG(ERROR) << "Plain text not in clipboard.";
     return false;
   }
@@ -111,6 +115,14 @@ static bool JNI_ClipboardAndroidTestSupport_NativeTestClipboardNotifications(
     JNIEnv* env) {
   int notification_count = WriteTextAndCountNotifications(u"test notification");
   return notification_count == 1;
+}
+
+static bool JNI_ClipboardAndroidTestSupport_NativeHasCustomData(JNIEnv* env) {
+  auto* clipboard = Clipboard::GetForCurrentThread();
+  std::string data = clipboard_test_util::ReadData(
+      clipboard, ClipboardFormatType::DataTransferCustomType(),
+      /* data_dst = */ nullptr);
+  return !data.empty();
 }
 
 }  // namespace ui

@@ -9,12 +9,10 @@
 #include <utility>
 
 #include "build/build_config.h"
-#include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
-#include "chrome/browser/favicon/favicon_utils.h"
-#include "chrome/browser/renderer_context_menu/render_view_context_menu.h"
 #include "chrome/common/webui_url_constants.h"
 #include "components/guest_view/browser/guest_view_event.h"
 #include "components/renderer_context_menu/context_menu_delegate.h"
+#include "components/renderer_context_menu/render_view_context_menu_base.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/common/url_constants.h"
@@ -84,23 +82,33 @@ bool ChromeWebViewGuestDelegate::HandleContextMenu(
   }
 #endif
   CHECK(menu_delegate);
-  pending_menu_ = menu_delegate->BuildMenu(render_frame_host, params);
+
+  int request_id = ++pending_context_menu_request_id_;
+  menu_delegate->BuildMenuAsync(
+      render_frame_host, params,
+      base::BindOnce(&ChromeWebViewGuestDelegate::OnBuildMenuComplete,
+                     weak_ptr_factory_.GetWeakPtr(), request_id));
+  return true;
+}
+
+void ChromeWebViewGuestDelegate::OnBuildMenuComplete(
+    int request_id,
+    std::unique_ptr<RenderViewContextMenuBase> menu) {
+  pending_menu_ = std::move(menu);
   // It's possible for the returned menu to be null, so early out to avoid
   // a crash. TODO(wjmaclean): find out why it's possible for this to happen
   // in the first place, and if it's an error.
   if (!pending_menu_) {
-    return false;
+    return;
   }
 
   // Pass it to embedder.
-  int request_id = ++pending_context_menu_request_id_;
   base::DictValue args;
   args.Set(webview::kContextMenuItems,
            MenuModelToValue(pending_menu_->menu_model()));
   args.Set(webview::kRequestId, request_id);
   web_view_guest()->DispatchEventToView(std::make_unique<GuestViewEvent>(
       webview::kEventContextMenuShow, std::move(args)));
-  return true;
 }
 
 void ChromeWebViewGuestDelegate::OnShowContextMenu(int request_id) {

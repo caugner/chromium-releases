@@ -198,7 +198,7 @@ export class ContentController {
 
     // When a node is deleted, the read aloud model can get out of sync with the
     // DOM. To be safe, delete the node from the model.
-    if (deletedNode && chrome.readingMode.isTsTextSegmentationEnabled) {
+    if (deletedNode && !chrome.readingMode.isPhraseHighlightingEnabled) {
       getReadAloudModel().onNodeWillBeDeleted?.(deletedNode);
     }
 
@@ -257,6 +257,20 @@ export class ContentController {
       const contentContainer = document.createElement('div');
       contentContainer.innerHTML = this.getTrustedHtml(contentHtml);
 
+
+      // Strip single newlines from text nodes to prevent unexpected sentence
+      // breaks, as Readability preserves raw HTML newlines which are visually
+      // rendered as spaces. Consecutive newlines are preserved as they may
+      // denote intentional line breaks.
+      const walker =
+          document.createTreeWalker(contentContainer, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (node.nodeValue && !node.parentElement?.closest('pre')) {
+          node.nodeValue = node.nodeValue.replace(/(?<!\n)\n(?!\n)/g, ' ');
+        }
+      }
+
       // Replace tags that shouldn't be interactive or have special behavior
       // in reading mode. This is similar to what happens in `buildSubtree_`
       // for Screen2x.
@@ -288,6 +302,8 @@ export class ContentController {
         this.setEmpty();
         return null;
       }
+
+      this.logger_.logNewPage(/*speechPlayed=*/ false);
 
       this.setState(ContentType.HAS_CONTENT);
 
@@ -374,7 +390,7 @@ export class ContentController {
       }
       this.nodeStore_.estimateWordsSeenWithDelay();
       // Initialize the speech tree with the new content.
-      if (chrome.readingMode.isTsTextSegmentationEnabled) {
+      if (!chrome.readingMode.isPhraseHighlightingEnabled) {
         const contextNode = ReadAloudNode.create(rootNode);
         if (contextNode) {
           // Don't initialize until after drawing otherwise, the DOM nodes might
@@ -477,7 +493,7 @@ export class ContentController {
     // which can be computationally expensive.
     // This needs to be done after the text node is created and added to the
     // node store.
-    if (!chrome.readingMode.isTsTextSegmentationEnabled) {
+    if (chrome.readingMode.isPhraseHighlightingEnabled) {
       this.speechController_.initializeSpeechTree(textNode);
     }
 

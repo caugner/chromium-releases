@@ -15,20 +15,18 @@ import type {CrButtonElement} from 'chrome://resources/cr_elements/cr_button/cr_
 import type {CrDialogElement} from 'chrome://resources/cr_elements/cr_dialog/cr_dialog.js';
 import type {CrInputElement} from 'chrome://resources/cr_elements/cr_input/cr_input.js';
 import {WebUiListenerMixin} from 'chrome://resources/cr_elements/web_ui_listener_mixin.js';
+import {assert} from 'chrome://resources/js/assert.js';
 import {microTask, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {loadTimeData} from '../i18n_setup.js';
 
 import {getTemplate} from './search_engine_edit_dialog.html.js';
-import type {SearchEngine, SearchEnginesBrowserProxy, SearchEnginesInfo} from './search_engines_browser_proxy.js';
+import type {CategorizedTemplateUrls, SearchEngine, SearchEnginesBrowserProxy, SearchEnginesInfo} from './search_engines_browser_proxy.js';
 import {SearchEnginesBrowserProxyImpl} from './search_engines_browser_proxy.js';
 
-/**
- * The |modelIndex| to use when a new search engine is added. Must match
- * with kNewSearchEngineIndex constant specified at
- * chrome/browser/ui/webui/settings/search_engines_handler.cc
- */
-const DEFAULT_MODEL_INDEX: number = -1;
+// The `id` to use when a new search engine is added.  See
+// `kInvalidTemplateURLID`.
+const DEFAULT_MODEL_ID: number = 0;
 
 export interface SettingsSearchEngineEditDialogElement {
   $: {
@@ -123,7 +121,10 @@ export class SettingsSearchEngineEditDialogElement extends
     });
 
     this.addWebUiListener(
-        'search-engines-changed', this.enginesChanged_.bind(this));
+        'search-engines-changed',
+        loadTimeData.getBoolean('searchSettingsUpdate') ?
+            this.updateEnginesFromCategorizedUrls_.bind(this) :
+            this.updateEnginesFromSearchEnginesInfo_.bind(this));
   }
 
   override connectedCallback() {
@@ -131,11 +132,37 @@ export class SettingsSearchEngineEditDialogElement extends
 
     microTask.run(() => this.updateActionButtonState_());
     this.browserProxy_.searchEngineEditStarted(
-        this.model ? this.model.modelIndex : DEFAULT_MODEL_INDEX);
+        this.model ? this.model.id : DEFAULT_MODEL_ID);
     this.$.dialog.showModal();
   }
 
-  private enginesChanged_(searchEnginesInfo: SearchEnginesInfo) {
+  private updateEnginesFromCategorizedUrls_(
+      categorizedTemplateUrls: CategorizedTemplateUrls) {
+    assert(loadTimeData.getBoolean('searchSettingsUpdate'));
+
+    if (this.model) {
+      const engineStillExists = [
+        'activeSiteShortcuts',
+        'inactiveSiteShortcuts',
+        'activeFeatureShortcuts',
+        'inactiveFeatureShortcuts',
+      ].some(type => {
+        return categorizedTemplateUrls[type].some(e => e.id === this.model!.id);
+      });
+      if (!engineStillExists) {
+        this.cancel_();
+        return;
+      }
+    }
+
+    [this.$.searchEngine, this.$.keyword, this.$.queryUrl].forEach(
+        element => this.validateElement_(element));
+  }
+
+  private updateEnginesFromSearchEnginesInfo_(
+      searchEnginesInfo: SearchEnginesInfo) {
+    assert(!loadTimeData.getBoolean('searchSettingsUpdate'));
+
     if (this.model) {
       const engineWasRemoved =
           ['defaults', 'actives', 'others', 'extensions'].every(

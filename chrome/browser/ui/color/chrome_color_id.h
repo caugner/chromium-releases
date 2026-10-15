@@ -205,6 +205,7 @@
   E_CPONLY(kColorGlicInactiveTabUnderlineGradient1) \
   E_CPONLY(kColorGlicInactiveTabUnderlineGradient2) \
   E_CPONLY(kColorGlicInactiveTabUnderlineGradient3) \
+  E_CPONLY(kColorGlicSelectionOverlayToast) \
   /* Hover Button colors */ \
   E_CPONLY(kColorHoverButtonBackgroundHovered) \
   /* Lens overlay colors. */ \
@@ -268,6 +269,7 @@
   E_CPONLY(kColorNewTabPageThreadsRailIconButton) \
   E_CPONLY(kColorNewTabPageChipBackground) \
   E_CPONLY(kColorNewTabPageChipForeground) \
+  E_CPONLY(kColorNewTabPageComposeboxSubmitButtonBackground) \
   E_CPONLY(kColorComposeboxBackground) \
   E_CPONLY(kColorComposeboxFileChipSpinner) \
   E_CPONLY(kColorComposeboxFont) \
@@ -304,7 +306,11 @@
   E_CPONLY(kColorComposeboxFileCarouselUrl) \
   E_CPONLY(kColorComposeboxContextEntrypointTextDisabled) \
   E_CPONLY(kColorComposeboxContextEntrypointHoverBackground) \
+  E_CPONLY(kColorComposeboxContextEntrypointBackground) \
+  E_CPONLY(kColorComposeboxLensButtonHoverBackground) \
   E_CPONLY(kColorComposeboxLink) \
+  E_CPONLY(kColorComposeboxToolChipBackground) \
+  E_CPONLY(kColorComposeboxVoiceButtonHoverBackground) \
   E_CPONLY(kColorNewTabPageCommonInputPlaceholder) \
   E_CPONLY(kColorNewTabPageControlBackgroundHovered) \
   E_CPONLY(kColorNewTabPageControlBackgroundSelected) \
@@ -408,6 +414,7 @@
   E_CPONLY(kColorOmniboxComposeboxFileThumbnailOverlayIcon) \
   E_CPONLY(kColorOmniboxComposeboxPrimaryAction) \
   E_CPONLY(kColorOmniboxComposeboxSubmitButtonBackground) \
+  E_CPONLY(kColorOmniboxComposeboxSubmitButtonEnergy) \
   E_CPONLY(kColorOmniboxComposeboxSubmitButtonIcon) \
   E_CPONLY(kColorOmniboxContextEntrypointHoverBackground) \
   E_CPONLY(kColorOmniboxContextEntrypointText) \
@@ -424,6 +431,7 @@
   E_CPONLY(kColorOmniboxKeywordSeparator) \
   E_CPONLY(kColorOmniboxResultsBackground) \
   E_CPONLY(kColorOmniboxResultsBackgroundHovered) \
+  E_CPONLY(kColorOmniboxResultsBackgroundHoverOverlay) \
   E_CPONLY(kColorOmniboxResultsBackgroundSelected) \
   E_CPONLY(kColorOmniboxResultsBackgroundIph) \
   E_CPONLY(kColorOmniboxResultsButtonBorder) \
@@ -721,6 +729,13 @@
   E_CPONLY(kColorReadAnythingAudioControlsIconHighContrast) \
   E_CPONLY(kColorReadAnythingAudioControlsIconLowContrastLight) \
   E_CPONLY(kColorReadAnythingAudioControlsIconLowContrastDark) \
+  E_CPONLY(kColorReadAnythingFullPageScrollbarBlue) \
+  E_CPONLY(kColorReadAnythingFullPageScrollbarDark) \
+  E_CPONLY(kColorReadAnythingFullPageScrollbarLight) \
+  E_CPONLY(kColorReadAnythingFullPageScrollbarYellow) \
+  E_CPONLY(kColorReadAnythingFullPageScrollbarHighContrast) \
+  E_CPONLY(kColorReadAnythingFullPageScrollbarLowContrastLight) \
+  E_CPONLY(kColorReadAnythingFullPageScrollbarLowContrastDark) \
   /* Realbox colors. */ \
   E_CPONLY(kColorSearchboxAnswerIconBackground) \
   E_CPONLY(kColorSearchboxAnswerIconForeground) \
@@ -875,6 +890,7 @@
   E_CPONLY(kColorHoverCardTabAlertAudioPlayingIcon) \
   /* Tab colors. */ \
   E_CPONLY(kColorTabBackgroundActiveFrameActive) \
+  E_CPONLY(kColorDetachedTabBackgroundActiveFrameActive) \
   E_CPONLY(kColorTabBackgroundActiveFrameInactive) \
   E_CPONLY(kColorTabBackgroundInactiveFrameActive) \
   E_CPONLY(kColorTabBackgroundInactiveFrameInactive) \
@@ -1086,6 +1102,8 @@
     E_CPONLY(kColorBorealisSplashScreenForeground) \
     /* Caption colors. */ \
     E_CPONLY(kColorCaptionForeground) \
+    E_CPONLY(kColorVerticalTabsCaptionButtonForegroundActive) \
+    E_CPONLY(kColorVerticalTabsCaptionButtonForegroundInactive) \
     /* Sharesheet colors. */ \
     E_CPONLY(kColorSharesheetTargetButtonIconShadow)
 #elif BUILDFLAG(IS_WIN)

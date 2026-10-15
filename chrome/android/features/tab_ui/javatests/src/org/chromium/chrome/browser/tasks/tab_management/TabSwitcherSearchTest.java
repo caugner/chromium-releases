@@ -123,6 +123,8 @@ public class TabSwitcherSearchTest {
 
     @Test
     @MediumTest
+    @DisableIf.Device(DeviceFormFactor.DESKTOP) // crbug.com/494245361
+    @DisableFeatures({OmniboxFeatureList.OMNIBOX_ITEM_DECORATION})
     public void testZeroPrefixSuggestions() {
         List<String> urlsToOpen =
                 List.of(
@@ -185,6 +187,8 @@ public class TabSwitcherSearchTest {
 
     @Test
     @MediumTest
+    @DisableIf.Device(DeviceFormFactor.DESKTOP) // crbug.com/494245361
+    @DisableFeatures({OmniboxFeatureList.OMNIBOX_ITEM_DECORATION})
     // Regression test for the currently selected tab being included/excluded randomly.
     public void testZeroPrefixSuggestions_IgnoresHiddenTabs() {
         ChromeTabbedActivity cta = mCtaTestRule.getActivity();
@@ -226,6 +230,7 @@ public class TabSwitcherSearchTest {
 
     @Test
     @LargeTest
+    @DisableIf.Device(DeviceFormFactor.DESKTOP) // crbug.com/494245361
     public void testZeroPrefixSuggestions_duplicateUrls() {
         List<String> urlsToOpen =
                 List.of(
@@ -242,6 +247,7 @@ public class TabSwitcherSearchTest {
 
     @Test
     @MediumTest
+    @DisableIf.Device(DeviceFormFactor.DESKTOP) // crbug.com/494245361
     public void testTypedSuggestions() {
         List<String> urlsToOpen = List.of("/chrome/test/data/android/navigate/one.html");
         mPage = Journeys.prepareRegularTabsWithWebPages(mPage, mTestServer.getURLs(urlsToOpen));
@@ -294,6 +300,7 @@ public class TabSwitcherSearchTest {
 
     @Test
     @MediumTest
+    @DisableIf.Device(DeviceFormFactor.DESKTOP) // crbug.com/494245361
     public void testTypedSuggestions_OpenSuggestionWithEnter() {
         List<String> urlsToOpen =
                 List.of(
@@ -343,6 +350,7 @@ public class TabSwitcherSearchTest {
 
     @Test
     @MediumTest
+    @DisableFeatures({OmniboxFeatureList.OMNIBOX_ITEM_DECORATION})
     public void testTypedSuggestions_OpenSearchSuggestion() {
         TabSwitcherSearchStation tabSwitcherSearchStation =
                 mPage.openRegularTabSwitcher().openTabSwitcherSearch();
@@ -358,6 +366,8 @@ public class TabSwitcherSearchTest {
     @Test
     @MediumTest
     @EnableFeatures({OmniboxFeatureList.ANDROID_HUB_SEARCH_TAB_GROUPS})
+    @DisableFeatures({OmniboxFeatureList.OMNIBOX_ITEM_DECORATION})
+    @DisableIf.Device(DeviceFormFactor.DESKTOP) // crbug.com/494245361
     public void testTypedSuggestions_OpenTabGroupSearchSuggestion() {
         String tabGroupTitle = "Test";
         Tab firstTab = mPage.loadedTabElement.value();
@@ -406,6 +416,8 @@ public class TabSwitcherSearchTest {
     @Test
     @MediumTest
     @EnableFeatures({OmniboxFeatureList.ANDROID_HUB_SEARCH_TAB_GROUPS})
+    @DisableFeatures({OmniboxFeatureList.OMNIBOX_ITEM_DECORATION})
+    @DisableIf.Device(DeviceFormFactor.DESKTOP) // crbug.com/494245361
     public void testTypedSuggestions_OpenTabGroupSearchSuggestionByURLMatch() {
         String tabGroupTitle = "Test";
         Tab firstTab = mPage.loadedTabElement.value();
@@ -456,6 +468,8 @@ public class TabSwitcherSearchTest {
     @EnableFeatures({
         OmniboxFeatureList.ANDROID_HUB_SEARCH_TAB_GROUPS + ":enable_hub_search_tab_groups_pane/true"
     })
+    @DisableFeatures({OmniboxFeatureList.OMNIBOX_ITEM_DECORATION})
+    @DisableIf.Device(DeviceFormFactor.DESKTOP) // crbug.com/494245361
     public void testTypedSuggestionsFromTabGroupsPane_OpenTabGroupSearchSuggestion() {
         String tabGroupTitle = "Test";
         Tab firstTab = mPage.loadedTabElement.value();
@@ -504,6 +518,7 @@ public class TabSwitcherSearchTest {
 
     @Test
     @MediumTest
+    @DisableFeatures({OmniboxFeatureList.OMNIBOX_ITEM_DECORATION})
     public void testTypedSuggestions_OpenSearchSuggestion_Incognito() {
         List<String> urlsToOpen = List.of("/chrome/test/data/android/navigate/one.html");
         mPage = Journeys.createIncognitoTabsWithWebPages(mPage, mTestServer.getURLs(urlsToOpen));
@@ -521,7 +536,9 @@ public class TabSwitcherSearchTest {
     @Test
     @MediumTest
     @RequiresRestart("Adding the bookmark affects suggestions in subsequent tests")
+    @DisableFeatures({OmniboxFeatureList.OMNIBOX_ITEM_DECORATION})
     // TODO(crbug.com/394401323): Add some PT station for searching bookmarks.
+    @DisableIf.Device(DeviceFormFactor.DESKTOP) // crbug.com/494245361
     public void testBookmarkSuggestions() {
         WebPageStation openPage =
                 mPage.openNewTabFast()
@@ -548,6 +565,8 @@ public class TabSwitcherSearchTest {
 
     @Test
     @MediumTest
+    @DisableIf.Device(DeviceFormFactor.DESKTOP) // crbug.com/494245361
+    @DisableFeatures({OmniboxFeatureList.OMNIBOX_ITEM_DECORATION})
     // TODO(crbug.com/394401463): Add some PT station for searching history.
     public void testHistorySuggestions() throws TimeoutException {
         TabSwitcherSearchStation tabSwitcherSearchStation =

@@ -6,11 +6,12 @@
 
 #import "base/apple/foundation_util.h"
 #import "base/strings/sys_string_conversions.h"
+#import "components/autofill/core/browser/filling/field_filling_util.h"
 #import "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/autofill/autofill_ai/public/autofill_ai_constants.h"
-#import "ios/chrome/browser/autofill/autofill_ai/ui/autofill_ai_save_entity_mutator.h"
-#import "ios/chrome/browser/autofill/ui_bundled/address_editor/cells/autofill_edit_profile_button_footer_item.h"
-#import "ios/chrome/browser/shared/public/commands/autofill_commands.h"
+#import "ios/chrome/browser/autofill/autofill_ai/public/autofill_ai_ui_util.h"
+#import "ios/chrome/browser/net/model/crurl.h"
+#import "ios/chrome/browser/settings/autofill/autofill_ai/utils/autofill_ai_date_util.h"
 #import "ios/chrome/browser/shared/ui/table_view/cells/table_view_link_header_footer_item.h"
 #import "ios/chrome/browser/shared/ui/table_view/cells/table_view_text_edit_item.h"
 #import "ios/chrome/browser/shared/ui/table_view/cells/table_view_text_header_footer_item.h"
@@ -25,7 +26,6 @@ typedef NS_ENUM(NSInteger, SectionIdentifier) {
   SectionIdentifierNewEntity = 0,
   SectionIdentifierOldEntity,
   SectionIdentifierFooter,
-  SectionIdentifierActions,
   SectionCount,
 };
 
@@ -36,12 +36,32 @@ NSArray<TableViewTextEditItem*>* CreateItemsFromEntity(
   std::string locale =
       base::SysNSStringToUTF8([[NSLocale currentLocale] localeIdentifier]);
 
+  NSDateFormatter* dateFormatter = [[NSDateFormatter alloc] init];
+  dateFormatter.dateStyle = NSDateFormatterMediumStyle;
+  dateFormatter.timeStyle = NSDateFormatterNoStyle;
+  dateFormatter.locale =
+      [NSLocale localeWithLocaleIdentifier:base::SysUTF8ToNSString(locale)];
+
   for (const auto& attribute : entity.attributes()) {
     TableViewTextEditItem* item = [[TableViewTextEditItem alloc] init];
     item.fieldNameLabelText =
-        base::SysUTF16ToNSString(attribute.type().GetNameForI18n());
-    item.textFieldValue =
-        base::SysUTF16ToNSString(attribute.GetCompleteInfo(locale));
+        autofill::DisplayNameForAutofillAiAttributeType(attribute.type());
+
+    std::u16string value;
+    if (attribute.type().data_type() ==
+        autofill::AttributeType::DataType::kDate) {
+      NSDate* dateValue = NSDateFromAttributeInstance(attribute);
+      value =
+          base::SysNSStringToUTF16([dateFormatter stringFromDate:dateValue]);
+    } else {
+      value = attribute.GetCompleteInfo(locale);
+    }
+
+    if (attribute.masked()) {
+      // If the attribute is masked, the obfuscated value is shown.
+      value = autofill::GetObfuscatedValue(value, /*visible_suffix_length=*/4);
+    }
+    item.textFieldValue = base::SysUTF16ToNSString(value);
     item.textFieldEnabled = NO;
     item.hideIcon = YES;
     [items addObject:item];
@@ -52,8 +72,6 @@ NSArray<TableViewTextEditItem*>* CreateItemsFromEntity(
 void RegisterCells(UITableView* table_view) {
   RegisterTableViewCell<TableViewTextEditCell>(table_view);
   RegisterTableViewHeaderFooter<TableViewTextHeaderFooterView>(table_view);
-  RegisterTableViewHeaderFooter<AutofillEditProfileButtonFooterCell>(
-      table_view);
   RegisterTableViewHeaderFooter<TableViewLinkHeaderFooterView>(table_view);
 }
 
@@ -80,7 +98,7 @@ TableViewTextHeaderFooterView* GetHeaderView(UITableView* table_view,
 }  // namespace
 
 @interface AutofillAISaveEntityTableViewController () <
-    AutofillEditProfileButtonFooterDelegate>
+    TableViewLinkHeaderFooterItemDelegate>
 @end
 
 @implementation AutofillAISaveEntityTableViewController {
@@ -101,15 +119,7 @@ TableViewTextHeaderFooterView* GetHeaderView(UITableView* table_view,
   [super viewDidLoad];
 
   self.tableView.accessibilityIdentifier = kAutofillAISaveEntityTableViewId;
-
-  // Configure the NavigationBar.
-  UIBarButtonItem* cancelButton = [[UIBarButtonItem alloc]
-      initWithBarButtonSystemItem:UIBarButtonSystemItemCancel
-                           target:self
-                           action:@selector(handleCancelButton)];
-  cancelButton.accessibilityIdentifier = kAutofillAISaveEntityCancelButtonId;
-  self.navigationItem.leftBarButtonItem = cancelButton;
-  self.navigationController.navigationBar.prefersLargeTitles = NO;
+  self.tableView.allowsSelection = NO;
 
   RegisterCells(self.tableView);
 
@@ -121,7 +131,11 @@ TableViewTextHeaderFooterView* GetHeaderView(UITableView* table_view,
     return;
   }
 
-  [self setTitle:base::SysUTF16ToNSString(_newEntity->type().GetNameForI18n())];
+  autofill::EntityTypeName typeName = _newEntity->type().name();
+  NSString* title = _oldEntity.has_value()
+                        ? autofill::GetDialogTitleForUpdateEntity(typeName)
+                        : autofill::GetDialogTitleForSaveEntity(typeName);
+  [self setTitle:title];
 
   _dataSource = [[UITableViewDiffableDataSource alloc]
       initWithTableView:self.tableView
@@ -152,13 +166,12 @@ TableViewTextHeaderFooterView* GetHeaderView(UITableView* table_view,
 
   [snapshot appendSectionsWithIdentifiers:@[
     @(SectionIdentifierFooter),
-    @(SectionIdentifierActions),
   ]];
 
   [_dataSource applySnapshot:snapshot animatingDifferences:NO];
 }
 
-#pragma mark - AutofillAISaveEntityConsumer
+#pragma mark - Public Methods
 
 - (void)setNewEntity:(autofill::EntityInstance)newEntity
            oldEntity:(std::optional<autofill::EntityInstance>)oldEntity
@@ -201,19 +214,14 @@ TableViewTextHeaderFooterView* GetHeaderView(UITableView* table_view,
   if (sectionIdentifier == SectionIdentifierFooter) {
     TableViewLinkHeaderFooterView* footer =
         DequeueTableViewHeaderFooter<TableViewLinkHeaderFooterView>(tableView);
+    footer.delegate = self;
+    if ([self isSaveToWallet]) {
+      GURL url = _oldEntity.has_value() ? autofill::GetGoogleWalletPassesURL()
+                                        : autofill::GetManageYourInfoURL();
+      footer.urls = @[ [[CrURL alloc] initWithGURL:url] ];
+    }
     [footer setText:[self footerText]
           withColor:[UIColor colorNamed:kTextSecondaryColor]];
-    return footer;
-  }
-
-  if (sectionIdentifier == SectionIdentifierActions) {
-    AutofillEditProfileButtonFooterCell* footer =
-        DequeueTableViewHeaderFooter<AutofillEditProfileButtonFooterCell>(
-            tableView);
-    footer.delegate = self;
-    [footer.button setTitle:[self acceptButtonText]
-                   forState:UIControlStateNormal];
-    footer.button.enabled = YES;
     return footer;
   }
 
@@ -239,26 +247,11 @@ TableViewTextHeaderFooterView* GetHeaderView(UITableView* table_view,
   SectionIdentifier sectionIdentifier =
       [self sectionIdentifierForSection:section];
 
-  if (sectionIdentifier == SectionIdentifierFooter ||
-      sectionIdentifier == SectionIdentifierActions) {
+  if (sectionIdentifier == SectionIdentifierFooter) {
     return UITableViewAutomaticDimension;
   }
 
   return 0;
-}
-
-#pragma mark - Actions
-
-- (void)handleCancelButton {
-  [self.mutator cancelSaving];
-  [self.autofillHandler dismissSaveEntityDialog];
-}
-
-#pragma mark - AutofillEditProfileButtonFooterDelegate
-
-- (void)didTapButton {
-  [self.mutator acceptSaving];
-  [self.autofillHandler dismissSaveEntityDialog];
 }
 
 #pragma mark - Private
@@ -276,18 +269,22 @@ TableViewTextHeaderFooterView* GetHeaderView(UITableView* table_view,
 
 - (NSString*)footerText {
   if ([self isSaveToWallet]) {
-    return l10n_util::GetNSStringF(IDS_IOS_AUTOFILL_AI_FOOTER_SAVE_TO_WALLET,
-                                   _userEmail);
+    if (_oldEntity.has_value()) {
+      return autofill::GetUpdateEntitySavedInWalletFooterText(
+          base::SysUTF16ToNSString(_userEmail));
+    } else {
+      return autofill::GetSaveEntityToWalletFooterText(
+          base::SysUTF16ToNSString(_userEmail));
+    }
   } else {
     return l10n_util::GetNSString(IDS_IOS_AUTOFILL_AI_FOOTER_SAVE_TO_DEVICE);
   }
 }
 
-- (NSString*)acceptButtonText {
-  return l10n_util::GetNSString(
-      _oldEntity.has_value()
-          ? IDS_AUTOFILL_UPDATE_ADDRESS_PROMPT_OK_BUTTON_LABEL
-          : IDS_AUTOFILL_SAVE_ADDRESS_PROMPT_OK_BUTTON_LABEL);
+#pragma mark - TableViewLinkHeaderFooterItemDelegate
+
+- (void)view:(TableViewLinkHeaderFooterView*)view didTapLinkURL:(CrURL*)URL {
+  [self.delegate didTapLinkWithURL:URL];
 }
 
 @end

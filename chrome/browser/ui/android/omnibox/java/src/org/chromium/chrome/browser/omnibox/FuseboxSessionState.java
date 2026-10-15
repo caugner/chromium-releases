@@ -15,12 +15,14 @@ import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.omnibox.fusebox.ComposeboxQueryControllerBridge;
 import org.chromium.chrome.browser.omnibox.fusebox.FuseboxAttachmentModelList;
 import org.chromium.chrome.browser.omnibox.fusebox.FuseboxAttachmentModelList.FuseboxAttachmentChangeListener;
+import org.chromium.chrome.browser.omnibox.fusebox.FuseboxMetrics;
 import org.chromium.chrome.browser.omnibox.suggestions.AutocompleteController;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.components.embedder_support.util.UrlUtilities;
 import org.chromium.components.omnibox.AutocompleteInput;
+import org.chromium.components.omnibox.AutocompleteRequestType;
 import org.chromium.components.omnibox.OmniboxFeatures;
-import org.chromium.components.omnibox.ToolModeProto.ToolMode;
+import org.chromium.components.omnibox.ToolModeUtils;
 
 import java.util.Optional;
 
@@ -55,14 +57,15 @@ public class FuseboxSessionState implements UserData {
                     FuseboxSessionState.this.onAttachmentListChanged();
                 }
             };
-    private final Callback<Integer> mOnToolModeChanged = this::onToolModeChanged;
+    private final Callback<Integer> mOnRequestTypeChanged = this::onRequestTypeChanged;
 
     /**
      * Details about the user input in the Omnibox. Retained to allow session reconstruction, for
      * example when the user switches tabs.
      */
-    private final AutocompleteInput mAutocompleteInput;
+    private final AutocompleteInput mAutocompleteInput = new AutocompleteInput();
 
+    private @Nullable FuseboxMetrics mMetrics;
     private @Nullable Profile mProfile;
     private @Nullable ComposeboxQueryControllerBridge mComposeBoxQueryControllerBridge;
     private @Nullable AutocompleteController mAutocomplete;
@@ -101,17 +104,16 @@ public class FuseboxSessionState implements UserData {
     private static FuseboxSessionState getSessionForTab(UserDataHost userDataHost) {
         FuseboxSessionState state = userDataHost.getUserData(FuseboxSessionState.class);
         if (state == null) {
-            state = new FuseboxSessionState(new AutocompleteInput());
+            state = new FuseboxSessionState();
             userDataHost.setUserData(FuseboxSessionState.class, state);
         }
         return state;
     }
 
     /** Constructs a new, empty FuseboxSessionState. */
-    private FuseboxSessionState(AutocompleteInput input) {
-        mAutocompleteInput = input;
+    private FuseboxSessionState() {
         if (OmniboxFeatures.sShowModelPicker.getValue()) {
-            mAutocompleteInput.getToolModeSupplier().addSyncObserver(mOnToolModeChanged);
+            mAutocompleteInput.getRequestTypeSupplier().addSyncObserver(mOnRequestTypeChanged);
         }
     }
 
@@ -143,18 +145,26 @@ public class FuseboxSessionState implements UserData {
 
         mIsActive = true;
         mAutocompleteInput.setUrlFocusTime(System.currentTimeMillis());
-        // Use current URL if the Retention is active, the input is not already set, and the URL
-        // should be user-visible.
+
+        // Use current URL if the Retention is active as the starting input.
+        // On eligible LFF devices the Omnibox should, by default, present the
+        // current page URL (if the URL is eligible for display).
         if (OmniboxFeatures.shouldRetainOmniboxOnFocus()
-                && mAutocompleteInput.getUserText().isEmpty()
                 && UrlBarData.shouldShowUrl(mAutocompleteInput.getPageUrl(), false)) {
             var editUrl = UrlUtilities.stripScheme(mAutocompleteInput.getPageUrl().getSpec());
-            mAutocompleteInput.setUserText(editUrl).setSelection(0, Integer.MAX_VALUE);
+            mAutocompleteInput.setInitialUserText(editUrl);
+        } else {
+            mAutocompleteInput.setInitialUserText("");
         }
 
-        // The session is activated for the first time. Preserve the initial value of the User Text
-        // now. If the session is re-activated later, the user text will be preserved.
-        mAutocompleteInput.setInitialUserText(mAutocompleteInput.getUserText());
+        // Apply the initial default value unless user text is already set.
+        if (mAutocompleteInput.getUserText().isEmpty()) {
+            mAutocompleteInput
+                    .setUserText(mAutocompleteInput.getInitialUserText())
+                    .setSelection(
+                            OmniboxFeatures.shouldRetainOmniboxOnFocus() ? 0 : Integer.MAX_VALUE,
+                            Integer.MAX_VALUE);
+        }
 
         // Stop here if we're already waiting for profile.
         // This makes sense in scenarios where session object goes through a full cycle
@@ -208,6 +218,7 @@ public class FuseboxSessionState implements UserData {
 
         if (mComposeBoxQueryControllerBridge != null) {
             // Composebox Controller may not be instantiated if locale or policies prohibit AIM.
+            mMetrics = new FuseboxMetrics();
             // Create attachments list only if allowed.
             mFuseboxAttachmentModelList = new FuseboxAttachmentModelList();
             mFuseboxAttachmentModelList.setComposeboxQueryControllerBridge(
@@ -224,7 +235,7 @@ public class FuseboxSessionState implements UserData {
     public void destroy() {
         tearDownSessionControllers();
         if (OmniboxFeatures.sShowModelPicker.getValue()) {
-            mAutocompleteInput.getToolModeSupplier().removeObserver(mOnToolModeChanged);
+            mAutocompleteInput.getRequestTypeSupplier().removeObserver(mOnRequestTypeChanged);
         }
     }
 
@@ -244,6 +255,7 @@ public class FuseboxSessionState implements UserData {
         }
 
         mComposeBoxQueryControllerBridge = null;
+        mMetrics = null;
         mAutocomplete = null;
         mProfile = null;
     }
@@ -268,15 +280,12 @@ public class FuseboxSessionState implements UserData {
         mAutocompleteInput.setHasAttachments(hasAttachments);
     }
 
-    private void onToolModeChanged(int toolMode) {
+    private void onRequestTypeChanged(@AutocompleteRequestType int requestType) {
         assert OmniboxFeatures.sShowModelPicker.getValue();
         if (mComposeBoxQueryControllerBridge != null) {
-            // TODO(https://crbug.com/492562651): Infra either needs to consistently support this
-            // changing tool mode, or simplify the API in some way such that this code can avoid
-            // knowing about it. This logic should not be here.
-            if (toolMode == ToolMode.TOOL_MODE_IMAGE_GEN_UPLOAD_VALUE) {
-                toolMode = ToolMode.TOOL_MODE_IMAGE_GEN_VALUE;
-            }
+            int toolMode =
+                    ToolModeUtils.getToolModeForRequestType(
+                            requestType, /* hasAttachments= */ false);
             mComposeBoxQueryControllerBridge.setActiveTool(toolMode);
         }
     }
@@ -294,6 +303,11 @@ public class FuseboxSessionState implements UserData {
     /** Returns the current {@link AutocompleteInput} for this session. */
     public AutocompleteInput getAutocompleteInput() {
         return mAutocompleteInput;
+    }
+
+    /** Returns the current {@link FuseboxMetrics} for this session. */
+    public @Nullable FuseboxMetrics getMetrics() {
+        return mMetrics;
     }
 
     /** Returns the current {@link ComposeboxQueryControllerBridge} for this session. */

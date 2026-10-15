@@ -63,13 +63,16 @@ FileSystemAccessWatcherManager::FileSystemAccessWatcherManager(
     FileSystemAccessManagerImpl* manager,
     base::PassKey<FileSystemAccessManagerImpl> /*pass_key*/)
     : manager_(manager),
-      bucket_path_watcher_(std::make_unique<FileSystemAccessBucketPathWatcher>(
-          base::WrapRefCounted(manager_->context()),
-          base::PassKey<FileSystemAccessWatcherManager>())) {
+      bucket_path_watcher_(
+          base::MakeRefCounted<FileSystemAccessBucketPathWatcher>(
+              base::WrapRefCounted(manager_->context()),
+              base::PassKey<FileSystemAccessWatcherManager>())) {
   RegisterSource(bucket_path_watcher_.get());
 }
 
-FileSystemAccessWatcherManager::~FileSystemAccessWatcherManager() = default;
+FileSystemAccessWatcherManager::~FileSystemAccessWatcherManager() {
+  bucket_path_watcher_->Disable();
+}
 
 void FileSystemAccessWatcherManager::BindObserverHost(
     const BindingContext& binding_context,
@@ -126,12 +129,8 @@ void FileSystemAccessWatcherManager::OnRawChange(
     const storage::FileSystemURL& changed_url,
     bool error,
     const FileSystemAccessChangeSource::ChangeInfo& raw_change_info,
-    FileSystemAccessWatchScope scope) {
+    const FileSystemAccessWatchScope& scope) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-
-  // `scope` is passed by value because the notifications below can
-  // synchronously trigger the destruction of the source that owns the
-  // original scope, leading to a use-after-free if it were a reference.
 
   // TODO(crbug.com/40268906): Batch changes.
 
@@ -241,12 +240,8 @@ void FileSystemAccessWatcherManager::OnRawChange(
 void FileSystemAccessWatcherManager::OnUsageChange(
     size_t old_usage,
     size_t new_usage,
-    FileSystemAccessWatchScope scope) {
+    const FileSystemAccessWatchScope& scope) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-
-  // `scope` is passed by value because the notifications below can
-  // synchronously trigger the destruction of the source that owns the
-  // original scope, leading to a use-after-free if it were a reference.
 
   // The bucket file system's usage should not change.
   CHECK(scope.GetWatchType() != WatchType::kAllBucketFileSystems);
@@ -313,7 +308,8 @@ void FileSystemAccessWatcherManager::RemoveObserver(
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     return source->scope().Contains(newly_unobserved_scope) &&
            std::ranges::none_of(
-               observation_groups_, [&source](const auto& observation) {
+               observation_groups_.GetReentrantRange(),
+               [&source](const auto& observation) {
                  return source->scope().Contains(observation.scope());
                });
   });

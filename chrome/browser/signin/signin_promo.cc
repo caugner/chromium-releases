@@ -5,6 +5,7 @@
 #include "chrome/browser/signin/signin_promo.h"
 
 #include "base/feature_list.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/strings/string_number_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -90,8 +91,7 @@ GURL GetChromeSyncURLForDice(ChromeSyncUrlArgs args) {
   switch (args.flow) {
     // Default behavior.
     case Flow::NONE:
-      if (base::FeatureList::IsEnabled(
-              syncer::kReplaceSyncPromosWithSignInPromos)) {
+      if (syncer::IsReplaceSyncPromosWithSignInPromosEnabled()) {
         // If History Sync Opt-in is enabled, use a customized sign-in screen
         // that does NOT mention history sync benefits.
         url = net::AppendQueryParameter(url, "flow", "history_opt_in");
@@ -107,6 +107,18 @@ GURL GetChromeSyncURLForDice(ChromeSyncUrlArgs args) {
   if (base::FeatureList::IsEnabled(switches::kSignInPromoMaterialNextUI)) {
     url = net::AppendQueryParameter(url, "theme", "mn");
   }
+
+  if (base::FeatureList::IsEnabled(
+          switches::kMagiChromeSignInExperimentsBatch1)) {
+    std::string exp_param = base::GetFieldTrialParamValueByFeature(
+        switches::kMagiChromeSignInExperimentsBatch1,
+        "magichrome_fre_exp_branch");
+    if (!exp_param.empty()) {
+      url = net::AppendQueryParameter(url, "magichrome_fre_exp_branch",
+                                      exp_param);
+    }
+  }
+
   return url;
 }
 #endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)

@@ -5,9 +5,11 @@
 #include "remoting/host/linux/gdm_remote_display_manager.h"
 
 #include <algorithm>
+#include <array>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -16,10 +18,11 @@
 #include "base/logging.h"
 #include "base/sequence_checker.h"
 #include "base/types/expected.h"
-#include "remoting/host/base/loggable.h"
+#include "remoting/base/loggable.h"
 #include "remoting/host/linux/dbus_interfaces/org_freedesktop_DBus_ObjectManager.h"
 #include "remoting/host/linux/dbus_interfaces/org_freedesktop_DBus_Properties.h"
 #include "remoting/host/linux/dbus_interfaces/org_gnome_DisplayManager.h"
+#include "remoting/host/linux/gvariant_dict_builder.h"
 #include "remoting/host/linux/gvariant_ref.h"
 
 namespace remoting {
@@ -31,6 +34,7 @@ using gvariant::ObjectPath;
 using gvariant::ObjectPathCStr;
 
 constexpr char kGdmBusName[] = "org.gnome.DisplayManager";
+constexpr ObjectPathCStr kGdmManagerPath = "/org/gnome/DisplayManager/Manager";
 constexpr ObjectPathCStr kGdmDisplaysPath =
     "/org/gnome/DisplayManager/Displays";
 constexpr ObjectPathCStr kGdmRemoteDisplayFactoryPath =
@@ -56,11 +60,10 @@ void GdmRemoteDisplayManager::Init(GDBusConnectionRef connection,
   initialization_state_ = InitializationState::INITIALIZING;
   SubscribeSignals();
 
-  // Get all remote displays that have already been created before the
-  // initialization.
-  connection_.Call<org_freedesktop_DBus_ObjectManager::GetManagedObjects>(
-      kGdmBusName, kGdmDisplaysPath, std::tuple(),
-      base::BindOnce(&GdmRemoteDisplayManager::OnGetAllRemoteDisplaysResult,
+  // Get GDM version first.
+  connection_.GetProperty<org_gnome_DisplayManager_Manager::Version>(
+      kGdmBusName, kGdmManagerPath,
+      base::BindOnce(&GdmRemoteDisplayManager::OnGetVersionResult,
                      weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
 }
 
@@ -74,9 +77,11 @@ void GdmRemoteDisplayManager::CreateRemoteDisplay(ObjectPath remote_id,
   // connection is created.
   connection_
       .Call<org_gnome_DisplayManager_RemoteDisplayFactory::CreateRemoteDisplay>(
-          kGdmBusName, kGdmRemoteDisplayFactoryPath, std::tuple(remote_id),
+          kGdmBusName, kGdmRemoteDisplayFactoryPath,
+          std::tuple(GVariantDictBuilder().Add("remote-id", remote_id).Build()),
           base::BindOnce(&GdmRemoteDisplayManager::OnCreateRemoteDisplayResult,
-                         weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
+                         weak_ptr_factory_.GetWeakPtr(), remote_id,
+                         std::move(callback)));
 }
 
 void GdmRemoteDisplayManager::SubscribeSignals() {
@@ -95,6 +100,28 @@ void GdmRemoteDisplayManager::SubscribeSignals() {
       kGdmBusName, kGdmDisplaysPath,
       base::BindRepeating(&GdmRemoteDisplayManager::OnInterfacesRemoved,
                           weak_ptr_factory_.GetWeakPtr()));
+}
+
+void GdmRemoteDisplayManager::OnGetVersionResult(
+    Callback init_callback,
+    base::expected<std::string, Loggable> result) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK_EQ(initialization_state_, InitializationState::INITIALIZING);
+
+  if (!result.has_value()) {
+    initialization_state_ = InitializationState::NOT_INITIALIZED;
+    std::move(init_callback).Run(base::unexpected(result.error()));
+    return;
+  }
+
+  version_ = std::move(result.value());
+
+  // Get all remote displays that have already been created before the
+  // initialization.
+  connection_.Call<org_freedesktop_DBus_ObjectManager::GetManagedObjects>(
+      kGdmBusName, kGdmDisplaysPath, std::tuple(),
+      base::BindOnce(&GdmRemoteDisplayManager::OnGetAllRemoteDisplaysResult,
+                     weak_ptr_factory_.GetWeakPtr(), std::move(init_callback)));
 }
 
 void GdmRemoteDisplayManager::OnGetAllRemoteDisplaysResult(
@@ -124,13 +151,44 @@ void GdmRemoteDisplayManager::OnGetAllRemoteDisplaysResult(
 }
 
 void GdmRemoteDisplayManager::OnCreateRemoteDisplayResult(
+    ObjectPath remote_id,
     Callback callback,
     base::expected<std::tuple<>, Loggable> result) {
-  if (!result.has_value()) {
-    std::move(callback).Run(base::unexpected(result.error()));
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (result.has_value()) {
+    std::move(callback).Run(base::ok());
     return;
   }
-  std::move(callback).Run(base::ok());
+
+  // GNOME 50 changed the D-Bus interface of CreateRemoteDisplay to use a
+  // properties dictionary. If the call failed, it may be because we are
+  // running on a pre-GNOME 50 system. Fallback to the old interface.
+  //
+  // Use a weak pointer so that `callback` will be silently dropped if `this` is
+  // destructed before the fallback call completes.
+  connection_.Call<org_gnome_DisplayManager_RemoteDisplayFactory::
+                       CreateRemoteDisplay_PreGnome50>(
+      kGdmBusName, kGdmRemoteDisplayFactoryPath, std::tuple(remote_id),
+      base::BindOnce(
+          [](base::WeakPtr<GdmRemoteDisplayManager> that,
+             Loggable previous_error, Callback callback,
+             base::expected<std::tuple<>, Loggable> result) {
+            if (!that) {
+              return;
+            }
+            DCHECK_CALLED_ON_VALID_SEQUENCE(that->sequence_checker_);
+            if (result.has_value()) {
+              std::move(callback).Run(base::ok());
+              return;
+            }
+            // If both fail, include the first as context for the second.
+            Loggable combined_error(result.error());
+            combined_error.AddContext(FROM_HERE, previous_error.ToString());
+            std::move(callback).Run(
+                base::unexpected(std::move(combined_error)));
+          },
+          weak_ptr_factory_.GetWeakPtr(), std::move(result).error(),
+          std::move(callback)));
 }
 
 void GdmRemoteDisplayManager::OnInterfacesAddedInternal(

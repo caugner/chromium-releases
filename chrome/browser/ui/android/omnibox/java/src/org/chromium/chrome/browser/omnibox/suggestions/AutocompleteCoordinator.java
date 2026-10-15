@@ -377,15 +377,6 @@ public class AutocompleteCoordinator implements OmniboxSuggestionsVisualState {
 
         boolean isShowingList = mContainer != null && mContainer.isShown();
 
-        if (event.getKeyCode() == KeyEvent.KEYCODE_ESCAPE) {
-            if (isShowingList) {
-                mMediator.stopAutocomplete(true);
-            } else {
-                mMediator.finishInteraction();
-            }
-            return true;
-        }
-
         // Always handle <ENTER> key, even if the suggestions list is not showing.
         // This allows users to navigate to the typed url or query.
         // Try to dispatch to suggestions list, if one is showing, otherwise invoke navigation.
@@ -409,6 +400,12 @@ public class AutocompleteCoordinator implements OmniboxSuggestionsVisualState {
             return false;
         }
 
+        if (keyCode == KeyEvent.KEYCODE_TAB && event.hasNoModifiers()) {
+            if (triggerSiteSearch(SiteSearchActivationSource.TAB)) {
+                return true;
+            }
+        }
+
         // Do not attempt to interpret non-navigaton keys.
         // There are cases where the SPACE key may gen inappropriately routed to the
         // Suggestion, simulating press/long press of the UI element.
@@ -423,9 +420,14 @@ public class AutocompleteCoordinator implements OmniboxSuggestionsVisualState {
         return false;
     }
 
+    /** Site search was successfully triggered. */
+    public boolean triggerSiteSearch(@SiteSearchActivationSource int source) {
+        return mMediator.triggerSiteSearch(source);
+    }
+
     /** Notify the Autocomplete about Omnibox text change. */
     public void onInputChanged() {
-        mMediator.onInputChanged(false);
+        mMediator.onInputChanged();
     }
 
     /** Trigger autocomplete for the given query. */
@@ -467,6 +469,19 @@ public class AutocompleteCoordinator implements OmniboxSuggestionsVisualState {
      */
     public void prefetchZeroSuggestResults(@Nullable Tab tab) {
         mMediator.startPrefetch(tab != null ? tab.getWebContents() : null);
+    }
+
+    /** Stop current suggestions requests and clear the suggestions list. */
+    public void stopAutocomplete() {
+        mMediator.stopAutocomplete(/* clear= */ true);
+    }
+
+    /** Returns whether Autocomplete is serving suggestions. */
+    public boolean isServingSuggestions() {
+        return mMediator.isInInputSession()
+                && mContainer != null
+                && mContainer.isShown()
+                && mMediator.getSuggestionCount() > 0;
     }
 
     /**

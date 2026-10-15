@@ -112,7 +112,7 @@ class TestHooks : public AnimationDelegate {
   virtual void WillApplyCompositorChanges() {}
   virtual void BeginMainFrame(const viz::BeginFrameArgs& args) {}
   virtual void WillBeginMainFrame() {}
-  virtual void WillBeginImplCommit() {}
+  virtual void DidUpdateLayers() {}
   virtual void DidBeginMainFrame() {}
   virtual void UpdateLayerTreeHost() {}
   virtual void DidInitializeLayerTreeFrameSink() {}

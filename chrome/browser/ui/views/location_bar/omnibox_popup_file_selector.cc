@@ -8,16 +8,17 @@
 #include "base/containers/span.h"
 #include "base/files/file_util.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/metrics/user_metrics.h"
 #include "base/strings/strcat.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
 #include "base/unguessable_token.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
-#include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/browser/ui/contextual_search/searchbox_context_data.h"
 #include "chrome/browser/ui/omnibox/omnibox_context_menu_controller.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
+#include "chrome/browser/ui/select_file_policy/chrome_select_file_policy.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/cr_components/composebox/composebox_handler.h"
 #include "chrome/browser/ui/webui/omnibox_popup/omnibox_popup_ui.h"
@@ -28,6 +29,7 @@
 #include "components/lens/lens_features.h"
 #include "components/lens/lens_overlay_mime_type.h"
 #include "components/omnibox/browser/searchbox.mojom.h"
+#include "components/omnibox/common/omnibox_metrics_utils.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/mime_util.h"
 #include "ui/base/base_window.h"
@@ -163,15 +165,14 @@ void OmniboxPopupFileSelector::OnFileDataReady(
   }
 
   edit_model_->OpenAiMode(false, /*via_context_menu=*/true);
-
   const std::string prefix = was_ai_mode_open_
                                  ? kAimContextTypeHistogramPrefix
                                  : kClassicContextTypeHistogramPrefix;
   const std::string sliced_prefix = base::StrCat({prefix, ".Clicked"});
-  base::UmaHistogramEnumeration(
-      sliced_prefix, is_image_
-                         ? OmniboxContextMenuController::ContextType::kImage
-                         : OmniboxContextMenuController::ContextType::kFile);
+  omnibox::ContextType context_type =
+      is_image_ ? omnibox::ContextType::kImage : omnibox::ContextType::kFile;
+  OmniboxContextMenuController::RecordContextMenuItemSelection(sliced_prefix,
+                                                               context_type);
 }
 
 void OmniboxPopupFileSelector::UpdateSearchboxContextData(

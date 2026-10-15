@@ -14,9 +14,9 @@
 #include "build/build_config.h"
 #include "chrome/browser/glic/host/glic.mojom-shared.h"
 #include "chrome/browser/glic/host/glic_ui.h"
+#include "chrome/browser/glic/public/features.h"
 #include "chrome/browser/glic/test_support/interactive_glic_test.h"
 #include "chrome/browser/glic/test_support/interactive_test_util.h"
-#include "chrome/browser/glic/widget/glic_window_controller.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_test_util.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
@@ -838,8 +838,7 @@ class GlicUiUnifiedFreIntegrationTest : public GlicUiInteractiveUiTestBase {
  public:
   GlicUiUnifiedFreIntegrationTest()
       : GlicUiInteractiveUiTestBase(TestParams(/*connected=*/true)) {
-    feature_list_.InitWithFeatures(
-        {features::kGlicUnifiedFreScreen, features::kGlicMultiInstance}, {});
+    feature_list_.InitAndEnableFeature(features::kGlicMultiInstance);
   }
   ~GlicUiUnifiedFreIntegrationTest() override = default;
 
@@ -948,7 +947,10 @@ IN_PROC_BROWSER_TEST_F(GlicUiUnifiedFreIntegrationTest, RejectFreClosesPanel) {
                        .SetMustRemainVisible(false)),
       WaitForHide(kGlicViewElementId),
       PollState(kControllerIsShowingState,
-                [this]() { return GetWindowControllerImpl().IsShowing(); }),
+                [this]() {
+                  auto* instance = GetGlicInstance();
+                  return instance && instance->IsShowing();
+                }),
       WaitForState(kControllerIsShowingState, false),
       CheckControllerShowing(false),
       CheckResult(

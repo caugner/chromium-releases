@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <string>
+#include <variant>
 
 #include "ash/ash_export.h"
 #include "ash/system/tray/tray_background_view.h"
@@ -32,10 +33,12 @@ class ASH_EXPORT ImagedTrayIcon : public TrayBackgroundView {
  public:
   using IconVisibilityCallback =
       base::RepeatingCallback<bool(session_manager::SessionState state)>;
+  using StringVariant = std::variant<std::u16string, /*message_id=*/int>;
 
   ImagedTrayIcon(Shelf* shelf,
                  const ui::ImageModel& image_model,
-                 const std::u16string& tooltip,
+                 const StringVariant& tooltip,
+                 const StringVariant& accessibility_name,
                  const TrayBackgroundViewCatalogName catalog_name);
 
   ImagedTrayIcon(const ImagedTrayIcon&) = delete;
@@ -47,12 +50,15 @@ class ASH_EXPORT ImagedTrayIcon : public TrayBackgroundView {
   // should return true if the icon should be visible in the given state.
   void set_icon_visibility_callback(IconVisibilityCallback callback);
 
+  void SetTooltip(const StringVariant& tooltip);
+  void SetAccessibilityName(const StringVariant& name);
+
   // TrayBackgroundView:
   void ClickedOutsideBubble(const ui::LocatedEvent& event) override;
   void UpdateTrayItemColor(bool is_active) override;
-  void HandleLocaleChange() override;
   void HideBubbleWithView(const TrayBubbleView* bubble_view) override;
   void HideBubble(const TrayBubbleView* bubble_view) override;
+  void HandleLocaleChange() override;
 
   views::ImageView* image_view() { return image_view_; }
 
@@ -60,6 +66,8 @@ class ASH_EXPORT ImagedTrayIcon : public TrayBackgroundView {
   class IconVisibilityHandler;
 
   raw_ptr<views::ImageView> image_view_;
+  StringVariant tooltip_;
+  StringVariant accessibility_name_;
 
   std::unique_ptr<IconVisibilityHandler> session_visibility_handler_;
 };

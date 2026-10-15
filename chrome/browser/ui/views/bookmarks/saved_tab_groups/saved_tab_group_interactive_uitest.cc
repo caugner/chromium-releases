@@ -33,9 +33,9 @@
 #include "chrome/browser/ui/views/bookmarks/saved_tab_groups/saved_tab_group_tabs_menu_model.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/tab_strip_region_view.h"
+#include "chrome/browser/ui/views/tabs/groups/tab_group_editor_bubble_view.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab/tab_close_button.h"
-#include "chrome/browser/ui/views/tabs/tab_group_editor_bubble_view.h"
 #include "chrome/browser/ui/views/tabs/tab_group_header.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/ui/views/test/tab_strip_interactive_test_mixin.h"
@@ -220,13 +220,15 @@ class SavedTabGroupInteractiveTest
           {features::kTabGroupMenuMoreEntryPoints,
            features::kBookmarkTabGroupConversion,
            data_sharing::features::kDataSharingFeature},
-          {data_sharing::features::kDataSharingJoinOnly});
+          {data_sharing::features::kDataSharingJoinOnly,
+           tab_groups::kProjectsPanel});
     } else {
       scoped_feature_list_.InitWithFeatures(
           {features::kTabGroupMenuMoreEntryPoints,
            features::kBookmarkTabGroupConversion},
           {data_sharing::features::kDataSharingFeature,
-           data_sharing::features::kDataSharingJoinOnly});
+           data_sharing::features::kDataSharingJoinOnly,
+           tab_groups::kProjectsPanel});
     }
 
     SavedTabGroupInteractiveTestBase::SetUp();
@@ -341,7 +343,6 @@ class SavedTabGroupInteractiveTest
               tab_groups::TabGroupSyncServiceFactory::GetForProfile(
                   browser()->profile()));
       service_impl->GetModel()->AddedFromSync(std::move(group));
-
     });
   }
 
@@ -1165,13 +1166,12 @@ IN_PROC_BROWSER_TEST_P(SavedTabGroupInteractiveTest,
       EnsureNotPresent(STGEverythingMenu::kTabGroup));
 }
 
-
 class SavedTabGroupEverythingMenuMoreEntryPointsFeature
     : public SavedTabGroupInteractiveTestBase {
  public:
   SavedTabGroupEverythingMenuMoreEntryPointsFeature() {
-    scoped_feature_list_.InitAndEnableFeature(
-        features::kTabGroupMenuMoreEntryPoints);
+    scoped_feature_list_.InitWithFeatures(
+        {features::kTabGroupMenuMoreEntryPoints}, {tab_groups::kProjectsPanel});
   }
 
  private:
@@ -1202,8 +1202,9 @@ class SavedTabGroupsCreateNewTabGroupAppMenu
     : public SavedTabGroupInteractiveTestBase {
  public:
   SavedTabGroupsCreateNewTabGroupAppMenu() {
-    scoped_feature_list_.InitAndEnableFeature(
-        features::kCreateNewTabGroupAppMenuTopLevel);
+    scoped_feature_list_.InitWithFeatures(
+        {features::kCreateNewTabGroupAppMenuTopLevel},
+        {tab_groups::kProjectsPanel});
   }
 
  private:
@@ -1246,7 +1247,9 @@ IN_PROC_BROWSER_TEST_P(SavedTabGroupInteractiveTest,
 class TabGroupShortcutsInteractiveTest
     : public SavedTabGroupInteractiveTestBase {
  public:
-  TabGroupShortcutsInteractiveTest() = default;
+  TabGroupShortcutsInteractiveTest() {
+    scoped_feature_list_.InitWithFeatures({}, {tab_groups::kProjectsPanel});
+  }
   ~TabGroupShortcutsInteractiveTest() override = default;
 
   void SetUp() override { SavedTabGroupInteractiveTestBase::SetUp(); }
@@ -1498,7 +1501,7 @@ class SavedTabGroupFocusInteractiveTestNonSubmenu
     scoped_feature_list_.InitWithFeaturesAndParameters(
         {{features::kTabGroupsFocusing,
           {{"tab_groups_focusing_default_to_focused", "true"}}}},
-        {features::kTabGroupMenuMoreEntryPoints});
+        {features::kTabGroupMenuMoreEntryPoints, tab_groups::kProjectsPanel});
     SavedTabGroupInteractiveTestBase::SetUp();
   }
 
@@ -1514,7 +1517,7 @@ class SavedTabGroupFocusInteractiveTestSubmenu
         {{features::kTabGroupsFocusing,
           {{"tab_groups_focusing_default_to_focused", "true"}}},
          {features::kTabGroupMenuMoreEntryPoints, {}}},
-        {});
+        {tab_groups::kProjectsPanel});
     SavedTabGroupInteractiveTestBase::SetUp();
   }
 

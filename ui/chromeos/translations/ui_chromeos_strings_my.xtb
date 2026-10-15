@@ -49,10 +49,11 @@
 <translation id="1379911846207762492">အင်တာနက်ချိတ်ဆက်မှု မရှိသည့်အခါ ဖွင့်ကြည့်နိုင်ရန် ဖိုင်များကို အော့ဖ်လိုင်းသုံးနိုင်အောင် ပြုလုပ်နိုင်သည်။</translation>
 <translation id="1383876407941801731">ရှာဖွေမှု</translation>
 <translation id="1388045380422025115">အမျိုးအစားအားလုံး</translation>
-<translation id="1395262318152388157">ဆလိုက်ဒါးကို ရှာပါ</translation>
+<translation id="1395262318152388157">ရှာဖွေရွှေ့ဘား</translation>
 <translation id="1399511500114202393">အသုံးပြုသူ အသိအမှတ်ပြုလက်မှတ် မရှိပါ</translation>
 <translation id="1403008701842173542">နေရာအနှံ့</translation>
 <translation id="1404323374378969387">နော်ဝေး</translation>
+<translation id="1412476183660741812">လက်မှတ်ထိုးထားသော Web Bundle</translation>
 <translation id="1433628812591023318">Parallels Desktop တွင် ဖိုင်များဆွဲချရန် ဖိုင်ကို Windows ဖိုင်များသို့ ရွှေ့ရပါမည်။</translation>
 <translation id="1435838927755162558">ဖိုင်တွဲကို Parallels Desktop အား မျှဝေခြင်း</translation>
 <translation id="1439919885608649279">ပန်းများနှင့်လူ</translation>
@@ -220,6 +221,7 @@
 <translation id="2708477391501452176">ပြင်သစ် BÉPO</translation>
 <translation id="2719020180254996569">ကွန်ရက် <ph name="NETWORK_COUNT" /> ခုအနက်မှ <ph name="NETWORK_INDEX" />၊ <ph name="NETWORK_NAME" />၊ <ph name="CONNECTION_STATUS" />၊ အသေးစိတ်များ</translation>
 <translation id="2724954091494693138">F ကီးဘုတ်ဖြင့် တူရကီ</translation>
+<translation id="2727633948226935816">ထပ်ပြီးသတိမပေးပါနှင့်</translation>
 <translation id="2728450421877450246">ပြင်သစ်</translation>
 <translation id="2732288874651063549"><ph name="VM_NAME" /> မျှဝေမှုကို စီမံရန်</translation>
 <translation id="2732839045120506979">ဗီယက်နမ် VNI</translation>
@@ -280,7 +282,7 @@
 <translation id="3269333278563769269">ပေါ်တူဂီ</translation>
 <translation id="3272909651715601089">"<ph name="PATH" />" ကို ဖွင့်၍မရပါ</translation>
 <translation id="3280431534455935878">ပြင်ဆင်နေ</translation>
-<translation id="3280719573299097127">သင်သည် အခမဲ့မဟုတ်သော ကွန်ရက်ကို သုံးနေသည်။ ဖိုင်စင့်ခ်လုပ်ခြင်းကို ခဏရပ်ထားသည်။</translation>
+<translation id="3280719573299097127">သင်သည် အခပေး ကွန်ရက်ကို သုံးနေသည်။ ဖိုင်စင့်ခ်လုပ်ခြင်းကို ခဏရပ်ထားသည်။</translation>
 <translation id="3280987981688031357">ဓာတ်ပြား</translation>
 <translation id="3290356915286466215">မလုံခြုံပါ</translation>
 <translation id="3291218047831493686">ဆင်းမ်ကတ်လော့ခ် ဆက်တင်ပြောင်းရန် ဤကွန်ရက်နှင့်ချိတ်ဆက်ပါ</translation>
@@ -470,6 +472,7 @@
 <translation id="4788401404269709922"><ph name="NUMBER_OF_KB" /> KB</translation>
 <translation id="4789067489790477934">သင်၏ Google Drive ရှိ ဖိုင်များကို Parallels Desktop အား အသုံးပြုခွင့်ပေးမည်။ ပြောင်းလဲမှုများကို သင်၏အခြားစက်များနှင့် စင့်ခ်လုပ်သွားပါမည်။</translation>
 <translation id="4790766916287588578">InScript ကီးဘုတ်ဖြင့် ဟိန္ဒီ</translation>
+<translation id="4798645114741131062">သင့် ChromeOS Flex စက်သည် မကြာမီ အပ်ဒိတ်များ ရရှိတော့မည်မဟုတ်ပါ။ ChromeOS စက်ပစ္စည်းသို့ အဆင့်မြှင့်ရန် စဉ်းစားပါ။</translation>
 <translation id="4801956050125744859">နှစ်ခုစလုံးကို ထားရှိရန်</translation>
 <translation id="4802185962157240723">ဟန်ဂေရီ</translation>
 <translation id="4804827417948292437">ထောပတ်သီး</translation>
@@ -619,6 +622,7 @@
 <translation id="5819442873484330149">ဟံဂူလ် ၃ စုံ(နောက်ဆုံး)</translation>
 <translation id="5832976493438355584">သော့ပိတ်ထား</translation>
 <translation id="5833610766403489739">ဒီဖိုင်မှာ တစ်နေရာရာကို ရောက်သွားပြီ။ ကျေးဇူးပြုပြီး သင်၏ ဒေါင်းလုဒ် နေရာ ဆက်တင်ကို စစ်ကြည့်ပြီး ထပ်စမ်းပါ။</translation>
+<translation id="5833859326857395309">နောက်ဆုံးအပ်ဒိတ်</translation>
 <translation id="5838451609423551646">ထည့်သွင်းမှုအားလုံးကို ရွေးချယ်မှုမှ ဖယ်ရှားထားသည်။</translation>
 <translation id="5845721951356578987">သူနာပြု</translation>
 <translation id="5858478190805449225">ဘက်ထရီ အားထိန်း ဖွင့်ထားသည်။ ဘက်ထရီ အားထိန်းပိတ်ထားချိန်၌ ထပ်စမ်းကြည့်ပါ။</translation>
@@ -919,7 +923,7 @@
 <translation id="8087576439476816834">ဒေါင်းလုဒ်လုပ်ရန်၊ <ph name="PROFILE_NAME" /></translation>
 <translation id="8106045200081704138">ကျွန်ုပ်အား မျှဝေထား</translation>
 <translation id="8116072619078571545">ရေခဲရေ</translation>
-<translation id="8120392982188717723">အခမဲ့ မဟုတ်သည့် ကွန်ရက်များဖြင့် စင့်ခ်လုပ်ခွင့်ပြုရန်</translation>
+<translation id="8120392982188717723">အခပေး ကွန်ရက်များဖြင့် စင့်ခ်လုပ်ခွင့်ပြုရန်</translation>
 <translation id="8124093710070495550">စင့်ခ်လုပ်ခြင်း ပြဿနာ</translation>
 <translation id="8128733386027980860">Dvorak ကီးဘုတ်ဖြင့် အင်္ဂလိပ် (ယူအက်စ်)</translation>
 <translation id="8137331602592933310">"<ph name="FILENAME" />" ကို သင့်အား မျှဝေပေးခဲ့သည်။ သင်သည် ၎င်းကို မပိုင်ဆိုင်၍ ၎င်းကို သင် မဖျက်နိုင်ပါ။</translation>

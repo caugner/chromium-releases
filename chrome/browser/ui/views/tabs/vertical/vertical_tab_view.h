@@ -13,7 +13,7 @@
 #include "chrome/browser/ui/tabs/tab_data.h"
 #include "chrome/browser/ui/tabs/tab_style.h"
 #include "chrome/browser/ui/tabs/vertical_tab_strip_state_controller.h"
-#include "chrome/browser/ui/views/tabs/hover_card_anchor_target.h"
+#include "chrome/browser/ui/views/tabs/hovercard/hover_card_anchor_target.h"
 #include "chrome/browser/ui/views/tabs/tab/alert_indicator_button.h"
 #include "chrome/browser/ui/views/tabs/tab/tab_context_menu_controller.h"
 #include "chrome/common/buildflags.h"
@@ -32,14 +32,7 @@ class GlowHoverController;
 class TabCloseButton;
 class TabCollectionNode;
 class TabIcon;
-
-namespace views {
-class Label;
-}
-
-namespace tabs {
-class VerticalTabStripStateController;
-}
+class TabTitle;
 
 namespace glic {
 class TabUnderlineView;
@@ -79,14 +72,14 @@ class VerticalTabView : public views::View,
   const TabCollectionNode* collection_node() const { return collection_node_; }
   const TabStyle* tab_style() const { return tab_style_; }
   float radial_highlight_opacity() { return radial_highlight_opacity_; }
+  const tabs::TabData& data() const { return tab_data_; }
+  bool IsActive() const { return active_; }
 
   TabCloseButton* close_button_for_testing() { return close_button_; }
-  bool collapsed_for_testing() { return collapsed_; }
 
   // HoverCardAnchorTarget:
-  bool IsActive() const override;
-  bool IsValid() const override;
-  const tabs::TabData& data() const override;
+  bool NeedsToShowThumbnail() const override;
+  bool IsValidHoverCardTarget() const override;
   views::BubbleBorder::Arrow GetAnchorPosition() const override;
   const views::View* GetAnchorView() const override;
 
@@ -141,8 +134,8 @@ class VerticalTabView : public views::View,
                            const TabChildConfig& config,
                            const bool center) const;
 
-  // Calculates the visibilities of child views based on various states.
-  absl::flat_hash_map<views::View*, bool> CalculateChildVisibilities() const;
+  // Calculates the visibility of child view based on various states.
+  bool IsChildVisible(const views::View* child, const int width) const;
 
   // views::LayoutDelegate
   views::ProposedLayout CalculateProposedLayout(
@@ -166,10 +159,10 @@ class VerticalTabView : public views::View,
   void ResetCollectionNode();
 
   void UpdateAccessibleName();
+  void OnFrameActiveStateChanged();
   void OnAXNameChanged(ax::mojom::StringAttribute attribute,
                        const std::optional<std::string>& name);
-  void OnCollapsedStateChanged(
-      tabs::VerticalTabStripStateController* controller);
+  void OnCollapseStateChanged(tabs::VerticalTabStripCollapseState state);
   void OnDataChanged();
   void SetSelection(bool selected);
   void UpdateTabData(tabs::TabInterface* tab);
@@ -194,6 +187,11 @@ class VerticalTabView : public views::View,
 
   bool IsDragging() const;
 
+  static int UncollapsedMinWidth();
+  static int CollapsedWidth();
+
+  bool IsInExpandOnHover(int width) const;
+
   const tabs::TabInterface* GetTabInterface() const;
 
   raw_ptr<TabCollectionNode> collection_node_ = nullptr;
@@ -203,16 +201,16 @@ class VerticalTabView : public views::View,
   const raw_ptr<const TabStyle> tab_style_;
 
   const raw_ptr<TabIcon> icon_;
-  const raw_ptr<views::Label> title_;
+  const raw_ptr<TabTitle> title_;
   const raw_ptr<AlertIndicatorButton> alert_indicator_;
   const raw_ptr<TabCloseButton> close_button_;
-
   raw_ptr<glic::TabUnderlineView> glic_tab_underline_view_ = nullptr;
 
   base::CallbackListSubscription node_destroyed_subscription_;
   base::CallbackListSubscription data_changed_subscription_;
   base::CallbackListSubscription collapsed_state_changed_subscription_;
   base::CallbackListSubscription paint_as_active_subscription_;
+  base::CallbackListSubscription ax_name_changed_subscription_;
 
   tabs::TabData tab_data_;
   bool active_ = false;
@@ -230,8 +228,7 @@ class VerticalTabView : public views::View,
 
   std::optional<int> active_tab_fill_id_;
   std::optional<int> inactive_tab_fill_id_;
-
-  base::CallbackListSubscription ax_name_changed_subscription_;
+  bool should_fill_background_tab_color_ = false;
 
   std::optional<performance_manager::freezing::FreezingVote> freezing_vote_;
 

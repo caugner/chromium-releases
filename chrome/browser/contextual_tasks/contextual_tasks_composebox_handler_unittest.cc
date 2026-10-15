@@ -10,7 +10,9 @@
 
 #include "base/containers/span.h"
 #include "base/memory/raw_ptr.h"
+#include "base/observer_list.h"
 #include "base/run_loop.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/bind.h"
 #include "base/test/gmock_callback_support.h"
 #include "base/test/metrics/histogram_tester.h"
@@ -25,6 +27,7 @@
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service_factory.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/tab_list/tab_list_interface.h"
+#include "chrome/browser/ui/contextual_search/desktop_query_contextualizer_delegate.h"
 #include "chrome/browser/ui/contextual_search/tab_contextualization_controller.h"
 #include "chrome/browser/ui/lens/lens_query_flow_router.h"
 #include "chrome/browser/ui/lens/lens_search_controller.h"
@@ -115,6 +118,15 @@ class MockContextualTasksUI : public ContextualTasksUI {
  public:
   explicit MockContextualTasksUI(content::WebUI* web_ui)
       : ContextualTasksUI(web_ui) {}
+
+  contextual_search::ContextualSearchSessionHandle*
+  GetOrCreateContextualSessionHandle() override {
+    return session_handle_ptr_;
+  }
+  void SetSessionHandle(
+      contextual_search::ContextualSearchSessionHandle* handle) {
+    session_handle_ptr_ = handle;
+  }
   MOCK_METHOD(void,
               PostMessageToWebview,
               (const lens::ClientToAimMessage& message),
@@ -128,6 +140,10 @@ class MockContextualTasksUI : public ContextualTasksUI {
               TakeInputStateModel,
               (),
               (override));
+
+ private:
+  raw_ptr<contextual_search::ContextualSearchSessionHandle>
+      session_handle_ptr_ = nullptr;
 };
 
 class TestContextualTasksComposeboxHandler
@@ -135,17 +151,14 @@ class TestContextualTasksComposeboxHandler
  public:
   using ContextualTasksComposeboxHandler::ContextualTasksComposeboxHandler;
 
-  MOCK_METHOD(void,
-              UploadTabContextWithData,
-              (int32_t tab_id,
-               std::optional<int64_t> context_id,
-               std::unique_ptr<lens::ContextualInputData> data,
-               RecontextualizeTabCallback callback),
-              (override));
   MOCK_METHOD(std::optional<base::UnguessableToken>,
               GetLensOverlayToken,
               (),
               (override));
+  MOCK_METHOD(LensSearchController*,
+              GetLensSearchController,
+              (),
+              (const, override));
   MOCK_METHOD(void,
               OnContextUploadStatusChanged,
               (const base::UnguessableToken& context_token,
@@ -208,6 +221,11 @@ class MockLensSearchController : public LensSearchController {
               CloseLensAsync,
               (lens::LensOverlayDismissalSource dismissal_source),
               (override));
+  MOCK_METHOD(void,
+              CloseLensAsync,
+              (lens::LensOverlayDismissalSource dismissal_source,
+               bool side_panel_already_closing),
+              (override));
 
   lens::LensQueryFlowRouter* query_router() override {
     return mock_router_.get();
@@ -224,6 +242,32 @@ class ContextualTasksComposeboxHandlerTest
  public:
   ContextualTasksComposeboxHandlerTest() = default;
   ~ContextualTasksComposeboxHandlerTest() override = default;
+
+  void SimulateUploadStatusChanged(
+      const base::UnguessableToken& context_token,
+      lens::MimeType mime_type,
+      contextual_search::ContextUploadStatus context_upload_status,
+      const std::optional<contextual_search::ContextUploadErrorType>&
+          error_type = std::nullopt) {
+    for (auto& obs : upload_observers_) {
+      obs.OnContextUploadStatusChanged(context_token, mime_type,
+                                       context_upload_status, error_type);
+    }
+  }
+
+  void PostUploadStatusChanged(
+      const base::UnguessableToken& context_token,
+      lens::MimeType mime_type,
+      contextual_search::ContextUploadStatus context_upload_status,
+      const std::optional<contextual_search::ContextUploadErrorType>&
+          error_type = std::nullopt) {
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE,
+        base::BindOnce(
+            &ContextualTasksComposeboxHandlerTest::SimulateUploadStatusChanged,
+            base::Unretained(this), context_token, mime_type,
+            context_upload_status, error_type));
+  }
 
   std::unique_ptr<contextual_search::InputStateModel>
   CreateMockInputStateModel() {
@@ -257,6 +301,28 @@ class ContextualTasksComposeboxHandlerTest
     auto mock_controller = std::make_unique<testing::NiceMock<
         contextual_search::MockContextualSearchContextController>>();
     mock_controller_ = mock_controller.get();
+
+    controller_weak_factory_ = std::make_unique<base::WeakPtrFactory<
+        contextual_search::ContextualSearchContextController>>(
+        mock_controller_);
+    ON_CALL(*mock_controller_, AsWeakPtr()).WillByDefault([this]() {
+      return controller_weak_factory_->GetWeakPtr();
+    });
+
+    ON_CALL(*mock_controller_, AddObserver(testing::_))
+        .WillByDefault(
+            [this](contextual_search::ContextualSearchContextController::
+                       ContextUploadStatusObserver* obs) {
+              if (!upload_observers_.HasObserver(obs)) {
+                upload_observers_.AddObserver(obs);
+              }
+            });
+    ON_CALL(*mock_controller_, RemoveObserver(testing::_))
+        .WillByDefault(
+            [this](contextual_search::ContextualSearchContextController::
+                       ContextUploadStatusObserver* obs) {
+              upload_observers_.RemoveObserver(obs);
+            });
     service_ = std::make_unique<contextual_search::ContextualSearchService>(
         /*identity_manager=*/nullptr, url_loader_factory(),
         template_url_service(), fake_variations_client(),
@@ -272,12 +338,14 @@ class ContextualTasksComposeboxHandlerTest
     session_handle_ =
         service_->GetSession(contextual_session_handle->session_id(),
                              /*invocation_source=*/std::nullopt);
+    session_handle_->CheckSearchContentSharingSettings(profile()->GetPrefs());
     ContextualSearchWebContentsHelper::GetOrCreateForWebContents(web_contents())
         ->SetTaskSession(std::nullopt, std::move(contextual_session_handle),
                          /*input_state_model=*/nullptr);
 
     mock_ui_ =
         std::make_unique<testing::NiceMock<MockContextualTasksUI>>(&web_ui_);
+    mock_ui_->SetSessionHandle(session_handle_.get());
     ON_CALL(*mock_ui_, GetWebUIWebContents())
         .WillByDefault(testing::Return(web_contents()));
     ON_CALL(*mock_ui_, GetTaskId())
@@ -300,6 +368,7 @@ class ContextualTasksComposeboxHandlerTest
         mojo::PendingReceiver<composebox::mojom::PageHandler>(),
         std::move(page_remote),
         mojo::PendingReceiver<searchbox::mojom::PageHandler>(),
+        searchbox_page_receiver_.BindNewPipeAndPassRemote(),
         base::BindRepeating(
             &ContextualTasksUI::GetOrCreateContextualSessionHandle,
             base::Unretained(mock_ui_.get())),
@@ -307,10 +376,13 @@ class ContextualTasksComposeboxHandlerTest
                             base::Unretained(mock_ui_.get())),
         base::BindRepeating(&ContextualTasksUI::TakeInputStateModel,
                             base::Unretained(mock_ui_.get())));
+    ON_CALL(*handler_, GetLensSearchController())
+        .WillByDefault(testing::Return(mock_lens_controller_.get()));
     handler_->SetMockContextualTasksService(mock_contextual_tasks_service_ptr_);
     handler_->recontextualizer_ =
         std::make_unique<contextual_tasks::QueryContextualizer>(
-            mock_contextual_tasks_service_ptr_, handler_.get());
+            mock_contextual_tasks_service_ptr_,
+            handler_->desktop_delegate_.get());
 
     // Default to calling the real implementation for
     // OnContextUploadStatusChanged.
@@ -328,10 +400,6 @@ class ContextualTasksComposeboxHandlerTest
                                                context_upload_status,
                                                error_type);
             });
-
-    auto searchbox_page_remote =
-        searchbox_page_receiver_.BindNewPipeAndPassRemote();
-    handler_->SetPage(std::move(searchbox_page_remote));
 
     // Setup MockTabContextualizationController
     tabs::TabInterface* active_tab =
@@ -364,6 +432,7 @@ class ContextualTasksComposeboxHandlerTest
     mock_contextual_tasks_service_ptr_ = nullptr;
     mock_tab_controller_ = nullptr;
     mock_lens_controller_ = nullptr;
+    mock_ui_->SetSessionHandle(nullptr);
     session_handle_.reset();
     service_.reset();
     mock_ui_.reset();
@@ -390,6 +459,13 @@ class ContextualTasksComposeboxHandlerTest
   testing::NiceMock<MockSearchboxPage> mock_searchbox_page_;
   mojo::Receiver<searchbox::mojom::Page> searchbox_page_receiver_{
       &mock_searchbox_page_};
+
+  base::ObserverList<contextual_search::ContextualSearchContextController::
+                         ContextUploadStatusObserver>
+      upload_observers_;
+  std::unique_ptr<base::WeakPtrFactory<
+      contextual_search::ContextualSearchContextController>>
+      controller_weak_factory_;
 
  private:
   base::test::ScopedFeatureList feature_list_;
@@ -555,16 +631,17 @@ TEST_F(ContextualTasksComposeboxHandlerTest,
         std::move(callback).Run(std::move(data));
       });
 
-  // Expect UploadTabContextWithData call.
-  EXPECT_CALL(*handler_, UploadTabContextWithData(testing::_,
-                                                  std::optional<int64_t>(12345),
-                                                  testing::_, testing::_))
+  // Expect StartFileUploadFlow call.
+  EXPECT_CALL(*mock_controller_,
+              StartFileUploadFlow(testing::_, testing::_, testing::_))
       .WillOnce(
-          [](int32_t tab_id, std::optional<int64_t> context_id,
-             std::unique_ptr<lens::ContextualInputData> data,
-             ContextualSearchboxHandler::RecontextualizeTabCallback callback) {
+          [this](const base::UnguessableToken& file_token,
+                 std::unique_ptr<lens::ContextualInputData> data,
+                 std::optional<lens::ImageEncodingOptions> image_options) {
             EXPECT_TRUE(data->is_implicit_upload);
-            std::move(callback).Run(true);
+            PostUploadStatusChanged(
+                file_token, lens::MimeType::kUnknown,
+                contextual_search::ContextUploadStatus::kUploadSuccessful);
           });
 
   EXPECT_CALL(*mock_controller_, CreateClientToAimRequest(testing::_))
@@ -654,16 +731,17 @@ TEST_F(ContextualTasksComposeboxHandlerTest,
         std::move(callback).Run(std::move(data));
       });
 
-  // Expect UploadTabContextWithData call because content changed.
-  EXPECT_CALL(*handler_, UploadTabContextWithData(testing::_,
-                                                  std::optional<int64_t>(12345),
-                                                  testing::_, testing::_))
+  // Expect StartFileUploadFlow call because content changed.
+  EXPECT_CALL(*mock_controller_,
+              StartFileUploadFlow(testing::_, testing::_, testing::_))
       .WillOnce(
-          [](int32_t tab_id, std::optional<int64_t> context_id,
-             std::unique_ptr<lens::ContextualInputData> data,
-             ContextualSearchboxHandler::RecontextualizeTabCallback callback) {
+          [this](const base::UnguessableToken& file_token,
+                 std::unique_ptr<lens::ContextualInputData> data,
+                 std::optional<lens::ImageEncodingOptions> image_options) {
             EXPECT_TRUE(data->is_implicit_upload);
-            std::move(callback).Run(true);
+            PostUploadStatusChanged(
+                file_token, lens::MimeType::kUnknown,
+                contextual_search::ContextUploadStatus::kUploadSuccessful);
           });
 
   EXPECT_CALL(*mock_controller_, CreateClientToAimRequest(testing::_))
@@ -761,9 +839,9 @@ TEST_F(ContextualTasksComposeboxHandlerTest,
         std::move(callback).Run(std::move(data));
       });
 
-  // Expect UploadTabContextWithData call to NOT be called.
-  EXPECT_CALL(*handler_, UploadTabContextWithData(testing::_, testing::_,
-                                                  testing::_, testing::_))
+  // Expect StartFileUploadFlow call to NOT be called.
+  EXPECT_CALL(*mock_controller_,
+              StartFileUploadFlow(testing::_, testing::_, testing::_))
       .Times(0);
 
   EXPECT_CALL(*mock_controller_, CreateClientToAimRequest(testing::_))
@@ -814,9 +892,9 @@ TEST_F(ContextualTasksComposeboxHandlerTest,
                   std::unique_ptr<contextual_tasks::ContextualTaskContext>)>
                   callback) { std::move(callback).Run(std::move(context)); });
 
-  // Expect UploadTabContextWithData to NOT be called.
-  EXPECT_CALL(*handler_, UploadTabContextWithData(testing::_, testing::_,
-                                                  testing::_, testing::_))
+  // Expect StartFileUploadFlow to NOT be called.
+  EXPECT_CALL(*mock_controller_,
+              StartFileUploadFlow(testing::_, testing::_, testing::_))
       .Times(0);
 
   // Expect CreateClientToAimRequest IS called (query submission continues).
@@ -873,9 +951,9 @@ TEST_F(ContextualTasksComposeboxHandlerTest,
                   std::unique_ptr<contextual_tasks::ContextualTaskContext>)>
                   callback) { std::move(callback).Run(std::move(context)); });
 
-  // Expect UploadTabContextWithData to NOT be called.
-  EXPECT_CALL(*handler_, UploadTabContextWithData(testing::_, testing::_,
-                                                  testing::_, testing::_))
+  // Expect StartFileUploadFlow to NOT be called.
+  EXPECT_CALL(*mock_controller_,
+              StartFileUploadFlow(testing::_, testing::_, testing::_))
       .Times(0);
 
   // Expect CreateClientToAimRequest IS called.
@@ -1009,16 +1087,17 @@ TEST_F(ContextualTasksComposeboxHandlerTest,
         std::move(callback).Run(std::move(data));
       });
 
-  // Expect UploadTabContextWithData call because bitmap changed.
-  EXPECT_CALL(*handler_, UploadTabContextWithData(testing::_,
-                                                  std::optional<int64_t>(12345),
-                                                  testing::_, testing::_))
+  // Expect StartFileUploadFlow call because bitmap changed.
+  EXPECT_CALL(*mock_controller_,
+              StartFileUploadFlow(testing::_, testing::_, testing::_))
       .WillOnce(
-          [](int32_t tab_id, std::optional<int64_t> context_id,
-             std::unique_ptr<lens::ContextualInputData> data,
-             ContextualSearchboxHandler::RecontextualizeTabCallback callback) {
+          [this](const base::UnguessableToken& context_token,
+                 std::unique_ptr<lens::ContextualInputData> data,
+                 std::optional<lens::ImageEncodingOptions> image_options) {
             EXPECT_TRUE(data->is_implicit_upload);
-            std::move(callback).Run(true);
+            PostUploadStatusChanged(
+                context_token, lens::MimeType::kUnknown,
+                contextual_search::ContextUploadStatus::kUploadSuccessful);
           });
 
   EXPECT_CALL(*mock_controller_, CreateClientToAimRequest(testing::_))
@@ -1110,9 +1189,9 @@ TEST_F(
         std::move(callback).Run(std::move(data));
       });
 
-  // Expect UploadTabContextWithData call to NOT be called.
-  EXPECT_CALL(*handler_, UploadTabContextWithData(testing::_, testing::_,
-                                                  testing::_, testing::_))
+  // Expect StartFileUploadFlow call to NOT be called.
+  EXPECT_CALL(*mock_controller_,
+              StartFileUploadFlow(testing::_, testing::_, testing::_))
       .Times(0);
 
   EXPECT_CALL(*mock_controller_, CreateClientToAimRequest(testing::_))
@@ -1303,16 +1382,19 @@ TEST_F(ContextualTasksComposeboxHandlerTest, AddTabContext_Delayed) {
         std::move(callback).Run(std::move(data));
       });
 
-  // Expect UploadTabContextWithData call.
-  EXPECT_CALL(*handler_, UploadTabContextWithData(testing::_, testing::_,
-                                                  testing::_, testing::_))
+  // Expect StartFileUploadFlow call.
+  EXPECT_CALL(*mock_controller_,
+              StartFileUploadFlow(testing::_, testing::_, testing::_))
       .WillOnce(
-          [](int32_t tab_id, std::optional<int64_t> context_id,
-             std::unique_ptr<lens::ContextualInputData> data,
-             ContextualSearchboxHandler::RecontextualizeTabCallback callback) {
-            // The delay-upload tab is not an implicit upload.
-            EXPECT_FALSE(data->is_implicit_upload);
-            std::move(callback).Run(true);
+          [this](const base::UnguessableToken& file_token,
+                 std::unique_ptr<lens::ContextualInputData> data,
+                 std::optional<lens::ImageEncodingOptions> image_options) {
+            // The delay-upload tab is an implicit upload because it was
+            // auto-suggested.
+            EXPECT_TRUE(data->is_implicit_upload);
+            PostUploadStatusChanged(
+                file_token, lens::MimeType::kUnknown,
+                contextual_search::ContextUploadStatus::kUploadSuccessful);
           });
 
   EXPECT_CALL(*mock_controller_, CreateClientToAimRequest(testing::_))
@@ -1393,9 +1475,9 @@ TEST_F(ContextualTasksComposeboxHandlerTest, DeleteContext_Delayed) {
   ASSERT_EQ(handler_->GetNumContextUploading(), 0);
   ASSERT_EQ(handler_->GetNumTabsDelayed(), 0);
 
-  // 3. Verify UploadTabContextWithData is NOT called when submitting.
-  EXPECT_CALL(*handler_, UploadTabContextWithData(testing::_, testing::_,
-                                                  testing::_, testing::_))
+  // 3. Verify StartFileUploadFlow is NOT called when submitting.
+  EXPECT_CALL(*mock_controller_,
+              StartFileUploadFlow(testing::_, testing::_, testing::_))
       .Times(0);
 
   EXPECT_CALL(*mock_controller_, CreateClientToAimRequest(testing::_))
@@ -1489,7 +1571,7 @@ TEST_F(ContextualTasksComposeboxHandlerTest, SubmitQuery_WaitsForUpload) {
   uploading_info.upload_status =
       contextual_search::ContextUploadStatus::kUploadSuccessful;
   EXPECT_CALL(*mock_ui_, PostMessageToWebview(testing::_)).Times(1);
-  handler_->OnContextUploadStatusChanged(
+  SimulateUploadStatusChanged(
       token, lens::MimeType::kPdf,
       contextual_search::ContextUploadStatus::kUploadSuccessful, std::nullopt);
 
@@ -1552,13 +1634,13 @@ TEST_F(ContextualTasksComposeboxHandlerTest,
 
   ASSERT_TRUE(current_token.has_value()) << "AddFileContext failed.";
 
-  handler_->OnContextUploadStatusChanged(
+  SimulateUploadStatusChanged(
       *current_token, lens::MimeType::kImage,
       contextual_search::ContextUploadStatus::kProcessing, std::nullopt);
   ASSERT_TRUE(handler_->IsAnyContextUploading());
   ASSERT_FALSE(handler_->HasPendingQueryForTesting());
 
-  handler_->OnContextUploadStatusChanged(
+  SimulateUploadStatusChanged(
       *current_token, lens::MimeType::kImage,
       contextual_search::ContextUploadStatus::kUploadReplaced, std::nullopt);
 
@@ -1596,7 +1678,7 @@ TEST_F(ContextualTasksComposeboxHandlerTest,
   ASSERT_FALSE(handler_->HasPendingQueryForTesting());
 
   EXPECT_CALL(*mock_ui_, PostMessageToWebview(testing::_)).Times(0);
-  handler_->OnContextUploadStatusChanged(
+  SimulateUploadStatusChanged(
       *current_token_2, lens::MimeType::kImage,
       contextual_search::ContextUploadStatus::kProcessing, std::nullopt);
 
@@ -1604,7 +1686,7 @@ TEST_F(ContextualTasksComposeboxHandlerTest,
   ASSERT_FALSE(handler_->HasPendingQueryForTesting());
 
   EXPECT_CALL(*mock_ui_, PostMessageToWebview(testing::_)).Times(0);
-  handler_->OnContextUploadStatusChanged(
+  SimulateUploadStatusChanged(
       *current_token_2, lens::MimeType::kImage,
       contextual_search::ContextUploadStatus::kNotUploaded, std::nullopt);
 
@@ -1612,7 +1694,7 @@ TEST_F(ContextualTasksComposeboxHandlerTest,
   ASSERT_FALSE(handler_->HasPendingQueryForTesting());
 
   EXPECT_CALL(*mock_ui_, PostMessageToWebview(testing::_)).Times(0);
-  handler_->OnContextUploadStatusChanged(
+  SimulateUploadStatusChanged(
       *current_token_2, lens::MimeType::kImage,
       contextual_search::ContextUploadStatus::kUploadStarted, std::nullopt);
 
@@ -1620,7 +1702,7 @@ TEST_F(ContextualTasksComposeboxHandlerTest,
   ASSERT_FALSE(handler_->HasPendingQueryForTesting());
 
   EXPECT_CALL(*mock_ui_, PostMessageToWebview(testing::_)).Times(0);
-  handler_->OnContextUploadStatusChanged(
+  SimulateUploadStatusChanged(
       *current_token_2, lens::MimeType::kImage,
       contextual_search::ContextUploadStatus::kProcessingSuggestSignalsReady,
       std::nullopt);
@@ -1636,7 +1718,7 @@ TEST_F(ContextualTasksComposeboxHandlerTest,
 
   testing::Mock::VerifyAndClearExpectations(mock_ui_.get());
   EXPECT_CALL(*mock_ui_, PostMessageToWebview(testing::_)).Times(1);
-  handler_->OnContextUploadStatusChanged(
+  SimulateUploadStatusChanged(
       *current_token_2, lens::MimeType::kImage,
       contextual_search::ContextUploadStatus::kUploadExpired, std::nullopt);
 
@@ -1883,16 +1965,18 @@ TEST_F(ContextualTasksComposeboxHandlerTest,
               base::OnceCallback<void(
                   std::unique_ptr<contextual_tasks::ContextualTaskContext>)>
                   callback) { std::move(callback).Run(std::move(context)); });
-  EXPECT_CALL(*handler_,
-              UploadTabContextWithData(testing::_, testing::Eq(std::nullopt),
-                                       testing::_, testing::_))
+  EXPECT_CALL(
+      *mock_controller_,
+      StartFileUploadFlow(
+          testing::_, testing::A<std::unique_ptr<lens::ContextualInputData>>(),
+          testing::_))
       .WillOnce(
-          [](int32_t tab_id, std::optional<int64_t> context_id,
-             std::unique_ptr<lens::ContextualInputData> data,
-             ContextualSearchboxHandler::RecontextualizeTabCallback callback) {
-            // The delay-upload tab is not an implicit upload.
-            EXPECT_FALSE(data->is_implicit_upload);
-            std::move(callback).Run(true);
+          [this](const base::UnguessableToken& file_token,
+                 std::unique_ptr<lens::ContextualInputData> data,
+                 std::optional<lens::ImageEncodingOptions> image_options) {
+            PostUploadStatusChanged(
+                file_token, lens::MimeType::kUnknown,
+                contextual_search::ContextUploadStatus::kUploadSuccessful);
           });
 
   EXPECT_CALL(*mock_controller_, CreateClientToAimRequest(testing::_))
@@ -1916,7 +2000,6 @@ TEST_F(ContextualTasksComposeboxHandlerTest,
 
   ASSERT_TRUE(token_opt.has_value())
       << "AddTabContext failed. URL setup might be wrong.";
-  base::UnguessableToken token = *token_opt;
   contextual_search::FileInfo uploading_info{};
   uploading_info.mime_type = lens::MimeType::kPdf;
   uploading_info.upload_status =
@@ -1924,7 +2007,7 @@ TEST_F(ContextualTasksComposeboxHandlerTest,
   uploading_info.tab_session_id =
       sessions::SessionTabHelper::IdForTab(active_tab->GetContents());
 
-  EXPECT_CALL(*mock_controller_, GetFileInfo(token))
+  EXPECT_CALL(*mock_controller_, GetFileInfo(testing::_))
       .WillRepeatedly(testing::Return(&uploading_info));
   // Should submit when SubmitQuery run + delayed tabs finish uploading.
   EXPECT_CALL(*mock_ui_, PostMessageToWebview(testing::_)).Times(1);
@@ -1933,6 +2016,7 @@ TEST_F(ContextualTasksComposeboxHandlerTest,
   // No pending query yet since have not submitted yet.
   ASSERT_FALSE(handler_->HasPendingQueryForTesting());
   handler_->SubmitQuery("What is this?", 0, false, false, false, false);
+  base::RunLoop().RunUntilIdle();
 
   // Now the delayed tabs should have uploaded.
   ASSERT_EQ(handler_->GetNumTabsDelayed(), 0);
@@ -2013,7 +2097,7 @@ TEST_F(ContextualTasksComposeboxHandlerTest, SubmitQuery_Immediately) {
   uploading_info.upload_status =
       contextual_search::ContextUploadStatus::kUploadSuccessful;
   EXPECT_CALL(*mock_ui_, PostMessageToWebview(testing::_)).Times(1);
-  handler_->OnContextUploadStatusChanged(
+  SimulateUploadStatusChanged(
       *current_token, lens::MimeType::kPdf,
       contextual_search::ContextUploadStatus::kUploadSuccessful, std::nullopt);
 
@@ -2061,19 +2145,17 @@ TEST_F(ContextualTasksComposeboxHandlerTest,
         std::move(callback).Run(std::move(data));
       });
 
-  EXPECT_CALL(*handler_, UploadTabContextWithData(testing::_, testing::_,
-                                                  testing::_, testing::_))
+  EXPECT_CALL(*mock_controller_,
+              StartFileUploadFlow(testing::_, testing::_, testing::_))
       .WillRepeatedly(
-          [](int32_t tab_id, std::optional<int64_t> context_id,
+          [](const base::UnguessableToken& file_token,
              std::unique_ptr<lens::ContextualInputData> data,
-             ContextualSearchboxHandler::RecontextualizeTabCallback callback) {
-            // The delay-upload tab is not an implicit upload.
+             std::optional<lens::ImageEncodingOptions> image_options) {
             EXPECT_FALSE(data->is_implicit_upload);
-            std::move(callback).Run(true);
           });
 
   EXPECT_CALL(*mock_controller_, CreateClientToAimRequest(testing::_))
-      .WillOnce(testing::Return(lens::ClientToAimMessage()));
+      .WillRepeatedly(testing::Return(lens::ClientToAimMessage()));
 
   // Run add file context's callback via mock so can store token in test.
   base::MockCallback<ContextualTasksComposeboxHandler::AddFileContextCallback>
@@ -2144,7 +2226,25 @@ TEST_F(ContextualTasksComposeboxHandlerTest,
   // Do not submit to server yet.
   EXPECT_CALL(*mock_ui_, PostMessageToWebview(testing::_)).Times(0);
 
+  testing::Mock::VerifyAndClearExpectations(mock_controller_.get());
+  EXPECT_CALL(*mock_controller_, CreateClientToAimRequest(testing::_))
+      .WillRepeatedly(testing::Return(lens::ClientToAimMessage()));
+  EXPECT_CALL(*mock_controller_, GetFileInfo(testing::_))
+      .WillRepeatedly(testing::Return(&info_processing));
+  EXPECT_CALL(*mock_controller_,
+              StartFileUploadFlow(testing::_, testing::_, testing::_))
+      .WillOnce(
+          [this](const base::UnguessableToken& file_token,
+                 std::unique_ptr<lens::ContextualInputData> data,
+                 std::optional<lens::ImageEncodingOptions> image_options) {
+            PostUploadStatusChanged(
+                file_token, lens::MimeType::kUnknown,
+                contextual_search::ContextUploadStatus::kUploadSuccessful);
+          });
+
   handler_->SubmitQuery("Combined Test", 0, false, false, false, false);
+  base::RunLoop().RunUntilIdle();
+
   // Delayed tabs should be uploaded once submit is run.
   ASSERT_EQ(handler_->GetNumTabsDelayed(), 0);
 
@@ -2154,19 +2254,15 @@ TEST_F(ContextualTasksComposeboxHandlerTest,
   ASSERT_TRUE(handler_->HasPendingQueryForTesting());
   ASSERT_EQ(handler_->GetNumContextUploading(), 2);
 
-  // File is finished uploading.
-  handler_->OnContextUploadStatusChanged(
-      *file_token_opt, lens::MimeType::kPdf,
-      contextual_search::ContextUploadStatus::kUploadSuccessful, std::nullopt);
-
-  // Still waiting on Normal Tab though, so has not sent yet.
-  ASSERT_TRUE(handler_->HasPendingQueryForTesting());
-  ASSERT_TRUE(handler_->IsAnyContextUploading());
-
-  // Normal tab is finished uploading.
+  // Explicit files and non-delayed tabs need to be manually completed,
+  // since they started uploading before the auto-completing mock was set up.
   EXPECT_CALL(*mock_ui_, PostMessageToWebview(testing::_)).Times(1);
-  handler_->OnContextUploadStatusChanged(
-      *normal_tab_token_opt, lens::MimeType::kHtml,
+
+  SimulateUploadStatusChanged(
+      *normal_tab_token_opt, lens::MimeType::kUnknown,
+      contextual_search::ContextUploadStatus::kUploadSuccessful, std::nullopt);
+  SimulateUploadStatusChanged(
+      *file_token_opt, lens::MimeType::kUnknown,
       contextual_search::ContextUploadStatus::kUploadSuccessful, std::nullopt);
 
   ASSERT_FALSE(handler_->IsAnyContextUploading());
@@ -2212,14 +2308,20 @@ TEST_F(ContextualTasksComposeboxHandlerTest,
   EXPECT_CALL(*mock_tab_controller_, GetPageContext(testing::_))
       .WillRepeatedly(
           [&](auto callback) { delayed_tab_callback = std::move(callback); });
-  EXPECT_CALL(*handler_, UploadTabContextWithData(testing::_, testing::_,
-                                                  testing::_, testing::_))
-      .WillRepeatedly([](int32_t, auto, auto, auto callback) {
-        std::move(callback).Run(true);
-      });
+
+  std::vector<base::UnguessableToken> query_tokens;
+  EXPECT_CALL(*mock_controller_,
+              StartFileUploadFlow(testing::_, testing::_, testing::_))
+      .WillRepeatedly(
+          [&query_tokens](
+              const base::UnguessableToken& file_token,
+              std::unique_ptr<lens::ContextualInputData> data,
+              std::optional<lens::ImageEncodingOptions> image_options) {
+            query_tokens.push_back(file_token);
+          });
 
   EXPECT_CALL(*mock_controller_, CreateClientToAimRequest(testing::_))
-      .WillOnce(testing::Return(lens::ClientToAimMessage()));
+      .WillRepeatedly(testing::Return(lens::ClientToAimMessage()));
 
   base::MockCallback<ContextualTasksComposeboxHandler::AddTabContextCallback>
       cb_d1;
@@ -2311,21 +2413,31 @@ TEST_F(ContextualTasksComposeboxHandlerTest,
   ASSERT_EQ(handler_->GetNumContextUploading(), 1);
   ASSERT_EQ(handler_->GetNumTabsDelayed(), 1);
 
-  contextual_search::FileInfo info_processing;
-  info_processing.upload_status =
+  contextual_search::FileInfo file_info_rB;
+  file_info_rB.upload_status =
       contextual_search::ContextUploadStatus::kProcessing;
-  info_processing.tab_session_id = session_id;
-  EXPECT_CALL(*mock_controller_, GetFileInfo(*token_rB_opt))
-      .WillRepeatedly(testing::Return(&info_processing));
+  file_info_rB.tab_session_id = session_id;
+  EXPECT_CALL(*mock_controller_, GetFileInfo(testing::_))
+      .WillRepeatedly(testing::Return(&file_info_rB));
 
   EXPECT_CALL(*mock_ui_, PostMessageToWebview(testing::_)).Times(0);
   handler_->SubmitQuery("Stress Test", 0, false, false, false, false);
+  base::RunLoop().RunUntilIdle();
 
   // Delayed tab #2 finishes uploading.
   ASSERT_TRUE(!delayed_tab_callback.is_null());
   auto data = std::make_unique<lens::ContextualInputData>();
   data->is_page_context_eligible = true;
   std::move(delayed_tab_callback).Run(std::move(data));
+  base::RunLoop().RunUntilIdle();
+
+  // Now manually complete the UploadTracker's pending items.
+  for (const auto& token : query_tokens) {
+    SimulateUploadStatusChanged(
+        token, lens::MimeType::kUnknown,
+        contextual_search::ContextUploadStatus::kUploadSuccessful);
+  }
+  base::RunLoop().RunUntilIdle();
 
   // Verify that still uploading.
   ASSERT_EQ(handler_->GetNumTabsDelayed(), 0);
@@ -2336,7 +2448,7 @@ TEST_F(ContextualTasksComposeboxHandlerTest,
 
   // Finish uploading file B.
   EXPECT_CALL(*mock_ui_, PostMessageToWebview(testing::_)).Times(1);
-  handler_->OnContextUploadStatusChanged(
+  SimulateUploadStatusChanged(
       *token_rB_opt, lens::MimeType::kHtml,
       contextual_search::ContextUploadStatus::kUploadSuccessful, std::nullopt);
 
@@ -2405,7 +2517,10 @@ TEST_F(ContextualTasksComposeboxHandlerTest,
   base::MockCallback<ContextualTasksComposeboxHandler::AddFileContextCallback>
       callback;
   base::RunLoop run_loop;
+  base::UnguessableToken file_token;
   EXPECT_CALL(callback, Run(testing::_)).WillOnce([&](const auto& result) {
+    ASSERT_TRUE(result.has_value());
+    file_token = result.value();
     run_loop.Quit();
   });
 
@@ -2444,6 +2559,19 @@ TEST_F(ContextualTasksComposeboxHandlerTest,
                   std::unique_ptr<contextual_tasks::ContextualTaskContext>)>
                   callback) { std::move(callback).Run(std::move(context)); });
 
+  // CreateClientToAimRequest should NOT be called during
+  // CreateAndSendQueryMessage because context is uploading.
+  EXPECT_CALL(*mock_controller_, CreateClientToAimRequest(testing::_)).Times(0);
+  EXPECT_CALL(*mock_ui_, PostMessageToWebview(testing::_)).Times(0);
+
+  handler_->CreateAndSendQueryMessage(kQuery);
+
+  EXPECT_TRUE(handler_->HasPendingQueryForTesting());
+
+  // Now complete the upload and verify that CreateClientToAimRequest is called.
+  testing::Mock::VerifyAndClearExpectations(mock_controller_.get());
+  testing::Mock::VerifyAndClearExpectations(mock_ui_.get());
+
   EXPECT_CALL(*mock_controller_, CreateClientToAimRequest(testing::_))
       .WillOnce([&](std::unique_ptr<
                     contextual_search::ContextualSearchContextController::
@@ -2453,12 +2581,13 @@ TEST_F(ContextualTasksComposeboxHandlerTest,
         EXPECT_TRUE(info->force_include_latest_interaction_request_data);
         return lens::ClientToAimMessage();
       });
+  EXPECT_CALL(*mock_ui_, PostMessageToWebview(testing::_)).Times(1);
 
-  EXPECT_CALL(*mock_ui_, PostMessageToWebview(testing::_)).Times(0);
+  SimulateUploadStatusChanged(
+      file_token, lens::MimeType::kUnknown,
+      contextual_search::ContextUploadStatus::kUploadSuccessful, std::nullopt);
 
-  handler_->CreateAndSendQueryMessage(kQuery);
-
-  EXPECT_TRUE(handler_->HasPendingQueryForTesting());
+  EXPECT_FALSE(handler_->HasPendingQueryForTesting());
 }
 
 TEST_F(ContextualTasksComposeboxHandlerTest,
@@ -2473,9 +2602,7 @@ TEST_F(ContextualTasksComposeboxHandlerTest,
           testing::ReturnRefOfCopy(std::optional<base::Uuid>(task_id)));
 
   // Set up uploaded tokens in the session handle used by the handler.
-  ContextualSearchWebContentsHelper::GetOrCreateForWebContents(web_contents())
-      ->session_handle()
-      ->CreateContextToken();
+  session_handle_->CreateContextToken();
 
   // Mock GetLensOverlayToken.
   EXPECT_CALL(*handler_, GetLensOverlayToken())
@@ -2629,9 +2756,9 @@ TEST_F(ContextualTasksComposeboxHandlerTest, ClearFiles_Delayed) {
   ASSERT_EQ(handler_->GetNumContextUploading(), 0);
   ASSERT_EQ(handler_->GetNumTabsDelayed(), 0);
 
-  // 3. Verify UploadTabContextWithData is NOT called.
-  EXPECT_CALL(*handler_, UploadTabContextWithData(testing::_, testing::_,
-                                                  testing::_, testing::_))
+  // 3. Verify StartFileUploadFlow is NOT called.
+  EXPECT_CALL(*mock_controller_,
+              StartFileUploadFlow(testing::_, testing::_, testing::_))
       .Times(0);
 
   EXPECT_CALL(*mock_controller_, CreateClientToAimRequest(testing::_))
@@ -2795,12 +2922,16 @@ TEST_F(ContextualTasksComposeboxHandlerTest, AddFileContext_NullSessionHandle) {
   mojo::PendingRemote<composebox::mojom::Page> page_remote;
   mojo::PendingReceiver<composebox::mojom::Page> page_receiver =
       page_remote.InitWithNewPipeAndPassReceiver();
+  mojo::PendingRemote<searchbox::mojom::Page> searchbox_page_remote;
+  mojo::PendingReceiver<searchbox::mojom::Page> searchbox_page_receiver =
+      searchbox_page_remote.InitWithNewPipeAndPassReceiver();
 
   auto handler = std::make_unique<TestContextualTasksComposeboxHandler>(
       mock_ui_.get(), profile(), web_contents(),
       mojo::PendingReceiver<composebox::mojom::PageHandler>(),
       std::move(page_remote),
       mojo::PendingReceiver<searchbox::mojom::PageHandler>(),
+      std::move(searchbox_page_remote),
       base::BindRepeating(
           []() -> contextual_search::ContextualSearchSessionHandle* {
             return nullptr;
@@ -2862,12 +2993,17 @@ TEST_F(ContextualTasksComposeboxHandlerTest, ActiveModelIsPassed) {
       &ContextualTasksComposeboxHandlerTest::CreateMockInputStateModel,
       base::Unretained(this));
   mojo::PendingRemote<composebox::mojom::Page> page_remote;
-  auto page_receiver = page_remote.InitWithNewPipeAndPassReceiver();
+  mojo::PendingReceiver<composebox::mojom::Page> page_receiver =
+      page_remote.InitWithNewPipeAndPassReceiver();
+  mojo::PendingRemote<searchbox::mojom::Page> searchbox_page_remote;
+  mojo::PendingReceiver<searchbox::mojom::Page> searchbox_page_receiver =
+      searchbox_page_remote.InitWithNewPipeAndPassReceiver();
   auto custom_handler = std::make_unique<TestContextualTasksComposeboxHandler>(
       mock_ui_.get(), profile(), web_contents(),
       mojo::PendingReceiver<composebox::mojom::PageHandler>(),
       std::move(page_remote),
       mojo::PendingReceiver<searchbox::mojom::PageHandler>(),
+      std::move(searchbox_page_remote),
       base::BindRepeating(
           &ContextualTasksUI::GetOrCreateContextualSessionHandle,
           base::Unretained(mock_ui_.get())),
@@ -2886,6 +3022,49 @@ TEST_F(ContextualTasksComposeboxHandlerTest, ActiveModelIsPassed) {
   ASSERT_NE(handler_model, nullptr);
   EXPECT_EQ(handler_model->get_state_for_testing().active_model,
             omnibox::ModelMode::MODEL_MODE_GEMINI_PRO);
+}
+
+TEST_F(ContextualTasksComposeboxHandlerTest, SuggestInputsCallbackWorks) {
+  auto mock_session =
+      std::make_unique<contextual_search::MockContextualSearchSessionHandle>();
+
+  lens::proto::LensOverlaySuggestInputs suggest_inputs;
+
+  EXPECT_CALL(*mock_session, GetSuggestInputs())
+      .WillRepeatedly(testing::Return(suggest_inputs));
+
+  auto mock_session_ptr = mock_session.get();
+
+  auto mock_get_session_callback = base::BindRepeating(
+      [](contextual_search::MockContextualSearchSessionHandle* ptr)
+          -> contextual_search::ContextualSearchSessionHandle* { return ptr; },
+      mock_session_ptr);
+
+  mojo::PendingRemote<composebox::mojom::Page> page_remote;
+  mojo::PendingReceiver<composebox::mojom::Page> page_receiver =
+      page_remote.InitWithNewPipeAndPassReceiver();
+  mojo::PendingRemote<searchbox::mojom::Page> searchbox_page_remote;
+  mojo::PendingReceiver<searchbox::mojom::Page> searchbox_page_receiver =
+      searchbox_page_remote.InitWithNewPipeAndPassReceiver();
+
+  auto custom_handler = std::make_unique<TestContextualTasksComposeboxHandler>(
+      mock_ui_.get(), profile(), web_contents(),
+      mojo::PendingReceiver<composebox::mojom::PageHandler>(),
+      std::move(page_remote),
+      mojo::PendingReceiver<searchbox::mojom::PageHandler>(),
+      std::move(searchbox_page_remote),
+      mock_get_session_callback,
+      base::BindRepeating(&ContextualTasksUI::ClearContextualSessionHandle,
+                          base::Unretained(mock_ui_.get())),
+      base::BindRepeating(&ContextualTasksUI::TakeInputStateModel,
+                          base::Unretained(mock_ui_.get())));
+
+  auto* client = static_cast<ContextualOmniboxClient*>(
+      custom_handler->GetOmniboxControllerForTesting()->client());
+
+  auto result = client->GetLensOverlaySuggestInputsForTesting();
+
+  ASSERT_TRUE(result.has_value());
 }
 
 TEST_F(ContextualTasksComposeboxHandlerTest,

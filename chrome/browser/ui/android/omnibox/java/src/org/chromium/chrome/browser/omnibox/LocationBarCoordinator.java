@@ -48,8 +48,6 @@ import org.chromium.chrome.browser.lens.LensController;
 import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
 import org.chromium.chrome.browser.lifecycle.NativeInitObserver;
 import org.chromium.chrome.browser.locale.LocaleManager;
-import org.chromium.chrome.browser.merchant_viewer.MerchantTrustSignalsCoordinator;
-import org.chromium.chrome.browser.multiwindow.MultiInstanceManager;
 import org.chromium.chrome.browser.omnibox.LocationBarMediator.OmniboxUma;
 import org.chromium.chrome.browser.omnibox.fusebox.FuseboxCoordinator;
 import org.chromium.chrome.browser.omnibox.fusebox.FuseboxCoordinator.FuseboxState;
@@ -179,9 +177,6 @@ public class LocationBarCoordinator
      * @param omniboxUma Interface for logging UMA histogram.
      * @param bookmarkState State of a URL bookmark state.
      * @param isToolbarMicEnabledSupplier Whether toolbar mic is enabled or not.
-     * @param merchantTrustSignalsCoordinatorSupplier Supplier of {@link
-     *     MerchantTrustSignalsCoordinator}. Can be null if a store icon shouldn't be shown, such as
-     *     when called from a search activity.
      * @param backPressManager The {@link BackPressManager} for intercepting back press.
      * @param tabModelSelectorSupplier Supplier of the {@link TabModelSelector}.
      * @param uiOverrides embedder-specific UI overrides
@@ -218,8 +213,6 @@ public class LocationBarCoordinator
             OmniboxUma omniboxUma,
             BookmarkState bookmarkState,
             BooleanSupplier isToolbarMicEnabledSupplier,
-            @Nullable Supplier<MerchantTrustSignalsCoordinator>
-                    merchantTrustSignalsCoordinatorSupplier,
             OmniboxActionDelegateImpl omniboxActionDelegate,
             @Nullable BrowserStateBrowserControlsVisibilityDelegate
                     browserControlsVisibilityDelegate,
@@ -237,7 +230,6 @@ public class LocationBarCoordinator
             boolean isToolbarPositionCustomizationEnabled,
             @Nullable PageZoomManager pageZoomManager,
             Function<Tab, @Nullable Bitmap> tabFaviconFunction,
-            @Nullable MultiInstanceManager multiInstanceManager,
             SnackbarManager snackbarManager,
             View bottomContainerView,
             @Nullable OmniboxChipManager omniboxChipManager) {
@@ -329,7 +321,6 @@ public class LocationBarCoordinator
                         modalDialogManagerSupplier,
                         mPageZoomIndicatorCoordinator,
                         mFuseboxCoordinator,
-                        multiInstanceManager,
                         locationBarEmbedder,
                         omniboxChipManager);
         if (backPressManager != null) {
@@ -345,7 +336,10 @@ public class LocationBarCoordinator
                         mLocationBarMediator,
                         windowAndroid.getKeyboardDelegate(),
                         isIncognito,
-                        onLongClickListener);
+                        onLongClickListener,
+                        mLocationBarMediator::onUrlTextChanged,
+                        mLocationBarMediator::onUrlTextRichChanged,
+                        mLocationBarMediator);
 
         // Set up text wrapping listener for FuseboxCoordinator
         mTextWrappingListener = this::onTextWrappingChanged;
@@ -376,13 +370,11 @@ public class LocationBarCoordinator
                 new StatusCoordinator(
                         isTabletWindow(),
                         statusView,
-                        mUrlCoordinator,
                         locationBarDataProvider,
                         templateUrlServiceSupplier,
                         profileObservableSupplier,
                         windowAndroid,
                         pageInfoAction,
-                        merchantTrustSignalsCoordinatorSupplier,
                         browserControlsVisibilityDelegate);
         mLocationBarMediator.setCoordinators(
                 mUrlCoordinator, mAutocompleteCoordinator, mStatusCoordinator);
@@ -411,9 +403,6 @@ public class LocationBarCoordinator
 
         mInstallButton = mLocationBarLayout.findViewById(R.id.install_button);
         mInstallButton.setOnClickListener(mLocationBarMediator::installButtonClicked);
-
-        mUrlCoordinator.setTextChangeListener(mLocationBarMediator::onUrlTextChanged);
-        mUrlCoordinator.setKeyDownListener(mLocationBarMediator);
 
         // The LocationBar's direction is tied to the UrlBar's text direction. Icons inside the
         // location bar, e.g. lock, refresh, X, should be reversed if UrlBar's text is RTL.

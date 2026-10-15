@@ -92,7 +92,7 @@ ScriptTool::~ScriptTool() = default;
 
 void ScriptTool::Execute(ToolFinishedCallback callback) {
   auto weak_this = weak_ptr_factory_.GetWeakPtr();
-  std::optional<uint32_t> execution_id =
+  std::optional<base::UnguessableToken> execution_id =
       frame_->GetWebFrame()->GetDocument().ExecuteScriptTool(
           blink::WebString::FromUTF8(action_->name),
           blink::WebString::FromUTF8(action_->input_arguments),
@@ -111,8 +111,14 @@ void ScriptTool::Cancel() {
   if (!execution_id_.has_value()) {
     return;
   }
+  // CancelScriptTool() synchronously dispatches DOM events that might destroy
+  // the owning frame and this tool. Use a weak pointer to detect if `this` is
+  // still valid.
+  base::WeakPtr<ScriptTool> weak_this = weak_ptr_factory_.GetWeakPtr();
   frame_->GetWebFrame()->GetDocument().CancelScriptTool(execution_id_.value());
-  execution_id_.reset();
+  if (weak_this) {
+    execution_id_.reset();
+  }
 }
 
 std::string ScriptTool::DebugString() const {

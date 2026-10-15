@@ -166,6 +166,7 @@
 #include "components/media_router/browser/media_router_dialog_controller.h"
 #include "components/media_router/browser/media_router_metrics.h"
 #include "components/omnibox/browser/autocomplete_classifier.h"
+#include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/password_manager/content/browser/content_password_manager_driver.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
@@ -926,7 +927,8 @@ DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(RenderViewContextMenu,
 RenderViewContextMenu::RenderViewContextMenu(
     content::RenderFrameHost& render_frame_host,
     const content::ContextMenuParams& params,
-    bool is_paste_enabled)
+    bool is_paste_enabled,
+    bool is_paste_and_match_style_enabled)
     : RenderViewContextMenuBase(render_frame_host, params),
       extension_items_(
           browser_context_,
@@ -946,7 +948,8 @@ RenderViewContextMenu::RenderViewContextMenu(
       accessibility_labels_submenu_model_(this),
       embedder_web_contents_(GetWebContentsToUse(&render_frame_host)),
       autofill_context_menu_manager_(this, &menu_model_),
-      is_paste_enabled_(is_paste_enabled) {
+      is_paste_enabled_(is_paste_enabled),
+      is_paste_and_match_style_enabled_(is_paste_and_match_style_enabled) {
   if (!g_custom_id_ranges_initialized) {
     g_custom_id_ranges_initialized = true;
     SetContentCustomCommandIdRange(IDC_CONTENT_CONTEXT_CUSTOM_FIRST,
@@ -1091,7 +1094,7 @@ void RenderViewContextMenu::IssuePreconnectionToUrl(
   net::SchemefulSite anonymization_key_schemeful_site(anonymization_key_gurl);
   auto network_anonymization_key =
       net::NetworkAnonymizationKey::CreateCrossSite(
-          anonymization_key_schemeful_site);
+          std::move(anonymization_key_schemeful_site));
   loading_predictor->PreconnectURLIfAllowed(GURL(preconnect_url),
                                             /*allow_credentials=*/true,
                                             network_anonymization_key);
@@ -1563,7 +1566,8 @@ void RenderViewContextMenu::RecordShownItem(int id, bool is_submenu) {
 }
 
 bool RenderViewContextMenu::IsHTML5Fullscreen() const {
-  Browser* browser = chrome::FindBrowserWithTab(embedder_web_contents_);
+  BrowserWindowInterface* browser =
+      chrome::FindBrowserWithTab(embedder_web_contents_);
   if (!browser) {
     return false;
   }
@@ -1575,7 +1579,8 @@ bool RenderViewContextMenu::IsHTML5Fullscreen() const {
 }
 
 bool RenderViewContextMenu::IsPressAndHoldEscRequiredToExitFullscreen() const {
-  Browser* browser = chrome::FindBrowserWithTab(source_web_contents_);
+  BrowserWindowInterface* browser =
+      chrome::FindBrowserWithTab(source_web_contents_);
   if (!browser) {
     return false;
   }
@@ -1806,10 +1811,6 @@ void RenderViewContextMenu::AppendLinkItems() {
             menu_model_
                 .GetIndexOfCommandId(IDC_CONTENT_CONTEXT_OPENLINKSPLITVIEW)
                 .value();
-        menu_model_.SetIsNewFeatureAt(
-            command_index,
-            UserEducationService::MaybeShowNewBadge(
-                GetBrowserContext(), features::kSideBySideLinkMenuNewBadge));
         menu_model_.SetElementIdentifierAt(command_index,
                                            kOpenLinkInSplitMenuItem);
       }
@@ -1829,7 +1830,7 @@ void RenderViewContextMenu::AppendLinkItems() {
 
 #if !BUILDFLAG(IS_ANDROID)
     if (base::FeatureList::IsEnabled(blink::features::kLinkPreview) &&
-        !is_link_to_iwa &&
+        params_.link_url.SchemeIsHTTPOrHTTPS() && !is_link_to_iwa &&
         !extensions::WebViewGuest::FromRenderFrameHost(GetRenderFrameHost())) {
       menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_OPENLINKPREVIEW,
                                       IDS_CONTENT_CONTEXT_OPENLINKPREVIEW);
@@ -2507,7 +2508,7 @@ void RenderViewContextMenu::AppendSearchProvider() {
     return;
   }
 
-  base::ReplaceChars(params_.selection_text, AutocompleteMatch::kInvalidChars,
+  base::ReplaceChars(params_.selection_text, AutocompleteInput::kInvalidChars,
                      u" ", &params_.selection_text);
 
   AutocompleteMatch match;
@@ -3435,8 +3436,6 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
             if (auto* rfh = GetRenderFrameHost()) {
               glic_service->Close(rfh->GetOutermostMainFrame());
             }
-          } else {
-            glic_service->CloseAndShutdown();
           }
         }
       }
@@ -3699,9 +3698,10 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       // so drop fullscreen when it is shown. https://crbug.com/1170584
       // TODO(avi): Do we need to attach the fullscreen block to the emoji
       // panel?
-      source_web_contents_
-          ->ForSecurityDropFullscreen(/*display_id=*/display::kInvalidDisplayId)
-          .RunAndReset();
+      if (!source_web_contents_->ForSecurityDropFullscreen(
+              /*display_id=*/display::kInvalidDisplayId)) {
+        return;
+      }
 
       Browser* browser = GetBrowser();
       if (browser) {
@@ -4029,9 +4029,7 @@ bool RenderViewContextMenu::IsPasteAndMatchStyleEnabled() const {
     return false;
   }
 
-  return ui::Clipboard::GetForCurrentThread()->IsFormatAvailable(
-      ui::ClipboardFormatType::PlainTextType(), ui::ClipboardBuffer::kCopyPaste,
-      CreateDataEndpoint(/*notify_if_restricted=*/false).get());
+  return is_paste_and_match_style_enabled_;
 }
 
 bool RenderViewContextMenu::IsPrintPreviewEnabled() const {
@@ -4456,13 +4454,13 @@ void RenderViewContextMenu::ExecGlic() {
         glic_item_executed_ = true;
         glic::GlicInvokeOptions options(
             glic::mojom::InvocationSource::kWebContentsContextMenu);
-        options.fre_override = glic::mojom::FreOverride::kTrustFirstInline;
         std::string arm = features::kGlicContextMenuArm.Get();
         if (arm == "arm3") {
           options.fre_override = glic::mojom::FreOverride::kTrustFirstClick;
         } else {
           options.fre_override = glic::mojom::FreOverride::kTrustFirstInline;
         }
+
         if (arm == "arm2") {
           options.prompts.push_back(
               l10n_util::GetStringUTF8(IDS_GLIC_SUMMARIZE_PAGE_PROMPT));

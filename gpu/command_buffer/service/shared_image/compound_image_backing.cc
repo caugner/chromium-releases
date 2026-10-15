@@ -735,7 +735,8 @@ std::unique_ptr<SharedImageBacking> CompoundImageBacking::Create(
 
   auto* gpu_backing_factory = shared_image_factory->GetFactoryByUsage(
       GetGpuSharedImageUsage(SharedImageUsageSet(usage)), format, size,
-      /*pixel_data=*/{}, gfx::EMPTY_BUFFER);
+      /*pixel_data=*/{}, gfx::EMPTY_BUFFER, /*stream=*/std::nullopt,
+      /*params=*/nullptr);
   if (!gpu_backing_factory) {
     return nullptr;
   }
@@ -752,7 +753,7 @@ std::unique_ptr<SharedImageBacking> CompoundImageBacking::Create(
   return base::WrapUnique(new CompoundImageBacking(
       mailbox, format, size, color_space, surface_origin, alpha_type, usage,
       std::move(debug_label), std::move(shm_backing),
-      shared_image_factory->GetWeakPtr(), gpu_backing_factory->GetWeakPtr(),
+      shared_image_factory->GetFactoryRef(), gpu_backing_factory->GetWeakPtr(),
       std::move(copy_manager)));
 }
 
@@ -775,7 +776,8 @@ std::unique_ptr<SharedImageBacking> CompoundImageBacking::Create(
 
   auto* gpu_backing_factory = shared_image_factory->GetFactoryByUsage(
       GetGpuSharedImageUsage(SharedImageUsageSet(usage)), format, size,
-      /*pixel_data=*/{}, gfx::EMPTY_BUFFER);
+      /*pixel_data=*/{}, gfx::EMPTY_BUFFER, /*stream=*/std::nullopt,
+      /*params=*/nullptr);
   if (!gpu_backing_factory) {
     return nullptr;
   }
@@ -792,7 +794,7 @@ std::unique_ptr<SharedImageBacking> CompoundImageBacking::Create(
   return base::WrapUnique(new CompoundImageBacking(
       mailbox, format, size, color_space, surface_origin, alpha_type, usage,
       std::move(debug_label), std::move(shm_backing),
-      shared_image_factory->GetWeakPtr(), gpu_backing_factory->GetWeakPtr(),
+      shared_image_factory->GetFactoryRef(), gpu_backing_factory->GetWeakPtr(),
       std::move(copy_manager), std::move(buffer_usage)));
 }
 
@@ -815,7 +817,7 @@ std::unique_ptr<SharedImageBacking> CompoundImageBacking::WrapExternalBacking(
   auto buffer_usage = backing->buffer_usage();
   return base::WrapUnique(new CompoundImageBacking(
       std::move(si_usage), std::move(buffer_usage), std::move(backing),
-      std::move(copy_manager), shared_image_factory->GetWeakPtr()));
+      std::move(copy_manager), shared_image_factory->GetFactoryRef()));
 }
 
 // static
@@ -892,7 +894,7 @@ CompoundImageBacking::CompoundImageBacking(
     SharedImageUsageSet usage,
     std::string debug_label,
     std::unique_ptr<SharedImageBacking> shm_backing,
-    base::WeakPtr<SharedImageFactory> shared_image_factory,
+    scoped_refptr<SharedImageFactoryRef> shared_image_factory,
     base::WeakPtr<SharedImageBackingFactory> gpu_backing_factory,
     scoped_refptr<SharedImageCopyManager> copy_manager,
     std::optional<gfx::BufferUsage> buffer_usage)
@@ -947,7 +949,7 @@ CompoundImageBacking::CompoundImageBacking(
     std::optional<gfx::BufferUsage> buffer_usage,
     std::unique_ptr<SharedImageBacking> backing,
     scoped_refptr<SharedImageCopyManager> copy_manager,
-    base::WeakPtr<SharedImageFactory> shared_image_factory)
+    scoped_refptr<SharedImageFactoryRef> shared_image_factory)
     : ClearTrackingSharedImageBacking(backing->mailbox(),
                                       backing->format(),
                                       backing->size(),
@@ -1097,6 +1099,42 @@ void CompoundImageBacking::NotifyEndAccess(SharedImageBacking* backing,
     auto cleared_rect = backing->ClearedRect();
     if (cleared_rect != ClearedRect()) {
       SetClearedRectInternal(cleared_rect);
+    }
+
+    // When is_thread_safe() is true, multiple threads can access the backings.
+    // If a GL backing was written to, we proactively sync its content to all
+    // other backings. This is required to support multithreading scenarios
+    // where GL access happens on the GPU main thread and skia or other kind of
+    // access happens on a different thread. Note that this is only enabled when
+    // kUseDynamicBackingAllocations is enabled where CompoundImageBacking can
+    // dynamically allocate GL backing on a different thread during runtime.
+    // When dynamic allocations are not enabled, existing backings already
+    // handles the proactive sync where needed (eg:
+    // WrappedGraphiteTextureBacking via
+    // GLTexturePassthroughFallbackImageRepresentation). Note that this solution
+    // will not work if we start with GLTextureImageBacking and than want to
+    // reallocate on a different thread where we can't access GL texture. We
+    // will need to handle that case with another solution.
+    // Also note that we are copying back to all the backings here, even to
+    // those that will never be read. This can be a performance bottleneck when
+    // there are multiple backings.
+    if (base::FeatureList::IsEnabled(
+            features::kUseCompoundImageBackingAsDefault) &&
+        base::FeatureList::IsEnabled(features::kUseDynamicBackingAllocations) &&
+        is_thread_safe() &&
+        (backing->GetType() == SharedImageBackingType::kGLTexture)) {
+      for (auto& element : elements_) {
+        auto* dst_backing = element.GetBacking();
+        if (dst_backing && dst_backing != backing &&
+            element.content_id_ != latest_content_id_) {
+          if (copy_manager_->CopyImage(backing, dst_backing)) {
+            element.content_id_ = latest_content_id_;
+          } else {
+            LOG(ERROR) << "DCSI: Proactive copy from " << backing->GetName()
+                       << " to " << dst_backing->GetName() << " failed.";
+          }
+        }
+      }
     }
   }
 }
@@ -1362,12 +1400,14 @@ CompoundImageBacking::ProduceSkiaGanesh(
   access_params.context_state = context_state;
   auto* backing =
       GetOrAllocateBacking(SharedImageAccessStream::kSkia, access_params);
-  if (!backing)
+  if (!backing) {
     return nullptr;
+  }
 
   auto real_rep = backing->ProduceSkiaGanesh(manager, tracker, context_state);
-  if (!real_rep)
+  if (!real_rep) {
     return nullptr;
+  }
 
   auto* gr_context = context_state ? context_state->gr_context() : nullptr;
   return std::make_unique<WrappedSkiaGaneshCompoundImageRepresentation>(
@@ -1635,9 +1675,12 @@ SharedImageBacking* CompoundImageBacking::GetOrAllocateBacking(
   if (base::FeatureList::IsEnabled(features::kUseDynamicBackingAllocations) &&
       shared_image_factory_) {
     SharedImageUsageSet usage = GetUsageFromAccessStream(stream);
-    auto* gpu_backing_factory = shared_image_factory_->GetFactoryByUsage(
-        usage, format(), size(),
-        /*pixel_data=*/{}, gfx::EMPTY_BUFFER);
+    SharedImageBackingFactory* gpu_backing_factory = nullptr;
+    shared_image_factory_->Execute([&](SharedImageFactory* factory) {
+      gpu_backing_factory = factory->GetFactoryByUsage(
+          usage, format(), size(),
+          /*pixel_data=*/{}, gfx::EMPTY_BUFFER, stream, &params);
+    });
 
     if (gpu_backing_factory) {
       ElementHolder element;

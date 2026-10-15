@@ -11,6 +11,10 @@
 #include "ui/gfx/image/image.h"
 #include "url/gurl.h"
 
+bool OmniboxClient::IsChromeOmniboxClient() const {
+  return false;
+}
+
 bool OmniboxClient::CurrentPageExists() const {
   return true;
 }
@@ -49,7 +53,7 @@ bookmarks::BookmarkModel* OmniboxClient::GetBookmarkModel() {
 
 bool OmniboxClient::ShowConfirmationDialogIfDefaultSearchExtensionControlled(
     const GURL& url,
-    base::OnceCallback<void(bool)> callback) {
+    base::OnceCallback<void(ExtensionControlledDialogResult)> callback) {
   return false;
 }
 

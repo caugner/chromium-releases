@@ -119,13 +119,12 @@ class AppBannerManagerAndroid
 
   // Called when the Java-side has retrieved information for the app.
   // Returns |false| if an icon fetch couldn't be kicked off.
-  void OnAppDetailsRetrieved(
-      JNIEnv* env,
-      int request_id,
-      const base::android::JavaRef<jobject>& japp_data,
-      const base::android::JavaRef<jstring>& japp_title,
-      const base::android::JavaRef<jstring>& japp_package,
-      const base::android::JavaRef<jstring>& jicon_url);
+  void OnAppDetailsRetrieved(JNIEnv* env,
+                             int request_id,
+                             const base::android::JavaRef<jobject>& japp_data,
+                             std::u16string&& app_title,
+                             std::string&& app_package,
+                             std::string&& icon_url);
 
   void ShowBannerFromBadge(const InstallBannerConfig& config);
 
@@ -178,8 +177,9 @@ class AppBannerManagerAndroid
   bool IsRelatedNonWebAppInstalled(
       const blink::Manifest::RelatedApplication& related_app) const override;
   void MaybeShowAmbientBadge(const InstallBannerConfig& config) override;
-  void ShowBannerUi(WebappInstallSource install_source,
-                    const InstallBannerConfig& config) override;
+  AppBannerManager::ShowBannerUiResult ShowBannerUi(
+      WebappInstallSource install_source,
+      const InstallBannerConfig& config) override;
   void InvalidateWeakPtrsForThisNavigation() override;
   void ResetCurrentPageData() override;
   void InstallableWebAppStatusUpdate() override;
@@ -202,16 +202,15 @@ class AppBannerManagerAndroid
   friend class content::WebContentsUserData<AppBannerManagerAndroid>;
 
   struct QueryNativeAppConfig {
-    QueryNativeAppConfig(
-        const base::android::ScopedJavaLocalRef<jstring>& url,
-        const base::android::ScopedJavaLocalRef<jstring>& package,
-        const base::android::ScopedJavaLocalRef<jstring>& referrer);
+    QueryNativeAppConfig(const std::string& url,
+                         const std::string& package,
+                         const std::string& referrer);
     QueryNativeAppConfig(const QueryNativeAppConfig& config);
     ~QueryNativeAppConfig();
 
-    base::android::ScopedJavaLocalRef<jstring> url;
-    base::android::ScopedJavaLocalRef<jstring> package;
-    base::android::ScopedJavaLocalRef<jstring> referrer;
+    std::string url;
+    std::string package;
+    std::string referrer;
   };
 
   // Creates the Java-side AppBannerManager.
@@ -226,7 +225,6 @@ class AppBannerManagerAndroid
   base::expected<QueryNativeAppConfig, InstallableStatusCode>
   GetNativeAppFetchRequestConfig(
       const GURL& validated_url,
-      JNIEnv* env,
       const blink::Manifest::RelatedApplication& related_application) const;
 
   // Called when the download of a native app's icon is complete, as native

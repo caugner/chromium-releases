@@ -91,7 +91,9 @@ public class CrossDeviceSettingImporter implements TopResumedActivityChangedObse
     private static final Set<Integer> NOT_READY_YET_STATES =
             Set.of(
                     ServiceStatus.DEVICE_INFO_TRACKER_MISSING,
-                    ServiceStatus.LOCAL_DEVICE_INFO_MISSING);
+                    ServiceStatus.LOCAL_DEVICE_INFO_MISSING,
+                    ServiceStatus.SYNC_NOT_CONFIGURED_AND_LOCAL_DEVICE_INFO_MISSING,
+                    ServiceStatus.WAITING_FOR_INITIAL_SYNC);
 
     private final ActivityLifecycleDispatcher mActivityLifecycleDispatcher;
     private final NullableObservableSupplier<Tab> mActivityTabSupplier;
@@ -112,6 +114,10 @@ public class CrossDeviceSettingImporter implements TopResumedActivityChangedObse
             };
 
     private @Nullable Tab mObservedTab;
+    private @Nullable CrossDevicePrefTracker mTrackerBeingObserved;
+    private @Nullable CrossDevicePrefTrackerObserver mTrackerObserver;
+    private @Nullable Runnable mLocalStateObserver;
+
     private final Callback<@Nullable Tab> mTabChangeCallback =
             new Callback<@Nullable Tab>() {
                 @Override
@@ -156,6 +162,21 @@ public class CrossDeviceSettingImporter implements TopResumedActivityChangedObse
         onTabChangeOrGainFocus(mActivityTabSupplier.get());
     }
 
+    private void stopObservingTracker() {
+        if (mTrackerObserver != null && mTrackerBeingObserved != null) {
+            mTrackerBeingObserved.removeObserver(mTrackerObserver);
+        }
+        mTrackerObserver = null;
+        mTrackerBeingObserved = null;
+    }
+
+    private void stopObservingLocalState() {
+        if (mLocalStateObserver != null) {
+            LocalStatePrefs.removeObserver(mLocalStateObserver);
+        }
+        mLocalStateObserver = null;
+    }
+
     /**
      * Called when the current tab changes or gains focus.
      *
@@ -163,6 +184,10 @@ public class CrossDeviceSettingImporter implements TopResumedActivityChangedObse
      */
     @VisibleForTesting
     void onTabChangeOrGainFocus(@Nullable Tab currentTab) {
+        onTabChangeOrGainFocus(currentTab, /* availableImmediately= */ true);
+    }
+
+    private void onTabChangeOrGainFocus(@Nullable Tab currentTab, boolean availableImmediately) {
         if (!FeatureList.isNativeInitialized()
                 || !ChromeFeatureList.isEnabled(XPLAT_SYNCED_SETUP)) {
             return;
@@ -178,60 +203,89 @@ public class CrossDeviceSettingImporter implements TopResumedActivityChangedObse
         if (crossDevicePrefTracker == null) return;
 
         @ServiceStatus int status = crossDevicePrefTracker.getServiceStatus();
-        if (NOT_READY_YET_STATES.contains(status)) {
-            crossDevicePrefTracker.addObserver(
-                    new CrossDevicePrefTrackerObserver() {
-                        @Override
-                        public void onRemotePrefChanged(
-                                String prefName,
-                                TimestampedPrefValue timestampedPrefValue,
-                                int osType,
-                                int formFactor) {}
+        boolean trackerReady = !NOT_READY_YET_STATES.contains(status);
+        boolean localStateReady = LocalStatePrefs.areNativePrefsLoaded();
 
-                        @Override
-                        public void onServiceStatusChanged(int status) {
-                            // If the cross-device pref tracker is still not ready, keep listening
-                            // for a future status change.
-                            if (NOT_READY_YET_STATES.contains(status)) return;
+        // If both dependencies are ready, stop any active observation and proceed to import.
+        if (trackerReady && localStateReady) {
+            stopObservingTracker();
+            stopObservingLocalState();
+            onCrossDevicePrefTrackerAndLocalStateReady(
+                    crossDevicePrefTracker, status, profile, currentTab, availableImmediately);
+            return;
+        }
 
-                            // Ensure the tab and profile are up-to-date, and still non-null.
-                            @Nullable Tab tabAfterStatusChange = mActivityTabSupplier.get();
-                            if (tabAfterStatusChange == null) return;
-
-                            @Nullable Profile profileAfterStatusChange =
-                                    tabAfterStatusChange.getProfile();
-                            if (!profile.equals(profileAfterStatusChange)) return;
-
-                            onCrossDevicePrefTrackerReady(
-                                    crossDevicePrefTracker,
-                                    status,
-                                    profileAfterStatusChange,
-                                    tabAfterStatusChange,
-                                    /* availableImmediately= */ false);
-                        }
-                    });
+        // Otherwise, defer the logic by observing whichever dependency is not yet ready.
+        if (!trackerReady) {
+            ensureObservingTracker(crossDevicePrefTracker, profile);
         } else {
-            onCrossDevicePrefTrackerReady(
-                    crossDevicePrefTracker,
-                    status,
-                    profile,
-                    currentTab,
-                    /* availableImmediately= */ true);
+            stopObservingTracker();
+        }
+
+        if (!localStateReady) {
+            ensureObservingLocalState();
+        } else {
+            stopObservingLocalState();
         }
     }
 
+    private void ensureObservingTracker(CrossDevicePrefTracker tracker, Profile profile) {
+        if (mTrackerBeingObserved != null && mTrackerBeingObserved != tracker) {
+            stopObservingTracker();
+        }
+        if (mTrackerObserver != null) return;
+
+        mTrackerObserver =
+                new CrossDevicePrefTrackerObserver() {
+                    @Override
+                    public void onRemotePrefChanged(
+                            String prefName,
+                            TimestampedPrefValue timestampedPrefValue,
+                            int osType,
+                            int formFactor) {}
+
+                    @Override
+                    public void onServiceStatusChanged(int status) {
+                        // If the tracker is still not ready, keep listening for status changes.
+                        if (NOT_READY_YET_STATES.contains(status)) return;
+
+                        // Ensure the tab and profile are still valid before retrying.
+                        @Nullable Tab currentTab = mActivityTabSupplier.get();
+                        if (currentTab == null) return;
+
+                        @Nullable Profile currentProfile = currentTab.getProfile();
+                        if (!profile.equals(currentProfile)) return;
+
+                        onTabChangeOrGainFocus(currentTab, /* availableImmediately= */ false);
+                    }
+                };
+        mTrackerBeingObserved = tracker;
+        tracker.addObserver(mTrackerObserver);
+    }
+
+    private void ensureObservingLocalState() {
+        if (mLocalStateObserver != null) return;
+
+        mLocalStateObserver =
+                () ->
+                        onTabChangeOrGainFocus(
+                                mActivityTabSupplier.get(), /* availableImmediately= */ false);
+        LocalStatePrefs.addObserver(mLocalStateObserver);
+    }
+
     /**
-     * Handles the {@link CrossDevicePrefTracker} reaching a "ready" state.
+     * Handles the {@link CrossDevicePrefTracker} and {@link LocalStatePrefs} reaching a "ready"
+     * state.
      *
      * @param tracker The {@link CrossDevicePrefTracker}.
      * @param status The {@link ServiceStatus} of the tracker.
      * @param profile The {@link Profile}.
      * @param tab The {@link Tab} that is currently focused.
-     * @param availableImmediately Whether the CrossDevicePrefTracker was available immediately
-     *     (when we first checked).
+     * @param availableImmediately Whether the CrossDevicePrefTracker and LocalStatePrefs were
+     *     available immediately (when we first checked).
      */
     @VisibleForTesting
-    void onCrossDevicePrefTrackerReady(
+    void onCrossDevicePrefTrackerAndLocalStateReady(
             CrossDevicePrefTracker tracker,
             @ServiceStatus int status,
             Profile profile,
@@ -675,5 +729,7 @@ public class CrossDeviceSettingImporter implements TopResumedActivityChangedObse
             mObservedTab.removeObserver(mTabObserver);
             mObservedTab = null;
         }
+        stopObservingTracker();
+        stopObservingLocalState();
     }
 }

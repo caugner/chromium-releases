@@ -71,7 +71,7 @@ export class ComposeboxFileThumbnailElement extends CrLitElement {
 
   protected accessor isUploading_: boolean = false;
 
-  protected get usePdfIcon_(): boolean {
+  protected shouldUsePdfIcon_(): boolean {
     return !this.lensSendRawFileMediaTypesEnabled_ ||
         this.file.type === 'pdf' || this.file.type === 'application/pdf';
   }
@@ -87,22 +87,51 @@ export class ComposeboxFileThumbnailElement extends CrLitElement {
     }
   }
 
-  protected onRemoveButtonClick_() {
-    // TODO(crbug.com/422559977): Send call to handler to delete file from
-    // cache.
-    this.fire('delete-file', {uuid: this.file.uuid, fromUserAction: true});
+  override firstUpdated(changedProperties: PropertyValues<this>) {
+    super.firstUpdated(changedProperties);
+    requestAnimationFrame(() => {
+      this.classList.add('entering');
+      const animations = this.getAnimations();
+      if (animations.length > 0) {
+        Promise.allSettled(animations.map(a => a.finished)).then(() => {
+          this.classList.remove('entering');
+        });
+      } else {
+        this.classList.remove('entering');
+      }
+    });
   }
 
-  protected get deleteFileButtonTitle_(): string {
+  protected onRemoveButtonClick_() {
+    if (this.classList.contains('exiting')) {
+      return;
+    }
+
+    this.classList.add('exiting');
+    const animations = this.getAnimations();
+
+    if (animations.length === 0) {
+      this.classList.remove('exiting');
+      this.fire('delete-file', {uuid: this.file.uuid, fromUserAction: true});
+    } else {
+      Promise.allSettled(animations.map(a => a.finished)).then(() => {
+        this.classList.remove('exiting');
+        this.fire('delete-file', {uuid: this.file.uuid, fromUserAction: true});
+      });
+    }
+  }
+
+  protected getDeleteFileButtonTitle_(): string {
     return loadTimeData.getStringF('composeboxDeleteFileTitle', this.file.name);
   }
 
-  protected get formattedUrl_(): string|null {
+  protected getFormattedUrl_(): string|null {
     if (!this.file?.url) {
       return null;
     }
     const link = new URL(this.file.url);
-    return (link.host + link.pathname).replace(/\/$/, '');
+    const host = link.host.replace(/^www\./, '');
+    return (host + link.pathname).replace(/\/$/, '');
   }
 }
 

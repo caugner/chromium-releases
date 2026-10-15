@@ -48,7 +48,6 @@ static void SetReferrerForRequest(LocalDOMWindow* origin_window,
 
   request.SetReferrerString(referrer.referrer);
   request.SetReferrerPolicy(referrer.referrer_policy);
-  request.SetHTTPOriginToMatchReferrerIfNeeded();
 }
 
 void LogDanglingMarkupHistogram(LocalDOMWindow* origin_window,

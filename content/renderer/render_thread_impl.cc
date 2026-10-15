@@ -165,6 +165,8 @@
 #include "third_party/perfetto/include/perfetto/tracing/track.h"
 #include "third_party/skia/include/core/SkFontMgr.h"
 #include "third_party/skia/include/core/SkGraphics.h"
+#include "third_party/skia/include/private/chromium/SkCodecsICCProfileChromium.h"
+#include "third_party/skia/include/private/chromium/SkExifChromium.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/base/ui_base_switches_util.h"
 #include "ui/display/display_switches.h"
@@ -294,6 +296,17 @@ bool IsBackgrounded(std::optional<base::Process::Priority> process_priority) {
     case base::Process::Priority::kUserVisible:
     case base::Process::Priority::kUserBlocking:
       return false;
+  }
+}
+
+// Helper function to update the content and media clients when the
+// GpuChannelHost may have been updated.
+void OnPotentialNewGpuChannelHost(gpu::GpuChannelHost* host) {
+  if (host) {
+    RenderMediaClient::SetGpuFeatureInfo(host->gpu_feature_info());
+    GetContentClient()->SetGpuInfo(host->gpu_info());
+  } else {
+    RenderMediaClient::SetGpuFeatureInfo(gpu::GpuFeatureInfo());
   }
 }
 
@@ -485,6 +498,8 @@ void RenderThreadImpl::Init() {
   // to wait on a sync call.
   gpu_->EstablishGpuChannel(
       base::BindOnce([](scoped_refptr<gpu::GpuChannelHost> host) {
+        // We don't call OnPotentialNewGpuChannelHost() here since this occurs
+        // before the RenderMediaClient has been initialized.
         if (host) {
           GetContentClient()->SetGpuInfo(host->gpu_info());
         }
@@ -785,6 +800,22 @@ void RenderThreadImpl::InitializeWebKit(mojo::BinderMap* binders) {
 
   RenderMediaClient::Initialize();
 
+  // Configure the ICC profile parser kill-switch early, before any image
+  // decoding occurs. When the feature is enabled, this forces skcms to be
+  // used instead of the Rust-based ICC parser.
+  // TODO(crbug.com/463653726): Remove this once the feature is validated in
+  // Stable.
+  SkCodecs::ICCProfileChromium::ForceSkcms(
+      base::FeatureList::IsEnabled(blink::features::kForceSkcmsICCParsing));
+
+  // Configure the EXIF parser kill-switch early, before any image decoding
+  // occurs. When the feature is enabled, this forces the C++ SkExif parser to
+  // be used instead of the Rust-based EXIF parser.
+  // TODO(crbug.com/463653726): Remove this once the feature is validated in
+  // Stable.
+  SkExif::ForceSkExif(
+      base::FeatureList::IsEnabled(blink::features::kForceSkExifCppParsing));
+
   // Hook up blink's codecs so skia can call them. Since only the renderer
   // processes should be doing image decoding, this is not done in the common
   // skia initialization code for the GPU.
@@ -825,28 +856,16 @@ void RenderThreadImpl::InitializeRenderer(
 
 void RenderThreadImpl::RegisterSchemes() {
   // chrome:
-  WebString chrome_scheme(WebString::FromASCII(kChromeUIScheme));
+  WebString chrome_scheme(WebString::FromAscii(kChromeUIScheme));
   WebSecurityPolicy::RegisterURLSchemeAsDisplayIsolated(chrome_scheme);
   WebSecurityPolicy::RegisterURLSchemeAsNotAllowingJavascriptURLs(
       chrome_scheme);
   WebSecurityPolicy::RegisterURLSchemeAsWebUI(chrome_scheme);
 
-  // Service workers for chrome://
-  if (base::FeatureList::IsEnabled(
-          features::kEnableServiceWorkersForChromeScheme)) {
-    WebSecurityPolicy::RegisterURLSchemeAsAllowingServiceWorkers(chrome_scheme);
-  }
-
   WebString chrome_untrusted_scheme(
-      WebString::FromASCII(kChromeUIUntrustedScheme));
+      WebString::FromAscii(kChromeUIUntrustedScheme));
 
   // chrome-untrusted:
-  // Service workers for chrome-untrusted://
-  if (base::FeatureList::IsEnabled(
-          features::kEnableServiceWorkersForChromeUntrusted)) {
-    WebSecurityPolicy::RegisterURLSchemeAsAllowingServiceWorkers(
-        chrome_untrusted_scheme);
-  }
   WebSecurityPolicy::RegisterURLSchemeAsNotAllowingJavascriptURLs(
       chrome_untrusted_scheme);
   WebSecurityPolicy::RegisterURLSchemeAsSupportingFetchAPI(
@@ -867,24 +886,24 @@ void RenderThreadImpl::RegisterSchemes() {
   }
 
   // devtools:
-  WebString devtools_scheme(WebString::FromASCII(kChromeDevToolsScheme));
+  WebString devtools_scheme(WebString::FromAscii(kChromeDevToolsScheme));
   WebSecurityPolicy::RegisterURLSchemeAsDisplayIsolated(devtools_scheme);
   WebSecurityPolicy::RegisterURLSchemeAsSupportingFetchAPI(devtools_scheme);
   WebSecurityPolicy::RegisterURLSchemeAsNotAllowingJavascriptURLs(
       devtools_scheme);
 
   // view-source:
-  WebString view_source_scheme(WebString::FromASCII(kViewSourceScheme));
+  WebString view_source_scheme(WebString::FromAscii(kViewSourceScheme));
   WebSecurityPolicy::RegisterURLSchemeAsDisplayIsolated(view_source_scheme);
 
   // chrome-error:
-  WebString error_scheme(WebString::FromASCII(kChromeErrorScheme));
+  WebString error_scheme(WebString::FromAscii(kChromeErrorScheme));
   WebSecurityPolicy::RegisterURLSchemeAsDisplayIsolated(error_scheme);
   WebSecurityPolicy::RegisterURLSchemeAsNotAllowingJavascriptURLs(error_scheme);
   WebSecurityPolicy::RegisterURLSchemeAsError(error_scheme);
 
   // googlechrome:
-  WebString google_chrome_scheme(WebString::FromASCII(kGoogleChromeScheme));
+  WebString google_chrome_scheme(WebString::FromAscii(kGoogleChromeScheme));
   WebSecurityPolicy::RegisterURLSchemeAsDisplayIsolated(google_chrome_scheme);
 }
 
@@ -929,8 +948,7 @@ media::GpuVideoAcceleratorFactories* RenderThreadImpl::GetGpuFactories() {
   auto media_context_provider = viz::ContextProviderCommandBuffer::CreateForGL(
       gpu_channel_host, kGpuStreamIdMedia, kGpuStreamPriorityMedia,
       GURL("chrome://gpu/RenderThreadImpl::CreateOffscreenContext/Media"),
-      viz::command_buffer_metrics::ContextType::MEDIA,
-      /*lose_context_when_out_of_memory=*/true);
+      viz::command_buffer_metrics::ContextType::MEDIA);
 
   const bool enable_video_decode_accelerator =
 #if BUILDFLAG(IS_LINUX)
@@ -1014,9 +1032,7 @@ RenderThreadImpl::GetVideoFrameCompositorContextProvider(
           GURL("chrome://gpu/RenderThreadImpl::CreateOffscreenContext/"
                "RenderCompositor"),
           /*automatic_flushes=*/false, /*support_locking=*/false, limits,
-          viz::command_buffer_metrics::ContextType::RENDERER_COMPOSITOR,
-          /*lose_context_when_out_of_memory=*/true);
-
+          viz::command_buffer_metrics::ContextType::RENDERER_COMPOSITOR);
   return video_frame_compositor_context_provider_;
 }
 
@@ -1080,8 +1096,7 @@ RenderThreadImpl::SharedMainThreadContextProvider() {
                "RendererMainThread"),
           /*automatic_flushes=*/true, /*support_locking=*/false,
           gpu::SharedMemoryLimits(),
-          viz::command_buffer_metrics::ContextType::RENDERER_MAIN_THREAD,
-          /*lose_context_when_out_of_memory=*/true);
+          viz::command_buffer_metrics::ContextType::RENDERER_MAIN_THREAD);
 
   auto result = shared_main_thread_contexts_->BindToCurrentSequence();
   if (result != gpu::ContextResult::kSuccess) {
@@ -1304,8 +1319,7 @@ scoped_refptr<gpu::GpuChannelHost> RenderThreadImpl::EstablishGpuChannelSync() {
 
   scoped_refptr<gpu::GpuChannelHost> gpu_channel =
       gpu_->EstablishGpuChannelSync();
-  if (gpu_channel)
-    GetContentClient()->SetGpuInfo(gpu_channel->gpu_info());
+  OnPotentialNewGpuChannelHost(gpu_channel.get());
   return gpu_channel;
 }
 
@@ -1317,8 +1331,7 @@ void RenderThreadImpl::EstablishGpuChannel(
       [](EstablishGpuChannelCallback callback, RenderThreadImpl* thread,
          scoped_refptr<gpu::GpuChannelHost> host) {
         TRACE_EVENT_END("gpu", perfetto::Track::FromPointer(thread));
-        if (host)
-          GetContentClient()->SetGpuInfo(host->gpu_info());
+        OnPotentialNewGpuChannelHost(host.get());
         std::move(callback).Run(std::move(host));
       },
       // The GPU process can crash; in that case, run the callback with no host
@@ -1538,8 +1551,7 @@ RenderThreadImpl::SharedCompositorWorkerContextProvider(
                "RenderWorker"),
           /*automatic_flushes=*/false, /*support_locking=*/true,
           shared_memory_limits,
-          viz::command_buffer_metrics::ContextType::RENDERER_RASTER_WORKER,
-          /*lose_context_when_out_of_memory=*/true);
+          viz::command_buffer_metrics::ContextType::RENDERER_RASTER_WORKER);
 
   auto result = shared_worker_context_provider_->BindToCurrentSequence();
   if (result != gpu::ContextResult::kSuccess) {
@@ -1548,6 +1560,64 @@ RenderThreadImpl::SharedCompositorWorkerContextProvider(
   }
 
   return shared_worker_context_provider_;
+}
+
+void RenderThreadImpl::SharedMediaContextProvider(
+    base::OnceCallback<void(scoped_refptr<viz::RasterContextProvider>)>
+        callback) {
+  DCHECK(IsMainThread());
+  // Try to reuse existing shared worker context provider.
+  if (shared_media_context_provider_) {
+    // Note: If context is lost, delete reference after releasing the lock.
+    viz::RasterContextProvider::ScopedRasterContextLock lock(
+        shared_media_context_provider_.get());
+    if (lock.RasterInterface()->GetGraphicsResetStatusKHR() == GL_NO_ERROR) {
+      std::move(callback).Run(shared_media_context_provider_);
+      return;
+    }
+  }
+
+  scoped_refptr<gpu::GpuChannelHost> gpu_channel_host(
+      EstablishGpuChannelSync());
+  if (!gpu_channel_host) {
+    shared_media_context_provider_ = nullptr;
+    std::move(callback).Run(shared_media_context_provider_);
+    return;
+  }
+
+  auto shared_memory_limits = gpu::SharedMemoryLimits::ForGPURasterContext();
+
+  auto context_provider = viz::ContextProviderCommandBuffer::CreateForRaster(
+      std::move(gpu_channel_host), kGpuStreamIdWorker, kGpuStreamPriorityWorker,
+      GURL("chrome://gpu/RenderThreadImpl::CreateOffscreenContext/"
+           "MediaWorker"),
+      /*automatic_flushes=*/false, /*support_locking=*/true,
+      shared_memory_limits,
+      viz::command_buffer_metrics::ContextType::RENDERER_MEDIA_WORKER);
+
+  GetMediaSequencedTaskRunner()->PostTaskAndReplyWithResult(
+      FROM_HERE,
+      base::BindOnce(&RenderThreadImpl::BindMediaContextProviderOnMediaThread,
+                     base::Unretained(this), std::move(context_provider)),
+      base::BindOnce(&RenderThreadImpl::SetMediaContextProviderOnMainThread,
+                     base::Unretained(this), std::move(callback)));
+}
+
+scoped_refptr<viz::RasterContextProvider>
+RenderThreadImpl::BindMediaContextProviderOnMediaThread(
+    scoped_refptr<viz::RasterContextProvider> rcp) {
+  if (rcp->BindToCurrentSequence() != gpu::ContextResult::kSuccess) {
+    return nullptr;
+  }
+  return rcp;
+}
+
+void RenderThreadImpl::SetMediaContextProviderOnMainThread(
+    base::OnceCallback<void(scoped_refptr<viz::RasterContextProvider>)>
+        callback,
+    scoped_refptr<viz::RasterContextProvider> rcp) {
+  shared_media_context_provider_ = rcp;
+  std::move(callback).Run(rcp);
 }
 
 bool RenderThreadImpl::RendererIsHidden() const {

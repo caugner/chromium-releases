@@ -60,6 +60,7 @@ import org.chromium.chrome.browser.lens.LensEntryPoint;
 import org.chromium.chrome.browser.lens.LensIntentParams;
 import org.chromium.chrome.browser.lens.LensMetrics;
 import org.chromium.chrome.browser.locale.LocaleManager;
+import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
 import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
 import org.chromium.chrome.browser.preferences.ChromeSharedPreferences;
 import org.chromium.chrome.browser.profiles.Profile;
@@ -72,6 +73,7 @@ import org.chromium.chrome.browser.share.ShareHelper;
 import org.chromium.chrome.browser.share.ShareUtils;
 import org.chromium.chrome.browser.share.link_to_text.LinkToTextHelper;
 import org.chromium.chrome.browser.tab.TabContextMenuItemDelegate;
+import org.chromium.chrome.browser.ui.signin.ForcedSigninStatusProvider;
 import org.chromium.components.browser_ui.share.ShareParams;
 import org.chromium.components.browser_ui.widget.BrowserUiListMenuUtils;
 import org.chromium.components.embedder_support.contextmenu.ChipDelegate;
@@ -432,6 +434,11 @@ public class ChromeContextMenuPopulator implements ContextMenuPopulator {
         return UrlFormatter.formatUrlForDisplayOmitSchemeOmitTrivialSubdomains(url.getSpec());
     }
 
+    private boolean areMandatoryFlowsCompleted(Profile profile) {
+        return FirstRunStatus.getFirstRunFlowComplete()
+                && !ForcedSigninStatusProvider.getForProfile(profile).isForcedSigninShowing();
+    }
+
     @VisibleForTesting
     boolean isTabletScreen() {
         return DeviceFormFactor.isNonMultiDisplayContextOnTablet(mContext);
@@ -484,7 +491,7 @@ public class ChromeContextMenuPopulator implements ContextMenuPopulator {
         }
         if (mParams.isAnchor()) {
             ModelList linkGroup = new ModelList();
-            if (FirstRunStatus.getFirstRunFlowComplete()
+            if (areMandatoryFlowsCompleted(getProfile())
                     && !isEmptyUrl(mParams.getUrl())
                     && UrlUtilities.isAcceptedScheme(mParams.getUrl())) {
                 if (mMode == ContextMenuMode.NORMAL) {
@@ -495,14 +502,14 @@ public class ChromeContextMenuPopulator implements ContextMenuPopulator {
                             && !shouldOpenIncognitoAsWindow()) {
                         linkGroup.add(createListItem(Item.OPEN_IN_INCOGNITO_TAB));
                     }
-                    if (mItemDelegate.isOpenInOtherWindowSupported()) {
-                        linkGroup.add(createListItem(Item.OPEN_IN_OTHER_WINDOW));
-                    } else if (isTabletScreen() && mItemDelegate.canEnterMultiWindowMode()) {
+                    if (MultiWindowUtils.isLinkNavigationToNewWindowSupported()) {
                         linkGroup.add(createListItem(Item.OPEN_IN_NEW_WINDOW));
+                    } else if (mItemDelegate.isOpenInOtherWindowSupported()) {
+                        linkGroup.add(createListItem(Item.OPEN_IN_OTHER_WINDOW));
                     }
                     if (!mItemDelegate.isIncognito()
                             && mItemDelegate.isIncognitoSupported()
-                            && shouldOpenIncognitoAsWindow()) {
+                            && MultiWindowUtils.isLinkNavigationToIncognitoWindowSupported()) {
                         linkGroup.add(createListItem(Item.OPEN_IN_INCOGNITO_WINDOW));
                     }
                 }
@@ -536,7 +543,7 @@ public class ChromeContextMenuPopulator implements ContextMenuPopulator {
                     linkGroup.add(createListItem(Item.COPY_LINK_TEXT));
                 }
             }
-            if (FirstRunStatus.getFirstRunFlowComplete()) {
+            if (areMandatoryFlowsCompleted(getProfile())) {
                 if (!mItemDelegate.isIncognito()
                         && UrlUtilities.isDownloadableScheme(mParams.getLinkUrl())) {
                     linkGroup.add(
@@ -601,7 +608,7 @@ public class ChromeContextMenuPopulator implements ContextMenuPopulator {
             }
         }
 
-        if (mParams.isImage() && FirstRunStatus.getFirstRunFlowComplete()) {
+        if (mParams.isImage() && areMandatoryFlowsCompleted(getProfile())) {
             ModelList imageGroup = new ModelList();
             boolean isSrcDownloadableScheme =
                     UrlUtilities.isDownloadableScheme(mParams.getSrcUrl());
@@ -676,7 +683,7 @@ public class ChromeContextMenuPopulator implements ContextMenuPopulator {
             groupedItems.add(imageGroup);
         }
 
-        if (mParams.isVideo() && FirstRunStatus.getFirstRunFlowComplete()) {
+        if (mParams.isVideo() && areMandatoryFlowsCompleted(getProfile())) {
             ModelList videoGroup = new ModelList();
             if (mParams.canSaveMedia() && UrlUtilities.isDownloadableScheme(mParams.getSrcUrl())) {
                 videoGroup.add(
@@ -718,7 +725,7 @@ public class ChromeContextMenuPopulator implements ContextMenuPopulator {
         // Only add below items to the front of link group iff it's in the CUSTOM_TAB or WEB_APP
         // mode.
         if ((mMode == ContextMenuMode.WEB_APP || mMode == ContextMenuMode.CUSTOM_TAB)
-                && FirstRunStatus.getFirstRunFlowComplete()) {
+                && areMandatoryFlowsCompleted(getProfile())) {
             ModelList items =
                     groupedItems.isEmpty()
                             ? new ModelList()
@@ -748,7 +755,7 @@ public class ChromeContextMenuPopulator implements ContextMenuPopulator {
             }
         }
 
-        if (shouldShowDeveloperMenu() && FirstRunStatus.getFirstRunFlowComplete()) {
+        if (shouldShowDeveloperMenu() && areMandatoryFlowsCompleted(getProfile())) {
             ModelList developerGroup = new ModelList();
             if (mParams.isPage()
                     && shouldShowEmptySpaceContextMenu()
@@ -1086,19 +1093,21 @@ public class ChromeContextMenuPopulator implements ContextMenuPopulator {
             tabItemDelegate.onOpenInNewIncognitoTab(mParams.getUrl());
         } else if (itemId == R.id.contextmenu_open_in_incognito_window) {
             recordContextMenuSelection(ContextMenuUma.Action.OPEN_IN_INCOGNITO_WINDOW);
-            tabItemDelegate.openInAnotherWindow(
-                    mParams.getUrl(), /* referrer= */ null, /* isIncognito= */ true);
+            tabItemDelegate.openInIncognitoWindow(mParams.getUrl());
         } else if (itemId == R.id.contextmenu_open_in_other_window) {
             recordContextMenuSelection(ContextMenuUma.Action.OPEN_IN_OTHER_WINDOW);
             tabItemDelegate.openInOtherWindow(
-                    mParams.getUrl(), mParams.getReferrer(), tabItemDelegate.isIncognito());
+                    mParams.getUrl(),
+                    mParams.getReferrer(),
+                    tabItemDelegate.isIncognito(),
+                    /* preferNew= */ false);
         } else if (itemId == R.id.contextmenu_open_in_new_window) {
             recordContextMenuSelection(ContextMenuUma.Action.OPEN_IN_NEW_WINDOW);
-            // TODO(crbug.com/458784417): Update openInOtherWindow to handle all cases of opening
-            // URLs.
-            // |openInOtherWindow| can handle opening in a new window as well.
             tabItemDelegate.openInOtherWindow(
-                    mParams.getUrl(), mParams.getReferrer(), tabItemDelegate.isIncognito());
+                    mParams.getUrl(),
+                    mParams.getReferrer(),
+                    tabItemDelegate.isIncognito(),
+                    /* preferNew= */ true);
         } else if (itemId == R.id.contextmenu_open_in_ephemeral_tab) {
             recordContextMenuSelection(ContextMenuUma.Action.OPEN_IN_EPHEMERAL_TAB);
             tabItemDelegate.onOpenInEphemeralTab(mParams.getUrl(), mParams.getLinkText());

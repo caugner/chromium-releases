@@ -473,13 +473,16 @@ void PassthroughResources::SharedImageData::EnsureClear(
     api->glDisableFn(GL_SCISSOR_TEST);
     api->glClearFn(GL_COLOR_BUFFER_BIT);
 
+    if (api->glCheckFramebufferStatusEXTFn(GL_FRAMEBUFFER) ==
+        GL_FRAMEBUFFER_COMPLETE) {
+      // Mark the shared image as cleared.
+      representation_->SetCleared();
+    }
+
     // Delete the generated framebuffer.
     api->glFramebufferTexture2DEXTFn(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
                                      texture->target(), 0, 0);
     api->glDeleteFramebuffersEXTFn(1, &fbo);
-
-    // Mark the shared image as cleared.
-    representation_->SetCleared();
   }
 }
 
@@ -1312,9 +1315,16 @@ gpu::Capabilities GLES2DecoderPassthroughImpl::GetCapabilities() {
   caps.msaa_is_slow = MSAAIsSlow(feature_info_->workarounds());
   caps.avoid_stencil_buffers =
       feature_info_->workarounds().avoid_stencil_buffers;
-  caps.supports_rgb_to_yuv_conversion = true;
-  // Technically, YUV readback is handled on the client side, but enable it here
-  // so that clients can use this to detect support.
+
+  if (base::FeatureList::IsEnabled(
+          features::kNvidiaWaylandYuvHardwareConversionWorkaround) &&
+      feature_info_->workarounds().disable_rgb_to_yuv_conversion) {
+    caps.supports_rgb_to_yuv_conversion = false;
+  } else {
+    caps.supports_rgb_to_yuv_conversion = true;
+  }
+  // Technically, YUV readback is handled on the client side, but enable it
+  // here so that clients can use this to detect support.
   caps.supports_yuv_readback = true;
   caps.mesa_framebuffer_flip_y =
       feature_info_->feature_flags().mesa_framebuffer_flip_y;
@@ -1546,6 +1556,17 @@ void GLES2DecoderPassthroughImpl::MarkContextLost(
   // Only lose the context once.
   if (WasContextLost()) {
     return;
+  }
+
+  // SECURITY: crbug.com/500187083 and crbug.com/517018374.
+  // Unconditionally clear per-context callbacks that hold a raw
+  // `this` pointer if the context IsCurrent before it gets lost, to
+  // prevent UAF when Destroy(have_context=false) skips them.
+  if (context_ && context_->IsCurrent(nullptr) && api()) {
+    api()->glDebugMessageCallbackKHRFn(nullptr, nullptr);
+    if (feature_info_ && feature_info_->feature_flags().angle_blob_cache) {
+      api()->glBlobCacheCallbacksANGLEFn(nullptr, nullptr, nullptr);
+    }
   }
 
   // Don't make GL calls in here, the context might not be current.
@@ -1848,6 +1869,28 @@ error::Error GLES2DecoderPassthroughImpl::
                                                          GLenum pname,
                                                          GLsizei length,
                                                          GLint* params) {
+  // Likely a gl error if no parameters were returned
+  if (length < 1) {
+    return error::kNoError;
+  }
+
+  switch (pname) {
+    case GL_PIXEL_LOCAL_TEXTURE_NAME_ANGLE:
+      if (*params != 0 &&
+          !GetClientID(&resources_->texture_id_map, *params, params)) {
+        return error::kInvalidArguments;
+      }
+      break;
+  }
+
+  return error::kNoError;
+}
+
+error::Error GLES2DecoderPassthroughImpl::
+    PatchGetFramebufferPixelLocalStorageParameteruivANGLE(GLint plane,
+                                                          GLenum pname,
+                                                          GLsizei length,
+                                                          GLuint* params) {
   // Likely a gl error if no parameters were returned
   if (length < 1) {
     return error::kNoError;

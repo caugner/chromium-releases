@@ -841,6 +841,44 @@ TEST_P(GLCopyTextureCHROMIUMES3Test, BigTexture) {
   RunCopyTexture(GL_TEXTURE_2D, copy_type, src_format, 0, dest_format, 0, true);
 }
 
+TEST_P(GLCopyTextureCHROMIUMES3Test, CopyTextureOverflow) {
+  if (ShouldSkipTest()) {
+    GTEST_SKIP();
+  }
+  CopyType copy_type = GetParam();
+  if (copy_type == TexImage) {
+    // This test only works for sub-image copies because GL_RGB9_E5 is
+    // not a valid input to glCopyTextureCHROMIUM.
+    GTEST_SKIP();
+  }
+
+  // This test requires a large amount of memory and specifically triggers
+  // an overflow in the validating command decoder.
+  GLsizei width = 19000;
+  GLsizei height = 19000;
+
+  GLuint textures[2];
+  glGenTextures(2, textures);
+
+  glBindTexture(GL_TEXTURE_2D, textures[0]);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
+               GL_UNSIGNED_BYTE, nullptr);
+
+  glBindTexture(GL_TEXTURE_2D, textures[1]);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB9_E5, width, height, 0, GL_RGB, GL_FLOAT,
+               nullptr);
+
+  glCopySubTextureCHROMIUM(textures[0], 0, GL_TEXTURE_2D, textures[1], 0, 0, 0,
+                           0, 0, width, height, false, false, false);
+
+  // We don't care about GL errors, just that it doesn't crash the GPU process.
+  // Clear any GL errors so they don't fail subsequent tests.
+  while (glGetError() != GL_NO_ERROR) {
+  }
+
+  glDeleteTextures(2, textures);
+}
+
 TEST_P(GLCopyTextureCHROMIUMES3Test, FormatCombinationsFromLuminance) {
   TestFormatCombinations({
       {GL_LUMINANCE, GL_LUMINANCE, GL_UNSIGNED_BYTE},
@@ -1810,6 +1848,104 @@ TEST_F(GLCopyTextureCHROMIUMTest, CopySubTextureOffset) {
 
   glDeleteTextures(2, textures_);
   glDeleteFramebuffers(1, &framebuffer_id_);
+}
+
+TEST_P(GLCopyTextureCHROMIUMES3Test, RasterizerDiscardDoesNotInterfere) {
+#if !BUILDFLAG(ENABLE_VALIDATING_COMMAND_DECODER)
+  GTEST_SKIP() << "Test only reproduces with validating decoder";
+#else
+  if (gl_.gpu_preferences().use_passthrough_cmd_decoder) {
+    GTEST_SKIP() << "Skipping test because it's run with the passthrough "
+                    "command decoder";
+  }
+
+  if (!gl_.IsInitialized()) {
+    GTEST_SKIP() << "ES3 context unavailable";
+  }
+
+  constexpr GLsizei kW = 64, kH = 64;
+
+  // --- Step 1: prime VRAM with a recognisable pattern, then free it. ---
+  {
+    GLuint prime;
+    glGenTextures(1, &prime);
+    glBindTexture(GL_TEXTURE_2D, prime);
+    std::vector<uint8_t> pat(kW * kH * 4, 0xCA);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, kW, kH, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, pat.data());
+    glFinish();
+    glDeleteTextures(1, &prime);
+  }
+
+  // --- Step 2: dest texture, allocated WITHOUT data → uninitialized VRAM. ---
+  GLuint dest;
+  glGenTextures(1, &dest);
+  glBindTexture(GL_TEXTURE_2D, dest);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, kW, kH, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+               nullptr);
+
+  // --- Step 3: trivial source texture (contents irrelevant). ---
+  GLuint src;
+  glGenTextures(1, &src);
+  glBindTexture(GL_TEXTURE_2D, src);
+  std::vector<uint8_t> green(kW * kH * 4, 0);
+  for (size_t i = 0; i < green.size(); i += 4) {
+    green[i + 1] = 0xFF;  // G
+    green[i + 3] = 0xFF;  // A
+  }
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, kW, kH, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+               green.data());
+
+  // --- Step 4: enable RASTERIZER_DISCARD on the command-buffer context. ---
+  glEnable(GL_RASTERIZER_DISCARD);
+  ASSERT_EQ(static_cast<GLenum>(GL_NO_ERROR), glGetError());
+
+  // --- Step 5: issue the copy. flip_y=GL_TRUE forces a draw-based path ---
+  CopyType copy_type = GetParam();
+  if (copy_type == TexImage) {
+    glCopyTextureCHROMIUM(src, 0, GL_TEXTURE_2D, dest, 0, GL_RGBA8,
+                          GL_UNSIGNED_BYTE, GL_TRUE, GL_FALSE, GL_FALSE);
+  } else {
+    glCopySubTextureCHROMIUM(src, 0, GL_TEXTURE_2D, dest, 0, 0, 0, 0, 0, kW, kH,
+                             GL_TRUE, GL_FALSE, GL_FALSE);
+  }
+  ASSERT_EQ(static_cast<GLenum>(GL_NO_ERROR), glGetError());
+
+  glDisable(GL_RASTERIZER_DISCARD);
+
+  // --- Step 6: read back. ---
+  GLuint fbo;
+  glGenFramebuffers(1, &fbo);
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                         dest, 0);
+  ASSERT_EQ(static_cast<GLenum>(GL_FRAMEBUFFER_COMPLETE),
+            glCheckFramebufferStatus(GL_FRAMEBUFFER));
+
+  std::vector<uint8_t> pixels(kW * kH * 4, 0);
+  glReadPixels(0, 0, kW, kH, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+  ASSERT_EQ(static_cast<GLenum>(GL_NO_ERROR), glGetError());
+
+  // --- Step 7: prove the leak is gone (copy succeeded). ---
+  size_t nonzero = 0, green_px = 0;
+  for (size_t i = 0; i < pixels.size(); i += 4) {
+    if (pixels[i] || pixels[i + 1] || pixels[i + 2] || pixels[i + 3]) {
+      ++nonzero;
+    }
+    if (pixels[i] == 0x00 && pixels[i + 1] == 0xFF && pixels[i + 2] == 0x00 &&
+        pixels[i + 3] == 0xFF) {
+      ++green_px;
+    }
+  }
+
+  // Expect all pixels to be green.
+  EXPECT_EQ(green_px, static_cast<size_t>(kW * kH));
+  EXPECT_GT(nonzero, 0u);
+
+  glDeleteFramebuffers(1, &fbo);
+  glDeleteTextures(1, &src);
+  glDeleteTextures(1, &dest);
+#endif  // !BUILDFLAG(ENABLE_VALIDATING_COMMAND_DECODER)
 }
 
 }  // namespace gpu

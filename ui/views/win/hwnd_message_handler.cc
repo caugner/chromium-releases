@@ -427,7 +427,7 @@ HWNDMessageHandler::HWNDMessageHandler(HWNDMessageHandlerDelegate* delegate,
       menu_depth_(0),
       id_generator_(0),
       pen_processor_(&id_generator_, true),
-      user_resize_detector_(delegate),
+      user_resize_move_detector_(delegate),
       touch_down_contexts_(0),
       last_mouse_hwheel_time_(0),
       dwm_transition_desired_(false),
@@ -817,9 +817,13 @@ void HWNDMessageHandler::Restore() {
 
 void HWNDMessageHandler::Activate() {
   if (IsMinimized()) {
-    base::AutoReset<bool> restoring_activate(&notify_restore_on_activate_,
-                                             true);
+    notify_restore_on_activate_ = true;
+    auto ref = msg_handler_weak_factory_.GetWeakPtr();
     ::ShowWindow(hwnd(), SW_RESTORE);
+    if (!ref) {
+      return;
+    }
+    notify_restore_on_activate_ = false;
   }
 
   ::SetWindowPos(hwnd(), HWND_TOP, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE);
@@ -889,6 +893,11 @@ bool HWNDMessageHandler::RunMoveLoop(const gfx::Vector2d& drag_offset,
 
 void HWNDMessageHandler::EndMoveLoop() {
   ::SendMessage(hwnd(), WM_CANCELMODE, 0, 0);
+}
+
+// static
+bool HWNDMessageHandler::IsInNativeMoveResizeLoop() {
+  return UserResizeMoveDetector::InMoveResizeLoop();
 }
 
 void HWNDMessageHandler::SendFrameChanged() {
@@ -1525,7 +1534,11 @@ void HWNDMessageHandler::PostProcessActivateMessage(
     last_size_param_ = SIZE_RESTORED;
   }
   if (delegate_->CanActivate()) {
+    auto ref = msg_handler_weak_factory_.GetWeakPtr();
     delegate_->HandleActivationChanged(active);
+    if (!ref) {
+      return;
+    }
   }
 
   if (!::IsWindow(window_gaining_or_losing_activation)) {
@@ -2028,7 +2041,7 @@ void HWNDMessageHandler::OnEnterMenuLoop(BOOL from_track_popup_menu) {
 }
 
 void HWNDMessageHandler::OnEnterSizeMove() {
-  user_resize_detector_.OnEnterSizeMove();
+  user_resize_move_detector_.OnEnterSizeMove();
   delegate_->HandleBeginWMSizeMove();
   SetMsgHandled(FALSE);
 }
@@ -2059,7 +2072,7 @@ void HWNDMessageHandler::OnExitMenuLoop(BOOL is_shortcut_menu) {
 }
 
 void HWNDMessageHandler::OnExitSizeMove() {
-  user_resize_detector_.OnExitSizeMove();
+  user_resize_move_detector_.OnExitSizeMove();
   delegate_->HandleEndWMSizeMove();
   SetMsgHandled(FALSE);
   // If the window was moved to a monitor which has a fullscreen window active,
@@ -2380,11 +2393,16 @@ LRESULT HWNDMessageHandler::OnInputEvent(UINT message,
 }
 
 void HWNDMessageHandler::OnMove(const gfx::Point& point) {
+  auto ref = msg_handler_weak_factory_.GetWeakPtr();
   delegate_->HandleMove();
+  if (!ref) {
+    return;
+  }
   SetMsgHandled(FALSE);
 }
 
 void HWNDMessageHandler::OnMoving(UINT param, const RECT* new_bounds) {
+  user_resize_move_detector_.OnMoving();
   delegate_->HandleMove();
 }
 
@@ -2889,7 +2907,7 @@ void HWNDMessageHandler::OnSize(UINT param, const gfx::Size& size) {
 }
 
 void HWNDMessageHandler::OnSizing(UINT param, RECT* rect) {
-  user_resize_detector_.OnSizing();
+  user_resize_move_detector_.OnSizing();
 
   // If the aspect ratio was not specified for the window, do nothing.
   if (!aspect_ratio_.has_value()) {

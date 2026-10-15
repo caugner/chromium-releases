@@ -58,6 +58,7 @@
 #include "third_party/blink/renderer/platform/allow_discouraged_type.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/shared_gpu_context.h"
 #include "third_party/blink/renderer/platform/graphics/web_graphics_context_3d_video_frame_pool.h"
+#include "third_party/blink/renderer/platform/peerconnection/rtc_video_encoder_media_log.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/webrtc/convert_to_webrtc_video_frame_buffer.h"
 #include "third_party/blink/renderer/platform/webrtc/webrtc_video_frame_adapter.h"
@@ -76,7 +77,6 @@
 #include "third_party/webrtc/modules/video_coding/codecs/h264/include/h264.h"
 #include "third_party/webrtc/modules/video_coding/include/video_error_codes.h"
 #include "third_party/webrtc/modules/video_coding/svc/create_scalability_structure.h"
-#include "third_party/webrtc/modules/video_coding/svc/simulcast_to_svc_converter.h"
 #include "third_party/webrtc/rtc_base/time_utils.h"
 
 namespace {
@@ -191,6 +191,9 @@ class RefCountedWritableSharedMemoryMapping
       const RefCountedWritableSharedMemoryMapping&) = delete;
   RefCountedWritableSharedMemoryMapping& operator=(
       const RefCountedWritableSharedMemoryMapping&) = delete;
+
+  const base::span<const uint8_t> AsSpan() const { return mapping_; }
+  const base::span<uint8_t> AsSpan() { return mapping_; }
 
   const unsigned char* front() const {
     return static_cast<const unsigned char*>(mapping_.memory());
@@ -349,15 +352,6 @@ bool IsValidTemporalSVC(
 namespace blink {
 
 namespace features {
-
-// Enabled-by-default, except for Android where SW encoder for H264 and AV1 are
-// not available. The existence of this flag remains only for testing purposes.
-BASE_FEATURE(kForceSoftwareForLowResolutions,
-#if !BUILDFLAG(IS_ANDROID)
-             base::FEATURE_ENABLED_BY_DEFAULT);
-#else
-             base::FEATURE_DISABLED_BY_DEFAULT);
-#endif
 
 // Avoids large latencies to build up by dropping frames when the number of
 // frames that are sent to a hardware video encoder reaches a certain limit.
@@ -631,14 +625,10 @@ bool UseSoftwareForLowResolution(const webrtc::VideoCodecType codec,
   // situations where a codec like H264 is available in HW but not SW in which
   // case SW fallback would result in a change of codec, see
   // https://crbug.com/1469318.
+  // Note: This flag will be rolled and enabled everywhere since we now check
+  // for actual software code availability when determining if it's possible.
   if (!base::FeatureList::IsEnabled(
-          features::kForceSoftwareForLowResolutions)) {
-    return false;
-  }
-
-  // H.265 does not support SW fallback, so it is excluded from low resoloution
-  // fallback.
-  if (codec == webrtc::kVideoCodecH265) {
+          media::kForceSoftwareForRtcLowResolutions)) {
     return false;
   }
 
@@ -722,6 +712,7 @@ class RTCVideoEncoder::Impl : public media::VideoEncodeAccelerator::Client {
   // its own thread, hence the |init_event| argument.
   void CreateAndInitializeVEA(
       const media::VideoEncodeAccelerator::Config& vea_config,
+      std::optional<webrtc::SimulcastToSvcConverter> simulcast_to_svc_converter,
       SignaledValue init_event);
 
   // Enqueue a frame from WebRTC for encoding. This function is called
@@ -766,10 +757,6 @@ class RTCVideoEncoder::Impl : public media::VideoEncodeAccelerator::Client {
 
   void Drain(SignaledValue event);
   void DrainCompleted(bool success);
-
-  void SetSimulcastToSvcConverter(std::optional<webrtc::SimulcastToSvcConverter>
-                                      simulcast_to_svc_converter);
-  void UpdateEncoderInfo(media::VideoEncoderInfo encoder_info);
 
  private:
   enum {
@@ -1030,6 +1017,8 @@ class RTCVideoEncoder::Impl : public media::VideoEncodeAccelerator::Client {
   // instead of SVC. Set only when simulcat config is emulated by SVC one.
   std::optional<webrtc::SimulcastToSvcConverter> simulcast_to_svc_converter_;
 
+  std::unique_ptr<media::MediaLog> media_log_;
+
   // They are bound to |gpu_task_runner_|, which is sequence checked by
   // |sequence_checker|.
   base::WeakPtr<Impl> weak_this_;
@@ -1078,11 +1067,13 @@ RTCVideoEncoder::Impl::Impl(
 
 void RTCVideoEncoder::Impl::CreateAndInitializeVEA(
     const media::VideoEncodeAccelerator::Config& vea_config,
+    std::optional<webrtc::SimulcastToSvcConverter> simulcast_to_svc_converter,
     SignaledValue init_event) {
   TRACE_EVENT0("webrtc", "RTCVideoEncoder::Impl::CreateAndInitializeVEA");
   DVLOG(3) << __func__;
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
+  simulcast_to_svc_converter_ = std::move(simulcast_to_svc_converter);
   status_ = WEBRTC_VIDEO_CODEC_UNINITIALIZED;
   async_init_event_ = ScopedSignaledValue(std::move(init_event));
 
@@ -1112,8 +1103,13 @@ void RTCVideoEncoder::Impl::CreateAndInitializeVEA(
       /*is_hardware_encoder=*/true,
       ToSVCScalabilityMode(vea_config.spatial_layers,
                            vea_config.inter_layer_pred));
-  if (auto status = video_encoder_->Initialize(
-          vea_config, this, std::make_unique<media::NullMediaLog>());
+
+  if (!media_log_) {
+    media_log_ = std::make_unique<RTCVideoEncoderMediaLog>();
+  }
+
+  if (auto status =
+          video_encoder_->Initialize(vea_config, this, media_log_->Clone());
       !status.is_ok()) {
     NotifyErrorStatus(
         {media::EncoderStatus::Codes::kEncoderInitializationError,
@@ -1142,6 +1138,7 @@ void RTCVideoEncoder::Impl::CreateAndInitializeVEA(
 
 void RTCVideoEncoder::Impl::NotifyEncoderInfoChange(
     const media::VideoEncoderInfo& info) {
+  encoder_info_ = info;
   update_encoder_info_callback_.Run(
       info,
       std::vector<webrtc::VideoFrameBuffer::Type>(
@@ -1276,16 +1273,6 @@ void RTCVideoEncoder::Impl::DrainCompleted(bool success) {
     NotifyErrorStatus({media::EncoderStatus::Codes::kEncoderInitializationError,
                        "Failed to flush VideoEncodeAccelerator"});
   }
-}
-
-void RTCVideoEncoder::Impl::SetSimulcastToSvcConverter(
-    std::optional<webrtc::SimulcastToSvcConverter> simulcast_to_svc_converter) {
-  simulcast_to_svc_converter_ = std::move(simulcast_to_svc_converter);
-}
-
-void RTCVideoEncoder::Impl::UpdateEncoderInfo(
-    media::VideoEncoderInfo encoder_info) {
-  encoder_info_ = std::move(encoder_info);
 }
 
 void RTCVideoEncoder::Impl::UseOutputBitstreamBuffer(
@@ -1527,7 +1514,9 @@ media::EncoderStatus RTCVideoEncoder::Impl::FillGenericFrameInfo(
       encode_buffers_tid_.resize(webrtc::kMaxEncoderBuffers);
     }
     uint32_t temporal_id = md_generic.temporal_idx;
-    for (int i = 0; i < webrtc::kMaxEncoderBuffers; i++) {
+    // This awkward cast is used to permit a change in the underlying
+    // type for webrtc::kMaxEncoderBuffers.
+    for (int i = 0; i < int{webrtc::kMaxEncoderBuffers}; i++) {
       bool referenced = !!(*md_generic.reference_flags & (1u << i));
       if (referenced) {
         // If VEA doesn't follow the SVC spec, we need to check whether
@@ -1686,8 +1675,8 @@ void RTCVideoEncoder::Impl::BitstreamBufferReady(
 #if BUILDFLAG(RTC_USE_H265)
   if (ps_tracker_.get()) {
     H265ParameterSetsTracker::FixedBitstream fixed =
-        ps_tracker_->MaybeFixBitstream(webrtc::MakeArrayView(
-            output_mapping->front(), metadata.payload_size_bytes));
+        ps_tracker_->MaybeFixBitstream(
+            output_mapping->AsSpan().first(metadata.payload_size_bytes));
     if (fixed.action == H265ParameterSetsTracker::PacketAction::kInsert) {
       image.SetEncodedData(fixed.bitstream);
       BitstreamBufferAvailable(bitstream_buffer_id);
@@ -2478,9 +2467,11 @@ RTCVideoEncoder::RTCVideoEncoder(
     bool is_constrained_h264,
     media::GpuVideoAcceleratorFactories* gpu_factories,
     scoped_refptr<media::MojoVideoEncoderMetricsProviderFactory>
-        encoder_metrics_provider_factory)
+        encoder_metrics_provider_factory,
+    bool is_software_fallback_available)
     : profile_(profile),
       is_constrained_h264_(is_constrained_h264),
+      is_software_fallback_available_(is_software_fallback_available),
       gpu_factories_(gpu_factories),
       encoder_metrics_provider_factory_(
           std::move(encoder_metrics_provider_factory)),
@@ -2577,7 +2568,8 @@ int32_t RTCVideoEncoder::DrainEncoderAndUpdateFrameSize(
 }
 
 int32_t RTCVideoEncoder::InitializeEncoder(
-    const media::VideoEncodeAccelerator::Config& vea_config) {
+    const media::VideoEncodeAccelerator::Config& vea_config,
+    std::optional<webrtc::SimulcastToSvcConverter> simulcast_to_svc_converter) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(webrtc_sequence_checker_);
   TRACE_EVENT1("webrtc", "RTCVideoEncoder::InitEncode", "config",
                vea_config.AsHumanReadableString());
@@ -2597,7 +2589,7 @@ int32_t RTCVideoEncoder::InitializeEncoder(
         *gpu_task_runner_.get(), FROM_HERE,
         CrossThreadBindOnce(
             &RTCVideoEncoder::Impl::CreateAndInitializeVEA, weak_impl_,
-            vea_config,
+            vea_config, std::move(simulcast_to_svc_converter),
             SignaledValue(&initialization_waiter, &initialization_retval)));
     // webrtc::VideoEncoder expects this call to be synchronous.
     initialization_waiter.Wait();
@@ -2692,7 +2684,8 @@ int32_t RTCVideoEncoder::InitEncode(
 
   codec_settings_ = converted_settings;
 
-  if (UseSoftwareForLowResolution(codec_settings_.codecType,
+  if (is_software_fallback_available_ &&
+      UseSoftwareForLowResolution(codec_settings_.codecType,
                                   codec_settings_.width,
                                   codec_settings_.height)) {
     return initialization_error_message;
@@ -2847,12 +2840,11 @@ int32_t RTCVideoEncoder::InitEncode(
         media::VideoEncodeAccelerator::Config::EncoderType::kNoPreference;
   }
 
-  int32_t initialization_ret = InitializeEncoder(vea_config);
+  int32_t initialization_ret =
+      InitializeEncoder(vea_config, std::move(simulcast_to_svc_converter));
   if (initialization_ret != WEBRTC_VIDEO_CODEC_OK) {
     ReleaseImpl();
     CHECK(!impl_);
-  } else {
-    impl_->SetSimulcastToSvcConverter(std::move(simulcast_to_svc_converter));
   }
   return initialization_ret;
 }
@@ -3030,7 +3022,6 @@ void RTCVideoEncoder::UpdateEncoderInfo(
     }
   }
 
-  impl_->UpdateEncoderInfo(media_enc_info);
   encoder_info_.requested_resolution_alignment =
       media_enc_info.requested_resolution_alignment;
   encoder_info_.apply_alignment_to_all_simulcast_layers =

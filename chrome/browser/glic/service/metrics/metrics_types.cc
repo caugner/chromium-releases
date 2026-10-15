@@ -20,87 +20,92 @@ std::string GetDaisyChainSourceString(DaisyChainSource source) {
       return "WebHandoff";
     case DaisyChainSource::kAutoOpenPdf:
       return "AutoOpenPdf";
-    default:
+    case DaisyChainSource::kUnknown:
       return "Unknown";
   }
 }
 
-GlicEntrypoint GetEntrypointFromInvocationSource(
-    mojom::InvocationSource source) {
-  switch (source) {
-    // OsButton sources bundles as one.
-    case glic::mojom::InvocationSource::kOsButton:
-    case glic::mojom::InvocationSource::kOsButtonMenu:
-      return GlicEntrypoint::kOsButton;
-    case glic::mojom::InvocationSource::kOsHotkey:
-      return GlicEntrypoint::kOsHotkey;
-    case glic::mojom::InvocationSource::kTopChromeButton:
-      return GlicEntrypoint::kTopChromeButton;
-    case glic::mojom::InvocationSource::kNudge:
-      return GlicEntrypoint::kNudge;
-    case glic::mojom::InvocationSource::kThreeDotsMenu:
-      return GlicEntrypoint::kThreeDotsMenu;
-    case glic::mojom::InvocationSource::kWhatsNew:
-      return GlicEntrypoint::kWhatsNew;
-    case glic::mojom::InvocationSource::kSharedTab:
-      return GlicEntrypoint::kSharedTab;
-    case glic::mojom::InvocationSource::kSharedImage:
-      return GlicEntrypoint::kSharedImage;
-    case glic::mojom::InvocationSource::kSkills:
-      return GlicEntrypoint::kSkills;
-    case glic::mojom::InvocationSource::kAutoOpenedByContextualCue:
-      return GlicEntrypoint::kAutoOpenedByContextualCue;
-    case glic::mojom::InvocationSource::kPdfSummarizeButton:
-      return GlicEntrypoint::kPdfSummarizeButton;
-    case glic::mojom::InvocationSource::kNavigationCapture:
-      return GlicEntrypoint::kNavigationCapture;
-    case glic::mojom::InvocationSource::kAutoOpenedForPdf:
-      return GlicEntrypoint::kAutoOpenedForPdf;
-    case glic::mojom::InvocationSource::kIph:
-      return GlicEntrypoint::kIph;
-    case glic::mojom::InvocationSource::kWebContentsContextMenu:
-      return GlicEntrypoint::kWebContentsContextMenu;
-    default:
-      return GlicEntrypoint::kOther;
+ResponseSegmentation GetResponseSegmentation(bool attached,
+                                             mojom::WebClientMode mode,
+                                             mojom::InvocationSource source) {
+  if (mode == mojom::WebClientMode::kUnknown) {
+    return ResponseSegmentation::kUnknown;
   }
+
+  ModeOffset modeOffset;
+  if (mode == mojom::WebClientMode::kText && attached) {
+    modeOffset = ModeOffset::kTextAttached;
+  } else if (mode == mojom::WebClientMode::kAudio && attached) {
+    modeOffset = ModeOffset::kAudioAttached;
+  } else if (mode == mojom::WebClientMode::kText && !attached) {
+    modeOffset = ModeOffset::kTextDetached;
+  } else {
+    modeOffset = ModeOffset::kAudioDetached;
+  }
+
+  int baseIndex =
+      static_cast<int>(source) * (static_cast<int>(ModeOffset::kMaxValue));
+  int offset = static_cast<int>(modeOffset);
+
+  return static_cast<ResponseSegmentation>(baseIndex + offset);
 }
 
-std::string GetEntrypointString(GlicEntrypoint entrypoint) {
-  switch (entrypoint) {
-    case GlicEntrypoint::kAutoOpenedByContextualCue:
+std::string GetInvocationSourceString(mojom::InvocationSource source) {
+  switch (source) {
+    case mojom::InvocationSource::kActorTaskIcon:
+      return "ActorTaskIcon";
+    case mojom::InvocationSource::kAfterSignIn:
+      return "AfterSignIn";
+    case mojom::InvocationSource::kAnchoredContextualCue:
+      return "AnchoredContextualCue";
+    case mojom::InvocationSource::kAutoOpenedByContextualCue:
       return "AutoOpenedByContextualCue";
-    case GlicEntrypoint::kAutoOpenedForPdf:
+    case mojom::InvocationSource::kAutoOpenedForPdf:
       return "AutoOpenedForPdf";
-    case GlicEntrypoint::kWebContentsContextMenu:
-      return "WebContentsContextMenu";
-    case GlicEntrypoint::kIph:
+    case mojom::InvocationSource::kCaptureRegionHotkey:
+      return "CaptureRegionHotkey";
+    case mojom::InvocationSource::kFre:
+      return "Fre";
+    case mojom::InvocationSource::kHandoffButton:
+      return "HandoffButton";
+    case mojom::InvocationSource::kIph:
       return "Iph";
-    case GlicEntrypoint::kNavigationCapture:
+    case mojom::InvocationSource::kNavigationCapture:
       return "NavigationCapture";
-    case GlicEntrypoint::kNudge:
+    case mojom::InvocationSource::kNudge:
       return "Nudge";
-    case GlicEntrypoint::kOsButton:
+    case mojom::InvocationSource::kOsButton:
       return "OsButton";
-    case GlicEntrypoint::kOsHotkey:
+    case mojom::InvocationSource::kOsButtonMenu:
+      return "OsButtonMenu";
+    case mojom::InvocationSource::kOsHotkey:
       return "OsHotkey";
-    case GlicEntrypoint::kOther:
-      return "Other";
-    case GlicEntrypoint::kPdfSummarizeButton:
+    case mojom::InvocationSource::kPdfSummarizeButton:
       return "PdfSummarizeButton";
-    case GlicEntrypoint::kSharedImage:
+    case mojom::InvocationSource::kProfilePicker:
+      return "ProfilePicker";
+    case mojom::InvocationSource::kSharedImage:
       return "SharedImage";
-    case GlicEntrypoint::kSharedTab:
+    case mojom::InvocationSource::kSharedTab:
       return "SharedTab";
-    case GlicEntrypoint::kSkills:
+    case mojom::InvocationSource::kSkills:
       return "Skills";
-    case GlicEntrypoint::kThreeDotsMenu:
+    case mojom::InvocationSource::kTextSelectionNudge:
+      return "TextSelectionNudge";
+    case mojom::InvocationSource::kTextSelectionWidget:
+      return "TextSelectionWidget";
+    case mojom::InvocationSource::kThreeDotsMenu:
       return "ThreeDotsMenu";
-    case GlicEntrypoint::kTopChromeButton:
+    case mojom::InvocationSource::kTopChromeButton:
       return "TopChromeButton";
-    case GlicEntrypoint::kWhatsNew:
+    case mojom::InvocationSource::kUnsupported:
+      return "Unsupported";
+    case mojom::InvocationSource::kWebContentsContextMenu:
+      return "WebContentsContextMenu";
+    case mojom::InvocationSource::kWhatsNew:
       return "WhatsNew";
-    default:
-      return "Other";
+    case mojom::InvocationSource::kZeroStateAutoSummarize:
+      return "ZeroStateAutoSummarize";
   }
 }
 }  // namespace glic

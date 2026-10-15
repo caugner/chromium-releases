@@ -17,7 +17,6 @@
 #include "chrome/browser/glic/public/glic_enabling.h"
 #include "chrome/browser/glic/public/glic_keyed_service.h"
 #include "chrome/browser/glic/public/glic_keyed_service_factory.h"
-#include "chrome/browser/glic/widget/glic_window_controller.h"
 #include "chrome/browser/new_tab_page/promos/promo_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
@@ -26,8 +25,14 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/customize_chrome/side_panel_controller.h"
+#include "chrome/browser/ui/tabs/public/tab_features.h"
+#include "chrome/browser/ui/tabs/split_tab_metrics.h"
+#include "chrome/browser/ui/tabs/tab_group_model.h"
+#include "chrome/browser/ui/tabs/vertical_tab_strip_metrics.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/webui/webui_embedding_context.h"
 #include "chrome/browser/user_education/tutorial_identifiers.h"
 #include "chrome/browser/user_education/user_education_service.h"
@@ -35,14 +40,17 @@
 #include "chrome/common/buildflags.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/webui_url_constants.h"
 #include "components/password_manager/core/common/password_manager_features.h"
 #include "components/performance_manager/public/features.h"
+#include "components/prefs/pref_service.h"
 #include "components/safe_browsing/content/browser/web_ui/safe_browsing_ui.h"
 #include "components/safe_browsing/core/common/safe_browsing_policy_handler.h"
 #include "components/safe_browsing/core/common/safe_browsing_prefs.h"
 #include "components/safe_browsing/core/common/safebrowsing_referral_methods.h"
 #include "components/saved_tab_groups/public/features.h"
+#include "components/tabs/public/tab_interface.h"
 #include "components/user_education/common/tutorial/tutorial_identifier.h"
 #include "components/user_education/common/tutorial/tutorial_service.h"
 #include "net/base/url_util.h"
@@ -151,6 +159,12 @@ void BrowserCommandHandler::CanExecuteCommand(
     case Command::kPrewarmGlicFre:
       can_execute = true;
       break;
+    case Command::kOpenSplitView:
+      can_execute = true;
+      break;
+    case Command::kEnableVerticalTabs:
+      can_execute = true;
+      break;
   }
   std::move(callback).Run(can_execute);
 }
@@ -247,6 +261,12 @@ void BrowserCommandHandler::ExecuteCommandWithDisposition(
     case Command::kPrewarmGlicFre:
       // No-op: Glic FRE pre-warming is removed.
       break;
+    case Command::kOpenSplitView:
+      OpenSplitView();
+      break;
+    case Command::kEnableVerticalTabs:
+      EnableVerticalTabs();
+      break;
     default:
       NOTREACHED() << "Unspecified behavior for command " << id;
   }
@@ -262,8 +282,9 @@ void BrowserCommandHandler::OnTutorialStarted(
 }
 
 void BrowserCommandHandler::StartTutorial(StartTutorialInPage::Params params) {
-  auto* browser = chrome::FindBrowserWithProfile(profile_);
-  StartTutorialInPage::Start(browser, std::move(params));
+  BrowserWindowInterface* browser = chrome::FindBrowserWithProfile(profile_);
+  StartTutorialInPage::Start(browser->GetBrowserForMigrationOnly(),
+                             std::move(params));
 }
 
 bool BrowserCommandHandler::TutorialServiceExists() {
@@ -273,8 +294,8 @@ bool BrowserCommandHandler::TutorialServiceExists() {
 }
 
 bool BrowserCommandHandler::BrowserSupportsTabGroups() {
-  Browser* browser = chrome::FindBrowserWithProfile(profile_);
-  return browser->tab_strip_model()->SupportsTabGroups();
+  BrowserWindowInterface* browser = chrome::FindBrowserWithProfile(profile_);
+  return browser->GetTabStripModel()->SupportsTabGroups();
 }
 
 void BrowserCommandHandler::StartTabGroupTutorial() {
@@ -309,11 +330,11 @@ bool BrowserCommandHandler::DefaultSearchProviderIsGoogle() {
 }
 
 bool BrowserCommandHandler::BrowserSupportsSavedTabGroups() {
-  Browser* browser = chrome::FindBrowserWithProfile(profile_);
+  BrowserWindowInterface* browser = chrome::FindBrowserWithProfile(profile_);
 
   // Duplicated from chrome/browser/ui/views/bookmarks/bookmark_bar_view.cc
   // Which cannot be included here
-  return browser->profile()->IsRegularProfile();
+  return browser->GetProfile()->IsRegularProfile();
 }
 
 void BrowserCommandHandler::OpenNTPAndStartCustomizeChromeTutorial() {
@@ -388,6 +409,22 @@ void BrowserCommandHandler::OpenGlicSettings() {
     NavigateToURL(net::AppendOrReplaceQueryParameter(GURL(url), "p", ks_param),
                   WindowOpenDisposition::SINGLETON_TAB);
   }
+}
+
+void BrowserCommandHandler::OpenSplitView() {
+  tabs::TabInterface* tab =
+      tabs::TabInterface::MaybeGetFromContents(web_contents_);
+  if (tab && !tab->IsSplit()) {
+    chrome::NewSplitTab(tab->GetBrowserWindowInterface(),
+                        split_tabs::SplitTabCreatedSource::kWhatsNew);
+  }
+}
+
+void BrowserCommandHandler::EnableVerticalTabs() {
+  profile_->GetPrefs()->SetBoolean(prefs::kVerticalTabsEnabled, true);
+
+  tabs::RecordVerticalTabStripModeChanged(
+      true, tabs::VerticalTabStripEntryPoint::kWhatsNew);
 }
 
 void BrowserCommandHandler::OpenFeedbackForm() {

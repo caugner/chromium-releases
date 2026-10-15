@@ -113,6 +113,7 @@ class SessionStorageNamespace;
 class SiteInstanceGroup;
 struct ContextMenuParams;
 struct CookieAccessDetails;
+struct GlobalRenderFrameHostId;
 struct GlobalRequestID;
 struct TrustTokenAccessDetails;
 
@@ -300,11 +301,12 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // Get the accessibility mode for the WebContents that owns this frame.
   virtual ui::AXMode GetAccessibilityMode();
 
-  // Asks whether the page is in a state of ignoring accessibility input events.
-  // This means if accessibility actions (other than hit testing) should be
-  // blocked. This is active while a ScopedIgnoreInputEvents token exists. See
-  // WebContents::IgnoreInputEvents for more information.
-  virtual bool ShouldIgnoreA11yInputEvents();
+  // Asks whether the page is in a state of ignoring input events.
+  // This means if accessibility actions (other than hit testing) and other
+  // user input should be blocked. This is active while a
+  // ScopedIgnoreInputEvents token exists. See WebContents::IgnoreInputEvents
+  // for more information.
+  virtual bool ShouldIgnoreInputEvents();
 
   // Called whenever the AXTreeID for the topmost RenderFrameHost has changed.
   virtual void AXTreeIDForMainFrameHasChanged() {}
@@ -637,7 +639,8 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
           blink_popup_widget_host,
       mojo::PendingAssociatedReceiver<blink::mojom::WidgetHost>
           blink_widget_host,
-      mojo::PendingAssociatedRemote<blink::mojom::Widget> blink_widget);
+      mojo::PendingAssociatedRemote<blink::mojom::Widget> blink_widget,
+      GlobalRenderFrameHostId creator_frame_id);
 
   virtual void DidLoadResourceFromMemoryCache(
       RenderFrameHostImpl* source,

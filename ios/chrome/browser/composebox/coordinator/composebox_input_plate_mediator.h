@@ -11,6 +11,7 @@
 #include <vector>
 
 #import "components/contextual_search/internal/ios/composebox_context_upload_observer_bridge.h"
+#import "components/contextual_tasks/public/query_contextualizer.h"
 #import "ios/chrome/browser/composebox/coordinator/composebox_entrypoint.h"
 #import "ios/chrome/browser/composebox/coordinator/composebox_mode_holder.h"
 #import "ios/chrome/browser/composebox/coordinator/composebox_omnibox_client_delegate.h"
@@ -20,6 +21,9 @@
 #import "ios/chrome/browser/omnibox/ui/text_field_view_containing.h"
 #import "ios/public/provider/chrome/browser/voice_search/voice_search_controller.h"
 
+@protocol BrowserCoordinatorCommands;
+@class CobrowseContext;
+class CobrowseBrowserAgent;
 @protocol ComposeboxDebuggerLogger;
 @class ComposeboxMetricsRecorder;
 @protocol ComposeboxURLLoader;
@@ -29,6 +33,7 @@ class AimEligibilityService;
 class FaviconLoader;
 class PersistTabContextBrowserAgent;
 class PrefService;
+class ProfileIOS;
 class TemplateURLService;
 class WebStateList;
 
@@ -36,7 +41,6 @@ namespace contextual_search {
 class ContextualSearchSessionHandle;
 }  // namespace contextual_search
 
-// Delegate for the ComposeboxInputPlateMediator.
 @protocol ComposeboxInputPlateMediatorDelegate
 // Reloads the composebox autocomplete suggestions.
 - (void)reloadAutocompleteSuggestionsRestarting:(BOOL)restart;
@@ -58,7 +62,9 @@ class ContextualSearchSessionHandle;
                 TextFieldViewContainingHeightDelegate,
                 VoiceSearchDelegate>
 
+// The composebox input plate consumer.
 @property(nonatomic, weak) id<ComposeboxInputPlateConsumer> consumer;
+// The composebox URL loader.
 @property(nonatomic, weak) id<ComposeboxURLLoader> URLLoader;
 // The delegate for this mediator.
 @property(nonatomic, weak) id<ComposeboxInputPlateMediatorDelegate> delegate;
@@ -80,7 +86,13 @@ class ContextualSearchSessionHandle;
                  templateURLService:(TemplateURLService*)templateURLService
               aimEligibilityService:
                   (AimEligibilityService*)aimEligibilityService
-                        prefService:(PrefService*)prefService;
+                        prefService:(PrefService*)prefService
+                            profile:(ProfileIOS*)profile
+               cobrowseBrowserAgent:(CobrowseBrowserAgent*)cobrowseBrowserAgent
+          browserCoordinatorHandler:
+              (id<BrowserCoordinatorCommands>)browserCoordinatorHandler
+                       sceneHandler:(id<SceneCommands>)sceneHandler
+                         entrypoint:(ComposeboxEntrypoint)entrypoint;
 
 - (void)disconnect;
 

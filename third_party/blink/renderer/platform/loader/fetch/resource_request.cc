@@ -42,6 +42,7 @@
 #include "third_party/blink/renderer/platform/network/http_names.h"
 #include "third_party/blink/renderer/platform/network/network_utils.h"
 #include "third_party/blink/renderer/platform/weborigin/referrer.h"
+#include "third_party/blink/renderer/platform/weborigin/security_policy.h"
 #include "third_party/blink/renderer/platform/wtf/text/base64.h"
 #include "third_party/blink/renderer/platform/wtf/text/strcat.h"
 
@@ -345,17 +346,6 @@ void ResourceRequestHead::SetHTTPOrigin(const SecurityOrigin* origin) {
 
 void ResourceRequestHead::ClearHTTPOrigin() {
   http_header_fields_.Remove(http_names::kOrigin);
-}
-
-void ResourceRequestHead::SetHttpOriginIfNeeded(const SecurityOrigin* origin) {
-  if (NeedsHTTPOrigin())
-    SetHTTPOrigin(origin);
-}
-
-void ResourceRequestHead::SetHTTPOriginToMatchReferrerIfNeeded() {
-  if (NeedsHTTPOrigin()) {
-    SetHTTPOrigin(SecurityOrigin::CreateFromString(ReferrerString()).get());
-  }
 }
 
 void ResourceRequestHead::ClearHTTPUserAgent() {

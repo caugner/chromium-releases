@@ -25,6 +25,9 @@
 #include "chrome/browser/ui/omnibox/test_omnibox_edit_model.h"
 #include "chrome/browser/ui/omnibox/test_omnibox_popup_view.h"
 #include "chrome/browser/ui/omnibox/test_omnibox_view.h"
+#include "components/contextual_search/contextual_search_metrics_recorder.h"
+#include "components/contextual_tasks/public/mock_contextual_tasks_service.h"
+#include "components/contextual_tasks/public/query_contextualizer.h"
 #include "components/dom_distiller/core/url_constants.h"
 #include "components/dom_distiller/core/url_utils.h"
 #include "components/omnibox/browser/actions/omnibox_action.h"
@@ -91,6 +94,83 @@ void OpenUrlFromEditBox(OmniboxController* controller,
   model->OpenMatchForTesting(match, WindowOpenDisposition::CURRENT_TAB, GURL(),
                              std::u16string(), 0);
 }
+
+class FakeQueryContextualizerDelegate
+    : public contextual_tasks::QueryContextualizer::Delegate {
+ public:
+  GURL GetTabUrl(contextual_tasks::QueryContextualizer::TabId id) override {
+    return GURL();
+  }
+  SessionID GetTabSessionId(
+      contextual_tasks::QueryContextualizer::TabId id) override {
+    return SessionID::InvalidValue();
+  }
+  void GetPageContext(
+      contextual_tasks::QueryContextualizer::TabId id,
+      base::OnceCallback<void(std::unique_ptr<lens::ContextualInputData>)>
+          callback) override {
+    std::move(callback).Run(nullptr);
+  }
+  bool IsTabValid(contextual_tasks::QueryContextualizer::TabId id) override {
+    return false;
+  }
+  std::optional<lens::ImageEncodingOptions>
+  GetTabViewportEncodingOptionsForQueryContextualizer() override {
+    return std::nullopt;
+  }
+
+  contextual_search::ContextualSearchSessionHandle*
+  GetOrCreateSessionHandleForQueryContextualizer() override {
+    return nullptr;
+  }
+  void GetRelevantTabsForQuery(
+      const std::string& query_text,
+      const std::vector<GURL>& attached_context_urls,
+      base::OnceCallback<void(
+          std::vector<contextual_tasks::QueryContextualizer::TabId>)> callback)
+      override {
+    std::move(callback).Run({});
+  }
+};
+
+using TaskIdType = std::optional<base::Uuid>;
+using TabIdList = std::vector<contextual_tasks::QueryContextualizer::TabId>;
+using IneligibleCallback =
+    contextual_tasks::QueryContextualizer::PageContextIneligibleCallback;
+using ProcessedCallback =
+    contextual_tasks::QueryContextualizer::TabProcessedCallback;
+using ContCallback =
+    contextual_tasks::QueryContextualizer::ContextualizedCallback;
+
+class MockQueryContextualizer : public contextual_tasks::QueryContextualizer {
+ public:
+  MockQueryContextualizer(
+      contextual_tasks::ContextualTasksService* service,
+      contextual_tasks::QueryContextualizer::Delegate* delegate)
+      : QueryContextualizer(service, delegate) {}
+  ~MockQueryContextualizer() override = default;
+
+  void Contextualize(const TaskIdType& task_id,
+                     const std::string& query_text,
+                     const TabIdList& tabs_to_recontextualize,
+                     const TabIdList& tabs_to_force_contextualize,
+                     IneligibleCallback on_ineligible_callback,
+                     ProcessedCallback on_processed_callback,
+                     ContCallback callback,
+                     bool enable_smart_tab_selection) override {
+    MockContextualize(task_id, query_text, tabs_to_recontextualize,
+                      tabs_to_force_contextualize);
+    std::move(callback).Run(nullptr);
+  }
+
+  MOCK_METHOD(void,
+              MockContextualize,
+              (const TaskIdType& task_id,
+               const std::string& query_text,
+               const TabIdList& tabs_to_recontextualize,
+               const TabIdList& tabs_to_force_contextualize),
+              ());
+};
 
 }  // namespace
 
@@ -469,7 +549,7 @@ TEST_F(OmniboxEditModelTest, KeywordModePreservesTemporaryText) {
 TEST_F(OmniboxEditModelTest, CtrlEnterNavigatesToDesiredTLD) {
   // Set the edit model into an inline autocomplete state.
   view()->SetUserText(u"foo");
-  model()->StartAutocomplete(false, false);
+  model()->StartAutocomplete(false);
   view()->OnInlineAutocompleteTextMaybeChanged(u"foo", u"bar");
 
   model()->OnControlKeyChanged(true);
@@ -482,7 +562,7 @@ TEST_F(OmniboxEditModelTest, CtrlEnterNavigatesToDesiredTLD) {
 TEST_F(OmniboxEditModelTest, CtrlEnterNavigatesToDesiredTLDTemporaryText) {
   // But if it's the temporary text, the View text should be used.
   view()->SetUserText(u"foo");
-  model()->StartAutocomplete(false, false);
+  model()->StartAutocomplete(false);
   model()->OnPopupDataChanged(u"foobar",
                               /*is_temporary_text=*/true, std::u16string(),
                               std::u16string(), std::u16string(), false,
@@ -1592,6 +1672,71 @@ TEST_F(OmniboxEditModelTest, OpenTabMatch) {
 }
 #endif  // !BUILDFLAG(IS_ANDROID)
 
+TEST_F(OmniboxEditModelTest, OpenMatchInvocationSource) {
+  AutocompleteMatch match(
+      controller()->autocomplete_controller()->search_provider(), 0, false,
+      AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED);
+  match.destination_url = GURL("https://google.com/search?q=test");
+  match.search_terms_args =
+      std::make_unique<TemplateURLRef::SearchTermsArgs>(u"test");
+  match.transition = ui::PAGE_TRANSITION_GENERATED;
+
+  // Ensure the keyword matches the default search provider.
+  auto* template_url_service = controller()->client()->GetTemplateURLService();
+  match.keyword = template_url_service->GetDefaultSearchProvider()->keyword();
+
+  // Set the page classification to simulate an NTP realbox.
+  client()->location_bar_model()->set_page_classification(
+      metrics::OmniboxEventProto::NTP_REALBOX);
+
+  model()->OnSetFocus(false);  // Avoids DCHECK in OpenMatch().
+  model()->SetUserText(u"test");
+
+  // Start autocomplete to sync the OmniboxEditModel's client state with the
+  // underlying AutocompleteController's input state.
+  model()->StartAutocomplete(/*prevent_inline_autocomplete=*/false);
+
+  GURL destination_url;
+  EXPECT_CALL(*client(), OnAutocompleteAccept(_, _, _, _, _, _, _, _, _, _, _))
+      .WillOnce(SaveArg<0>(&destination_url));
+
+  model()->OpenMatchForTesting(match, WindowOpenDisposition::CURRENT_TAB,
+                               GURL(), std::u16string(), 0);
+
+  // Verify the destination URL has the realbox source appended.
+  EXPECT_EQ(destination_url.spec(),
+            "https://google.com/search?q=test&source=chrome.rb");
+}
+
+TEST_F(OmniboxEditModelTest, OpenAiModeTriggersContextualize) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(omnibox::kAiModeOmniboxEntryPoint);
+
+  // Create a new model so it initializes QueryContextualizer. We inject our
+  // mock contextualizer using the setter to verify interactions.
+  auto mock_service =
+      std::make_unique<contextual_tasks::MockContextualTasksService>();
+  auto fake_delegate = std::make_unique<FakeQueryContextualizerDelegate>();
+  auto mock_contextualizer = std::make_unique<MockQueryContextualizer>(
+      mock_service.get(), fake_delegate.get());
+
+  auto* mock_ptr = mock_contextualizer.get();
+  model()->SetQueryContextualizerForTesting(std::move(mock_contextualizer));
+
+  AutocompleteMatch match;
+  match.type = AutocompleteMatchType::SEARCH_SUGGEST;
+  match.contents = u"test query";
+  model()->SetCurrentMatchForTest(match);
+
+  EXPECT_CALL(*mock_ptr, MockContextualize(_, "test query", _, _)).Times(1);
+
+  model()->OpenAiMode(/*via_keyboard=*/false, /*via_context_menu=*/false);
+
+  // Reset the mock contextualizer so it is destroyed before the local
+  // mock_service and fake_delegate it points to.
+  model()->SetQueryContextualizerForTesting(nullptr);
+}
+
 TEST_F(OmniboxEditModelTest, LogAnswerUsed) {
   base::HistogramTester histogram_tester;
   AutocompleteMatch match(
@@ -1777,8 +1922,8 @@ TEST_F(OmniboxEditModelPopupTest, AimPopupEnabled_ForcedNavigationEnabled) {
                 "Omnibox"),
             1);
   histogram_tester.ExpectUniqueSample(
-      "ContextualSearch.UserAction.SubmitQueryV2.WithoutContext.Omnibox", true,
-      1);
+      "ContextualSearch.UserAction.SubmitQueryV2.Omnibox",
+      contextual_search::ContextualSearchContextState::kWithoutContext, 1);
 
   testing::Mock::VerifyAndClearExpectations(client());
   EXPECT_CALL(*client(), IsAimPopupEnabled()).WillRepeatedly(Return(true));
@@ -1991,4 +2136,36 @@ TEST_F(OmniboxEditModelPopupTest,
 
   // 5. Verify selection was reset to 0.
   EXPECT_EQ(0u, model()->GetPopupSelection().line);
+}
+
+TEST_F(OmniboxEditModelPopupTest, OpenFeaturedSearchMatch) {
+  // Populate the TemplateURLService with starter pack entries.
+  std::vector<std::unique_ptr<TemplateURLData>> turls =
+      template_url_starter_pack_data::GetStarterPackEngines();
+  for (auto& starter_turl : turls) {
+    controller()->client()->GetTemplateURLService()->Add(
+        std::make_unique<TemplateURL>(std::move(*starter_turl)));
+  }
+
+  // Create a featured search match.
+  AutocompleteMatch match(nullptr, 1000, false,
+                          AutocompleteMatchType::STARTER_PACK);
+  match.keyword = u"@bookmarks";
+  match.associated_keyword = u"@bookmarks";
+  match.destination_url = GURL("chrome://bookmarks");
+
+  ACMatches matches;
+  matches.push_back(match);
+  AutocompleteResult* result = &AutocompleteControllerPublishedResult();
+  result->AppendMatches(matches);
+
+  model()->OnPopupResultChanged();
+
+  // Selecting the match with NORMAL state should enter keyword mode.
+  model()->OpenSelection(
+      OmniboxPopupSelection(0, OmniboxPopupSelection::NORMAL));
+
+  EXPECT_TRUE(model()->is_keyword_selected());
+  EXPECT_EQ(u"@bookmarks", model()->keyword());
+  EXPECT_FALSE(model()->is_keyword_hint());
 }

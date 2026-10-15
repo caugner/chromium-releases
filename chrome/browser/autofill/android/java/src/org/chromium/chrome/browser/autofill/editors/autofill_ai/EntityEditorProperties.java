@@ -4,6 +4,8 @@
 
 package org.chromium.chrome.browser.autofill.editors.autofill_ai;
 
+import android.app.Activity;
+
 import org.chromium.base.Callback;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.chrome.browser.autofill.editors.common.EditorComponentsProperties.EditorItem;
@@ -38,11 +40,20 @@ public class EntityEditorProperties {
             new ReadableBooleanPropertyKey("allow_delete");
     public static final ReadableObjectPropertyKey<Callback<Boolean>> DELETE_CALLBACK =
             new ReadableObjectPropertyKey<>("delete_callback");
+
+    public static final ReadableIntPropertyKey TOOLBAR_BRANDING_ICON_ID =
+            new ReadableIntPropertyKey("toolbar_branding_icon_id");
+    public static final ReadableIntPropertyKey TOOLBAR_BRANDING_ICON_TITLE =
+            new ReadableIntPropertyKey("toolbar_branding_icon_title");
+
     public static final WritableBooleanPropertyKey VALIDATE_ON_SHOW =
             new WritableBooleanPropertyKey("validate_on_show");
 
     public static final ReadableObjectPropertyKey<ListModel<EditorItem>> EDITOR_FIELDS =
             new ReadableObjectPropertyKey<>("editor_fields");
+
+    public static final ReadableObjectPropertyKey<Callback<Activity>> OPEN_HELP_CALLBACK =
+            new ReadableObjectPropertyKey<>("open_help_callback");
 
     public static final PropertyKey[] ALL_KEYS = {
         EDITOR_TITLE,
@@ -54,8 +65,11 @@ public class EntityEditorProperties {
         DELETE_CONFIRMATION_PRIMARY_BUTTON_TEXT_ID,
         ALLOW_DELETE,
         DELETE_CALLBACK,
+        TOOLBAR_BRANDING_ICON_ID,
+        TOOLBAR_BRANDING_ICON_TITLE,
         VALIDATE_ON_SHOW,
         EDITOR_FIELDS,
+        OPEN_HELP_CALLBACK,
     };
 
     private EntityEditorProperties() {}

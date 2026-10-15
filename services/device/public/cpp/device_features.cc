@@ -27,6 +27,10 @@ BASE_FEATURE(kSerialPortConnected,
 #endif  // !BUILDFLAG(IS_ANDROID)
 );
 
+// Restricts the sharing of C++ SerialPort and WritableStream instances across
+// different DOMWrapperWorld contexts to prevent cross-world leaks.
+BASE_FEATURE(kWebSerialWorldIsolatedCache, base::FEATURE_ENABLED_BY_DEFAULT);
+
 // This feature allows to dynamically introduce an additional list of devices
 // blocked by WebUSB via a Finch parameter. This parameter should be specified
 // in the Finch configuration to manage the list of blocked devices.
@@ -38,6 +42,18 @@ BASE_FEATURE(kWebUsbBlocklist,
 // protected interface class, even if the recipient is not set to interface
 // or endpoint. This protects devices which ignore this field.
 BASE_FEATURE(kWebUsbProtectedClassControlTransferBlock,
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
+// When enabled, WebUSB rejects claiming interfaces that share endpoints with
+// already claimed interfaces, and avoids overwriting endpoint mapping entries.
+// See crbug.com/513167952.
+BASE_FEATURE(kWebUsbHardenEndpointAliasing, base::FEATURE_ENABLED_BY_DEFAULT);
+
+// When enabled, WebUSB control transfers enforce a positive matching allowlist
+// for Standard requests (permitting only GET_STATUS, GET_DESCRIPTOR,
+// GET_CONFIGURATION, GET_INTERFACE, SYNCH_FRAME). All other Standard requests
+// are strictly blocked.
+BASE_FEATURE(kWebUsbEnforceStandardRequestAllowlist,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
 // When enabled, accessing the navigator.hid attribute does not prevent the
@@ -56,6 +72,11 @@ BASE_FEATURE(kWinSystemLocationPermissionEventBased,
 // do not use report IDs would incorrectly include an extra zero byte at the
 // start of the report and truncate the last byte of the report.
 BASE_FEATURE(kHidGetFeatureReportFix, base::FEATURE_ENABLED_BY_DEFAULT);
+
+// When enabled, HidConnectionWin will ensure that pending OVERLAPPED requests
+// are not deleted until the kernel has signaled completion, even if the
+// connection is closed.
+BASE_FEATURE(kSafeHidConnectionWinClose, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Defines a feature parameter for the `kWinSystemLocationPermission` feature.
 // This parameter controls the polling interval (in milliseconds) for checking

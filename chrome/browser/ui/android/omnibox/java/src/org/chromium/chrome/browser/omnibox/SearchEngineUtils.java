@@ -253,11 +253,7 @@ public class SearchEngineUtils implements Destroyable, TemplateUrlServiceObserve
         // remove the if check below. Instead rethink how our callers invoke this, and try to
         // simplify, potentially by removing request type.
         if (OmniboxFeatures.sShowModelPicker.getValue()) {
-            boolean configuredToolSelected =
-                    type == AutocompleteRequestType.IMAGE_GENERATION
-                            || type == AutocompleteRequestType.DEEP_SEARCH
-                            || type == AutocompleteRequestType.CANVAS;
-            if (configuredToolSelected) {
+            if (ToolModeUtils.isAimRequest(type)) {
                 String toolHint = getToolHintFromState(type, fuseboxSessionState);
                 if (!TextUtils.isEmpty(toolHint)) {
                     return toolHint;
@@ -269,7 +265,7 @@ public class SearchEngineUtils implements Destroyable, TemplateUrlServiceObserve
         int res =
                 switch (type) {
                     case AutocompleteRequestType.AI_MODE ->
-                            R.string.omnibox_empty_hint_with_dse_name_for_ai_mode;
+                            R.string.omnibox_ai_mode_scope_placeholder_text;
                     case AutocompleteRequestType.IMAGE_GENERATION ->
                             R.string.omnibox_empty_hint_for_image_generation;
                     default -> R.string.omnibox_empty_hint_with_dse_name;

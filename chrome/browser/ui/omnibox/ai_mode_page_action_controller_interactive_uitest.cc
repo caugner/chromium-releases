@@ -45,15 +45,6 @@ std::unique_ptr<KeyedService> BuildMockAimServiceEligibilityServiceInstance(
           /*url_loader_factory=*/nullptr, /*identity_manager=*/nullptr,
           AimEligibilityService::Configuration{});
 
-  EXPECT_CALL(*mock_aim_eligibility_service, IsServerEligibilityEnabled())
-      .WillRepeatedly(testing::Return(true));
-  EXPECT_CALL(*mock_aim_eligibility_service, IsAimEligible())
-      .WillRepeatedly(testing::Return(true));
-  EXPECT_CALL(*mock_aim_eligibility_service, IsAimLocallyEligible())
-      .WillRepeatedly(testing::Return(true));
-  EXPECT_CALL(*mock_aim_eligibility_service, IsFuseboxEligible())
-      .WillRepeatedly(testing::Return(true));
-
   return std::move(mock_aim_eligibility_service);
 }
 
@@ -99,7 +90,7 @@ class AiModePageActionControllerInteractiveUiTest
                                       },
                                   },
                               },
-                              {omnibox::kWebUIOmniboxPopup, {}},
+                              {omnibox::internal::kWebUIOmniboxPopup, {}},
                               {omnibox::internal::kWebUIOmniboxAimPopup, {}}},
         /*disabled_features*/ {kHideAimEntrypointOnUserInput});
   }
@@ -223,7 +214,7 @@ class AiModePageActionControllerHideEntryPointOnEditInteractiveUiTest
                                       },
                                   },
                               },
-                              {omnibox::kWebUIOmniboxPopup, {}},
+                              {omnibox::internal::kWebUIOmniboxPopup, {}},
                               {omnibox::internal::kWebUIOmniboxAimPopup, {}}},
         /*disabled_features*/ {});
   }
@@ -237,16 +228,9 @@ IN_PROC_BROWSER_TEST_F(
                   CheckChipVisible(/*visible=*/false));
 }
 
-// TODO(crbug.com/495319330): Re-enable the test when it's fixed.
-#if defined(ADDRESS_SANITIZER) && defined(_WIN32)
-#define MAYBE_VisibleWhileNotEditingOmnibox \
-  DISABLED_VisibleWhileNotEditingOmnibox
-#else
-#define MAYBE_VisibleWhileNotEditingOmnibox VisibleWhileNotEditingOmnibox
-#endif
 IN_PROC_BROWSER_TEST_F(
     AiModePageActionControllerHideEntryPointOnEditInteractiveUiTest,
-    MAYBE_VisibleWhileNotEditingOmnibox) {
+    VisibleWhileNotEditingOmnibox) {
   RunTestSequence(OpenTabWithPageUrlAndFocusOmnibox(),
                   OpenOmniboxPopupByTypingASingleZero(),
                   SendKeyPress(kOmniboxElementId, ui::VKEY_BACK),

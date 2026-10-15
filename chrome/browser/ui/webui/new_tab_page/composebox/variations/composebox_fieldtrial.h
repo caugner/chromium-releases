@@ -41,9 +41,6 @@ extern const base::FeatureParam<int> kMaxNumFiles;
 // Whether or not to show a description in the context menu entrypoint, or just
 // the icon.
 extern const base::FeatureParam<bool> kShowContextMenuDescription;
-// Whether or not to show the context menu description only when the user
-// hovers over the button.
-extern const base::FeatureParam<bool> kEnableEphemeralContextMenuDescription;
 // Whether to show section headers in the context menu.
 extern const base::FeatureParam<bool> kShowContextMenuHeaders;
 
@@ -105,32 +102,12 @@ enum class PlaceholderText {
 extern const base::FeatureParam<PlaceholderText> kSteadyPlaceholder;
 
 // Whether to show a series of cycling placeholder texts on the search input UI.
-extern const base::FeatureParam<bool> kCyclingPlaceholders;
-
-// Enum for `kRealboxLayoutMode`.
-enum class RealboxLayoutMode {
-  kTallBottomContext,
-  kTallTopContext,
-  kCompact,
-};
-
-// Flag to control the realbox layout mode (Tall, Compact).
-extern const base::FeatureParam<RealboxLayoutMode> kRealboxLayoutMode;
+BASE_DECLARE_FEATURE(kNtpRealboxCyclingPlaceholders);
 
 // Whether to enable multi-line input in the searchbox.
 extern const base::FeatureParam<bool> kMultiLineEnabled;
 
 bool IsNtpRealboxNextEnabled(Profile* profile);
-
-// String constants for RealboxLayoutMode.
-inline constexpr char kRealboxLayoutModeTallBottomContext[] =
-    "TallBottomContext";
-inline constexpr char kRealboxLayoutModeTallTopContext[] = "TallTopContext";
-inline constexpr char kRealboxLayoutModeCompact[] = "Compact";
-
-// Returns the string representation of `RealboxLayoutMode`.
-std::string_view RealboxLayoutModeToString(
-    RealboxLayoutMode realbox_layout_mode);
 
 }  // namespace ntp_realbox
 

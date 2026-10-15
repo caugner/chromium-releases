@@ -36,6 +36,7 @@ import android.widget.RelativeLayout.LayoutParams;
 import android.widget.Spinner;
 import android.widget.TextView;
 
+import androidx.annotation.DrawableRes;
 import androidx.annotation.StringRes;
 import androidx.core.view.MarginLayoutParamsCompat;
 
@@ -60,6 +61,7 @@ import org.chromium.components.browser_ui.settings.SettingsUtils;
 import org.chromium.components.browser_ui.styles.SemanticColorUtils;
 import org.chromium.components.browser_ui.widget.ActionConfirmationDialog;
 import org.chromium.components.browser_ui.widget.ActionConfirmationDialog.ConfirmationDialogHandler;
+import org.chromium.components.browser_ui.widget.ActionConfirmationDialog.ConfirmationDialogParams;
 import org.chromium.components.browser_ui.widget.ActionConfirmationDialog.DialogDismissType;
 import org.chromium.components.browser_ui.widget.AlwaysDismissedDialog;
 import org.chromium.components.browser_ui.widget.FadingEdgeScrollView;
@@ -254,6 +256,13 @@ public abstract class EditorViewBase extends AlwaysDismissedDialog
 
     public void setDeleteCallback(Callback<Boolean> deleteCallback) {
         mDeleteCallback = deleteCallback;
+    }
+
+    public void setBrandingIconDetails(
+            @DrawableRes int toolbarBrandingIconId, @StringRes int toolbarBrandingIconTitleId) {
+        EditorDialogToolbar toolbar =
+                (EditorDialogToolbar) mContainerView.findViewById(R.id.action_bar);
+        toolbar.setBrandingIconDetails(toolbarBrandingIconId, toolbarBrandingIconTitleId);
     }
 
     public void setDoneRunnable(Runnable doneRunnable) {
@@ -651,11 +660,12 @@ public abstract class EditorViewBase extends AlwaysDismissedDialog
                 };
 
         confirmationDialog.show(
-                res -> confirmationTitle,
-                res -> confirmationText,
-                primaryButtonText,
-                R.string.cancel,
-                /* supportStopShowing= */ false,
+                new ConfirmationDialogParams(mContext)
+                        .withTitle(confirmationTitle)
+                        .withDescription(confirmationText)
+                        .withPositiveButton(primaryButtonText)
+                        .withNegativeButton(R.string.cancel)
+                        .withSupportStopShowing(false),
                 confirmationDialogHandler);
 
         if (sObserverForTest != null) {

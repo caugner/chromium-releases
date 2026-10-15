@@ -35,8 +35,11 @@ import org.chromium.components.signin.AccountEmailDisplayHook;
 import org.chromium.components.signin.AccountManagerFacade;
 import org.chromium.components.signin.AccountManagerFacadeProvider;
 import org.chromium.components.signin.AccountsChangeObserver;
+import org.chromium.components.signin.SigninFeatureMap;
+import org.chromium.components.signin.SigninFeatures;
 import org.chromium.components.signin.base.AccountInfo;
 import org.chromium.components.signin.base.CoreAccountInfo;
+import org.chromium.components.signin.identitymanager.ConsentLevel;
 import org.chromium.components.signin.identitymanager.IdentityManager;
 import org.chromium.google_apis.gaia.CoreAccountId;
 
@@ -53,7 +56,7 @@ import java.util.function.Function;
  */
 @MainThread
 @NullMarked
-public class ProfileDataCache implements IdentityManager.Observer, AccountsChangeObserver {
+public class ProfileDataCache implements IdentityManager.Observer {
     /** Observer to get notifications about changes in profile data. */
     public interface Observer {
 
@@ -75,7 +78,11 @@ public class ProfileDataCache implements IdentityManager.Observer, AccountsChang
 
     private final Context mContext;
     private final AccountManagerFacade mAccountManagerFacade;
+    private final @Nullable AccountManagerAccountsChangeObserver
+            mAccountManagerAccountsChangeObserver;
     private final IdentityManager mIdentityManager;
+    private final @Nullable IdentityManagerAccountsChangeObserver
+            mIdentityManagerAccountsChangeObserver;
     private final int mImageSize;
     // The badge for a given account is selected as follows:
     // * If there is a config for that specific account, use that
@@ -98,6 +105,13 @@ public class ProfileDataCache implements IdentityManager.Observer, AccountsChang
         mContext = context;
         mAccountManagerFacade = accountManagerFacade;
         mIdentityManager = identityManager;
+        if (SigninFeatureMap.isEnabled(SigninFeatures.MAKE_IDENTITY_MANAGER_SOURCE_OF_ACCOUNTS)) {
+            mAccountManagerAccountsChangeObserver = null;
+            mIdentityManagerAccountsChangeObserver = new IdentityManagerAccountsChangeObserver();
+        } else {
+            mAccountManagerAccountsChangeObserver = new AccountManagerAccountsChangeObserver();
+            mIdentityManagerAccountsChangeObserver = null;
+        }
         mImageSize = imageSize;
         mDefaultBadgeConfig = badgeConfig;
         mPlaceholderImage = getScaledPlaceholderImage(context, imageSize);
@@ -169,7 +183,11 @@ public class ProfileDataCache implements IdentityManager.Observer, AccountsChang
      * @return The {@link DisplayableProfileData} containing the profile data corresponding to the
      *     given account or a {@link DisplayableProfileData} with a placeholder image and null full
      *     and given name.
+     * @deprecated Use {@link #getById} instead.
+     *     <p>TODO(crbug.com/494147426) Remove this method when all usages are migrated to {@link
+     *     #getById}.
      */
+    @Deprecated
     public DisplayableProfileData getProfileDataOrDefault(@Nullable String accountEmail) {
         DisplayableProfileData profileData =
                 accountEmail != null ? mAccountsCache.getByEmail(accountEmail) : null;
@@ -192,20 +210,13 @@ public class ProfileDataCache implements IdentityManager.Observer, AccountsChang
      * @return The {@link DisplayableProfileData} for the given account ID.
      */
     public DisplayableProfileData getById(CoreAccountId accountId) {
+        if (!mAccountsCache.isLoaded() || !mAccountsCache.contains(accountId)) {
+            updateCache();
+        }
+
         var profileData = mAccountsCache.getByAccountId(accountId);
         if (profileData != null) {
             return profileData;
-        }
-
-        // TODO(https://crbug.com/483627535): Remove that fallback to AccountManagerFacade after
-        // full migration to IdentityManager.
-        var accounts = mAccountManagerFacade.getAccounts();
-        if (accounts.isFulfilled()) {
-            for (var account : accounts.getResult()) {
-                if (account.getId().equals(accountId)) {
-                    return createDefaultProfileData(account.getEmail());
-                }
-            }
         }
 
         throw new IllegalArgumentException("Account not found");
@@ -250,13 +261,15 @@ public class ProfileDataCache implements IdentityManager.Observer, AccountsChang
     public void setBadge(CoreAccountId accountId, @Nullable BadgeConfig badgeConfig) {
         if (mPerAccountBadgeConfig.containsKey(accountId)
                 && Objects.equals(mPerAccountBadgeConfig.get(accountId), badgeConfig)) {
-            // Update is a no-op. The per-account badge set to accountEmail is the same as the
+            // Update is a no-op. The per-account badge set to accountId is the same as the
             // badgeResId.
             return;
         }
         mPerAccountBadgeConfig.put(accountId, badgeConfig);
-        var accountInfo = mIdentityManager.findExtendedAccountInfoByAccountId(accountId);
-        onExtendedAccountInfoUpdated(accountInfo);
+        var accountInfo = findAccountInfo(accountId);
+        if (accountInfo != null) {
+            onExtendedAccountInfoUpdated(accountInfo);
+        }
     }
 
     /**
@@ -265,7 +278,13 @@ public class ProfileDataCache implements IdentityManager.Observer, AccountsChang
     public void addObserver(Observer observer) {
         ThreadUtils.assertOnUiThread();
         if (mObservers.isEmpty()) {
-            mAccountManagerFacade.addObserver(this);
+            if (SigninFeatureMap.isEnabled(
+                    SigninFeatures.MAKE_IDENTITY_MANAGER_SOURCE_OF_ACCOUNTS)) {
+                mIdentityManager.addObserver(assumeNonNull(mIdentityManagerAccountsChangeObserver));
+            } else {
+                mAccountManagerFacade.addObserver(
+                        assumeNonNull(mAccountManagerAccountsChangeObserver));
+            }
             mIdentityManager.addObserver(this);
         }
         mObservers.addObserver(observer);
@@ -278,56 +297,77 @@ public class ProfileDataCache implements IdentityManager.Observer, AccountsChang
         ThreadUtils.assertOnUiThread();
         mObservers.removeObserver(observer);
         if (mObservers.isEmpty()) {
-            mAccountManagerFacade.removeObserver(this);
             mIdentityManager.removeObserver(this);
+            if (SigninFeatureMap.isEnabled(
+                    SigninFeatures.MAKE_IDENTITY_MANAGER_SOURCE_OF_ACCOUNTS)) {
+                mIdentityManager.removeObserver(
+                        assumeNonNull(mIdentityManagerAccountsChangeObserver));
+            } else {
+                mAccountManagerFacade.removeObserver(
+                        assumeNonNull(mAccountManagerAccountsChangeObserver));
+            }
         }
-    }
-
-    @Override
-    public void onCoreAccountInfosChanged() {
-        updateCache();
     }
 
     /** Implements {@link IdentityManager.Observer}. */
     @Override
-    public void onExtendedAccountInfoUpdated(@Nullable AccountInfo accountInfo) {
-        // We don't update the cache if the account information and ProfileDataCache config mean
-        // that we would just be returning the default profile data.
-        if (accountInfo != null
-                && (accountInfo.hasDisplayableInfo()
-                        || getBadgeConfigForAccount(accountInfo.getId()) != null)) {
-            var displayableProfileData = toDisplayableProfileData(accountInfo);
-            mAccountsCache.putAccount(
-                    new AccountsCache.AccountEntry(accountInfo.getId(), displayableProfileData));
-            fireOnProfileDataUpdated(displayableProfileData);
-        }
+    public void onExtendedAccountInfoUpdated(AccountInfo accountInfo) {
+        var displayableProfileData = toDisplayableProfileData(accountInfo);
+        mAccountsCache.putAccount(accountInfo.getId(), displayableProfileData);
+        fireOnProfileDataUpdated(displayableProfileData);
+    }
+
+    /** Checks if the cache contains profile data for the given account ID. */
+    public boolean hasProfileDataForTesting(CoreAccountId accountId) {
+        return mAccountsCache.getByAccountId(accountId) != null;
     }
 
     /**
      * @return Whether the cache contains non-default profile data for the given account.
+     * @deprecated Use {@link #hasProfileDataForTesting(CoreAccountId)} instead.
+     *     <p>TODO(crbug.com/494147426) Remove this method when all usages are migrated to {@link
+     *     #hasProfileDataForTesting(CoreAccountId)}.
      */
+    @Deprecated
     public boolean hasProfileDataForTesting(String accountEmail) {
         return mAccountsCache.getByEmail(accountEmail) != null;
     }
 
     private void updateCache() {
-        var accounts = mAccountManagerFacade.getAccounts();
-        if (!accounts.isFulfilled()) {
-            // When the list of accounts is ready - onCoreAccountInfosChanged will call
-            // updateCache again.
+        final @Nullable List<AccountInfo> coreAccounts = getCoreAccountsIfLoaded();
+        final @Nullable AccountInfo primaryAccountInfo = getPrimaryAccountInfo();
+
+        if (coreAccounts == null && primaryAccountInfo == null) {
             return;
         }
 
-        List<AccountsCache.AccountEntry> displayableAccounts = new ArrayList<>();
-        for (CoreAccountInfo account : accounts.getResult()) {
-            var accountInfo = mIdentityManager.findExtendedAccountInfoByAccountId(account.getId());
-            if (accountInfo != null
-                    && (accountInfo.hasDisplayableInfo()
-                            || getBadgeConfigForAccount(accountInfo.getId()) != null)) {
-                displayableAccounts.add(
-                        new AccountsCache.AccountEntry(
-                                accountInfo.getId(), toDisplayableProfileData(accountInfo)));
-            }
+        // Primary account can be set before list of all accounts is loaded. To avoid that case, we
+        // need to add primary account to the list of all accounts manually. That makes potential
+        // duplicate on the list, but it will be handled by the updateCache(List<AccountInfo>)
+        // method.
+        final var allAccounts =
+                coreAccounts != null ? new ArrayList<>(coreAccounts) : new ArrayList<AccountInfo>();
+        if (primaryAccountInfo != null) {
+            allAccounts.add(primaryAccountInfo);
+        }
+        updateCache(allAccounts);
+    }
+
+    private void updateCache(List<AccountInfo> accounts) {
+        var displayableAccounts = new LinkedHashMap<CoreAccountId, DisplayableProfileData>();
+        for (AccountInfo account : accounts) {
+            // Accounts list is combined from accounts with refresh tokens and the primary account
+            // at the last position. Because list of accounts is manually combined, there is a
+            // chance that the primary account is duplicated. We want to use computeIfAbsent here to
+            // avoid overriding the existing entry and double avatar generation.
+            displayableAccounts.computeIfAbsent(
+                    account.getId(),
+                    id -> {
+                        var extendedAccountInfo =
+                                mIdentityManager.findExtendedAccountInfoByAccountId(id);
+                        return toDisplayableProfileData(
+                                extendedAccountInfo != null ? extendedAccountInfo : account);
+                    });
         }
         mAccountsCache.setAccounts(displayableAccounts);
 
@@ -351,12 +391,23 @@ public class ProfileDataCache implements IdentityManager.Observer, AccountsChang
         if (badgeConfig != null) {
             croppedAvatar = overlayBadgeOnUserPicture(badgeConfig, croppedAvatar);
         }
-        return new DisplayableProfileData(
-                accountInfo.getEmail(),
-                croppedAvatar,
-                accountInfo.getFullName(),
-                accountInfo.getGivenName(),
-                accountInfo.canHaveEmailAddressDisplayed());
+
+        if (SigninFeatureMap.isEnabled(SigninFeatures.MAKE_IDENTITY_MANAGER_SOURCE_OF_ACCOUNTS)) {
+            return new DisplayableProfileData(
+                    accountInfo.getEmail(),
+                    croppedAvatar,
+                    accountInfo.getFullName(),
+                    accountInfo.getGivenName(),
+                    accountInfo.canHaveEmailAddressDisplayed());
+        } else {
+            final var shouldPopulateNames = accountInfo.hasDisplayableInfo() || badgeConfig != null;
+            return new DisplayableProfileData(
+                    accountInfo.getEmail(),
+                    croppedAvatar,
+                    shouldPopulateNames ? accountInfo.getFullName() : null,
+                    shouldPopulateNames ? accountInfo.getGivenName() : null,
+                    accountInfo.canHaveEmailAddressDisplayed());
+        }
     }
 
     private void fireOnAccountsUpdated(List<DisplayableProfileData> accounts) {
@@ -374,6 +425,49 @@ public class ProfileDataCache implements IdentityManager.Observer, AccountsChang
     private void fireOnProfileDataUpdated(DisplayableProfileData profileData) {
         for (Observer observer : mObservers) {
             observer.onProfileDataUpdated(profileData);
+        }
+    }
+
+    private @Nullable AccountInfo findAccountInfo(CoreAccountId accountId) {
+        var accountInfo = mIdentityManager.findExtendedAccountInfoByAccountId(accountId);
+        if (accountInfo != null) {
+            return accountInfo;
+        }
+        var coreAccounts = getCoreAccountsIfLoaded();
+        if (coreAccounts != null) {
+            for (var coreAccountInfo : coreAccounts) {
+                if (coreAccountInfo.getId().equals(accountId)) {
+                    return coreAccountInfo;
+                }
+            }
+        }
+        var primaryAccountInfo = getPrimaryAccountInfo();
+        if (primaryAccountInfo != null && primaryAccountInfo.getId().equals(accountId)) {
+            return primaryAccountInfo;
+        }
+        return null;
+    }
+
+    private @Nullable AccountInfo getPrimaryAccountInfo() {
+        var primaryAccountInfo = mIdentityManager.getPrimaryAccountInfo(ConsentLevel.SIGNIN);
+        if (primaryAccountInfo == null) {
+            return null;
+        }
+        return new AccountInfo.Builder(primaryAccountInfo).build();
+    }
+
+    private @Nullable List<AccountInfo> getCoreAccountsIfLoaded() {
+        if (SigninFeatureMap.isEnabled(SigninFeatures.MAKE_IDENTITY_MANAGER_SOURCE_OF_ACCOUNTS)) {
+            if (mIdentityManager.areRefreshTokensLoaded()) {
+                return mIdentityManager.getExtendedAccountInfoForAccountsWithRefreshToken();
+            }
+            return null;
+        } else {
+            var accounts = mAccountManagerFacade.getAccounts();
+            if (accounts.isFulfilled()) {
+                return accounts.getResult();
+            }
+            return null;
         }
     }
 
@@ -431,6 +525,48 @@ public class ProfileDataCache implements IdentityManager.Observer, AccountsChang
                 : mDefaultBadgeConfig;
     }
 
+    private class AccountManagerAccountsChangeObserver implements AccountsChangeObserver {
+
+        /** Implements {@link AccountsChangeObserver}. */
+        @Override
+        public void onCoreAccountInfosChanged() {
+            assert !SigninFeatureMap.isEnabled(
+                    SigninFeatures.MAKE_IDENTITY_MANAGER_SOURCE_OF_ACCOUNTS);
+            updateCache(mAccountManagerFacade.getAccounts().getResult());
+        }
+    }
+
+    private class IdentityManagerAccountsChangeObserver implements IdentityManager.Observer {
+
+        /** Implements {@link IdentityManager.Observer}. */
+        @Override
+        public void onRefreshTokensLoaded() {
+            assert SigninFeatureMap.isEnabled(
+                    SigninFeatures.MAKE_IDENTITY_MANAGER_SOURCE_OF_ACCOUNTS);
+            updateCache(mIdentityManager.getExtendedAccountInfoForAccountsWithRefreshToken());
+        }
+
+        /** Implements {@link IdentityManager.Observer}. */
+        @Override
+        public void onRefreshTokenUpdatedForAccount(CoreAccountInfo coreAccountInfo) {
+            assert SigninFeatureMap.isEnabled(
+                    SigninFeatures.MAKE_IDENTITY_MANAGER_SOURCE_OF_ACCOUNTS);
+            if (mIdentityManager.areRefreshTokensLoaded()) {
+                updateCache(mIdentityManager.getExtendedAccountInfoForAccountsWithRefreshToken());
+            }
+        }
+
+        /** Implements {@link IdentityManager.Observer}. */
+        @Override
+        public void onRefreshTokenRemovedForAccount(CoreAccountId accountId) {
+            assert SigninFeatureMap.isEnabled(
+                    SigninFeatures.MAKE_IDENTITY_MANAGER_SOURCE_OF_ACCOUNTS);
+            if (mIdentityManager.areRefreshTokensLoaded()) {
+                updateCache(mIdentityManager.getExtendedAccountInfoForAccountsWithRefreshToken());
+            }
+        }
+    }
+
     private static final class AccountsCache {
 
         private Promise<Map<CoreAccountId, DisplayableProfileData>> mAccounts = new Promise<>();
@@ -447,27 +583,22 @@ public class ProfileDataCache implements IdentityManager.Observer, AccountsChang
             }
         }
 
-        private void setAccounts(List<AccountEntry> accounts) {
-            var accountsMap = new LinkedHashMap<CoreAccountId, DisplayableProfileData>();
-            for (var account : accounts) {
-                accountsMap.put(account.mAccountId, account.mProfileData);
-            }
-
+        private void setAccounts(Map<CoreAccountId, DisplayableProfileData> accounts) {
             if (mAccounts.isFulfilled()) {
-                mAccounts = Promise.fulfilled(accountsMap);
+                mAccounts = Promise.fulfilled(accounts);
             } else {
-                mAccounts.fulfill(accountsMap);
+                mAccounts.fulfill(accounts);
             }
         }
 
-        private void putAccount(AccountEntry account) {
+        private void putAccount(CoreAccountId accountId, DisplayableProfileData profileData) {
             if (mAccounts.isFulfilled()) {
                 final var accounts = mAccounts.getResult();
-                accounts.put(account.mAccountId, account.mProfileData);
+                accounts.put(accountId, profileData);
                 mAccounts = Promise.fulfilled(accounts);
             } else {
                 final var accounts = new LinkedHashMap<CoreAccountId, DisplayableProfileData>();
-                accounts.put(account.mAccountId, account.mProfileData);
+                accounts.put(accountId, profileData);
                 mAccounts.fulfill(accounts);
             }
         }
@@ -490,14 +621,12 @@ public class ProfileDataCache implements IdentityManager.Observer, AccountsChang
             return null;
         }
 
-        private static final class AccountEntry {
-            private final CoreAccountId mAccountId;
-            private final DisplayableProfileData mProfileData;
+        private boolean contains(final CoreAccountId accountId) {
+            return getByAccountId(accountId) != null;
+        }
 
-            private AccountEntry(CoreAccountId accountId, DisplayableProfileData profileData) {
-                mAccountId = accountId;
-                mProfileData = profileData;
-            }
+        private boolean isLoaded() {
+            return mAccounts.isFulfilled();
         }
     }
 }

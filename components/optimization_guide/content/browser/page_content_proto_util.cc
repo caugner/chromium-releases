@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/feature_list.h"
+#include "base/logging.h"
 #include "base/notreached.h"
 #include "base/supports_user_data.h"
 #include "base/types/expected.h"
@@ -144,6 +145,10 @@ optimization_guide::proto::ClickabilityReason ConvertClickabilityReason(
       return optimization_guide::proto::CLICKABILITY_REASON_MOUSE_HOVER;
     case blink::mojom::AIPageContentClickabilityReason::kHoverPseudoClass:
       return optimization_guide::proto::CLICKABILITY_REASON_HOVER_PSEUDO_CLASS;
+    case blink::mojom::AIPageContentClickabilityReason::kAriaToggle:
+      return optimization_guide::proto::CLICKABILITY_REASON_ARIA_TOGGLE;
+    case blink::mojom::AIPageContentClickabilityReason::kAriaSelectable:
+      return optimization_guide::proto::CLICKABILITY_REASON_ARIA_SELECTABLE;
   }
   NOTREACHED();
 }
@@ -294,6 +299,14 @@ void ConvertNodeInteractionInfo(
   }
   proto_interaction_info->set_is_focusable(
       mojom_node_interaction_info.is_focusable);
+  proto_interaction_info->set_is_tabbable(
+      mojom_node_interaction_info.is_tabbable);
+  proto_interaction_info->set_has_aria_activedescendant(
+      mojom_node_interaction_info.has_aria_activedescendant);
+  for (int32_t dom_node_id :
+       mojom_node_interaction_info.aria_action_target_node_ids) {
+    proto_interaction_info->add_aria_action_target_node_ids(dom_node_id);
+  }
 
   if (mojom_node_interaction_info.document_scoped_z_order) {
     proto_interaction_info->set_document_scoped_z_order(
@@ -579,6 +592,7 @@ optimization_guide::proto::RedactionDecision ConvertRedactionDecision(
 
 void ConvertFormControlData(
     const blink::mojom::AIPageContentFormControlData& mojom_form_control_data,
+    blink::mojom::AIPageContentRedactionDecision redaction_decision,
     const std::optional<AutofillFieldMetadata>& autofill_metadata,
     optimization_guide::proto::FormControlData* proto_form_control_data) {
   proto_form_control_data->set_form_control_type(
@@ -608,8 +622,11 @@ void ConvertFormControlData(
     }
     proto_select_option->set_is_selected(select_option->is_selected);
   }
+  // Set the deprecated proto field for compatibility. The canonical redaction
+  // decision now lives on `ContentAttributes.redaction_decision`.
+  // TODO(crbug.com/480135178): Remove when consumers are migrated.
   proto_form_control_data->set_redaction_decision(
-      ConvertRedactionDecision(mojom_form_control_data.redaction_decision));
+      ConvertRedactionDecision(redaction_decision));
 
   // Incorporate any information received from Autofill.
   if (autofill_metadata) {
@@ -685,6 +702,8 @@ base::expected<void, std::string> ConvertAttributes(
 
   proto_attributes->set_attribute_type(
       ConvertAttributeType(mojom_attributes.attribute_type));
+  proto_attributes->set_redaction_decision(
+      ConvertRedactionDecision(mojom_attributes.redaction_decision));
 
   // When sensitive payment redaction is enabled, we populate
   // `mojom_attributes.geometry` for form controls that may contain
@@ -767,6 +786,7 @@ base::expected<void, std::string> ConvertAttributes(
     }
     ConvertFormControlData(
         *mojom_attributes.form_control_data,
+        mojom_attributes.redaction_decision,
         GetAutofillFieldData(source_frame_token, session, *proto_attributes),
         proto_attributes->mutable_form_control_data());
   } else if (mojom_attributes.table_data) {
@@ -981,6 +1001,19 @@ class Converter {
         return base::unexpected("could not find render_frame_info for iframe");
       }
 
+      // Security check: Verify that the child frame is a child of the current
+      // frame.
+      content::RenderFrameHost* child_rfh =
+          content::RenderFrameHost::FromFrameToken(
+              render_frame_info->global_frame_token);
+      content::RenderFrameHost* parent_rfh =
+          content::RenderFrameHost::FromFrameToken(source_frame_token);
+      if (child_rfh && parent_rfh &&
+          child_rfh->GetParentOrOuterDocument() != parent_rfh) {
+        return base::unexpected(
+            "compromised renderer: iframe is not a child of the current frame");
+      }
+
       auto* proto_iframe_data =
           proto_node->mutable_content_attributes()->mutable_iframe_data();
       if (frame_token.Is<blink::RemoteFrameToken>()) {
@@ -1141,6 +1174,17 @@ class Converter {
       return base::ok();
     }
 
+    if (page_content_proto().has_popup_window()) {
+      return base::ok();
+    }
+
+    if (!opener_frame_info.has_active_popup) {
+      // This could be a race condition where the popup was closed between the
+      // start of extraction and the renderer's response. We skip the popup
+      // but continue with the rest of the page content.
+      return base::ok();
+    }
+
     optimization_guide::proto::PopupWindow* popup_window =
         page_content_proto().mutable_popup_window();
 
@@ -1150,8 +1194,7 @@ class Converter {
 
     // Set the document ID to the frame which opened the popup (might be wrong,
     // because we treat a main page and its same-site iframes as the same
-    // document id). Also we don't need browser-side security check as the data
-    // all come from the same renderer.
+    // document id). We verify that the the popup is owned by the iframe.
     popup_window->mutable_opener_document_id()->set_serialized_token(
         opener_frame_info.serialized_server_token);
 
@@ -1327,6 +1370,13 @@ base::expected<void, std::string> ConvertAIPageContentToProto(
                       page_content_result);
   converter.AddPasswordRedactionData(*main_frame_page_content);
 
+  // Claim the singleton popup before walking child frames so the main frame
+  // wins if multiple verified frames report popup data.
+  if (main_frame_page_content->frame_data->popup) {
+    RETURN_IF_ERROR(converter.ConvertPopup(
+        *main_frame_page_content->frame_data->popup, *render_frame_info));
+  }
+
   RETURN_IF_ERROR(converter.ConvertNode(
       main_frame_token, *main_frame_page_content->root_node,
       GetAccessibilityFocusedNodeId(*main_frame_page_content->frame_data),
@@ -1348,12 +1398,6 @@ base::expected<void, std::string> ConvertAIPageContentToProto(
   }
   page_content_result.proto.set_version(version);
   page_content_result.proto.set_mode(mode);
-
-  // If the page had a popup open, provide that popup to APC as well.
-  if (main_frame_page_content->frame_data->popup) {
-    RETURN_IF_ERROR(converter.ConvertPopup(
-        *main_frame_page_content->frame_data->popup, *render_frame_info));
-  }
 
   return base::ok();
 }

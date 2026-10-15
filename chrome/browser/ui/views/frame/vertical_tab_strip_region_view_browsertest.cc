@@ -9,7 +9,10 @@
 #include "base/test/run_until.h"
 #include "base/test/scoped_feature_list.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/actions/chrome_action_id.h"
+#include "chrome/browser/ui/animation/browser_animation_controller.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_actions.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/tabs/features.h"
 #include "chrome/browser/ui/tabs/split_tab_metrics.h"
@@ -18,6 +21,7 @@
 #include "chrome/browser/ui/tabs/vertical_tab_strip_state.h"
 #include "chrome/browser/ui/tabs/vertical_tab_strip_state_controller.h"
 #include "chrome/browser/ui/ui_features.h"
+#include "chrome/browser/ui/views/animations/tab_strip_animations.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/top_container_view.h"
 #include "chrome/browser/ui/views/tabs/vertical/root_tab_collection_node.h"
@@ -26,14 +30,18 @@
 #include "chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.h"
 #include "chrome/browser/ui/views/tabs/vertical/vertical_unpinned_tab_container_view.h"
 #include "chrome/browser/ui/views/test/vertical_tabs_browser_test_mixin.h"
+#include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/tabs/public/tab_group.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/pointer/touch_ui_controller.h"
+#include "ui/display/screen.h"
 #include "ui/views/controls/button/button_controller.h"
+#include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/resize_area.h"
 #include "ui/views/controls/separator.h"
 #include "ui/views/focus/focus_manager.h"
@@ -98,21 +106,28 @@ class VerticalTabStripRegionViewTest
         ->button_controller()
         ->NotifyClick();
   }
+
+  bool IsAnimatingSize() const {
+    return BrowserAnimationController::From(browser())->IsAnimating(
+        TabStripAnimations::kVerticalTabStrip);
+  }
 };
 
 IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
                        SeparatorVisibilityChangesWithCollapsedState) {
   auto* tabs_separator = region_view()->tabs_separator_for_testing();
 
-  state_controller()->SetCollapsed(true);
-  EXPECT_TRUE(state_controller()->IsCollapsed());
+  state_controller()->RequestCollapse(true);
+  ASSERT_TRUE(base::test::RunUntil(
+      [&]() { return state_controller()->IsCollapsed(); }));
   ui_test_utils::ViewVisibilityWaiter(tabs_separator, false).Wait();
 
   AppendPinnedTab();
   ui_test_utils::ViewVisibilityWaiter(tabs_separator, true).Wait();
 
-  state_controller()->SetCollapsed(false);
-  EXPECT_FALSE(state_controller()->IsCollapsed());
+  state_controller()->RequestCollapse(false);
+  ASSERT_TRUE(base::test::RunUntil(
+      [&]() { return !state_controller()->IsCollapsed(); }));
   ui_test_utils::ViewVisibilityWaiter(tabs_separator, false).Wait();
 }
 
@@ -136,7 +151,7 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, ResizeViewSmaller) {
   ASSERT_EQ(
       initial_width,
       region_view()->target_collapse_state_for_testing().uncollapsed_width);
-  ASSERT_FALSE(region_view()->is_animating());
+  ASSERT_FALSE(IsAnimatingSize());
   ASSERT_FALSE(state_controller()->IsCollapsed());
   WaitForBoundsToMatchPreferredWidth();
 
@@ -153,7 +168,7 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, ResizeViewSmaller) {
     EXPECT_EQ(
         resize_width,
         region_view()->target_collapse_state_for_testing().uncollapsed_width);
-    EXPECT_FALSE(region_view()->is_animating());
+    EXPECT_FALSE(IsAnimatingSize());
     EXPECT_FALSE(state_controller()->IsCollapsed());
     WaitForBoundsToMatchPreferredWidth();
   }
@@ -173,7 +188,7 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, ResizeViewSmaller) {
     EXPECT_EQ(
         VerticalTabStripRegionView::kUncollapsedMinWidth,
         region_view()->target_collapse_state_for_testing().uncollapsed_width);
-    EXPECT_FALSE(region_view()->is_animating());
+    EXPECT_FALSE(IsAnimatingSize());
     EXPECT_FALSE(state_controller()->IsCollapsed());
     WaitForBoundsToMatchPreferredWidth();
   }
@@ -190,7 +205,7 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, ResizeViewSmaller) {
     EXPECT_EQ(
         VerticalTabStripRegionView::kUncollapsedMinWidth,
         region_view()->target_collapse_state_for_testing().uncollapsed_width);
-    EXPECT_TRUE(region_view()->is_animating());
+    EXPECT_TRUE(IsAnimatingSize());
 
     // Some time after the animation starts, the state controller collapsed
     // state will true.
@@ -199,8 +214,7 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, ResizeViewSmaller) {
 
     // When the animation completes, the preferred width will be the collapsed
     // width.
-    ASSERT_TRUE(
-        base::test::RunUntil([&]() { return !region_view()->is_animating(); }));
+    ASSERT_TRUE(base::test::RunUntil([&]() { return !IsAnimatingSize(); }));
     EXPECT_EQ(VerticalTabStripRegionView::kCollapsedWidth,
               region_view()->GetPreferredSize().width());
     WaitForBoundsToMatchPreferredWidth();
@@ -217,9 +231,8 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, MAYBE_ResizeViewBigger) {
   const int initial_width = VerticalTabStripRegionView::kCollapsedWidth;
 
   // Start this test from the collapsed state.
-  state_controller()->SetCollapsed(true);
-  ASSERT_TRUE(
-      base::test::RunUntil([&]() { return !region_view()->is_animating(); }));
+  state_controller()->RequestCollapse(true);
+  ASSERT_TRUE(base::test::RunUntil([&]() { return !IsAnimatingSize(); }));
   WaitForBoundsToMatchPreferredWidth();
 
   // Verify the initial state of the region view.
@@ -228,7 +241,7 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, MAYBE_ResizeViewBigger) {
   ASSERT_EQ(
       tabs::kVerticalTabStripDefaultUncollapsedWidth,
       region_view()->target_collapse_state_for_testing().uncollapsed_width);
-  ASSERT_FALSE(region_view()->is_animating());
+  ASSERT_FALSE(IsAnimatingSize());
   ASSERT_TRUE(state_controller()->IsCollapsed());
 
   // Grow the area a small amount and nothing will happen.
@@ -243,7 +256,7 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, MAYBE_ResizeViewBigger) {
     EXPECT_EQ(
         tabs::kVerticalTabStripDefaultUncollapsedWidth,
         region_view()->target_collapse_state_for_testing().uncollapsed_width);
-    EXPECT_FALSE(region_view()->is_animating());
+    EXPECT_FALSE(IsAnimatingSize());
     EXPECT_TRUE(state_controller()->IsCollapsed());
     EXPECT_EQ(initial_width, region_view()->width());
   }
@@ -260,7 +273,7 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, MAYBE_ResizeViewBigger) {
     EXPECT_EQ(
         VerticalTabStripRegionView::kUncollapsedMinWidth,
         region_view()->target_collapse_state_for_testing().uncollapsed_width);
-    EXPECT_TRUE(region_view()->is_animating());
+    EXPECT_TRUE(IsAnimatingSize());
 
     // Some time after the animation starts, the state controller collapsed
     // state will become false.
@@ -269,8 +282,7 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, MAYBE_ResizeViewBigger) {
 
     // When the animation completes, the preferred width will be the minimum
     // expanded width.
-    ASSERT_TRUE(
-        base::test::RunUntil([&]() { return !region_view()->is_animating(); }));
+    ASSERT_TRUE(base::test::RunUntil([&]() { return !IsAnimatingSize(); }));
     EXPECT_EQ(VerticalTabStripRegionView::kUncollapsedMinWidth,
               region_view()->GetPreferredSize().width());
     WaitForBoundsToMatchPreferredWidth();
@@ -290,7 +302,7 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, MAYBE_ResizeViewBigger) {
     EXPECT_EQ(
         resize_width,
         region_view()->target_collapse_state_for_testing().uncollapsed_width);
-    EXPECT_FALSE(region_view()->is_animating());
+    EXPECT_FALSE(IsAnimatingSize());
     EXPECT_FALSE(state_controller()->IsCollapsed());
     WaitForBoundsToMatchPreferredWidth();
   }
@@ -309,7 +321,7 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, MAYBE_ResizeViewBigger) {
     EXPECT_EQ(
         VerticalTabStripRegionView::kUncollapsedMaxWidth,
         region_view()->target_collapse_state_for_testing().uncollapsed_width);
-    EXPECT_FALSE(region_view()->is_animating());
+    EXPECT_FALSE(IsAnimatingSize());
     EXPECT_FALSE(state_controller()->IsCollapsed());
     WaitForBoundsToMatchPreferredWidth();
   }
@@ -392,8 +404,7 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
     ASSERT_LE(resize_width, VerticalTabStripRegionView::kCollapseSnapWidth);
 
     region_view()->OnResize(resize_amount, true);
-    ASSERT_TRUE(
-        base::test::RunUntil([&]() { return !region_view()->is_animating(); }));
+    ASSERT_TRUE(base::test::RunUntil([&]() { return !IsAnimatingSize(); }));
     EXPECT_EQ(VerticalTabStripRegionView::kCollapsedWidth,
               region_view()->GetPreferredSize().width());
     EXPECT_EQ(last_uncollapsed_width,
@@ -479,6 +490,33 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, LogsResizeMetrics) {
         "Tabs.VerticalTabs.TabStripSize",
         VerticalTabStripRegionView::kCollapsedWidth, 1);
   }
+}
+
+IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
+                       CancelCollapseAnimationUpdatesCollapseButton) {
+  actions::ActionItem* collapse_action =
+      actions::ActionManager::Get().FindAction(kActionToggleCollapseVertical);
+
+  // Request that the tabstrip collapses. The state controller collapse state
+  // should not be updated immediately.
+  state_controller()->RequestCollapse(true);
+  ASSERT_FALSE(state_controller()->IsCollapsed());
+
+  // The collapse button should be updated immediately to use the expand icon
+  // and text.
+  EXPECT_EQ(BrowserActions::GetCleanTitleAndTooltipText(
+                l10n_util::GetStringUTF16(IDS_EXPAND_VERTICAL_TABS)),
+            collapse_action->GetText());
+
+  // Cancel the collapse request with an expand request.
+  state_controller()->RequestCollapse(false);
+  EXPECT_FALSE(state_controller()->IsCollapsed());
+
+  // The collapse button should be updated immediately to use the collapse icon
+  // and text.
+  EXPECT_EQ(BrowserActions::GetCleanTitleAndTooltipText(
+                l10n_util::GetStringUTF16(IDS_COLLAPSE_VERTICAL_TABS)),
+            collapse_action->GetText());
 }
 
 // Verify that the pinned tabs container will never be larger than the unpinned
@@ -871,4 +909,313 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, ImmersiveModeLock) {
 
   // 10. Verify vertical tabs are now enabled.
   EXPECT_TRUE(controller->ShouldDisplayVerticalTabs());
+}
+
+IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
+                       GetLinkDropBoundsNoShift) {
+  // Add a tab to ensure count > 0.
+  AppendTab();
+
+  // Position the window such that there is room for the arrow.
+  display::Screen* screen = display::Screen::Get();
+  gfx::Rect display_bounds =
+      screen->GetDisplayNearestView(region_view()->GetWidget()->GetNativeView())
+          .bounds();
+  DropArrow::MaybeAdjustDisplayBounds(display_bounds);
+
+  // Place the window far enough from the edge so that the arrow (which is to
+  // the left of the region view) is within the display bounds.
+  browser()->window()->SetBounds(
+      gfx::Rect(display_bounds.x() + 100, display_bounds.y() + 100, 800, 600));
+
+  BrowserRootView::DropIndex index;
+  index.index = 0;
+  index.relative_to_index =
+      BrowserRootView::DropIndex::RelativeToIndex::kInsertBeforeIndex;
+
+  DropArrow::Direction direction;
+  gfx::Rect bounds =
+      region_view()->GetLinkDropBoundsForTesting(index, &direction);
+
+  EXPECT_EQ(direction, DropArrow::Direction::kRight);
+  // In LTR, x should be region_view()->GetBoundsInScreen().x() -
+  // DropArrow::kSize.
+  EXPECT_EQ(bounds.x(),
+            region_view()->GetBoundsInScreen().x() - DropArrow::kSize);
+}
+
+IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
+                       GetLinkDropBoundsWithShift) {
+  // Add a tab.
+  AppendTab();
+
+  // Position the window such that there is NO room for the arrow on the left.
+  display::Screen* screen = display::Screen::Get();
+  gfx::Rect display_bounds =
+      screen->GetDisplayNearestView(region_view()->GetWidget()->GetNativeView())
+          .bounds();
+  DropArrow::MaybeAdjustDisplayBounds(display_bounds);
+
+  // We want region_view()->GetBoundsInScreen().x() - DropArrow::kSize <
+  // display_bounds.x().
+  // Setting the window x to the display bounds x should ensure the arrow (which
+  // is to the left of the region view) is outside the display bounds.
+  browser()->window()->SetBounds(
+      gfx::Rect(display_bounds.x(), display_bounds.y(), 800, 600));
+
+  BrowserRootView::DropIndex index;
+  index.index = 0;
+  index.relative_to_index =
+      BrowserRootView::DropIndex::RelativeToIndex::kInsertBeforeIndex;
+
+  DropArrow::Direction direction;
+  gfx::Rect bounds =
+      region_view()->GetLinkDropBoundsForTesting(index, &direction);
+
+  // It should shift to the right side of the tab strip.
+  EXPECT_EQ(direction, DropArrow::Direction::kLeft);
+  EXPECT_EQ(bounds.x(), region_view()->GetBoundsInScreen().right());
+}
+
+IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
+                       GetLinkDropBoundsNoShiftRTL) {
+  base::i18n::SetICUDefaultLocale("ar");
+  ASSERT_TRUE(base::i18n::IsRTL());
+
+  // Add a tab to ensure count > 0.
+  AppendTab();
+
+  // Position the window such that there is room for the arrow on the right.
+  display::Screen* screen = display::Screen::Get();
+  gfx::Rect display_bounds =
+      screen->GetDisplayNearestView(region_view()->GetWidget()->GetNativeView())
+          .bounds();
+  DropArrow::MaybeAdjustDisplayBounds(display_bounds);
+
+  // In RTL, default arrow is to the right of the strip, at right() + kSize.
+  // We need right() + kSize + kSize (for arrow width) <=
+  // display_bounds.right(). So right() <= display_bounds.right() - 2 * kSize.
+  browser()->window()->SetBounds(gfx::Rect(display_bounds.right() - 800 - 100,
+                                           display_bounds.y() + 100, 800, 600));
+
+  BrowserRootView::DropIndex index;
+  index.index = 0;
+  index.relative_to_index =
+      BrowserRootView::DropIndex::RelativeToIndex::kInsertBeforeIndex;
+
+  DropArrow::Direction direction;
+  gfx::Rect bounds =
+      region_view()->GetLinkDropBoundsForTesting(index, &direction);
+
+  EXPECT_EQ(direction, DropArrow::Direction::kLeft);
+  // In RTL, x should be region_view()->GetBoundsInScreen().right() +
+  // DropArrow::kSize.
+  EXPECT_EQ(bounds.x(),
+            region_view()->GetBoundsInScreen().right() + DropArrow::kSize);
+}
+
+IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
+                       GetLinkDropBoundsWithShiftRTL) {
+  base::i18n::SetICUDefaultLocale("ar");
+  ASSERT_TRUE(base::i18n::IsRTL());
+
+  // Add a tab.
+  AppendTab();
+
+  // Position the window such that there is NO room for the arrow on the right.
+  display::Screen* screen = display::Screen::Get();
+  gfx::Rect display_bounds =
+      screen->GetDisplayNearestView(region_view()->GetWidget()->GetNativeView())
+          .bounds();
+  DropArrow::MaybeAdjustDisplayBounds(display_bounds);
+
+  // We want region_view()->GetBoundsInScreen().right() + DropArrow::kSize >
+  // display_bounds.right().
+  // Setting the window right to the display bounds right should ensure it.
+  browser()->window()->SetBounds(
+      gfx::Rect(display_bounds.right() - 800, display_bounds.y(), 800, 600));
+
+  BrowserRootView::DropIndex index;
+  index.index = 0;
+  index.relative_to_index =
+      BrowserRootView::DropIndex::RelativeToIndex::kInsertBeforeIndex;
+
+  DropArrow::Direction direction;
+  gfx::Rect bounds =
+      region_view()->GetLinkDropBoundsForTesting(index, &direction);
+
+  // It should shift to the left side of the tab strip.
+  EXPECT_EQ(direction, DropArrow::Direction::kRight);
+  EXPECT_EQ(bounds.x(), region_view()->GetBoundsInScreen().x());
+}
+
+IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
+                       ExpandOnHoverLockBehavior) {
+  // Set up collapsed vertical tab strip with expand on hover enabled.
+  VerticalTabStripRegionView* view = region_view();
+  state_controller()->SetExpandOnHoverEnabled(true);
+  state_controller()->RequestCollapse(true);
+
+  ASSERT_TRUE(base::test::RunUntil(
+      [&]() { return state_controller()->IsCollapsed(); }));
+
+  // Request focus so that the tab strip initiates expand on hover.
+  view->RequestFocus();
+
+  ASSERT_TRUE(
+      base::test::RunUntil([&]() { return view->is_expanded_on_hover(); }));
+
+  // Verify that the tab strip stays expanded when given a `kKeepExpanded` lock.
+  auto keep_expanded_lock =
+      view->GetExpandOnHoverLock(ExpandOnHoverLockType::kKeepExpanded);
+  EXPECT_TRUE(view->is_expanded_on_hover());
+
+  // Verify that the tab strip disables the expand on hover state when given a
+  // `kForceCollapse` lock.
+  auto force_collapse_lock =
+      view->GetExpandOnHoverLock(ExpandOnHoverLockType::kForceCollapse);
+  EXPECT_FALSE(view->is_expanded_on_hover());
+}
+
+IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
+                       KeepExpandedLockPreventsExpandOnHover) {
+  // Set up collapsed vertical tab strip with expand on hover enabled.
+  VerticalTabStripRegionView* view = region_view();
+  state_controller()->SetExpandOnHoverEnabled(true);
+  state_controller()->RequestCollapse(true);
+
+  ASSERT_TRUE(base::test::RunUntil(
+      [&]() { return state_controller()->IsCollapsed(); }));
+
+  // Acquire a `kKeepExpanded` lock while the strip is collapsed.
+  auto keep_expanded_lock =
+      view->GetExpandOnHoverLock(ExpandOnHoverLockType::kKeepExpanded);
+
+  // Request focus so that the tab strip would normally initiate expand on
+  // hover.
+  view->RequestFocus();
+
+  // Verify that the tab strip does not enter the expand on hover state.
+  EXPECT_FALSE(view->is_expanded_on_hover());
+}
+
+IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
+                       ExpandOnHoverEnabledChanged) {
+  // Fully collapse the tabstrip.
+  state_controller()->RequestCollapse(true);
+  ASSERT_TRUE(base::test::RunUntil(
+      [&]() { return state_controller()->IsCollapsed(); }));
+
+  ASSERT_FALSE(browser()->profile()->GetPrefs()->GetBoolean(
+      prefs::kVerticalTabsExpandOnHoverEnabled));
+  ASSERT_FALSE(region_view()->is_expanded_on_hover());
+
+  region_view()->GetFocusManager()->SetFocusedView(region_view());
+  EXPECT_FALSE(region_view()->is_expanded_on_hover());
+
+  browser()->profile()->GetPrefs()->SetBoolean(
+      prefs::kVerticalTabsExpandOnHoverEnabled, true);
+  ASSERT_TRUE(base::test::RunUntil(
+      [&]() { return region_view()->is_expanded_on_hover(); }));
+  ASSERT_TRUE(base::test::RunUntil([&]() { return !IsAnimatingSize(); }));
+
+  browser()->profile()->GetPrefs()->SetBoolean(
+      prefs::kVerticalTabsExpandOnHoverEnabled, false);
+  EXPECT_FALSE(region_view()->is_expanded_on_hover());
+  EXPECT_TRUE(IsAnimatingSize());
+  EXPECT_EQ(TabStripAnimations::kCollapseOnHover,
+            BrowserAnimationController::From(browser())->GetCurrentMotion(
+                TabStripAnimations::kVerticalTabStrip));
+}
+
+IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, ModeChanged) {
+  // Fully collapse the tabstrip.
+  state_controller()->RequestCollapse(true);
+  ASSERT_TRUE(base::test::RunUntil(
+      [&]() { return state_controller()->IsCollapsed(); }));
+
+  ASSERT_TRUE(browser()->profile()->GetPrefs()->GetBoolean(
+      prefs::kVerticalTabsEnabled));
+  ASSERT_FALSE(browser()->profile()->GetPrefs()->GetBoolean(
+      prefs::kVerticalTabsExpandOnHoverEnabled));
+  ASSERT_FALSE(region_view()->is_expanded_on_hover());
+
+  browser()->profile()->GetPrefs()->SetBoolean(
+      prefs::kVerticalTabsExpandOnHoverEnabled, true);
+  region_view()->GetFocusManager()->SetFocusedView(region_view());
+  ASSERT_TRUE(base::test::RunUntil(
+      [&]() { return region_view()->is_expanded_on_hover(); }));
+  ASSERT_TRUE(base::test::RunUntil([&]() { return !IsAnimatingSize(); }));
+
+  browser()->profile()->GetPrefs()->SetBoolean(prefs::kVerticalTabsEnabled,
+                                               false);
+
+  browser()->profile()->GetPrefs()->SetBoolean(prefs::kVerticalTabsEnabled,
+                                               true);
+  EXPECT_FALSE(region_view()->is_expanded_on_hover());
+  EXPECT_FALSE(IsAnimatingSize());
+}
+
+IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
+                       ResizeAreaNotVisibleInExpandOnHoverState) {
+  // Fully collapse the tabstrip.
+  state_controller()->RequestCollapse(true);
+  ASSERT_TRUE(base::test::RunUntil(
+      [&]() { return state_controller()->IsCollapsed(); }));
+  browser()->profile()->GetPrefs()->SetBoolean(
+      prefs::kVerticalTabsExpandOnHoverEnabled, true);
+
+  region_view()->GetFocusManager()->SetFocusedView(region_view());
+  ASSERT_TRUE(base::test::RunUntil(
+      [&]() { return region_view()->is_expanded_on_hover(); }));
+  ASSERT_FALSE(region_view()->resize_area_for_testing()->GetVisible());
+}
+
+IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
+                       ExpandOnHoverDisabledWhenWindowInactive) {
+  VerticalTabStripRegionView* view = region_view();
+  state_controller()->SetExpandOnHoverEnabled(true);
+  state_controller()->RequestCollapse(true);
+
+  ASSERT_TRUE(base::test::RunUntil(
+      [&]() { return state_controller()->IsCollapsed(); }));
+
+  view->RequestFocus();
+
+  ASSERT_TRUE(
+      base::test::RunUntil([&]() { return view->is_expanded_on_hover(); }));
+
+  // Create a second window to make the first inactive.
+  Browser* second_browser = CreateBrowser(browser()->profile());
+  ASSERT_TRUE(second_browser);
+
+  ASSERT_TRUE(
+      base::test::RunUntil([&]() { return !view->is_expanded_on_hover(); }));
+}
+
+IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
+                       LogExpandOnHoverShowDurationMetrics) {
+  base::HistogramTester histogram_tester;
+
+  // Set up collapsed vertical tab strip with expand on hover enabled.
+  VerticalTabStripRegionView* view = region_view();
+  state_controller()->SetExpandOnHoverEnabled(true);
+  state_controller()->RequestCollapse(true);
+
+  ASSERT_TRUE(base::test::RunUntil(
+      [&]() { return state_controller()->IsCollapsed(); }));
+
+  // Request focus so that the tab strip initiates expand on hover.
+  view->RequestFocus();
+  ASSERT_TRUE(
+      base::test::RunUntil([&]() { return view->is_expanded_on_hover(); }));
+
+  // Force collapse of the the tab strip.
+  auto force_collapse_lock =
+      view->GetExpandOnHoverLock(ExpandOnHoverLockType::kForceCollapse);
+  ASSERT_TRUE(
+      base::test::RunUntil([&]() { return !view->is_expanded_on_hover(); }));
+
+  histogram_tester.ExpectTotalCount(
+      "Tabs.VerticalTabs.ExpandOnHover.ShowDuration", 1);
 }
