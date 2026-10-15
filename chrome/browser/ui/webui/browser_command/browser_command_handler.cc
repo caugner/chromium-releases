@@ -136,6 +136,9 @@ void BrowserCommandHandler::CanExecuteCommand(
     case Command::kStartPasswordManagerTutorial:
       can_execute = TutorialServiceExists();
       break;
+    case Command::kOpenAutofillSettings:
+      can_execute = true;
+      break;
     case Command::kOpenAISettings:
       can_execute = true;
       break;
@@ -228,6 +231,10 @@ void BrowserCommandHandler::ExecuteCommandWithDisposition(
       break;
     case Command::kStartPasswordManagerTutorial:
       StartPasswordManagerTutorial();
+      break;
+    case Command::kOpenAutofillSettings:
+      NavigateToURL(GURL(chrome::GetSettingsUrl(chrome::kAutofillSubPage)),
+                    disposition);
       break;
     case Command::kOpenAISettings:
       OpenAISettings();
@@ -366,9 +373,9 @@ void BrowserCommandHandler::OpenGlic() {
 
   auto* browser_window = webui::GetBrowserWindowInterface(web_contents_);
 
-  glic_service->window_controller().Toggle(
-      browser_window, /*prevent_close=*/false,
-      glic::mojom::InvocationSource::kWhatsNew);
+  glic_service->ToggleUI(browser_window, /*prevent_close=*/false,
+                         glic::mojom::InvocationSource::kWhatsNew,
+                         /*prompt_suggestion=*/std::nullopt);
 #endif  // BUILDFLAG(ENABLE_GLIC)
 }
 
@@ -413,7 +420,7 @@ void BrowserCommandHandler::PrewarmGlicFre() {
 void BrowserCommandHandler::OpenSplitView() {
   tabs::TabInterface* tab =
       tabs::TabInterface::MaybeGetFromContents(web_contents_);
-  if (tab) {
+  if (tab && !tab->IsSplit()) {
     chrome::NewSplitTab(tab->GetBrowserWindowInterface(),
                         split_tabs::SplitTabCreatedSource::kWhatsNew);
   }

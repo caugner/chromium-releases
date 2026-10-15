@@ -8,6 +8,7 @@
 #include "base/test/gmock_move_support.h"
 #include "base/test/mock_callback.h"
 #include "base/test/run_until.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/test_future.h"
 #include "chrome/browser/optimization_guide/mock_optimization_guide_keyed_service.h"
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service.h"
@@ -16,6 +17,7 @@
 #include "chrome/browser/password_manager/password_change/model_quality_logs_uploader.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "components/optimization_guide/core/optimization_guide_proto_util.h"
+#include "components/password_manager/core/browser/features/password_features.h"
 #include "content/public/test/web_contents_tester.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -35,6 +37,7 @@ std::unique_ptr<KeyedService> CreateOptimizationService(
 enum class ResponseType {
   kSuccess,     // Expected response: is_logged_in = true
   kFailure,     // Expected response: is_logged_in = false
+  kError,       // Expected response: error_case is set
   kUnexpected,  // Unexpected response.
 };
 
@@ -52,12 +55,22 @@ void PostResponse(
       break;
     }
     case ResponseType::kSuccess:
-    case ResponseType::kFailure:
+    case ResponseType::kFailure: {
       optimization_guide::proto::PasswordChangeResponse response;
       bool is_logged_in = (type == ResponseType::kSuccess);
       response.mutable_is_logged_in_data()->set_is_logged_in(is_logged_in);
       server_response = optimization_guide::AnyWrapProto(response);
       break;
+    }
+    case ResponseType::kError: {
+      optimization_guide::proto::PasswordChangeResponse response;
+      response.mutable_is_logged_in_data()->set_error_case(
+          optimization_guide::proto::IsLoggedInResponseData::ErrorCase::
+              IsLoggedInResponseData_ErrorCase_LOGIN_FAILED);
+      response.mutable_is_logged_in_data()->set_is_logged_in(false);
+      server_response = optimization_guide::AnyWrapProto(response);
+      break;
+    }
   }
 
   auto result = optimization_guide::OptimizationGuideModelExecutionResult(
@@ -278,11 +291,16 @@ TEST_F(LoginStateCheckerTest, CachesPageContentIfRequestInFlight) {
   // First request finishes with a failure.
   optimization_guide::OptimizationGuideModelExecutionResultCallback
       second_optimization_guide_callback;
+  base::RunLoop run_loop;
   EXPECT_CALL(*optimization_service(), ExecuteModel)
-      .WillOnce(MoveArg<3>(&second_optimization_guide_callback));
+      .WillOnce(
+          testing::DoAll(testing::Invoke(&run_loop, &base::RunLoop::Quit),
+                         MoveArg<3>(&second_optimization_guide_callback)));
   PostResponse<ResponseType::kFailure>(
       std::move(first_optimization_guide_callback));
   EXPECT_FALSE(future.Take());
+  run_loop.Run();
+
   ASSERT_TRUE(second_optimization_guide_callback);
 
   // Second request should be processed now and succeed.
@@ -319,12 +337,17 @@ TEST_F(LoginStateCheckerTest, CachesOnlyLastPageContent) {
   // `ExecuteModel`.
   optimization_guide::OptimizationGuideModelExecutionResultCallback
       cached_optimization_guide_callback;
+  base::RunLoop run_loop;
   EXPECT_CALL(*optimization_service(), ExecuteModel)
       .Times(1)
-      .WillOnce(MoveArg<3>(&cached_optimization_guide_callback));
+      .WillOnce(
+          testing::DoAll(testing::Invoke(&run_loop, &base::RunLoop::Quit),
+                         MoveArg<3>(&cached_optimization_guide_callback)));
   PostResponse<ResponseType::kFailure>(
       std::move(initial_optimization_guide_callback));
   EXPECT_FALSE(future.Take());
+  run_loop.Run();
+
   ASSERT_TRUE(cached_optimization_guide_callback);
 
   // The cached request is processed and succeeds.
@@ -357,11 +380,14 @@ TEST_F(LoginStateCheckerTest, NoRequestWithEmptyCachedPageContent) {
 
   // Model replies that the user is not logged in.
   // This triggers the cached request.
+  base::RunLoop run_loop;
   EXPECT_CALL(*optimization_service(), ExecuteModel)
-      .WillOnce(MoveArg<3>(&optimization_guide_callback_2));
+      .WillOnce(testing::DoAll(testing::Invoke(&run_loop, &base::RunLoop::Quit),
+                               MoveArg<3>(&optimization_guide_callback_2)));
   PostResponse<ResponseType::kFailure>(
       std::move(optimization_guide_callback_1));
   EXPECT_FALSE(future.Take());
+  run_loop.Run();
   ASSERT_TRUE(optimization_guide_callback_2);
 
   // The cached request also fails with user not being logged in.
@@ -388,4 +414,24 @@ TEST_F(LoginStateCheckerTest, NoRequestWithEmptyCachedPageContent) {
       QualityStatus::
           PasswordChangeQuality_StepQuality_SubmissionStatus_ACTION_SUCCESS,
       /* expected_retry_count=*/2);
+}
+
+TEST_F(LoginStateCheckerTest, FailsAfterErrorInTheResponse) {
+  base::test::ScopedFeatureList feature_list(
+      password_manager::features::kStopLoginCheckOnFailedLogin);
+  base::test::TestFuture<bool> future;
+  EXPECT_CALL(*optimization_service(), ExecuteModel)
+      .WillOnce(WithArg<3>(&PostResponse<ResponseType::kUnexpected>));
+
+  std::unique_ptr<LoginStateChecker> checker =
+      CreateChecker(future.GetRepeatingCallback());
+  ASSERT_TRUE(checker->capturer());
+  checker->capturer()->ReplyWithContent(
+      optimization_guide::AIPageContentResult());
+  EXPECT_FALSE(future.Take());
+  VerifyQualityFields(
+      logs_uploader()->GetFinalLog(),
+      QualityStatus::
+          PasswordChangeQuality_StepQuality_SubmissionStatus_UNEXPECTED_STATE,
+      /* expected_retry_count=*/0);
 }

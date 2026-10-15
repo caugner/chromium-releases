@@ -16,7 +16,7 @@
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
-#include "components/omnibox/common/omnibox_features.h"
+#include "chrome/browser/ui/views/omnibox/omnibox_aim_popup_webui_content.h"
 #include "ui/base/cursor/cursor.h"
 #include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
@@ -228,8 +228,8 @@ DEFINE_VIEW_BUILDER(/* no export */, TopBackgroundView)
 RoundedOmniboxResultsFrame::RoundedOmniboxResultsFrame(
     views::View* contents,
     LocationBarView* location_bar,
-    bool include_cutout)
-    : contents_(contents), include_cutout_(include_cutout) {
+    bool forward_mouse_events)
+    : contents_(contents), forward_mouse_events_(forward_mouse_events) {
   const int corner_radius = views::LayoutProvider::Get()->GetCornerRadiusMetric(
       views::ShapeContextTokens::kOmniboxExpandedRadius);
   // Host the contents in its own View to simplify layout and customization.
@@ -247,13 +247,11 @@ RoundedOmniboxResultsFrame::RoundedOmniboxResultsFrame(
                     gfx::RoundedCornersF(corner_radius));
                 view->layer()->SetIsFastRoundedCorner(true);
               },
-              corner_radius));
-  if (include_cutout_) {
-    contents_host_builder.AddChild(
-        views::Builder<TopBackgroundView>(
-            std::make_unique<TopBackgroundView>(location_bar))
-            .CopyAddressTo(&top_background_));
-  }
+              corner_radius))
+          .AddChild(views::Builder<TopBackgroundView>(
+                        std::make_unique<TopBackgroundView>(location_bar))
+                        .CopyAddressTo(&top_background_));
+
   auto contents_host = std::move(contents_host_builder).Build();
   contents_host->AddChildViewRaw(contents_.get());
 
@@ -320,6 +318,13 @@ views::View* RoundedOmniboxResultsFrame::GetContents() {
   return contents_;
 }
 
+void RoundedOmniboxResultsFrame::SetCutoutVisibility(bool visible) {
+  if (visible == top_background_->GetVisible()) {
+    return;
+  }
+  top_background_->SetVisible(visible);
+}
+
 void RoundedOmniboxResultsFrame::Layout(PassKey) {
   // This is called when the Widget resizes due to results changing. Resizing
   // the Widget is fast on ChromeOS, but slow on other platforms, and can't be
@@ -328,20 +333,30 @@ void RoundedOmniboxResultsFrame::Layout(PassKey) {
   gfx::Rect bounds = GetContentsBounds();
   contents_host_->SetBoundsRect(bounds);
 
-  if (include_cutout_) {
+  if (top_background_->GetVisible()) {
     gfx::Rect top_bounds(contents_host_->GetContentsBounds());
-    top_bounds.set_height(GetNonResultSectionHeight(include_cutout_));
+    top_bounds.set_height(GetNonResultSectionHeight(true));
     top_bounds.Inset(GetLocationBarAlignmentInsets());
     top_background_->SetBoundsRect(top_bounds);
   }
 
   gfx::Rect results_bounds(contents_host_->GetContentsBounds());
   results_bounds.Inset(GetContentInsets());
+
+  // Workaround for 1px visual artifact. The WebUI autosize mechanism sends a
+  // 1px height when empty instead of hiding, which causes a 1px line to be
+  // rendered. Clamp to 0 to hide the artifact.
+  if (results_bounds.height() <= 1) {
+    results_bounds.set_height(0);
+  }
   contents_->SetBoundsRect(results_bounds);
 }
 
 void RoundedOmniboxResultsFrame::AddedToWidget() {
 #if defined(USE_AURA)
+  if (!forward_mouse_events_) {
+    return;
+  }
   // Use a ui::EventTargeter that allows mouse and touch events in the top
   // portion of the Widget to pass through to the omnibox beneath it.
   auto results_targeter = std::make_unique<aura::WindowTargeter>();
@@ -378,7 +393,8 @@ void RoundedOmniboxResultsFrame::OnMouseEvent(ui::MouseEvent* event) {
 
 // Insets used to position |contents_| within |contents_host_|.
 gfx::Insets RoundedOmniboxResultsFrame::GetContentInsets() {
-  return gfx::Insets::TLBR(GetNonResultSectionHeight(include_cutout_), 0, 0, 0);
+  return gfx::Insets::TLBR(
+      GetNonResultSectionHeight(top_background_->GetVisible()), 0, 0, 0);
 }
 
 BEGIN_METADATA(RoundedOmniboxResultsFrame)

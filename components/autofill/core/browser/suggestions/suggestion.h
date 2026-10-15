@@ -173,9 +173,10 @@ struct Suggestion {
 
   struct IdentityCredentialPayload final {
     IdentityCredentialPayload();
-    IdentityCredentialPayload(GURL configURL,
-                              std::string account_id,
-                              std::map<FieldType, std::u16string>& fields);
+    IdentityCredentialPayload(
+        GURL configURL,
+        std::string account_id,
+        const std::map<FieldType, std::u16string>& fields);
     IdentityCredentialPayload(const IdentityCredentialPayload&);
     IdentityCredentialPayload(IdentityCredentialPayload&&);
     IdentityCredentialPayload& operator=(const IdentityCredentialPayload&);
@@ -523,6 +524,11 @@ struct Suggestion {
   // This is the icon which is shown on the side of a suggestion.
   // If |custom_icon| is empty, the fallback built-in icon.
   Icon icon = Icon::kNoIcon;
+
+#if BUILDFLAG(IS_IOS)
+  // Indicates whether the suggestion has a custom card art image.
+  bool has_custom_card_art_image = false;
+#endif  // BUILDFLAG(IS_IOS)
 
   // An icon that appears after the suggestion in the suggestion view. For
   // passwords, this icon string shows whether the suggestion originates from

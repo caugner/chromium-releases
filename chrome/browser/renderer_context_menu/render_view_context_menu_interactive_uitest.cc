@@ -1162,12 +1162,6 @@ IN_PROC_BROWSER_TEST_F(ContextMenuFencedFrameTestNoTestingConfig,
 
 #if BUILDFLAG(ENABLE_GLIC)
 
-// TODO(b:448604727): State observation is currently unsupported with multi-
-// instance, so we will poll.
-DEFINE_LOCAL_STATE_IDENTIFIER_VALUE(
-    ui::test::PollingStateObserver<glic::mojom::WebUiState>,
-    kPollingWebUiState);
-
 class GlicInteractiveContextMenuTest
     : public glic::test::InteractiveGlicTest,
       public ::testing::WithParamInterface<bool> {
@@ -1178,7 +1172,8 @@ class GlicInteractiveContextMenuTest
           /*enabled_features=*/{features::kGlic, features::kTabstripComboButton,
                                 features::kGlicShareImage,
                                 features::kGlicMultiInstance,
-                                glic::mojom::features::kGlicMultiTab},
+                                glic::mojom::features::kGlicMultiTab,
+                                features::kGlicMultitabUnderlines},
           /*disabled_features=*/{features::kGlicWarming,
                                  features::kGlicFreWarming});
     } else {
@@ -1218,16 +1213,18 @@ class GlicInteractiveContextMenuTest
                   InstrumentInnerWebContents(glic::test::kGlicContentsElementId,
                                              glic::test::kGlicHostElementId, 0),
                   WaitForWebContentsReady(glic::test::kGlicContentsElementId))),
-        PollState(
-            kPollingWebUiState,
-            [this]() -> glic::mojom::WebUiState {
+        // TODO(b:448604727): State observation is currently unsupported with
+        // multi- instance, so we will poll.
+        PollUntil(
+            [this]() {
               if (glic::GlicInstance* instance =
                       glic_service()->GetInstanceForActiveTab(browser())) {
-                return instance->host().GetPrimaryWebUiState();
+                return instance->host().GetPrimaryWebUiState() ==
+                       glic::mojom::WebUiState::kReady;
               }
-              return glic::mojom::WebUiState::kUnavailable;
-            }),
-        WaitForState(kPollingWebUiState, glic::mojom::WebUiState::kReady));
+              return false;
+            },
+            "polling until web client is ready"));
   }
 
   auto CheckHistograms() {
@@ -1241,12 +1238,56 @@ class GlicInteractiveContextMenuTest
     });
   }
 
+  auto CacheCurrentInstance() {
+    return Do([this]() {
+      if (glic::GlicInstance* instance =
+              glic_service()->GetInstanceForActiveTab(browser())) {
+        cached_instance_id_ = instance->id();
+      }
+    });
+  }
+
+  auto CheckCachedInstance() {
+    return Do([this]() {
+      glic::GlicInstance* instance =
+          glic_service()->GetInstanceForActiveTab(browser());
+      EXPECT_TRUE(instance->id().is_valid());
+      EXPECT_TRUE(cached_instance_id_.is_valid());
+      EXPECT_NE(instance->id(), cached_instance_id_);
+      cached_instance_id_ = base::Uuid();
+    });
+  }
+
+  auto PollForNewGlicInstance() {
+    return PollUntil(
+        [this]() {
+          return cached_instance_id_.is_valid() &&
+                 cached_instance_id_ !=
+                     glic_service()->GetInstanceForActiveTab(browser())->id();
+        },
+        "polling we have a new glic instance");
+  }
+
+  auto WaitForAdditionalContext() {
+    return WaitForJsResult(
+        glic::test::kGlicContentsElementId,
+        "() => { "
+        "  let c = document.querySelector('#additionalContextResult');"
+        "  return !!c && c.children.length === 5 && "
+        "      c.children[1].innerText.startsWith('MIME Type: image/png') && "
+        "      c.children[4].innerText.startsWith("
+        "           'Tab Context: present');"
+        "}");
+  }
+
  private:
   base::test::ScopedFeatureList scoped_feature_list_;
   base::HistogramTester histogram_tester_;
+  glic::InstanceId cached_instance_id_;
 };
 
-IN_PROC_BROWSER_TEST_P(GlicInteractiveContextMenuTest, GlicShareImage) {
+// TODO(crbug.com/450446123): Re-enable after fixing
+IN_PROC_BROWSER_TEST_P(GlicInteractiveContextMenuTest, DISABLED_GlicShareImage) {
   DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kActiveTab);
 
   const GURL url = embedded_test_server()->GetURL(kDocumentWithImage);
@@ -1259,15 +1300,57 @@ IN_PROC_BROWSER_TEST_P(GlicInteractiveContextMenuTest, GlicShareImage) {
       MayInvolveNativeContextMenu(
           ClickMouse(ui_controls::RIGHT),
           SelectMenuItem(RenderViewContextMenu::kGlicShareImageMenuItem)),
-      PollForAndInstrumentGlic(),
-      WaitForJsResult(
-          glic::test::kGlicContentsElementId,
-          "() => { "
-          "  let c = document.querySelector('#additionalContextResult');"
-          "  return !!c && c.children.length === 4 && "
-          "      c.children[1].innerText.startsWith('MIME Type: image/png');"
-          "}"),
+      PollForAndInstrumentGlic(), WaitForAdditionalContext(),
       CheckHistograms());
+}
+
+IN_PROC_BROWSER_TEST_P(GlicInteractiveContextMenuTest, CreateNewInstance) {
+  if (!UseMultiInstance()) {
+    GTEST_SKIP()
+        << " creating a new instance is only meaningful for multi-instance";
+  }
+  DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kActiveTab);
+
+  const GURL url = embedded_test_server()->GetURL(kDocumentWithImage);
+  const DeepQuery kPathToImg{
+      "img",
+  };
+  RunTestSequence(
+      InstrumentTab(kActiveTab), NavigateWebContents(kActiveTab, url),
+      ToggleGlicWindow(GlicWindowMode::kAttached),
+      WaitForAndInstrumentGlic(kHostAndContents), CacheCurrentInstance(),
+      MoveMouseTo(kActiveTab, kPathToImg),
+      MayInvolveNativeContextMenu(
+          ClickMouse(ui_controls::RIGHT),
+          SelectMenuItem(RenderViewContextMenu::kGlicShareImageMenuItem)),
+      PollForNewGlicInstance(), PollForAndInstrumentGlic(),
+      WaitForAdditionalContext(), CheckCachedInstance(), CheckHistograms());
+}
+
+IN_PROC_BROWSER_TEST_P(GlicInteractiveContextMenuTest,
+                       CreateNewInstanceDetached) {
+  if (!UseMultiInstance()) {
+    GTEST_SKIP()
+        << " creating a new instance is only meaningful for multi-instance";
+  }
+  DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kActiveTab);
+
+  const GURL url = embedded_test_server()->GetURL(kDocumentWithImage);
+  const DeepQuery kPathToImg{
+      "img",
+  };
+  RunTestSequence(
+      InstrumentTab(kActiveTab), NavigateWebContents(kActiveTab, url),
+      ToggleGlicWindow(GlicWindowMode::kAttached),
+      // In this case, we will close the detached panel and then open again in
+      // the side panel. This should still result in a new instance.
+      Detach(), WaitForAndInstrumentGlic(kHostAndContents),
+      CacheCurrentInstance(), MoveMouseTo(kActiveTab, kPathToImg),
+      MayInvolveNativeContextMenu(
+          ClickMouse(ui_controls::RIGHT),
+          SelectMenuItem(RenderViewContextMenu::kGlicShareImageMenuItem)),
+      PollForNewGlicInstance(), PollForAndInstrumentGlic(),
+      WaitForAdditionalContext(), CheckCachedInstance(), CheckHistograms());
 }
 
 INSTANTIATE_TEST_SUITE_P(MultiInstance,

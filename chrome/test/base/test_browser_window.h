@@ -162,7 +162,6 @@ class TestBrowserWindow : public BrowserWindow, public BrowserListObserver {
   bool IsToolbarShowing() const override;
   bool IsBorderlessModeEnabled() const override;
   void ShowChromeLabs() override {}
-  views::WebView* GetContentsWebView() override;
   BrowserView* AsBrowserView() override;
   SharingDialog* ShowSharingDialog(content::WebContents* contents,
                                    SharingDialogData data) override;
@@ -190,7 +189,6 @@ class TestBrowserWindow : public BrowserWindow, public BrowserListObserver {
       content::WebContents* contents,
       bool show_signin_button) override;
 #if BUILDFLAG(IS_CHROMEOS)
-  views::Button* GetSharingHubIconButton() override;
   void ToggleMultitaskMenu() override;
 #else
   sharing_hub::SharingHubBubbleView* ShowSharingHubBubble(
@@ -209,8 +207,6 @@ class TestBrowserWindow : public BrowserWindow, public BrowserListObserver {
   void ShowOneClickSigninConfirmation(
       const std::u16string& email,
       base::OnceCallback<void(bool)> confirmed_callback) override {}
-  views::View* GetTopContainer() override;
-  views::View* GetLensOverlayView() override;
   DownloadBubbleUIController* GetDownloadBubbleUIController() override;
   void ConfirmBrowserCloseWithPendingDownloads(
       int download_count,
@@ -292,13 +288,13 @@ class TestBrowserWindow : public BrowserWindow, public BrowserListObserver {
     void SaveStateToContents(content::WebContents* contents) override {}
     void Revert() override {}
     OmniboxView* GetOmniboxView() override;
+    OmniboxController* GetOmniboxController() override;
     LocationBarTesting* GetLocationBarForTesting() override;
     LocationBarModel* GetLocationBarModel() override;
     content::WebContents* GetWebContents() override;
     std::optional<bubble_anchor_util::AnchorConfiguration> GetChipAnchor()
         override;
     void OnChanged() override {}
-    void OnPopupVisibilityChanged() override {}
     void UpdateWithoutTabRestore() override {}
   };
 

@@ -1395,7 +1395,6 @@ export class PdfViewerElement extends PdfViewerBaseElement {
                 this.saveToDriveProgress_.accountIsManaged ?? false),
             WindowOpenDisposition.NEW_FOREGROUND_TAB);
         this.saveToDriveState_ = SaveToDriveState.UNINITIALIZED;
-        // TODO(crbug.com/427449996): Add url testing for this case.
         break;
       case SaveToDriveBubbleRequestType.OPEN_IN_DRIVE:
         assert(this.saveToDriveProgress_.accountEmail);
@@ -1406,7 +1405,6 @@ export class PdfViewerElement extends PdfViewerBaseElement {
                 this.saveToDriveProgress_.driveItemId),
             WindowOpenDisposition.NEW_FOREGROUND_TAB);
         this.saveToDriveState_ = SaveToDriveState.UNINITIALIZED;
-        // TODO(crbug.com/427449996): Add url testing for this case.
         break;
       case SaveToDriveBubbleRequestType.RETRY:
         PdfViewerPrivateProxyImpl.getInstance().saveToDrive(
@@ -1466,8 +1464,6 @@ export class PdfViewerElement extends PdfViewerBaseElement {
         newState === SaveToDriveState.UNINITIALIZED,
         `Unexpected state: ${newState}`);
     if (oldState !== SaveToDriveState.UPLOADING) {
-      // TODO(crbug.com/427449996): Update the tests to make sure they all end
-      // with an UNINITIALIZED state.
       this.setShowBeforeUnloadDialog_(this.hasUnsavedEdits_);
     }
   }
@@ -1670,7 +1666,9 @@ export class PdfViewerElement extends PdfViewerBaseElement {
         return;
       }
       writer.write(blob);
+      // <if expr="enable_pdf_ink2">
       this.onSaveSuccessful_(requestType);
+      // </if>
       return;
     }
 
@@ -1678,7 +1676,9 @@ export class PdfViewerElement extends PdfViewerBaseElement {
       const writable = await this.selectFileAndGetWritable_(fileName);
       await writable.write(blob);
       await writable.close();
+      // <if expr="enable_pdf_ink2">
       this.onSaveSuccessful_(requestType);
+      // </if>
     } catch (error: any) {
       if (error.name !== 'AbortError') {
         console.error('window.showSaveFilePicker failed: ' + error);
@@ -1777,7 +1777,9 @@ export class PdfViewerElement extends PdfViewerBaseElement {
       if (writable !== null) {
         await writable.close();
       }
+      // <if expr="enable_pdf_ink2">
       this.onSaveSuccessful_(requestType);
+      // </if>
     } catch (error: any) {
       this.pluginController_.releaseSaveInBlockBuffers();
       if (error.name !== 'AbortError') {
@@ -1789,28 +1791,16 @@ export class PdfViewerElement extends PdfViewerBaseElement {
     }
   }
 
+  // <if expr="enable_pdf_ink2 or enable_pdf_save_to_drive">
   /**
    * Performs required tasks after a successful save.
    */
   private onSaveSuccessful_(requestType: SaveRequestType) {
-    // <if expr="enable_pdf_ink2 or enable_pdf_save_to_drive">
     this.setShowBeforeUnloadDialog_(this.shouldShowBeforeUnloadDialog_());
+    // <if expr="enable_pdf_ink2">
     this.hasSavedEdits_ =
         this.hasSavedEdits_ || requestType === SaveRequestType.EDITED;
-    // </if>
-  }
-
-  // <if expr="enable_pdf_ink2 or enable_pdf_save_to_drive">
-  /**
-   * Performs required tasks after a failed or cancelled save.
-   */
-  private onSaveFailedOrCancelled_(requestType: SaveRequestType) {
-    // Restore the original value of `hasUnsavedEdits_` and block closing the
-    // window if there are unsaved edits.
-    if (isEditedSaveRequestType(requestType)) {
-      this.hasUnsavedEdits_ = true;
-    }
-    this.setShowBeforeUnloadDialog_(this.shouldShowBeforeUnloadDialog_());
+    // </if> enable_pdf_ink2
   }
 
   /**
@@ -1822,10 +1812,10 @@ export class PdfViewerElement extends PdfViewerBaseElement {
     // If Save to Drive is uploading, block closing the window.
     showBeforeUnloadDialog =
         showBeforeUnloadDialog || this.isSaveToDriveUploading_();
-    // </if>
+    // </if> enable_pdf_save_to_drive
     return showBeforeUnloadDialog;
   }
-  // </if>
+  // </if> enable_pdf_ink2 or enable_pdf_save_to_drive
 
   /**
    * Records metrics for saving PDFs.
@@ -1907,6 +1897,18 @@ export class PdfViewerElement extends PdfViewerBaseElement {
   protected hasInk2AnnotationEdits_(): boolean {
     return this.textboxState_ === TextBoxState.EDITED ||
         this.hasCommittedInk2Edits_;
+  }
+
+  /**
+   * Performs required tasks after a failed or cancelled save.
+   */
+  private onSaveFailedOrCancelled_(requestType: SaveRequestType) {
+    // Restore the original value of `hasUnsavedEdits_` and block closing the
+    // window if there are unsaved edits.
+    if (isEditedSaveRequestType(requestType)) {
+      this.hasUnsavedEdits_ = true;
+    }
+    this.setShowBeforeUnloadDialog_(this.shouldShowBeforeUnloadDialog_());
   }
 
   protected onTextBoxStateChanged_(e: CustomEvent<TextBoxState>) {

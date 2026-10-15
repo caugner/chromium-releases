@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import './action_chips/action_chips.js';
 import './iframe.js';
 import './logo.js';
 import '/strings.m.js';
@@ -10,9 +11,10 @@ import 'chrome://resources/cr_components/searchbox/searchbox.js';
 import 'chrome://resources/cr_elements/cr_button/cr_button.js';
 import 'chrome://resources/cr_components/composebox/composebox.js';
 
+import {GlifAnimationState} from '//resources/cr_components/composebox/context_menu_entrypoint.js';
 import type {CustomizeButtonsElement} from 'chrome://new-tab-page/shared/customize_buttons/customize_buttons.js';
 import {ColorChangeUpdater} from 'chrome://resources/cr_components/color_change_listener/colors_css_updater.js';
-import type {ComposeboxFile} from 'chrome://resources/cr_components/composebox/common.js';
+import type {ContextualUpload} from 'chrome://resources/cr_components/composebox/common.js';
 import type {ComposeboxElement} from 'chrome://resources/cr_components/composebox/composebox.js';
 import {ComposeboxMode} from 'chrome://resources/cr_components/composebox/contextual_entrypoint_and_carousel.js';
 import {HelpBubbleMixinLit} from 'chrome://resources/cr_components/help_bubble/help_bubble_mixin_lit.js';
@@ -31,12 +33,14 @@ import {CrLitElement} from 'chrome://resources/lit/v3_0/lit.rollup.js';
 import type {PropertyValues} from 'chrome://resources/lit/v3_0/lit.rollup.js';
 import type {SkColor} from 'chrome://resources/mojo/skia/public/mojom/skcolor.mojom-webui.js';
 
+import {ActionChipsRetrievalState} from './action_chips/action_chips.js';
 import {getCss} from './app.css.js';
 import {getHtml} from './app.html.js';
 import {BackgroundManager} from './background_manager.js';
 import type {CustomizeButtonsDocumentCallbackRouter, CustomizeButtonsHandlerRemote} from './customize_buttons.mojom-webui.js';
-import {CustomizeChromeSection, SidePanelOpenTrigger} from './customize_buttons.mojom-webui.js';
+import {SidePanelOpenTrigger} from './customize_buttons.mojom-webui.js';
 import {CustomizeButtonsProxy} from './customize_buttons_proxy.js';
+import {CustomizeChromeSection} from './customize_chrome.mojom-webui.js';
 import {CustomizeDialogPage} from './customize_dialog_types.js';
 import type {IframeElement} from './iframe.js';
 import type {LogoElement} from './logo.js';
@@ -86,7 +90,8 @@ export enum NtpElement {
   CUSTOMIZE_BUTTON = 9,
   CUSTOMIZE_DIALOG = 10,  // Obsolete
   WALLPAPER_SEARCH_BUTTON = 11,
-  MAX_VALUE = WALLPAPER_SEARCH_BUTTON,
+  ACTION_CHIPS = 12,
+  MAX_VALUE = ACTION_CHIPS,
 }
 
 /**
@@ -118,7 +123,7 @@ const OGB_IFRAME_ORIGIN = 'chrome-untrusted://new-tab-page';
 const MSAL_IFRAME_ORIGIN = 'chrome-untrusted://ntp-microsoft-auth';
 
 export const CUSTOMIZE_CHROME_BUTTON_ELEMENT_ID =
-    'NewTabPageUI::kCustomizeChromeButtonElementId';
+    'CustomizeButtonsHandler::kCustomizeChromeButtonElementId';
 
 // 900px ~= 561px (max value for --ntp-search-box-width) * 1.5 + some margin.
 const realboxCanShowSecondarySideMediaQueryList =
@@ -183,6 +188,8 @@ export class AppElement extends AppElementBase {
       showCustomizeChromeText_: {type: Boolean},
 
       showWallpaperSearch_: {type: Boolean},
+
+      isActionChipsVisible_: {type: Boolean},
 
       isFooterVisible_: {type: Boolean},
 
@@ -298,7 +305,8 @@ export class AppElement extends AppElementBase {
        */
       wasComposeboxOpened_: {type: Boolean},
 
-      dropdownIsVisible_: {type: Boolean, reflect: true},
+      ntpNextFeaturesEnabled_: {type: Boolean},
+      maxTilesBeforeShowMore_: {type: Number},
 
       searchboxInputFocused_: {type: Boolean},
       composeboxInputFocused_: {type: Boolean},
@@ -306,6 +314,8 @@ export class AppElement extends AppElementBase {
        * Whether the scrim is shown in Realbox Next.
        */
       showScrim_: {type: Boolean, reflect: true},
+
+      contextMenuGlifAnimationState_: {type: String},
     };
   }
 
@@ -370,6 +380,8 @@ export class AppElement extends AppElementBase {
       loadTimeData.getBoolean('composeboxCloseByClickOutside');
   accessor composeboxEnabled: boolean =
       loadTimeData.getBoolean('searchboxShowComposebox');
+  protected accessor isActionChipsVisible_: boolean =
+      loadTimeData.getBoolean('actionChipsEnabled');
   protected accessor isFooterVisible_: boolean = false;
   protected accessor ntpRealboxNextEnabled_: boolean =
       loadTimeData.getBoolean('ntpRealboxNextEnabled');
@@ -377,10 +389,17 @@ export class AppElement extends AppElementBase {
       loadTimeData.getString('realboxLayoutMode');
   protected accessor searchboxCyclingPlaceholders_: boolean =
       loadTimeData.getBoolean('searchboxCyclingPlaceholders');
-  protected accessor dropdownIsVisible_: boolean = false;
+  protected accessor ntpNextFeaturesEnabled_: boolean =
+      loadTimeData.getBoolean('ntpNextFeaturesEnabled');
+  protected accessor maxTilesBeforeShowMore_: number =
+      loadTimeData.getInteger('maxTilesBeforeShowMore');
   protected accessor searchboxInputFocused_: boolean = false;
   protected accessor composeboxInputFocused_: boolean = false;
   protected accessor showScrim_: boolean = false;
+  protected accessor contextMenuGlifAnimationState_: GlifAnimationState =
+      this.ntpNextFeaturesEnabled_ && this.isActionChipsVisible_ ?
+      GlifAnimationState.SPINNER_ONLY :
+      GlifAnimationState.INELIGIBLE;
 
   private callbackRouter_: PageCallbackRouter;
   private pageHandler_: PageHandlerRemote;
@@ -392,13 +411,14 @@ export class AppElement extends AppElementBase {
   private setThemeListenerId_: number|null = null;
   private setCustomizeChromeSidePanelVisibilityListener_: number|null = null;
   private setWallpaperSearchButtonVisibilityListener_: number|null = null;
+  private setActionChipsVisibilityListenerId_: number|null = null;
   private footerVisibilityUpdatedListener_: number|null = null;
   private eventTracker_: EventTracker = new EventTracker();
   private shouldPrintPerformance_: boolean = false;
   private backgroundImageLoadStartEpoch_: number = 0;
   private backgroundImageLoadStart_: number = 0;
   private showWebstoreToastListenerId_: number|null = null;
-  private pendingComposeboxContextFiles_: ComposeboxFile[] = [];
+  private pendingComposeboxContextFiles_: ContextualUpload[] = [];
   private pendingComposeboxText_: string = '';
   private pendingComposeboxMode_: ComposeboxMode = ComposeboxMode.DEFAULT;
 
@@ -505,6 +525,10 @@ export class AppElement extends AppElementBase {
               }
             });
 
+    this.setActionChipsVisibilityListenerId_ =
+        this.callbackRouter_.setActionChipsVisibility.addListener(
+            (isVisible: boolean) => this.isActionChipsVisible_ = isVisible);
+
     this.footerVisibilityUpdatedListener_ =
         this.callbackRouter_.footerVisibilityUpdated.addListener(
             (visible: boolean) => {
@@ -572,6 +596,8 @@ export class AppElement extends AppElementBase {
         this.setWallpaperSearchButtonVisibilityListener_!);
     this.customizeButtonsCallbackRouter_.removeListener(
         this.setCustomizeChromeSidePanelVisibilityListener_!);
+    this.callbackRouter_.removeListener(
+        this.setActionChipsVisibilityListenerId_!);
     this.callbackRouter_.removeListener(this.footerVisibilityUpdatedListener_!);
     this.eventTracker_.removeAll();
   }
@@ -678,6 +704,10 @@ export class AppElement extends AppElementBase {
       this.onThemeChange_();
     }
 
+    if (changedPrivateProperties.has('isFooterVisible_') && this.lazyRender_) {
+      this.maybeRegisterCustomizeButtonHelpBubble_();
+    }
+
     if (changedPrivateProperties.has('logoColor_')) {
       this.style.setProperty(
           '--ntp-logo-color', this.rgbaOrInherit_(this.logoColor_));
@@ -758,20 +788,28 @@ export class AppElement extends AppElementBase {
     // Integration tests use this attribute to determine when lazy load has
     // completed.
     document.documentElement.setAttribute('lazy-loaded', String(true));
-    if (!this.isFooterVisible_) {
-      this.registerHelpBubble(
-          CUSTOMIZE_CHROME_BUTTON_ELEMENT_ID,
-          ['ntp-customize-buttons', '#customizeButton'], {fixed: true});
-      this.pageHandler_.maybeShowFeaturePromo(IphFeature.kCustomizeChrome);
+    if (this.maybeRegisterCustomizeButtonHelpBubble_()) {
+      this.pageHandler_.maybeTriggerAutomaticCustomizeChromePromo();
     }
     if (this.showWallpaperSearchButton_) {
       this.customizeButtonsHandler_.incrementWallpaperSearchButtonShownCount();
     }
   }
 
+  private maybeRegisterCustomizeButtonHelpBubble_(): boolean {
+    if (!this.isFooterVisible_) {
+      this.registerHelpBubble(
+          CUSTOMIZE_CHROME_BUTTON_ELEMENT_ID,
+          ['ntp-customize-buttons', '#customizeButton'], {fixed: true});
+      this.pageHandler_.maybeShowFeaturePromo(IphFeature.kCustomizeChrome);
+      return true;
+    }
+    return false;
+  }
+
   protected onComposeboxInitialized_(e: CustomEvent<{
     initializeComposeboxState:
-        (text: string, files: ComposeboxFile[], mode: ComposeboxMode) => void,
+        (text: string, files: ContextualUpload[], mode: ComposeboxMode) => void,
   }>) {
     e.detail.initializeComposeboxState(
         this.pendingComposeboxText_, this.pendingComposeboxContextFiles_,
@@ -783,7 +821,7 @@ export class AppElement extends AppElementBase {
 
   protected openComposebox_(e: CustomEvent<{
     searchboxText: string,
-    contextFiles: ComposeboxFile[],
+    contextFiles: ContextualUpload[],
     mode: ComposeboxMode,
   }>) {
     if (e.detail.searchboxText) {
@@ -911,6 +949,15 @@ export class AppElement extends AppElementBase {
     // <if expr="is_macosx">
     ctrlKeyPressed = ctrlKeyPressed || e.metaKey;
     // </if>
+    if (e.key === 'Escape' && this.showComposebox_) {
+      const composebox =
+          this.shadowRoot.querySelector<ComposeboxElement>('#composebox');
+      if (composebox) {
+        composebox.handleEscapeKeyLogic();
+        e.preventDefault();
+        return;
+      }
+    }
     if (ctrlKeyPressed && e.code === 'Period' && e.shiftKey) {
       this.showVoiceSearchOverlay_ = true;
       recordVoiceAction(VoiceAction.ACTIVATE_KEYBOARD);
@@ -1127,6 +1174,9 @@ export class AppElement extends AppElementBase {
     }
 
     switch (this.browserPromoType_) {
+      case 'disabled':
+        recordShowBrowserPromosResult(ShowNtpPromosResult.kNotShownDueToPolicy);
+        break;
       case 'empty':
         recordShowBrowserPromosResult(ShowNtpPromosResult.kNotShownNoPromos);
         break;
@@ -1224,6 +1274,9 @@ export class AppElement extends AppElementBase {
         case $$(this, 'cr-searchbox'):
           recordClick(NtpElement.REALBOX);
           return;
+        case $$(this, 'ntp-action-chips'):
+          recordClick(NtpElement.ACTION_CHIPS);
+          return;
         case $$(this, 'cr-most-visited'):
           recordClick(NtpElement.MOST_VISITED);
           return;
@@ -1262,10 +1315,6 @@ export class AppElement extends AppElementBase {
     return !!this.theme_?.backgroundImage?.attributionUrl;
   }
 
-  protected onDropdownVisibleChanged_(e: CustomEvent<{value: boolean}>) {
-    this.dropdownIsVisible_ = e.detail.value;
-  }
-
   protected onInputFocusChanged_(e: CustomEvent<{value: boolean}>) {
     switch (e.type) {
       case 'searchbox-input-focus-changed':
@@ -1284,6 +1333,33 @@ export class AppElement extends AppElementBase {
 
   protected onModulesShownToUserChanged_(e: CustomEvent<{value: boolean}>) {
     this.modulesShownToUser = e.detail.value;
+  }
+
+  protected onActionChipsRetrievalStateChanged_(
+      e: CustomEvent<{state: ActionChipsRetrievalState}>) {
+    const state = e.detail.state;
+    // Mapping of ActionChipsRetrievalState => GlifAnimationState:
+    // REQUESTED => SPINNER_ONLY
+    // UPDATED => STARTED (or FINISHED if cr_context_menu_entrypoint sets it)
+    // To avoid going back (or continuing) GlifAnimationState.STARTED, we stop
+    // updating the field when the current state is STARTED or FINISHED.
+    // There are a few cases to consider:
+    // - IsActionChipsVisible_ is false (and remains so): no event from the
+    //   action chips element, and thus the animation state remains INELIGIBLE.
+    // - IsActionChipsVisible_ is false and later becomes true: the change
+    //   triggers the rendering of the action chips element, and this in turn
+    //   causes an event with ActionChipsRetrievalState.REQUESTED to be fired.
+    //   After some time, an event with ActionChipsRetrievalState.UPDATED will
+    //   fire, and this starts the animation.
+    // - IsActionChipsVisible_ is true from the beginning: Same as above.
+    if ([GlifAnimationState.STARTED, GlifAnimationState.FINISHED].every(
+            s => s !== this.contextMenuGlifAnimationState_)) {
+      if (state === ActionChipsRetrievalState.REQUESTED) {
+        this.contextMenuGlifAnimationState_ = GlifAnimationState.SPINNER_ONLY;
+      } else if (state === ActionChipsRetrievalState.UPDATED) {
+        this.contextMenuGlifAnimationState_ = GlifAnimationState.STARTED;
+      }
+    }
   }
 }
 

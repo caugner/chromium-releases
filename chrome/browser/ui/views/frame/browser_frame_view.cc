@@ -10,6 +10,7 @@
 #include "base/memory/raw_ref.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/scoped_observation.h"
 #include "build/build_config.h"
 #include "build/buildflag.h"
 #include "chrome/app/vector_icons/vector_icons.h"
@@ -39,8 +40,10 @@
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/scoped_canvas.h"
 #include "ui/views/background.h"
+#include "ui/views/controls/label.h"
 #include "ui/views/view.h"
 #include "ui/views/view_class_properties.h"
+#include "ui/views/view_observer.h"
 #include "ui/views/window/hit_test_utils.h"
 
 #if BUILDFLAG(IS_WIN)
@@ -107,6 +110,34 @@ BEGIN_METADATA(ShowBrowserFrameRegionsView)
 END_METADATA
 }  // namespace
 
+// Tracks the browser view and clears out the pointer when it is destroyed.
+// Because of the way widgets are torn down, there will be a brief moment where
+// the frame exists but the contents view does not, so maintaining a reference
+// from the frame to the contents view that is never cleared is unsafe.
+//
+// Dereferences of `BrowserFrameView::browser_view()` would have previously
+// been UAFs in this situation; now they will be explicit null dereferences
+// (which is safer).
+//
+// See https://crbug.com/465209325 for an example of this happening.
+class BrowserFrameView::BrowserViewWatcher : public views::ViewObserver {
+ public:
+  BrowserViewWatcher(BrowserFrameView& frame, BrowserView* browser_view)
+      : frame_(frame) {
+    observation_.Observe(browser_view);
+  }
+  ~BrowserViewWatcher() override = default;
+
+  void OnViewIsDeleting(View* observed_view) override {
+    frame_->browser_view_ = nullptr;
+    observation_.Reset();
+  }
+
+ private:
+  const raw_ref<BrowserFrameView> frame_;
+  base::ScopedObservation<views::View, views::ViewObserver> observation_{this};
+};
+
 gfx::Rect BrowserFrameView::BoundsAndMargins::ToEnclosingRect() const {
   gfx::RectF temp = bounds;
   temp.Outset(margins);
@@ -115,7 +146,10 @@ gfx::Rect BrowserFrameView::BoundsAndMargins::ToEnclosingRect() const {
 
 BrowserFrameView::BrowserFrameView(BrowserWidget* browser_widget,
                                    BrowserView* browser_view)
-    : browser_widget_(browser_widget), browser_view_(browser_view) {
+    : browser_widget_(browser_widget),
+      browser_view_(browser_view),
+      browser_view_watcher_(
+          std::make_unique<BrowserViewWatcher>(*this, browser_view)) {
   DCHECK(browser_widget_);
   DCHECK(browser_view_);
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -164,13 +198,27 @@ bool BrowserFrameView::CaptionButtonsOnLeadingEdge() const {
   return false;
 }
 
-void BrowserFrameView::UpdateFullscreenTopUI() {}
-
-bool BrowserFrameView::ShouldHideTopUIForFullscreen() const {
-  return browser_widget_->IsFullscreen();
+bool BrowserFrameView::CaptionButtonsOnTrailingEdge() const {
+  return !CaptionButtonsOnLeadingEdge();
 }
 
-bool BrowserFrameView::CanUserExitFullscreen() const {
+void BrowserFrameView::LayoutWebAppWindowTitle(
+    const gfx::Rect& available_space,
+    views::Label& window_title_label) const {
+  // Default is no title.
+  window_title_label.SetVisible(false);
+}
+
+void BrowserFrameView::UpdateFullscreenTopUI() {}
+
+bool BrowserFrameView::ShouldHideTopUIInFullscreen() const {
+  return true;
+}
+
+bool BrowserFrameView::ShouldShowWebAppFrameToolbar() const {
+  if (browser_widget_->IsFullscreen() && ShouldHideTopUIInFullscreen()) {
+    return false;
+  }
   return true;
 }
 
@@ -218,17 +266,6 @@ bool BrowserFrameView::HasVisibleBackgroundTabShapes(
              TabStyle::TabSelectionState::kInactive,
              /*hovered=*/false, ShouldPaintAsActiveForState(active_state),
              *GetColorProvider()) != GetFrameColor(active_state);
-}
-
-bool BrowserFrameView::EverHasVisibleBackgroundTabShapes() const {
-  return HasVisibleBackgroundTabShapes(BrowserFrameActiveState::kActive) ||
-         HasVisibleBackgroundTabShapes(BrowserFrameActiveState::kInactive);
-}
-
-bool BrowserFrameView::CanDrawStrokes() const {
-  // Web apps should not draw strokes if they don't have a tab strip.
-  return !browser_view_->browser()->app_controller() ||
-         browser_view_->browser()->app_controller()->has_tab_strip();
 }
 
 SkColor BrowserFrameView::GetCaptionColor(
@@ -409,17 +446,3 @@ int BrowserFrameView::GetSystemMenuY() const {
 
 BEGIN_METADATA(BrowserFrameView)
 END_METADATA
-
-std::ostream& operator<<(std::ostream& os,
-                         const BrowserLayoutExclusionArea& exclusion) {
-  os << exclusion.content.ToString() << " +h: " << exclusion.horizontal_padding
-     << " +v: " << exclusion.vertical_padding;
-  return os;
-}
-
-std::ostream& operator<<(std::ostream& os, const BrowserLayoutParams& params) {
-  os << "client: " << params.visual_client_area.ToString() << " leading: { "
-     << params.leading_exclusion << "} trailing: { "
-     << params.trailing_exclusion << " }";
-  return os;
-}

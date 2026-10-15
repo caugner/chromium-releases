@@ -548,6 +548,11 @@ void ReadAnythingAppController::OnStringAttributeChanged(
     ax::mojom::StringAttribute attr,
     const std::string& old_value,
     const std::string& new_value) {
+  // Return early when the images flag is disabled to avoid potential crashes.
+  if (!features::IsReadAnythingImagesViaAlgorithmEnabled()) {
+    return;
+  }
+
   ui::AXNode* rm_node = model_.GetAXNode(node->id());
   if (!rm_node) {
     return;
@@ -555,8 +560,7 @@ void ReadAnythingAppController::OnStringAttributeChanged(
   // When the src for an image changes (e.g if an image was lazy loaded and
   // previously had a placeholder image), request the updated image. The info
   // will be returned via OnImageDataDownloaded.
-  if (features::IsReadAnythingImagesViaAlgorithmEnabled() &&
-      attr == ax::mojom::StringAttribute::kUrl &&
+  if (attr == ax::mojom::StringAttribute::kUrl &&
       rm_node->GetRole() == ax::mojom::Role::kImage) {
     RequestImageData(node->id());
   }
@@ -1143,6 +1147,8 @@ gin::ObjectTemplateBuilder ReadAnythingAppController::GetObjectTemplateBuilder(
                    &ReadAnythingAppController::IsReadAloudEnabled)
       .SetProperty("isTsTextSegmentationEnabled",
                    &ReadAnythingAppController::IsTsTextSegmentationEnabled)
+      .SetProperty("isReadabilityEnabled",
+                   &ReadAnythingAppController::IsReadabilityEnabled)
       .SetProperty("isChromeOsAsh", &ReadAnythingAppController::IsChromeOsAsh)
       .SetProperty("baseLanguageForSpeech",
                    &ReadAnythingAppController::GetLanguageCodeForSpeech)
@@ -1614,6 +1620,12 @@ bool ReadAnythingAppController::IsReadAloudEnabled() const {
 
 bool ReadAnythingAppController::IsTsTextSegmentationEnabled() const {
   return features::IsReadAnythingReadAloudTSTextSegmentationEnabled();
+}
+
+// Returns true if the experimental flag allowing testing with alternative
+// distillation methods such as Readability.js is enabled.
+bool ReadAnythingAppController::IsReadabilityEnabled() const {
+  return features::IsReadAnythingWithReadabilityEnabled();
 }
 
 bool ReadAnythingAppController::IsChromeOsAsh() const {
