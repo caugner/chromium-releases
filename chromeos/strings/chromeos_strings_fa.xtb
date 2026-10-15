@@ -54,7 +54,7 @@
 <translation id="1180621378971766337">دنج</translation>
 <translation id="1181037720776840403">برداشتن</translation>
 <translation id="1191518099344003522">«نام نقطه دستیابی» فعال است.</translation>
-<translation id="1195447618553298278">خطای ناشناس.</translation>
+<translation id="1195447618553298278">خطای ناشناخته.</translation>
 <translation id="1196264380943975940">خلاصه کردن امکان‌پذیر نیست. ترانویسی طولانی‌تری را امتحان کنید.</translation>
 <translation id="1196959502276349371">نسخه <ph name="VERSION" /></translation>
 <translation id="1199355487114804640">پخش/ مکث</translation>
@@ -949,7 +949,7 @@
 <translation id="5144311987923128508">کلید تأیید اکنون غیرفعال است</translation>
 <translation id="5144887194300568405">کپی کردن ترجمه</translation>
 <translation id="5145081769226915336">حالت تاریک به‌طور خودکار روشن شود؟</translation>
-<translation id="5145331109270917438">تاریخ اصلاح شدن</translation>
+<translation id="5145331109270917438">تاریخ اصلاح</translation>
 <translation id="5154917547274118687">حافظه</translation>
 <translation id="5160857336552977725">وارد سیستم <ph name="DEVICE_TYPE" /> خودتان شوید</translation>
 <translation id="5168185087976003268">سلامت باتری</translation>
@@ -1410,7 +1410,6 @@
 <translation id="7177485034254901881">این <ph name="DEVICE_TYPE" /> توسط <ph name="MANAGER" /> مدیریت می‌شود. سرپرستان می‌توانند این دستگاه را ازراه‌دور پیکربندی کنند.</translation>
 <translation id="7180611975245234373">بازآوری</translation>
 <translation id="7180865173735832675">سفارشی کردن</translation>
-<translation id="7182063559013288142">نقطه اتصال فوری</translation>
 <translation id="7184043045742675738">برای سفارشی‌سازی دکمه، روی یکی از کلیدها کلیک کنید. موقعیت را با موشواره یا کلیدهای جهت‌نما تغییر دهید.</translation>
 <translation id="7187669805838282391">در روز چهارشنبه</translation>
 <translation id="7205318498545665455">انتخاب میکروفون</translation>

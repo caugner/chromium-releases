@@ -342,7 +342,6 @@
 <translation id="2201071101391734388">हालसालैका <ph name="TOTAL_COUNT" /> वटा फोटोमध्ये <ph name="INDEX" /> औँ फोटो।</translation>
 <translation id="2201687081523799384">Google Tasks कोल्याप्स गर्नुहोस्</translation>
 <translation id="2208323208084708176">एकीकृत डेस्कटप मोड</translation>
-<translation id="2210311543574621570">तपाईंले Ctrl + V थिचिराख्नुभयो भने तपाईं क्लिपबोर्ड देख्नु हुने छ। तपाईं chrome://flags मा गई #clipboard-history-longpress फ्ल्याग अफ गरेर यो सर्टकट अफ गर्न सक्नुहुन्छ।</translation>
 <translation id="2215920961700443347">इन्टरनेट कनेक्ट गरिएको छैन। इन्टरनेट कनेक्ट गर्नुहोस् र फेरि प्रयास गर्नुहोस्।</translation>
 <translation id="2222841058024245321">डेस्क ७</translation>
 <translation id="2223384056430485343">स्प्लिट स्क्रिनमा</translation>
@@ -425,7 +424,7 @@
 <translation id="2473177541599297363">रिजोल्युसन पुष्टि गर्नुहोस्</translation>
 <translation id="2475783092753560388"><ph name="SEARCH_RESULT_TEXT" /> हाल्नुहोस्</translation>
 <translation id="2475982808118771221">त्रुटि भयो</translation>
-<translation id="2478076885740497414">एप स्थापना गर्नुहोस्</translation>
+<translation id="2478076885740497414">एप इन्स्टल गर्नुहोस्</translation>
 <translation id="2482878487686419369">नोटिफिकेसनहरू</translation>
 <translation id="2484513351006226581">किबोर्डको लेआउट स्विच गर्न <ph name="KEYBOARD_SHORTCUT" /> मा थिच्नुहोस्।</translation>
 <translation id="2486214324139475545"><ph name="DESK_NAME" /> को प्रिभ्यू। सक्रिय डेस्क।</translation>
@@ -569,7 +568,7 @@
 <translation id="2949420361496057765"><ph name="MODIFIER" /> थिच्नुहोस् र कुनै लिंकमा क्लिक गर्नुहोस्</translation>
 <translation id="2957159466053076448">तपाईं सेटिङमा गई जुनसुकै बेला यी सुविधाहरू अफ गर्न सक्नुहुन्छ। <ph name="LINK_TO_LEARN_MORE" /></translation>
 <translation id="295852781144570696">डिभाइसको अडियो</translation>
-<translation id="2963773877003373896">मोड3</translation>
+<translation id="2963773877003373896">mod3</translation>
 <translation id="2965227184985674128">माइक्रोफोन प्रयोग गर्ने अनुमति अन गर्ने हो?</translation>
 <translation id="296762781903199866"><ph name="LANGUAGE" /> भाषाका वाक् पहिचानसम्बन्धी फाइलहरू डाउनलोड गर्न सकिएन</translation>
 <translation id="2968761508099987738">तपाईंको हालको लोकेसन अहिले प्रयोग गर्न मिल्दैन।</translation>
@@ -1094,7 +1093,7 @@
 <translation id="4666911709726371538">थप एपहरू</translation>
 <translation id="4667099493359681081"><ph name="FILENAME" /> डाउनलोड गरिँदै छ</translation>
 <translation id="4672539464599646374">ब्याट्री सेभर अन गरिएको छ</translation>
-<translation id="4673427585974421255">अन नै छाड्नुहोस्</translation>
+<translation id="4673427585974421255">अन नै राख्नुहोस्</translation>
 <translation id="4677040906536311086">Google पाना</translation>
 <translation id="468019262817532242">तपाईंसँग कसैले पनि सामग्री सेयर गर्न सक्दैनन्</translation>
 <translation id="468293128311738995">तपाईंको फोनमा भएका एपहरू</translation>
@@ -2195,7 +2194,6 @@
 <translation id="8241650983304689286">नयाँ स्प्लिट भ्यूमा ट्याब हाल्नुहोस्</translation>
 <translation id="8247060538831475781"><ph name="CONNECTION_STATUS" />, सिग्नलको क्षमता <ph name="SIGNAL_STRENGTH" />, फोनको ब्याट्री <ph name="BATTERY_STATUS" /></translation>
 <translation id="825129991941217170">Google Drive मा भएका सबै सामग्री देखाउनुहोस्</translation>
-<translation id="8257510091797044096">आफ्नो डिभाइस सेटअप गर्नुहोस्</translation>
 <translation id="8261506727792406068">मेट्नुहोस्</translation>
 <translation id="8262312463845990408">प्लेब्याक टगल गर्नुहोस्</translation>
 <translation id="8268302343625273732">Google Classroom का सबै असाइनमेन्टहरू हेर्नुहोस्</translation>
@@ -2398,7 +2396,7 @@
 <translation id="8983038754672563810">HSPA</translation>
 <translation id="8990809378771970590"><ph name="IME_NAME" /> प्रयोग गरिँदै</translation>
 <translation id="8991648557324317894">रद्द गर्न fn + क्विक इन्सर्ट वा सिफ्ट थिच्नुहोस्।</translation>
-<translation id="899350903320462459">सूचनासम्बन्धी कारबाही गर्न यन्त्रलाई <ph name="LOGIN_ID" /> का रूपमा अनलक गर्नुहोस्</translation>
+<translation id="899350903320462459">नोटिफिकेसनसम्बन्धी कारबाही गर्न डिभाइसलाई <ph name="LOGIN_ID" /> का रूपमा अनलक गर्नुहोस्</translation>
 <translation id="8993733019280019776">तपाईं बोल्दै हुनुहुन्छ? तपाईंको माइक अफ छ। माइक चयन गरेर सो माइक अन गर्नुहोस्।</translation>
 <translation id="9000771174482730261">भण्डारण व्यवस्थापन गर्नुहोस्</translation>
 <translation id="9003374957546315126">इमोजी तथा थप सामग्री</translation>

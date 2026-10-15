@@ -31,6 +31,7 @@ namespace mojom {
 // allow_circular_includes_from. Our build rules should be refactored to avoid
 // this.
 enum class ProfileReadyState : int32_t;
+enum class InvocationSource : int32_t;
 }  // namespace mojom
 
 // This synthetic field trial is registered for users who are affected by the
@@ -153,6 +154,14 @@ class GlicEnabling : public signin::IdentityManager::Observer {
   // Whether the Trust-First Onboarding flow should be shown.
   static bool IsTrustFirstOnboardingEnabledForProfile(Profile* profile);
 
+  // Returns true if the FRE UI (standard FRE or Trust-First Onboarding) should
+  // be bypassed for certain invocation sources for unconsented users.
+  static bool ShouldBypassFreUi(Profile* profile,
+                                mojom::InvocationSource invocation_source);
+
+  // Whether the tab web contents contextual menu item is enabled.
+  static bool IsContextualMenuItemEnabled(Profile* profile);
+
   // Whether the required feature flags for multi-instance - kGlicMultiInstance,
   // kGlicMultiTab, and kGlicMultitabUnderlines - are enabled. When calling, be
   // sure that IsMultiInstanceEnabled() should not be used instead.
@@ -183,6 +192,10 @@ class GlicEnabling : public signin::IdentityManager::Observer {
       Profile* additional_profile);
 
   struct ProfileEnablement {
+    ProfileEnablement();
+    ProfileEnablement(ProfileEnablement&&);
+    ~ProfileEnablement();
+
     // These conditions are checked first and may prevent following checks from
     // occurring.
     bool feature_disabled : 1 = false;
@@ -191,6 +204,7 @@ class GlicEnabling : public signin::IdentityManager::Observer {
     // These are checked separately, so may be present in various combinations.
     bool not_rolled_out : 1 = false;
     bool primary_account_not_capable : 1 = false;
+    bool primary_account_not_fully_signed_in : 1 = false;
     bool disallowed_by_chrome_policy : 1 = false;
     bool disallowed_by_remote_admin : 1 = false;
     bool disallowed_by_remote_other : 1 = false;
@@ -199,6 +213,22 @@ class GlicEnabling : public signin::IdentityManager::Observer {
     // Whether live (audio) functionality is disallowed for this account type.
     bool live_disallowed : 1 = false;
 
+    enum class Reason {
+      kFeatureDisabled = 0,
+      kNotRegularProfile = 1,
+      kNotRolledOut = 2,
+      kPrimaryAccountNotCapable = 3,
+      kDisallowedByChromePolicy = 4,
+      kDisallowedByRemoteAdmin = 5,
+      kDisallowedByRemoteOther = 6,
+      kMaxValue = kDisallowedByRemoteOther,
+    };
+
+    // Record the state of this struct to UMA.
+    void RecordStartupMetrics() const { RecordMetrics("Startup"); }
+    void RecordSteadyStateMetrics() const { RecordMetrics("SteadyState"); }
+
+   public:
     bool IsProfileEligible() const {
       return !feature_disabled && !not_regular_profile;
     }
@@ -234,6 +264,10 @@ class GlicEnabling : public signin::IdentityManager::Observer {
     bool DisallowedByAdmin() const {
       return disallowed_by_chrome_policy || disallowed_by_remote_admin;
     }
+
+   private:
+    // `suffix` should be either "Startup" or "SteadyState".
+    void RecordMetrics(const std::string& suffix) const;
   };
   static ProfileEnablement EnablementForProfile(Profile* profile);
 
@@ -249,18 +283,27 @@ class GlicEnabling : public signin::IdentityManager::Observer {
   // This value can change at runtime.
   //
   // Once a profile is allowed to run glic, there are several more checks that
-  // are required to use glic although many callsites may not care about all of
-  // these:
+  // are required to use glic although many callsites may not care about all
+  // of these:
   //   * FRE has been passed. There is no way to permanently decline FRE, as
   //     it's only invoked on user interaction with glic entry points.
   //   * Entry point specific flags (e.g. kGlicPinnedToTabstrip).
   //   * Profile is not paused.
-  // If all entry-points have been disabled, then glic is functionally disabled.
+  // If all entry-points have been disabled, then glic is functionally
+  // disabled.
   bool IsAllowed();
 
   // Returns true if the given profile has completed the FRE and false
   // otherwise.
   bool HasConsented();
+
+  // Checks if startup metrics have already been recorded, and if not, records
+  // them.
+  void MaybeRecordStartupMetrics();
+
+  // Records startup metrics related to profile ineligibility. Should only be
+  // called once per profile.
+  static void RecordProfileIneligibilityMetricsAtStartup(Profile* profile);
 
   void SetGlicUserStatusUrlForTest(const GURL& test_url) {
     glic_user_status_fetcher_->SetGlicUserStatusUrlForTest(test_url);
@@ -327,6 +370,17 @@ class GlicEnabling : public signin::IdentityManager::Observer {
 
   void UpdateEnabledStatus();
   void UpdateConsentStatus();
+
+  static bool IsTrustFirstOnboardingGatedFeatureEnabled(
+      Profile* profile,
+      const base::Feature& feature,
+      const base::FeatureParam<bool>& onboarding_param);
+
+#if BUILDFLAG(IS_CHROMEOS)
+  static bool IsChromeOSProfileEligible(const Profile* profile);
+#endif  // BUILDFLAG(IS_CHROMEOS)
+
+  bool recorded_startup_metrics_ = false;
 
   raw_ptr<Profile> profile_;
   raw_ptr<ProfileAttributesStorage> profile_attributes_storage_;

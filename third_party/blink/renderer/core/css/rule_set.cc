@@ -35,7 +35,6 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/containers/contains.h"
 #include "base/substring_set_matcher/substring_set_matcher.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/renderer/core/css/css_font_selector.h"
@@ -67,6 +66,7 @@
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/inspector/invalidation_set_to_selector_map.h"
 #include "third_party/blink/renderer/core/route_matching/route_map.h"
+#include "third_party/blink/renderer/core/route_matching/route_match_state.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
@@ -223,9 +223,8 @@ void RuleData::MovedToDifferentRuleSet(const Vector<uint16_t>& old_backing,
                                        Vector<uint16_t>& new_backing,
                                        unsigned new_position) {
   unsigned new_pos = new_backing.size();
-  new_backing.insert(new_backing.size(),
-                     UNSAFE_BUFFERS(old_backing.data() + bloom_hash_pos_),
-                     bloom_hash_size_);
+  new_backing.AppendSpan(
+      base::span(old_backing).subspan(bloom_hash_pos_, bloom_hash_size_));
   bloom_hash_pos_ = new_pos;
   position_ = new_position;
 }
@@ -1516,10 +1515,19 @@ void RuleMap::AddFilteredRulesFromOtherSet(
       Seeker<StyleScope> scope_seeker(old_rule_set.scope_intervals_);
       for (const RuleData& rule_data : other.GetRulesFromExtent(extent)) {
         if (only_include.Contains(const_cast<StyleRule*>(rule_data.Rule()))) {
-          Add(key, rule_data);
+          RuleData* new_rule_data;
+          if (Add(key, rule_data)) {
+            new_rule_data = &backing.back();
+          } else {
+            // See comment in AddToBucket().
+            new_rule_set.universal_rules_.push_back(rule_data);
+            new_rule_data = &new_rule_set.universal_rules_.back();
+            UnmarkAsCoveredByBucketing(new_rule_data->MutableSelector());
+            new_rule_data->ComputeEntirelyCoveredByBucketing();
+          }
           new_rule_set.NewlyAddedFromDifferentRuleSet(
               rule_data, scope_seeker.Seek(rule_data.GetPosition()),
-              old_rule_set, backing.back());
+              old_rule_set, *new_rule_data);
         }
       }
     }
@@ -1537,10 +1545,19 @@ void RuleMap::AddFilteredRulesFromOtherSet(
       const unsigned bucket_number = other.bucket_number_[i];
       const RuleData& rule_data = other.backing[i];
       if (only_include.Contains(const_cast<StyleRule*>(rule_data.Rule()))) {
-        Add(*keys[bucket_number], rule_data);
+        RuleData* new_rule_data;
+        if (Add(*keys[bucket_number], rule_data)) {
+          new_rule_data = &backing.back();
+        } else {
+          // See comment in AddToBucket().
+          new_rule_set.universal_rules_.push_back(rule_data);
+          new_rule_data = &new_rule_set.universal_rules_.back();
+          UnmarkAsCoveredByBucketing(new_rule_data->MutableSelector());
+          new_rule_data->ComputeEntirelyCoveredByBucketing();
+        }
         new_rule_set.NewlyAddedFromDifferentRuleSet(
             rule_data, scope_seeker.Seek(rule_data.GetPosition()), old_rule_set,
-            backing.back());
+            *new_rule_data);
       }
     }
   }

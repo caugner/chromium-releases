@@ -17,10 +17,6 @@
 #include "third_party/abseil-cpp/absl/functional/overload.h"
 #include "ui/gfx/geometry/rect.h"
 
-#if !BUILDFLAG(IS_ANDROID)
-#include "chrome/browser/glic/widget/glic_widget.h"
-#endif
-
 namespace glic {
 
 // Key for the floating embedder. This is a struct to make it a distinct type
@@ -39,6 +35,7 @@ struct SidePanelShowOptions {
       : tab(bound_tab) {}
   base::raw_ref<tabs::TabInterface> tab;
   bool suppress_opening_animation = false;
+  bool pin_on_bind = true;
   GlicPinTrigger pin_trigger = GlicPinTrigger::kUnknown;
 };
 
@@ -52,6 +49,8 @@ using EmbedderOptions = std::variant<SidePanelShowOptions, FloatingShowOptions>;
 struct ShowOptions {
   explicit ShowOptions(EmbedderOptions panel_options);
   explicit ShowOptions(EmbedderOptions panel_options, bool focus);
+  explicit ShowOptions(EmbedderOptions panel_options,
+                       mojom::InvocationSource source);
   ShowOptions(const ShowOptions&);
   ShowOptions(ShowOptions&&);
   ShowOptions& operator=(const ShowOptions&);
@@ -68,12 +67,18 @@ struct ShowOptions {
   static ShowOptions ForSidePanel(tabs::TabInterface& bound_tab);
   static ShowOptions ForSidePanel(tabs::TabInterface& bound_tab,
                                   GlicPinTrigger pin_trigger);
+  static ShowOptions ForSidePanel(tabs::TabInterface& bound_tab,
+                                  GlicPinTrigger pin_trigger,
+                                  mojom::InvocationSource invocation_source);
 
   // Shared show options
   bool focus_on_show = false;
   bool reinitialize_if_already_active = false;
   std::optional<std::string> prompt_suggestion = std::nullopt;
   bool auto_send = false;
+  mojom::InvocationSource invocation_source =
+      mojom::InvocationSource::kTopChromeButton;
+  mojom::FreOverride fre_override = mojom::FreOverride::kUnspecified;
 
   // Container for options that are different between side panel and floaty.
   EmbedderOptions embedder_options;

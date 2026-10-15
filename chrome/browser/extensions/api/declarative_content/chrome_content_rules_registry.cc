@@ -176,7 +176,7 @@ ChromeContentRulesRegistry::CreateRule(
 
   std::vector<std::unique_ptr<const ContentAction>> actions;
   for (const base::Value& value : api_rule.actions) {
-    // TODO(crbug.com/40832669): Migrate api_rule to use base::Value::Dict to
+    // TODO(crbug.com/40832669): Migrate api_rule to use base::DictValue to
     // avoid conversion.
     if (!value.is_dict()) {
       return nullptr;
@@ -320,9 +320,14 @@ std::string ChromeContentRulesRegistry::RemoveRulesImpl(
   // rule multiple times.
   EvaluationScope evaluation_scope(this, IGNORE_REQUESTS);
 
+  // Deduplicate the list of rule identifiers to prevent removing the same
+  // rule multiple times and invalidating iterators.
+  std::set<std::string> deduplicated_rule_identifiers(rule_identifiers.begin(),
+                                                      rule_identifiers.end());
+
   std::vector<RulesMap::iterator> rules_to_erase;
   std::vector<const void*> predicate_groups_to_stop_tracking;
-  for (const std::string& id : rule_identifiers) {
+  for (const std::string& id : deduplicated_rule_identifiers) {
     // Skip unknown rules.
     auto content_rules_entry =
         content_rules_.find(std::make_pair(extension_id, id));

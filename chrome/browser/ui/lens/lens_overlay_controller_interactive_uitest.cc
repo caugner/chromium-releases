@@ -14,8 +14,8 @@
 #include "chrome/browser/autocomplete/aim_eligibility_service_factory.h"
 #include "chrome/browser/autocomplete/chrome_aim_eligibility_service.h"
 #include "chrome/browser/contextual_search/contextual_search_service_factory.h"
+#include "chrome/browser/contextual_tasks/contextual_tasks_panel_controller.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_service_factory.h"
-#include "chrome/browser/contextual_tasks/contextual_tasks_side_panel_coordinator.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service_factory.h"
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service.h"
@@ -46,6 +46,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/interaction/interactive_browser_test.h"
 #include "chrome/test/user_education/interactive_feature_promo_test.h"
+#include "components/contextual_search/internal/composebox_query_controller.h"
 #include "components/contextual_tasks/public/contextual_tasks_service.h"
 #include "components/contextual_tasks/public/features.h"
 #include "components/feature_engagement/public/feature_constants.h"
@@ -70,6 +71,21 @@
 #include "ui/events/keycodes/dom/dom_code.h"
 #include "ui/gfx/geometry/point.h"
 
+namespace lens {
+class LensQueryFlowRouterTestApi {
+ public:
+  explicit LensQueryFlowRouterTestApi(LensQueryFlowRouter* router)
+      : router_(router) {}
+
+  auto* GetContextualSearchSessionHandle() {
+    return router_->GetContextualSearchSessionHandle();
+  }
+
+ private:
+  raw_ptr<LensQueryFlowRouter> router_;
+};
+}  // namespace lens
+
 namespace {
 
 constexpr char kDocumentWithNamedElement[] = "/select.html";
@@ -86,11 +102,12 @@ class TestingAimEligibilityService : public ChromeAimEligibilityService {
       bool server_eligibility_enabled,
       PrefService& pref_service,
       TemplateURLService* template_url_service)
-      : ChromeAimEligibilityService(pref_service,
-                                    template_url_service,
-                                    /*url_loader_factory=*/nullptr,
-                                    /*identity_manager=*/nullptr,
-                                    /*is_off_the_record=*/false),
+      : ChromeAimEligibilityService(
+            pref_service,
+            /*template_url_service=*/template_url_service,
+            /*url_loader_factory=*/nullptr,
+            /*identity_manager=*/nullptr,
+            /*configuration=*/{}),
         is_locally_eligible_(is_locally_eligible),
         is_server_eligible_(is_server_eligible),
         server_eligibility_enabled_(server_eligibility_enabled) {}
@@ -301,11 +318,32 @@ class LensOverlayControllerCUJTest : public InteractiveFeaturePromoTest {
                  WaitForStateChange(overlayId, screenshot_is_rendered));
   }
 
+  InteractiveTestApi::MultiStep FinishScreenshotUpload(int tab_id = 0) {
+    // Get composebox query controller from session handle and router to
+    // update file upload status to success for testing.
+    return Steps(Do([this, tab_id]() {
+      content::WebContents* web_contents =
+          browser()->tab_strip_model()->GetWebContentsAt(tab_id);
+      auto* controller = LensSearchController::FromTabWebContents(web_contents);
+      auto* router = controller->query_router();
+      auto file_token = router->overlay_tab_context_file_token();
+
+      auto* session_handle = lens::LensQueryFlowRouterTestApi(router)
+                                 .GetContextualSearchSessionHandle();
+      auto* context_controller = static_cast<ComposeboxQueryController*>(
+          session_handle->GetController());
+      context_controller->update_file_upload_status_for_testing(
+          *file_token, contextual_search::FileUploadStatus::kUploadSuccessful,
+          std::nullopt);
+    }));
+  }
+
   template <typename T>
   InteractiveTestApi::MultiStep OpenLensOverlayWithRegionSearch(
       ui::ElementIdentifier tab_id,
       ui::ElementIdentifier overlay_id,
-      T&& target_point) {
+      T&& target_point,
+      int tab_id_int = 0) {
     DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kOverlayId);
     const GURL url = embedded_test_server()->GetURL(kDocumentWithImage);
 
@@ -339,7 +377,8 @@ class LensOverlayControllerCUJTest : public InteractiveFeaturePromoTest {
                       WaitForScreenshotRendered(overlay_id),
                       EnsurePresent(overlay_id, kPathToRegionSelection),
                       MoveMouseTo(LensOverlayController::kOverlayId),
-                      DragMouseTo(std::forward<T>(target_point))));
+                      DragMouseTo(std::forward<T>(target_point)),
+                      FinishScreenshotUpload(tab_id_int)));
   }
 
   bool TriggerLenOverlayHomeworkPageAction() {
@@ -1677,8 +1716,8 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksLensOverlayControllerInteractiveUiTest,
   DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kFirstTab);
 
   browser()->GetFeatures().side_panel_ui()->DisableAnimationsForTesting();
-  contextual_tasks::ContextualTasksSidePanelCoordinator* coordinator =
-      contextual_tasks::ContextualTasksSidePanelCoordinator::From(browser());
+  contextual_tasks::ContextualTasksPanelController* controller =
+      contextual_tasks::ContextualTasksPanelController::From(browser());
 
   auto* const browser_view = BrowserView::GetBrowserViewForBrowser(browser());
   auto off_center_point = base::BindLambdaForTesting([browser_view]() {
@@ -1692,7 +1731,7 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksLensOverlayControllerInteractiveUiTest,
       OpenLensOverlayWithRegionSearch(kFirstTab, kOverlayId, off_center_point),
       WaitForShow(kContextualTasksSidePanelWebViewElementId), Do([&]() {
         // Close the panel after it is opened.
-        coordinator->Close();
+        controller->Close();
       }),
       WaitForContextualPanelAndLensToClose());
 }
@@ -1703,8 +1742,8 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksLensOverlayControllerInteractiveUiTest,
   DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kFirstTab);
 
   browser()->GetFeatures().side_panel_ui()->DisableAnimationsForTesting();
-  contextual_tasks::ContextualTasksSidePanelCoordinator* coordinator =
-      contextual_tasks::ContextualTasksSidePanelCoordinator::From(browser());
+  contextual_tasks::ContextualTasksPanelController* controller =
+      contextual_tasks::ContextualTasksPanelController::From(browser());
   contextual_tasks::ContextualTasksService* contextual_tasks_service =
       contextual_tasks::ContextualTasksServiceFactory::GetForProfile(
           browser()->profile());
@@ -1732,11 +1771,11 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksLensOverlayControllerInteractiveUiTest,
                 browser()->tab_strip_model()->GetWebContentsAt(1)));
 
         // Show contextual tasks side panel.
-        coordinator->Show();
+        controller->Show();
       }),
       WaitForShow(kContextualTasksSidePanelWebViewElementId), Do([&]() {
         // Close the panel after it is opened.
-        coordinator->Close();
+        controller->Close();
       }),
       WaitForContextualPanelAndLensToClose());
 }
@@ -1749,8 +1788,8 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksLensOverlayControllerInteractiveUiTest,
   DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kSecondTab);
 
   browser()->GetFeatures().side_panel_ui()->DisableAnimationsForTesting();
-  contextual_tasks::ContextualTasksSidePanelCoordinator* coordinator =
-      contextual_tasks::ContextualTasksSidePanelCoordinator::From(browser());
+  contextual_tasks::ContextualTasksPanelController* controller =
+      contextual_tasks::ContextualTasksPanelController::From(browser());
 
   auto* const browser_view = BrowserView::GetBrowserViewForBrowser(browser());
   auto off_center_point = base::BindLambdaForTesting([browser_view]() {
@@ -1761,15 +1800,16 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksLensOverlayControllerInteractiveUiTest,
   });
 
   RunTestSequence(
-      OpenLensOverlayWithRegionSearch(kFirstTab, kOverlayId, off_center_point),
+      OpenLensOverlayWithRegionSearch(kFirstTab, kOverlayId, off_center_point,
+                                      0),
       WaitForShow(kContextualTasksSidePanelWebViewElementId),
       OpenArbitraryNewTab(),
       EnsureNotPresent(kContextualTasksSidePanelWebViewElementId),
       OpenLensOverlayWithRegionSearch(kSecondTab, kSecondOverlayId,
-                                      off_center_point),
+                                      off_center_point, 1),
       WaitForShow(kContextualTasksSidePanelWebViewElementId), Do([&]() {
         // Close the panel after it is opened.
-        coordinator->Close();
+        controller->Close();
       }),
       WaitForHide(kContextualTasksSidePanelWebViewElementId), Do([&]() {
         // Verify Lens Overlay is not closing on the first tab.
@@ -1824,7 +1864,8 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksLensOverlayControllerInteractiveUiTest,
               "(el) => { el.dispatchEvent(new KeyboardEvent('keydown', { "
               "key:'Enter', bubbles: true })); }",
               ExecuteJsMode::kFireAndForget)),
-      WaitForHide(kOverlayId),
+      // Screenshot is implicitly uploaded with CSB query.
+      FinishScreenshotUpload(), WaitForHide(kOverlayId),
       WaitForShow(kContextualTasksSidePanelWebViewElementId));
 }
 
@@ -1894,8 +1935,8 @@ IN_PROC_BROWSER_TEST_F(
   DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kOverlayId);
 
   browser()->GetFeatures().side_panel_ui()->DisableAnimationsForTesting();
-  contextual_tasks::ContextualTasksSidePanelCoordinator* coordinator =
-      contextual_tasks::ContextualTasksSidePanelCoordinator::From(browser());
+  contextual_tasks::ContextualTasksPanelController* controller =
+      contextual_tasks::ContextualTasksPanelController::From(browser());
 
   auto* const browser_view = BrowserView::GetBrowserViewForBrowser(browser());
   auto off_center_point = base::BindLambdaForTesting([browser_view]() {
@@ -1909,7 +1950,7 @@ IN_PROC_BROWSER_TEST_F(
       OpenLensOverlayWithRegionSearch(kFirstTab, kOverlayId, off_center_point),
       WaitForShow(kContextualTasksSidePanelWebViewElementId), Do([&]() {
         // Close the panel after it is opened.
-        coordinator->Close();
+        controller->Close();
       }),
       WaitForContextualPanelAndLensToClose());
 }
@@ -1921,8 +1962,8 @@ IN_PROC_BROWSER_TEST_F(
   DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kOverlayId);
 
   browser()->GetFeatures().side_panel_ui()->DisableAnimationsForTesting();
-  contextual_tasks::ContextualTasksSidePanelCoordinator* coordinator =
-      contextual_tasks::ContextualTasksSidePanelCoordinator::From(browser());
+  contextual_tasks::ContextualTasksPanelController* controller =
+      contextual_tasks::ContextualTasksPanelController::From(browser());
   contextual_tasks::ContextualTasksService* contextual_tasks_service =
       contextual_tasks::ContextualTasksServiceFactory::GetForProfile(
           browser()->profile());
@@ -1950,11 +1991,11 @@ IN_PROC_BROWSER_TEST_F(
                 browser()->tab_strip_model()->GetWebContentsAt(1)));
 
         // Show contextual tasks side panel.
-        coordinator->Show();
+        controller->Show();
       }),
       WaitForShow(kContextualTasksSidePanelWebViewElementId), Do([&]() {
         // Close the panel after it is opened.
-        coordinator->Close();
+        controller->Close();
       }),
       WaitForHide(kContextualTasksSidePanelWebViewElementId), Do([&]() {
         // Verify Lens Overlay did not close.

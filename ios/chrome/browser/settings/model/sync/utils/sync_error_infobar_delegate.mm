@@ -162,7 +162,8 @@ bool SyncErrorInfoBarDelegate::Accept() {
         kNeedsTrustedVaultKeyForEverything:
       [sync_presenter_handler_
           showTrustedVaultReauthForFetchKeysWithTrigger:
-              TrustedVaultTriggerFromInfoBarTrigger(trigger_)];
+              TrustedVaultTriggerFromInfoBarTrigger(trigger_)
+                                             completion:nil];
       break;
 
     case syncer::SyncService::UserActionableError::
@@ -171,11 +172,11 @@ bool SyncErrorInfoBarDelegate::Accept() {
         kTrustedVaultRecoverabilityDegradedForEverything:
       [sync_presenter_handler_
           showTrustedVaultReauthForDegradedRecoverabilityWithTrigger:
-              TrustedVaultTriggerFromInfoBarTrigger(trigger_)];
+              TrustedVaultTriggerFromInfoBarTrigger(trigger_)
+                                                          completion:nil];
       break;
     case syncer::SyncService::UserActionableError::kBookmarksLimitExceeded:
-      // TODO(crbug.com/452968646): Navigate to the concrete help center
-      // article.
+      [sync_presenter_handler_ showBookmarksLimitExceededHelp];
       break;
   }
 

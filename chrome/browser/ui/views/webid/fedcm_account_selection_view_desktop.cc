@@ -425,6 +425,14 @@ bool FedCmAccountSelectionView::ShowLoadingDialog(
   return true;
 }
 
+void FedCmAccountSelectionView::SetCanShowWidget(bool can_show_widget) {
+  if (can_show_widget == can_show_widget_) {
+    return;
+  }
+  can_show_widget_ = can_show_widget;
+  UpdateDialogVisibilityAndPosition();
+}
+
 bool FedCmAccountSelectionView::ShowVerifyingDialog(
     const content::RelyingPartyData& rp_data,
     const IdentityProviderDataPtr& idp_data,
@@ -686,8 +694,6 @@ void FedCmAccountSelectionView::OnLoginToIdP(const GURL& idp_config_url,
     return;
   }
 
-  delegate_->OnLoginToIdP(idp_config_url, idp_login_url);
-
   if (state_ == State::IDP_SIGNIN_STATUS_MISMATCH) {
     is_mismatch_continue_clicked_ = true;
     popup_window_state_ =
@@ -701,6 +707,8 @@ void FedCmAccountSelectionView::OnLoginToIdP(const GURL& idp_config_url,
     modal_account_chooser_state_ =
         webid::AccountChooserResult::kUseOtherAccountButton;
   }
+
+  delegate_->OnLoginToIdP(idp_config_url, idp_login_url);
 }
 
 void FedCmAccountSelectionView::OnGotIt(const ui::Event& event) {
@@ -1280,6 +1288,11 @@ gfx::Rect FedCmAccountSelectionView::GetDialogBounds() {
 }
 
 void FedCmAccountSelectionView::ShouldShowDialog(bool& should_show) {
+  if (!can_show_widget_) {
+    should_show = false;
+    return;
+  }
+
   if (dialog_type_ == DialogType::BUBBLE) {
     // Hide the bubble dialog if it can't fit.
     if (!CanFitInWebContents()) {

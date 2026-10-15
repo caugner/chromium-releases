@@ -4,11 +4,11 @@
 
 #include "chrome/browser/pdf/pdf_extension_util.h"
 
+#include <algorithm>
 #include <array>
 #include <string>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/notreached.h"
 #include "base/strings/string_util.h"
@@ -39,7 +39,9 @@
 #include "url/gurl.h"
 
 #if BUILDFLAG(IS_CHROMEOS)
+#include "chromeos/ash/components/browser_context_helper/browser_context_helper.h"
 #include "chromeos/ash/components/browser_context_helper/browser_context_types.h"
+#include "components/user_manager/user.h"
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
 #if BUILDFLAG(ENABLE_GLIC)
@@ -65,7 +67,7 @@ const char kNameTag[] = "<NAME>";
 
 // Gets strings that are used both by the stand-alone PDF Viewer and the Print
 // Preview PDF Viewer.
-base::Value::Dict GetCommonStrings() {
+base::DictValue GetCommonStrings() {
   static constexpr webui::LocalizedString kPdfResources[] = {
       {"errorDialogTitle", IDS_PDF_ERROR_DIALOG_TITLE},
       {"pageLoadFailed", IDS_PDF_PAGE_LOAD_FAILED},
@@ -77,7 +79,7 @@ base::Value::Dict GetCommonStrings() {
       {"tooltipZoomOut", IDS_PDF_TOOLTIP_ZOOM_OUT},
       {"twoUpViewEnable", IDS_PDF_TWO_UP_VIEW_ENABLE},
   };
-  base::Value::Dict dict;
+  base::DictValue dict;
   for (const auto& resource : kPdfResources) {
     dict.Set(resource.name, l10n_util::GetStringUTF16(resource.id));
   }
@@ -89,7 +91,7 @@ base::Value::Dict GetCommonStrings() {
 }
 
 // Gets strings that are used only by the stand-alone PDF Viewer.
-base::Value::Dict GetPdfViewerStrings() {
+base::DictValue GetPdfViewerStrings() {
   static constexpr webui::LocalizedString kPdfResources[] = {
       {"annotationsShowToggle", IDS_PDF_ANNOTATIONS_SHOW_TOGGLE},
       {"bookmarks", IDS_PDF_BOOKMARKS},
@@ -231,7 +233,7 @@ base::Value::Dict GetPdfViewerStrings() {
       {"ink2TextColorCyan3", IDS_PDF_INK2_ANNOTATION_COLOR_CYAN_3},
 #endif  // BUILDFLAG(ENABLE_PDF_INK2)
   };
-  base::Value::Dict dict;
+  base::DictValue dict;
   for (const auto& resource : kPdfResources) {
     dict.Set(resource.name, l10n_util::GetStringUTF16(resource.id));
   }
@@ -271,6 +273,40 @@ bool IsPdfInk2AnnotationsEnabled(content::BrowserContext* context) {
 }
 #endif  // BUILDFLAG(ENABLE_PDF_INK2)
 
+#if BUILDFLAG(ENABLE_PDF_SAVE_TO_DRIVE)
+bool IsPdfSaveToDriveEnabled(content::BrowserContext* context) {
+#if BUILDFLAG(IS_CHROMEOS)
+  // TODO(crbug.com/488428177): Write unit test for this logic.
+  // On ChromeOS, only regular user session has accounts associated with the
+  // browser.
+
+  // Only allow regular user session profiles.
+  auto* user =
+      ash::BrowserContextHelper::Get()->GetUserByBrowserContext(context);
+  if (!user) {
+    return false;
+  }
+  switch (user->GetType()) {
+    case user_manager::UserType::kRegular:
+    case user_manager::UserType::kChild:
+      // These are regular user sessions.
+      break;
+    case user_manager::UserType::kGuest:
+    case user_manager::UserType::kPublicAccount:
+    case user_manager::UserType::kKioskChromeApp:
+    case user_manager::UserType::kKioskWebApp:
+    case user_manager::UserType::kKioskIWA:
+    case user_manager::UserType::kKioskArcvmApp:
+      // Disallows guest, managed guest and kiosk app sessions.
+      return false;
+  }
+#endif  // BUILDFLAG(IS_CHROMEOS)
+
+  return base::FeatureList::IsEnabled(chrome_pdf::features::kPdfSaveToDrive) &&
+         !Profile::FromBrowserContext(context)->IsOffTheRecord();
+}
+#endif  // BUILDFLAG(ENABLE_PDF_SAVE_TO_DRIVE)
+
 }  // namespace
 
 std::string GetManifest() {
@@ -290,8 +326,8 @@ std::string GetManifest() {
   return manifest_contents;
 }
 
-base::Value::Dict GetStrings(PdfViewerContext context) {
-  base::Value::Dict dict = GetCommonStrings();
+base::DictValue GetStrings(PdfViewerContext context) {
+  base::DictValue dict = GetCommonStrings();
   if (context == PdfViewerContext::kPdfViewer ||
       context == PdfViewerContext::kAll) {
     dict.Merge(GetPdfViewerStrings());
@@ -303,11 +339,11 @@ base::Value::Dict GetStrings(PdfViewerContext context) {
   return dict;
 }
 
-base::Value::Dict GetAdditionalData(content::BrowserContext* context) {
+base::DictValue GetAdditionalData(content::BrowserContext* context) {
   // NOTE: This function should not include any data used for $i18n{}
   // replacements. The i18n string resources should be added using GetStrings()
   // above instead.
-  base::Value::Dict dict;
+  base::DictValue dict;
   dict.Set("printingEnabled", IsPrintingEnabled(context));
 
 #if BUILDFLAG(ENABLE_PDF_INK2)
@@ -331,9 +367,7 @@ base::Value::Dict GetAdditionalData(content::BrowserContext* context) {
 #endif  // BUILDFLAG(ENABLE_GLIC)
 
 #if BUILDFLAG(ENABLE_PDF_SAVE_TO_DRIVE)
-  const bool save_to_drive_enabled =
-      base::FeatureList::IsEnabled(chrome_pdf::features::kPdfSaveToDrive) &&
-      !Profile::FromBrowserContext(context)->IsOffTheRecord();
+  const bool save_to_drive_enabled = IsPdfSaveToDriveEnabled(context);
   dict.Set("pdfSaveToDrive", save_to_drive_enabled);
   dict.Set("pdfSaveToDriveHelpCenterURL",
            chrome::kPdfViewerSaveToDriveHelpCenterURL);
@@ -370,7 +404,7 @@ std::vector<webui::ResourcePath> GetResources(PdfViewerContext context) {
   std::vector<webui::ResourcePath> resources;
   resources.reserve(std::size(kPdfResources));
   for (const webui::ResourcePath& resource : kPdfResources) {
-    if (base::Contains(exclusions, resource.path)) {
+    if (std::ranges::contains(exclusions, resource.path)) {
       continue;
     }
     resources.push_back(resource);
@@ -395,7 +429,7 @@ bool MaybeDispatchSaveEvent(content::RenderFrameHost* embedder_host) {
   base::WeakPtr<extensions::StreamContainer> stream =
       pdf_viewer_stream_manager->GetStreamContainer(embedder_host);
 
-  base::Value::List args;
+  base::ListValue args;
   args.Append(stream->stream_url().spec());
 
   content::BrowserContext* context = embedder_host->GetBrowserContext();
@@ -411,7 +445,7 @@ bool MaybeDispatchSaveEvent(content::RenderFrameHost* embedder_host) {
 
 void DispatchShouldUpdateViewportEvent(content::RenderFrameHost* embedder_host,
                                        const GURL& new_pdf_url) {
-  base::Value::List args;
+  base::ListValue args;
   args.Append(new_pdf_url.spec());
 
   content::BrowserContext* context = embedder_host->GetBrowserContext();
@@ -431,14 +465,19 @@ bool ShouldShowGlicSummarizeButton(content::BrowserContext* context) {
     return false;
   }
 
-  // If the user has not passed FRE, and `kPdfGlicSummarizeFre` is false, then
-  // don't show the button.
-  if (!base::FeatureList::IsEnabled(features::kPdfGlicSummarizeFre) &&
-      !glic::GlicEnabling::HasConsentedForProfile(profile)) {
+  if (!base::FeatureList::IsEnabled(features::kPdfGlicSummarize)) {
     return false;
   }
 
-  return base::FeatureList::IsEnabled(features::kPdfGlicSummarize);
+  if (glic::GlicEnabling::HasConsentedForProfile(profile)) {
+    return true;
+  }
+
+  if (glic::GlicEnabling::IsTrustFirstOnboardingEnabledForProfile(profile)) {
+    return true;
+  }
+
+  return false;
 #else
   return false;
 #endif  // BUILDFLAG(ENABLE_GLIC)

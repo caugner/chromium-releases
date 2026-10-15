@@ -89,12 +89,16 @@ class RealboxSearchBrowserTestPage : public searchbox::mojom::Page {
       searchbox::mojom::SelectedFileInfoPtr file_info) override {}
   void UpdateAutoSuggestedTabContext(
       searchbox::mojom::TabInfoPtr tab_info) override {}
-  void OnShow() override {}
   MOCK_METHOD(void, SetKeywordSelected, (bool is_keyword_selected), (override));
   MOCK_METHOD(void, UpdateContentSharingPolicy, (bool enabled), (override));
   MOCK_METHOD(void, UpdateLensSearchEligibility, (bool eligible), (override));
-  MOCK_METHOD(void, UpdateAimEligibility, (bool eligible), (override));
-  void OnShowAiModePrefChanged(bool canShow) override {}
+  MOCK_METHOD(void, UpdateAimPopupEligibility, (bool eligible), (override));
+  MOCK_METHOD(void,
+              StepSelection,
+              (searchbox::mojom::SelectionDirection,
+               searchbox::mojom::SelectionStep));
+  MOCK_METHOD(void, OpenCurrentSelection, (WindowOpenDisposition));
+  MOCK_METHOD(void, SetAimButtonVisible, (bool visible));
 
   mojo::PendingRemote<searchbox::mojom::Page> GetRemotePage() {
     return receiver_.BindNewPipeAndPassRemote();
@@ -384,8 +388,11 @@ IN_PROC_BROWSER_TEST_P(RealboxHandlerTest, MatchVectorIcons) {
     match.type = static_cast<AutocompleteMatchType::Type>(type);
     if (match.type == AutocompleteMatchType::STARTER_PACK) {
       // All STARTER_PACK suggestions should have non-empty vector icons.
-      for (int starter_pack_id = template_url_starter_pack_data::kBookmarks;
-           starter_pack_id != template_url_starter_pack_data::kMaxStarterPackId;
+      for (int starter_pack_id = static_cast<int>(
+               template_url_starter_pack_data::StarterPackId::kBookmarks);
+           starter_pack_id !=
+           static_cast<int>(template_url_starter_pack_data::StarterPackId::
+                                kMaxStarterPackId);
            starter_pack_id++) {
         TemplateURLData turl_data;
         turl_data.starter_pack_id = starter_pack_id;

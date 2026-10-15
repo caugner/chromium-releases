@@ -29,7 +29,8 @@
 }
 
 - (BOOL)isTopInputPlate {
-  return _inputPlatePosition == ComposeboxInputPlatePosition::kTop;
+  return _inputPlatePosition == ComposeboxInputPlatePosition::kTop ||
+         _inputPlatePosition == ComposeboxInputPlatePosition::kiPad;
 }
 
 - (UIColor*)composeboxBackgroundColor {
@@ -101,6 +102,30 @@
 
 - (UIColor*)imageGenerationButtonTextColor {
   return [UIColor colorNamed:kTextPrimaryColor];
+}
+
+- (UIColor*)canvasButtonTextColor {
+  return [UIColor colorNamed:kBlue600Color];
+}
+
+- (UIColor*)canvasButtonBackgroundColor {
+  if (self.isTopInputPlate) {
+    return [UIColor colorNamed:kAimComposeboxButtonBackgroundColor];
+  } else {
+    return [UIColor colorNamed:kSecondaryBackgroundColor];
+  }
+}
+
+- (UIColor*)deepSearchButtonTextColor {
+  return [UIColor colorNamed:kBlue600Color];
+}
+
+- (UIColor*)deepSearchButtonBackgroundColor {
+  if (self.isTopInputPlate) {
+    return [UIColor colorNamed:kAimComposeboxButtonBackgroundColor];
+  } else {
+    return [UIColor colorNamed:kSecondaryBackgroundColor];
+  }
 }
 
 - (UIColor*)sendButtonForegroundColorHighlighted:(BOOL)highlighted {

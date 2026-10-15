@@ -2904,8 +2904,11 @@ std::optional<FeatureConfig> GetClientSideFeatureConfig(
     config.availability = Comparator(ANY, 0);
     config.session_rate = Comparator(ANY, 0);
 
-    // This IPH showing does not affect the session count for other IPHs.
-    config.session_rate_impact.type = SessionRateImpact::Type::NONE;
+    // This promo blocks the Gemini Image Remix IPH in the same session.
+    config.session_rate_impact.type = SessionRateImpact::Type::EXPLICIT;
+    config.session_rate_impact.affected_features.emplace();
+    config.session_rate_impact.affected_features->push_back(
+        kIPHiOSGeminiImageRemixFeature.name);
     config.blocked_by.type = BlockedBy::Type::NONE;
     config.blocking.type = Blocking::Type::NONE;
 
@@ -2926,8 +2929,11 @@ std::optional<FeatureConfig> GetClientSideFeatureConfig(
     config.availability = Comparator(ANY, 0);
     config.session_rate = Comparator(ANY, 0);
 
-    // This badge showing does not affect the session count for other IPHs.
-    config.session_rate_impact.type = SessionRateImpact::Type::NONE;
+    // This promo blocks the Gemini Image Remix IPH in the same session.
+    config.session_rate_impact.type = SessionRateImpact::Type::EXPLICIT;
+    config.session_rate_impact.affected_features.emplace();
+    config.session_rate_impact.affected_features->push_back(
+        kIPHiOSGeminiImageRemixFeature.name);
     config.blocked_by.type = BlockedBy::Type::NONE;
     config.blocking.type = Blocking::Type::NONE;
 
@@ -3031,6 +3037,23 @@ std::optional<FeatureConfig> GetClientSideFeatureConfig(
     config.event_configs.insert(
         EventConfig(events::kIOSGeminiFullscreenPromoTriggered,
                     Comparator(EQUAL, 0), 3, 365));
+    return config;
+  }
+
+  if (kIPHiOSPinMostVisitedSiteFeature.name == feature->name) {
+    // Show the in-product help if 1) it has never been triggered, and 2) user
+    // has not pinned any site to the most visited tile.
+    FeatureConfig config;
+    config.valid = true;
+    config.availability = Comparator(ANY, 0);
+    config.session_rate = Comparator(EQUAL, 0);
+    config.trigger =
+        EventConfig("ios_pin_mvt_site_triggered", Comparator(EQUAL, 0),
+                    feature_engagement::kMaxStoragePeriod,
+                    feature_engagement::kMaxStoragePeriod);
+    config.used = EventConfig(events::kIOSPinMVTSiteUsed, Comparator(EQUAL, 0),
+                              feature_engagement::kMaxStoragePeriod,
+                              feature_engagement::kMaxStoragePeriod);
     return config;
   }
 

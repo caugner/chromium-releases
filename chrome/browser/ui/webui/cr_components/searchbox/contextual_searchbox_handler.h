@@ -108,10 +108,10 @@ class ContextualSearchboxHandler
                       AddFileContextCallback callback) override;
   void AddTabContext(int32_t tab_id,
                      bool delay_upload,
-                     AddTabContextCallback) override;
+                     AddTabContextCallback callback) override;
   void DeleteContext(const base::UnguessableToken& file_token,
                      bool from_automatic_chip) override;
-  void ClearFiles() override;
+  void ClearFiles(bool should_block_auto_suggested_tabs) override;
   void SubmitQuery(const std::string& query_text,
                    uint8_t mouse_button,
                    bool alt_key,
@@ -121,6 +121,17 @@ class ContextualSearchboxHandler
   void GetRecentTabs(GetRecentTabsCallback callback) override;
   void GetTabPreview(int32_t tab_id, GetTabPreviewCallback callback) override;
   void GetInputState(GetInputStateCallback callback) override;
+
+  // Continues the process of adding tab context for a given `tab_id`.
+  // This method is used when a `context_token` has already been generated
+  // (e.g., by a composebox handler's AddTabContext) and the tab context needs
+  // to be associated with that specific token. This differs from
+  // `AddTabContext` since `AddTabContext` generates a new context token
+  // associated with a session handle.
+  void ContinueAddTabContext(int32_t tab_id,
+                             bool delay_upload,
+                             base::UnguessableToken context_token,
+                             AddTabContextCallback callback);
 
   // Called from browser code (e.g., Views-based file selector) to add file
   // context.
@@ -156,9 +167,6 @@ class ContextualSearchboxHandler
     return context_input_data_;
   }
 
-  // SearchboxHandler:
-  omnibox::InputState GetInputState() const override;
-
   std::vector<base::UnguessableToken> GetUploadedContextTokens();
 
   contextual_search::InputStateModel* input_state_model() {
@@ -171,7 +179,17 @@ class ContextualSearchboxHandler
   void SetActiveModelMode(omnibox::ModelMode model) override;
   void ActivateMetricsFunnel(const std::string& funnel_name) override;
 
+  void OnInputStateChangedForTesting(
+      const contextual_search::InputState& state) {
+    OnInputStateChanged(state);
+  }
+
  protected:
+  // SearchboxHandler:
+  omnibox::InputState GetInputState() const override;
+
+  virtual void OpenUrl(GURL url, const WindowOpenDisposition disposition);
+
   void ComputeAndOpenQueryUrl(
       const std::string& query_text,
       WindowOpenDisposition disposition,
@@ -217,9 +235,13 @@ class ContextualSearchboxHandler
   void RecordTabAddedMetric(tabs::TabInterface* const tab,
                             bool is_tab_suggestion_chip);
 
-  void InitializeInputStateModel();
+  virtual void InitializeInputStateModel();
 
   std::unique_ptr<contextual_search::InputStateModel> input_state_model_;
+
+  void OnInputStateChanged(const contextual_search::InputState& state);
+
+  base::CallbackListSubscription input_state_subscription_;
 
  private:
   // Helper to get the correct number of tab suggestions. Virtual so it
@@ -236,8 +258,6 @@ class ContextualSearchboxHandler
   void SnapshotTabContext(
       const base::UnguessableToken& context_token,
       std::unique_ptr<lens::ContextualInputData> page_content_data);
-
-  void OpenUrl(GURL url, const WindowOpenDisposition disposition);
 
   void OnPreviewReceived(GetTabPreviewCallback callback,
                          const SkBitmap& preview_bitmap);
@@ -258,16 +278,11 @@ class ContextualSearchboxHandler
       context_controller_;
 
   std::optional<lens::ContextualInputData> context_input_data_;
-  // Callback for `InputStateModel` changes.
-  void OnInputStateChanged(const contextual_search::InputState& state);
-
-  std::unique_ptr<contextual_search::InputState> input_state_;
-
-  base::CallbackListSubscription input_state_subscription_;
 
   // Callback to get the contextual session handle from WebUI controller.
   GetSessionHandleCallback get_session_callback_;
 
+ protected:
   base::WeakPtrFactory<ContextualSearchboxHandler> weak_ptr_factory_{this};
 };
 

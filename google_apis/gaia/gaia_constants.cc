@@ -296,7 +296,11 @@ const char kWebHistoryOAuth2Scope[] =
     "https://www.googleapis.com/auth/webhistory";
 
 // OAuth2 scope for Legion.
-const char kLegionAuthScope[] = "https://www.googleapis.com/auth/paic-auth";
+const char kLegionAuthScope[] = "https://www.googleapis.com/auth/paic";
+
+// OAuth2 scope for access to wallet passes.
+const char kWalletPassesOAuth2Scope[] =
+    "https://www.googleapis.com/auth/wallet_1p_passes";
 
 // Used to build ClientOAuth requests.  These are the names of keys used when
 // building base::DictionaryValue that represent the json data that makes up

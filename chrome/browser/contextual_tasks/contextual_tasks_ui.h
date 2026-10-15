@@ -18,7 +18,7 @@
 #include "chrome/browser/contextual_tasks/contextual_tasks_cookie_synchronizer.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_internals.mojom.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_page_handler.h"
-#include "chrome/browser/contextual_tasks/contextual_tasks_side_panel_coordinator.h"
+#include "chrome/browser/contextual_tasks/contextual_tasks_panel_controller.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_interface.h"
 #include "chrome/browser/contextual_tasks/task_info_delegate.h"
 #include "chrome/browser/ui/webui/top_chrome/top_chrome_web_ui_controller.h"
@@ -27,6 +27,7 @@
 #include "components/contextual_search/contextual_search_session_handle.h"
 #include "components/contextual_tasks/public/contextual_task_context.h"
 #include "components/contextual_tasks/public/contextual_tasks_service.h"
+#include "components/lens/lens_overlay_invocation_source.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -49,7 +50,7 @@ class WebContentsObserver;
 }  // namespace content
 
 namespace contextual_tasks {
-class ContextualTasksSidePanelCoordinator;
+class ContextualTasksPanelController;
 class ContextualTasksUiService;
 }  // namespace contextual_tasks
 
@@ -126,6 +127,7 @@ class ContextualTasksUI
   void SetThreadTurnId(std::optional<std::string> id) override;
   const std::optional<std::string>& GetThreadTitle() override;
   void SetThreadTitle(std::optional<std::string> title) override;
+  void SetAimUrl(const GURL& url) override;
   void SetIsAiPage(bool is_ai_page) override;
   bool IsShownInTab() override;
   BrowserWindowInterface* GetBrowser() override;
@@ -133,6 +135,7 @@ class ContextualTasksUI
   void OnZeroStateChange(bool is_zero_state) override;
   void PrepareForTaskChange() override;
   void OnTaskChanged() override;
+  GURL GetAimUrl() override;
 
   // contextual_tasks::ContextualTasksUIInterface implementation:
   Profile* GetProfile() override;
@@ -140,13 +143,23 @@ class ContextualTasksUI
   void CloseSidePanel() override;
   void OnSidePanelStateChanged() override;
   void OnActiveTabContextStatusChanged() override;
-  void OnLensOverlayStateChanged(bool is_showing) override;
+  void OnLensOverlayStateChanged(
+      bool is_showing,
+      std::optional<lens::LensOverlayInvocationSource> invocation_source)
+      override;
   bool IsLensOverlayShowing() const override;
   void OnPageContextEligibilityChecked(bool is_page_context_eligible) override;
   bool IsActiveTabContextSuggestionShowing() const override;
+  void MoveTaskUiToNewTab() override;
+  bool CanExpandToFullTab() const override;
   void PostMessageToWebview(const lens::ClientToAimMessage& message) override;
   contextual_search::ContextualSearchSessionHandle*
   GetOrCreateContextualSessionHandle() override;
+
+  void ClearContextualSessionHandle();
+
+  std::unique_ptr<contextual_search::InputStateModel> TakeInputStateModel()
+      override;
   mojo::Remote<contextual_tasks::mojom::Page>& GetPageRemote() override;
   const GURL& GetInnerFrameUrl() const override;
 
@@ -161,6 +174,15 @@ class ContextualTasksUI
   static bool IsZeroState(
       const GURL& url,
       contextual_tasks::ContextualTasksUiService* ui_service);
+
+  // Returns true if two URLs are equal. Unlike GURL::operator==, this method
+  // ignores the order of query parameters.
+  static bool AreUrlsEqual(const GURL& a, const GURL& b);
+
+  // Returns whether OnActiveTabContextStatusChanged should proceed with trying
+  // to add the current tab as an auto-chip.
+  bool CanUpdateSuggestedTabContext(tabs::TabInterface* tab,
+                                    const GURL& last_committed_url);
 
   void BindInterface(
       mojo::PendingReceiver<contextual_tasks::mojom::PageHandlerFactory>
@@ -201,6 +223,9 @@ class ContextualTasksUI
       std::unique_ptr<ContextualTasksComposeboxHandler> handler) {
     composebox_handler_ = std::move(handler);
   }
+
+  // Shows an OAuth error dialog.
+  void ShowOauthErrorDialog();
 
   void SetCookieSynchronizerForTesting(
       std::unique_ptr<contextual_tasks::ContextualTasksCookieSynchronizer>
@@ -253,8 +278,9 @@ class ContextualTasksUI
   // Update the task's details in the WebUI.
   void PushTaskDetailsToPage();
 
-  contextual_tasks::ContextualTasksSidePanelCoordinator*
-  GetSidePanelCoordinator();
+  bool CanExpandToFullTab();
+
+  contextual_tasks::ContextualTasksPanelController* GetPanelController();
 
   std::unique_ptr<ContextualTasksComposeboxHandler> composebox_handler_;
   std::unique_ptr<contextual_tasks::ContextualTasksCookieSynchronizer>

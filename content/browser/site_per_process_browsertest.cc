@@ -19,7 +19,6 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
@@ -363,7 +362,7 @@ void FocusFrame(FrameTreeNode* frame) {
 }
 
 bool ConvertJSONToPoint(const std::string& str, gfx::PointF* point) {
-  std::optional<base::Value::Dict> value =
+  std::optional<base::DictValue> value =
       base::JSONReader::ReadDict(str, base::JSON_PARSE_CHROMIUM_EXTENSIONS);
   if (!value) {
     return false;
@@ -594,6 +593,16 @@ void SitePerProcessIgnoreCertErrorsBrowserTest::
   SitePerProcessBrowserTest::TearDownInProcessBrowserTestFixture();
   mock_cert_verifier_.TearDownInProcessBrowserTestFixture();
 }
+
+class MainFrameThresholdTestBrowserClient
+    : public ContentBrowserTestContentBrowserClient {
+ public:
+  bool ShouldReuseAnyExistingProcessForNewMainFrameSiteInstance(
+      content::BrowserContext* browser_context,
+      const GURL& site_instance_original_url) override {
+    return true;
+  }
+};
 
 // SitePerProcessAutoplayBrowserTest
 
@@ -6256,172 +6265,6 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   EXPECT_EQ(orig_site_instance, child->current_frame_host()->GetSiteInstance());
 }
 
-// Intercepts calls to LocalMainFrame's ShowCreatedWindow mojo method, and
-// invokes the provided callback.
-class ShowCreatedWindowInterceptor
-    : public blink::mojom::LocalMainFrameHostInterceptorForTesting {
- public:
-  // The caller has to guarantee that `render_frame_host` lives at least as long
-  // as ShowCreatedWindowInterceptor.
-  ShowCreatedWindowInterceptor(
-      RenderFrameHostImpl* render_frame_host,
-      base::OnceCallback<void(int32_t pending_widget_routing_id)> test_callback)
-      : render_frame_host_(render_frame_host),
-        test_callback_(std::move(test_callback)),
-        swapped_impl_(
-            render_frame_host_->local_main_frame_host_receiver_for_testing(),
-            this) {}
-
-  ~ShowCreatedWindowInterceptor() override = default;
-
-  blink::mojom::LocalMainFrameHost* GetForwardingInterface() override {
-    return swapped_impl_.old_impl();
-  }
-
-  void ShowCreatedWindow(const blink::LocalFrameToken& opener_frame_token,
-                         WindowOpenDisposition disposition,
-                         blink::mojom::WindowFeaturesPtr window_features,
-                         bool user_gesture,
-                         ShowCreatedWindowCallback callback) override {
-    show_callback_ = std::move(callback);
-    opener_frame_token_ = opener_frame_token;
-    user_gesture_ = user_gesture;
-    window_features_ = std::move(window_features);
-    disposition_ = disposition;
-    std::move(test_callback_)
-        .Run(render_frame_host_->GetRenderWidgetHost()->GetRoutingID());
-  }
-
-  void ResumeShowCreatedWindow() {
-    GetForwardingInterface()->ShowCreatedWindow(
-        opener_frame_token_, disposition_, std::move(window_features_),
-        user_gesture_, std::move(show_callback_));
-  }
-
- private:
-  raw_ptr<RenderFrameHostImpl> render_frame_host_;
-  base::OnceCallback<void(int32_t pending_widget_routing_id)> test_callback_;
-  ShowCreatedWindowCallback show_callback_;
-  blink::LocalFrameToken opener_frame_token_;
-  blink::mojom::WindowFeaturesPtr window_features_;
-  bool user_gesture_ = false;
-  WindowOpenDisposition disposition_;
-  mojo::test::ScopedSwapImplForTesting<blink::mojom::LocalMainFrameHost>
-      swapped_impl_;
-};
-
-// Listens for the source WebContents opening the new WebContents then attaches
-// a show listener to the widget.
-class NewWindowCreatedObserver : public WebContentsObserver {
- public:
-  NewWindowCreatedObserver(
-      WebContents* web_contents,
-      base::OnceCallback<void(int32_t pending_widget_routing_id)> test_callback)
-      : WebContentsObserver(web_contents),
-        test_callback_(std::move(test_callback)) {}
-
-  // WebContentsObserver overrides.
-  void DidOpenRequestedURL(WebContents* new_contents,
-                           RenderFrameHost* source_render_frame_host,
-                           const GURL& url,
-                           const Referrer& referrer,
-                           WindowOpenDisposition disposition,
-                           ui::PageTransition transition,
-                           bool started_from_context_menu,
-                           bool renderer_initiated) override {
-    show_interceptor_ = std::make_unique<ShowCreatedWindowInterceptor>(
-        static_cast<RenderFrameHostImpl*>(new_contents->GetPrimaryMainFrame()),
-        std::move(test_callback_));
-
-    // Stop observing now.
-    Observe(nullptr);
-  }
-
-  void ResumeShowCreatedWindow() {
-    show_interceptor_->ResumeShowCreatedWindow();
-  }
-
- private:
-  std::unique_ptr<ShowCreatedWindowInterceptor> show_interceptor_;
-  base::OnceCallback<void(int32_t pending_widget_routing_id)> test_callback_;
-};
-
-// Test for https://crbug.com/612276.  Simultaneously open two new windows from
-// two subframes in different processes, where each subframe process's next
-// routing ID is the same.  Make sure that both windows are created properly.
-//
-// Each new window requires two IPCs to first create it (handled by
-// CreateNewWindow) and then show it (ShowCreatedWindow).  In the bug, both
-// CreateNewWindow calls arrived before the ShowCreatedWindow calls, resulting
-// in the two pending windows colliding in the pending WebContents map, which
-// used to be keyed only by routing_id.
-IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
-                       TwoSubframesCreatePopupsSimultaneously) {
-  // This test covers a scenario which can only happen when creating and showing
-  // a new window is split between to IPC's and some conflicting update happens
-  // between them. kCombineNewWindowIPCs eliminates this possibility by
-  // combining the function of the two IPC's into one.
-  if (base::FeatureList::IsEnabled(blink::features::kCombineNewWindowIPCs)) {
-    return;
-  }
-  GURL main_url(embedded_test_server()->GetURL(
-      "a.com", "/cross_site_iframe_factory.html?a(b,c)"));
-  EXPECT_TRUE(NavigateToURL(shell(), main_url));
-
-  FrameTreeNode* root = web_contents()->GetPrimaryFrameTree().root();
-  FrameTreeNode* child1 = root->child_at(0);
-  FrameTreeNode* child2 = root->child_at(1);
-  RenderFrameHostImpl* frame1 = child1->current_frame_host();
-  RenderFrameHostImpl* frame2 = child2->current_frame_host();
-  RenderProcessHost* process1 = frame1->GetProcess();
-  RenderProcessHost* process2 = frame2->GetProcess();
-
-  // Call window.open simultaneously in both subframes to create two popups.
-  // Wait for and then drop both ShowCreatedWindow messages.  This will ensure
-  // that both CreateNewWindow calls happen before either ShowCreatedWindow
-  // call.
-  base::RunLoop run_loop1;
-  int32_t routing_id1;
-  NewWindowCreatedObserver interceptor1(
-      web_contents(),
-      base::BindLambdaForTesting([&](int32_t pending_widget_routing_id) {
-        routing_id1 = pending_widget_routing_id;
-        run_loop1.Quit();
-      }));
-  EXPECT_TRUE(ExecJs(child1, "window.open();"));
-  run_loop1.Run();
-
-  base::RunLoop run_loop2;
-  int32_t routing_id2;
-  NewWindowCreatedObserver interceptor2(
-      web_contents(),
-      base::BindLambdaForTesting([&](int32_t pending_widget_routing_id) {
-        routing_id2 = pending_widget_routing_id;
-        run_loop2.Quit();
-      }));
-
-  EXPECT_TRUE(ExecJs(child2, "window.open();"));
-  run_loop2.Run();
-
-  // At this point, we should have two pending WebContents.
-  EXPECT_TRUE(web_contents()->pending_contents_.contains(
-      GlobalRoutingID(process1->GetDeprecatedID(), routing_id1)));
-  EXPECT_TRUE(web_contents()->pending_contents_.contains(
-      GlobalRoutingID(process2->GetDeprecatedID(), routing_id2)));
-
-  // Both subframes were set up in the same way, so the next routing ID for the
-  // new popup windows should match up (this led to the collision in the
-  // pending contents map in the original bug).
-  EXPECT_EQ(routing_id1, routing_id2);
-
-  // Now, resuming processing the show messages.
-  interceptor1.ResumeShowCreatedWindow();
-  interceptor2.ResumeShowCreatedWindow();
-
-  // Verify that both shells were properly created.
-  EXPECT_EQ(3u, Shell::windows().size());
-}
-
 // Intercepts calls to PopupWidgetHost's ShowPopup mojo method, and
 // invokes the provided callback. The caller has to guarantee that
 // `render_widget_host` lives at least as long as
@@ -9518,8 +9361,7 @@ class SitePerProcessBrowserTestWithSubframePriority
  public:
   SitePerProcessBrowserTestWithSubframePriority() {
     scoped_feature_list_.InitWithFeatures(
-        /* enabled_features= */ {features::kSubframePriorityContribution,
-                                 features::kSubframeImportance},
+        /* enabled_features= */ {features::kSubframeImportance},
         /* disabled_features= */ {});
   }
 
@@ -9998,7 +9840,7 @@ IN_PROC_BROWSER_TEST_P(TouchSelectionControllerClientAndroidSiteIsolationTest,
   // Load test URL with cross-process child.
   SetupTest();
 
-  EXPECT_EQ(ui::TouchSelectionController::INACTIVE,
+  EXPECT_EQ(ui::TouchSelectionController::ActiveStatus::kInactive,
             root_rwhv()->touch_selection_controller()->active_status());
   // Find the location of some text to select.
   gfx::PointF point_f = GetPointInChild();
@@ -10013,7 +9855,7 @@ IN_PROC_BROWSER_TEST_P(TouchSelectionControllerClientAndroidSiteIsolationTest,
   selection_controller_client()->Wait();
 
   // Check that selection is active and the quick menu is showing.
-  EXPECT_EQ(ui::TouchSelectionController::SELECTION_ACTIVE,
+  EXPECT_EQ(ui::TouchSelectionController::ActiveStatus::kSelectionActive,
             root_rwhv()->touch_selection_controller()->active_status());
 
   // Make sure handles are correctly positioned.
@@ -10030,7 +9872,7 @@ IN_PROC_BROWSER_TEST_P(TouchSelectionControllerClientAndroidSiteIsolationTest,
   SimpleTap(gfx::Point(point_inside_iframe.x(), point_inside_iframe.y()));
   selection_controller_client()->Wait();
 
-  EXPECT_EQ(ui::TouchSelectionController::INACTIVE,
+  EXPECT_EQ(ui::TouchSelectionController::ActiveStatus::kInactive,
             root_rwhv()->touch_selection_controller()->active_status());
 
   // Let's wait for the previous events to clear the round-trip to the renders
@@ -10048,7 +9890,7 @@ IN_PROC_BROWSER_TEST_P(TouchSelectionControllerClientAndroidSiteIsolationTest,
   selection_controller_client()->Wait();
 
   // Check that selection is active and the quick menu is showing.
-  EXPECT_EQ(ui::TouchSelectionController::SELECTION_ACTIVE,
+  EXPECT_EQ(ui::TouchSelectionController::ActiveStatus::kSelectionActive,
             root_rwhv()->touch_selection_controller()->active_status());
 
   // Tap inside/outside the iframe and make sure the selection handles go away.
@@ -10062,7 +9904,7 @@ IN_PROC_BROWSER_TEST_P(TouchSelectionControllerClientAndroidSiteIsolationTest,
   SimpleTap(gfx::Point(point_outside_iframe.x(), point_outside_iframe.y()));
   selection_controller_client()->Wait();
 
-  EXPECT_EQ(ui::TouchSelectionController::INACTIVE,
+  EXPECT_EQ(ui::TouchSelectionController::ActiveStatus::kInactive,
             root_rwhv()->touch_selection_controller()->active_status());
 
   // Cleanup before shutting down.
@@ -10081,7 +9923,7 @@ IN_PROC_BROWSER_TEST_P(TouchSelectionControllerClientAndroidSiteIsolationTest,
   // Load test URL with cross-process child.
   SetupTest();
 
-  EXPECT_EQ(ui::TouchSelectionController::INACTIVE,
+  EXPECT_EQ(ui::TouchSelectionController::ActiveStatus::kInactive,
             root_rwhv()->touch_selection_controller()->active_status());
   // Find the location of some text to select.
   gfx::PointF point_f = GetPointInChild();
@@ -10096,7 +9938,7 @@ IN_PROC_BROWSER_TEST_P(TouchSelectionControllerClientAndroidSiteIsolationTest,
   selection_controller_client()->Wait();
 
   // Check that selection is active and the quick menu is showing.
-  EXPECT_EQ(ui::TouchSelectionController::SELECTION_ACTIVE,
+  EXPECT_EQ(ui::TouchSelectionController::ActiveStatus::kSelectionActive,
             root_rwhv()->touch_selection_controller()->active_status());
 
   // Make sure handles are correctly positioned.
@@ -11290,8 +11132,6 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, FrameDepthTest) {
   EXPECT_FALSE(child1_rvh->is_active());
   EXPECT_EQ(RenderProcessHostImpl::kMaxFrameDepthForPriority,
             child1_rvh->GetWidget()->GetPriority().frame_depth);
-  EXPECT_FALSE(static_cast<RenderWidgetHostOwnerDelegate*>(child1_rvh)
-                   ->ShouldContributePriorityToProcess());
   // The RenderWidgetHost of the RenderFrameHost is different from the
   // RenderWidgetHost of the RenderViewHost and contributes to the priority.
   EXPECT_NE(child1->current_frame_host()->GetRenderWidgetHost(),
@@ -14212,6 +14052,11 @@ class SitePerProcessWithMainFrameThresholdTestBase
   }
   ~SitePerProcessWithMainFrameThresholdTestBase() override = default;
 
+  void SetUpOnMainThread() override {
+    SitePerProcessBrowserTestBase::SetUpOnMainThread();
+    test_client_ = std::make_unique<MainFrameThresholdTestBrowserClient>();
+  }
+
   Shell* CreateShellAndNavigateToURL(const GURL& url) {
     const GURL kOtherUrl =
         embedded_test_server()->GetURL("bar.test", "/title1.html");
@@ -14228,6 +14073,8 @@ class SitePerProcessWithMainFrameThresholdTestBase
 
  private:
   base::test::ScopedFeatureList scoped_feature_list_;
+
+  std::unique_ptr<MainFrameThresholdTestBrowserClient> test_client_;
 };
 
 class SitePerProcessWithMainFrameThresholdTest
@@ -14839,9 +14686,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   crash_observer.Wait();
 
   EXPECT_EQ(test_client.crashed_rfhs().size(), 2u);
-  EXPECT_TRUE(base::Contains(test_client.crashed_rfhs(), rfh_b1));
-  EXPECT_TRUE(base::Contains(test_client.crashed_rfhs(), rfh_b2));
-  EXPECT_FALSE(base::Contains(test_client.crashed_rfhs(), rfh_b3));
+  EXPECT_TRUE(std::ranges::contains(test_client.crashed_rfhs(), rfh_b1));
+  EXPECT_TRUE(std::ranges::contains(test_client.crashed_rfhs(), rfh_b2));
+  EXPECT_FALSE(std::ranges::contains(test_client.crashed_rfhs(), rfh_b3));
 }
 
 INSTANTIATE_TEST_SUITE_P(All,

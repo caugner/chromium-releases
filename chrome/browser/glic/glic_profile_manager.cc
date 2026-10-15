@@ -40,7 +40,8 @@
 namespace {
 bool g_prewarming_enabled_for_testing_ = true;
 std::optional<Profile*> g_forced_profile_for_launch_;
-std::optional<network::mojom::ConnectionType> g_forced_connection_type_;
+std::optional<net::NetworkChangeNotifier::ConnectionType>
+    g_forced_connection_type_;
 }  // namespace
 
 namespace glic {
@@ -92,6 +93,9 @@ GlicProfileManager::GlicProfileManager()
   ProfileManager* profile_manager = g_browser_process->profile_manager();
   if (profile_manager) {
     profile_manager->AddObserver(this);
+    for (Profile* profile : profile_manager->GetLoadedProfiles()) {
+      profile_observations_.AddObservation(profile);
+    }
   }
 }
 
@@ -286,7 +290,7 @@ void GlicProfileManager::ShowProfilePicker() {
 
   // TODO(crbug.com/450679848): Profile Picker doesn't make sense on ChromeOS.
 #if !BUILDFLAG(IS_CHROMEOS)
-// TODO(b/470059315): Decide if this makes sense on desktop android.
+// Profile picker won't be used on Android.
 #if !BUILDFLAG(IS_ANDROID)
   ProfilePicker::Show(
       ProfilePicker::Params::ForGlicManager(std::move(callback)));
@@ -347,6 +351,11 @@ bool GlicProfileManager::IsShowing() const {
   return last_active_glic_->IsWindowOrFreShowing();
 }
 
+void GlicProfileManager::OnProfileAdded(Profile* profile) {
+  GlicEnabling::RecordProfileIneligibilityMetricsAtStartup(profile);
+  profile_observations_.AddObservation(profile);
+}
+
 void GlicProfileManager::OnProfileMarkedForPermanentDeletion(Profile* profile) {
   GlicKeyedService* glic_keyed_service =
       glic::GlicKeyedServiceFactory::GetGlicKeyedService(profile);
@@ -354,6 +363,20 @@ void GlicProfileManager::OnProfileMarkedForPermanentDeletion(Profile* profile) {
     return;
   }
   glic_keyed_service->Shutdown();
+}
+
+void GlicProfileManager::OnOffTheRecordProfileCreated(Profile* profile) {
+  // Guest and System profiles are managed by their own "backing" parent
+  // profiles. The creation of these parent profiles is already captured by
+  // `OnProfileAdded`. Thus, avoid logging again here.
+  if (profile->IsGuestSession() || profile->IsSystemProfile()) {
+    return;
+  }
+  GlicEnabling::RecordProfileIneligibilityMetricsAtStartup(profile);
+}
+
+void GlicProfileManager::OnProfileWillBeDestroyed(Profile* profile) {
+  profile_observations_.RemoveObservation(profile);
 }
 
 void GlicProfileManager::OnMemoryPressure(base::MemoryPressureLevel level) {
@@ -373,7 +396,7 @@ void GlicProfileManager::ForceProfileForLaunchForTesting(
 
 // static
 void GlicProfileManager::ForceConnectionTypeForTesting(
-    std::optional<network::mojom::ConnectionType> connection_type) {
+    std::optional<net::NetworkChangeNotifier::ConnectionType> connection_type) {
   g_forced_connection_type_ = connection_type;
 }
 
@@ -425,7 +448,8 @@ void GlicProfileManager::CanPreloadForProfile(Profile* profile,
   }
 
   auto on_got_connection_type = [](ShouldPreloadCallback callback,
-                                   network::mojom::ConnectionType type) {
+                                   net::NetworkChangeNotifier::ConnectionType
+                                       type) {
     std::move(callback).Run(
         network::NetworkConnectionTracker::IsConnectionCellular(type)
             ? GlicPrewarmingChecksResult::kCellularConnection
@@ -434,7 +458,7 @@ void GlicProfileManager::CanPreloadForProfile(Profile* profile,
   auto callbacks = base::SplitOnceCallback(std::move(callback));
 
   // Attempt to synchronously query the connection type.
-  network::mojom::ConnectionType connection_type;
+  net::NetworkChangeNotifier::ConnectionType connection_type;
   bool synchronously_got_connection_type = false;
   if (g_forced_connection_type_) {
     synchronously_got_connection_type = true;

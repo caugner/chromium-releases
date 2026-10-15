@@ -18,7 +18,6 @@
 
 #include "base/containers/flat_map.h"
 #include "base/containers/span.h"
-#include "base/dcheck_is_on.h"
 #include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -299,7 +298,7 @@ class PDFiumEngine : public DocumentLoader::Client,
   // - "page" - an int Value.
   // - "children" - a list of Values, with each entry containing
   //   a dictionary Value of the same structure.
-  virtual base::Value::List GetBookmarks();
+  virtual base::ListValue GetBookmarks();
 
   // Gets the named destination by name.
   std::optional<NamedDestination> GetNamedDestination(
@@ -595,7 +594,6 @@ class PDFiumEngine : public DocumentLoader::Client,
   // Searches for a text fragment within the text of the PDF.
   void SearchForFragment(const std::u16string& term,
                          int char_to_start_searching_from,
-                         int last_char_index_to_search,
                          int page_to_search,
                          AddSearchResultCallback add_result_callback);
 
@@ -1024,8 +1022,7 @@ class PDFiumEngine : public DocumentLoader::Client,
   // dictionaries representing the child bookmarks. If `bookmark` is null, then
   // this method traverses from the root of the bookmarks tree. Note that the
   // root bookmark contains no useful information.
-  base::Value::Dict TraverseBookmarks(FPDF_BOOKMARK bookmark,
-                                      unsigned int depth);
+  base::DictValue TraverseBookmarks(FPDF_BOOKMARK bookmark, unsigned int depth);
 
   void ScrollBasedOnScrollAlignment(
       const gfx::Rect& scroll_rect,
@@ -1394,11 +1391,11 @@ class PDFiumEngine : public DocumentLoader::Client,
   // stroke changes.
   std::set<int> ink_stroked_pages_needing_regeneration_;
 
-#if DCHECK_IS_ON()
-  // Used to keep track of LoadV2InkPathsForPage() calls as a sanity check.
-  // Stores the 0-based page indices for pages that have been loaded.
-  std::set<int> pages_with_loaded_v2_ink_paths_;
-#endif  // DCHECK_IS_ON()
+  // Stores the 0-based page indices for pages that have loaded shapes.
+  // Unlike `ink_stroke_data_`, which is dynamic, the loaded shapes data is
+  // static. So just store this data separately from `ink_modeled_shape_map_` to
+  // make searches faster.
+  std::set<int> pages_with_loaded_v2_ink_shapes_;
 
   // Used to hand out unique IDs of type InkModeledShapeId for the V2 Ink paths
   // read out of the PDF. It is stored here as the raw type to simplify

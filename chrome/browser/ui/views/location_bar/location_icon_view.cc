@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/views/location_bar/location_icon_view.h"
 
 #include "base/functional/bind.h"
+#include "base/trace_event/trace_event.h"
 #include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_ui_util.h"
@@ -19,6 +20,7 @@
 #include "chrome/browser/ui/views/page_info/page_info_bubble_view.h"
 #include "chrome/grit/branded_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/contextual_tasks/public/features.h"
 #include "components/dom_distiller/core/url_constants.h"
 #include "components/omnibox/browser/location_bar_model.h"
 #include "components/security_state/core/security_state.h"
@@ -127,6 +129,11 @@ bool LocationIconView::IsBubbleShowing() const {
          PageInfoBubbleView::BUBBLE_NONE;
 }
 
+void LocationIconView::OnGestureEvent(ui::GestureEvent* event) {
+  delegate_->OnLocationIconGestureEvent(event);
+  IconLabelBubbleView::OnGestureEvent(event);
+}
+
 bool LocationIconView::OnMousePressed(const ui::MouseEvent& event) {
   delegate_->OnLocationIconPressed(event);
 
@@ -193,7 +200,9 @@ bool LocationIconView::GetShowText() const {
   if (url.SchemeIs(content::kChromeUIScheme) ||
       url.SchemeIs(extensions::kExtensionScheme) ||
       url.SchemeIs(url::kFileScheme) ||
-      url.SchemeIs(dom_distiller::kDomDistillerScheme)) {
+      url.SchemeIs(dom_distiller::kDomDistillerScheme) ||
+      (location_bar_model->IsContextualTasksPage() &&
+       contextual_tasks::ShouldShowExpandedSecurityChip())) {
     return true;
   }
 
@@ -210,7 +219,9 @@ std::u16string LocationIconView::GetText() const {
   }
 
   if (delegate_->GetLocationBarModel()->GetURL().SchemeIs(
-          content::kChromeUIScheme)) {
+          content::kChromeUIScheme) ||
+      (contextual_tasks::ShouldShowExpandedSecurityChip() &&
+       delegate_->GetLocationBarModel()->IsContextualTasksPage())) {
     return l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME);
   }
 
@@ -357,6 +368,7 @@ void LocationIconView::OnIconFetched(const gfx::Image& image) {
 
 void LocationIconView::Update(bool suppress_animations,
                               bool force_hide_background) {
+  TRACE_EVENT("omnibox", "LocationIconView::Update");
   UpdateTextVisibility(suppress_animations);
   UpdateBorder();
   // Update the background before the icon, since the vector icon

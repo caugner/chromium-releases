@@ -527,7 +527,9 @@ AppActivity* CastActivityManager::AddAppActivity(const MediaRoute& route,
                                           session_tracker_, logger_.get(),
                                           debugger_.get()));
   auto* const activity_ptr = activity.get();
-  activities_.emplace(route.media_route_id(), std::move(activity));
+  // Use insert_or_assign to avoid Use-After-Free on route ID collision.
+  // See crbug.com/500091052.
+  activities_.insert_or_assign(route.media_route_id(), std::move(activity));
   app_activities_[route.media_route_id()] = activity_ptr;
   return activity_ptr;
 }
@@ -556,7 +558,9 @@ CastActivity* CastActivityManager::AddMirroringActivity(
   activity->BindChannelToServiceReceiver();
   activity->CreateMirroringServiceHost();
   auto* const activity_ptr = activity.get();
-  activities_.emplace(route.media_route_id(), std::move(activity));
+  // Use insert_or_assign to avoid Use-After-Free on route ID collision.
+  // See crbug.com/500091052.
+  activities_.insert_or_assign(route.media_route_id(), std::move(activity));
   return activity_ptr;
 }
 
@@ -686,7 +690,7 @@ void CastActivityManager::OnSessionRemoved(const MediaSinkInternal& sink) {
 
 void CastActivityManager::OnMediaStatusUpdated(
     const MediaSinkInternal& sink,
-    const base::Value::Dict& media_status,
+    const base::DictValue& media_status,
     std::optional<int> request_id) {
   auto it = FindActivityBySink(sink);
   if (it != activities_.end()) {
@@ -956,7 +960,7 @@ void CastActivityManager::HandleLaunchSessionResponse(
   if (!client_id.empty() &&
       session->message_namespaces().contains(cast_channel::kMediaNamespace)) {
     // Request media status from the receiver.
-    base::Value::Dict request;
+    base::DictValue request;
     request.Set("type", cast_util::EnumToString<
                             cast_channel::V2MessageType,
                             cast_channel::V2MessageType::kMediaGetStatus>());

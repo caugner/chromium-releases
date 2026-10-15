@@ -153,10 +153,10 @@ TEST_F(SyncErrorInfobarDelegateTest, SyncServiceNeedsTrustedVaultKey) {
       .WillByDefault(Return(syncer::SyncService::UserActionableError::
                                 kNeedsTrustedVaultKeyForEverything));
 
-  OCMExpect(
-      [presenter_ showTrustedVaultReauthForFetchKeysWithTrigger:
-                      trusted_vault ::TrustedVaultUserActionTriggerForUMA::
-                          kNewTabPageInfobar]);
+  OCMExpect([presenter_
+      showTrustedVaultReauthForFetchKeysWithTrigger:
+          trusted_vault::TrustedVaultUserActionTriggerForUMA::kNewTabPageInfobar
+                                         completion:nil]);
   auto delegate = std::make_unique<SyncErrorInfoBarDelegate>(
       profile_.get(), presenter_, kSyncErrorInfoBarTrigger);
 
@@ -170,13 +170,29 @@ TEST_F(SyncErrorInfobarDelegateTest,
           Return(syncer::SyncService::UserActionableError::
                      kTrustedVaultRecoverabilityDegradedForEverything));
 
-  OCMExpect(
-      [presenter_ showTrustedVaultReauthForDegradedRecoverabilityWithTrigger:
-                      trusted_vault ::TrustedVaultUserActionTriggerForUMA::
-                          kNewTabPageInfobar]);
+  OCMExpect([presenter_
+      showTrustedVaultReauthForDegradedRecoverabilityWithTrigger:
+          trusted_vault::TrustedVaultUserActionTriggerForUMA::kNewTabPageInfobar
+                                                      completion:nil]);
   auto delegate = std::make_unique<SyncErrorInfoBarDelegate>(
       profile_.get(), presenter_, kSyncErrorInfoBarTrigger);
 
+  EXPECT_TRUE(delegate->Accept());
+}
+
+TEST_F(SyncErrorInfobarDelegateTest, SyncServiceBookmarksLimitExceeded) {
+  ON_CALL(*mock_sync_service(), GetUserActionableError())
+      .WillByDefault(Return(
+          syncer::SyncService::UserActionableError::kBookmarksLimitExceeded));
+
+  OCMExpect([presenter_ showBookmarksLimitExceededHelp]);
+  auto delegate = std::make_unique<SyncErrorInfoBarDelegate>(
+      profile_.get(), presenter_, kSyncErrorInfoBarTrigger);
+
+  EXPECT_FALSE(delegate->GetTitleText().empty());
+  EXPECT_FALSE(delegate->GetMessageText().empty());
+  EXPECT_FALSE(
+      delegate->GetButtonLabel(SyncErrorInfoBarDelegate::BUTTON_OK).empty());
   EXPECT_TRUE(delegate->Accept());
 }
 

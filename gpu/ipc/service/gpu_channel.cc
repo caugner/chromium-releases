@@ -69,7 +69,6 @@
 #include "ui/gl/gl_utils.h"
 
 #if BUILDFLAG(IS_WIN)
-#include "components/viz/common/overlay_state/win/overlay_state_service.h"
 #include "gpu/ipc/service/dcomp_texture_win.h"
 #endif
 
@@ -89,17 +88,6 @@ bool TryCreateDCOMPTexture(
   if (!channel)
     return false;
   return channel->CreateDCOMPTexture(route_id, std::move(receiver));
-}
-
-bool TryRegisterOverlayStateObserver(
-    base::WeakPtr<GpuChannel> channel,
-    mojo::PendingRemote<gpu::mojom::OverlayStateObserver>
-        promotion_hint_observer,
-    const gpu::Mailbox& mailbox) {
-  if (!channel)
-    return false;
-  return channel->RegisterOverlayStateObserver(
-      std::move(promotion_hint_observer), std::move(mailbox));
 }
 #endif  // BUILDFLAG(IS_WIN)
 
@@ -184,11 +172,6 @@ class GPU_IPC_SERVICE_EXPORT GpuChannelMessageFilter
       int32_t route_id,
       mojo::PendingAssociatedReceiver<mojom::DCOMPTexture> receiver,
       CreateDCOMPTextureCallback callback) override;
-  void RegisterOverlayStateObserver(
-      mojo::PendingRemote<gpu::mojom::OverlayStateObserver>
-          promotion_hint_observer,
-      const gpu::Mailbox& mailbox,
-      RegisterOverlayStateObserverCallback callback) override;
   void CopyToGpuMemoryBufferAsync(
       const gpu::Mailbox& mailbox,
       const std::vector<gpu::SyncToken>& sync_token_dependencies,
@@ -444,14 +427,6 @@ void GpuChannelMessageFilter::CreateGpuMemoryBuffer(
     const viz::SharedImageFormat& format,
     gfx::BufferUsage buffer_usage,
     CreateGpuMemoryBufferCallback callback) {
-  if (!viz::HasEquivalentBufferFormat(format)) {
-    // Client GMB code still operates on BufferFormat so the SharedImageFormat
-    // received here must have an equivalent BufferFormat.
-    LOG(ERROR) << "Invalid format." << format.ToString();
-    std::move(callback).Run(gfx::GpuMemoryBufferHandle());
-    return;
-  }
-
   gfx::GpuMemoryBufferHandle handle;
   if (SharedImageFactory::IsNativeBufferSupported(format, buffer_usage,
                                                   gpu_extra_info_)) {
@@ -578,24 +553,6 @@ void GpuChannelMessageFilter::CreateDCOMPTexture(
       FROM_HERE,
       base::BindOnce(&TryCreateDCOMPTexture, gpu_channel_->AsWeakPtr(),
                      route_id, std::move(receiver)),
-      std::move(callback));
-}
-
-void GpuChannelMessageFilter::RegisterOverlayStateObserver(
-    mojo::PendingRemote<gpu::mojom::OverlayStateObserver>
-        promotion_hint_observer,
-    const gpu::Mailbox& mailbox,
-    RegisterOverlayStateObserverCallback callback) {
-  base::AutoLock auto_lock(gpu_channel_lock_);
-  if (!gpu_channel_) {
-    std::visit([](auto& receiver) { receiver.reset(); }, receiver_);
-    return;
-  }
-  main_task_runner_->PostTaskAndReplyWithResult(
-      FROM_HERE,
-      base::BindOnce(&TryRegisterOverlayStateObserver,
-                     gpu_channel_->AsWeakPtr(),
-                     std::move(promotion_hint_observer), mailbox),
       std::move(callback));
 }
 
@@ -1014,6 +971,11 @@ void GpuChannel::CreateCommandBuffer(
     return;
   }
 
+  if (route_id <= static_cast<int32_t>(GpuChannelReservedRoutes::kMaxValue)) {
+    LOG(ERROR) << "ContextResult::kFatalFailure: using reserved route";
+    return;
+  }
+
   int32_t stream_id = init_params->stream_id;
   CommandBufferId command_buffer_id =
       CommandBufferIdFromChannelAndRoute(client_id_, route_id);
@@ -1075,6 +1037,10 @@ void GpuChannel::DestroyCommandBuffer(int32_t route_id) {
   TRACE_EVENT1("gpu", "GpuChannel::OnDestroyCommandBuffer", "route_id",
                route_id);
 
+  if (route_id <= static_cast<int32_t>(GpuChannelReservedRoutes::kMaxValue)) {
+    return;
+  }
+
   std::unique_ptr<CommandBufferStub> stub;
   auto it = stubs_.find(route_id);
   if (it != stubs_.end()) {
@@ -1106,19 +1072,6 @@ bool GpuChannel::CreateDCOMPTexture(
     return false;
   }
   dcomp_textures_.emplace(route_id, std::move(dcomp_texture));
-  return true;
-}
-
-bool GpuChannel::RegisterOverlayStateObserver(
-    mojo::PendingRemote<gpu::mojom::OverlayStateObserver>
-        promotion_hint_observer,
-    const gpu::Mailbox& mailbox) {
-  viz::OverlayStateService* overlay_state_service =
-      viz::OverlayStateService::GetInstance();
-  if (!overlay_state_service)
-    return false;
-  overlay_state_service->RegisterObserver(std::move(promotion_hint_observer),
-                                          std::move(mailbox));
   return true;
 }
 #endif  // BUILDFLAG(IS_WIN)

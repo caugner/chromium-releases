@@ -17,6 +17,8 @@
 #include "chrome/browser/actor/ui/actor_ui_state_manager_interface.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/glic/browser_ui/scoped_glic_button_indicator.h"
+#include "chrome/browser/glic/common/application_hotkey_delegate.h"
+#include "chrome/browser/glic/common/glic_panel_hotkey_delegate.h"
 #include "chrome/browser/glic/fre/glic_fre_controller.h"
 #include "chrome/browser/glic/fre/glic_fre_dialog_view.h"
 #include "chrome/browser/glic/glic_metrics.h"
@@ -28,9 +30,7 @@
 #include "chrome/browser/glic/host/webui_contents_container.h"
 #include "chrome/browser/glic/public/glic_enabling.h"
 #include "chrome/browser/glic/public/glic_keyed_service.h"
-#include "chrome/browser/glic/widget/application_hotkey_delegate.h"
 #include "chrome/browser/glic/widget/browser_conditions.h"
-#include "chrome/browser/glic/widget/glic_panel_hotkey_delegate.h"
 #include "chrome/browser/glic/widget/glic_view.h"
 #include "chrome/browser/glic/widget/glic_widget.h"
 #include "chrome/browser/glic/widget/glic_window_animator.h"
@@ -48,11 +48,12 @@
 #include "chrome/browser/ui/views/chrome_widget_sublevel.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/tab_strip_region_view.h"
+#include "chrome/browser/ui/views/glic/glic_button_interface.h"
 #include "chrome/browser/ui/views/interaction/browser_elements_views.h"
 #include "chrome/browser/ui/views/side_panel/side_panel.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_entry.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_ui.h"
-#include "chrome/browser/ui/views/tabs/glic_button.h"
+#include "chrome/browser/ui/views/tabs/glic/tab_strip_glic_button.h"
 #include "chrome/browser/ui/views/tabs/tab_strip_action_container.h"
 #include "chrome/browser/ui/views/tabs/window_finder.h"
 #include "chrome/common/chrome_features.h"
@@ -70,6 +71,7 @@
 #include "ui/events/event_observer.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/views/accessibility/view_accessibility.h"
+#include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/webview/webview.h"
 #include "ui/views/event_monitor.h"
 #include "ui/views/interaction/element_tracker_views.h"
@@ -274,21 +276,23 @@ void GlicWindowControllerImpl::ShowAfterSignIn(base::WeakPtr<Browser> browser) {
          // Prefer the source that triggered the sign-in, but if that's not
          // available, report it as coming from the sign-in flow.
          opening_source_.value_or(mojom::InvocationSource::kAfterSignIn),
-         prompt_suggestion_, false /* auto_send */);
+         prompt_suggestion_, false /* auto_send */, std::nullopt);
 }
 
 void GlicWindowControllerImpl::Toggle(
     BrowserWindowInterface* bwi,
     bool prevent_close,
     mojom::InvocationSource source,
-    std::optional<std::string> prompt_suggestion,
-    bool auto_send) {
+    std::optional<std::string> deprecated_prompt_suggestion,
+    bool deprecated_auto_send,
+    std::optional<std::string> deprecated_conversation_id) {
   Browser* new_attached_browser =
       bwi ? bwi->GetBrowserForMigrationOnly() : nullptr;
 
   if (!AlwaysDetached()) {
     ToggleWhenNotAlwaysDetached(new_attached_browser, prevent_close, source,
-                                prompt_suggestion, auto_send);
+                                deprecated_prompt_suggestion,
+                                deprecated_auto_send);
     return;
   }
 
@@ -300,7 +304,8 @@ void GlicWindowControllerImpl::Toggle(
 
   // If floaty is closed, open floaty
   if (state_ == State::kClosed) {
-    Show(new_attached_browser, source, prompt_suggestion, /*auto_send=*/false);
+    Show(new_attached_browser, source, deprecated_prompt_suggestion,
+         /*auto_send=*/false);
     return;
   }
 
@@ -463,14 +468,14 @@ void GlicWindowControllerImpl::CreateNewConversationForTabs(
   NOTIMPLEMENTED();
 }
 
-void GlicWindowControllerImpl::MoveTabsToConversation(
+void GlicWindowControllerImpl::ShowInstanceForTabs(
     const std::vector<tabs::TabInterface*>& tabs,
-    const std::string& conversation_id) {
+    const InstanceId& instance_id) {
   NOTIMPLEMENTED();
 }
 
-std::vector<ConversationInfo> GlicWindowControllerImpl::GetRecentConversations(
-    size_t limit) {
+std::vector<ConversationInfo>
+GlicWindowControllerImpl::GetRecentlyActiveInstances(size_t limit) {
   return {};
 }
 
@@ -844,7 +849,7 @@ void GlicWindowControllerImpl::SidePanelShown(BrowserWindowInterface* browser) {
 
   // Trigger custom event for testing.
   views::ElementTrackerViews::GetInstance()->NotifyCustomEvent(
-      kGlicWidgetAttached, GlicButton::FromBrowser(browser));
+      kGlicWidgetAttached, GlicButtonInterface::FromBrowser(browser));
   AfterViewShown();
 }
 
@@ -1127,7 +1132,9 @@ void GlicWindowControllerImpl::HandleGlicButtonIndicator() {
     scoped_glic_button_indicator_.reset();
     return;
   }
-  GlicButton* glic_button = GlicButton::FromBrowser(browser);
+  glic::TabStripGlicButton* glic_button =
+      static_cast<glic::TabStripGlicButton*>(
+          glic::GlicButtonInterface::FromBrowser(browser));
   // If there isn't an existing scoped indicator for this button, create one.
   if (!scoped_glic_button_indicator_ ||
       scoped_glic_button_indicator_->GetGlicButton() != glic_button) {
@@ -1169,9 +1176,10 @@ BrowserWindowInterface* GlicWindowControllerImpl::FindBrowserForAttachment() {
         CHECK(tab_strip_view);
 
         // If the profile is enabled, the Glic button must be available.
-        glic::GlicButton* glic_button =
-            BrowserElementsViews::From(browser)->GetViewAs<glic::GlicButton>(
-                kGlicButtonElementId);
+        views::LabelButton* glic_button =
+            glic::GlicButtonInterface::FromBrowser(browser);
+        BrowserElementsViews::From(browser)->GetViewAs<views::LabelButton>(
+            kGlicButtonElementId);
         CHECK(glic_button);
 
         // Define attachment zone as the right of the tab strip. It either is

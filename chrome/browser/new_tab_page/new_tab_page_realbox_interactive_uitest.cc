@@ -12,6 +12,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/test/interaction/interactive_browser_test.h"
+#include "components/omnibox/browser/aim_eligibility_service_features.h"
 #include "components/omnibox/browser/mock_aim_eligibility_service.h"
 #include "components/prefs/pref_service.h"
 #include "components/search/ntp_features.h"
@@ -40,6 +41,7 @@ using ntp_realbox::RealboxLayoutMode;
 using ::testing::ValuesIn;
 
 DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kNtpElementId);
+DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kGooglePageId);
 
 // Contains variables on which these tests may be parameterized. This approach
 // makes it easy to build sets of relevant tests, vs. the brute-force
@@ -74,13 +76,15 @@ std::unique_ptr<KeyedService> BuildMockAimServiceEligibilityServiceInstance(
       std::make_unique<MockAimEligibilityService>(
           CHECK_DEREF(profile->GetPrefs()), /*template_url_service=*/nullptr,
           /*url_loader_factory=*/nullptr, /*identity_manager=*/nullptr,
-          /*is_off_the_record=*/false);
+          AimEligibilityService::Configuration{});
 
   ON_CALL(*mock_aim_eligibility_service, IsAimEligible())
       .WillByDefault(testing::Return(true));
   ON_CALL(*mock_aim_eligibility_service, IsAimLocallyEligible())
       .WillByDefault(testing::Return(true));
   ON_CALL(*mock_aim_eligibility_service, IsServerEligibilityEnabled())
+      .WillByDefault(testing::Return(true));
+  ON_CALL(*mock_aim_eligibility_service, IsFuseboxEligible())
       .WillByDefault(testing::Return(true));
 
   return std::move(mock_aim_eligibility_service);
@@ -110,6 +114,12 @@ class NtpRealboxUiTest
       }
     }();
     enabled_features.emplace_back(ntp_realbox::kNtpRealboxNext, realbox_params);
+    enabled_features.emplace_back(omnibox::kAimEnabled,
+                                  base::FieldTrialParams());
+    enabled_features.emplace_back(omnibox::kAimServerEligibilityEnabled,
+                                  base::FieldTrialParams());
+    enabled_features.emplace_back(omnibox::kAimUsePecApi,
+                                  base::FieldTrialParams());
 
     // Disable NTP features that load asynchronously to prevent page shifts.
     // TODO(crbug.com/452928336): Wait for a signal that the NTP's layout is
@@ -237,7 +247,7 @@ IN_PROC_BROWSER_TEST_P(NtpRealboxUiTest, DISABLED_Screenshots) {
   const DeepQuery kSearchboxContainer = {"ntp-app", "#content"};
   const DeepQuery kRealbox = {"ntp-app", "cr-searchbox", "#inputWrapper"};
   const DeepQuery kContextMenuEntrypoint = {
-      "ntp-app", "cr-searchbox", "contextual-entrypoint-and-carousel"};
+      "ntp-app", "cr-searchbox", "#context"};
 
   RunTestSequence(
       // 1. Open 1P new tab page.
@@ -256,4 +266,35 @@ IN_PROC_BROWSER_TEST_P(NtpRealboxUiTest, DISABLED_Screenshots) {
           ScreenshotWebUi(kNtpElementId, kSearchboxContainer,
                           /*screenshot_name=*/std::string(),
                           /*baseline_cl=*/"7055903")));
+}
+
+IN_PROC_BROWSER_TEST_P(NtpRealboxUiTest, ContextualEntrypointOpensComposebox) {
+  if (!GetParam().compose_button_enabled) {
+    GTEST_SKIP() << "Compose button not enabled for this parameter set";
+  }
+
+  DEFINE_LOCAL_CUSTOM_ELEMENT_EVENT_TYPE(kComposeboxDialogOpenEvent);
+
+  const DeepQuery kRealbox = {"ntp-app", "cr-searchbox", "#inputWrapper"};
+  const DeepQuery kComposeButton = {"ntp-app", "cr-searchbox",
+                                    "#composeButton"};
+  const DeepQuery kComposeboxDialog = {"ntp-app", "#composeboxDialog"};
+
+  WebContentsInteractionTestUtil::StateChange composebox_dialog_open;
+  composebox_dialog_open.event = kComposeboxDialogOpenEvent;
+  composebox_dialog_open.where = kComposeboxDialog;
+  composebox_dialog_open.test_function =
+      "(el) => el && el.hasAttribute('open')";
+
+  RunTestSequence(
+      // 1. Open a site.
+      AddInstrumentedTab(kGooglePageId, GURL("https://www.google.com")),
+      // 2. Load NTP.
+      AddInstrumentedTab(kNtpElementId, GURL(chrome::kChromeUINewTabURL)),
+      // 3. Assert NTP has loaded by waiting for the realbox to render.
+      WaitForElementToRender(kNtpElementId, kRealbox),
+      // 4. Click on the compose button.
+      ClickElement(kNtpElementId, kComposeButton),
+      // 5. Observe/assert that the contextual dialog is open.
+      WaitForStateChange(kNtpElementId, composebox_dialog_open));
 }

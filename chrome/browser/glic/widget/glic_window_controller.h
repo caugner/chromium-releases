@@ -28,10 +28,6 @@
 #include "ui/gfx/native_ui_types.h"
 #include "ui/views/widget/widget.h"
 
-#if !BUILDFLAG(IS_ANDROID)
-#include "chrome/browser/glic/widget/local_hotkey_manager.h"
-#endif
-
 class Browser;
 
 namespace content {
@@ -53,7 +49,7 @@ class GlicKeyedService;
 enum class AttachChangeReason;
 
 struct ConversationInfo {
-  std::string id;
+  InstanceId instance_id;
   std::string title;
 };
 
@@ -78,19 +74,20 @@ class GlicWindowController {
       const tabs::TabInterface* tab) const = 0;
   virtual void CreateNewConversationForTabs(
       const std::vector<tabs::TabInterface*>& tabs) = 0;
-  virtual void MoveTabsToConversation(
-      const std::vector<tabs::TabInterface*>& tabs,
-      const std::string& conversation_id) = 0;
-  virtual std::vector<ConversationInfo> GetRecentConversations(
+  virtual void ShowInstanceForTabs(const std::vector<tabs::TabInterface*>& tabs,
+                                   const InstanceId& instance_id) = 0;
+  virtual std::vector<ConversationInfo> GetRecentlyActiveInstances(
       size_t limit) = 0;
 
   // Show, summon, or activate the panel if needed, or close it if it's already
   // active and prevent_close is false.
-  virtual void Toggle(BrowserWindowInterface* bwi,
-                      bool prevent_close,
-                      mojom::InvocationSource source,
-                      std::optional<std::string> prompt_suggestion,
-                      bool auto_send) = 0;
+  virtual void Toggle(
+      BrowserWindowInterface* bwi,
+      bool prevent_close,
+      mojom::InvocationSource source,
+      std::optional<std::string> deprecated_prompt_suggestion,
+      bool deprecated_auto_send,
+      std::optional<std::string> deprecated_conversation_id) = 0;
 
   // If the panel is opened, but sign-in is required, we provide a sign-in
   // button which closes the panel. This is called after the user signs in to

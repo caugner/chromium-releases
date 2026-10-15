@@ -122,7 +122,7 @@ class CastActivityManager : public CastActivityManagerBase,
                                const CastSession& session) override;
   void OnSessionRemoved(const MediaSinkInternal& sink) override;
   void OnMediaStatusUpdated(const MediaSinkInternal& sink,
-                            const base::Value::Dict& media_status,
+                            const base::DictValue& media_status,
                             std::optional<int> request_id) override;
 
   void OnSourceChanged(const std::string& media_route_id,
@@ -149,6 +149,9 @@ class CastActivityManager : public CastActivityManagerBase,
 
  private:
   friend class CastActivityManagerTest;
+  FRIEND_TEST_ALL_PREFIXES(CastActivityManagerTest, AddAppActivityCollision);
+  FRIEND_TEST_ALL_PREFIXES(CastActivityManagerTest,
+                           AddMirroringActivityCollision);
   FRIEND_TEST_ALL_PREFIXES(CastActivityManagerWithTerminatingTest,
                            LaunchSessionTerminatesExistingSessionOnSink);
   FRIEND_TEST_ALL_PREFIXES(CastActivityManagerTest,

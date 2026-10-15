@@ -78,7 +78,7 @@ class OmniboxPopupViewWebUITest : public InProcessBrowserTest {
 
   LocationBarView* location_bar() {
     auto* browser_view = BrowserView::GetBrowserViewForBrowser(browser());
-    return browser_view->toolbar()->location_bar();
+    return browser_view->toolbar()->location_bar_view();
   }
   OmniboxViewViews* omnibox_view() { return location_bar()->omnibox_view(); }
   OmniboxController* controller() {
@@ -188,7 +188,8 @@ void OmniboxPopupViewWebUITest::SetUp() {
 void OmniboxPopupViewWebUITest::WaitForHandler() {
   auto* popup_view = static_cast<OmniboxPopupViewWebUI*>(
       location_bar()->GetOmniboxPopupViewForTesting());
-  auto* omnibox_popup_webui_content = popup_view->presenter_->GetWebUIContent();
+  auto* omnibox_popup_webui_content =
+      popup_view->presenter()->GetWebUIContent();
 
   auto* web_contents = omnibox_popup_webui_content->GetWebContents();
   content::WaitForLoadStop(web_contents);
@@ -241,11 +242,11 @@ IN_PROC_BROWSER_TEST_F(OmniboxPopupViewWebUITest, PopupLoadsAndAcceptsCalls) {
   WaitForHandler();
   auto* popup_view = static_cast<OmniboxPopupViewWebUI*>(
       location_bar()->GetOmniboxPopupViewForTesting());
-  popup_view->presenter_->Show();
+  popup_view->presenter()->Show();
   popup_view->UpdatePopupAppearance();
   OmniboxPopupSelection selection(OmniboxPopupSelection::kNoMatch);
   popup_view->ProvideButtonFocusHint(0);
-  popup_view->presenter_->Hide();
+  popup_view->presenter()->Hide();
 }
 
 #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)

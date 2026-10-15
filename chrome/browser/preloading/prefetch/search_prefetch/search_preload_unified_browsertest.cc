@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <algorithm>
 #include <string>
 
-#include "base/containers/contains.h"
 #include "base/files/file_path.h"
 #include "base/functional/bind.h"
 #include "base/path_service.h"
@@ -312,7 +312,7 @@ class SearchPreloadUnifiedBrowserTest : public PlatformBrowserTest,
           search_prefetch_service()->GetSearchPrefetchStatusForTesting(
               canonical_search_url);
       if (current_status &&
-          base::Contains(acceptable_status, current_status.value())) {
+          std::ranges::contains(acceptable_status, current_status.value())) {
         break;
       }
       if (!current_status && acceptable_status.empty()) {
@@ -1412,7 +1412,7 @@ IN_PROC_BROWSER_TEST_F(SearchPreloadUnifiedBrowserTest, TriggerAndActivate) {
   // 4. Click and activate.
   content::test::PrerenderHostObserver prerender_observer(
       *GetActiveWebContents(), expected_prerender_url);
-  location_bar->GetOmniboxController()->edit_model()->OpenSelectionForTesting();
+  location_bar->GetOmniboxController()->edit_model()->OpenCurrentSelection();
   prerender_observer.WaitForActivation();
   histogram_tester.ExpectUniqueSample(
       "Omnibox.SearchPrefetch.PrefetchFinalStatus.SuggestionPrefetch",
@@ -1476,7 +1476,7 @@ IN_PROC_BROWSER_TEST_F(SearchPreloadUnifiedBrowserTest,
   // 5. Click the result.
   content::TestNavigationObserver navigation_observer(GetActiveWebContents(),
                                                       1);
-  location_bar->GetOmniboxController()->edit_model()->OpenSelectionForTesting();
+  location_bar->GetOmniboxController()->edit_model()->OpenCurrentSelection();
   navigation_observer.Wait();
   histogram_tester.ExpectBucketCount(
       "Omnibox.SearchPrefetch.PrefetchServingReason2",

@@ -35,7 +35,7 @@
 #import "ios/chrome/browser/shared/public/commands/browser_coordinator_commands.h"
 #import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
 #import "ios/chrome/browser/shared/public/commands/credential_provider_promo_commands.h"
-#import "ios/chrome/browser/shared/public/commands/docking_promo_commands.h"
+#import "ios/chrome/browser/shared/public/commands/promos_manager_commands.h"
 #import "ios/chrome/browser/shared/public/commands/scene_commands.h"
 #import "ios/chrome/browser/shared/public/commands/settings_commands.h"
 #import "ios/chrome/browser/shared/public/commands/whats_new_commands.h"
@@ -294,7 +294,7 @@ class TipsNotificationClientTest : public PlatformTest {
         AuthenticationServiceFactory::GetForProfile(profile_.get());
     identity_manager->AddIdentity([FakeSystemIdentity fakeIdentity1]);
     authentication_service->SignIn([FakeSystemIdentity fakeIdentity1],
-                                   signin_metrics::AccessPoint::kUnknown);
+                                   signin_metrics::AccessPoint::kStartPage);
   }
 
   web::WebTaskEnvironment task_environment_;
@@ -487,8 +487,8 @@ TEST_F(TipsNotificationClientTest, SetUpListContinuationHandle) {
 // Tests that the client handles a Docking promo notification response.
 TEST_F(TipsNotificationClientTest, DockingHandle) {
   StubPrepareToPresentModal();
-  id mock_handler = MockHandler(@protocol(DockingPromoCommands));
-  OCMExpect([mock_handler showDockingPromo:YES]);
+  id mock_handler = MockHandler(@protocol(PromosManagerCommands));
+  OCMExpect([mock_handler showDockingPromo]);
 
   mock_response_ = MockRequestResponse(TipsNotificationType::kDocking);
   client_->HandleNotificationInteraction(mock_response_);

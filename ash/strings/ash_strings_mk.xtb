@@ -162,7 +162,7 @@
 <translation id="1505542291183484463">Прозорец за променување големина со плочки надолу</translation>
 <translation id="1510238584712386396">Стартер</translation>
 <translation id="1520303207432623762">{NUM_APPS,plural, =1{Прикажи ги поставките за известувања. Известувањата се исклучени за една апликација}one{Прикажи ги поставките за известувања. Известувањата се исклучени за # апликација}other{Прикажи ги поставките за известувања. Известувањата се исклучени за # апликации}}</translation>
-<translation id="1521655867290435174">Табели на Google</translation>
+<translation id="1521655867290435174">Google Sheets</translation>
 <translation id="1523032696246003">Батерија: <ph name="BATTERY_PERCENTAGE" /> % | <ph name="TIME" /> до полна батерија</translation>
 <translation id="1525508553941733066">ОТФРЛИ</translation>
 <translation id="1526448108126799339">Отвора нова картичка во нов прозорец</translation>
@@ -342,7 +342,6 @@
 <translation id="2201071101391734388">Неодамнешна фотографија: <ph name="INDEX" /> од <ph name="TOTAL_COUNT" />.</translation>
 <translation id="2201687081523799384">Собери го Google Tasks</translation>
 <translation id="2208323208084708176">Режим на единствена работна површина</translation>
-<translation id="2210311543574621570">Ќе ја видите привремената меморија кога ќе притиснете и ќе задржите Ctrl + V. Кратенкава може да ја исклучите така што ќе ја оневозможите ознаката #clipboard-history-longpress во chrome://flags.</translation>
 <translation id="2215920961700443347">Нема интернет. Поврзете се на интернет, па обидете се повторно.</translation>
 <translation id="2222841058024245321">Работна површина 7</translation>
 <translation id="2223384056430485343">На поделен екран</translation>
@@ -2196,7 +2195,6 @@
 <translation id="8241650983304689286">Додајте картичка во новиот поделен приказ</translation>
 <translation id="8247060538831475781"><ph name="CONNECTION_STATUS" />, јачина на сигналот: <ph name="SIGNAL_STRENGTH" />, батерија на телефонот: <ph name="BATTERY_STATUS" /></translation>
 <translation id="825129991941217170">Прикажи ги сите содржини во Google Drive</translation>
-<translation id="8257510091797044096">Поставете го уредот</translation>
 <translation id="8261506727792406068">Избриши</translation>
 <translation id="8262312463845990408">Вклучете/исклучете ја репродукцијата</translation>
 <translation id="8268302343625273732">Погледнете ги сите задачи во Google Classroom</translation>

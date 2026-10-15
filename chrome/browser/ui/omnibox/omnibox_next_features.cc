@@ -37,7 +37,6 @@ BASE_FEATURE(kWebUIOmniboxAimPopup, DISABLED);
 
 constexpr base::FeatureParam<AddContextButtonVariant>::Option
     kAddContextButtonVariantOptions[] = {
-        {AddContextButtonVariant::kNone, "none"},
         {AddContextButtonVariant::kBelowResults, "below_results"},
         {AddContextButtonVariant::kAboveResults, "above_results"},
         {AddContextButtonVariant::kInline, "inline"}};
@@ -46,7 +45,12 @@ constexpr base::FeatureParam<AddContextButtonVariant>::Option
 const base::FeatureParam<AddContextButtonVariant>
     kWebUIOmniboxAimPopupAddContextButtonVariantParam{
         &internal::kWebUIOmniboxAimPopup, "Omnibox_AddContextButtonVariant",
-        AddContextButtonVariant::kNone, &kAddContextButtonVariantOptions};
+        AddContextButtonVariant::kBelowResults, &kAddContextButtonVariantOptions};
+// If true, hides the "Add Context" button in the "classic" popup.
+const base::FeatureParam<bool> kHideClassicContextButton{
+    &internal::kWebUIOmniboxAimPopup, "Omnibox_HideClassicContextButton",
+    false};
+
 // When enabled, clicking aim button in omnibox always navigates directly to
 // g.com/aimode, e.g. instead of opening the AI Mode popup
 // (`omnibox::internal::kWebUIOmniboxAimPopup`).
@@ -66,6 +70,9 @@ BASE_FEATURE(kWebUIOmniboxPopupDebug, DISABLED);
 // Enables side-by-side comparison omnibox suggestions in WebUI and Views.
 const base::FeatureParam<bool> kWebUIOmniboxPopupDebugSxSParam{
     &kWebUIOmniboxPopupDebug, "SxS", false};
+// If enabled, the WebUIOmniboxPopup controls its own selection state instead of
+// following that of the OmniboxEditModel.
+BASE_FEATURE(kWebUIOmniboxPopupSelectionControl, DISABLED);
 
 // Decodes a proto object from its serialized Base64 string representation.
 // Returns true if decoding and parsing succeed, false otherwise.
@@ -183,9 +190,7 @@ bool ShouldShowAimContextMenuOption(Profile* profile) {
   }
 
   const bool is_aim_context_entrypoint_enabled =
-      omnibox::IsAimPopupEnabled(profile) &&
-      (omnibox::kWebUIOmniboxAimPopupAddContextButtonVariantParam.Get() !=
-       omnibox::AddContextButtonVariant::kNone);
+      omnibox::IsAimPopupEnabled(profile);
 
   return is_aim_context_entrypoint_enabled;
 }
@@ -204,7 +209,7 @@ bool IsAimPopupEnabled(Profile* profile) {
   }
 
   auto* aim_service = AimEligibilityServiceFactory::GetForProfile(profile);
-  return aim_service && aim_service->IsAimEligible();
+  return aim_service && aim_service->IsFuseboxEligible();
 }
 
 bool IsContentSharingEnabled(
@@ -297,7 +302,7 @@ const base::FeatureParam<bool> kShowContextMenu(
 const base::FeatureParam<bool> kShowContextMenuDescription(
     &internal::kWebUIOmniboxAimPopup,
     "Omnibox_ShowContextMenuDescription",
-    true);
+    false);
 const base::FeatureParam<bool> kShowContextMenuTabPreviews(
     &internal::kWebUIOmniboxAimPopup,
     "Omnibox_ShowContextMenuTabPreviews",

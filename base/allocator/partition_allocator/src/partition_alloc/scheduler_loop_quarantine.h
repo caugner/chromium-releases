@@ -62,7 +62,7 @@
 
 namespace partition_alloc {
 
-struct PartitionRoot;
+class PartitionRoot;
 class ThreadCache;
 struct SchedulerLoopQuarantineStats;
 
@@ -186,6 +186,8 @@ class SchedulerLoopQuarantineBranch {
       --branch_.pause_quarantine_;
     }
   };
+
+  int PausedCountForTesting() { return pause_quarantine_; }
 
  private:
   // `ToBeFreedArray` is used in `Quarantine` and

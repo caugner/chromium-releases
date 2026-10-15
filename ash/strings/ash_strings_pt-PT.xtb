@@ -342,7 +342,6 @@
 <translation id="2201071101391734388">Foto recente <ph name="INDEX" /> de <ph name="TOTAL_COUNT" />.</translation>
 <translation id="2201687081523799384">Reduzir Google Tasks</translation>
 <translation id="2208323208084708176">Modo de ambiente de trabalho unificado</translation>
-<translation id="2210311543574621570">Vai ver a área de transferência quando premir sem soltar Ctrl + V. Para desativar este atalho, desative a sinalização #clipboard-history-longpress em chrome://flags.</translation>
 <translation id="2215920961700443347">Sem Internet. Ligue-se à Internet e tente novamente.</translation>
 <translation id="2222841058024245321">Espaço de trabalho 7</translation>
 <translation id="2223384056430485343">Num ecrã dividido</translation>
@@ -1383,7 +1382,7 @@ Nenhum dispositivo ligado.</translation>
 <translation id="5586388332127302891">Lupa ancorada ativada. Prima <ph name="ACCELERATOR" /> novamente para desativar a opção.</translation>
 <translation id="5587506661873751671">A transferir – <ph name="DOWNLOAD_PERCENT" />%</translation>
 <translation id="558849140439112033">Arraste para selecionar uma área a capturar.</translation>
-<translation id="5590609058453685222">A chamada de atenção sobre a desativação do som está ativada. Vai receber uma notificação se falar enquanto estiver com o som desativado.</translation>
+<translation id="5590609058453685222">O Alerta de som desativado está ativado. Vai receber uma notificação se falar enquanto estiver com o som desativado.</translation>
 <translation id="5592745162308462420">fn</translation>
 <translation id="5593564924968945303">Navegador Chrome</translation>
 <translation id="5596627076506792578">Mais opções</translation>
@@ -2195,7 +2194,6 @@ Para encerrar o dispositivo, prima sem soltar o botão ligar/desligar novamente 
 <translation id="8241650983304689286">Adicionar separador à nova vista dividida</translation>
 <translation id="8247060538831475781"><ph name="CONNECTION_STATUS" />, intensidade do sinal: <ph name="SIGNAL_STRENGTH" />, bateria do telemóvel: <ph name="BATTERY_STATUS" /></translation>
 <translation id="825129991941217170">Mostrar todo o conteúdo do Google Drive</translation>
-<translation id="8257510091797044096">Configurar o dispositivo</translation>
 <translation id="8261506727792406068">Eliminar</translation>
 <translation id="8262312463845990408">Ativar/desativar reprodução</translation>
 <translation id="8268302343625273732">Ver todos os trabalhos no Google Classroom</translation>

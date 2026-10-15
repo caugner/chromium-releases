@@ -48,6 +48,10 @@ BASE_DECLARE_FEATURE_PARAM(bool, kGlicNavigationGatingUseSiteNotOrigin);
 // TODO(crbug.com/453660392): Remove flag once Component Updater rollout starts.
 BASE_DECLARE_FEATURE_PARAM(bool, kGlicIncludeHardcodedBlockListEntries);
 
+// Controls whether chrome records UMA metrics for navigations by sending the
+// `NavigationConfirmationRequest` and recording the response.
+BASE_DECLARE_FEATURE(kGlicRecordNavigationConfirmationRequestMetrics);
+
 // When enabled, `beforeunload` dialog will not be displayed and the callback
 // indicating the dialog outcome will be called with `true`.
 // Warning: Enabling this feature can lead to data loss when navigating.
@@ -101,6 +105,8 @@ BASE_DECLARE_FEATURE(kActorRestartObservationDelayControllerOnNavigate);
 // Kill switch to disable sending a browser signal (which is used for user
 // interaction) before sending action to renderer.
 BASE_DECLARE_FEATURE(kActorSendBrowserSignalForAction);
+
+BASE_DECLARE_FEATURE(kGlicActorLoadAndExtractContentTool);
 
 }  // namespace actor
 

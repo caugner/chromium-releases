@@ -9,18 +9,23 @@
 #include <utility>
 
 #include "build/build_config.h"
-#include "chrome/browser/controlled_frame/controlled_frame_user_agent_util.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
 #include "chrome/browser/favicon/favicon_utils.h"
 #include "chrome/browser/renderer_context_menu/render_view_context_menu.h"
+#include "chrome/common/webui_url_constants.h"
 #include "components/guest_view/browser/guest_view_event.h"
 #include "components/renderer_context_menu/context_menu_delegate.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_widget_host_view.h"
+#include "content/public/common/url_constants.h"
 #include "extensions/browser/api/web_request/web_request_api.h"
 #include "extensions/browser/guest_view/web_view/web_view_constants.h"
 #include "ui/base/mojom/menu_source_type.mojom.h"
 #include "url/gurl.h"
+
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+#include "chrome/browser/controlled_frame/controlled_frame_user_agent_util.h"
+#endif
 
 using guest_view::GuestViewEvent;
 
@@ -28,11 +33,11 @@ namespace extensions {
 
 namespace {
 
-// Returns the top level items (ignoring submenus) as a base::Value::List.
-base::Value::List MenuModelToValue(const ui::SimpleMenuModel& menu_model) {
-  base::Value::List items;
+// Returns the top level items (ignoring submenus) as a base::ListValue.
+base::ListValue MenuModelToValue(const ui::SimpleMenuModel& menu_model) {
+  base::ListValue items;
   for (size_t i = 0; i < menu_model.GetItemCount(); ++i) {
-    base::Value::Dict item_value;
+    base::DictValue item_value;
     // TODO(lazyboy): We need to expose some kind of enum equivalent of
     // |command_id| instead of plain integers.
     item_value.Set(webview::kMenuItemCommandId, menu_model.GetCommandIdAt(i));
@@ -73,17 +78,23 @@ bool ChromeWebViewGuestDelegate::HandleContextMenu(
 
   ContextMenuDelegate* menu_delegate =
       ContextMenuDelegate::FromWebContents(web_contents);
-  DCHECK(menu_delegate);
+#if BUILDFLAG(IS_ANDROID)
+  if (!menu_delegate) {  // TODO(b/479602478): May be null on Android.
+    return false;
+  }
+#endif
+  CHECK(menu_delegate);
   pending_menu_ = menu_delegate->BuildMenu(render_frame_host, params);
   // It's possible for the returned menu to be null, so early out to avoid
   // a crash. TODO(wjmaclean): find out why it's possible for this to happen
   // in the first place, and if it's an error.
-  if (!pending_menu_)
+  if (!pending_menu_) {
     return false;
+  }
 
   // Pass it to embedder.
   int request_id = ++pending_context_menu_request_id_;
-  base::Value::Dict args;
+  base::DictValue args;
   args.Set(webview::kContextMenuItems,
            MenuModelToValue(pending_menu_->menu_model()));
   args.Set(webview::kRequestId, request_id);
@@ -93,12 +104,14 @@ bool ChromeWebViewGuestDelegate::HandleContextMenu(
 }
 
 void ChromeWebViewGuestDelegate::OnShowContextMenu(int request_id) {
-  if (!pending_menu_)
+  if (!pending_menu_) {
     return;
+  }
 
   // Make sure this was the correct request.
-  if (request_id != pending_context_menu_request_id_)
+  if (request_id != pending_context_menu_request_id_) {
     return;
+  }
 
   // TODO(lazyboy): Implement.
 
@@ -124,16 +137,25 @@ bool ChromeWebViewGuestDelegate::NavigateToURLShouldBlock(const GURL& url) {
 
 std::optional<blink::UserAgentOverride>
 ChromeWebViewGuestDelegate::GetDefaultUserAgentOverride() {
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   // Controlled Frame has its own UserAgentOverride.
   if (web_view_guest()->IsOwnedByControlledFrameEmbedder()) {
     return controlled_frame::GetDefaultControlledFrameUserAgentOverride(
         enable_client_hints_brand_);
   }
+#endif
   return std::nullopt;
 }
 
 void ChromeWebViewGuestDelegate::SetClientHintsEnabled(bool enable) {
   enable_client_hints_brand_ = enable;
+}
+
+bool ChromeWebViewGuestDelegate::ShouldForwardOpenUrlFromTabToOwnerWebContents(
+    const GURL& owner_url) {
+  // Allow contextual tasks URL to redirect to owner_web_cotnents.
+  return owner_url.scheme() == content::kChromeUIScheme &&
+         owner_url.host() == chrome::kChromeUIContextualTasksHost;
 }
 
 }  // namespace extensions

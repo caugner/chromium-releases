@@ -29,7 +29,6 @@ class ImageButton;
 
 class BrowserView;
 class CustomTabBarTitleOriginView;
-class WebAppMenuButton;
 
 // For Desktop PWAs, a CustomTabBarView displays a read only title and origin
 // for the current page and a security status icon. This is visible if the
@@ -52,7 +51,6 @@ class CustomTabBarView : public views::AccessiblePaneView,
   ~CustomTabBarView() override;
 
   LocationIconView* location_icon_view() { return location_icon_view_; }
-  AppMenuButton* custom_tab_menu_button() { return web_app_menu_button_; }
 
   // views::AccessiblePaneView:
   gfx::Rect GetAnchorBoundsInScreen() const override;
@@ -83,8 +81,8 @@ class CustomTabBarView : public views::AccessiblePaneView,
       security_state::SecurityLevel security_level) const override;
   bool ShowPageInfoDialog() override;
   const LocationBarModel* GetLocationBarModel() const override;
-  ui::ImageModel GetLocationIcon(LocationIconView::Delegate::IconFetchedCallback
-                                     on_icon_fetched) const override;
+  ui::ImageModel GetLocationIcon(
+      LocationIconView::Delegate::IconFetchedCallback on_icon_fetched) override;
 
   // Methods for testing.
   std::u16string title_for_testing() const { return last_title_; }
@@ -138,10 +136,6 @@ class CustomTabBarView : public views::AccessiblePaneView,
   std::unique_ptr<ui::SimpleMenuModel> context_menu_model_;
   std::unique_ptr<views::MenuRunner> context_menu_runner_;
   raw_ptr<Browser> browser_ = nullptr;
-
-  // This remains a nullptr for Desktop PWAs and is non-null for Android apps
-  // on ChromeOS.
-  raw_ptr<WebAppMenuButton> web_app_menu_button_ = nullptr;
 
   raw_ptr<views::FlexLayout> layout_manager_;
 

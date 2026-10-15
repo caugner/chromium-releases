@@ -18,6 +18,7 @@
 #include "chrome/browser/glic/host/context/glic_tab_data.h"
 #include "chrome/browser/glic/host/glic.mojom.h"
 #include "chrome/browser/glic/public/glic_instance.h"
+#include "chrome/browser/glic/public/glic_instance_metrics_backwards_compatibility.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "ui/display/display.h"
@@ -188,6 +189,10 @@ enum class ResponseSegmentation {
   kHandoffButtonAttachedAudio = 54,
   kHandoffButtonDetachedText = 55,
   kHandoffButtonDetachedAudio = 56,
+  kSkillsAttachedText = 57,
+  kSkillsAttachedAudio = 58,
+  kSkillsDetachedText = 59,
+  kSkillsDetachedAudio = 60,
   kAutoOpenedByContextualCueAttachedText = 65,
   kAutoOpenedByContextualCueAttachedAudio = 66,
   kAutoOpenedByContextualCueDetachedText = 67,
@@ -196,7 +201,19 @@ enum class ResponseSegmentation {
   kPdfSummarizeButtonAttachedAudio = 70,
   kPdfSummarizeButtonDetachedText = 71,
   kPdfSummarizeButtonDetachedAudio = 72,
-  kMaxValue = kPdfSummarizeButtonDetachedAudio,
+  kNavigationCaptureAttachedText = 73,
+  kNavigationCaptureAttachedAudio = 74,
+  kNavigationCaptureDetachedText = 75,
+  kNavigationCaptureDetachedAudio = 76,
+  kAutoOpenedForPdfAttachedText = 77,
+  kAutoOpenedForPdfAttachedAudio = 78,
+  kAutoOpenedForPdfDetachedText = 79,
+  kAutoOpenedForPdfDetachedAudio = 80,
+  kWebContentsContextMenuAttachedText = 93,
+  kWebContentsContextMenuAttachedAudio = 94,
+  kWebContentsContextMenuDetachedText = 95,
+  kWebContentsContextMenuDetachedAudio = 96,
+  kMaxValue = kWebContentsContextMenuDetachedAudio,
 };
 // LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:GlicResponseSegmentation)
 
@@ -266,7 +283,7 @@ class BrowserActivityObserver;
 // Responsible for all glic web-client metrics, and all stateful glic metrics.
 // Some stateless glic metrics are logged inline in the relevant code for
 // convenience.
-class GlicMetrics {
+class GlicMetrics : public GlicInstanceMetricsBackwardsCompatibility {
  public:
   class Delegate {
    public:
@@ -284,33 +301,38 @@ class GlicMetrics {
   GlicMetrics(Profile* profile, GlicEnabling* enabling);
   GlicMetrics(const GlicMetrics&) = delete;
   GlicMetrics& operator=(const GlicMetrics&) = delete;
-  ~GlicMetrics();
+  ~GlicMetrics() override;
+
+  // `GlicInstanceMetricsBackwardsCompatibility`:
+  void OnUserInputSubmitted(mojom::WebClientMode mode) override;
+  void OnReaction(mojom::MetricUserInputReactionType reaction_type) override;
+  void OnResponseStarted() override;
+  void OnResponseStopped(mojom::ResponseStopCause cause) override;
+  void OnTurnCompleted(mojom::WebClientModel model,
+                       base::TimeDelta duration) override;
+  void DidRequestContextFromTab(tabs::TabInterface& tab) override;
+  void OnGlicScrollAttempt() override;
+  void OnGlicScrollComplete(bool success) override;
 
   // See glic.mojom for details. These are events from the web client. The
   // lifetime of the web client is scoped to that of the window, so if these
   // methods are called then controller_ is guaranteed to exist.
-  void OnUserInputSubmitted(mojom::WebClientMode mode);
   void OnContextUploadStarted();
   void OnContextUploadCompleted();
-  void OnReaction(mojom::MetricUserInputReactionType reaction_type);
-  void OnResponseStarted();
-  void OnResponseStopped(mojom::ResponseStopCause cause);
   void OnSessionTerminated();
   void OnResponseRated(bool positive);
-  void OnTurnCompleted(mojom::WebClientModel model, base::TimeDelta duration);
-  void OnModelChanged(mojom::WebClientModel model);
   void OnRecordUseCounter(uint16_t counter);
 
   void OnAttachedToBrowser(AttachChangeReason reason);
   void OnDetachedFromBrowser(AttachChangeReason reason);
 
   // ----Public API called by other glic classes-----
-  // Called when the "Trust-First Onboarding" flow is shown (side panel).
-  void OnTrustFirstOnboardingShown();
   // Called when the user completes the onboarding flow (consents).
   void OnTrustFirstOnboardingAccept();
-  // Called when the user dismisses the onboarding flow without consenting.
-  void OnTrustFirstOnboardingDismissed();
+  // Called when any instance is closed. This method is idempotent. If
+  // trust-first FRE was shown and not accepted, this metric logs a dismiss
+  // metric, and then clears the bit tracking FRE open.
+  void OnInstanceClosed();
   // Called when the user clicks Accept in the FRE.
   void OnFreAccepted();
   // Called when the glic window starts to open.
@@ -332,16 +354,10 @@ class GlicMetrics {
   void OnWidgetUserResizeStarted();
   // Called when the glic window stops being resized by the user.
   void OnWidgetUserResizeEnded();
-  // Called when the glic window finishes closing.
+  // Called when the detached glic window finishes closing.
   void OnGlicWindowClose(Browser* last_active_browser,
                          std::optional<display::Display> display,
                          const gfx::Rect& glic_bounds);
-  // Called when glic requests a scroll.
-  void OnGlicScrollAttempt();
-  // Called when scrolling starts (after glic requests to scroll) or if
-  // the operation fails. `success` is true if a scroll was successfully
-  // triggered.
-  void OnGlicScrollComplete(bool success);
 
   // Called when a tab is pinned for sharing with glic. `success` is true if the
   // pinning was successful.
@@ -381,16 +397,16 @@ class GlicMetrics {
 
   void SetDelegateForTesting(std::unique_ptr<Delegate> delegate);
 
-  // Must be called when context is requested from a tab.
-  void DidRequestContextFromTab(content::WebContents& web_contents);
-
   // Sets the input mode of the web client. Should be called when the panel is
   // opened and in every subsequent mode change.
   void SetWebClientMode(mojom::WebClientMode mode);
 
-  mojom::WebClientModel current_model() const { return current_model_; }
-
  private:
+  // Called when any instance is opened. This method is used to track whether an
+  // FRE onboarding is going to be shown. If an FRE onboarding is already shown,
+  // this method is idempotent.
+  void OnInstanceOpened();
+
   // Called when `impression_timer_` fires.
   void OnImpressionTimerFired();
 
@@ -408,6 +424,9 @@ class GlicMetrics {
 
   // Called when kGlicTabContextEnabled changes.
   void OnTabContextEnabledPrefChanged();
+
+  // Records the time from startup until Glic was enabled for the profile.
+  void RecordStartupEnablement();
 
   // Returns the area in the display a given center point is.
   DisplayPosition GetDisplayPositionOfPoint(
@@ -455,8 +474,6 @@ class GlicMetrics {
   // client. It is reset when user input is submitted.
   ukm::SourceId last_tab_context_source_id_ = ukm::NoURLSourceId();
 
-  mojom::WebClientModel current_model_ = mojom::WebClientModel::kDefault;
-
   // Session state. `session_start_time_` is a sentinel that is cleared in
   // OnGlicWindowClose() and is used to determine whether
   // OnGlicWindowStartedOpening was called.
@@ -480,6 +497,10 @@ class GlicMetrics {
   // Whether Glic is enabled and FRE has been completed. Tracked to trigger
   // metric(s) on change.
   bool is_enabled_ = false;
+
+  // Whether we have already recorded the metric that tracks how long it took
+  // for Glic to be enabled since startup.
+  bool recorded_startup_enablement_ = false;
 
   std::vector<base::CallbackListSubscription> subscriptions_;
 

@@ -829,7 +829,8 @@ TEST_F(PaymentMethodAccessoryControllerTestForBnpl,
       form, form.fields().front().global_id());
   autofill_manager().FillOrPreviewForm(
       mojom::ActionPersistence::kFill, form, form.fields().front().global_id(),
-      FillingPayload(&bnpl_card), AutofillTriggerSource::kPopup);
+      FillingPayload(&bnpl_card),
+      AutofillTriggerSource::kKeyboardAccessoryOrBottomSheet);
 
   std::u16string cvc = u"123";
   autofill_manager().GetCreditCardAccessManager()->CacheUnmaskedCardInfo(

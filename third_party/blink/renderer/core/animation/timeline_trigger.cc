@@ -122,6 +122,10 @@ void TimelineTrigger::HandlePostTripAdd(Animation* animation,
   };
 
   if (old_behavior_for_current_state != new_behavior_for_current_state) {
+    // We are retroactively activating or deactivating the animation. The same
+    // restrictions on activation/deactivation should apply.
+    base::AutoReset<bool> is_activating_or_deactivating(
+        &is_activating_or_deactivating_, true);
     PerformBehavior(*animation, *new_behavior_for_current_state,
                     exception_state);
     animation->UpdateIfNecessary();
@@ -178,18 +182,12 @@ void TimelineTrigger::CreateCompositorTrigger() {
     return;
   }
 
-  // TODO(crbug.com/473568234): Support multiple timelines.
-  AnimationTimeline* timeline = Timeline();
-
-  if (!timeline || !timeline->GetDocument()) {
-    return;
-  }
-
-  cc::AnimationTimeline* cc_timeline = timeline->EnsureCompositorTimeline();
+  cc::AnimationTimeline* cc_timeline =
+      Timeline() ? Timeline()->EnsureCompositorTimeline() : nullptr;
   if (!cc_timeline) {
     return;
   }
-  timeline->GetDocument()->AttachCompositorTimeline(cc_timeline);
+  GetDocument()->AttachCompositorTimeline(cc_timeline);
   cc::AnimationHost* host = cc_timeline->animation_host();
   CHECK(host);
 
@@ -208,7 +206,7 @@ void TimelineTrigger::DestroyCompositorTrigger() {
   if (compositor_trigger_) {
     cc::AnimationHost* host = compositor_trigger_->GetAnimationHost();
     if (host) {
-      host->RemoveTrigger(compositor_trigger_.get());
+      host->RemoveTrigger(compositor_trigger_);
     }
     compositor_trigger_ = nullptr;
   }

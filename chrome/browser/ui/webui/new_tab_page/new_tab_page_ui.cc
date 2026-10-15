@@ -255,8 +255,6 @@ content::WebUIDataSource* CreateAndAddNewTabPageUiHtmlSource(Profile* profile) {
   source->AddBoolean(
       "middleSlotPromoDismissalEnabled",
       base::FeatureList::IsEnabled(ntp_features::kNtpMiddleSlotPromoDismissal));
-  source->AddBoolean("mobilePromoEnabled", base::FeatureList::IsEnabled(
-                                               ntp_features::kNtpMobilePromo));
   source->AddBoolean(
       "modulesDragAndDropEnabled",
       base::FeatureList::IsEnabled(ntp_features::kNtpModulesDragAndDrop));
@@ -294,6 +292,9 @@ content::WebUIDataSource* CreateAndAddNewTabPageUiHtmlSource(Profile* profile) {
   source->AddBoolean("multiLineEnabled",
                      ntp_realbox::IsNtpRealboxNextEnabled(profile) &&
                          ntp_realbox::kMultiLineEnabled.Get());
+  source->AddBoolean(
+      "caretAnimationEnabled",
+      base::FeatureList::IsEnabled(ntp_features::kNtpAnimatedCaret));
 
   static constexpr webui::LocalizedString kStrings[] = {
       {"doneButton", IDS_DONE},
@@ -629,20 +630,27 @@ content::WebUIDataSource* CreateAndAddNewTabPageUiHtmlSource(Profile* profile) {
       (aim_eligible || ntp_composebox::IsNtpComposeboxEnabled(profile)));
 
   if (ntp_realbox::IsNtpRealboxNextEnabled(profile)) {
-    switch (ntp_realbox::kSteadyPlaceholder.Get()) {
-      case ntp_realbox::PlaceholderText::ASK_OR_TYPE:
-        source->AddString("searchBoxPlaceholder",
-                          l10n_util::GetStringFUTF16(
-                              IDS_WEBUI_OMNIBOX_PLACEHOLDER_TEXT, u"Google"));
-        break;
-      case ntp_realbox::PlaceholderText::ASK:
-        source->AddLocalizedString(
-            "searchBoxPlaceholder",
-            IDS_NTP_SEARCH_BOX_DYNAMIC_PLACEHOLDER_ASK_GOOGLE);
-        break;
-      default:
-        NOTREACHED();
+    if (ntp_realbox::kCyclingPlaceholders.Get()) {
+      source->AddLocalizedString(
+          "searchBoxPlaceholder",
+          IDS_NTP_SEARCH_BOX_DYNAMIC_PLACEHOLDER_ASK_GOOGLE);
+    } else {
+      switch (ntp_realbox::kSteadyPlaceholder.Get()) {
+        case ntp_realbox::PlaceholderText::ASK_OR_TYPE:
+          source->AddString("searchBoxPlaceholder",
+                            l10n_util::GetStringFUTF16(
+                                IDS_WEBUI_OMNIBOX_PLACEHOLDER_TEXT, u"Google"));
+          break;
+        case ntp_realbox::PlaceholderText::ASK:
+          source->AddLocalizedString(
+              "searchBoxPlaceholder",
+              IDS_NTP_SEARCH_BOX_DYNAMIC_PLACEHOLDER_ASK_GOOGLE);
+          break;
+        default:
+          NOTREACHED();
+      }
     }
+
   } else {
     source->AddLocalizedString("searchBoxPlaceholder",
                                IDS_GOOGLE_SEARCH_BOX_EMPTY_HINT_MD);
@@ -804,7 +812,9 @@ constexpr std::string_view kDisabledBrowserPromo = "disabled";
 int NewTabPageUI::instance_count_ = 0;
 
 NewTabPageUI::NewTabPageUI(content::WebUI* web_ui)
-    : ui::MojoWebUIController(web_ui, /*enable_chrome_send=*/true),
+    : ui::MojoWebUIController(web_ui,
+                              /*enable_chrome_send=*/true,
+                              /*enable_chrome_histograms=*/true),
       content::WebContentsObserver(web_ui->GetWebContents()),
       page_factory_receiver_(this),
       customize_buttons_factory_receiver_(this),
@@ -968,9 +978,9 @@ void NewTabPageUI::ResetProfilePrefs(PrefService* prefs) {
   prefs->SetBoolean(ntp_prefs::kNtpPersonalShortcutsVisible, true);
   prefs->SetBoolean(ntp_prefs::kNtpShowAllMostVisitedTiles, false);
   prefs->SetTime(ntp_prefs::kNtpLastModuleStalenessUpdate, base::Time());
-  prefs->SetDict(ntp_prefs::kNtpModuleStalenessCountDict, base::Value::Dict());
+  prefs->SetDict(ntp_prefs::kNtpModuleStalenessCountDict, base::DictValue());
   prefs->SetDict(ntp_prefs::kNtpModulesAutoRemovalDisabledDict,
-                 base::Value::Dict());
+                 base::DictValue());
   prefs->SetInteger(ntp_prefs::kNtpContextMenuClickCount, 0);
 }
 
@@ -1261,6 +1271,8 @@ void NewTabPageUI::CreatePageHandler(
       std::move(pending_page_handler), std::move(pending_page),
       std::move(pending_searchbox_handler), profile_, web_contents(),
       base::BindRepeating(&NewTabPageUI::GetOrCreateContextualSessionHandle,
+                          base::Unretained(this)),
+      base::BindRepeating(&NewTabPageUI::ClearContextualSessionHandle,
                           base::Unretained(this)));
 
   // TODO(crbug.com/435288212): Move searchbox mojom to use factory pattern.
@@ -1295,7 +1307,7 @@ void NewTabPageUI::CreateActionChipsHandler(
 // OnColorProviderChanged can be called during the destruction process and
 // should not directly access any member variables.
 void NewTabPageUI::OnColorProviderChanged() {
-  base::Value::Dict update;
+  base::DictValue update;
   if (!web_contents() || !web_ui()) {
     return;
   }
@@ -1308,7 +1320,7 @@ void NewTabPageUI::OnColorProviderChanged() {
 }
 
 void NewTabPageUI::OnCustomBackgroundImageUpdated() {
-  base::Value::Dict update;
+  base::DictValue update;
   url::RawCanonOutputT<char> encoded_url;
   auto custom_background_url =
       (ntp_custom_background_service_
@@ -1345,6 +1357,10 @@ NewTabPageUI::GetOrCreateContextualSessionHandle() {
     }
   }
   return shared_session_handle_.get();
+}
+
+void NewTabPageUI::ClearContextualSessionHandle() {
+  shared_session_handle_.reset();
 }
 
 void NewTabPageUI::DidStartNavigation(
@@ -1405,7 +1421,7 @@ void NewTabPageUI::OnEnterpriseShortcutsPolicyChanged() {
 
 void NewTabPageUI::OnLoad() {
   MaybeEnableEnterpriseShortcutsVisibility();
-  base::Value::Dict update;
+  base::DictValue update;
   update.Set("navigationStartTime",
              navigation_start_time_.InMillisecondsFSinceUnixEpoch());
   const bool modules_enabled = ntp::HasModulesEnabled(

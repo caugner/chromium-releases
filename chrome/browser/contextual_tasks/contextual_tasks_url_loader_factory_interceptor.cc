@@ -10,6 +10,8 @@
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/webui_url_constants.h"
+#include "components/contextual_tasks/public/features.h"
+#include "components/embedder_support/user_agent_utils.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
@@ -30,6 +32,7 @@
 #include "services/network/public/mojom/url_loader.mojom.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
+#include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
 
 namespace contextual_tasks {
 
@@ -206,13 +209,22 @@ class ContextualTasksProxyingURLLoaderFactory
   ContextualTasksProxyingURLLoaderFactory(
       mojo::PendingReceiver<network::mojom::URLLoaderFactory> loader_receiver,
       mojo::PendingRemote<network::mojom::URLLoaderFactory> target_factory,
-      ContextualTasksUiService* ui_service)
+      ContextualTasksUiService* ui_service,
+      base::WeakPtr<content::WebContents> web_contents)
       : network::SelfDeletingURLLoaderFactory(std::move(loader_receiver)),
-        ui_service_(ui_service ? ui_service->GetWeakPtr() : nullptr) {
+        ui_service_(ui_service ? ui_service->GetWeakPtr() : nullptr),
+        web_contents_(web_contents) {
     target_factory_.Bind(std::move(target_factory));
     target_factory_.set_disconnect_handler(base::BindOnce(
         &ContextualTasksProxyingURLLoaderFactory::OnTargetFactoryDisconnected,
         base::Unretained(this)));
+
+    if (base::FeatureList::IsEnabled(
+            kContextualTasksSendFullVersionListEnabled)) {
+      blink::UserAgentMetadata ua_metadata =
+          embedder_support::GetUserAgentMetadata();
+      ch_ua_full_version_list_ = ua_metadata.SerializeBrandFullVersionList();
+    }
   }
 
   ~ContextualTasksProxyingURLLoaderFactory() override = default;
@@ -226,34 +238,44 @@ class ContextualTasksProxyingURLLoaderFactory
       mojo::PendingRemote<network::mojom::URLLoaderClient> client,
       const net::MutableNetworkTrafficAnnotationTag& traffic_annotation)
       override {
+    network::ResourceRequest modified_request = request;
+    if (base::FeatureList::IsEnabled(
+            kContextualTasksSendFullVersionListEnabled) &&
+        !ch_ua_full_version_list_.empty()) {
+      modified_request.headers.SetHeader("Sec-CH-UA-Full-Version-List",
+                                         ch_ua_full_version_list_);
+    }
+
     if (!ui_service_) {
-      target_factory_->CreateLoaderAndStart(std::move(loader), request_id,
-                                            options, request, std::move(client),
-                                            traffic_annotation);
+      target_factory_->CreateLoaderAndStart(
+          std::move(loader), request_id, options, modified_request,
+          std::move(client), traffic_annotation);
       return;
     }
 
     // Only intercept HTTP/HTTPS requests.
-    if (!request.url.SchemeIs(url::kHttpsScheme)) {
-      target_factory_->CreateLoaderAndStart(std::move(loader), request_id,
-                                            options, request, std::move(client),
-                                            traffic_annotation);
+    if (!modified_request.url.SchemeIs(url::kHttpsScheme)) {
+      target_factory_->CreateLoaderAndStart(
+          std::move(loader), request_id, options, modified_request,
+          std::move(client), traffic_annotation);
       return;
     }
 
     // If the request doesn't need the Authorization header, create the loader
     // and start immediately.
-    if (!ShouldAddAuthHeader(request.url)) {
-      target_factory_->CreateLoaderAndStart(std::move(loader), request_id,
-                                            options, request, std::move(client),
-                                            traffic_annotation);
+    if (!ShouldAddAuthHeader(modified_request.url)) {
+      target_factory_->CreateLoaderAndStart(
+          std::move(loader), request_id, options, modified_request,
+          std::move(client), traffic_annotation);
       return;
     }
 
-    ui_service_->GetAccessToken(base::BindOnce(
-        &ContextualTasksProxyingURLLoaderFactory::OnAccessTokenReceived,
-        weak_factory_.GetWeakPtr(), std::move(loader), request_id, options,
-        request, std::move(client), traffic_annotation));
+    ui_service_->GetAccessToken(
+        base::BindOnce(
+            &ContextualTasksProxyingURLLoaderFactory::OnAccessTokenReceived,
+            weak_factory_.GetWeakPtr(), std::move(loader), request_id, options,
+            modified_request, std::move(client), traffic_annotation),
+        web_contents_);
   }
 
  private:
@@ -286,8 +308,11 @@ class ContextualTasksProxyingURLLoaderFactory
         std::move(loader));
   }
 
+  std::string ch_ua_full_version_list_;
+
   mojo::Remote<network::mojom::URLLoaderFactory> target_factory_;
   base::WeakPtr<ContextualTasksUiService> ui_service_;
+  base::WeakPtr<content::WebContents> web_contents_;
   base::WeakPtrFactory<ContextualTasksProxyingURLLoaderFactory> weak_factory_{
       this};
 };
@@ -333,8 +358,9 @@ void MaybeInterceptURLLoaderFactory(
   auto [receiver, remote] = factory_builder.Append();
 
   // The proxy factory manages its own lifetime.
-  new ContextualTasksProxyingURLLoaderFactory(std::move(receiver),
-                                              std::move(remote), ui_service);
+  new ContextualTasksProxyingURLLoaderFactory(
+      std::move(receiver), std::move(remote), ui_service,
+      owner_web_contents->GetWeakPtr());
 }
 
 }  // namespace contextual_tasks

@@ -10,9 +10,11 @@ import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -46,7 +48,9 @@ import org.robolectric.shadows.ShadowPackageManager;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.ResettersForTesting;
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
+import org.chromium.base.supplier.SettableNonNullObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.Features.EnableFeatures;
@@ -71,6 +75,7 @@ import org.chromium.chrome.browser.toolbar.ToolbarPositionController.StateTransi
 import org.chromium.chrome.browser.toolbar.ToolbarPositionController.ToolbarPositionAndSource;
 import org.chromium.chrome.browser.toolbar.settings.AddressBarPreference;
 import org.chromium.chrome.browser.toolbar.top.ToolbarLayout;
+import org.chromium.chrome.browser.ui.edge_to_edge.TopInsetProvider;
 import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.components.prefs.PrefService;
 import org.chromium.components.user_prefs.UserPrefs;
@@ -79,6 +84,7 @@ import org.chromium.ui.KeyboardVisibilityDelegate;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.display.DisplayAndroid;
 import org.chromium.url.GURL;
+import org.chromium.url.JUnitTestGURLs;
 
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -88,6 +94,8 @@ import java.util.concurrent.atomic.AtomicReference;
 public class ToolbarPositionControllerTest {
 
     @Rule public MockitoRule mMockitoJUnit = MockitoJUnit.rule();
+    @Mock Tab mTab;
+
     private static final int TOOLBAR_HEIGHT = 56;
     private static final int CONTROL_CONTAINER_ID = 12356;
 
@@ -265,6 +273,7 @@ public class ToolbarPositionControllerTest {
     @Mock private View mControlContainerView;
     @Mock private View mProgressBarContainer;
     @Mock private ViewGroup mProgressBarParent;
+    @Mock private TopInsetProvider mTopInsetProvider;
     @Mock private View mRootView;
     @Mock private Profile mProfile;
     @Mock private UserPrefs.Natives mUserPrefsNatives;
@@ -275,32 +284,34 @@ public class ToolbarPositionControllerTest {
     @Mock private DisplayAndroid mDisplayAndroid;
 
     private Context mContext;
-    private final ObservableSupplierImpl<Boolean> mIsNtpShowing =
-            new ObservableSupplierImpl<>(false);
-    private final ObservableSupplierImpl<Boolean> mIsIncognitoNtpShowing =
-            new ObservableSupplierImpl<>(false);
-    private final ObservableSupplierImpl<Boolean> mIsTabSwitcherShowing =
-            new ObservableSupplierImpl<>(false);
-    private final ObservableSupplierImpl<Boolean> mIsOmniboxFocused =
-            new ObservableSupplierImpl<>(false);
-    private final ObservableSupplierImpl<Boolean> mIsFindInPageShowing =
-            new ObservableSupplierImpl<>(false);
-    private final ObservableSupplierImpl<@ControlsPosition Integer> mToolbarPosition =
-            new ObservableSupplierImpl<>(ControlsPosition.NONE);
+    private final SettableNonNullObservableSupplier<Boolean> mIsNtpShowing =
+            ObservableSuppliers.createNonNull(false);
+    private final SettableNonNullObservableSupplier<Boolean> mIsIncognitoNtpShowing =
+            ObservableSuppliers.createNonNull(false);
+    private final SettableNonNullObservableSupplier<Boolean> mIsTabSwitcherShowing =
+            ObservableSuppliers.createNonNull(false);
+    private final SettableNonNullObservableSupplier<Boolean> mIsOmniboxFocused =
+            ObservableSuppliers.createNonNull(false);
+    private final SettableNonNullObservableSupplier<Boolean> mIsFindInPageShowing =
+            ObservableSuppliers.createNonNull(false);
+    private final SettableNonNullObservableSupplier<Integer> mToolbarPosition =
+            ObservableSuppliers.createNonNull(ControlsPosition.NONE);
     private final FormFieldFocusedSupplier mIsFormFieldFocused = new FormFieldFocusedSupplier();
     private BottomControlsStacker mBottomControlsStacker;
     private ToolbarPositionController mController;
-    private final ObservableSupplierImpl<Integer> mBottomToolbarOffsetSupplier =
-            new ObservableSupplierImpl<>();
-    private final ObservableSupplierImpl<Integer> mKeyboardAccessoryHeightSupplier =
-            new ObservableSupplierImpl<>(0);
-    private final ObservableSupplierImpl<Integer> mControlContainerTranslationSupplier =
-            new ObservableSupplierImpl<>(0);
-    private final ObservableSupplierImpl<Integer> mControlContainerHeightSupplier =
-            new ObservableSupplierImpl<>(TOOLBAR_HEIGHT);
-    private final ObservableSupplierImpl<Integer> mKeyboardHeightSupplier =
-            new ObservableSupplierImpl<>(0);
-    private final ObservableSupplierImpl<Profile> mProfileSupplier = new ObservableSupplierImpl<>();
+    private final SettableNonNullObservableSupplier<Integer> mBottomToolbarOffsetSupplier =
+            ObservableSuppliers.createNonNull(0);
+    private final SettableNonNullObservableSupplier<Integer> mKeyboardAccessoryHeightSupplier =
+            ObservableSuppliers.createNonNull(0);
+    private final SettableNonNullObservableSupplier<Integer> mControlContainerTranslationSupplier =
+            ObservableSuppliers.createNonNull(0);
+    private final SettableNonNullObservableSupplier<Integer> mControlContainerHeightSupplier =
+            ObservableSuppliers.createNonNull(TOOLBAR_HEIGHT);
+    private final SettableNonNullObservableSupplier<Integer> mKeyboardHeightSupplier =
+            ObservableSuppliers.createNonNull(0);
+    private final SettableMonotonicObservableSupplier<Tab> mActivityTabSupplier =
+            ObservableSuppliers.createMonotonic();
+    private SettableNonNullObservableSupplier<Profile> mProfileSupplier;
     private HistogramWatcher mStartupExpectation;
 
     public static class FakeKeyboardVisibilityDelegate extends KeyboardVisibilityDelegate {
@@ -343,7 +354,7 @@ public class ToolbarPositionControllerTest {
         mProgressBarLayoutParams.gravity = Gravity.BOTTOM;
         mProgressBarLayoutParams.anchorGravity = Gravity.BOTTOM;
         mProgressBarLayoutParams.setAnchorId(CONTROL_CONTAINER_ID);
-        mProfileSupplier.set(mProfile);
+        mProfileSupplier = ObservableSuppliers.createNonNull(mProfile);
         UserPrefsJni.setInstanceForTesting(mUserPrefsNatives);
         when(mUserPrefsNatives.get(mProfile)).thenReturn(mPrefs);
 
@@ -372,12 +383,14 @@ public class ToolbarPositionControllerTest {
                         mProgressBarContainer,
                         mControlContainerTranslationSupplier,
                         mControlContainerHeightSupplier,
+                        mTopInsetProvider,
                         new Handler(Looper.getMainLooper()),
                         mContext,
                         mToolbarPosition,
                         mProfileSupplier,
                         mKeyboardHeightSupplier,
-                        mWindowAndroid);
+                        mWindowAndroid,
+                        mActivityTabSupplier);
 
         LocalStatePrefs.setNativePrefsLoadedForTesting(true);
         LocalStatePrefsJni.setInstanceForTesting(mLocalStatePrefsNatives);
@@ -1059,6 +1072,45 @@ public class ToolbarPositionControllerTest {
         mController.destroy();
         setUserToolbarAnchorPreference(/* showToolbarOnTop= */ false);
         assertControlsAtTop();
+    }
+
+    @Test
+    public void testMaybeForceBottomToolbarLayoutUpdateAndCapture() {
+        // 1. Test mIsFirstPositionChange is true.
+        assertTrue(mController.getIsFirstPositionChangeForTesting());
+        // After setUp, mIsFirstPositionChange is true because initial position (TOP) didn't change.
+        mController.maybeForceBottomToolbarLayoutUpdateAndCapture(/* isNtpShowing= */ true);
+        verify(mControlContainer, never()).doSynchronousLayoutAndCapture();
+
+        // Trigger a position change to set mIsFirstPositionChange to false.
+        setUserToolbarAnchorPreference(false); // Changes to BOTTOM
+        assertControlsAtBottom();
+        // During this first change, maybeForceToolbarLayoutUpdateAndCapture() was called inside
+        // updateCurrentPosition(), but mIsFirstPositionChange was still true, so it did nothing.
+        verify(mControlContainer, never()).doSynchronousLayoutAndCapture();
+
+        // mIsFirstPositionChange is now false.
+        assertFalse(mController.getIsFirstPositionChangeForTesting());
+
+        // 2. Test active tab is NTP.
+        mController.maybeForceBottomToolbarLayoutUpdateAndCapture(/* isNtpShowing= */ true);
+        verify(mControlContainer, never()).doSynchronousLayoutAndCapture();
+
+        // 3. Test active tab is not NTP, and layout changed.
+        // We need onToEdgeChange to return true.
+        // maybeForceToolbarLayoutUpdateAndCapture calls onToEdgeChange(0, false).
+        // Set mTopInset to something non-zero first.
+        when(mTab.getUrl()).thenReturn(JUnitTestGURLs.URL_1);
+        mActivityTabSupplier.set(mTab);
+        mController.onToEdgeChange(50, true);
+        mController.maybeForceBottomToolbarLayoutUpdateAndCapture(/* isNtpShowing= */ false);
+        verify(mControlContainer).doSynchronousLayoutAndCapture();
+
+        // 4. Test active tab is not NTP, but layout DID NOT change.
+        // mTopInset is now 0 (from previous call).
+        clearInvocations(mControlContainer);
+        mController.maybeForceBottomToolbarLayoutUpdateAndCapture(/* isNtpShowing= */ false);
+        verify(mControlContainer, never()).doSynchronousLayoutAndCapture();
     }
 
     private void assertControlsAtBottom() {

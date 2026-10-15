@@ -11,8 +11,10 @@
 #include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/bind.h"
+#include "base/test/run_until.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/with_feature_override.h"
 #include "base/time/time.h"
@@ -1292,6 +1294,10 @@ IN_PROC_BROWSER_TEST_F(SearchPrefetchServiceEnabledBrowserTest,
   histogram_tester.ExpectUniqueSample(
       "Omnibox.SearchPrefetch.PrefetchFinalStatus.SuggestionPrefetch",
       SearchPrefetchStatus::kPrefetchServedForRealNavigation, 1);
+  histogram_tester.ExpectUniqueSample(
+      "Omnibox.SearchPrefetch.TakePrefetchResponseFromMemoryCache."
+      "ResourceResponseReceived",
+      true, 1);
   histogram_tester.ExpectTotalCount(
       "Omnibox.SearchPrefetch.ClickToNavigationIntercepted", 1);
   histogram_tester.ExpectTotalCount(
@@ -2137,7 +2143,7 @@ IN_PROC_BROWSER_TEST_F(SearchPrefetchServiceEnabledBrowserTest,
   ASSERT_TRUE(prefetch_status.has_value());
   EXPECT_EQ(SearchPrefetchStatus::kCanBeServed, prefetch_status.value());
 
-  location_bar->GetOmniboxController()->edit_model()->OpenSelectionForTesting();
+  location_bar->GetOmniboxController()->edit_model()->OpenCurrentSelection();
 
   WaitUntilStatusChangesTo(canonical_search_url, std::nullopt);
 
@@ -2176,7 +2182,7 @@ IN_PROC_BROWSER_TEST_F(SearchPrefetchServiceEnabledBrowserTest,
   ASSERT_TRUE(prefetch_status.has_value());
   EXPECT_EQ(SearchPrefetchStatus::kCanBeServed, prefetch_status.value());
 
-  location_bar->GetOmniboxController()->edit_model()->OpenSelectionForTesting();
+  location_bar->GetOmniboxController()->edit_model()->OpenCurrentSelection();
 
   WaitUntilStatusChangesTo(canonical_search_url, std::nullopt);
 
@@ -2187,6 +2193,7 @@ IN_PROC_BROWSER_TEST_F(SearchPrefetchServiceEnabledBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(SearchPrefetchServiceEnabledBrowserTest,
                        PrefetchServedBeforeHeaders) {
+  base::HistogramTester histogram_tester;
   set_service_deferral_type(
       SearchPreloadTestResponseDeferralType::kDeferHeader);
   std::string search_terms = kOmniboxSuggestPrefetchQuery;
@@ -2207,8 +2214,14 @@ IN_PROC_BROWSER_TEST_F(SearchPrefetchServiceEnabledBrowserTest,
   GURL canonical_search_url = GetCanonicalSearchURL(
       autocomplete_controller->result().match_at(0).destination_url);
 
-  location_bar->GetOmniboxController()->edit_model()->OpenSelectionForTesting();
+  location_bar->GetOmniboxController()->edit_model()->OpenCurrentSelection();
   WaitUntilStatusChangesTo(canonical_search_url, std::nullopt);
+
+  histogram_tester.ExpectUniqueSample(
+      "Omnibox.SearchPrefetch.TakePrefetchResponseFromMemoryCache."
+      "ResourceResponseReceived",
+      false, 1);
+
   DispatchDelayedResponseTask();
 
   content::WaitForLoadStop(GetWebContents());
@@ -2249,7 +2262,7 @@ IN_PROC_BROWSER_TEST_F(SearchPrefetchServiceEnabledBrowserTest,
   WaitUntilStatusChangesTo(canonical_search_url,
                            SearchPrefetchStatus::kCanBeServed);
 
-  location_bar->GetOmniboxController()->edit_model()->OpenSelectionForTesting();
+  location_bar->GetOmniboxController()->edit_model()->OpenCurrentSelection();
 
   // Wait until it is served to a real navigation.
   WaitUntilStatusChangesTo(canonical_search_url, std::nullopt);
@@ -2315,7 +2328,7 @@ IN_PROC_BROWSER_TEST_F(SearchPrefetchServiceEnabledBrowserTest,
       SecurityStateTabHelper::FromWebContents(GetWebContents());
   WaitUntilStatusChangesTo(canonical_search_url,
                            SearchPrefetchStatus::kCanBeServed);
-  location_bar->GetOmniboxController()->edit_model()->OpenSelectionForTesting();
+  location_bar->GetOmniboxController()->edit_model()->OpenCurrentSelection();
 
   // Wait until it is served to a real navigation.
   WaitUntilStatusChangesTo(canonical_search_url, std::nullopt);
@@ -2358,7 +2371,7 @@ IN_PROC_BROWSER_TEST_F(SearchPrefetchServiceEnabledBrowserTest,
   WaitUntilStatusChangesTo(canonical_search_url,
                            SearchPrefetchStatus::kCanBeServed);
 
-  location_bar->GetOmniboxController()->edit_model()->OpenSelectionForTesting();
+  location_bar->GetOmniboxController()->edit_model()->OpenCurrentSelection();
   // Wait until it is served to the navigation.
   WaitUntilStatusChangesTo(canonical_search_url, std::nullopt);
 
@@ -3960,7 +3973,7 @@ IN_PROC_BROWSER_TEST_F(SearchPrefetchServiceNavigationPrefetchBrowserTest,
   ASSERT_TRUE(prefetch_status.has_value());
   EXPECT_EQ(SearchPrefetchStatus::kComplete, prefetch_status.value());
 
-  location_bar->GetOmniboxController()->edit_model()->OpenSelectionForTesting();
+  location_bar->GetOmniboxController()->edit_model()->OpenCurrentSelection();
 
   // Wait until it is served to the navigation.
   WaitUntilStatusChangesTo(canonical_search_url, std::nullopt);
@@ -4003,7 +4016,7 @@ IN_PROC_BROWSER_TEST_F(SearchPrefetchServiceNavigationPrefetchBrowserTest,
           canonical_search_url);
   EXPECT_FALSE(prefetch_status.has_value());
 
-  location_bar->GetOmniboxController()->edit_model()->OpenSelectionForTesting();
+  location_bar->GetOmniboxController()->edit_model()->OpenCurrentSelection();
 
   // Suggestion server does not suggest the user agent to prefetch the resource,
   // so there should be no prefetch attempt.
@@ -4314,4 +4327,83 @@ IN_PROC_BROWSER_TEST_F(SearchNavigationPrefetchIncognitoBrowserTest,
           .ExtractString();
   EXPECT_FALSE(inner_html.contains("regular"));
   EXPECT_TRUE(inner_html.contains("prefetch"));
+}
+
+class SearchKeepAliveRequestTrackerBrowserTest
+    : public SearchPrefetchBaseBrowserTest {
+ public:
+  SearchKeepAliveRequestTrackerBrowserTest() {
+    std::vector<base::test::FeatureRefAndParams> enabled_features = {
+        {kSearchPrefetchServicePrefetching,
+         {{"max_attempts_per_caching_duration", "3"},
+          {"cache_size", "1"},
+          {"device_memory_threshold_MB", "0"}}},
+        {
+            kSearchPrefetchBeaconLogging,
+            {{"search_prefetch_beacon_host", ""}},
+        }};
+    feature_list_.InitWithFeaturesAndParameters(enabled_features, {});
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(SearchKeepAliveRequestTrackerBrowserTest,
+                       BasicPrefetchFunctionality) {
+  base::HistogramTester histogram_tester;
+  auto* search_prefetch_service =
+      SearchPrefetchServiceFactory::GetForProfile(browser()->profile());
+  ASSERT_NE(nullptr, search_prefetch_service);
+
+  std::string search_terms = "prefetch_content";
+
+  auto [prefetch_url, search_url] =
+      GetSearchPrefetchAndNonPrefetch(search_terms);
+  GURL canonical_search_url = GetCanonicalSearchURL(prefetch_url);
+
+  EXPECT_TRUE(search_prefetch_service->MaybePrefetchURL(prefetch_url,
+                                                        GetWebContents()));
+  histogram_tester.ExpectUniqueSample(
+      "Omnibox.SearchPrefetch.PrefetchEligibilityReason2.SuggestionPrefetch",
+      SearchPrefetchEligibilityReason::kPrefetchStarted, 1);
+  auto prefetch_status =
+      search_prefetch_service->GetSearchPrefetchStatusForTesting(
+          canonical_search_url);
+  WaitUntilStatusChangesTo(canonical_search_url,
+                           SearchPrefetchStatus::kComplete);
+
+  prefetch_status = search_prefetch_service->GetSearchPrefetchStatusForTesting(
+      canonical_search_url);
+  ASSERT_TRUE(prefetch_status.has_value());
+  EXPECT_EQ(SearchPrefetchStatus::kComplete, prefetch_status.value());
+
+  ASSERT_TRUE(content::NavigateToURL(GetWebContents(), search_url));
+
+  histogram_tester.ExpectUniqueSample(
+      "Omnibox.SearchPrefetch.PrefetchFinalStatus.SuggestionPrefetch",
+      SearchPrefetchStatus::kPrefetchServedForRealNavigation, 1);
+
+  content::RenderFrameHost* frame = GetWebContents()->GetPrimaryMainFrame();
+  std::string js_template = R"(
+      fetch("$1", { method: "POST", keepalive: true})
+    )";
+  GURL ack_url = GetSearchServerQueryURLWithNoQuery(
+      "/ack?pf=" + kSuggestPrefetchParam.Get());
+  EXPECT_EQ(true, content::ExecJs(
+                      frame, base::ReplaceStringPlaceholders(js_template,
+                                                             {
+                                                                 ack_url.spec(),
+                                                             },
+                                                             nullptr)));
+
+  ASSERT_TRUE(base::test::RunUntil([&]() {
+    auto count_map = histogram_tester.GetTotalCountsForPrefix(
+        "Omnibox.SearchPrefetch.KeepAliveRequestFinalStage");
+    int num = count_map["Omnibox.SearchPrefetch.KeepAliveRequestFinalStage"];
+    return num > 0;
+  })) << "Timeout waiting keep alive loader finishes";
+  histogram_tester.ExpectUniqueSample(
+      "Omnibox.SearchPrefetch.KeepAliveRequestFinalStage",
+      content::KeepAliveRequestTracker::RequestStageType::kLoaderCompleted, 1);
 }

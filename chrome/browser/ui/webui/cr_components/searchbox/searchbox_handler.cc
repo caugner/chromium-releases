@@ -67,7 +67,9 @@
 #include "url/gurl.h"
 
 namespace searchbox_internal {
-const char* kSearchIconResourceName = "//resources/images/icon_search.svg";
+
+const char* kSearchSparkIconResourceName =
+    "//resources/cr_components/searchbox/icons/search_spark.svg";
 }  // namespace searchbox_internal
 
 namespace {
@@ -149,8 +151,7 @@ const char* kNotesSparkIconResourceName =
 const char* kPageIconResourceName =
     "//resources/cr_components/searchbox/icons/page.svg";
 const char* kPedalsIconResourceName = "//theme/current-channel-logo";
-const char* kSearchSparkIconResourceName =
-    "//resources/cr_components/searchbox/icons/search_spark.svg";
+const char* kSearchIconResourceName = "//resources/images/icon_search.svg";
 const char* kSparkIconResourceName =
     "//resources/cr_components/searchbox/icons/spark.svg";
 const char* kStarActiveIconResourceName =
@@ -215,7 +216,7 @@ static void DefineChromeRefreshRealboxIcons() {
       "//resources/cr_components/searchbox/icons/page_cr23.svg";
   kPedalsIconResourceName =
       "//resources/cr_components/searchbox/icons/chrome_product_cr23.svg";
-  searchbox_internal::kSearchIconResourceName =
+  kSearchIconResourceName =
       "//resources/cr_components/searchbox/icons/search_cr23.svg";
   kTabIconResourceName =
       "//resources/cr_components/searchbox/icons/tab_cr23.svg";
@@ -335,7 +336,7 @@ void SearchboxHandler::SetupWebUIDataSource(content::WebUIDataSource* source,
       {"addContext", IDS_NTP_COMPOSE_ADD_CONTEXTS},
       {"addContextTitle", IDS_NTP_COMPOSE_ADD_CONTEXT_TITLE},
       {"addImage", IDS_NTP_COMPOSE_ADD_IMAGE},
-      {"addTab", IDS_NTP_COMPOSE_MOST_RECENT_TABS},
+      {"addTab", IDS_NTP_COMPOSEBOX_TAB_PICKER_ADD_TABS_TITLE},
       {"dismissButton", IDS_NTP_DISMISS},
       // TODO(b/467036804): Update the value of `lensSearchAriaLabel`.
       {"lensSearchAriaLabel", IDS_CONTENT_CONTEXT_LENS_OVERLAY},
@@ -368,6 +369,8 @@ void SearchboxHandler::SetupWebUIDataSource(content::WebUIDataSource* source,
        IDS_NTP_COMPOSE_FILE_UPLOAD_VALIDATION_FAILED},
       {"composeboxFileUploadFailed", IDS_NTP_COMPOSE_FILE_UPLOAD_FAILED},
       {"composeboxFileUploadExpired", IDS_NTP_COMPOSE_FILE_UPLOAD_EXPIRED},
+      {"composeboxFileUploadNotAllowed",
+       IDS_NTP_COMPOSE_FILE_UPLOAD_NOT_ALLOWED},
       {"menu", IDS_MENU},
       {"uploadFile", IDS_NTP_COMPOSE_ADD_FILE},
       {"deepSearch", IDS_NTP_COMPOSE_DEEP_SEARCH},
@@ -414,9 +417,9 @@ void SearchboxHandler::SetupWebUIDataSource(content::WebUIDataSource* source,
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
           ? kGoogleGIconResourceName
 #else
-          ? searchbox_internal::kSearchIconResourceName
+          ? kSearchIconResourceName
 #endif
-          : searchbox_internal::kSearchIconResourceName);
+          : kSearchIconResourceName);
 
   source->AddBoolean("searchboxVoiceSearch", enable_voice_search);
   source->AddBoolean("searchboxLensSearch", enable_lens_search);
@@ -428,22 +431,16 @@ void SearchboxHandler::SetupWebUIDataSource(content::WebUIDataSource* source,
                      ntp_features::kNtpRealboxCr23SteadyStateShadow.Get());
 
   auto composebox_config = ntp_composebox::FeatureConfig::Get().config;
-  source->AddString("composeboxDragAndDropHint",
-                    l10n_util::GetPluralStringFUTF16(
-                        IDS_NTP_COMPOSE_DRAG_AND_DROP_HINT,
-                        composebox_config.composebox().max_num_files()));
-  source->AddString("maxFilesReachedError",
-                    l10n_util::GetPluralStringFUTF16(
-                        IDS_NTP_COMPOSE_MAX_FILES_REACHED_ERROR,
-                        composebox_config.composebox().max_num_files()));
   int max_images = 0;
   int max_pdfs = 0;
+  int max_files = 0;
   AimEligibilityService* service =
       AimEligibilityServiceFactory::GetForProfile(profile);
   const omnibox::SearchboxConfig* config =
       service ? service->GetSearchboxConfig() : nullptr;
 
   if (config && config->has_rule_set()) {
+    max_files = config->rule_set().max_total_inputs();
     for (const auto& rule : config->rule_set().input_type_rules()) {
       if (rule.input_type() == omnibox::INPUT_TYPE_LENS_IMAGE) {
         max_images = rule.max_instance();
@@ -452,6 +449,19 @@ void SearchboxHandler::SetupWebUIDataSource(content::WebUIDataSource* source,
       }
     }
   }
+
+  source->AddString(
+      "composeboxDragAndDropHint",
+      l10n_util::GetPluralStringFUTF16(
+          IDS_NTP_COMPOSE_DRAG_AND_DROP_HINT,
+          max_files > 0 ? max_files
+                        : composebox_config.composebox().max_num_files()));
+  source->AddString(
+      "maxFilesReachedError",
+      l10n_util::GetPluralStringFUTF16(
+          IDS_NTP_COMPOSE_MAX_FILES_REACHED_ERROR,
+          max_files > 0 ? max_files
+                        : composebox_config.composebox().max_num_files()));
   // TODO(crbug.com/483852166): Update the error messages to be more specific to
   // the input type.
   source->AddString(
@@ -544,7 +554,7 @@ std::string SearchboxHandler::AutocompleteIconToResourceName(
   } else if (icon.name == omnibox::kProductChromeRefreshIcon.name) {
     return kPedalsIconResourceName;
   } else if (icon.name == omnibox::kSearchSparkIcon.name) {
-    return kSearchSparkIconResourceName;
+    return searchbox_internal::kSearchSparkIconResourceName;
   } else if (icon.name == omnibox::kSparkIcon.name) {
     return kSparkIconResourceName;
   } else if (icon.name == omnibox::kStarActiveChromeRefreshIcon.name) {
@@ -558,7 +568,7 @@ std::string SearchboxHandler::AutocompleteIconToResourceName(
   } else if (icon.name == vector_icons::kHistoryChromeRefreshIcon.name) {
     return kHistoryIconResourceName;
   } else if (icon.name == vector_icons::kSearchChromeRefreshIcon.name) {
-    return searchbox_internal::kSearchIconResourceName;
+    return kSearchIconResourceName;
   }
 
   // Don't add new icons here. Add them alphabetically by `if` predicate. E.g.
@@ -930,9 +940,10 @@ void SearchboxHandler::QueryAutocomplete(const std::u16string& input,
   // Set the lens overlay suggest inputs, if available.
   if (std::optional<lens::proto::LensOverlaySuggestInputs> suggest_inputs =
           controller_->client()->GetLensOverlaySuggestInputs()) {
-    // Don't set lens params if in "Create Image" or "Canvas" mode. This
-    // prevents the contextual client from being used in this tool mode.
-    if (!GetInputState().image_gen_upload_active ||
+    // Don't set lens params if in "Create Image" with an image present or in
+    // "Canvas" mode. This prevents the contextual client from being used in
+    // this tool mode.
+    if (!GetInputState().image_gen_upload_active &&
         GetInputState().active_tool != omnibox::ToolMode::TOOL_MODE_CANVAS) {
       autocomplete_input.set_lens_overlay_suggest_inputs(*suggest_inputs);
     }
@@ -979,6 +990,60 @@ void SearchboxHandler::OpenAutocompleteMatch(uint8_t line,
                               disposition);
 }
 
+OmniboxPopupSelection ConvertSelection(
+    searchbox::mojom::OmniboxPopupSelectionPtr selection) {
+  OmniboxPopupSelection::LineState state =
+      OmniboxPopupSelection::LineState::LINE_STATE_MAX_VALUE;
+  switch (selection->state) {
+    case searchbox::mojom::SelectionLineState::kNormal: {
+      state = OmniboxPopupSelection::LineState::NORMAL;
+      break;
+    }
+    case searchbox::mojom::SelectionLineState::kKeywordMode: {
+      state = OmniboxPopupSelection::LineState::KEYWORD_MODE;
+      break;
+    }
+    case searchbox::mojom::SelectionLineState::kFocusedButtonAction: {
+      state = OmniboxPopupSelection::LineState::FOCUSED_BUTTON_ACTION;
+      break;
+    }
+    case searchbox::mojom::SelectionLineState::kFocusedButtonRemoveSuggestion: {
+      state =
+          OmniboxPopupSelection::LineState::FOCUSED_BUTTON_REMOVE_SUGGESTION;
+      break;
+    }
+    case searchbox::mojom::SelectionLineState::kFocusedButtonAim: {
+      state = OmniboxPopupSelection::LineState::FOCUSED_BUTTON_AIM;
+      break;
+    }
+    case searchbox::mojom::SelectionLineState::
+        kFocusedButtonContextEntrypoint: {
+      // Handled directly by webui omnibox popup.
+      NOTREACHED();
+    }
+  }
+  CHECK_NE(state, OmniboxPopupSelection::LineState::LINE_STATE_MAX_VALUE);
+  // Special case line for mojom equivalent of kNoMatch; it is represented
+  // as uint8_t so direct conversion would become a positive out of bounds
+  // index.
+  return OmniboxPopupSelection(selection->line == 255
+                                   ? OmniboxPopupSelection::kNoMatch
+                                   : selection->line,
+                               state, selection->action_index);
+}
+
+void SearchboxHandler::SetPopupSelection(
+    searchbox::mojom::OmniboxPopupSelectionPtr selection) {
+  edit_model()->SetPopupSelection(ConvertSelection(std::move(selection)), false,
+                                  false, false);
+}
+
+void SearchboxHandler::OpenPopupSelection(
+    searchbox::mojom::OmniboxPopupSelectionPtr selection,
+    WindowOpenDisposition disposition) {
+  edit_model()->OpenSelection(ConvertSelection(std::move(selection)));
+}
+
 void SearchboxHandler::OnNavigationLikely(
     uint8_t line,
     const GURL& url,
@@ -1019,12 +1084,8 @@ void SearchboxHandler::ActivateKeyword(
     const GURL& url,
     base::TimeTicks match_selection_timestamp,
     bool is_mouse_event) {
-  // Generic searchbox should not show keywords.
-  NOTREACHED();
-}
-
-void SearchboxHandler::ShowContextMenu(const gfx::Point& point) {
-  // Generic searchbox should not have a context menu.
+  // TODO(b/449785444): Allow embedders other than the Omnibox to activate
+  // keyword mode.
   NOTREACHED();
 }
 

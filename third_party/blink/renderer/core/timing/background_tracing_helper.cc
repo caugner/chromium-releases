@@ -6,7 +6,6 @@
 
 #include <string_view>
 
-#include "base/containers/contains.h"
 #include "base/containers/span.h"
 #include "base/feature_list.h"
 #include "base/numerics/byte_conversions.h"
@@ -207,11 +206,8 @@ size_t BackgroundTracingHelper::GetIdSuffixPos(StringView string) {
 }
 
 bool BackgroundTracingHelper::MarkNameIsTrigger(StringView mark_name) {
-  if (mark_name.length() < std::size(kTriggerPrefix)) {
-    return false;
-  }
-  return StringView(mark_name, 0, std::size(kTriggerPrefix) - 1) ==
-         kTriggerPrefix;
+  return mark_name.starts_with(kTriggerPrefix) &&
+         mark_name.length() >= std::size(kTriggerPrefix);
 }
 
 std::pair<StringView, std::optional<uint32_t>>

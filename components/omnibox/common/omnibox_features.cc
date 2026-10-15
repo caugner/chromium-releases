@@ -106,7 +106,9 @@ BASE_FEATURE(kOnDeviceHeadProviderIncognito,
 BASE_FEATURE(kOnDeviceHeadProviderNonIncognito,
              "OmniboxOnDeviceHeadProviderNonIncognito",
              ENABLED);
-BASE_FEATURE(kOnDeviceTailModel, "OmniboxOnDeviceTailModel", DISABLED);
+BASE_FEATURE(kOnDeviceTailModel,
+             "OmniboxOnDeviceTailModel",
+             enable_if(IS_ANDROID || IS_IOS));
 BASE_FEATURE(kOnDeviceTailEnableEnglishModel,
              "OmniboxOnDeviceTailEnableEnglishModel",
              ENABLED);
@@ -268,9 +270,6 @@ BASE_FEATURE(kOmniboxAsyncViewInflation, DISABLED);
 // Use FusedLocationProvider on Android to fetch device location.
 BASE_FEATURE(kUseFusedLocationProvider, ENABLED);
 
-// Enables storing successful query/match in the shortcut database On Android.
-BASE_FEATURE(kOmniboxShortcutsAndroid, ENABLED);
-
 // Updates various NTP/Omnibox assets and descriptions for visual alignment on
 // iOS.
 BASE_FEATURE(kOmniboxMobileParityUpdate, ENABLED);
@@ -338,6 +337,9 @@ BASE_FEATURE(kOmniboxDebugLogs, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kThinkingModelIconUpdate, base::FEATURE_DISABLED_BY_DEFAULT);
 
+// If enabled, animates the caret in the omnibox.
+BASE_FEATURE(kOmniboxAnimatedCaret, base::FEATURE_ENABLED_BY_DEFAULT);
+
 #if BUILDFLAG(IS_ANDROID)
 // Accelerates time from cold start to focused Omnibox on low-end devices,
 // prioritizing Omnibox focus and background initialization.
@@ -367,7 +369,7 @@ BASE_FEATURE(kOmniboxImprovementForLFF, DISABLED);
 BASE_FEATURE(kUrlBarWithoutLigatures, ENABLED);
 
 namespace android {
-static jlong JNI_OmniboxFeatureMap_GetNativeMap(JNIEnv* env) {
+static int64_t JNI_OmniboxFeatureMap_GetNativeMap(JNIEnv* env) {
   static const base::Feature* const kFeaturesExposedToJava[] = {
       &kDiagnostics,
       &kAnimateSuggestionsListAppearance,
@@ -387,7 +389,7 @@ static jlong JNI_OmniboxFeatureMap_GetNativeMap(JNIEnv* env) {
       &kRemoveSearchReadyOmnibox};
   static base::NoDestructor<base::android::FeatureMap> kFeatureMap(
       kFeaturesExposedToJava);
-  return reinterpret_cast<jlong>(kFeatureMap.get());
+  return reinterpret_cast<int64_t>(kFeatureMap.get());
 }
 }  // namespace android
 #endif  // BUILDFLAG(IS_ANDROID)

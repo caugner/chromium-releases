@@ -17,6 +17,7 @@
 #include "chrome/browser/glic/host/glic_web_client_access.h"
 #include "chrome/browser/glic/host/host_metrics.h"
 #include "chrome/browser/glic/public/glic_instance.h"
+#include "chrome/browser/glic/public/glic_passkeys.h"
 #include "chrome/common/actor/task_id.h"
 #include "components/autofill/core/browser/integrators/glic/actor_form_filling_types.h"
 #include "components/tabs/public/tab_interface.h"
@@ -36,6 +37,9 @@ class GlicPageHandler;
 class GlicWindowController;
 class WebUIContentsContainer;
 class GlicInstanceMetrics;
+class GlicInstanceMetricsBackwardsCompatibility;
+class EmptyInstanceDelegate;
+class GlicSkillsManager;
 
 // The host owns the WebUI that contains the main glic UI and the web client.
 // TODO(crbug.com/409332639): Better encapsulate details here.
@@ -140,12 +144,17 @@ class Host : public GlicSharingManagerProvider {
 
     virtual void OnInteractionModeChange(mojom::WebClientMode new_mode) = 0;
     virtual GlicInstanceMetrics* instance_metrics() = 0;
+    virtual GlicInstanceMetricsBackwardsCompatibility&
+    instance_metrics_backwards_compatibility() = 0;
 
     virtual bool IsActive() = 0;
   };
 
   class Observer : public base::CheckedObserver {
    public:
+    // Called when Glic is connected to the WebClient.
+    virtual void WebClientConnected() {}
+
     // Called when the client is ready to show, invoked sometime after
     // `Host::PanelWillOpen()` is called.
     virtual void ClientReadyToShow(const mojom::OpenPanelInfo&) {}
@@ -175,6 +184,8 @@ class Host : public GlicSharingManagerProvider {
   ~Host() override;
   Host& operator=(const Host&) = delete;
 
+  Profile* profile() const { return profile_; }
+
   void SetDelegate(EmbedderDelegate* delegate);
 
   struct PanelWillOpenOptions {
@@ -196,6 +207,8 @@ class Host : public GlicSharingManagerProvider {
     // active first.
     std::optional<std::vector<glic::mojom::ConversationInfoPtr>>
         recently_active_conversations;
+    // An override for the First Run Experience.
+    mojom::FreOverride fre_override = mojom::FreOverride::kUnspecified;
   };
   void PanelWillOpen(mojom::InvocationSource invocation_source,
                      PanelWillOpenOptions options);
@@ -230,10 +243,17 @@ class Host : public GlicSharingManagerProvider {
   // GlicSharingManagerProvider Implementation.
   GlicSharingManager& sharing_manager() override;
 
+  GlicSkillsManager& skills_manager();
+
   Host::InstanceDelegate& instance_delegate();
 
   GlicInstanceMetrics* instance_metrics() {
     return instance_delegate().instance_metrics();
+  }
+
+  GlicInstanceMetricsBackwardsCompatibility&
+  instance_metrics_backwards_compatibility() {
+    return instance_delegate().instance_metrics_backwards_compatibility();
   }
 
   WebUIContentsContainer* contents_container() { return contents_.get(); }
@@ -263,6 +283,14 @@ class Host : public GlicSharingManagerProvider {
   // Whether the primary web client is connected.
   bool IsReady() const;
   bool IsContextAccessIndicatorEnabled() const;
+
+  std::optional<mojom::InvocationSource> invocation_source() const {
+    return invocation_source_;
+  }
+
+  void SetInvocationSource(mojom::InvocationSource invocation_source) {
+    invocation_source_ = invocation_source;
+  }
 
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
@@ -389,8 +417,21 @@ class Host : public GlicSharingManagerProvider {
 
   void NotifyActorTaskListRowClicked(int32_t task_id);
 
+  void NotifySkillToInvokeChanged(mojom::SkillPtr skill);
+
+  void Invoke(mojom::InvokeOptionsPtr options, base::OnceClosure callback);
+  void InvokeWithAutoSubmit(InvokeWithAutoSubmitPasskey auto_submit_passkey,
+                            mojom::InvokeOptionsPtr options,
+                            base::OnceClosure callback);
+
+  void NotifyContextualSkillsChanged(
+      std::vector<mojom::SkillPreviewPtr> contextual_skill_previews);
+
  private:
   friend class HostManager;
+
+  void InvokeInternal(mojom::InvokeOptionsPtr options,
+                      base::OnceClosure callback);
 
   void WebUIPageHandlerAdded(GlicPageHandler* page_handler);
   void WebUIPageHandlerRemoved(GlicPageHandler* page_handler);
@@ -452,6 +493,9 @@ class Host : public GlicSharingManagerProvider {
   std::optional<PageHandlerInfo> handler_info_;
 
   raw_ptr<GlicSharingManagerProvider> sharing_manager_provider_;
+
+  // Responsible for skill update logic.
+  std::unique_ptr<GlicSkillsManager> skills_manager_;
 
   // The current view in the primary page handler.
   mojom::CurrentView primary_current_view_ = mojom::CurrentView::kConversation;
@@ -528,6 +572,7 @@ class HostManager {
   raw_ptr<Profile> profile_;
   base::WeakPtr<GlicWindowController> window_controller_;
   std::unique_ptr<EmptyEmbedderDelegate> empty_embedder_delegate_;
+  std::unique_ptr<EmptyInstanceDelegate> instance_delegate_stub_;
   // Hosts for any unclaimed page handlers, which is approximately limited to
   // chrome://glic in tabs. These are only important for developers, and do not
   // need to be fully functional.

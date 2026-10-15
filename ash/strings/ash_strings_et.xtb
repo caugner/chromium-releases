@@ -342,7 +342,6 @@
 <translation id="2201071101391734388">Hiljutine foto <ph name="INDEX" />/<ph name="TOTAL_COUNT" />.</translation>
 <translation id="2201687081523799384">Google Tasksi ahendamine</translation>
 <translation id="2208323208084708176">Ühendatud töölaua režiim</translation>
-<translation id="2210311543574621570">Lõikelaud kuvatakse, kui vajutate pikalt klahve Ctrl + v. Saate selle otsetee välja lülitada, lülitades lehel chrome://flags välja lipu #clipboard-history-longpress.</translation>
 <translation id="2215920961700443347">Internetiühendus puudub. Looge ühendus internetiga ja proovige uuesti.</translation>
 <translation id="2222841058024245321">Töölaud 7</translation>
 <translation id="2223384056430485343">Jagatud ekraanikuva režiimis</translation>
@@ -1456,7 +1455,7 @@ Teatud funktsioone on aku tööea pikendamiseks piiratud.</translation>
 <translation id="5791926618942305301">Määrake ekraanikuva jäädvustamises <ph name="SOURCE" /> <ph name="TYPE" />. Jäädvustamise tüübi valimiseks vajutage tabulaatorit. Jäädvustamiseks vajutage sisestusklahvi. Määrake jäädvustamisala valimisel osaline ekraanipilt. Kui see pole veel aktiivne, vajutage piirkonna valimiseks tühikut.</translation>
 <translation id="579415080077680903">Vaigistus</translation>
 <translation id="5802516411616338943">Ava kiirseaded</translation>
-<translation id="5804651031882187592">Lülitage seade „SIM-i lukustamine“ välja</translation>
+<translation id="5804651031882187592">Lülitage seade „SIMi lukustamine“ välja</translation>
 <translation id="5805809050170488595">Klõpsake võrgu <ph name="NETWORK_NAME" /> aktiveerimiseks</translation>
 <translation id="5818796501620225415">Saate rohkem aega lisada või keskendumisseansi lõpetada</translation>
 <translation id="5819918159912280082">Teie Chromebook taaskäivitati ootamatult. Avage oma eelmised aknad ja rakendused.</translation>
@@ -2196,7 +2195,6 @@ Seadme väljalülitamiseks vajutage uuesti pikalt seadme toitenuppu.</translatio
 <translation id="8241650983304689286">Vahelehe lisamine uuele poolitatud vaatele</translation>
 <translation id="8247060538831475781"><ph name="CONNECTION_STATUS" />, signaalitugevus: <ph name="SIGNAL_STRENGTH" />, telefoni aku: <ph name="BATTERY_STATUS" /></translation>
 <translation id="825129991941217170">Kuva kogu Google Drive'i sisu</translation>
-<translation id="8257510091797044096">Seadistage oma seade</translation>
 <translation id="8261506727792406068">Kustuta</translation>
 <translation id="8262312463845990408">Taasesituse käivitamine/peatamine</translation>
 <translation id="8268302343625273732">Vaadake kõiki ülesandeid Google Classroomis</translation>

@@ -931,7 +931,7 @@
 <translation id="5051044138948155788">Esta é a única páxina. Ao realizar esta acción, accederás á pantalla de inicio da función do escáner.</translation>
 <translation id="5053233795640754917">Pór en pausa</translation>
 <translation id="5056587122125565772">Crear imaxe</translation>
-<translation id="5078711626843651677">Os modelos de voz almacenaranse de forma temporal no dispositivo ata que remate o etiquetado de interlocutores. Podes desactivar esta opción cando queiras en Configuración.</translation>
+<translation id="5078711626843651677">Os modelos de voz almacenaranse de forma temporal no dispositivo ata que remate a etiquetaxe de interlocutores. Podes desactivar esta opción cando queiras en Configuración.</translation>
 <translation id="5078983345702708852">futurista</translation>
 <translation id="5087864757604726239">volver</translation>
 <translation id="5088172560898466307">Nome do host do servidor</translation>
@@ -1410,7 +1410,6 @@
 <translation id="7177485034254901881"><ph name="MANAGER" /> xestiona este dispositivo (<ph name="DEVICE_TYPE" />). Os administradores poden configuralo de forma remota.</translation>
 <translation id="7180611975245234373">Actualizar</translation>
 <translation id="7180865173735832675">Personalizar</translation>
-<translation id="7182063559013288142">Zona wifi instantánea</translation>
 <translation id="7184043045742675738">Fai clic en calquera tecla para personalizar o botón. Cambia a tecla de posición co rato ou coas teclas de frecha.</translation>
 <translation id="7187669805838282391">o mércores</translation>
 <translation id="7205318498545665455">Escolle o micrófono</translation>

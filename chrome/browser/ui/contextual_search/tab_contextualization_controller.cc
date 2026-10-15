@@ -8,12 +8,12 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/bind_post_task.h"
 #include "base/task/thread_pool.h"
-#include "chrome/browser/page_content_annotations/page_content_extraction_service.h"
 #include "chrome/browser/page_content_annotations/page_content_extraction_service_factory.h"
-#include "chrome/browser/page_content_annotations/page_content_extraction_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/lens/lens_features.h"
 #include "components/optimization_guide/content/browser/page_context_eligibility.h"
+#include "components/page_content_annotations/content/page_content_extraction_service.h"
+#include "components/page_content_annotations/core/page_content_extraction_types.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "components/viz/common/frame_sinks/copy_output_result.h"
 #include "content/public/browser/navigation_handle.h"
@@ -103,7 +103,10 @@ void TabContextualizationController::GetAnnotatedPageContent(
       optimization_guide::DefaultAIPageContentOptions(
           /*on_critical_path=*/true);
   ai_page_content_options->max_meta_elements = 20;
-  ai_page_content_options->include_same_site_only = true;
+  ai_page_content_options->include_same_site_only =
+      base::FeatureList::IsEnabled(
+          lens::features::
+              kLensRestrictAnnotatedPageContentToSameSiteFramesForNextQueries);
   optimization_guide::GetAIPageContent(tab_->GetContents(),
                                        std::move(ai_page_content_options),
                                        std::move(callback));
