@@ -10,10 +10,14 @@ export function getHtml(this: OmniboxAimAppElement) {
   // clang-format off
   return html`<!--_html_template_start_-->
 <div id="content">
-  <cr-composebox ntp-realbox-next-enabled
+  <cr-composebox id="composebox" searchbox-next-enabled
       searchbox-layout-mode="${this.searchboxLayoutMode_}"
+      ?disable-caret-color-animation="${this.disableCaretColorAnimation_}"
+      ?disable-composebox-animation="${this.disableComposeboxAnimation_}"
+      ?disable-voice-search-animation="${true}"
       @context-menu-entrypoint-click="${this.onContextualEntryPointClicked_}"
       @close-composebox="${this.onCloseComposebox_}"
+      @composebox-submit="${this.onComposeboxSubmit_}"
       entrypoint-name="Omnibox">
   </cr-composebox>
 </div>

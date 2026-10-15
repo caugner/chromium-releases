@@ -11,6 +11,7 @@
 #include "chromeos/ui/base/app_types.h"
 #include "chromeos/ui/base/window_properties.h"
 #include "components/exo/display.h"
+#include "components/exo/test/test_security_delegate.h"
 #include "components/exo/wayland/test/client_util.h"
 #include "components/exo/wayland/test/server_util.h"
 #include "components/exo/wayland/test/wayland_server_test.h"
@@ -18,7 +19,7 @@
 #include "components/exo/xdg_shell_surface.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/aura/client/aura_constants.h"
-#include "ui/compositor/scoped_animation_duration_scale_mode.h"
+#include "ui/gfx/scoped_animation_duration_scale_mode.h"
 #include "ui/views/test/test_widget_builder.h"
 
 namespace exo::wayland {
@@ -154,6 +155,16 @@ class WaylandAuraShellServerTest : public test::WaylandServerTest {
   }
 
   raw_ptr<Display, DanglingUntriaged> display_;
+};
+
+class RestrictedAuraShellServerTest : public WaylandAuraShellServerTest {
+ public:
+  std::unique_ptr<Server> CreateServer() override {
+    auto security_delegate =
+        std::make_unique<::exo::test::TestSecurityDelegate>();
+    security_delegate->SetCanSetSystemModal(false);
+    return WaylandServerTest::CreateServer(std::move(security_delegate));
+  }
 };
 
 // Home screen -> any window
@@ -409,8 +420,8 @@ TEST_F(WaylandAuraShellServerTest, OverviewMode) {
   // Need at least one window for overview animation.
   auto native_widget = views::test::TestWidgetBuilder().BuildOwnsNativeWidget();
 
-  ui::ScopedAnimationDurationScaleMode non_zero(
-      ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
+  gfx::ScopedAnimationDurationScaleMode non_zero(
+      gfx::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
 
   // Test starting overview and letting the animation complete.
   overview_controller->StartOverview(start_action);
@@ -543,6 +554,54 @@ TEST_F(WaylandAuraShellServerTest, SetUnSetFloat) {
   EXPECT_TRUE(window_state->IsFloated());
   EXPECT_TRUE(
       gfx::Rect(0, 300, 400, 300).Contains(widget->GetWindowBoundsInScreen()));
+}
+
+TEST_F(WaylandAuraShellServerTest, SetSystemModalAllowed) {
+  auto keys = SetupClientSurfaces();
+
+  std::unique_ptr<zaura_toplevel> zaura_toplevel;
+  PostToClientAndWait([&](test::TestClient* client) {
+    auto* data = client->GetDataAs<ClientData>();
+    zaura_toplevel.reset(zaura_shell_get_aura_toplevel_for_xdg_toplevel(
+        client->globals().aura_shell.get(),
+        data->test_surfaces_list[0].xdg_toplevel.get()));
+    zaura_toplevel_set_system_modal(zaura_toplevel.get());
+    wl_display_flush(client->display());
+    wl_display_roundtrip(client->display());
+    EXPECT_EQ(0, wl_display_get_error(client->display()));
+  });
+
+  AttachBufferToSurfaces();
+
+  WaylandXdgSurface* xdg_surface =
+      test::server_util::GetUserDataForResource<WaylandXdgSurface>(
+          server_.get(), keys[0].shell_surface_key);
+  ASSERT_TRUE(xdg_surface);
+  EXPECT_TRUE(xdg_surface->shell_surface->GetWidget()->IsModal());
+}
+
+TEST_F(RestrictedAuraShellServerTest, SetSystemModalDenied) {
+  auto keys = SetupClientSurfaces();
+
+  std::unique_ptr<zaura_toplevel> zaura_toplevel;
+  PostToClientAndWait([&](test::TestClient* client) {
+    auto* data = client->GetDataAs<ClientData>();
+    zaura_toplevel.reset(zaura_shell_get_aura_toplevel_for_xdg_toplevel(
+        client->globals().aura_shell.get(),
+        data->test_surfaces_list[0].xdg_toplevel.get()));
+    zaura_toplevel_set_system_modal(zaura_toplevel.get());
+    wl_display_flush(client->display());
+    wl_display_roundtrip(client->display());
+    EXPECT_EQ(0, wl_display_get_error(client->display()));
+  });
+
+  AttachBufferToSurfaces();
+
+  WaylandXdgSurface* xdg_surface =
+      test::server_util::GetUserDataForResource<WaylandXdgSurface>(
+          server_.get(), keys[0].shell_surface_key);
+  ASSERT_TRUE(xdg_surface);
+  EXPECT_FALSE(xdg_surface->shell_surface->GetWidget()->IsModal());
 }
 
 class WaylandAuraOutputServerTest : public test::WaylandServerTest {

@@ -20,6 +20,7 @@
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/common/buildflags.h"
+#include "ui/base/template_expressions.h"
 #include "url/origin.h"
 
 namespace content {
@@ -46,6 +47,10 @@ class CONTENT_EXPORT WebUIDataSourceImpl : public URLDataSourceImpl,
   void AddResourcePath(std::string_view path, int resource_id) override;
   void AddResourcePaths(base::span<const webui::ResourcePath> paths) override;
   void SetDefaultResource(int resource_id) override;
+  void SetResourcePathToResponse(std::string_view path,
+                                 std::string_view content) override;
+  void PopulateWebUIResources(
+      base::flat_map<std::string, std::string>& map) const override;
   void SetRequestFilter(const WebUIDataSource::ShouldHandleRequestCallback&
                             should_handle_request_callback,
                         const WebUIDataSource::HandleRequestCallback&
@@ -62,6 +67,9 @@ class CONTENT_EXPORT WebUIDataSourceImpl : public URLDataSourceImpl,
   url::Origin GetOrigin() override;
   void SetSupportedScheme(std::string_view scheme) override;
 
+  // URLDataSourceImpl:
+  const ui::TemplateReplacements* GetReplacements() const override;
+
   // Add the locale to the load time data defaults. May be called repeatedly.
   void EnsureLoadTimeDataDefaultsAdded();
 
@@ -71,6 +79,10 @@ class CONTENT_EXPORT WebUIDataSourceImpl : public URLDataSourceImpl,
   // URL path to resource ID (Grit IDR) map.
   const std::map<std::string, int>& path_to_idr_map() const {
     return path_to_idr_map_;
+  }
+
+  const std::map<std::string, std::string>& path_to_response_map() const {
+    return path_to_response_map_;
   }
 
  protected:
@@ -94,7 +106,7 @@ class CONTENT_EXPORT WebUIDataSourceImpl : public URLDataSourceImpl,
   friend class URLDataManagerBackendTest;
   friend class WebUIDataSource;
   friend class WebUIDataSourceTest;
-  friend class WebUIImplTest;
+  friend class WebUIImplTestBase;
 
   // Methods that match URLDataSource which are called by
   // InternalDataSource.
@@ -117,6 +129,7 @@ class CONTENT_EXPORT WebUIDataSourceImpl : public URLDataSourceImpl,
   int default_resource_;
   bool use_strings_js_ = false;
   std::map<std::string, int> path_to_idr_map_;
+  std::map<std::string, std::string> path_to_response_map_;
 #if BUILDFLAG(LOAD_WEBUI_FROM_DISK)
   std::map<int, std::string> idr_to_file_map_;
   bool load_from_disk_ = false;

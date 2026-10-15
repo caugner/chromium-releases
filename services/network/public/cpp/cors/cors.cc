@@ -134,15 +134,9 @@ const char kAccessControlAllowCredentials[] =
 const char kAccessControlAllowHeaders[] = "Access-Control-Allow-Headers";
 const char kAccessControlAllowMethods[] = "Access-Control-Allow-Methods";
 const char kAccessControlAllowOrigin[] = "Access-Control-Allow-Origin";
-const char kAccessControlAllowPrivateNetwork[] =
-    "Access-Control-Allow-Private-Network";
 const char kAccessControlMaxAge[] = "Access-Control-Max-Age";
 const char kAccessControlRequestHeaders[] = "Access-Control-Request-Headers";
 const char kAccessControlRequestMethod[] = "Access-Control-Request-Method";
-const char kAccessControlRequestPrivateNetwork[] =
-    "Access-Control-Request-Private-Network";
-const char kPrivateNetworkDeviceId[] = "Private-Network-Access-ID";
-const char kPrivateNetworkDeviceName[] = "Private-Network-Access-Name";
 
 }  // namespace header_names
 
@@ -483,7 +477,7 @@ std::vector<std::string> PrivilegedNoCorsHeaderNames() {
   return {"range"};
 }
 
-bool IsForbiddenMethod(const std::string& method) {
+bool IsForbiddenMethod(std::string_view method) {
   const std::string upper_method = base::ToUpperASCII(method);
   return upper_method == net::HttpRequestHeaders::kConnectMethod ||
          upper_method == net::HttpRequestHeaders::kTraceMethod ||

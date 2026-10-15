@@ -2,12 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "sandbox/linux/syscall_broker/broker_process.h"
 
 #include <errno.h>
@@ -28,6 +22,7 @@
 #include <string_view>
 #include <vector>
 
+#include "base/compiler_specific.h"
 #include "base/containers/flat_map.h"
 #include "base/containers/flat_set.h"
 #include "base/containers/span.h"
@@ -409,7 +404,7 @@ void TestOpenCpuinfo(bool fast_check_in_client, bool recursive) {
     base::ScopedFD cpuinfo_fd_closer(cpuinfo_fd);
     EXPECT_GE(cpuinfo_fd, 0);
     char buf[3];
-    memset(buf, 0, sizeof(buf));
+    UNSAFE_TODO(memset(buf, 0, sizeof(buf)));
     int read_len1 = read(cpuinfo_fd, buf, sizeof(buf));
     EXPECT_GT(read_len1, 0);
 
@@ -418,7 +413,7 @@ void TestOpenCpuinfo(bool fast_check_in_client, bool recursive) {
     base::ScopedFD cpuinfo_fd2_closer(cpuinfo_fd2);
     EXPECT_GE(cpuinfo_fd2, 0);
     char buf2[3];
-    memset(buf2, 1, sizeof(buf2));
+    UNSAFE_TODO(memset(buf2, 1, sizeof(buf2)));
     int read_len2 = read(cpuinfo_fd2, buf2, sizeof(buf2));
     EXPECT_GT(read_len1, 0);
 
@@ -426,7 +421,7 @@ void TestOpenCpuinfo(bool fast_check_in_client, bool recursive) {
     EXPECT_EQ(read_len1, read_len2);
     // Compare the cpuinfo as returned by the broker with the one we opened
     // ourselves.
-    EXPECT_EQ(memcmp(buf, buf2, read_len1), 0);
+    UNSAFE_TODO(EXPECT_EQ(memcmp(buf, buf2, read_len1), 0));
 
     ASSERT_TRUE(TestUtils::CurrentProcessHasChildren());
   }
@@ -456,6 +451,72 @@ TEST(BrokerProcess, OpenCpuinfoWithClientCheckRecursive) {
 
 TEST(BrokerProcess, OpenCpuinfoNoClientCheckRecursive) {
   TestOpenCpuinfo(false /* fast_check_in_client */, true /* recursive */);
+  // Don't do anything here, so that ASSERT works in the subfunction as
+  // expected.
+}
+
+void TestOpenDirectory(bool fast_check_in_client) {
+  base::ScopedTempDir temp_dir;
+  ASSERT_TRUE(
+      temp_dir.CreateUniqueTempDirUnderPath(base::FilePath(kTempDirForTests)));
+  const std::string temp_dir_str = temp_dir.GetPath().MaybeAsASCII();
+  ASSERT_FALSE(temp_dir_str.empty());
+
+  base::FilePath sub_dir_path = temp_dir.GetPath().AppendASCII("sub");
+  ASSERT_TRUE(base::CreateDirectory(sub_dir_path));
+  const std::string sub_dir_str = sub_dir_path.MaybeAsASCII();
+  ASSERT_FALSE(sub_dir_str.empty());
+
+  base::FilePath file_path = temp_dir.GetPath().AppendASCII("file");
+  ASSERT_TRUE(base::WriteFile(file_path, "data"));
+  const std::string file_str = file_path.MaybeAsASCII();
+  ASSERT_FALSE(file_str.empty());
+
+  BrokerCommandSet command_set = MakeBrokerCommandSet({COMMAND_OPEN});
+  std::vector<BrokerFilePermission> permissions = {
+      BrokerFilePermission::ReadWriteCreateRecursive(temp_dir_str + "/")};
+  auto policy = std::make_optional<BrokerSandboxConfig>(
+      command_set, permissions, kFakeErrnoSentinel);
+  BrokerProcess open_broker(std::move(policy), BrokerType::SIGNAL_BASED,
+                            fast_check_in_client);
+  ASSERT_TRUE(open_broker.Fork(base::BindOnce(&NoOpCallback)));
+
+  // Regular files under the recursive prefix open normally.
+  int fd =
+      open_broker.GetBrokerClientSignalBased()->Open(file_str.c_str(), O_RDWR);
+  EXPECT_GE(fd, 0);
+  if (fd >= 0) {
+    EXPECT_EQ(0, IGNORE_EINTR(close(fd)));
+  }
+
+  // Opening a directory under the recursive prefix is allowed.
+  fd = open_broker.GetBrokerClientSignalBased()->Open(sub_dir_str.c_str(),
+                                                      O_RDONLY);
+  EXPECT_GE(fd, 0);
+  if (fd >= 0) {
+    EXPECT_EQ(0, IGNORE_EINTR(close(fd)));
+  }
+  fd = open_broker.GetBrokerClientSignalBased()->Open(sub_dir_str.c_str(),
+                                                      O_RDONLY | O_DIRECTORY);
+  EXPECT_GE(fd, 0);
+  if (fd >= 0) {
+    EXPECT_EQ(0, IGNORE_EINTR(close(fd)));
+  }
+
+  // The recursive root itself, reached via a "/." suffix, is rejected.
+  fd = open_broker.GetBrokerClientSignalBased()->Open(
+      (temp_dir_str + "/.").c_str(), O_RDONLY);
+  EXPECT_EQ(fd, -kFakeErrnoSentinel);
+}
+
+TEST(BrokerProcess, OpenDirectoryClient) {
+  TestOpenDirectory(true /* fast_check_in_client */);
+  // Don't do anything here, so that ASSERT works in the subfunction as
+  // expected.
+}
+
+TEST(BrokerProcess, OpenDirectoryHost) {
+  TestOpenDirectory(false /* fast_check_in_client */);
   // Don't do anything here, so that ASSERT works in the subfunction as
   // expected.
 }
@@ -496,7 +557,7 @@ TEST(BrokerProcess, OpenFileRW) {
   len = read(tempfile.fd(), buf, sizeof(buf));
 
   ASSERT_EQ(len, static_cast<ssize_t>(sizeof(test_text)));
-  ASSERT_EQ(memcmp(test_text, buf, sizeof(test_text)), 0);
+  UNSAFE_TODO(ASSERT_EQ(memcmp(test_text, buf, sizeof(test_text)), 0));
 
   ASSERT_EQ(close(tempfile2), 0);
 }
@@ -885,7 +946,7 @@ TEST(BrokerProcess, CreateFile) {
     char buf[1024];
     ssize_t len = HANDLE_EINTR(read(fd_check, buf, sizeof(buf)));
     ASSERT_EQ(len, static_cast<ssize_t>(sizeof(kTestText)));
-    ASSERT_EQ(memcmp(kTestText, buf, sizeof(kTestText)), 0);
+    UNSAFE_TODO(ASSERT_EQ(memcmp(kTestText, buf, sizeof(kTestText)), 0));
   }
 
   // Cleanup.
@@ -923,7 +984,7 @@ void TestStatHelper(bool fast_check_in_client, bool follow_links) {
 
     ASSERT_TRUE(open_broker.Fork(base::BindOnce(&NoOpCallback)));
 
-    memset(&sb, 0, sizeof(sb));
+    UNSAFE_TODO(memset(&sb, 0, sizeof(sb)));
     EXPECT_EQ(-kFakeErrnoSentinel,
               open_broker.GetBrokerClientSignalBased()->DefaultStatForTesting(
                   tempfile_name, follow_links, &sb));
@@ -942,7 +1003,7 @@ void TestStatHelper(bool fast_check_in_client, bool follow_links) {
 
     ASSERT_TRUE(open_broker.Fork(base::BindOnce(&NoOpCallback)));
 
-    memset(&sb, 0, sizeof(sb));
+    UNSAFE_TODO(memset(&sb, 0, sizeof(sb)));
     EXPECT_EQ(-kFakeErrnoSentinel,
               open_broker.GetBrokerClientSignalBased()->DefaultStatForTesting(
                   nonesuch_name, follow_links, &sb));
@@ -957,7 +1018,7 @@ void TestStatHelper(bool fast_check_in_client, bool follow_links) {
 
     ASSERT_TRUE(open_broker.Fork(base::BindOnce(&NoOpCallback)));
 
-    memset(&sb, 0, sizeof(sb));
+    UNSAFE_TODO(memset(&sb, 0, sizeof(sb)));
     EXPECT_EQ(-kFakeErrnoSentinel,
               open_broker.GetBrokerClientSignalBased()->DefaultStatForTesting(
                   tempfile_name, follow_links, &sb));
@@ -973,7 +1034,7 @@ void TestStatHelper(bool fast_check_in_client, bool follow_links) {
 
     ASSERT_TRUE(open_broker.Fork(base::BindOnce(&NoOpCallback)));
 
-    memset(&sb, 0, sizeof(sb));
+    UNSAFE_TODO(memset(&sb, 0, sizeof(sb)));
     EXPECT_EQ(-ENOENT,
               open_broker.GetBrokerClientSignalBased()->DefaultStatForTesting(
                   nonesuch_name, follow_links, &sb));
@@ -1020,7 +1081,7 @@ void TestStatHelper(bool fast_check_in_client, bool follow_links) {
 
     ASSERT_TRUE(open_broker.Fork(base::BindOnce(&NoOpCallback)));
 
-    memset(&sb, 0, sizeof(sb));
+    UNSAFE_TODO(memset(&sb, 0, sizeof(sb)));
     EXPECT_EQ(-ENOENT,
               open_broker.GetBrokerClientSignalBased()->DefaultStatForTesting(
                   nonesuch_name, follow_links, &sb));
@@ -1069,7 +1130,7 @@ void TestStatHelper(bool fast_check_in_client, bool follow_links) {
 
     ASSERT_TRUE(open_broker.Fork(base::BindOnce(&NoOpCallback)));
 
-    memset(&sb, 0, sizeof(sb));
+    UNSAFE_TODO(memset(&sb, 0, sizeof(sb)));
     EXPECT_EQ(0,
               open_broker.GetBrokerClientSignalBased()->DefaultStatForTesting(
                   tempfile_name, follow_links, &sb));
@@ -1339,7 +1400,7 @@ void TestReadlinkHelper(bool fast_check_in_client) {
     ssize_t retlen = open_broker.GetBrokerClientSignalBased()->Readlink(
         newpath_name, buf, sizeof(buf));
     EXPECT_TRUE(retlen == static_cast<ssize_t>(strlen(oldpath_name)));
-    EXPECT_EQ(0, memcmp(oldpath_name, buf, retlen));
+    UNSAFE_TODO(EXPECT_EQ(0, memcmp(oldpath_name, buf, retlen)));
   }
   {
     // Actual file with permissions to see file, but too small a buffer.

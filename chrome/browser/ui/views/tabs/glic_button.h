@@ -60,9 +60,6 @@ class GlicButton : public TabStripNudgeButton,
   void RestoreDefaultLabel();
   void SetGlicPanelIsOpen(bool open);
 
-  // Update button for glic attachment state.
-  void SetGlicDetached(bool detached);
-
   // TabStripNudgeButton:
   void SetIsShowingNudge(bool is_showing) override;
 
@@ -115,6 +112,7 @@ class GlicButton : public TabStripNudgeButton,
  private:
   // views::LabelButton:
   void SetText(std::u16string_view text) override;
+  void NotifyClick(const ui::Event& event) override;
 
   // Creates the model for the context menu.
   std::unique_ptr<ui::SimpleMenuModel> CreateMenuModel();
@@ -157,6 +155,8 @@ class GlicButton : public TabStripNudgeButton,
   // Used to update the tooltip text when the showing states of the Glic
   // window/FRE change.
   void UpdateTooltipText();
+
+  void OnLabelVisibilityChanged();
 
   // Callback subscription for listening to changes to the Glic window
   // activation changes.
@@ -220,6 +220,9 @@ class GlicButton : public TabStripNudgeButton,
   // should be refactored to use the new solution in 144.
   bool is_animating_text_ = false;
   int default_label_width_ = 0;
+  // Keep track if the label is currently suppressed, for example, when the task
+  // icon is showing.
+  bool is_label_suppressed_ = false;
 
   base::WeakPtrFactory<GlicButton> weak_ptr_factory_{this};
 };

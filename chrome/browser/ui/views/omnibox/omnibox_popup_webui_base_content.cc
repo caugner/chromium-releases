@@ -7,6 +7,9 @@
 #include <string_view>
 
 #include "base/functional/bind.h"
+#include "base/metrics/histogram_functions.h"
+#include "chrome/browser/lifetime/browser_shutdown.h"
+#include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/omnibox/omnibox_controller.h"
@@ -16,6 +19,7 @@
 #include "chrome/browser/ui/views/omnibox/omnibox_context_menu.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_popup_aim_presenter.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_popup_presenter_base.h"
+#include "chrome/browser/ui/views/omnibox/omnibox_popup_tab_selection_listener.h"
 #include "chrome/browser/ui/views/omnibox/rounded_omnibox_results_frame.h"
 #include "chrome/browser/ui/webui/omnibox_popup/omnibox_popup_ui.h"
 #include "chrome/browser/ui/webui/omnibox_popup/omnibox_popup_web_contents_helper.h"
@@ -25,8 +29,6 @@
 #include "components/zoom/zoom_controller.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
-#include "third_party/blink/public/common/input/web_gesture_event.h"
-#include "third_party/blink/public/common/input/web_input_event.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/mojom/menu_source_type.mojom.h"
 #include "ui/gfx/geometry/rounded_corners_f.h"
@@ -96,7 +98,10 @@ void OmniboxPopupWebUIBaseContent::ShowUI() {
   // the content URL and create a new renderer.
   if (contents_wrapper_->web_contents() &&
       contents_wrapper_->web_contents()->IsCrashed()) {
+    base::UmaHistogramBoolean("Omnibox.Popup.WebUI.CrashRecovery", true);
     LoadContent();
+  } else {
+    base::UmaHistogramBoolean("Omnibox.Popup.WebUI.CrashRecovery", false);
   }
   SetWebContents(contents_wrapper_->web_contents());
 
@@ -121,9 +126,27 @@ void OmniboxPopupWebUIBaseContent::ResizeDueToAutoResize(
     content::WebContents* source,
     const gfx::Size& new_size) {
   WebView::ResizeDueToAutoResize(source, new_size);
-  if (GetVisible()) {
-    popup_presenter_->SetWidgetContentHeight(new_size.height());
-  }
+  // Debounce the resize event by 2 frame's time (assuming 60 Hz) to avoid
+  // flickering issues when the renderer sends a transient initial size.
+  // The issue is manifested as the popup being clipped at the top.
+  // This happens when:
+  // 1. Widget::Show() is called, then
+  // 2. SetBounds() is called with a smaller height.
+  // 3. a new frame is not generated timely after resize.
+  // As a result, the widget displays an old image that has an taller height,
+  // hence clipped.
+  //
+  // This debouncer suppresses the resize in step #2. The resize comes
+  // from the state when the WebUI document briefly contains empty suggestion
+  // result.
+  //
+  // TODO(crbug.com/474369306): there is a race condition between widget show
+  // and WebUI document update. The widget is shown too early. Remove the
+  // debouncer after making the JS initiate the widget show.
+  debounce_resize_timer_.Start(
+      FROM_HERE, base::Seconds(2) / 60,
+      base::BindOnce(&OmniboxPopupPresenterBase::OnContentHeightChanged,
+                     base::Unretained(popup_presenter_), new_size.height()));
 }
 
 bool OmniboxPopupWebUIBaseContent::HandleKeyboardEvent(
@@ -137,6 +160,15 @@ bool OmniboxPopupWebUIBaseContent::HandleKeyboardEvent(
       event, GetFocusManager());
 }
 
+void OmniboxPopupWebUIBaseContent::RequestMediaAccessPermission(
+    content::WebContents* web_contents,
+    const content::MediaStreamRequest& request,
+    content::MediaResponseCallback callback) {
+  // Note: This is needed for voice search in the AIM popup.
+  MediaCaptureDevicesDispatcher::GetInstance()->ProcessMediaAccessRequest(
+      web_contents, request, std::move(callback), /*extension=*/nullptr);
+}
+
 void OmniboxPopupWebUIBaseContent::SetContentURL(std::string_view url) {
   content_url_ = GURL(url);
   LoadContent();
@@ -148,8 +180,18 @@ void OmniboxPopupWebUIBaseContent::LoadContent() {
       content_url_, location_bar_view_->profile(), IDS_TASK_MANAGER_OMNIBOX);
   contents_wrapper_->SetHost(weak_factory_.GetWeakPtr());
   SetWebContents(contents_wrapper_->web_contents());
-  webui::SetBrowserWindowInterface(contents_wrapper_->web_contents(),
-                                   location_bar_view_->browser());
+  extensions::SetViewType(contents_wrapper_->web_contents(),
+                          extensions::mojom::ViewType::kComponent);
+  // LocationBarView can be instantiated in windows that do not have a
+  // Browser object (i.e Captive Portal). In that case, features depending on
+  // the browser are not supported and should be skipped.
+  if (Browser* browser = location_bar_view_->browser()) {
+    webui::SetBrowserWindowInterface(contents_wrapper_->web_contents(),
+                                     browser);
+    tab_selection_listener_ =
+        std::make_unique<OmniboxPopupTabSelectionListener>(
+            weak_factory_.GetWeakPtr(), browser->tab_strip_model());
+  }
   // Make the OmniboxController available to the OmniboxPopupUI.
   OmniboxPopupWebContentsHelper::CreateForWebContents(GetWebContents());
   OmniboxPopupWebContentsHelper::FromWebContents(GetWebContents())
@@ -170,24 +212,7 @@ void OmniboxPopupWebUIBaseContent::LoadContent() {
   OnViewBoundsChanged(location_bar_view_);
 }
 
-bool OmniboxPopupWebUIBaseContent::PreHandleGestureEvent(
-    content::WebContents* source,
-    const blink::WebGestureEvent& event) {
-  // Block gestures that will zoom on Mac devices (i.e. pinch to zoom
-  // and double tap to zoom)
-#if BUILDFLAG(IS_MAC)
-  if (blink::WebInputEvent::IsPinchGestureEventType(event.GetType())) {
-    return true;
-  }
-
-  if (event.GetType() == blink::WebInputEvent::Type::kGestureDoubleTap) {
-    return true;
-  }
-#endif
-  return false;
-}
-
-void OmniboxPopupWebUIBaseContent::OnWidgetClosed() {
+void OmniboxPopupWebUIBaseContent::OnPopupHidden() {
   // This removes the content from being considered for rendering by the
   // compositor while the popup is closed. The content is re-inserted right
   // before the view is displayed. This has the effect of tossing out old,
@@ -206,6 +231,16 @@ content::WebContents* OmniboxPopupWebUIBaseContent::GetWrappedWebContents() {
 
 void OmniboxPopupWebUIBaseContent::OnMenuClosed() {
   std::move(context_menu_).reset();
+}
+
+void OmniboxPopupWebUIBaseContent::PrimaryMainFrameRenderProcessGone(
+    base::TerminationStatus status) {
+  if (browser_shutdown::HasShutdownStarted()) {
+    return;
+  }
+
+  base::UmaHistogramEnumeration("Omnibox.Popup.WebUI.RendererProcessGoneStatus",
+                                status, base::TERMINATION_STATUS_MAX_ENUM);
 }
 
 BEGIN_METADATA(OmniboxPopupWebUIBaseContent)

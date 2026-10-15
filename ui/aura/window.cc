@@ -149,18 +149,31 @@ class ScopedCursorHider {
   ScopedCursorHider& operator=(const ScopedCursorHider&) = delete;
 
   ~ScopedCursorHider() {
-    if (!window_->IsRootWindow())
+    // Store the raw window pointer in a local variable and clear the `window_`
+    // raw_ptr to nullptr before carrying out the rest of the destructor. Since
+    // the window can be synchronously destroyed inside display query sink calls
+    // below, clearing the raw_ptr while the window is still alive prevents
+    // Chromium's dangling raw_ptr checks from triggering on destruction.
+    Window* window = window_;
+    window_ = nullptr;
+
+    if (!window->IsRootWindow()) {
       return;
+    }
 
     // Update the device scale factor of the cursor client only when the last
     // mouse location is on this root window.
     if (hid_cursor_) {
-      client::CursorClient* cursor_client = client::GetCursorClient(window_);
-      if (cursor_client) {
-        const display::Display& display =
-            display::Screen::Get()->GetDisplayNearestWindow(window_);
-        cursor_client->SetDisplay(display);
-        cursor_client->ShowCursor();
+      aura::WindowTracker tracker;
+      tracker.Add(window);
+      const display::Display& display =
+          display::Screen::Get()->GetDisplayNearestWindow(window);
+      if (tracker.Contains(window)) {
+        client::CursorClient* cursor_client = client::GetCursorClient(window);
+        if (cursor_client) {
+          cursor_client->SetDisplay(display);
+          cursor_client->ShowCursor();
+        }
       }
     }
   }
@@ -389,7 +402,11 @@ bool Window::IsVisible() const {
 }
 
 Window::OcclusionState Window::GetOcclusionState() const {
+#if BUILDFLAG(IS_CHROMEOS)
+  return occlusion_state_override_.value_or(occlusion_state_);
+#else
   return occlusion_state_;
+#endif
 }
 
 ScopedWindowCaptureRequest Window::MakeWindowCapturable() {
@@ -1115,6 +1132,13 @@ void Window::SetOcclusionInfo(OcclusionState occlusion_state,
   OcclusionState old_occlusion_state = occlusion_state_;
   occlusion_state_ = occlusion_state;
   occluded_region_in_root_ = occluded_region;
+
+#if BUILDFLAG(IS_CHROMEOS)
+  if (occlusion_state_override_) {
+    return;
+  }
+#endif  // BUILDFLAG(IS_CHROMEOS)
+
   if (delegate_)
     delegate_->OnWindowOcclusionChanged(old_occlusion_state, occlusion_state);
 
@@ -1515,6 +1539,36 @@ void Window::SetOpaqueRegionsForOcclusion(
   opaque_regions_for_occlusion_ = opaque_regions_for_occlusion;
   for (auto& observer : observers_)
     observer.OnWindowOpaqueRegionsForOcclusionChanged(this);
+}
+
+#if BUILDFLAG(IS_CHROMEOS)
+void Window::SetOcclusionStateOverride(
+    std::optional<OcclusionState> occlusion_state) {
+  if (occlusion_state == occlusion_state_override_) {
+    return;
+  }
+  auto old_occlusion_state =
+      occlusion_state ? occlusion_state_override_.value_or(occlusion_state_)
+                      : occlusion_state_override_.value();
+  occlusion_state_override_ = occlusion_state;
+
+  if (delegate_) {
+    delegate_->OnWindowOcclusionChanged(old_occlusion_state,
+                                        GetOcclusionState());
+  }
+
+  for (WindowObserver& observer : observers_) {
+    observer.OnWindowOcclusionChanged(this);
+  }
+}
+#endif
+
+base::WeakPtr<ui::GestureConsumer> Window::GetWeakPtr() {
+  return weak_factory_.GetWeakPtr();
+}
+
+base::WeakPtr<aura::Window> Window::GetWeakPtrAsWindow() {
+  return weak_factory_.GetWeakPtr();
 }
 
 void Window::NotifyResizeLoopStarted() {

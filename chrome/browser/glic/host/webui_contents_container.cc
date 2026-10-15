@@ -47,6 +47,7 @@ WebUIContentsContainer::WebUIContentsContainer(
   CHECK(web_contents_);
   Observe(web_contents_.get());
   web_contents_->SetPageBaseBackgroundColor(SK_ColorTRANSPARENT);
+  web_contents_->SetSupportsDraggableRegions(true);
 
   web_contents_->GetController().LoadURLWithParams(
       content::NavigationController::LoadURLParams(
@@ -75,7 +76,7 @@ void WebUIContentsContainer::PrimaryMainFrameRenderProcessGone(
       web_contents_->GetBrowserContext());
   if (GlicEnabling::IsMultiInstanceEnabled()) {
     // TODO(crbug.com/454120908): swap for a reloaded host in case of a crash.
-    keyed_service->Close(web_contents_->GetPrimaryMainFrame());
+    keyed_service->CloseAndShutdown(web_contents_->GetPrimaryMainFrame());
   } else {
     keyed_service->CloseAndShutdown();
   }

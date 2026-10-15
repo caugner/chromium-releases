@@ -1642,18 +1642,18 @@ int HttpCache::Transaction::DoCacheReadResponse() {
   TransitionToState(STATE_CACHE_READ_RESPONSE_COMPLETE);
 
   io_buf_len_ = entry_->GetEntry()->GetDataSize(kResponseInfoIndex);
-  read_buf_ = base::MakeRefCounted<IOBufferWithSize>(io_buf_len_);
+  cache_buf_ = base::MakeRefCounted<IOBufferWithSize>(io_buf_len_);
 
   net_log_.BeginEvent(NetLogEventType::HTTP_CACHE_READ_INFO);
   BeginDiskCacheAccessTimeCount();
-  return entry_->GetEntry()->ReadData(kResponseInfoIndex, 0, read_buf_.get(),
+  return entry_->GetEntry()->ReadData(kResponseInfoIndex, 0, cache_buf_.get(),
                                       io_buf_len_, io_callback_);
 }
 
 int HttpCache::Transaction::DoCacheReadResponseComplete(int result) {
   TRACE_EVENT_INSTANT(TRACE_DISABLED_BY_DEFAULT("net"),
                       "DoCacheReadResponseComplete", track_for_state_change_,
-                      "result", result, "io_buf_len", read_buf_->size());
+                      "result", result, "io_buf_len", cache_buf_->size());
   net_log_.EndEventWithNetErrorCode(NetLogEventType::HTTP_CACHE_READ_INFO,
                                     result);
   EndDiskCacheAccessTimeCount(DiskCacheAccessType::kRead);
@@ -1661,8 +1661,8 @@ int HttpCache::Transaction::DoCacheReadResponseComplete(int result) {
   // Record the time immediately before the cached response is parsed.
   read_headers_since_ = TimeTicks::Now();
 
-  if (result != read_buf_->size() ||
-      !HttpCache::ParseResponseInfo(read_buf_->span(), &response_,
+  if (result != cache_buf_->size() ||
+      !HttpCache::ParseResponseInfo(cache_buf_->span(), &response_,
                                     &truncated_)) {
     return OnCacheReadError(result, true);
   }
@@ -2828,7 +2828,16 @@ int HttpCache::Transaction::BeginCacheValidation() {
     // LOAD_FROM_CACHE_IF_OFFLINE case.
     if (!ConditionalizeRequest()) {
       couldnt_conditionalize_request_ = true;
-      UpdateCacheEntryStatus(CacheEntryStatus::ENTRY_CANT_CONDITIONALIZE);
+      if (cache_entry_status_ != CacheEntryStatus::ENTRY_CANT_CONDITIONALIZE) {
+        // `cache_entry_status_` may already be marked as
+        // `ENTRY_CANT_CONDITIONALIZE`. This can occur if an existed cache entry
+        // was initially deemed unusable (e.g. a "no-cache" header), and then,
+        // another concurrent same URL transactions receives the "no-cache"
+        // response again which leads this transaction's BeginCacheValidation()
+        // to re-evaluate the entry as unusable. This check avoids redundant
+        // status updates.
+        UpdateCacheEntryStatus(CacheEntryStatus::ENTRY_CANT_CONDITIONALIZE);
+      }
       if (partial_) {
         return DoRestartPartialRequest();
       }
@@ -3134,10 +3143,14 @@ HttpCache::Transaction::GetHttpCacheEntryRejectionStatus(
     return HttpCacheEntryRejectionStatus::kNoRejectionLoadOnlyFromCache;
   }
 
-  return (in_memory_info & HINT_UNUSABLE_PER_CACHING_HEADERS) ==
-                 HINT_UNUSABLE_PER_CACHING_HEADERS
+  if ((in_memory_info & HINT_UNUSABLE_PER_CACHING_HEADERS) !=
+      HINT_UNUSABLE_PER_CACHING_HEADERS) {
+    return HttpCacheEntryRejectionStatus::kNoRejectionUsable;
+  }
+
+  return base::FeatureList::IsEnabled(features::kHttpCacheSkipUnusableEntry)
              ? HttpCacheEntryRejectionStatus::kRejection
-             : HttpCacheEntryRejectionStatus::kNoRejectionUsable;
+             : HttpCacheEntryRejectionStatus::kNoRejectionHintDisabled;
 }
 
 bool HttpCache::Transaction::MaybeRejectBasedOnEntryInMemoryData(
@@ -3515,8 +3528,7 @@ int HttpCache::Transaction::WriteResponseInfoToEntry(
     if (request_->is_main_frame_navigation) {
       in_memory_data |= HINT_HIGH_PRIORITY;
     }
-    cache_->GetCurrentBackend()->SetEntryInMemoryData(cache_key_,
-                                                      in_memory_data);
+    entry_->GetEntry()->SetEntryInMemoryData(in_memory_data);
   }
 
   BeginDiskCacheAccessTimeCount();
@@ -4034,10 +4046,10 @@ void HttpCache::Transaction::SaveNetworkTransactionInfo(
   network_transaction_info_.received_body_bytes =
       transaction.GetReceivedBodyBytes();
 
-  ConnectionAttempts attempts = transaction.GetConnectionAttempts();
-  for (const auto& attempt : attempts) {
-    network_transaction_info_.old_connection_attempts.push_back(attempt);
-  }
+  const auto connection_attempts = transaction.GetConnectionAttempts();
+  network_transaction_info_.old_connection_attempts.insert(
+      network_transaction_info_.old_connection_attempts.end(),
+      connection_attempts.begin(), connection_attempts.end());
   network_transaction_info_.old_remote_endpoint = IPEndPoint();
   transaction.GetRemoteEndpoint(&network_transaction_info_.old_remote_endpoint);
 

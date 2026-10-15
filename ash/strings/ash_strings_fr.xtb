@@ -234,7 +234,7 @@
 <translation id="1747827819627189109">Clavier à l'écran activé</translation>
 <translation id="1749109475624620922">La fenêtre <ph name="WINDOW_TITLE" /> est associée à tous les bureaux</translation>
 <translation id="1750088060796401187">Seuls <ph name="MAX_DESK_LIMIT" /> bureaux sont autorisés. Supprimez un bureau pour en ajouter un.</translation>
-<translation id="1751335846119670066">M'aider à lire</translation>
+<translation id="1751335846119670066">Aide-moi à lire</translation>
 <translation id="1755408179247123630">Activer Sélectionner pour écouter ?</translation>
 <translation id="1755556344721611131">Appli de diagnostic</translation>
 <translation id="1756833229520115364">Impossible d'enregistrer le modèle. Il y a trop de fenêtres ou d'onglets.</translation>
@@ -1906,7 +1906,7 @@ Branchez votre appareil sur une source d'alimentation.</translation>
 <translation id="735745346212279324">VPN déconnecté</translation>
 <translation id="7360036564632145207">Vous pouvez optimiser les performances en modifiant le paramètre "Protection de l'accès aux données pour les périphériques"</translation>
 <translation id="736045644501761622">Définir le fond d'écran et le style</translation>
-<translation id="7368041336688136012">Vous devez avoir au moins 18 ans pour utiliser M'aider à lire, M'aider à écrire et pour créer des images avec l'IA.</translation>
+<translation id="7368041336688136012">Vous devez avoir au moins 18 ans pour utiliser Aide-moi à lire et Aide-moi à écrire, et pour créer des images avec l'IA.</translation>
 <translation id="7371404428569700291">Enregistrer la fenêtre</translation>
 <translation id="7372069265635026568"><ph name="AVAILABLE_MEMORY" /> de mémoire disponible sur un total de <ph name="TOTAL_MEMORY" /></translation>
 <translation id="737315737514430195">L'accès au micro est accordé à l'ensemble des sites Web et applis ayant l'autorisation d'y accéder</translation>
@@ -2411,6 +2411,7 @@ Pour éteindre l'appareil, appuyez à nouveau de manière prolongée sur le bout
 <translation id="9050999376345823055">Appuyer sur "." pour relâcher</translation>
 <translation id="906458777597946297">Agrandir la fenêtre</translation>
 <translation id="9065203028668620118">Modifier</translation>
+<translation id="9068849894565669697">Sélectionner couleur</translation>
 <translation id="9071966355747967534"><ph name="FEATURE_NAME" /> n'est pas disponible</translation>
 <translation id="9072519059834302790">Temps restant avant que la batterie soit déchargée : <ph name="TIME_LEFT" />.</translation>
 <translation id="9074432941673450836">Utilisez des applis pour tout ce dont vous avez besoin sur votre <ph name="PRODUCT_NAME" />. Vous trouverez vos applis dans le Lanceur d'applications. Vous pouvez également appuyer sur la touche Lanceur d'applications (au-dessus de la touche Maj gauche) du clavier.</translation>
@@ -2474,7 +2475,7 @@ Pour éteindre l'appareil, appuyez à nouveau de manière prolongée sur le bout
 <translation id="954052413789300507">Espace insuffisant pour <ph name="FILENAME" />. Libérez de l'espace.</translation>
 <translation id="954520015070501466">30 min</translation>
 <translation id="956452277966142925">Paramètres du tableau de bord Jeux</translation>
-<translation id="961856697154696964">Suppr. données navigation</translation>
+<translation id="961856697154696964">Supprimer les données de navigation</translation>
 <translation id="974545358917229949">Affichage de <ph name="RESULT_COUNT" /> résultats pour <ph name="QUERY" /></translation>
 <translation id="981011780479609956">Aucune date limite</translation>
 <translation id="98120814841227350">Accéder à la fin du document</translation>

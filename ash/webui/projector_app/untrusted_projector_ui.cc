@@ -20,7 +20,6 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/common/url_constants.h"
-#include "ui/webui/color_change_listener/color_change_handler.h"
 #include "ui/webui/webui_allowlist.h"
 #include "url/gurl.h"
 
@@ -99,8 +98,13 @@ void CreateAndAddProjectorHTMLSource(content::WebUI* web_ui,
 UntrustedProjectorUI::UntrustedProjectorUI(
     content::WebUI* web_ui,
     UntrustedProjectorUIDelegate* delegate,
-    PrefService* pref_service)
-    : UntrustedWebUIController(web_ui), pref_service_(pref_service) {
+    PrefService* pref_service,
+    signin::IdentityManager* identity_manager,
+    network::mojom::URLLoaderFactory* url_loader_factory)
+    : UntrustedWebUIController(web_ui),
+      pref_service_(pref_service),
+      identity_manager_(identity_manager),
+      url_loader_factory_(url_loader_factory) {
   CreateAndAddProjectorHTMLSource(web_ui, delegate);
   ProjectorAppClient::Get()->NotifyAppUIActive(true);
 }
@@ -118,18 +122,13 @@ void UntrustedProjectorUI::BindInterface(
   receiver_.Bind(std::move(factory));
 }
 
-void UntrustedProjectorUI::BindInterface(
-    mojo::PendingReceiver<color_change_listener::mojom::PageHandler> receiver) {
-  color_provider_handler_ = std::make_unique<ui::ColorChangeHandler>(
-      web_ui()->GetWebContents(), std::move(receiver));
-}
-
 void UntrustedProjectorUI::Create(
     mojo::PendingReceiver<projector::mojom::UntrustedProjectorPageHandler>
         projector_handler,
     mojo::PendingRemote<projector::mojom::UntrustedProjectorPage> projector) {
   page_handler_ = std::make_unique<UntrustedProjectorPageHandlerImpl>(
-      std::move(projector_handler), std::move(projector), pref_service_);
+      std::move(projector_handler), std::move(projector), pref_service_,
+      identity_manager_, url_loader_factory_);
 }
 
 WEB_UI_CONTROLLER_TYPE_IMPL(UntrustedProjectorUI)

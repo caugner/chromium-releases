@@ -7,6 +7,7 @@
 #include <string>
 
 #include "base/feature_list.h"
+#include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
 #include "build/branding_buildflags.h"
 #include "chrome/browser/task_manager/common/task_manager_features.h"
@@ -61,6 +62,37 @@ ui::ColorTransform SelectColorBasedOnDarkInputOrMode(
                              std::move(light_mode_color_transform));
 }
 
+// Determines a color to use for Actor Ui components based on the tab frame
+// color used in custom themes. In the near-white case, we default to use an
+// accent color instead.
+ui::ColorTransform SelectActorUiColorBasedOnNearWhiteInput() {
+  return base::BindRepeating(
+      [](SkColor input_color, const ui::ColorMixer& mixer) {
+        const SkColor frame_color = mixer.GetResultColor(ui::kColorFrameActive);
+
+        // 1.0f is white. For near-white scenarios, we want to use the accent
+        // color to ensure visibility.
+        constexpr float kThreshold = 1.1f;
+        if (color_utils::GetContrastRatio(frame_color, SK_ColorWHITE) <
+            kThreshold) {
+          return mixer.GetResultColor(ui::kColorAccent);
+        }
+
+        return frame_color;
+      });
+}
+
+// Blend the custom color (based on the tab frame of a custom theme) on
+// the provided alpha.
+ui::ColorTransform GetActorUiScrimColor(SkAlpha alpha) {
+  return base::BindRepeating(
+      [](SkAlpha alpha, SkColor input_color, const ui::ColorMixer& mixer) {
+        return color_utils::BlendTowardMaxContrast(
+            mixer.GetResultColor(ui::kColorFrameActive), alpha);
+      },
+      alpha);
+}
+
 ui::ColorTransform GetToolbarTopSeparatorColorTransform(
     ui::ColorTransform toolbar_color_transform,
     ui::ColorTransform frame_color_transform) {
@@ -106,6 +138,17 @@ void AddChromeColorMixer(ui::ColorProvider* provider,
       key.color_mode == ui::ColorProviderKey::ColorMode::kDark;
   ui::ColorMixer& mixer = provider->AddMixer();
 
+  mixer[kColorActorUiHandoffButtonBorder] =
+      SelectActorUiColorBasedOnNearWhiteInput();
+  mixer[kColorActorUiOverlayBorder] = SelectActorUiColorBasedOnNearWhiteInput();
+  mixer[kColorActorUiOverlayBorderGlow] =
+      SelectActorUiColorBasedOnNearWhiteInput();
+  mixer[kColorActorUiScrimStart] = GetActorUiScrimColor(
+      /*alpha=*/0x66);
+  mixer[kColorActorUiScrimMiddle] = GetActorUiScrimColor(
+      /*alpha=*/0x00);
+  mixer[kColorActorUiScrimEnd] = GetActorUiScrimColor(
+      /*alpha=*/0x26);
   mixer[kColorAppMenuHighlightSeverityLow] = AdjustHighlightColorForContrast(
       ui::kColorAlertLowSeverity, kColorToolbar);
   mixer[kColorAppMenuHighlightSeverityHigh] = {
@@ -120,6 +163,8 @@ void AddChromeColorMixer(ui::ColorProvider* provider,
   mixer[kColorAvatarButtonHighlightSyncError] = AdjustHighlightColorForContrast(
       ui::kColorAlertHighSeverity, kColorToolbar);
   mixer[kColorAvatarButtonHighlightSyncPaused] = {
+      kColorAvatarButtonHighlightDefault};
+  mixer[kColorAvatarButtonHighlightPasskeysLocked] = {
       kColorAvatarButtonHighlightDefault};
   mixer[kColorAvatarButtonHighlightSigninPaused] = {
       kColorAvatarButtonHighlightDefault};
@@ -342,13 +387,10 @@ void AddChromeColorMixer(ui::ColorProvider* provider,
   mixer[kColorPipWindowBackToTabButtonBackground] = {
       SkColorSetA(SK_ColorBLACK, 0x60)};
   mixer[kColorPipWindowBackground] = {SK_ColorBLACK};
-  mixer[kColorPipWindowControlsBackground] = {
-      SkColorSetA(gfx::kGoogleGrey900, 0xC1)};
   mixer[kColorPipWindowTopBarBackground] = {gfx::kGoogleGrey900};
   mixer[kColorPipWindowForeground] =
       ui::GetColorWithMaxContrast(kColorPipWindowBackground);
   mixer[kColorPipWindowForegroundInactive] = {gfx::kGoogleGrey500};
-  mixer[kColorPipWindowHangUpButtonForeground] = {gfx::kGoogleRed300};
   mixer[kColorPipWindowScrimFull] = {SkColorSetA(SK_ColorBLACK, 0x66)};
   mixer[kColorPipWindowScrimTopGradientStart] = {
       SkColorSetA(SK_ColorBLACK, 0xCD)};

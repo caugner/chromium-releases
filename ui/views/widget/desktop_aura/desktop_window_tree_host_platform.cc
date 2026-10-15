@@ -444,9 +444,17 @@ void DesktopWindowTreeHostPlatform::Show(ui::mojom::WindowShowState show_state,
 
   platform_window()->Show(DetermineInactivity(show_state));
 
+  auto weak_ptr = weak_factory_.GetWeakPtr();
+  if (!weak_ptr) {
+    return;
+  }
+
   switch (show_state) {
     case ui::mojom::WindowShowState::kMaximized:
       platform_window()->Maximize();
+      if (!weak_ptr) {
+        return;
+      }
       if (!restore_bounds.IsEmpty()) {
         // Enforce |restored_bounds_in_pixels_| since calling Maximize() could
         // have reset it.
@@ -461,6 +469,10 @@ void DesktopWindowTreeHostPlatform::Show(ui::mojom::WindowShowState show_state,
       break;
     default:
       break;
+  }
+
+  if (!weak_ptr) {
+    return;
   }
 
   if (native_widget_delegate_->CanActivate()) {
@@ -623,7 +635,11 @@ bool DesktopWindowTreeHostPlatform::IsActive() const {
 }
 
 void DesktopWindowTreeHostPlatform::Maximize() {
+  auto weak_ptr = weak_factory_.GetWeakPtr();
   platform_window()->Maximize();
+  if (!weak_ptr) {
+    return;
+  }
   if (IsMinimized()) {
     Show(ui::mojom::WindowShowState::kNormal, gfx::Rect());
   }
@@ -635,7 +651,11 @@ void DesktopWindowTreeHostPlatform::Minimize() {
 }
 
 void DesktopWindowTreeHostPlatform::Restore() {
+  auto weak_ptr = weak_factory_.GetWeakPtr();
   platform_window()->Restore();
+  if (!weak_ptr) {
+    return;
+  }
   Show(ui::mojom::WindowShowState::kNormal, gfx::Rect());
 }
 
@@ -1022,7 +1042,15 @@ void DesktopWindowTreeHostPlatform::OnActivationChanged(bool active) {
   }
   is_active_ = active;
   aura::WindowTreeHostPlatform::OnActivationChanged(active);
+
+  // HandleActivationChanged() notifications can cause the widget to be
+  // synchronously closed.
+  auto weak_this = weak_factory_.GetWeakPtr();
   desktop_native_widget_aura_->HandleActivationChanged(active);
+  if (!weak_this) {
+    return;
+  }
+
   ScheduleRelayout();
 }
 
@@ -1048,7 +1076,7 @@ SkPath DesktopWindowTreeHostPlatform::GetWindowMaskForWindowShapeInPixels() {
   SkPath window_mask = GetWindowMask(GetWidget());
   // Convert SkPath in DIPs to pixels.
   if (!window_mask.isEmpty()) {
-    window_mask.transform(
+    window_mask = window_mask.makeTransform(
         gfx::TransformToFlattenedSkMatrix(GetRootTransform()));
   }
   return window_mask;

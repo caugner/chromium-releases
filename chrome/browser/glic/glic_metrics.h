@@ -93,7 +93,11 @@ enum class ShareImageResult {
   kFailedSawNavigation = 8,
   kFailedDiscardedContents = 9,
   kFailedDetachedTab = 10,
-  kMaxValue = kFailedDetachedTab,
+  kFailedClipboardCopyPolicy = 11,
+  kFailedClipboardPastePolicy = 12,
+  kFailedNoInstance = 13,
+  kFailedClientUnreadied = 14,
+  kMaxValue = kFailedClientUnreadied,
 };
 
 // LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:ShareImageResult)
@@ -307,6 +311,12 @@ class GlicMetrics {
   void OnDetachedFromBrowser(AttachChangeReason reason);
 
   // ----Public API called by other glic classes-----
+  // Called when the "Trust-First Onboarding" flow is shown (side panel).
+  void OnTrustFirstOnboardingShown();
+  // Called when the user completes the onboarding flow (consents).
+  void OnTrustFirstOnboardingAccept();
+  // Called when the user dismisses the onboarding flow without consenting.
+  void OnTrustFirstOnboardingDismissed();
   // Called when the user clicks Accept in the FRE.
   void OnFreAccepted();
   // Called when the glic window starts to open.
@@ -487,6 +497,9 @@ class GlicMetrics {
   // reset together after the metric is recorded.
   // The timestamp when the glic window starts to be shown.
   base::TimeTicks show_start_time_;
+
+  // The timestamp when the onboarding flow was shown.
+  base::TimeTicks onboarding_shown_time_;
 
   // The following variables are used for recording scroll related metrics.
   // The number of scroll attempts  (tracked per session and reset when the

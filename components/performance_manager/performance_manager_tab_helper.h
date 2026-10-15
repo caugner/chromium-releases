@@ -74,6 +74,7 @@ class PerformanceManagerTabHelper
       content::RenderFrameHost* render_frame_host,
       content::RenderFrameHost::LifecycleState old_state,
       content::RenderFrameHost::LifecycleState new_state) override;
+  void OnVisibilityWillChange(content::Visibility visibility) override;
   void OnVisibilityChanged(content::Visibility visibility) override;
   void OnAudioStateChanged(bool audible) override;
   void OnFrameAudioStateChanged(content::RenderFrameHost* render_frame_host,
@@ -185,7 +186,10 @@ class PerformanceManagerTabHelper
       permission_controller_subscription_id_;
 
   raw_ptr<DestructionObserver> destruction_observer_ = nullptr;
-  base::ObserverList<Observer, true, false> observers_;
+  base::ObserverList<Observer,
+                     true,
+                     base::ObserverListReentrancyPolicy::kDisallowReentrancy>
+      observers_;
 
   WEB_CONTENTS_USER_DATA_KEY_DECL();
 };

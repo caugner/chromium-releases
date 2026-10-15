@@ -50,6 +50,9 @@
 
 namespace content {
 
+// The path to the generated strings.m.js file.
+constexpr char kStringsJsPath[] = "strings.m.js";
+
 // static
 WebUIDataSource* WebUIDataSource::CreateAndAdd(BrowserContext* browser_context,
                                                const std::string& source_name) {
@@ -183,9 +186,6 @@ class WebUIDataSourceImpl::InternalDataSource : public URLDataSource {
     return parent_->deny_xframe_options_;
   }
   bool ShouldServeMimeTypeAsContentTypeHeader() override { return true; }
-  const ui::TemplateReplacements* GetReplacements() override {
-    return &parent_->replacements_;
-  }
   bool ShouldReplaceI18nInJS() override {
     return parent_->ShouldReplaceI18nInJS();
   }
@@ -362,6 +362,10 @@ void WebUIDataSourceImpl::EnableReplaceI18nInJS() {
   should_replace_i18n_in_js_ = true;
 }
 
+const ui::TemplateReplacements* WebUIDataSourceImpl::GetReplacements() const {
+  return &replacements_;
+}
+
 void WebUIDataSourceImpl::EnsureLoadTimeDataDefaultsAdded() {
   if (!add_load_time_data_defaults_)
     return;
@@ -399,6 +403,28 @@ url::Origin WebUIDataSourceImpl::GetOrigin() {
   }
   CHECK(!result.opaque());
   return result;
+}
+
+void WebUIDataSourceImpl::SetResourcePathToResponse(std::string_view path,
+                                                    std::string_view content) {
+  CHECK(path != kStringsJsPath);
+  path_to_response_map_[std::string(path)] = std::string(content);
+}
+
+void WebUIDataSourceImpl::PopulateWebUIResources(
+    base::flat_map<std::string, std::string>& resource_map) const {
+  CHECK(!resource_map.contains(kStringsJsPath));
+  for (const auto& [path, content] : path_to_response_map_) {
+    resource_map[path] = content;
+  }
+
+  // Set strings last so that it won't be overridden by any other resources.
+  if (use_strings_js_) {
+    std::string generated_js;
+    webui::AppendJsonJS(localized_strings_, &generated_js,
+                        /*from_js_module=*/true);
+    resource_map[kStringsJsPath] = std::move(generated_js);
+  }
 }
 
 void WebUIDataSourceImpl::SetSupportedScheme(std::string_view scheme) {

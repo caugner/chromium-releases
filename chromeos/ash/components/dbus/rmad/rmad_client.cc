@@ -10,7 +10,6 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
-#include "base/functional/callback_forward.h"
 #include "base/logging.h"
 #include "base/memory/raw_ptr.h"
 #include "base/observer_list.h"
@@ -106,7 +105,9 @@ class RmadClientImpl : public RmadClient {
   void StartCheckForRmadFiles();
 
   raw_ptr<dbus::ObjectProxy> rmad_proxy_ = nullptr;
-  base::ObserverList<Observer, /*check_empty=*/true, /*allow_reentrancy=*/false>
+  base::ObserverList<Observer,
+                     /*check_empty=*/true,
+                     base::ObserverListReentrancyPolicy::kDisallowReentrancy>
       observers_;
 
   // True if the RMAD executable exists.

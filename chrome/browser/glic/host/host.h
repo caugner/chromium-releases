@@ -15,6 +15,7 @@
 #include "chrome/browser/glic/host/context/glic_sharing_manager_provider.h"
 #include "chrome/browser/glic/host/glic.mojom.h"
 #include "chrome/browser/glic/host/glic_web_client_access.h"
+#include "chrome/browser/glic/host/host_metrics.h"
 #include "chrome/browser/glic/public/glic_instance.h"
 #include "chrome/common/actor/task_id.h"
 #include "components/autofill/core/browser/integrators/glic/actor_form_filling_types.h"
@@ -23,7 +24,7 @@
 
 namespace actor {
 class ActorTaskDelegate;
-}
+}  // namespace actor
 
 class Profile;
 namespace content {
@@ -208,10 +209,8 @@ class Host : public GlicSharingManagerProvider {
   // Delete the owned web contents and prepare for destruction.
   void Shutdown();
 
-  // Request panel closing if the web contents is present and matches.
-  void Close(content::RenderFrameHost* outermost_render_frame_host);
-  // Reload the web contents, if it is present and matches.
-  void Reload(content::RenderFrameHost* render_frame_host);
+  // Request panel closing.
+  void Close();
   // Reload the web contents.
   void Reload();
 
@@ -236,6 +235,9 @@ class Host : public GlicSharingManagerProvider {
   WebUIContentsContainer* contents_container() { return contents_.get(); }
   // Returns the WebUI web contents. May be null.
   content::WebContents* webui_contents() const;
+
+  // Returns the WebClient web contents. May be null.
+  content::WebContents* web_client_contents() const;
 
   // Returns whether `contents` is the glic WebUI web contents.
   bool IsGlicWebUi(content::WebContents* contents) const;
@@ -278,6 +280,9 @@ class Host : public GlicSharingManagerProvider {
 
   // Informs the web client that additional context is available.
   void NotifyAdditionalContext(mojom::AdditionalContextPtr context);
+
+  // Returns the RenderProcessHost for the WebClient, or nullptr if none.
+  content::RenderProcessHost* GetWebClientRenderProcessHost() const;
 
   // Returns the current view (conversation or actuation) in the floaty.
   mojom::CurrentView GetPrimaryCurrentView();
@@ -334,6 +339,7 @@ class Host : public GlicSharingManagerProvider {
   // Sets the areas of the view from which it should be draggable.
   void SetPanelDraggableAreas(GlicPageHandler* page_handler,
                               const std::vector<gfx::Rect>& draggable_areas);
+
   // Sets the minimum widget size that the widget will allow the user to resize
   // to.
   void SetMinimumWidgetSize(GlicPageHandler* page_handler,
@@ -373,6 +379,10 @@ class Host : public GlicSharingManagerProvider {
 
   void FloatingPanelCanAttachChanged(bool can_attach);
 
+  // Returns if the outer frame matches either the WebUI frame or the guest
+  // frame.
+  bool IsWebContentPresentAndMatches(content::RenderFrameHost* rfh);
+
  private:
   friend class HostManager;
 
@@ -381,9 +391,6 @@ class Host : public GlicSharingManagerProvider {
   GlicKeyedService& glic_service();
   GlicPageHandler* page_handler() const;
   bool IsGlicWebUiHost(content::RenderProcessHost* host) const;
-  // Returns if the outer frame matches either the WebUI frame or the guest
-  // frame.
-  bool IsWebContentPresentAndMatches(content::RenderFrameHost* rfh);
 
   // Information about the page handler which is cleared when the page handler
   // goes away.
@@ -442,6 +449,11 @@ class Host : public GlicSharingManagerProvider {
 
   // The current view in the primary page handler.
   mojom::CurrentView primary_current_view_ = mojom::CurrentView::kConversation;
+
+  base::WeakPtr<content::WebContents> web_client_contents_;
+
+  HostMetrics metrics_;
+
   base::WeakPtrFactory<Host> weak_ptr_factory_{this};
 };
 

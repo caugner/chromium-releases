@@ -1,13 +1,18 @@
 // Copyright 2025 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.js';
+
 import type {ContextualUpload, TabUpload} from 'chrome://resources/cr_components/composebox/common.js';
+import {TabUploadOrigin} from 'chrome://resources/cr_components/composebox/common.js';
 import {ComposeboxMode} from 'chrome://resources/cr_components/composebox/contextual_entrypoint_and_carousel.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
+import type {PropertyValues} from 'chrome://resources/lit/v3_0/lit.rollup.js';
 import {CrLitElement} from 'chrome://resources/lit/v3_0/lit.rollup.js';
 
 import type {ActionChip, ActionChipsHandlerInterface, PageCallbackRouter, TabInfo} from '../action_chips.mojom-webui.js';
 import {ChipType} from '../action_chips.mojom-webui.js';
+import {WindowProxy} from '../window_proxy.js';
 
 import {getCss} from './action_chips.css.js';
 import {getHtml} from './action_chips.html.js';
@@ -21,6 +26,11 @@ namespace ActionChipsConstants {
 function recordClick(chipType: ChipType) {
   chrome.metricsPrivate.recordEnumerationValue(
       'NewTabPage.ActionChips.Click', chipType, ChipType.MAX_VALUE + 1);
+}
+
+// Records a latency metric.
+function recordLatency(metricName: string, latency: number) {
+  chrome.metricsPrivate.recordTime(metricName, Math.round(latency));
 }
 
 /**
@@ -57,13 +67,28 @@ export class ActionChipsElement extends CrLitElement {
   static override get properties() {
     return {
       actionChips_: {type: Array, state: true},
+      showSimplifiedUI_: {
+        type: Boolean,
+        reflect: true,
+      },
+      showDismissalUI_: {
+        type: Boolean,
+        reflect: true,
+      },
+      themeHasBackgroundImage: {type: Boolean, reflect: true},
     };
   }
 
   private handler: ActionChipsHandlerInterface;
   private callbackRouter: PageCallbackRouter;
   protected accessor actionChips_: ActionChip[] = [];
+  accessor themeHasBackgroundImage: boolean = false;
+  protected accessor showSimplifiedUI_: boolean =
+      loadTimeData.getBoolean('ntpNextShowSimplificationUIEnabled');
+  protected accessor showDismissalUI_: boolean =
+      loadTimeData.getBoolean('ntpNextShowDismissalUIEnabled');
   private onActionChipChangedListenerId_: number|null = null;
+  private initialLoadStartTime_: number|null = null;
 
   private delayTabUploads_: boolean =
       loadTimeData.getBoolean('addTabUploadDelayOnActionChipClick');
@@ -79,12 +104,14 @@ export class ActionChipsElement extends CrLitElement {
         return 'banana';
       case ChipType.kDeepSearch:
         return 'deep-search';
+      case ChipType.kDeepDive:
+        return 'deep-dive';
       default:
         return '';
     }
   }
 
-  protected getId_(chip: ActionChip): string|null {
+  protected getId_(chip: ActionChip, index: number): string|null {
     switch (chip.type) {
       case ChipType.kImage:
         return 'nano-banana';
@@ -92,6 +119,8 @@ export class ActionChipsElement extends CrLitElement {
         return 'deep-search';
       case ChipType.kRecentTab:
         return 'tab-context';
+      case ChipType.kDeepDive:
+        return `deep-dive-${index}`;
       default:
         return null;
     }
@@ -102,6 +131,7 @@ export class ActionChipsElement extends CrLitElement {
     const proxy = ActionChipsApiProxyImpl.getInstance();
     this.handler = proxy.getHandler();
     this.callbackRouter = proxy.getCallbackRouter();
+    this.initialLoadStartTime_ = WindowProxy.getInstance().now();
   }
 
   override connectedCallback() {
@@ -125,11 +155,37 @@ export class ActionChipsElement extends CrLitElement {
     this.callbackRouter.removeListener(this.onActionChipChangedListenerId_!);
   }
 
+  override updated(changedProperties: PropertyValues<this>) {
+    super.updated(changedProperties);
+
+    // Records only the first load latency after rendering chips.
+    if (this.initialLoadStartTime_ !== null && this.actionChips_.length > 0) {
+      recordLatency(
+          'NewTabPage.ActionChips.WebUI.InitialLoadLatency',
+          WindowProxy.getInstance().now() - this.initialLoadStartTime_);
+      this.initialLoadStartTime_ = null;
+    }
+  }
+
   protected onCreateImageClick_() {
     recordClick(ChipType.kImage);
     this.onActionChipClick_(
         ActionChipsConstants.EMPTY_QUERY_STRING, [],
         ComposeboxMode.CREATE_IMAGE);
+  }
+
+  protected onDeepDiveClick_(chip: ActionChip) {
+    recordClick(ChipType.kDeepDive);
+    const tab = chip.tab!;
+    const deepDiveTabInfo: TabUpload = {
+      tabId: tab.tabId,
+      url: tab.url,
+      title: tab.title,
+      delayUpload: this.delayTabUploads_,
+      origin: TabUploadOrigin.ACTION_CHIP,
+    };
+    this.onActionChipClick_(
+        chip.suggestion, [deepDiveTabInfo], ComposeboxMode.DEFAULT);
   }
 
   protected onDeepSearchClick_() {
@@ -146,6 +202,7 @@ export class ActionChipsElement extends CrLitElement {
       url: tab.url,
       title: tab.title,
       delayUpload: this.delayTabUploads_,
+      origin: TabUploadOrigin.ACTION_CHIP,
     };
     this.onActionChipClick_(
         ActionChipsConstants.EMPTY_QUERY_STRING, [recentTabInfo],
@@ -163,9 +220,19 @@ export class ActionChipsElement extends CrLitElement {
       case ChipType.kRecentTab:
         this.onTabContextClick_(chip.tab!);
         break;
+      case ChipType.kDeepDive:
+        this.onDeepDiveClick_(chip);
+        break;
       default:
         // Do nothing yet...
     }
+  }
+
+  protected removeChip_(chip: ActionChip, e: MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    this.actionChips_ =
+        this.actionChips_.filter((c) => c.suggestion !== chip.suggestion);
   }
 
   protected getFaviconUrl_(url: string): string {
@@ -184,6 +251,49 @@ export class ActionChipsElement extends CrLitElement {
   private onActionChipClick_(
       query: string, contextFiles: ContextualUpload[], mode: ComposeboxMode) {
     this.fire('action-chip-click', {searchboxText: query, contextFiles, mode});
+  }
+
+  protected recentTabChipTitle_(chip: ActionChip) {
+    if (!chip.tab) {
+      return '';
+    }
+    const url = new URL(chip.tab.url.url);
+    const domain = url.hostname.replace(/^www\./, '');
+    return `${chip.suggestion} - ${domain}`;
+  }
+
+  protected isDeepDiveChip_(chip: ActionChip) {
+    return chip.type === ChipType.kDeepDive;
+  }
+
+  protected isRecentTabChip_(chip: ActionChip) {
+    return chip.type === ChipType.kRecentTab;
+  }
+
+  protected showDashSimplifiedUI_(chip: ActionChip) {
+    return chip.type !== ChipType.kDeepDive && this.showSimplifiedUI_;
+  }
+
+  protected getChipTitle_(chip: ActionChip) {
+    const suggestion = chip.suggestion;
+
+    if (!chip.tab) {
+      return suggestion;
+    }
+
+    const tabTitle = chip.tab.title;
+    const url = new URL(chip.tab.url.url);
+    const domain = url.hostname.replace(/^www\./, '');
+
+    if (this.isRecentTabChip_(chip)) {
+      return `${suggestion} - ${domain}`;
+    }
+
+    if (this.isDeepDiveChip_(chip)) {
+      return `${tabTitle} - ${domain} - ${suggestion}`;
+    }
+
+    return suggestion;
   }
 }
 

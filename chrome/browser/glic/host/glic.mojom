@@ -83,7 +83,6 @@ enum WebUiState {
   // Web view is displayed.
   kReady = 8,
   // Glic is unresponsive. Currently this will show the same UI as kError.
-  // TODO(crbug.com/394162784): create an unresponsive UI.
   kUnresponsive = 9,
   // Sign in panel is displayed.
   kSignIn = 10,
@@ -276,6 +275,16 @@ struct UserProfileInfo {
   bool is_managed;
 };
 
+// @generate glic_api
+// The platform glic is running on.
+enum Platform {
+  kUnknown = 0,
+  kMacOS = 1,
+  kWindows = 2,
+  kLinux = 3,
+  kChromeOS = 4,
+};
+
 // The result of `WebClientCreated()`. Contains information that needs to be
 // available before the web client is initialized.
 struct WebClientInitialState {
@@ -288,6 +297,7 @@ struct WebClientInitialState {
   bool os_location_permission_enabled;
   string hotkey;
   mojo_base.mojom.Version chrome_version;
+  Platform platform;
   // Whether the glic panel can currently be attached to a browser window.
   bool can_attach;
   // Whether the panel is active. See `NotifyPanelActiveChange`.
@@ -297,6 +307,7 @@ struct WebClientInitialState {
   // Reflects the enabling state of always-detached mode.
   bool always_detached_mode;
   bool enable_zero_state_suggestions;
+  bool enable_cached_get_user_profile_info;
   // Whether features::kGlicActor is enabled.
   bool enable_act_in_focused_tab;
   // Whether features::kGlicScrollTo is enabled.
@@ -336,6 +347,12 @@ struct WebClientInitialState {
   bool enable_get_tab_by_id;
   // Whether kGlicOpenPasswordManagerSettingsPageApi is enabled.
   bool enable_open_password_manager_settings_page;
+  // Whether kGlicLoadAndExtractContent is enabled.
+  bool enable_load_and_extract_content;
+  // Whether kGlicTrustFirstOnboarding is enabled.
+  bool enable_trust_first_onboarding;
+  // Whether the user has completed the onboarding flow.
+  bool onboarding_completed;
 };
 
 // Options for getting tab context.
@@ -914,6 +931,9 @@ interface WebClientHandler {
   // `conversation_id` must be non-empty to be considered valid.
   RegisterConversation(ConversationInfo info)
       => (RegisterConversationErrorReason? error_reason);
+
+  // Called when the user has completed the onboarding flow.
+  SetOnboardingCompleted();
 };
 
 // Information about a conversation.
@@ -1049,6 +1069,8 @@ enum WebUseCounter {
   // Default counter. Never used.
   [Default] kDefault = 0,
   kSubmitPromptWithAutoMode = 1,
+  kTaskInterruptedForUserConfirmation = 2,
+  kTaskInterruptedForUserClarification = 3,
 };
 
 // LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:GlicWebUseCounter)
@@ -1245,6 +1267,9 @@ interface WebClient {
 
   // Informs the client that the capability to act on web pages has changed.
   NotifyActOnWebCapabilityChanged(bool can_act_on_web);
+
+  // The onboarding completed state has changed.
+  NotifyOnboardingCompletedChanged(bool completed);
 };
 
 // Information extracted from a tab.
@@ -1447,6 +1472,12 @@ enum HostCapability {
   kGetModelQualityClientId = 2,
   // Glic is in multi-instance mode.
   kMultiInstance = 3,
+  // Enables the experimental "Trust First" (Arm 1 - "Start Chat") onboarding
+  // UI flow, bypassing the standard FRE flow.
+  kTrustFirstOnboardingArm1 = 4,
+  // Enables the experimental "Trust First" (Arm 2 - "Welcome Screen")
+  // onboarding UI flow, bypassing the standard FRE flow.
+  kTrustFirstOnboardingArm2 = 5,
 };
 
 // A request to change the glic web client to a view suitable for tracking the

@@ -20,7 +20,6 @@
 #include "content/public/browser/webui_config.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
-#include "ui/webui/color_change_listener/color_change_handler.h"
 #include "ui/webui/mojo_web_ui_controller.h"
 #include "ui/webui/resources/js/tracked_element/tracked_element.mojom.h"
 
@@ -29,6 +28,10 @@ class Browser;
 namespace content {
 class BrowserContext;
 }  // namespace content
+
+namespace contextual_search {
+class ContextualSearchSessionHandle;
+}  // namespace contextual_search
 
 namespace searchbox::mojom {
 class PageHandler;
@@ -70,16 +73,11 @@ class WebUIBrowserUI : public ui::MojoWebUIController,
   void BindInterface(mojo::PendingReceiver<searchbox::mojom::PageHandler>
                          pending_page_handler);
   void BindInterface(
-      mojo::PendingReceiver<metrics_reporter::mojom::PageMetricsHost> receiver);
-  void BindInterface(
       mojo::PendingReceiver<guest_contents::mojom::GuestContentsHost> receiver);
   void BindInterface(
       mojo::PendingReceiver<tabs_api::mojom::TabStripService> receiver);
   void BindInterface(
       mojo::PendingReceiver<tracked_element::mojom::TrackedElementHandler>
-          receiver);
-  void BindInterface(
-      mojo::PendingReceiver<color_change_listener::mojom::PageHandler>
           receiver);
 
   void BookmarkBarStateChanged(BookmarkBar::AnimateChangeType change_type);
@@ -100,11 +98,16 @@ class WebUIBrowserUI : public ui::MojoWebUIController,
 
  private:
   WEB_UI_CONTROLLER_TYPE_DECL();
+  // Lazily creates and returns a reference to the owned contextual search
+  // session handle for `realbox_handler_`.
+  contextual_search::ContextualSearchSessionHandle*
+  GetOrCreateContextualSessionHandle();
   // webui_browser::mojom::PageHandlerFactory:
   void CreatePageHandler(
       mojo::PendingRemote<webui_browser::mojom::Page> page,
       mojo::PendingReceiver<webui_browser::mojom::PageHandler> receiver)
       override;
+  void GetTabStripInset(GetTabStripInsetCallback callback) override;
 
   // bookmark_bar::mojom::PageHandlerFactory:
   void CreatePageHandler(mojo::PendingRemote<bookmark_bar::mojom::Page> page,
@@ -122,12 +125,13 @@ class WebUIBrowserUI : public ui::MojoWebUIController,
   // UIs.
   const std::vector<ui::ElementIdentifier>& GetKnownElementIdentifiers() const;
 
-  MetricsReporter metrics_reporter_;
+  // Must outlive `realbox_handler_`.
+  std::unique_ptr<contextual_search::ContextualSearchSessionHandle>
+      session_handle_;
   std::unique_ptr<RealboxHandler> realbox_handler_;
   std::unique_ptr<WebUIBrowserBookmarkBarPageHandler>
       bookmark_bar_page_handler_;
   std::unique_ptr<ui::TrackedElementHandler> tracked_element_handler_;
-  std::unique_ptr<ui::ColorChangeHandler> color_provider_handler_;
 
   mojo::Remote<webui_browser::mojom::Page> page_;
   mojo::Receiver<webui_browser::mojom::PageHandlerFactory>

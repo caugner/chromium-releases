@@ -4,7 +4,6 @@
 
 #include "media/gpu/chromeos/gl_image_processor_backend.h"
 
-#include "base/functional/callback_forward.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/stl_util.h"
 #include "base/synchronization/waitable_event.h"
@@ -13,6 +12,7 @@
 #include "base/trace_event/trace_event.h"
 #include "components/viz/common/resources/shared_image_format.h"
 #include "media/base/format_utils.h"
+#include "media/gpu/buffer_validation.h"
 #include "media/gpu/chromeos/frame_resource.h"
 #include "media/gpu/chromeos/platform_video_frame_utils.h"
 #include "media/gpu/macros.h"
@@ -102,6 +102,12 @@ std::unique_ptr<ui::NativePixmapGLBinding> CreateAndBindImage(
     return nullptr;
   }
 
+  if (!VerifyGpuMemoryBufferHandle(frame->format(), frame->coded_size(),
+                                   gpu_memory_buffer_handle)) {
+    LOG(ERROR) << "Failed to validate GpuMemoryBufferHandle";
+    return nullptr;
+  }
+
   if (!should_split_planes) {
     auto native_pixmap = base::MakeRefCounted<gfx::NativePixmapDmaBuf>(
         frame->coded_size(), viz::MultiPlaneFormat::kNV12,
@@ -110,7 +116,7 @@ std::unique_ptr<ui::NativePixmapGLBinding> CreateAndBindImage(
 
     // Import the NativePixmap into GL.
     return GetCurrentGLOzone().ImportNativePixmap(
-        std::move(native_pixmap), gfx::BufferFormat::YUV_420_BIPLANAR,
+        std::move(native_pixmap), viz::MultiPlaneFormat::kNV12,
         gfx::BufferPlane::DEFAULT, frame->coded_size(), gfx::ColorSpace(),
         target, texture_id);
   }
@@ -142,8 +148,7 @@ std::unique_ptr<ui::NativePixmapGLBinding> CreateAndBindImage(
 
   // Import the NativePixmap into GL.
   return GetCurrentGLOzone().ImportNativePixmap(
-      std::move(native_pixmap),
-      viz::SinglePlaneSharedImageFormatToBufferFormat(plane_format),
+      std::move(native_pixmap), plane_format,
       plane ? gfx::BufferPlane::UV : gfx::BufferPlane::Y, plane_size,
       gfx::ColorSpace(), target, texture_id);
 }

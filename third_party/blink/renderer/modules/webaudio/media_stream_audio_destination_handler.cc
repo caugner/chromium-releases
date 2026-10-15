@@ -7,6 +7,7 @@
 #include <inttypes.h>
 
 #include "base/synchronization/lock.h"
+#include "media/base/audio_bus.h"
 #include "third_party/blink/public/platform/modules/webrtc/webrtc_logging.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_input.h"
 #include "third_party/blink/renderer/modules/webaudio/base_audio_context.h"
@@ -31,7 +32,7 @@ constexpr uint32_t kMaxChannelCountSupported = 8;
 MediaStreamAudioDestinationHandler::MediaStreamAudioDestinationHandler(
     AudioNode& node,
     uint32_t number_of_channels,
-    WebAudioDestinationConsumer* webaudio_consumer)
+    scoped_refptr<WebAudioDestinationConsumer> webaudio_consumer)
     : AudioHandler(NodeType::kNodeTypeMediaStreamAudioDestination,
                    node,
                    node.context()->sampleRate()),
@@ -52,10 +53,10 @@ MediaStreamAudioDestinationHandler::MediaStreamAudioDestinationHandler(
 scoped_refptr<MediaStreamAudioDestinationHandler>
 MediaStreamAudioDestinationHandler::Create(
     AudioNode& node, uint32_t number_of_channels,
-    WebAudioDestinationConsumer* webaudio_consumer) {
+    scoped_refptr<WebAudioDestinationConsumer> webaudio_consumer) {
   return base::AdoptRef(
       new MediaStreamAudioDestinationHandler(
-          node, number_of_channels, webaudio_consumer));
+          node, number_of_channels, std::move(webaudio_consumer)));
 }
 
 MediaStreamAudioDestinationHandler::~MediaStreamAudioDestinationHandler() {
@@ -188,7 +189,7 @@ void MediaStreamAudioDestinationHandler::SendLogMessage(
 }
 
 void MediaStreamAudioDestinationHandler::SetConsumer(
-    WebAudioDestinationConsumer* destination_consumer,
+    scoped_refptr<WebAudioDestinationConsumer> destination_consumer,
     int number_of_channels,
     float sample_rate) {
   if (!destination_consumer) {
@@ -196,7 +197,7 @@ void MediaStreamAudioDestinationHandler::SetConsumer(
   }
 
   base::AutoLock locker(consumer_lock_);
-  destination_consumer_ = destination_consumer;
+  destination_consumer_ = std::move(destination_consumer);
   destination_consumer_->SetFormat(number_of_channels, sample_rate);
 }
 

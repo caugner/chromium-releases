@@ -62,14 +62,14 @@ WebRtcMediaStreamTrackAdapter::CreateRemoteTrackAdapter(
     remote_track_adapter->InitializeRemoteAudioTrack(
         base::WrapRefCounted(
             static_cast<webrtc::AudioTrackInterface*>(webrtc_track.get())),
-        factory->GetSupplementable());
+        factory->GetExecutionContext());
   } else {
     DCHECK_EQ(webrtc_track->kind(),
               webrtc::MediaStreamTrackInterface::kVideoKind);
     remote_track_adapter->InitializeRemoteVideoTrack(
         base::WrapRefCounted(
             static_cast<webrtc::VideoTrackInterface*>(webrtc_track.get())),
-        factory->GetSupplementable());
+        factory->GetExecutionContext());
   }
   return remote_track_adapter;
 }
@@ -110,6 +110,17 @@ void WebRtcMediaStreamTrackAdapterTraits::Destruct(
 }
 
 void WebRtcMediaStreamTrackAdapter::Dispose() {
+  if (!main_thread_->BelongsToCurrentThread()) {
+    PostCrossThreadTask(
+        *main_thread_, FROM_HERE,
+        CrossThreadBindOnce(&WebRtcMediaStreamTrackAdapter::DisposeOnMainThread,
+                            WrapRefCounted(this)));
+    return;
+  }
+  DisposeOnMainThread();
+}
+
+void WebRtcMediaStreamTrackAdapter::DisposeOnMainThread() {
   DCHECK(main_thread_->BelongsToCurrentThread());
   DCHECK(is_initialized_);
   if (is_disposed_)

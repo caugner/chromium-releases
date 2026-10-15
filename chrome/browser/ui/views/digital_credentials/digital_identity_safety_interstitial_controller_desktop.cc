@@ -18,6 +18,10 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/dialog_model.h"
 #include "ui/base/mojom/dialog_button.mojom.h"
+#include "ui/display/screen.h"
+#include "ui/views/layout/layout_provider.h"
+#include "ui/views/style/typography.h"
+#include "ui/views/style/typography_provider.h"
 #include "ui/views/widget/widget.h"
 
 using DialogButton = ui::DialogModel::Button;
@@ -69,7 +73,7 @@ DigitalIdentitySafetyInterstitialControllerDesktop::ShowInterstitial(
   interstitial_type_ = interstitial_type;
   callback_ = std::move(callback);
 
-  ShowInterstitialImpl(web_contents, /*was_request_aborted=*/false);
+  ShowInterstitialImpl(/*was_request_aborted=*/false);
   return base::BindOnce(
       &DigitalIdentitySafetyInterstitialControllerDesktop::Abort,
       weak_ptr_factory_.GetWeakPtr());
@@ -81,12 +85,14 @@ void DigitalIdentitySafetyInterstitialControllerDesktop::Abort() {
   }
 
   dialog_widget_->CloseWithReason(views::Widget::ClosedReason::kUnspecified);
-  ShowInterstitialImpl(*web_contents_, /*was_request_aborted*/ true);
+  ShowInterstitialImpl(/*was_request_aborted=*/true);
 }
 
 void DigitalIdentitySafetyInterstitialControllerDesktop::ShowInterstitialImpl(
-    content::WebContents& web_contents,
     bool was_request_aborted) {
+  if (!web_contents_) {
+    return;
+  }
   int body_resource_id = 0;
   int negative_button_label_resource_id = 0;
   switch (interstitial_type_) {
@@ -106,9 +112,17 @@ void DigitalIdentitySafetyInterstitialControllerDesktop::ShowInterstitialImpl(
 
   bool positive_button_enabled = !was_request_aborted;
 
+  const views::LayoutProvider* layout_provider = views::LayoutProvider::Get();
+  const int dialog_width = layout_provider->GetDistanceMetric(
+      views::DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH);
+  const gfx::Insets dialog_insets =
+      layout_provider->GetInsetsMetric(views::INSETS_DIALOG);
+  const float content_width = dialog_width - dialog_insets.width();
+
+  const gfx::FontList& font_list = views::TypographyProvider::Get().GetFont(
+      views::style::CONTEXT_DIALOG_BODY_TEXT, views::style::STYLE_PRIMARY);
   std::u16string formatted_origin =
-      url_formatter::FormatOriginForSecurityDisplay(
-          rp_origin_, url_formatter::SchemeDisplay::OMIT_CRYPTOGRAPHIC);
+      url_formatter::ElideUrl(rp_origin_.GetURL(), font_list, content_width);
   std::u16string body_text =
       l10n_util::GetStringFUTF16(body_resource_id, formatted_origin);
   std::u16string positive_button_label = l10n_util::GetStringUTF16(
@@ -155,10 +169,16 @@ void DigitalIdentitySafetyInterstitialControllerDesktop::ShowInterstitialImpl(
             formatted_origin)));
   }
   dialog_widget_ = constrained_window::ShowWebModal(
-      dialog_model_builder.Build(), &web_contents);
+      dialog_model_builder.Build(), web_contents_.get());
 
+  // ShowWebModal() can synchronously drop fullscreen mode. On macOS, this
+  // can spin a nested run loop that processes a tab close, potentially
+  // destroying the WebContents. Check liveness before observing it.
+  if (!web_contents_) {
+    return;
+  }
   close_on_navigation_observer_ = std::make_unique<CloseOnNavigationObserver>();
-  close_on_navigation_observer_->Observe(web_contents);
+  close_on_navigation_observer_->Observe(*web_contents_);
 }
 
 void DigitalIdentitySafetyInterstitialControllerDesktop::OnDialogClosed(

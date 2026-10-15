@@ -88,11 +88,16 @@ class GlicWindowControllerImpl
   void MaybeSetWidgetCanResize() override;
   gfx::Size GetPanelSize() override;
   void Close() override;
+  void CloseInstanceWithFrame(
+      content::RenderFrameHost* render_frame_host) override;
+  void CloseAndShutdownInstanceWithFrame(
+      content::RenderFrameHost* render_frame_host) override;
 
   void AddStateObserver(StateObserver* observer) override;
   void RemoveStateObserver(StateObserver* observer) override;
   void AddGlobalStateObserver(PanelStateObserver* observer) override;
   void RemoveGlobalStateObserver(PanelStateObserver* observer) override;
+
   bool IsPanelShowingForBrowser(
       const BrowserWindowInterface& bwi) const override;
 
@@ -178,6 +183,8 @@ class GlicWindowControllerImpl
   // GlicInstance implementation
   Host& host() override;
   const InstanceId& id() const override;
+  std::optional<std::string> conversation_id() const override;
+  base::TimeTicks GetLastActiveTime() const override;
   base::CallbackListSubscription RegisterStateChange(
       StateChangeCallback callback) override;
   base::CallbackListSubscription

@@ -5,6 +5,7 @@
 import '//resources/cr_elements/cr_action_menu/cr_action_menu.js';
 import '//resources/cr_elements/cr_button/cr_button.js';
 import '//resources/cr_elements/cr_dialog/cr_dialog.js';
+import '//resources/cr_elements/cr_icon/cr_icon.js';
 import '//resources/cr_elements/cr_icon_button/cr_icon_button.js';
 import '//resources/cr_elements/cr_input/cr_input.js';
 import '//resources/cr_elements/cr_toast/cr_toast_manager.js';
@@ -20,7 +21,7 @@ import {EventTracker} from '//resources/js/event_tracker.js';
 import {FocusOutlineManager} from '//resources/js/focus_outline_manager.js';
 import {loadTimeData} from '//resources/js/load_time_data.js';
 import {isMac} from '//resources/js/platform.js';
-import {hasKeyModifiers} from '//resources/js/util.js';
+import {hasKeyModifiers, htmlEscape} from '//resources/js/util.js';
 import {CrLitElement} from '//resources/lit/v3_0/lit.rollup.js';
 import type {PropertyValues} from '//resources/lit/v3_0/lit.rollup.js';
 import {TileSource} from '//resources/mojo/components/ntp_tiles/tile_source.mojom-webui.js';
@@ -273,6 +274,10 @@ export class MostVisitedElement extends MostVisitedElementBase {
           performance.measure('most-visited-mojo', 'most-visited-mojo-start');
           this.info_ = info;
         });
+
+    this.callbackRouter_.onMostVisitedTilesAutoRemoval.addListener(() => {
+      this.autoRemovalToast_();
+    });
 
     this.pageHandler_.getMostVisitedExpandedState().then(({isExpanded}) => {
       this.showAll_ = isExpanded;
@@ -1154,6 +1159,15 @@ export class MostVisitedElement extends MostVisitedElementBase {
     }
   }
 
+  private autoRemovalToast_() {
+    this.fire('most-visited-auto-removed', {
+      message: loadTimeData.getString('shortcutsInactivityRemovalMsg'),
+      undo: () => {
+        this.pageHandler_.undoMostVisitedAutoRemoval();
+      },
+    });
+  }
+
   private toast_(msgId: string, showButtons: boolean, source: TileSource) {
     this.toastSource_ = source;
     this.$.toastManager.show(loadTimeData.getString(msgId), !showButtons);
@@ -1188,6 +1202,10 @@ export class MostVisitedElement extends MostVisitedElementBase {
     return loadTimeData.getString('shortcutMoreActions') ?
         loadTimeData.getStringF('shortcutMoreActions', title) :
         '';
+  }
+
+  protected getRemoveButtonText_(title: string): string {
+    return this.i18n('linkRemoveA11y', htmlEscape(title));
   }
 
   protected isFromEnterpriseShortcut_(source: number) {

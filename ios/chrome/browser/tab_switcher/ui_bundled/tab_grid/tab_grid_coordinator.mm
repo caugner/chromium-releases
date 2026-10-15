@@ -47,10 +47,6 @@
 #import "ios/chrome/browser/menu/ui_bundled/tab_context_menu_delegate.h"
 #import "ios/chrome/browser/policy/model/policy_util.h"
 #import "ios/chrome/browser/reading_list/model/reading_list_browser_agent.h"
-#import "ios/chrome/browser/recent_tabs/ui_bundled/recent_tabs_mediator.h"
-#import "ios/chrome/browser/recent_tabs/ui_bundled/recent_tabs_menu_helper.h"
-#import "ios/chrome/browser/recent_tabs/ui_bundled/recent_tabs_presentation_delegate.h"
-#import "ios/chrome/browser/recent_tabs/ui_bundled/recent_tabs_table_view_controller.h"
 #import "ios/chrome/browser/saved_tab_groups/model/ios_tab_group_sync_util.h"
 #import "ios/chrome/browser/saved_tab_groups/model/tab_group_sync_service_factory.h"
 #import "ios/chrome/browser/search_engines/model/template_url_service_factory.h"
@@ -749,6 +745,12 @@ bool FindNavigatorShouldBePresentedInBrowser(Browser* browser) {
       determineTabGridTransitionTypeWithAnimationEnabled:animationEnabled];
 
   Browser* browser = isIncognito ? self.incognitoBrowser : self.regularBrowser;
+  if (!browser) {
+    // The browser can be nil here, for example when switching account. Do not
+    // try to call the completion block as the code assumes there is a browser.
+    // See crbug.com/466376004.
+    return;
+  }
   web::WebState* activeWebState =
       browser->GetWebStateList()->GetActiveWebState();
   BOOL isRegularBrowserNTP = !isIncognito && activeWebState &&

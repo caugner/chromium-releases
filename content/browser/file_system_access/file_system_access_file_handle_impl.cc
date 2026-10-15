@@ -7,7 +7,6 @@
 #include "base/files/file_error_or.h"
 #include "base/files/file_util.h"
 #include "base/files/safe_base_name.h"
-#include "base/functional/callback_forward.h"
 #include "base/functional/callback_helpers.h"
 #include "base/logging.h"
 #include "base/strings/stringprintf.h"
@@ -16,6 +15,7 @@
 #include "base/uuid.h"
 #include "build/build_config.h"
 #include "components/file_access/scoped_file_access_delegate.h"
+#include "content/browser/blob_storage/chrome_blob_storage_context.h"
 #include "content/browser/file_system_access/features.h"
 #include "content/browser/file_system_access/file_system_access_access_handle_host_impl.h"
 #include "content/browser/file_system_access/file_system_access_error.h"
@@ -192,7 +192,9 @@ void FileSystemAccessFileHandleImpl::CreateFileWriter(
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   RunWithPermission(
-      FileSystemAccessManagerImpl::GetEffectiveWritePermissionMode(),
+      keep_existing_data
+          ? blink::mojom::FileSystemAccessPermissionMode::kReadWrite
+          : FileSystemAccessManagerImpl::GetEffectiveWritePermissionMode(),
       base::BindOnce(&FileSystemAccessFileHandleImpl::CreateFileWriterImpl,
                      weak_factory_.GetWeakPtr(), keep_existing_data, auto_close,
                      mode),
@@ -534,7 +536,8 @@ void FileSystemAccessFileHandleImpl::CreateFileWriterImpl(
     blink::mojom::FileSystemAccessWritableFileStreamLockMode mode,
     CreateFileWriterCallback callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK_EQ(GetEffectiveWritePermissionStatus(),
+  DCHECK_EQ(keep_existing_data ? GetReadWritePermissionStatus()
+                               : GetEffectiveWritePermissionStatus(),
             blink::mojom::PermissionStatus::GRANTED);
 
   // TODO(crbug.com/40194651): Expand this check to all backends.
@@ -610,7 +613,9 @@ void FileSystemAccessFileHandleImpl::StartCreateSwapFile(
     return;
   }
 
-  if (GetEffectiveWritePermissionStatus() != PermissionStatus::GRANTED) {
+  if ((keep_existing_data ? GetReadWritePermissionStatus()
+                          : GetEffectiveWritePermissionStatus()) !=
+      PermissionStatus::GRANTED) {
     std::move(callback).Run(file_system_access_error::FromStatus(
                                 FileSystemAccessStatus::kPermissionDenied),
                             mojo::NullRemote());

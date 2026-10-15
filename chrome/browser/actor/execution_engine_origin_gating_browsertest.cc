@@ -7,6 +7,7 @@
 #include "base/test/test_future.h"
 #include "chrome/browser/actor/actor_features.h"
 #include "chrome/browser/actor/actor_policy_checker.h"
+#include "chrome/browser/actor/actor_switches.h"
 #include "chrome/browser/actor/actor_task_metadata.h"
 #include "chrome/browser/actor/actor_test_util.h"
 #include "chrome/browser/actor/execution_engine.h"
@@ -238,15 +239,13 @@ class ExecutionEngineOriginGatingBrowserTest
     if (multi_instance_enabled()) {
       scoped_feature_list_.InitWithFeatures(
           /*enabled_features=*/{features::kGlicMultiInstance,
-                                glic::mojom::features::kGlicMultiTab,
-                                features::kGlicMultitabUnderlines},
+                                glic::mojom::features::kGlicMultiTab},
           /*disabled_features=*/{});
     } else {
       scoped_feature_list_.InitWithFeatures(
           /*enabled_features=*/{},
           /*disabled_features=*/{features::kGlicMultiInstance,
-                                 glic::mojom::features::kGlicMultiTab,
-                                 features::kGlicMultitabUnderlines});
+                                 glic::mojom::features::kGlicMultiTab});
     }
   }
   ~ExecutionEngineOriginGatingBrowserTest() override = default;
@@ -569,6 +568,66 @@ IN_PROC_BROWSER_TEST_P(ExecutionEngineOriginGatingBrowserTest,
       "Actor.NavigationGating.AllowListSize", 2, 1);
   // The list of confirmed sensitive origins should have 1 entry.
   histogram_tester_for_init_.ExpectBucketCount(
+      "Actor.NavigationGating.ConfirmedListSize", 1, 1);
+}
+
+IN_PROC_BROWSER_TEST_P(ExecutionEngineOriginGatingBrowserTest,
+                       SandboxedSiteDoesNotReprompt) {
+  base::HistogramTester histogram_tester;
+  const GURL sandboxed_blocked_page = embedded_https_test_server().GetURL(
+      "blocked.example.com", "/actor/sandboxed_blank.html");
+  const GURL blocked_page = embedded_https_test_server().GetURL(
+      "blocked.example.com", "/actor/blank.html");
+  const GURL normal_page_with_link = embedded_https_test_server().GetURL(
+      "www.example.com", base::StrCat({"/actor/link_full_page.html?href=",
+                                       EncodeURI(blocked_page.spec())}));
+
+  // Start on sandboxed page.
+  ASSERT_TRUE(content::NavigateToURL(web_contents(), sandboxed_blocked_page));
+  OpenGlicAndCreateTask();
+
+  // Perform some action on the sandboxed site
+  std::unique_ptr<ToolRequest> click =
+      MakeClickRequest(*active_tab(), gfx::Point(1, 1));
+  // Try navigating away
+  std::unique_ptr<ToolRequest> navigate_to_link =
+      MakeNavigateRequest(*active_tab(), normal_page_with_link.spec());
+  // Clicks on full-page link to go back to sandboxed page.
+  std::unique_ptr<ToolRequest> click_link =
+      MakeClickRequest(*active_tab(), gfx::Point(1, 1));
+
+  RunTestSequence(CreateMockWebClientRequest(
+      content::JsReplace(kHandleUserConfirmationDialogTempl, true)));
+  ActResultFuture result;
+  actor_task().Act(ToRequestList(click, navigate_to_link, click_link),
+                   result.GetCallback());
+  ExpectOkResult(result);
+
+  auto expected_request =
+      base::Value::Dict()
+          .Set("navigationOrigin",
+               url::Origin::Create(normal_page_with_link).GetDebugString())
+          .Set("forBlocklistedOrigin", true);
+  VerifyUserConfirmationDialogRequest(expected_request);
+
+  // Trigger ExecutionEngine destructor for metrics.
+  actor_keyed_service().ResetForTesting();
+
+  // Each actual navigation should not have applied the gate. The origin was
+  // confirmed when during MayActOnTab.
+  histogram_tester.ExpectBucketCount("Actor.NavigationGating.AppliedGate",
+                                     false, 2);
+  histogram_tester.ExpectTotalCount("Actor.NavigationGating.AppliedGate", 2);
+  // Permission should have been explicitly granted once during MayActOnTab. The
+  // navigation to to `www.example.com` had implicit permission via the tool
+  // request.
+  histogram_tester.ExpectUniqueSample(
+      "Actor.NavigationGating.PermissionGranted", true, 1);
+  // The allow-list should have 2 entries at the end of the task.
+  histogram_tester.ExpectUniqueSample("Actor.NavigationGating.AllowListSize", 2,
+                                      1);
+  // The list of confirmed sensitive origins should have 1 entry.
+  histogram_tester.ExpectUniqueSample(
       "Actor.NavigationGating.ConfirmedListSize", 1, 1);
 }
 
@@ -1132,6 +1191,40 @@ INSTANTIATE_TEST_SUITE_P(All,
                            }
                            NOTREACHED();
                          });
+
+class ExecutionEngineOriginGatingSafetyDisabledBrowserTest
+    : public ExecutionEngineOriginGatingBrowserTestBase {
+ public:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    ExecutionEngineOriginGatingBrowserTestBase::SetUpCommandLine(command_line);
+    command_line->AppendSwitch(actor::switches::kDisableActorSafetyChecks);
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(ExecutionEngineOriginGatingSafetyDisabledBrowserTest,
+                       IgnoreBlocklist) {
+  const GURL start_url =
+      embedded_https_test_server().GetURL("example.com", "/actor/link.html");
+  const GURL blocked_url = embedded_https_test_server().GetURL(
+      "blocked.example.com", "/actor/blank.html");
+
+  ASSERT_TRUE(content::NavigateToURL(web_contents(), start_url));
+  OpenGlicAndCreateTask();
+
+  // Create a navigation request to the blocked URL.
+  std::unique_ptr<ToolRequest> navigate_to_blocked =
+      MakeNavigateRequest(*active_tab(), blocked_url.spec());
+
+  // Execute the navigation action.
+  ActResultFuture result;
+  actor_task().Act(ToRequestList(navigate_to_blocked), result.GetCallback());
+
+  // The navigation should succeed because the safety checks are disabled.
+  ExpectOkResult(result);
+
+  // Verify that the browser navigated to the blocked URL.
+  EXPECT_EQ(web_contents()->GetLastCommittedURL(), blocked_url);
+}
 
 class ExecutionEngineSiteGatingBrowserTest
     : public ExecutionEngineOriginGatingBrowserTestBase,

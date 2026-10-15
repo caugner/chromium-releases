@@ -59,6 +59,13 @@ void XRWebGLSwapChain::ClearCurrentTexture() {
                                   0, i);
       gl->Clear(clear_bits);
     }
+  } else if (IsCube()) {
+    for (uint32_t i = 0; i < 6; ++i) {
+      gl->FramebufferTexture2D(GL_FRAMEBUFFER, attachment,
+                               GL_TEXTURE_CUBE_MAP_POSITIVE_X + i,
+                               texture->Object(), 0);
+      gl->Clear(clear_bits);
+    }
   } else {
     gl->FramebufferTexture2D(GL_FRAMEBUFFER, attachment, GL_TEXTURE_2D,
                              texture->Object(), 0);
@@ -94,7 +101,7 @@ XRWebGLStaticSwapChain::XRWebGLStaticSwapChain(
     bool webgl2)
     : XRWebGLSwapChain(context, descriptor, webgl2) {}
 
-XRWebGLStaticSwapChain::~XRWebGLStaticSwapChain() {
+void XRWebGLStaticSwapChain::Dispose() {
   if (owned_texture_) {
     gpu::gles2::GLES2Interface* gl = context()->ContextGL();
     if (!gl) {

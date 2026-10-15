@@ -163,9 +163,17 @@ export declare interface GlicBrowserHost {
   /** Returns the precise Chrome's version. */
   getChromeVersion(): Promise<ChromeVersion>;
 
+  /** Return the platform glic is running on. */
+  getPlatform?(): Platform;
+
   /**
    * Notifies the browser that the web client has switched modes. Note that this
    * call does not change any aspect of the panel itself (e.g. resize-ability).
+   *
+   * This should be called by the web client whenever it switches modes. It
+   * should not be called, though, when the panel is being opened, as the
+   * opening mode is already part of the information returned to the browser by
+   * `notifyPanelWillOpen`.
    *
    * @param newMode the mode the web client switched into.
    */
@@ -911,6 +919,26 @@ export declare interface GlicBrowserHost {
 
   /** Returns the host's capability to act on web pages. */
   getActOnWebCapability?(): ObservableValue<boolean>;
+
+  /**
+   * @todo Not yet implemented: https://crbug.com/458761731.
+   *
+   * Load and extract content from given urls.
+   */
+  loadAndExtractContent?(urls: string[], options: TabContextOptions[]):
+      Promise<TabContextResult[]>;
+
+  /**
+   * Called when the user has completed the onboarding flow.
+   */
+  setOnboardingCompleted?(): void;
+
+  /**
+   * Returns an observable that emits whether the user has completed the
+   * onboarding flow. The observable will be updated when the value changes to
+   * allow coordination between multiple Glic instances.
+   */
+  isOnboardingCompleted?(): ObservableValue<boolean>;
 }
 
 /** Information about a conversation. */
@@ -2179,6 +2207,7 @@ export interface ExtensibleEnums {
   actorTaskStopReason: typeof ActorTaskStopReason;
   UserGrantedPermissionDuration: typeof UserGrantedPermissionDuration;
   webUseCounter: typeof WebUseCounter;
+  platform: typeof Platform;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -2273,6 +2302,17 @@ export enum CaptureScreenshotErrorReason {
   SCREEN_CAPTURE_REQUEST_THROTTLED = 1,
   // User declined screen capture dialog before taking a screenshot.
   USER_CANCELLED_SCREEN_PICKER_DIALOG = 2,
+}
+
+///////////////////////////////////////////////
+// WARNING - GENERATED FROM MOJOM, DO NOT EDIT.
+// The platform glic is running on.
+export enum Platform {
+  UNKNOWN = 0,
+  MAC_OS = 1,
+  WINDOWS = 2,
+  LINUX = 3,
+  CHROME_OS = 4,
 }
 
 ///////////////////////////////////////////////
@@ -2397,6 +2437,8 @@ export enum WebUseCounter {
   // Default counter. Never used.
   DEFAULT = 0,
   SUBMIT_PROMPT_WITH_AUTO_MODE = 1,
+  TASK_INTERRUPTED_FOR_USER_CONFIRMATION = 2,
+  TASK_INTERRUPTED_FOR_USER_CLARIFICATION = 3,
 }
 
 ///////////////////////////////////////////////
@@ -2431,6 +2473,12 @@ export enum HostCapability {
   GET_MODEL_QUALITY_CLIENT_ID = 2,
   // Glic is in multi-instance mode.
   MULTI_INSTANCE = 3,
+  // Enables the experimental "Trust First" (Arm 1 - "Start Chat") onboarding
+  // UI flow, bypassing the standard FRE flow.
+  TRUST_FIRST_ONBOARDING_ARM1 = 4,
+  // Enables the experimental "Trust First" (Arm 2 - "Welcome Screen")
+  // onboarding UI flow, bypassing the standard FRE flow.
+  TRUST_FIRST_ONBOARDING_ARM2 = 5,
 }
 
 ///////////////////////////////////////////////

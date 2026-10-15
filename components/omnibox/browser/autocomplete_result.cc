@@ -96,17 +96,6 @@ constexpr size_t kMaxPedalCount =
 constexpr size_t kMaxPedalMatchIndex =
     is_ios ? 3 : std::numeric_limits<size_t>::max();
 
-#if BUILDFLAG(IS_IOS) || BUILDFLAG(IS_ANDROID)
-// The entrypoint id associated with aim being invoked from the AIM shortcut of
-// typed state. Used for logging purposes.
-// Do not change without changing the IDs in chrome_aim_entry_point.proto
-omnibox::ChromeAimEntryPoint GetAimActionEntrypointID() {
-  return is_android
-             ? omnibox::ANDROID_CHROME_AIM_SHORTCUT_TYPED_STATE_ENTRY_POINT
-             : omnibox::IOS_CHROME_OMNIBOX_SEARCH_ENTRY_POINT;
-}
-#endif
-
 }  // namespace
 
 // static
@@ -176,7 +165,8 @@ size_t AutocompleteResult::GetDynamicMaxMatches() {
       kDynamicMaxMatchesLimit);
 }
 
-AutocompleteResult::AutocompleteResult() {
+AutocompleteResult::AutocompleteResult()
+    : max_url_matches_(is_android || is_ios ? 5 : 7) {
   matches_.reserve(kMaxAutocompletePositionValue);
 }
 
@@ -643,6 +633,23 @@ void AutocompleteResult::SortAndCull(
       } else if (omnibox::IsSearchResultsPage(page_classification)) {
         sections.push_back(
             std::make_unique<IOSSRPZpsSection>(suggestion_groups_map_));
+      } else if (omnibox::IsComposebox(page_classification)) {
+        auto composebox_suggestion_limit_config =
+            omnibox_feature_configs::ComposeboxSuggestionLimit::Get();
+        size_t composebox_max_suggestions = 15u;
+        size_t max_aim_suggestions = 15u;
+        size_t max_contextual_suggestions = 15u;
+        if (composebox_suggestion_limit_config.enabled) {
+          composebox_max_suggestions =
+              composebox_suggestion_limit_config.max_suggestions;
+          max_aim_suggestions =
+              composebox_suggestion_limit_config.max_aim_suggestions;
+          max_contextual_suggestions =
+              composebox_suggestion_limit_config.max_contextual_suggestions;
+        }
+        sections.push_back(std::make_unique<IOSComposeboxZpsSection>(
+            suggestion_groups_map_, composebox_max_suggestions,
+            max_aim_suggestions, max_contextual_suggestions));
       } else {
         sections.push_back(
             std::make_unique<IOSWebZpsSection>(suggestion_groups_map_));
@@ -655,6 +662,9 @@ void AutocompleteResult::SortAndCull(
       if (omnibox::IsAndroidHub(page_classification)) {
         sections.push_back(
             std::make_unique<AndroidHubNonZPSSection>(suggestion_groups_map_));
+      } else if (omnibox::IsComposebox(page_classification)) {
+        sections.push_back(std::make_unique<AndroidComposeboxNonZPSSection>(
+            suggestion_groups_map_));
       } else {
         bool show_only_search_suggestions =
             omnibox::IsCustomTab(page_classification);
@@ -685,14 +695,10 @@ void AutocompleteResult::SortAndCull(
       return false;
     });
 
-    // Limit URL matches per OmniboxMaxURLMatches.
-    size_t max_url_count = 0;
+    // Limit URL matches.
     if (input.GetFeaturedKeywordMode() !=
-            AutocompleteInput::FeaturedKeywordMode::kExact &&
-        OmniboxFieldTrial::IsMaxURLMatchesFeatureEnabled() &&
-        (max_url_count = OmniboxFieldTrial::GetMaxURLMatches()) != 0) {
-      LimitNumberOfURLsShown(GetMaxMatches(is_zero_suggest), max_url_count,
-                             comparing_object);
+        AutocompleteInput::FeaturedKeywordMode::kExact) {
+      LimitNumberOfURLsShown(GetMaxMatches(is_zero_suggest), comparing_object);
     }
 
     // Limit total matches accounting for suggestions score <= 0, sub matches,
@@ -946,40 +952,6 @@ void AutocompleteResult::AttachPedalsToMatches(
     }
   }
 }
-
-#if BUILDFLAG(IS_IOS) || BUILDFLAG(IS_ANDROID)
-void AutocompleteResult::AttachAimAction(
-    TemplateURLService* template_url_service,
-    AutocompleteProviderClient* client) {
-  if (!OmniboxFieldTrial::IsDeterministicAimActionInTypedStateEnabled(client)) {
-    return;
-  }
-
-  for (AutocompleteMatch& match : matches_) {
-    if (!match.actions.empty()) {
-      continue;
-    }
-    if (match.allowed_to_be_default_match &&
-        AutocompleteMatch::IsSearchType(match.type) &&
-        match.contents.length() >=
-            static_cast<size_t>(
-                OmniboxFieldTrial::kMinimumTypedCharactersToInvokeAimShortcut
-                    .Get())) {
-      omnibox::SuggestTemplateInfo::TemplateAction template_action;
-      template_action.set_action_type(
-          omnibox::SuggestTemplateInfo_TemplateAction_ActionType_CHROME_AIM);
-      template_action.set_action_uri(
-          GetUrlForAim(template_url_service, GetAimActionEntrypointID(),
-                       /*query_start_time=*/base::Time::Now(), match.contents)
-              .spec());
-      match.actions.emplace_back(base::MakeRefCounted<OmniboxActionInSuggest>(
-          std::move(template_action), std::nullopt));
-      // Only attach to the first eligible match.
-      return;
-    }
-  }
-}
-#endif
 
 void AutocompleteResult::AttachContextualSearchFulfillmentActionToMatches() {
   for (AutocompleteMatch& match : matches_) {
@@ -1326,6 +1298,7 @@ void AutocompleteResult::ClearMatches() {
   matches_.clear();
   suggestion_groups_map_.clear();
   smart_compose_inline_hint_.clear();
+  has_contextual_chips_ = false;
 #if BUILDFLAG(IS_ANDROID)
   DestroyJavaObject();
 #endif
@@ -1335,6 +1308,7 @@ void AutocompleteResult::SwapMatchesWith(AutocompleteResult* other) {
   matches_.swap(other->matches_);
   suggestion_groups_map_.swap(other->suggestion_groups_map_);
   smart_compose_inline_hint_.swap(other->smart_compose_inline_hint_);
+  has_contextual_chips_ = other->has_contextual_chips();
 
 #if BUILDFLAG(IS_ANDROID)
   DestroyJavaObject();
@@ -1349,6 +1323,7 @@ void AutocompleteResult::CopyMatchesFrom(const AutocompleteResult& other) {
   matches_ = other.matches_;
   suggestion_groups_map_ = other.suggestion_groups_map_;
   smart_compose_inline_hint_ = other.smart_compose_inline_hint_;
+  has_contextual_chips_ = other.has_contextual_chips();
 
 #if BUILDFLAG(IS_ANDROID)
   DestroyJavaObject();
@@ -1689,7 +1664,6 @@ AutocompleteResult::GetMatchComparisonFields(const AutocompleteMatch& match) {
 
 void AutocompleteResult::LimitNumberOfURLsShown(
     size_t max_matches,
-    size_t max_url_count,
     const CompareWithDemoteByType<AutocompleteMatch>& comparing_object) {
   size_t search_count =
       std::ranges::count_if(matches_, [&](const AutocompleteMatch& m) {
@@ -1697,8 +1671,10 @@ void AutocompleteResult::LimitNumberOfURLsShown(
                // Don't count if would be removed.
                comparing_object.GetDemotedRelevance(m) > 0;
       });
-  // Display more than GetMaxURLMatches() if there are no non-URL suggestions
+  // Display more than `max_url_matches_` if there are no non-URL suggestions
   // to replace them. Avoid signed math.
+
+  size_t max_url_count = max_url_matches_;
   if (max_matches > search_count && max_matches - search_count > max_url_count)
     max_url_count = max_matches - search_count;
   size_t url_count = 0;

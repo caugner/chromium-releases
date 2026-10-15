@@ -11,6 +11,7 @@
 #include "base/scoped_observation.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_features.h"
+#include "chrome/browser/new_tab_page/new_tab_page_util.h"
 #include "chrome/browser/ntp_tiles/chrome_most_visited_sites_factory.h"
 #include "chrome/browser/predictors/loading_predictor.h"
 #include "chrome/browser/predictors/loading_predictor_config.h"
@@ -100,6 +101,7 @@ void MostVisitedHandler::AddMostVisitedTile(
     const GURL& url,
     const std::string& title,
     AddMostVisitedTileCallback callback) {
+  DisableShortcutsAutoRemoval(profile_);
   if (most_visited_sites_->IsCustomLinksEnabled()) {
     bool success =
         most_visited_sites_->AddCustomLink(url, base::UTF8ToUTF16(title));
@@ -111,6 +113,7 @@ void MostVisitedHandler::AddMostVisitedTile(
 
 void MostVisitedHandler::DeleteMostVisitedTile(
     most_visited::mojom::MostVisitedTilePtr tile) {
+  DisableShortcutsAutoRemoval(profile_);
   if (IsFromEnterpriseShortcut(tile->source)) {
     CHECK(most_visited_sites_->IsEnterpriseShortcutsEnabled());
     most_visited_sites_->DeleteEnterpriseShortcut(tile->url);
@@ -151,12 +154,21 @@ void MostVisitedHandler::RestoreMostVisitedDefaults(
 void MostVisitedHandler::ReorderMostVisitedTile(
     most_visited::mojom::MostVisitedTilePtr tile,
     uint8_t new_pos) {
+  DisableShortcutsAutoRemoval(profile_);
   if (IsFromEnterpriseShortcut(tile->source)) {
     CHECK(most_visited_sites_->IsEnterpriseShortcutsEnabled());
     most_visited_sites_->ReorderEnterpriseShortcut(tile->url, new_pos);
   } else if (most_visited_sites_->IsCustomLinksEnabled()) {
     most_visited_sites_->ReorderCustomLink(tile->url, new_pos);
   }
+}
+
+void MostVisitedHandler::UndoMostVisitedAutoRemoval() {
+  DisableShortcutsAutoRemoval(profile_);
+  // Set the pref to true to show the shortcuts.
+  profile_->GetPrefs()->SetBoolean(ntp_prefs::kNtpShortcutsVisible, true);
+  logger_.LogEvent(NTP_SHORTCUTS_AUTO_REMOVE_UNDO,
+                   base::TimeDelta() /* unused */);
 }
 
 void MostVisitedHandler::UndoMostVisitedTileAction(
@@ -188,6 +200,7 @@ void MostVisitedHandler::UpdateMostVisitedTile(
     const GURL& new_url,
     const std::string& new_title,
     UpdateMostVisitedTileCallback callback) {
+  DisableShortcutsAutoRemoval(profile_);
   if (IsFromEnterpriseShortcut(tile->source)) {
     CHECK(most_visited_sites_->IsEnterpriseShortcutsEnabled());
     bool success = most_visited_sites_->UpdateEnterpriseShortcut(
@@ -208,6 +221,8 @@ void MostVisitedHandler::UpdateMostVisitedTile(
 void MostVisitedHandler::OnMostVisitedTilesRendered(
     std::vector<most_visited::mojom::MostVisitedTilePtr> tiles,
     double time) {
+  // Update staleness info on tiles rendered.
+  UpdateShortcutsStaleness(profile_);
   for (size_t i = 0; i < tiles.size(); i++) {
     logger_.LogMostVisitedImpression(MakeNTPTileImpression(*tiles[i], i));
   }
@@ -230,6 +245,7 @@ void MostVisitedHandler::OnMostVisitedTileNavigation(
     bool ctrl_key,
     bool meta_key,
     bool shift_key) {
+  DisableShortcutsAutoRemoval(profile_);
   logger_.LogMostVisitedNavigation(MakeNTPTileImpression(*tile, index));
 
   WindowOpenDisposition disposition = ui::DispositionFromClick(
@@ -263,6 +279,7 @@ void MostVisitedHandler::GetMostVisitedExpandedState(
 }
 
 void MostVisitedHandler::SetMostVisitedExpandedState(bool is_expanded) {
+  DisableShortcutsAutoRemoval(profile_);
   profile_->GetPrefs()->SetBoolean(ntp_prefs::kNtpShowAllMostVisitedTiles,
                                    is_expanded);
 }
@@ -344,6 +361,8 @@ void MostVisitedHandler::OnURLsAvailable(
     bool is_user_triggered,
     const std::map<ntp_tiles::SectionType, ntp_tiles::NTPTilesVector>&
         sections) {
+  // Filter out stale shortcuts and notify the UI to show the toast.
+  MaybeRemoveStaleShortcuts();
   auto* template_url_service =
       TemplateURLServiceFactory::GetForProfile(profile_);
   auto result = most_visited::mojom::MostVisitedInfo::New();
@@ -385,6 +404,41 @@ MostVisitedHandler::GetNewTabPagePreloadPipelineManager() {
   tabs::TabInterface* tab = webui::GetTabInterface(web_contents_);
   return tab ? tab->GetTabFeatures()->new_tab_page_preload_pipeline_manager()
              : nullptr;
+}
+
+void MostVisitedHandler::MaybeRemoveStaleShortcuts() {
+  // Don't remove stale shortcuts if the feature is disabled.
+  if (!base::FeatureList::IsEnabled(
+          ntp_features::kNtpFeatureOptimizationShortcutsRemoval)) {
+    return;
+  }
+
+  // Don't remove stale shortcuts if the user has enterprise shortcuts.
+  if (most_visited_sites_->IsEnterpriseShortcutsEnabled()) {
+    return;
+  }
+
+  // Remove shortcuts if they are enabled, visible, and the staleness count is
+  // above the threshold.
+  if (!profile_->GetPrefs()->GetBoolean(ntp_prefs::kNtpShortcutsVisible)) {
+    return;
+  }
+
+  if (profile_->GetPrefs()->GetBoolean(
+          ntp_prefs::kNtpShortcutsAutoRemovalDisabled)) {
+    return;
+  }
+
+  if (profile_->GetPrefs()->GetInteger(ntp_prefs::kNtpShortcutsStalenessCount) <
+      ntp_features::kStaleShortcutsCountThreshold.Get()) {
+    return;
+  }
+
+  profile_->GetPrefs()->SetBoolean(ntp_prefs::kNtpShortcutsVisible, false);
+  profile_->GetPrefs()->SetBoolean(ntp_prefs::kNtpShortcutsAutoRemovalDisabled,
+                                   true);
+  page_->OnMostVisitedTilesAutoRemoval();
+  logger_.LogEvent(NTP_SHORTCUTS_AUTO_REMOVE, base::TimeDelta() /* unused */);
 }
 
 void MostVisitedHandler::OnMigrationRun() {

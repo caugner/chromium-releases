@@ -597,6 +597,48 @@ TEST_F(AppListSyncableServiceTest, NonOEMItemIgnoreSyncToOEMFolder) {
   EXPECT_EQ(std::string(), app_item->folder_id());
 }
 
+// Verifies that an item is not moved to a parent that is not a folder by sync.
+TEST_F(AppListSyncableServiceTest, ItemIgnoreSyncToNonFolderParent) {
+  // Create an app.
+  const std::string app_id = CreateNextAppId(extensions::kWebStoreAppId);
+  scoped_refptr<extensions::Extension> app = MakeApp(
+      kSomeAppName, app_id, extensions::Extension::WAS_INSTALLED_BY_DEFAULT);
+  InstallExtension(app.get());
+
+  // Create another app that will be the "fake" parent (not a folder).
+  const std::string fake_parent_id = CreateNextAppId(app_id);
+  scoped_refptr<extensions::Extension> fake_parent =
+      MakeApp("Fake Parent", fake_parent_id,
+              extensions::Extension::WAS_INSTALLED_BY_DEFAULT);
+  InstallExtension(fake_parent.get());
+
+  ChromeAppListItem* app_item = GetModelUpdater()->FindItem(app_id);
+  ASSERT_TRUE(app_item);
+  // It is in the top list.
+  EXPECT_EQ(std::string(), app_item->folder_id());
+
+  // Send sync that this app is parented by the other app (which is not a
+  // folder).
+  syncer::SyncDataList sync_list;
+  sync_list.push_back(
+      CreateAppRemoteData(app_id, kSomeAppName, fake_parent_id,
+                          app_item->position().ToInternalValue(),
+                          std::string() /* item_pin_ordinal */));
+  // Include the fake parent in sync data as an app, not a folder.
+  sync_list.push_back(CreateAppRemoteData(
+      fake_parent_id, "Fake Parent", std::string(),
+      GetModelUpdater()->FindItem(fake_parent_id)->position().ToInternalValue(),
+      std::string(), sync_pb::AppListSpecifics_AppListItemType_TYPE_APP));
+
+  app_list_syncable_service()->MergeDataAndStartSyncing(
+      syncer::APP_LIST, sync_list,
+      std::make_unique<syncer::FakeSyncChangeProcessor>());
+  content::RunAllTasksUntilIdle();
+
+  // Parent folder should not be changed to the non-folder item.
+  EXPECT_EQ(std::string(), app_item->folder_id());
+}
+
 TEST_F(AppListSyncableServiceTest, InitialMerge) {
   const std::string kItemId1 = GenerateId("item_id1");
   const std::string kItemId2 = GenerateId("item_id2");
@@ -1363,7 +1405,7 @@ TEST_F(AppListSyncableServiceTest, FirstAvailablePosition) {
   for (int i = 0; i < max_items_in_first_page - 1; ++i) {
     std::unique_ptr<ChromeAppListItem> item =
         std::make_unique<ChromeAppListItem>(
-            profile_.get(), GenerateId("item_id" + base::NumberToString(i)),
+            profile(), GenerateId("item_id" + base::NumberToString(i)),
             model_updater);
     ItemTestApi(item.get()).SetPosition(last_app_position);
     model_updater->AddItem(std::move(item));
@@ -1379,7 +1421,7 @@ TEST_F(AppListSyncableServiceTest, FirstAvailablePosition) {
   // Fill up the first page.
   std::unique_ptr<ChromeAppListItem> app_item =
       std::make_unique<ChromeAppListItem>(
-          profile_.get(),
+          profile(),
           GenerateId("item_id" + base::NumberToString(max_items_in_first_page)),
           model_updater);
   const syncer::StringOrdinal new_item_position =
@@ -1492,7 +1534,7 @@ TEST_F(AppListSyncableServiceTest, EphemeralAppsNotSynced) {
   EXPECT_FALSE(GetSyncItem(ephemeral_app_id));
 
   std::unique_ptr<ChromeAppListItem> ephemeral_app_item =
-      std::make_unique<ChromeAppListItem>(profile_.get(), ephemeral_app_id,
+      std::make_unique<ChromeAppListItem>(profile(), ephemeral_app_id,
                                           model_updater);
   ephemeral_app_item->SetIsEphemeral(true);
   // Can't use InstallExtension() because it calls AppRegistryCache::OnApps()
@@ -1509,7 +1551,7 @@ TEST_F(AppListSyncableServiceTest, EphemeralAppsNotSynced) {
 
   // Ephemeral sync items are not added to the local storage.
   const base::Value::Dict& local_items =
-      profile_->GetPrefs()->GetDict(prefs::kAppListLocalState);
+      profile()->GetPrefs()->GetDict(prefs::kAppListLocalState);
 
   const base::Value::Dict* dict_item = local_items.FindDict(ephemeral_app_id);
   EXPECT_FALSE(dict_item);
@@ -1542,7 +1584,7 @@ TEST_F(AppListSyncableServiceTest, EphemeralFoldersNotSynced) {
   syncer::StringOrdinal position =
       syncer::StringOrdinal::CreateInitialOrdinal();
   std::unique_ptr<ChromeAppListItem> ephemeral_folder_item =
-      std::make_unique<ChromeAppListItem>(profile_.get(), ephemeral_folder_id,
+      std::make_unique<ChromeAppListItem>(profile(), ephemeral_folder_id,
                                           model_updater);
   ephemeral_folder_item->SetChromeIsFolder(true);
   ephemeral_folder_item->SetChromeName("Folder");
@@ -1560,7 +1602,7 @@ TEST_F(AppListSyncableServiceTest, EphemeralFoldersNotSynced) {
 
   // Ephemeral sync items are not added to the local storage.
   const base::Value::Dict& local_items =
-      profile_->GetPrefs()->GetDict(prefs::kAppListLocalState);
+      profile()->GetPrefs()->GetDict(prefs::kAppListLocalState);
   const base::Value::Dict* dict_item =
       local_items.FindDict(ephemeral_folder_id);
   EXPECT_FALSE(dict_item);
@@ -3127,7 +3169,7 @@ TEST_F(AppListSyncableServiceTest, NewAppPlacementInitiallyOnlyFolders) {
   const std::string kFolderItemId1 = GenerateId("folder_id1");
   AppListModelUpdater* model_updater = GetModelUpdater();
   std::unique_ptr<ChromeAppListItem> folder_item1 =
-      std::make_unique<ChromeAppListItem>(profile_.get(), kFolderItemId1,
+      std::make_unique<ChromeAppListItem>(profile(), kFolderItemId1,
                                           model_updater);
   folder_item1->SetChromeIsFolder(true);
   ItemTestApi(folder_item1.get()).SetPosition(position);
@@ -3137,7 +3179,7 @@ TEST_F(AppListSyncableServiceTest, NewAppPlacementInitiallyOnlyFolders) {
 
   const std::string kFolderItemId2 = GenerateId("folder_id2");
   std::unique_ptr<ChromeAppListItem> folder_item2 =
-      std::make_unique<ChromeAppListItem>(profile_.get(), kFolderItemId2,
+      std::make_unique<ChromeAppListItem>(profile(), kFolderItemId2,
                                           model_updater);
   folder_item2->SetChromeIsFolder(true);
   ItemTestApi(folder_item2.get()).SetPosition(position);
@@ -3147,7 +3189,7 @@ TEST_F(AppListSyncableServiceTest, NewAppPlacementInitiallyOnlyFolders) {
 
   const std::string kFolderItemId3 = GenerateId("folder_id3");
   std::unique_ptr<ChromeAppListItem> folder_item3 =
-      std::make_unique<ChromeAppListItem>(profile_.get(), kFolderItemId3,
+      std::make_unique<ChromeAppListItem>(profile(), kFolderItemId3,
                                           model_updater);
   folder_item3->SetChromeIsFolder(true);
   ItemTestApi(folder_item3.get()).SetPosition(position);
@@ -4013,11 +4055,11 @@ TEST_F(AppListSyncableServiceAppPreloadTest, LauncherOrdering) {
     app->installer_package_id = package_id;
     std::vector<apps::AppPtr> deltas;
     deltas.push_back(std::move(app));
-    apps::AppServiceProxyFactory::GetForProfile(profile_.get())
-        ->OnApps(std::move(deltas), apps::AppType::kUnknown,
-                 /*should_notify_initialized=*/false);
+    apps::AppServiceProxyFactory::GetForProfile(profile())->OnApps(
+        std::move(deltas), apps::AppType::kUnknown,
+        /*should_notify_initialized=*/false);
     auto item = std::make_unique<ChromeAppListItem>(
-        profile_.get(), package_id.identifier(), GetModelUpdater());
+        profile(), package_id.identifier(), GetModelUpdater());
     ItemTestApi(item.get()).SetName(package_id.identifier());
     app_list_syncable_service()->AddItem(std::move(item));
   };

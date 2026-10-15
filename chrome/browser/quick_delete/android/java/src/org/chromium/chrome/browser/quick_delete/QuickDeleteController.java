@@ -18,8 +18,8 @@ import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.browsing_data.TimePeriod;
 import org.chromium.chrome.browser.browsing_data.TimePeriodUtils;
 import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
-import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.layouts.LayoutManager;
+import org.chromium.chrome.browser.layouts.LayoutType;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab_ui.TabSwitcherUtils;
@@ -135,13 +135,6 @@ public class QuickDeleteController {
         mQuickDeleteMediator.destroy();
     }
 
-    /**
-     * @return True, if quick delete survey is enabled, false otherwise
-     */
-    public static boolean isQuickDeleteSurveyEnabled() {
-        return ChromeFeatureList.sQuickDeleteAndroidSurvey.isEnabled();
-    }
-
     /** Show the Quick Delete dialog. */
     public void showDialog() {
         mDialogDelegate.showDialog();
@@ -188,10 +181,14 @@ public class QuickDeleteController {
         if (isTabClosureDisabled) {
             showPostDeleteFeedback(timePeriod, trackerLock);
         } else {
-            TabSwitcherUtils.navigateToTabSwitcher(
-                    mLayoutManager,
-                    /* animate= */ true,
-                    () -> maybeShowQuickDeleteAnimation(timePeriod, trackerLock));
+            if (mLayoutManager != null) {
+                TabSwitcherUtils.navigateToTabSwitcher(
+                        mLayoutManager,
+                        /* animate= */ true,
+                        () -> maybeShowQuickDeleteAnimation(timePeriod, trackerLock));
+            } else {
+                maybeShowQuickDeleteAnimation(timePeriod, trackerLock);
+            }
         }
     }
 
@@ -202,7 +199,11 @@ public class QuickDeleteController {
             mDeleteArchivedTabsFilter.prepareListOfTabsToBeClosed(timePeriod);
         }
         boolean isTabModelEmpty = mTabModel.getCount() == 0;
-        if (!isTabModelEmpty) {
+        // If the tab switcher is not displayed, skip the animation.
+        boolean isTabSwitcherVisible =
+                mLayoutManager != null && mLayoutManager.isLayoutVisible(LayoutType.TAB_SWITCHER);
+
+        if (!isTabModelEmpty && isTabSwitcherVisible) {
             List<Tab> tabs =
                     mDeleteRegularTabsFilter
                             .getListOfTabsFilteredToBeClosedExcludingPlaceholderTabGroups();
@@ -230,9 +231,6 @@ public class QuickDeleteController {
         if (trackerLock == null) return;
         trackerLock.release();
 
-        if (isQuickDeleteSurveyEnabled()) {
-            mDelegate.triggerHatsSurvey();
-        }
         destroy();
     }
 

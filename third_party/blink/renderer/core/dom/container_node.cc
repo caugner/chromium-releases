@@ -66,6 +66,7 @@
 #include "third_party/blink/renderer/core/html/html_dialog_element.h"
 #include "third_party/blink/renderer/core/html/html_document.h"
 #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
+#include "third_party/blink/renderer/core/html/html_stream.h"
 #include "third_party/blink/renderer/core/html/html_tag_collection.h"
 #include "third_party/blink/renderer/core/html/html_template_element.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
@@ -275,6 +276,20 @@ bool ContainerNode::EnsurePreInsertionValidity(
     }
   }
 
+  // Node::ConvertNodeUnionsIntoNodes behaves differently depending on
+  // whether there is one node or more than one, since it simulates
+  // insertion into a DocumentFragment for the latter case.  If it handled
+  // more than one node, then it already removed the children from their old
+  // parent.  Check here that those removals didn't do anything bad.  (We
+  // could potentially make this faster by using a DOMMutationDetector in
+  // ConvertNodeUnionsIntoNodes and storing whether we need to do this.)
+  if (new_children && new_children->size() != 1u &&
+      RuntimeEnabledFeatures::RecheckParentDuringNodeVectorInsertionEnabled() &&
+      !RecheckNodeInsertionStructuralPrereq(*new_children, next,
+                                            exception_state)) {
+    return false;
+  }
+
   if (auto* document = DynamicTo<Document>(this)) {
     // Step 2 is unnecessary. No one can have a Document child.
     // Step 3:
@@ -347,7 +362,7 @@ bool ContainerNode::EnsurePreInsertionValidity(
 bool ContainerNode::RecheckNodeInsertionStructuralPrereq(
     const NodeVector& new_children,
     const Node* next,
-    ExceptionState& exception_state) {
+    ExceptionState& exception_state) const {
   for (const auto& child : new_children) {
     if (child->parentNode()) {
       // A new child was added to another parent before adding to this
@@ -1925,6 +1940,13 @@ WritableStream* ContainerNode::patchAfter(ScriptState* script_state,
                                           ExceptionState& exception_state) {
   return patchBetween(script_state, a, nullptr, exception_state);
 }
+
+WritableStream* ContainerNode::streamAppendHTMLUnsafe(
+    ScriptState* script_state,
+    ExceptionState& exception_state) {
+  return HTMLStream::Create(script_state, this, exception_state);
+}
+
 WritableStream* ContainerNode::patchBefore(ScriptState* script_state,
                                            Node* b,
                                            ExceptionState& exception_state) {

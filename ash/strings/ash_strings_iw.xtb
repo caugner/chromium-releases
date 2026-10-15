@@ -1546,7 +1546,7 @@
 <translation id="6095425951508823973">הוספת חיבור באמצעות <ph name="PROVIDER" /></translation>
 <translation id="6099678161144790572">נערך בחודש האחרון</translation>
 <translation id="6103838137565245112">מערכת</translation>
-<translation id="6108952804512516814">‏יצירה באמצעות AI</translation>
+<translation id="6108952804512516814">‏יצירה בעזרת AI</translation>
 <translation id="6114505516289286752">הורדת קובצי הדיבור של <ph name="LANGUAGE" /> הסתיימה</translation>
 <translation id="6119360623251949462"><ph name="CHARGING_STATE" />. <ph name="BATTERY_SAVER_STATE" /></translation>
 <translation id="6119972796024789243">תיקון צבע</translation>
@@ -2413,6 +2413,7 @@
 <translation id="9050999376345823055">כדי לשחרר, צריך ללחוץ על "."</translation>
 <translation id="906458777597946297">הגדלת החלון</translation>
 <translation id="9065203028668620118">עריכה</translation>
+<translation id="9068849894565669697">בחירת צבע</translation>
 <translation id="9071966355747967534">התכונה '<ph name="FEATURE_NAME" />' לא זמינה</translation>
 <translation id="9072519059834302790"><ph name="TIME_LEFT" /> עד להתרוקנות הסוללה.</translation>
 <translation id="9074432941673450836">‏בעזרת האפליקציות אפשר לבצע כל מה שצריך ב-<ph name="PRODUCT_NAME" />. האפליקציות נמצאות במרכז האפליקציות. אפשר גם להקיש על מקש 'מרכז האפליקציות' (מעל מקש Shift השמאלי) במקלדת.</translation>

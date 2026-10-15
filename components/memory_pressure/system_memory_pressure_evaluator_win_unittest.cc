@@ -4,6 +4,10 @@
 
 #include "components/memory_pressure/system_memory_pressure_evaluator_win.h"
 
+#include <windows.h>
+
+#include <ntstatus.h>
+
 #include "base/byte_count.h"
 #include "base/functional/bind.h"
 #include "base/memory/mock_memory_pressure_listener.h"
@@ -15,10 +19,6 @@
 #include "components/memory_pressure/multi_source_memory_pressure_monitor.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-#if BUILDFLAG(IS_WIN)
-#include <windows.h>
-#endif
 
 namespace memory_pressure {
 namespace win {
@@ -104,13 +104,13 @@ class TestSystemMemoryPressureEvaluator : public SystemMemoryPressureEvaluator {
   MEMORYSTATUSEX GetSystemMemoryStatusForTesting() { return mem_status_; }
 
  private:
-  bool GetSystemMemoryStatus(MEMORYSTATUSEX* mem_status) override {
+  bool GetSystemMemoryStatus(MEMORYSTATUSEX& mem_status) override {
     // Simply copy the memory status set by the test fixture.
-    *mem_status = mem_status_;
+    mem_status = mem_status_;
     return true;
   }
 
-  MEMORYSTATUSEX mem_status_;
+  MEMORYSTATUSEX mem_status_{};
 };
 
 class WinSystemMemoryPressureEvaluatorTest : public testing::Test {
@@ -256,8 +256,15 @@ TEST_F(WinSystemMemoryPressureEvaluatorTest, CheckMemoryPressure) {
     testing::Mock::VerifyAndClearExpectations(&listener);
   }
 
-  // Going down to no pressure should not produce an notification.
+  // Going down to no pressure should produce a notification.
+  EXPECT_CALL(listener, OnMemoryPressure(base::MEMORY_PRESSURE_LEVEL_NONE));
   evaluator.SetNone();
+  evaluator.CheckMemoryPressure();
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(base::MEMORY_PRESSURE_LEVEL_NONE, evaluator.current_vote());
+  testing::Mock::VerifyAndClearExpectations(&listener);
+
+  // Again no pressure should not produce an additional notification.
   evaluator.CheckMemoryPressure();
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(base::MEMORY_PRESSURE_LEVEL_NONE, evaluator.current_vote());

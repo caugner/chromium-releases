@@ -52,13 +52,6 @@ BASE_FEATURE(kUIExperimentMaxAutocompleteMatches,
              "OmniboxUIExperimentMaxAutocompleteMatches",
              DISABLED);
 
-// Feature used to cap the number of URL-type matches shown within the
-// Omnibox. If enabled, the number of URL-type matches is limited (unless
-// there are no more non-URL matches available.) If enabled, there is a
-// companion parameter - OmniboxMaxURLMatches - which specifies the maximum
-// desired number of URL-type matches.
-BASE_FEATURE(kOmniboxMaxURLMatches, ENABLED);
-
 // Feature used to cap max suggestions to a dynamic limit based on how many URLs
 // would be shown. E.g., show up to 10 suggestions if doing so would display no
 // URLs; else show up to 8 suggestions if doing so would include 1 or more URLs.
@@ -170,21 +163,12 @@ BASE_FEATURE(kMostVisitedTilesHorizontalRenderGroup,
 // accommodate the autocompletions.
 BASE_FEATURE(kRichAutocompletion, "OmniboxRichAutocompletion", ENABLED);
 
-// When enabled, use Assistant for omnibox voice query recognition instead of
-// Android's built-in voice recognition service. Only works on Android.
-BASE_FEATURE(kOmniboxAssistantVoiceSearch, DISABLED);
-
 // When enabled, the multimodal input button is shown in the Omnibox.
 BASE_FEATURE(kOmniboxMultimodalInput, DISABLED);
 
 // Whether the AI Mode entrypoint is shown in the Omnibox as a RHS button. Only
 // used on desktop platforms.
-// The first feature enables the entrypoint for all users. The second feature
-// enables the entrypoint only for users who have their locale set to English
-// and are located in the US, and has no effect if the first feature is
-// enabled.
-BASE_FEATURE(kAiModeOmniboxEntryPoint, DISABLED);
-BASE_FEATURE(kAiModeOmniboxEntryPointEnUs, ENABLED);
+BASE_FEATURE(kAiModeOmniboxEntryPoint, ENABLED);
 
 // Hides the AIM entrypoint in the Omnibox when user input is in progress. Only
 // used on desktop platforms.
@@ -341,26 +325,15 @@ BASE_FEATURE(kEnableSiteSearchAllowUserOverridePolicy, ENABLED);
 // Enables preconnecting to omnibox suggestions that are not only Search types.
 BASE_FEATURE(kPreconnectNonSearchOmniboxSuggestions, DISABLED);
 
-// Enabls adding an aim shortcut in the typed state.
-BASE_FEATURE(kOmniboxAimShortcutTypedState, DISABLED);
-
 // When enabled, unblocks omnibox height on small form factor devices, allowing
 // users to type in multiline / longer text.
 BASE_FEATURE(kMultilineEditField, "OmniboxMultilineEditField", DISABLED);
 
-#if BUILDFLAG(IS_IOS)
-// Enables the Gemini Prototype Omnibox Provider.
-BASE_FEATURE(kGeminiPrototypeOmniboxProvider,
-             "OmniboxGeminiPrototypeProvider",
-             DISABLED);
-
-bool IsGeminiPrototypeProviderEnabled() {
-  return base::FeatureList::IsEnabled(kGeminiPrototypeOmniboxProvider);
-}
-#endif
-
 // Controls whether the composebox
 BASE_FEATURE(kComposeboxUsesChromeComposeClient, ENABLED);
+
+// Controls whether or not contextual composebox should display suggestions.
+BASE_FEATURE(kComposeboxAttachmentsTypedState, DISABLED);
 
 #if BUILDFLAG(IS_ANDROID)
 // Accelerates time from cold start to focused Omnibox on low-end devices,
@@ -387,6 +360,9 @@ BASE_FEATURE(kDiagnostics, "OmniboxDiagnostics", DISABLED);
 // factors.
 BASE_FEATURE(kOmniboxImprovementForLFF, DISABLED);
 
+// If enabled, disables ligatures in the URL bar on Android.
+BASE_FEATURE(kUrlBarWithoutLigatures, ENABLED);
+
 namespace android {
 static jlong JNI_OmniboxFeatureMap_GetNativeMap(JNIEnv* env) {
   static const base::Feature* const kFeaturesExposedToJava[] = {
@@ -395,13 +371,13 @@ static jlong JNI_OmniboxFeatureMap_GetNativeMap(JNIEnv* env) {
       &kOmniboxTouchDownTriggerForPrefetch,
       &kOmniboxAsyncViewInflation,
       &kRichAutocompletion,
+      &kUrlBarWithoutLigatures,
       &kUseFusedLocationProvider,
       &kJumpStartOmnibox,
       &kAndroidHubSearchTabGroups,
       &kPostDelayedTaskFocusTab,
       &kOmniboxMobileParityUpdateV2,
       &kOmniboxSiteSearch,
-      &kOmniboxAimShortcutTypedState,
       &kOmniboxMultimodalInput,
       &kMultilineEditField,
       &kOmniboxImprovementForLFF,
@@ -414,3 +390,7 @@ static jlong JNI_OmniboxFeatureMap_GetNativeMap(JNIEnv* env) {
 #endif  // BUILDFLAG(IS_ANDROID)
 // Note: no new flags beyond this point.
 }  // namespace omnibox
+
+#if BUILDFLAG(IS_ANDROID)
+DEFINE_JNI(OmniboxFeatureMap)
+#endif

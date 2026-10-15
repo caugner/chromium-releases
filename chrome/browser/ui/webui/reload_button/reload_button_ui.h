@@ -16,14 +16,9 @@
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "ui/webui/mojo_web_ui_controller.h"
-#include "ui/webui/resources/cr_components/color_change_listener/color_change_listener.mojom.h"
-#include "ui/webui/resources/js/metrics_reporter/metrics_reporter.mojom-forward.h"
-
-class MetricsReporter;
-class ReloadButtonUI;
 
 namespace ui {
-class ColorChangeHandler;
+class ColorProvider;
 }  // namespace ui
 
 class ReloadButtonUI : public TopChromeWebUIController,
@@ -38,13 +33,28 @@ class ReloadButtonUI : public TopChromeWebUIController,
 
   void BindInterface(
       mojo::PendingReceiver<reload_button::mojom::PageHandlerFactory> receiver);
-  void BindInterface(
-      mojo::PendingReceiver<metrics_reporter::mojom::PageMetricsHost> receiver);
-  void BindInterface(
-      mojo::PendingReceiver<color_change_listener::mojom::PageHandler>
-          receiver);
 
   void SetReloadButtonState(bool is_loading, bool is_menu_enabled);
+
+  ReloadButtonPageHandler* page_handler_for_testing();
+
+  // TopChromeWebUIController:
+  // The controller uses `requesting_origin` to:
+  // 1. Decide which resources to expose, e.g. only expose "chrome://theme"
+  //    resources to trusted "chrome://" origins.
+  // 2. Generate correct CORS headers. Since resources added here often belong
+  //    to a different origin than the page loading the, they need a CORS header
+  //    that explicitly allow `current_origin`.
+  void PopulateLocalResourceLoaderConfig(
+      blink::mojom::LocalResourceLoaderConfig* config,
+      const url::Origin& requesting_origin) override;
+
+  // For testing:
+  // Sets a custom CommandUpdater for testing purposes.
+  void SetCommandUpdaterForTesting(CommandUpdater* command_updater);
+
+  // Sets a custom ColorProvider for testing purposes.
+  void SetColorProviderForTesting(const ui::ColorProvider* color_provider);
 
  private:
   // reload_button::mojom::PageHandlerFactory:
@@ -53,13 +63,17 @@ class ReloadButtonUI : public TopChromeWebUIController,
       mojo::PendingReceiver<reload_button::mojom::PageHandler> receiver)
       override;
 
-  std::unique_ptr<MetricsReporter> metrics_reporter_;
+  CommandUpdater* GetCommandUpdater() const;
+
   std::unique_ptr<ReloadButtonPageHandler> page_handler_;
-  // The color change handler notifies the WebUI when the color provider
-  // changes.
-  std::unique_ptr<ui::ColorChangeHandler> color_provider_handler_;
   mojo::Receiver<reload_button::mojom::PageHandlerFactory>
       page_factory_receiver_{this};
+
+  // Initialized only in tests by SetCommandUpdaterForTesting().
+  raw_ptr<CommandUpdater> command_updater_for_testing_ = nullptr;
+
+  // Initialized only in tests by SetColorProviderForTesting().
+  raw_ptr<const ui::ColorProvider> color_provider_for_testing_ = nullptr;
 
   WEB_UI_CONTROLLER_TYPE_DECL();
 };

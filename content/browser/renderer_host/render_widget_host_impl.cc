@@ -35,6 +35,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/current_thread.h"
 #include "base/task/single_thread_task_runner.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/time/default_tick_clock.h"
 #include "base/time/time.h"
 #include "base/trace_event/optional_trace_event.h"
@@ -63,7 +64,6 @@
 #include "content/browser/compositor/surface_utils.h"
 #include "content/browser/devtools/devtools_instrumentation.h"
 #include "content/browser/file_system/browser_file_system_helper.h"
-#include "content/browser/file_system_access/file_system_access_manager_impl.h"
 #include "content/browser/gpu/compositor_util.h"
 #include "content/browser/renderer_host/agent_scheduling_group_host.h"
 #include "content/browser/renderer_host/data_transfer_util.h"
@@ -834,6 +834,12 @@ void RenderWidgetHostImpl::SetIsLoading(bool is_loading) {
   if (view_) {
     view_->SetIsLoading(is_loading);
   }
+}
+
+void RenderWidgetHostImpl::WillSendInputEventToRenderer(
+    const WebInputEvent& event) {
+  GetRenderInputRouter()->GetDispatchToRendererCallback().Run(
+      event, input::DispatchToRendererResult::kDispatched);
 }
 
 void RenderWidgetHostImpl::WasHidden() {
@@ -2673,8 +2679,16 @@ std::optional<bool> RenderWidgetHostImpl::IsDelegatedInkHovering() {
 void RenderWidgetHostImpl::NotifyObserversOfInputEvent(
     const WebInputEvent& event,
     bool dispatched_to_renderer) {
+  NotifyObserversOfInputEventWithSource(
+      event, input::InputEventSource::kBrowser, dispatched_to_renderer);
+}
+
+void RenderWidgetHostImpl::NotifyObserversOfInputEventWithSource(
+    const WebInputEvent& event,
+    input::InputEventSource source,
+    bool dispatched_to_renderer) {
   for (auto& observer : input_event_observers_) {
-    observer.OnInputEvent(*this, event);
+    observer.OnInputEvent(*this, event, source);
   }
   if (dispatched_to_renderer) {
     delegate_->DidReceiveInputEvent(this, event);
@@ -2867,6 +2881,34 @@ void RenderWidgetHostImpl::StartDragging(
     process->FilterURL(true, &url_info.url);
   }
   process->FilterURL(false, &filtered_data.html_base_url);
+
+  // Propagate the FilterURL results back into `drag_data` so that the DevTools
+  // intercept path (Input.dragIntercepted) sees the same filtered values as the
+  // OS-drag path. Without this, a CDP client following the documented
+  // dragIntercepted -> dispatchDragEvent round-trip would replay the
+  // pre-filter renderer-supplied URLs into DragTargetDrop.
+  for (auto& item : drag_data->items) {
+    if (!item->is_string()) {
+      continue;
+    }
+    auto& s = item->get_string();
+    if (s->string_type == ui::kMimeTypeUriList) {
+      std::u16string rebuilt;
+      for (const auto& url_info : filtered_data.url_infos) {
+        if (!rebuilt.empty()) {
+          rebuilt.append(u"\r\n");
+        }
+        rebuilt.append(base::UTF8ToUTF16(url_info.url.spec()));
+      }
+      s->string_data = std::move(rebuilt);
+    } else if (s->string_type == ui::kMimeTypeHtml) {
+      s->base_url = filtered_data.html_base_url;
+    } else if (s->string_type == ui::kMimeTypeDownloadUrl &&
+               filtered_data.download_metadata.empty()) {
+      s->string_data.clear();
+    }
+  }
+
   // Filter out any paths that the renderer didn't have access to. This prevents
   // the following attack on a malicious renderer:
   // 1. StartDragging IPC sent with renderer-specified filesystem paths that it
@@ -3045,15 +3087,31 @@ bool RenderWidgetHostImpl::StoredVisualPropertiesNeedsUpdate(
 }
 
 void RenderWidgetHostImpl::AutoscrollStart(const gfx::PointF& position) {
+  input::RenderWidgetTargeter::AutoscrollStatus status =
+      delegate()->GetInputEventRouter()->SetAutoScrollInProgress(GetView(),
+                                                                 true);
+  if (status == input::RenderWidgetTargeter::AutoscrollStatus::kFailed) {
+    return;
+  }
+
+  if (status == input::RenderWidgetTargeter::AutoscrollStatus::kDeferred) {
+    autoscroll_targeting_pending_ = true;
+    autoscroll_start_position_ = position;
+    return;
+  }
+
   GetView()->OnAutoscrollStart();
   sent_autoscroll_scroll_begin_ = false;
   autoscroll_in_progress_ = true;
-  delegate()->GetInputEventRouter()->SetAutoScrollInProgress(
-      autoscroll_in_progress_);
   autoscroll_start_position_ = position;
 }
 
 void RenderWidgetHostImpl::AutoscrollFling(const gfx::Vector2dF& velocity) {
+  if (autoscroll_targeting_pending_) {
+    pending_autoscroll_fling_velocity_ = velocity;
+    return;
+  }
+
   CHECK(autoscroll_in_progress_);
   if (!sent_autoscroll_scroll_begin_ && velocity != gfx::Vector2dF()) {
     // Send a GSB event with valid delta hints.
@@ -3085,7 +3143,7 @@ void RenderWidgetHostImpl::AutoscrollEnd() {
   autoscroll_in_progress_ = false;
 
   delegate()->GetInputEventRouter()->SetAutoScrollInProgress(
-      autoscroll_in_progress_);
+      GetView(), autoscroll_in_progress_);
   // Don't send a GFC if no GSB is sent.
   if (!sent_autoscroll_scroll_begin_) {
     return;
@@ -3100,6 +3158,27 @@ void RenderWidgetHostImpl::AutoscrollEnd() {
 
   GetRenderInputRouter()->ForwardGestureEventWithLatencyInfo(cancel_event,
                                                              ui::LatencyInfo());
+}
+
+void RenderWidgetHostImpl::OnAutoscrollTargetResolved(bool success) {
+  if (!autoscroll_targeting_pending_) {
+    return;
+  }
+
+  autoscroll_targeting_pending_ = false;
+
+  if (!success) {
+    pending_autoscroll_fling_velocity_.reset();
+    return;
+  }
+
+  AutoscrollStart(autoscroll_start_position_);
+
+  if (pending_autoscroll_fling_velocity_) {
+    gfx::Vector2dF velocity = *pending_autoscroll_fling_velocity_;
+    pending_autoscroll_fling_velocity_.reset();
+    AutoscrollFling(velocity);
+  }
 }
 
 bool RenderWidgetHostImpl::IsAutoscrollInProgress() {
@@ -3154,6 +3233,12 @@ RenderWidgetHostViewBase* RenderWidgetHostImpl::GetRenderWidgetHostViewBase() {
 void RenderWidgetHostImpl::OnStartStylusWriting() {
   if (view_) {
     view_->OnStartStylusWriting();
+  }
+}
+
+void RenderWidgetHostImpl::OnUnconfirmedTapConvertedToTap() {
+  if (view_) {
+    view_->OnUnconfirmedTapConvertedToTap();
   }
 }
 

@@ -278,9 +278,16 @@ public class CustomTabToolbarButtonsViewBinder
             if (view.getMinimizeButton() != null) view.getMinimizeButton().setVisibility(View.GONE);
         }
 
+        var optionalButton = view.getOptionalButton();
+        if (optionalButton != null) {
+            // TODO(https://crbug.com/455076202): Figure out when this happen.
+            var parent = optionalButton.getParent();
+            if (parent != null) {
+                ((ViewGroup) parent).removeView(optionalButton);
+            }
+        }
         // Check if we have space for the optional button and we should be showing it. The optional
         // button is handled by its own MVC component, so it will have been inflated elsewhere.
-        var optionalButton = view.getOptionalButton();
         if (posParams.availableWidth >= defaultButtonWidth && model.get(OPTIONAL_BUTTON_VISIBLE)) {
             assertNonNull(optionalButton);
             optionalButton.setVisibility(View.VISIBLE);

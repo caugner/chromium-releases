@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "base/containers/contains.h"
-#include "base/debug/crash_logging.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
@@ -76,6 +75,9 @@ struct OneTimeMessageContextData : public base::SupportsUserData::Data {
       "extension_one_time_message_context_data";
 
   std::map<PortId, OneTimeOpener> openers;
+  // If the receiver is still present for `PortId`, then a response can still be
+  // sent from the listener to the message sender. Otherwise no response (or
+  // error) should be sent back to the message sender from the listener.
   std::map<PortId, OneTimeReceiver> receivers;
 
   using OneTimePortCallbacks =
@@ -94,7 +96,7 @@ struct OneTimeMessageContextData : public base::SupportsUserData::Data {
 
 constexpr char OneTimeMessageContextData::kPerContextDataKey[];
 
-bool OnMessagePolyfillSupportEnabled() {
+bool IsMessagePolyfillSupportEnabled() {
   return base::FeatureList::IsEnabled(
       extensions_features::kRuntimeOnMessageWebExtensionPolyfillSupport);
 }
@@ -194,85 +196,7 @@ void DelayedOneTimeMessageCallbackHelper(
   std::move(*callback).Run(&arguments);
 }
 
-// Checks the listener `result` for any errors thrown by listeners. If any are
-// found, this populates `error_message_out` with the first one found and
-// returns true. Otherwise, returns false.
-bool MaybeGetFirstErrorMessageFromListenerResult(
-    v8::Isolate* isolate,
-    v8::Local<v8::Context> context,
-    v8::Local<v8::Value> result,
-    std::string* error_message_out) {
-  v8::Local<v8::Array> errors_array =
-      GetListenerResultArray(isolate, context, result, "errors");
-  if (errors_array.IsEmpty()) {
-    return false;
-  }
-
-  uint32_t errors_count = errors_array->Length();
-
-  // Search array for errors.
-  for (uint32_t i = 0; i < errors_count; ++i) {
-    v8::MaybeLocal<v8::Value> maybe_error = errors_array->Get(context, i);
-    v8::Local<v8::Value> error;
-    // Assume the result could throw due to changes at runtime by the
-    // extension's JS code.
-    if (!maybe_error.ToLocal(&error) && !error->IsNativeError()) {
-      continue;
-    }
-    v8::Local<v8::Message> error_message =
-        v8::Exception::CreateMessage(isolate, error);
-    std::string error_message_from_v8;
-    bool error_message_string_convert_success =
-        gin::Converter<std::string>::FromV8(
-            isolate, error_message->Get().As<v8::Value>(),
-            &error_message_from_v8);
-    if (error_message_string_convert_success &&
-        !error_message_from_v8.empty()) {
-      *error_message_out = error_message_from_v8;
-    } else {
-      *error_message_out =
-          "Error message from listener couldn't be parsed or was empty.";
-    }
-    // An error was found.
-    return true;
-  }
-
-  // No errors were found.
-  return false;
-}
-
-base::debug::CrashKeyString* GetPromiseRejectFeatureEnabledCrashKey() {
-  static auto* crash_key = base::debug::AllocateCrashKeyString(
-      "ext_promise_reject_feature_enabled", base::debug::CrashKeySize::Size256);
-  return crash_key;
-}
-
 }  // namespace
-
-namespace debug {
-
-// Helper for adding a crash keys when we encounter unexpected state in promise
-// support for rejections.
-//
-// It is only created when the callback for a promise rejection is called to
-// process the rejection's reason/value.
-//
-// All keys are logged every time this class is instantiated.
-class ScopedPromiseRejectedResponseCrashKeys {
- public:
-  explicit ScopedPromiseRejectedResponseCrashKeys(
-      bool promise_support_feature_enabled)
-      : promise_reject_feature_enabled_crash_key_(
-            GetPromiseRejectFeatureEnabledCrashKey(),
-            promise_support_feature_enabled ? "true" : "false") {}
-  ~ScopedPromiseRejectedResponseCrashKeys() = default;
-
- private:
-  // Records if the promise support feature was enabled as "true" or "false".
-  base::debug::ScopedCrashKeyString promise_reject_feature_enabled_crash_key_;
-};
-
-}  // namespace debug
 
 // A helper class to manage the creation and tracking of callbacks for
 // one-time messages, such as the message response callback.
@@ -312,10 +236,30 @@ class OneTimeMessageHandler::OneTimeMessageCallbackManager {
       const PortId& port_id,
       std::unique_ptr<OneTimeMessageHandler::OneTimeMessageCallback> callback);
 
+  // Returns a v8 function that will call `callback` whenever a listener in the
+  // receiver throws a synchronous error. `callback` will *not* be cleaned up
+  // when the returned function is garbage collected by v8 since it is expected
+  // to cleaned up by either a) being called, or b) being deleted after all
+  // listeners have been dispatched to.
+  // `callback_id` is the unique ID of `callback` for later retrieval when the
+  // returned function calls `callback.`
+  v8::Local<v8::Function> CreateListenerThrowsErrorFunction(
+      ScriptContext& script_context,
+      const PortId& port_id,
+      std::unique_ptr<OneTimeMessageHandler::OneTimeMessageCallback> callback,
+      const CallbackID& callback_id);
+
   // Clears any pending `OneTimeMessageHandler::OneTimeMessageCallback`s that
   // could be called for `port_id`.
   void ClearCallbackDataForPortId(ScriptContext* script_context,
                                   const PortId& port_id);
+
+  // Deletes `port_id`'s `OneTimeMessageHandler::OneTimeMessageCallback` that is
+  // identified by `callback_id` .
+  void DeleteCallbackDataForCallbackId(
+      ScriptContext* script_context,
+      const PortId& port_id,
+      const OneTimeMessageHandler::CallbackID& callback_id);
 
   // Gets the number of pending callbacks for the `port_id` on the associated
   // per context data for testing purposes.
@@ -332,11 +276,20 @@ class OneTimeMessageHandler::OneTimeMessageCallbackManager {
   // there are no more `OneTimeMessageHandler::OneTimeMessageCallback`s to
   // collect, otherwise we'll notify of the one and only callback (message
   // response) collection.
+  // `optional_callback_id` allows the caller to specify the
+  // `OneTimeMessageHandler::CallbackID` used to identify the callback,
+  // otherwise one will be generated for them.
   v8::Local<v8::Function> CreateDelayedOneTimeMessageCallback(
       ScriptContext& script_context,
       const PortId& port_id,
       std::unique_ptr<OneTimeMessageHandler::OneTimeMessageCallback> callback,
       bool cleanup_if_function_unused);
+  v8::Local<v8::Function> CreateDelayedOneTimeMessageCallback(
+      ScriptContext& script_context,
+      const PortId& port_id,
+      std::unique_ptr<OneTimeMessageHandler::OneTimeMessageCallback> callback,
+      bool cleanup_if_function_unused,
+      std::optional<CallbackID> optional_callback_id);
 
   // Triggered when a `v8::Function` that had `cleanup_if_function_unused` set
   // to true when it was created is no longer accessible in the context and v8
@@ -385,6 +338,17 @@ v8::Local<v8::Function> OneTimeMessageHandler::OneTimeMessageCallbackManager::
       /*cleanup_if_function_unused=*/false);
 }
 
+v8::Local<v8::Function> OneTimeMessageHandler::OneTimeMessageCallbackManager::
+    CreateListenerThrowsErrorFunction(
+        ScriptContext& script_context,
+        const PortId& port_id,
+        std::unique_ptr<OneTimeMessageHandler::OneTimeMessageCallback> callback,
+        const CallbackID& callback_id) {
+  return CreateDelayedOneTimeMessageCallback(
+      script_context, port_id, std::move(callback),
+      /*cleanup_if_function_unused=*/false, callback_id);
+}
+
 void OneTimeMessageHandler::OneTimeMessageCallbackManager::
     ClearCallbackDataForPortId(ScriptContext* script_context,
                                const PortId& port_id) {
@@ -396,6 +360,24 @@ void OneTimeMessageHandler::OneTimeMessageCallbackManager::
   }
 
   data->pending_receiver_callbacks.erase(port_id);
+}
+
+void OneTimeMessageHandler::OneTimeMessageCallbackManager::
+    DeleteCallbackDataForCallbackId(
+        ScriptContext* script_context,
+        const PortId& port_id,
+        const OneTimeMessageHandler::CallbackID& callback_id) {
+  OneTimeMessageContextData* data =
+      GetPerContextData<OneTimeMessageContextData>(script_context->v8_context(),
+                                                   kDontCreateIfMissing);
+  if (!data) {
+    return;
+  }
+
+  if (auto port_iter = data->pending_receiver_callbacks.find(port_id);
+      port_iter != data->pending_receiver_callbacks.end()) {
+    port_iter->second.erase(callback_id);
+  }
 }
 
 int OneTimeMessageHandler::OneTimeMessageCallbackManager::
@@ -596,20 +578,29 @@ OneTimeMessageHandler::CreateMessageResponseCallback(const PortId& port_id) {
 std::unique_ptr<OneTimeMessageHandler::OneTimeMessageCallback>
 OneTimeMessageHandler::CreatePromiseRejectedCallback(const PortId& port_id) {
   return std::make_unique<OneTimeMessageHandler::OneTimeMessageCallback>(
-      base::BindOnce(&OneTimeMessageHandler::PromiseRejectedResponse,
+      base::BindOnce(&OneTimeMessageHandler::OnPromiseRejectedResponse,
                      weak_factory_.GetWeakPtr(), port_id));
 }
 
 std::unique_ptr<OneTimeMessageHandler::OneTimeMessageCallback>
-OneTimeMessageHandler::CreateEventDispatchCallback(const PortId& port_id) {
+OneTimeMessageHandler::CreateEventDispatchCallback(
+    const PortId& port_id,
+    std::optional<CallbackID> listener_error_callback_id) {
   return std::make_unique<OneTimeMessageHandler::OneTimeMessageCallback>(
       base::BindOnce(&OneTimeMessageHandler::OnEventFired,
+                     weak_factory_.GetWeakPtr(), port_id,
+                     listener_error_callback_id));
+}
+
+std::unique_ptr<OneTimeMessageHandler::OneTimeMessageCallback>
+OneTimeMessageHandler::CreateListenerErrorCallback(const PortId& port_id) {
+  return std::make_unique<OneTimeMessageHandler::OneTimeMessageCallback>(
+      base::BindOnce(&OneTimeMessageHandler::OnListenerThrowsError,
                      weak_factory_.GetWeakPtr(), port_id));
 }
 
 void OneTimeMessageHandler::OnAllCallbacksCollected(
     ScriptContext* script_context,
-    v8::Local<v8::Context> context,
     const PortId& port_id) {
   OneTimeMessageContextData* data =
       GetPerContextData<OneTimeMessageContextData>(script_context->v8_context(),
@@ -623,8 +614,11 @@ void OneTimeMessageHandler::OnAllCallbacksCollected(
   if (iter == data->receivers.end()) {
     return;
   }
+  // Since no more callbacks can be called the receiver doesn't need to be
+  // tracked anymore.
+  data->receivers.erase(port_id);
 
-  // Another receiver may reply so don't close the channel.
+  // A different receiver may reply so don't close the channel.
   CloseReceiverMessagePortOrChannel(script_context, port_id,
                                     /*close_channel=*/false,
                                     /*error=*/std::nullopt);
@@ -666,7 +660,7 @@ bool OneTimeMessageHandler::DeliverMessageToReceiver(
           *script_context, target_port_id,
           std::move(message_response_callback));
 
-  if (OnMessagePolyfillSupportEnabled()) {
+  if (IsMessagePolyfillSupportEnabled()) {
     port.message_response_function =
         v8::Global<v8::Function>(isolate, message_response_function);
   }
@@ -688,20 +682,33 @@ bool OneTimeMessageHandler::DeliverMessageToReceiver(
         isolate, {v8_message, v8_sender, message_response_function});
 
     v8::Local<v8::Function> message_dispatched_function;
+    v8::Local<v8::Function> listener_throws_error_function;
     // For runtime.onMessage, we require that the listener indicate if they
     // intend to respond asynchronously. `message_dispatched_callback` will
     // check the results of the listeners to determine if a listener indicated
     // it intended to respond asynchronously.
     if (port.event_name == messaging_util::kOnMessageEvent) {
-      auto message_dispatched_callback =
-          CreateEventDispatchCallback(target_port_id);
+      CallbackID listener_throws_error_callback_id;
+      if (IsMessagePolyfillSupportEnabled()) {
+        auto listener_throws_error_callback =
+            CreateListenerErrorCallback(target_port_id);
+        listener_throws_error_callback_id = CallbackID::Create();
+        listener_throws_error_function =
+            callback_manager_->CreateListenerThrowsErrorFunction(
+                *script_context, target_port_id,
+                std::move(listener_throws_error_callback),
+                listener_throws_error_callback_id);
+      }
+      auto message_dispatched_callback = CreateEventDispatchCallback(
+          target_port_id, listener_throws_error_callback_id);
       message_dispatched_function =
           callback_manager_->CreateEventDispatchFunction(
               *script_context, target_port_id,
               std::move(message_dispatched_callback));
     }
     bindings_system_->api_system()->event_handler()->FireEventInContext(
-        port.event_name, context, &args, nullptr, message_dispatched_function);
+        port.event_name, context, &args, /*filter=*/nullptr,
+        message_dispatched_function, listener_throws_error_function);
   } else {
     console::AddMessage(script_context,
                         blink::mojom::ConsoleMessageLevel::kError, error);
@@ -855,17 +862,6 @@ void OneTimeMessageHandler::CloseReceiverMessagePortOrChannel(
     const PortId& port_id,
     bool close_channel,
     std::optional<std::string> error) {
-  OneTimeMessageContextData* data =
-      GetPerContextData<OneTimeMessageContextData>(script_context->v8_context(),
-                                                   kDontCreateIfMissing);
-  // The context should still be around whenever this method is called.
-  CHECK(data) << "context was destroyed before message port closure.";
-  // Cleanup the receiver port if it is still around.
-  data->receivers.erase(port_id);
-
-  // With the message port closing callbacks aren't allowed to be called after
-  // this point so proactively clean them up.
-  callback_manager_->ClearCallbackDataForPortId(script_context, port_id);
 
   // If there was an error send it back to the message sender.
   if (close_channel && error) {
@@ -896,8 +892,13 @@ void OneTimeMessageHandler::OnOneTimeMessageResponse(
     return;
 
   auto iter = data->receivers.find(port_id);
+  // The channel may already be closed (if a listener replied (promise rejected)
+  // or listener threw error).
   if (iter == data->receivers.end())
     return;
+  // The response will be sent after this point so we no longer need to track
+  // the receiver.
+  data->receivers.erase(port_id);
 
   v8::Local<v8::Value> value;
   // We allow omitting the message argument (e.g., sendMessage()). Default the
@@ -909,15 +910,18 @@ void OneTimeMessageHandler::OnOneTimeMessageResponse(
 
   ScriptContext* script_context = GetScriptContextFromV8Context(context);
 
+  // With the message port closing callbacks aren't allowed to be called after
+  // this point so try to proactively clean them up.
+  CHECK(script_context->is_valid());
+  callback_manager_->ClearCallbackDataForPortId(script_context, port_id);
+
   std::string message_creation_error;
   std::unique_ptr<Message> message = messaging_util::MessageFromV8(
       context, value, port_id.serialization_format, &message_creation_error);
   if (!message) {
     // Throw an error in the listener context.
     arguments->ThrowTypeError(message_creation_error);
-    if (base::FeatureList::IsEnabled(
-            extensions_features::
-                kRuntimeOnMessageWebExtensionPolyfillSupport)) {
+    if (IsMessagePolyfillSupportEnabled()) {
       // This is a "fatal" error for the channel so close it entirely.
       CloseReceiverMessagePortOrChannel(script_context, port_id,
                                         /*close_channel=*/true,
@@ -943,6 +947,18 @@ v8::Local<v8::Function> OneTimeMessageHandler::OneTimeMessageCallbackManager::
         const PortId& port_id,
         std::unique_ptr<OneTimeMessageCallback> callback,
         bool cleanup_if_function_unused) {
+  return CreateDelayedOneTimeMessageCallback(
+      script_context, port_id, std::move(callback), cleanup_if_function_unused,
+      /*optional_callback_id=*/std::nullopt);
+}
+
+v8::Local<v8::Function> OneTimeMessageHandler::OneTimeMessageCallbackManager::
+    CreateDelayedOneTimeMessageCallback(
+        ScriptContext& script_context,
+        const PortId& port_id,
+        std::unique_ptr<OneTimeMessageCallback> callback,
+        bool cleanup_if_function_unused,
+        std::optional<CallbackID> optional_callback_id) {
   CHECK(callback);
   v8::Isolate* isolate = script_context.isolate();
   v8::Local<v8::Context> context = script_context.v8_context();
@@ -957,7 +973,13 @@ v8::Local<v8::Function> OneTimeMessageHandler::OneTimeMessageCallbackManager::
   // must exist for us to proceed.
   CHECK(data);
 
-  CallbackID callback_id = OneTimeMessageHandler::CallbackID::Create();
+  CallbackID callback_id;
+  if (optional_callback_id) {
+    callback_id = *optional_callback_id;
+  } else {
+    callback_id = OneTimeMessageHandler::CallbackID::Create();
+  }
+
   // We convert to a v8::String here because we want to validate the string is
   // still a valid `CallbackID` when we retrieve it from v8 when `function` is
   // called.
@@ -995,8 +1017,10 @@ void OneTimeMessageHandler::OneTimeMessageCallbackManager::
     OnDelayedOneTimeMessageCallbackCollected(ScriptContext* script_context,
                                              const PortId& port_id,
                                              CallbackID callback_id) {
-  // Note: we know |script_context| is still valid because the GC callback won't
+  // Note: we know `script_context` is still valid because the GC callback won't
   // be called after context invalidation.
+  CHECK(script_context->is_valid());
+
   v8::HandleScope handle_scope(script_context->isolate());
   OneTimeMessageContextData* data =
       GetPerContextData<OneTimeMessageContextData>(script_context->v8_context(),
@@ -1020,7 +1044,7 @@ void OneTimeMessageHandler::OneTimeMessageCallbackManager::
     if (!callbacks.empty()) {
       // If we've deleted the callback, but there's still a remaining callback
       // then this should only happen iff polyfill support is enabled.
-      DCHECK(OnMessagePolyfillSupportEnabled());
+      DCHECK(IsMessagePolyfillSupportEnabled());
       // When polyfill support is enabled we'll create two callbacks (message
       // response and promise reject) that can be collected at different times.
       // Only the last callback of these two collected should continue on to
@@ -1033,14 +1057,38 @@ void OneTimeMessageHandler::OneTimeMessageCallbackManager::
   }
 
   // Notify `message_handler_` so it can update the port state.
-  message_handler_->OnAllCallbacksCollected(
-      script_context, script_context->v8_context(), port_id);
+  message_handler_->OnAllCallbacksCollected(script_context, port_id);
   // More callbacks could be collected later so we'll leave the callback data
   // alone after closing the port.
 }
 
-void OneTimeMessageHandler::PromiseRejectedResponse(const PortId& port_id,
-                                                    gin::Arguments* arguments) {
+std::optional<std::string> OneTimeMessageHandler::GetErrorMessageFromValue(
+    v8::Isolate* isolate,
+    v8::Local<v8::Value> possible_error_value) {
+  if (!possible_error_value->IsNativeError()) {
+    return std::nullopt;
+  }
+
+  v8::Local<v8::Message> error_message =
+      v8::Exception::CreateMessage(isolate, possible_error_value);
+  std::string error_message_from_v8;
+  bool error_message_string_convert_success =
+      gin::Converter<std::string>::FromV8(isolate,
+                                          error_message->Get().As<v8::Value>(),
+                                          &error_message_from_v8);
+
+  if (!error_message_string_convert_success || error_message_from_v8.empty()) {
+    return std::nullopt;
+  }
+
+  return error_message_from_v8;
+}
+
+void OneTimeMessageHandler::OnPromiseRejectedResponse(
+    const PortId& port_id,
+    gin::Arguments* arguments) {
+  CHECK(IsMessagePolyfillSupportEnabled());
+
   CHECK(arguments);
   v8::Isolate* isolate = arguments->isolate();
   v8::Local<v8::Context> context = isolate->GetCurrentContext();
@@ -1054,19 +1102,27 @@ void OneTimeMessageHandler::PromiseRejectedResponse(const PortId& port_id,
     return;
   }
   auto iter = data->receivers.find(port_id);
-  // The channel may already be closed (if a listener already replied).
+  // The channel may already be closed (if a listener already replied, or
+  // listener threw error).
   if (iter == data->receivers.end()) {
     return;
   }
+  // The promise reject will be sent as an error response after this point so we
+  // no longer need to track the receiver.
+  data->receivers.erase(port_id);
 
-  debug::ScopedPromiseRejectedResponseCrashKeys promise_rejected_crash_keys(
-      /*promise_support_feature_enabled=*/OnMessagePolyfillSupportEnabled());
-  v8::Local<v8::Value> promise_reject_reason;
+  v8::Local<v8::Value> promise_reject_value;
   // This is safe to CHECK() because when a promise rejects it always provides a
   // value. Even if `reject()` (with no argument) is called we see `undefined`
   // for `promise_reject_value`.
   CHECK(arguments->Length() > 0);
-  CHECK(arguments->GetNext(&promise_reject_reason));
+  CHECK(arguments->GetNext(&promise_reject_value));
+
+  ScriptContext* script_context = GetScriptContextFromV8Context(context);
+  // With the message port closing callbacks aren't allowed to be called after
+  // this point so try to proactively clean them up.
+  CHECK(script_context->is_valid());
+  callback_manager_->ClearCallbackDataForPortId(script_context, port_id);
 
   // If promise rejection reason is a JS Error type then close the message port
   // with the Error's .message property. Otherwise return a generic error
@@ -1075,25 +1131,75 @@ void OneTimeMessageHandler::PromiseRejectedResponse(const PortId& port_id,
   // with the rejection error. mozilla/webextension-polyfill doesn't support it
   // currently, but plans to (see
   // https://github.com/mozilla/webextension-polyfill/issues/210).
-  std::string promise_reject_error_message =
-      "A runtime.onMessage listener's promise rejected without an Error";
-  if (promise_reject_reason->IsNativeError()) {
-    v8::Local<v8::Message> error_message =
-        v8::Exception::CreateMessage(isolate, promise_reject_reason);
-    std::string error_message_from_v8;
-    bool error_message_string_convert_success =
-        gin::Converter<std::string>::FromV8(
-            isolate, error_message->Get().As<v8::Value>(),
-            &error_message_from_v8);
-    if (error_message_string_convert_success) {
-      promise_reject_error_message = error_message_from_v8;
-    }
+  std::optional<std::string> error_message_from_value =
+      GetErrorMessageFromValue(isolate, promise_reject_value);
+
+  std::string error_message =
+      error_message_from_value
+          ? *error_message_from_value
+          : "A runtime.onMessage listener's promise rejected without an Error";
+
+  // TODO(crbug.com/439644930): Support sending the listener's stack trace along
+  // with the rejection error. mozilla/webextension-polyfill doesn't support it
+  // currently, but plans to (see
+  // https://github.com/mozilla/webextension-polyfill/issues/210).
+
+  CloseReceiverMessagePortOrChannel(script_context, port_id,
+                                    /*close_channel=*/true, error_message);
+}
+
+void OneTimeMessageHandler::OnListenerThrowsError(const PortId& port_id,
+                                                  gin::Arguments* arguments) {
+  CHECK(IsMessagePolyfillSupportEnabled());
+
+  v8::Isolate* isolate = arguments->isolate();
+  v8::Local<v8::Context> context = isolate->GetCurrentContext();
+
+  OneTimeMessageContextData* data =
+      GetPerContextData<OneTimeMessageContextData>(context,
+                                                   kDontCreateIfMissing);
+
+  // Dispatching can invalidate the context so if it is then we won't be able to
+  // inform the message sender.
+  if (!data) {
+    return;
   }
 
+  auto iter = data->receivers.find(port_id);
+  // The channel may already be closed (if a listener already replied).
+  if (iter == data->receivers.end()) {
+    return;
+  }
+  // The listener thrown error will be sent as an error response after this
+  // point so we no longer need to track the receiver.
+  data->receivers.erase(port_id);
+
   ScriptContext* script_context = GetScriptContextFromV8Context(context);
+  // Since we catch the error thrown by the context in order to get here the
+  // context should still be valid at this point.
+  CHECK(script_context->is_valid());
+  // With the message port closing callbacks aren't allowed to be called after
+  // this point so try to proactively clean them up.
+  callback_manager_->ClearCallbackDataForPortId(script_context, port_id);
+
+  v8::Local<v8::Value> listener_thrown_value;
+  CHECK(arguments->Length() > 0);
+  CHECK(arguments->GetNext(&listener_thrown_value));
+
+  std::optional<std::string> error_message_from_value =
+      GetErrorMessageFromValue(isolate, listener_thrown_value);
+  std::string error_message =
+      error_message_from_value
+          ? *error_message_from_value
+          : "Error message from listener couldn't be parsed or was empty.";
+
+  // TODO(crbug.com/439644930): Support sending the listener's stack trace along
+  // with the rejection error. mozilla/webextension-polyfill doesn't support it
+  // currently, but plans to (see
+  // https://github.com/mozilla/webextension-polyfill/issues/210).
+
   CloseReceiverMessagePortOrChannel(script_context, port_id,
-                                    /*close_channel=*/true,
-                                    promise_reject_error_message);
+                                    /*close_channel=*/true, error_message);
 }
 
 bool OneTimeMessageHandler::CheckAndHandleAsyncListenerReply(
@@ -1132,7 +1238,7 @@ bool OneTimeMessageHandler::CheckAndHandleAsyncListenerReply(
     // If promise returns are not supported, then we don't need to attach any
     // callbacks and can return early once we find at least one listener that
     // wants to reply asynchronously
-    if (!OnMessagePolyfillSupportEnabled() && will_reply_async) {
+    if (!IsMessagePolyfillSupportEnabled() && will_reply_async) {
       return true;
     }
 
@@ -1140,7 +1246,7 @@ bool OneTimeMessageHandler::CheckAndHandleAsyncListenerReply(
     // reply async. Attach callbacks for both the promise resolving or
     // rejecting. This is so that whatever the promise settles to is considered
     // the listener replying to the message sender with the settled value.
-    if (OnMessagePolyfillSupportEnabled() && listener_return->IsPromise()) {
+    if (IsMessagePolyfillSupportEnabled() && listener_return->IsPromise()) {
       auto promise_rejected_response_callback =
           CreatePromiseRejectedCallback(port_id);
       v8::Local<v8::Function> promise_rejected_function =
@@ -1158,8 +1264,10 @@ bool OneTimeMessageHandler::CheckAndHandleAsyncListenerReply(
   return will_reply_async;
 }
 
-void OneTimeMessageHandler::OnEventFired(const PortId& port_id,
-                                         gin::Arguments* arguments) {
+void OneTimeMessageHandler::OnEventFired(
+    const PortId& port_id,
+    std::optional<CallbackID> listener_error_callback_id,
+    gin::Arguments* arguments) {
   v8::Isolate* isolate = arguments->isolate();
   v8::Local<v8::Context> context = isolate->GetCurrentContext();
 
@@ -1177,39 +1285,37 @@ void OneTimeMessageHandler::OnEventFired(const PortId& port_id,
                                                    kDontCreateIfMissing);
   if (!data)
     return;
-  auto iter = data->receivers.find(port_id);
-  // The channel may already be closed (if the listener replied).
-  if (iter == data->receivers.end())
-    return;
-
-  OneTimeReceiver& port = iter->second;
 
   ScriptContext* script_context = GetScriptContextFromV8Context(context);
   DCHECK(script_context)
       << "script context was destroyed before runtime.onMessage listener "
          "results could be processed.";
 
-  // If we find that a listener threw an error when attempting to respond to the
-  // message, we consider that to be a message channel-closing event when
-  // polyfill support is enabled. Get the first listener error message seen and
-  // provide that back to the message sender.
-  std::string first_listener_error_message;
-  if (base::FeatureList::IsEnabled(
-          extensions_features::kRuntimeOnMessageWebExtensionPolyfillSupport) &&
-      MaybeGetFirstErrorMessageFromListenerResult(
-          isolate, context, result, &first_listener_error_message)) {
-    // TODO(crbug.com/439644930): Support sending the listener's stack trace
-    // along with the rejection error. mozilla/webextension-polyfill doesn't
-    // support it currently, but plans to (see
-    // https://github.com/mozilla/webextension-polyfill/issues/210).
-    CloseReceiverMessagePortOrChannel(script_context, port_id,
-                                      /*close_channel=*/true,
-                                      first_listener_error_message);
+  // Cleanup listener error callback if created since it shouldn't be possible
+  // for synchronous thrown errors to appear after all listeners have finished
+  // being dispatched to.
+  if (IsMessagePolyfillSupportEnabled() &&
+      listener_error_callback_id
+      // We get here once all listeners have been dispatched to, but since any
+      // of them could invalidate the context we need to check it's still valid
+      // before trying to access the context to cleanup the callback. If the
+      // context is invalid the cleanup will happen shortly after this when the
+      // context destructs.
+      && binding::IsContextValid(context)) {
+    callback_manager_->DeleteCallbackDataForCallbackId(
+        script_context, port_id, *listener_error_callback_id);
+  }
+
+  auto iter = data->receivers.find(port_id);
+  // The channel may be closed (if the listener replied or threw an error).
+  if (iter == data->receivers.end()) {
     return;
   }
 
+  OneTimeReceiver& port = iter->second;
+
   v8::Local<v8::Function> promise_resolved_function;
-  if (OnMessagePolyfillSupportEnabled()) {
+  if (IsMessagePolyfillSupportEnabled()) {
     promise_resolved_function = port.message_response_function.Get(isolate);
     // Ensure the global function doesn't outlive port closing.
     port.message_response_function.SetWeak();
@@ -1231,6 +1337,7 @@ void OneTimeMessageHandler::OnEventFired(const PortId& port_id,
   // The listener did not reply and did not indicate it would reply later from
   // any of its listeners. Close the message port. Don't close the channel
   // because another listener (in a separate context) may reply.
+  data->receivers.erase(port_id);
   CloseReceiverMessagePortOrChannel(script_context, port_id,
                                     /*close_channel=*/false,
                                     /*error=*/std::nullopt);

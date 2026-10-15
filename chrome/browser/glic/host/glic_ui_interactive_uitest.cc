@@ -11,6 +11,7 @@
 #include "base/test/metrics/user_action_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "chrome/browser/glic/host/glic.mojom-shared.h"
 #include "chrome/browser/glic/host/glic_ui.h"
 #include "chrome/browser/glic/test_support/interactive_glic_test.h"
@@ -645,6 +646,8 @@ IN_PROC_BROWSER_TEST_F(GlicUiFullLoadingSequenceTest, EscapeKeyDismisses) {
       CheckEscapeKeyDismisses(kErrorPanel));
 }
 
+#if !BUILDFLAG(IS_CHROMEOS)
+// Multi-profile is not supported on ChromeOS.
 class GlicWithMultipleProfilesTest : public GlicUiInteractiveUiTestBase {
  public:
   GlicWithMultipleProfilesTest() : GlicUiInteractiveUiTestBase({}) {}
@@ -690,6 +693,7 @@ IN_PROC_BROWSER_TEST_F(GlicWithMultipleProfilesTest, OpenGlicInEachProfile) {
       CheckControllerShowing(false),
       OpenGlicWindow(GlicWindowMode::kAttached, GlicInstrumentMode::kHostOnly));
 }
+#endif  // !BUILDFLAG(IS_CHROMEOS)
 
 DEFINE_LOCAL_STATE_IDENTIFIER_VALUE(ui::test::PollingStateObserver<GURL>,
                                     kOpenedTabUrlState);
@@ -1012,6 +1016,35 @@ IN_PROC_BROWSER_TEST_F(GlicUiUnifiedFreIntegrationTest,
       InAnyContext(CheckElementHidden(kFreContainer, true)),
       InAnyContext(
           WaitForElementVisible(test::kGlicHostElementId, kGlicGuestPanel)));
+}
+
+class GlicUiTrustFirstOnboardingTest : public GlicUiInteractiveUiTestBase {
+ public:
+  GlicUiTrustFirstOnboardingTest()
+      : GlicUiInteractiveUiTestBase(TestParams(/*connected=*/true)) {
+    feature_list_.InitAndEnableFeature(features::kGlicTrustFirstOnboarding);
+  }
+  ~GlicUiTrustFirstOnboardingTest() override = default;
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(GlicUiTrustFirstOnboardingTest, FreIsSkipped) {
+  if (base::FeatureList::IsEnabled(features::kGlicMultiInstance)) {
+    // TODO(crbug.com/453696965): Broken in multi-instance.
+    GTEST_SKIP() << "Skipping for kGlicMultiInstance";
+  }
+  const DeepQuery kFreContainer = {"#fre-app-container"};
+  const DeepQuery kGlicContainer = {"#glic-app-container"};
+  RunTestSequence(
+      ObserveState(kGlicUiStateHistory, GetHost()),
+      OpenGlicWindow(GlicWindowMode::kDetached, GlicInstrumentMode::kHostOnly),
+      InAnyContext(WaitForShow(test::kGlicHostElementId)),
+      // Check that the FRE is not shown.
+      CheckElementVisible(kFreContainer, false),
+      // Check that the main Glic container is shown.
+      CheckElementVisible(kGlicContainer, true));
 }
 
 }  // namespace glic

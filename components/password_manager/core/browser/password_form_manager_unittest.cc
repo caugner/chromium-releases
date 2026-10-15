@@ -98,6 +98,8 @@ using ::autofill::SINGLE_USERNAME;
 using ::autofill::SINGLE_USERNAME_FORGOT_PASSWORD;
 using ::autofill::UNKNOWN_TYPE;
 using ::autofill::password_generation::PasswordGenerationType;
+using ::autofill::test::WithoutUnserializedData;
+using ::autofill::test::WithoutValues;
 using ::autofill::upload_contents_matchers::FieldAutofillTypeIs;
 using ::autofill::upload_contents_matchers::FieldsContain;
 using ::autofill::upload_contents_matchers::FieldSignatureIs;
@@ -114,6 +116,7 @@ using ::testing::IsNull;
 using ::testing::Mock;
 using ::testing::NiceMock;
 using ::testing::Pointee;
+using ::testing::ResultOf;
 using ::testing::Return;
 using ::testing::ReturnRef;
 using ::testing::SaveArg;
@@ -157,6 +160,14 @@ auto UploadFieldIs(const FormFieldData& field,
                FieldAutofillTypeIs({type}), matchers...);
 }
 
+testing::Matcher<const FormData&> DeepEqualsWithoutUnserializedData(
+    const FormData& expected) {
+  return ResultOf(
+      "WithoutUnserializedData()",
+      [](const FormData& actual) { return WithoutUnserializedData(actual); },
+      WithoutUnserializedData(expected));
+}
+
 // Returns a matcher that checks that a vote upload happened for a form with
 // `kSingleUsernameFormSignature` and a field with
 // `kSingleUsernameFieldSignature` with type `SINGLE_USERNAME`.
@@ -182,10 +193,6 @@ MATCHER_P(FormHasPassword, password_value, "") {
   return arg.new_password_value == password_value;
 }
 
-MATCHER_P(FormDataPointeeEqualTo, form_data, "") {
-  return autofill::FormData::DeepEqual(*arg, form_data);
-}
-
 class MockPasswordManagerDriver : public StubPasswordManagerDriver {
  public:
   MOCK_METHOD(void,
@@ -197,6 +204,7 @@ class MockPasswordManagerDriver : public StubPasswordManagerDriver {
               (const autofill::PasswordFormGenerationData&),
               (override));
   MOCK_METHOD(bool, IsInPrimaryMainFrame, (), (const, override));
+  MOCK_METHOD(int, GetId, (), (const, override));
 };
 
 class MockPasswordManagerClient : public StubPasswordManagerClient {
@@ -264,7 +272,8 @@ void CheckPendingCredentials(const PasswordForm& expected,
   EXPECT_EQ(expected.username_element, actual.username_element);
   EXPECT_EQ(expected.password_element, actual.password_element);
   EXPECT_EQ(expected.blocked_by_user, actual.blocked_by_user);
-  EXPECT_TRUE(FormData::DeepEqual(expected.form_data, actual.form_data));
+  EXPECT_EQ(WithoutUnserializedData(WithoutValues(expected.form_data)),
+            WithoutUnserializedData(WithoutValues(actual.form_data)));
 }
 
 struct ExpectedGenerationUKM {
@@ -316,11 +325,13 @@ void CheckPasswordGenerationUKM(const ukm::TestAutoSetUkmRecorder& recorder,
 }
 
 // Create predictions for |form| using field predictions |field_predictions|.
-std::map<FormSignature, FormPredictions> CreatePredictions(
-    const FormData& form,
-    std::vector<std::pair<int, FieldType>> field_predictions,
-    bool is_override = false) {
+std::map<std::pair<autofill::FormSignature, int>, FormPredictions>
+CreatePredictions(const FormData& form,
+                  std::vector<std::pair<int, FieldType>> field_predictions,
+                  bool is_override = false,
+                  int driver_id = 0) {
   FormPredictions predictions;
+  predictions.driver_id = driver_id;
   for (const auto& index_prediction : field_predictions) {
     autofill::FieldRendererId renderer_id =
         form.fields()[index_prediction.first].renderer_id();
@@ -330,8 +341,9 @@ std::map<FormSignature, FormPredictions> CreatePredictions(
     predictions.fields.emplace_back(renderer_id, field_signature, server_type,
                                     is_override);
   }
-  FormSignature form_signature = CalculateFormSignature(form);
-  return {{form_signature, predictions}};
+  autofill::FormSignature form_signature =
+      autofill::CalculateFormSignature(form);
+  return {{{form_signature, driver_id}, predictions}};
 }
 
 // Create simple predictions on single username field.
@@ -957,8 +969,8 @@ TEST_P(PasswordFormManagerTest, ServerPredictionsWithinDelay) {
   SetNonFederatedAndNotifyFetchCompleted({saved_match_});
   Mock::VerifyAndClearExpectations(&driver_);
 
-  std::map<FormSignature, FormPredictions> predictions = CreatePredictions(
-      observed_form_, {std::make_pair(2, autofill::PASSWORD)});
+  auto predictions = CreatePredictions(observed_form_,
+                                       {std::make_pair(2, autofill::PASSWORD)});
 
   // Expect filling without delay on receiving server predictions.
   EXPECT_CALL(driver_, PropagateFillDataOnParsingCompletion).Times(1);
@@ -966,6 +978,31 @@ TEST_P(PasswordFormManagerTest, ServerPredictionsWithinDelay) {
   Mock::VerifyAndClearExpectations(&driver_);
 
   // Expect no filling on receiving predictions again.
+  EXPECT_CALL(driver_, PropagateFillDataOnParsingCompletion).Times(0);
+  form_manager_->ProcessServerPredictions(predictions);
+}
+
+// Tests that PasswordFormManager does not adopt server predictions if they
+// belong to a different driver.
+TEST_P(PasswordFormManagerTest, ServerPredictionsDriverIdMismatch) {
+  EXPECT_CALL(driver_, GetId()).WillRepeatedly(Return(1));
+  CreateFormManager(observed_form_);
+
+  // Expects no filling on save matches receiving.
+  EXPECT_CALL(driver_, PropagateFillDataOnParsingCompletion).Times(0);
+  SetNonFederatedAndNotifyFetchCompleted({saved_match_});
+  Mock::VerifyAndClearExpectations(&driver_);
+
+  auto base_predictions = CreatePredictions(
+      observed_form_, {std::make_pair(2, autofill::PASSWORD)});
+
+  std::map<std::pair<autofill::FormSignature, int>, FormPredictions>
+      predictions;
+  predictions[{autofill::CalculateFormSignature(observed_form_), 2}] =
+      base_predictions.begin()->second;
+
+  // Expect NO filling on receiving server predictions because driver_id
+  // mismatches.
   EXPECT_CALL(driver_, PropagateFillDataOnParsingCompletion).Times(0);
   form_manager_->ProcessServerPredictions(predictions);
 }
@@ -981,8 +1018,8 @@ TEST_P(PasswordFormManagerTest, ServerPredictionsAfterDelay) {
   task_environment_.FastForwardUntilNoTasksRemain();
   Mock::VerifyAndClearExpectations(&driver_);
 
-  std::map<FormSignature, FormPredictions> predictions = CreatePredictions(
-      observed_form_, {std::make_pair(2, autofill::PASSWORD)});
+  auto predictions = CreatePredictions(observed_form_,
+                                       {std::make_pair(2, autofill::PASSWORD)});
 
   // Expect filling on receiving server predictions because it was less than
   // kMaxTimesAutofill attempts to fill.
@@ -999,8 +1036,8 @@ TEST_P(PasswordFormManagerTest, ServerPredictionsBeforeFetcher) {
   EXPECT_CALL(driver_, PropagateFillDataOnParsingCompletion).Times(0);
   CreateFormManager(observed_form_);
 
-  std::map<FormSignature, FormPredictions> predictions = CreatePredictions(
-      observed_form_, {std::make_pair(2, autofill::PASSWORD)});
+  auto predictions = CreatePredictions(observed_form_,
+                                       {std::make_pair(2, autofill::PASSWORD)});
   form_manager_->ProcessServerPredictions(predictions);
   Mock::VerifyAndClearExpectations(&driver_);
 
@@ -1161,7 +1198,7 @@ TEST_P(PasswordFormManagerTest, CreatePendingCredentialsEmptyName) {
   test_api(anonymous_signup).field(2).set_name({});
   test_api(anonymous_signup).field(2).set_value(u"a password");
   // Mark the password field as new-password.
-  std::map<FormSignature, FormPredictions> predictions = CreatePredictions(
+  auto predictions = CreatePredictions(
       observed_form_, {std::make_pair(2, autofill::ACCOUNT_CREATION_PASSWORD)});
 
   form_manager_->ProcessServerPredictions(predictions);
@@ -3741,7 +3778,7 @@ TEST_P(PasswordFormManagerTest, UsernameFirstFlowFillSingleUsernameForm) {
 
   // Provide server predictions for the single username form, which will trigger
   // FillNow().
-  std::map<FormSignature, FormPredictions> predictions =
+  auto predictions =
       CreatePredictions(non_password_form_,
                         {std::make_pair(kUsernameFieldIndex, SINGLE_USERNAME)});
   form_manager_->ProcessServerPredictions(predictions);
@@ -4156,7 +4193,7 @@ TEST_P(PasswordFormManagerTest, ResetPasswordFormSubmitted) {
 // not provisionally saved.
 TEST_P(PasswordFormManagerTest, ProvisinallySavedOnSingleUsernameForm) {
   CreateFormManager(non_password_form_);
-  std::map<FormSignature, FormPredictions> predictions =
+  auto predictions =
       CreatePredictions(non_password_form_,
                         {std::make_pair(kUsernameFieldIndex, SINGLE_USERNAME)});
   form_manager_->ProcessServerPredictions(predictions);
@@ -4615,7 +4652,7 @@ TEST_P(PasswordFormManagerTest, ServerPredictionsIgnoredOnLocalhost) {
 
   // Expect no filling on receiving predictions.
   EXPECT_CALL(driver_, PropagateFillDataOnParsingCompletion).Times(0);
-  form_manager_->ProcessServerPredictions({{kFormSignature, predictions}});
+  form_manager_->ProcessServerPredictions({{{kFormSignature, 0}, predictions}});
 }
 
 // Tests that crowdsourcing votes are not uploaded for forms on localhost.
@@ -4798,7 +4835,7 @@ TEST_P(PasswordFormManagerTest, SetCreditCardFieldsAsBanned) {
   SetNonFederatedAndNotifyFetchCompleted({saved_match_});
 
   // Server prediction marks element on index three as a credit card field.
-  std::map<FormSignature, FormPredictions> predictions = CreatePredictions(
+  auto predictions = CreatePredictions(
       observed_form_, {std::make_pair(3, autofill::CREDIT_CARD_NAME_FULL)});
 
   PasswordFormFillData fill_data;
@@ -4976,8 +5013,9 @@ TEST_F(PasswordFormManagerTestWithMockedSaver, SaveCredentials) {
   EXPECT_TRUE(form_manager_->ProvisionallySave(submitted_form, &driver_,
                                                possible_usernames_));
   PasswordForm updated_form;
-  EXPECT_CALL(*mock_password_save_manager(),
-              Save(FormDataPointeeEqualTo(observed_form_), _))
+  EXPECT_CALL(
+      *mock_password_save_manager(),
+      Save(Pointee(DeepEqualsWithoutUnserializedData(observed_form_)), _))
       .WillOnce(SaveArg<1>(&updated_form));
   EXPECT_CALL(client_, UpdateFormManagers());
   form_manager_->Save();
@@ -5015,7 +5053,7 @@ TEST_F(PasswordFormManagerTestWithMockedSaver,
 
   PasswordForm saved_form;
   EXPECT_CALL(*mock_password_save_manager(),
-              Save(FormDataPointeeEqualTo(observed_form_),
+              Save(Pointee(DeepEqualsWithoutUnserializedData(observed_form_)),
                    FormHasPassword(new_password)))
       .WillOnce(SaveArg<1>(&saved_form));
   EXPECT_CALL(client_, UpdateFormManagers());
@@ -5221,8 +5259,9 @@ TEST_F(PasswordFormManagerTestWithMockedSaver,
               CreatePendingCredentials(_, _, _, _, _));
   EXPECT_TRUE(form_manager_->ProvisionallySave(submitted_form_, &driver_,
                                                possible_usernames_));
-  EXPECT_CALL(*mock_password_save_manager(),
-              Save(FormDataPointeeEqualTo(submitted_form_), _))
+  EXPECT_CALL(
+      *mock_password_save_manager(),
+      Save(Pointee(DeepEqualsWithoutUnserializedData(submitted_form_)), _))
       .WillOnce(SaveArg<1>(&updated_form));
   form_manager_->Save();
   EXPECT_EQ(submitted_form_.fields()[kUsernameFieldIndex].value(),

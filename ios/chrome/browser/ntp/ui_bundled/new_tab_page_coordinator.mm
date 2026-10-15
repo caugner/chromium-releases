@@ -11,6 +11,7 @@
 #import "base/metrics/user_metrics.h"
 #import "base/metrics/user_metrics_action.h"
 #import "base/time/time.h"
+#import "components/contextual_search/contextual_search_service.h"
 #import "components/feature_engagement/public/event_constants.h"
 #import "components/feature_engagement/public/tracker.h"
 #import "components/feed/core/v2/public/common_enums.h"
@@ -33,7 +34,6 @@
 #import "ios/chrome/app/profile/profile_init_stage.h"
 #import "ios/chrome/app/profile/profile_state.h"
 #import "ios/chrome/app/profile/profile_state_observer.h"
-#import "ios/chrome/browser/aim/prototype/coordinator/aim_prototype_availability.h"
 #import "ios/chrome/browser/authentication/account_menu/coordinator/account_menu_coordinator.h"
 #import "ios/chrome/browser/authentication/account_menu/coordinator/account_menu_coordinator_delegate.h"
 #import "ios/chrome/browser/authentication/account_menu/public/account_menu_constants.h"
@@ -42,6 +42,7 @@
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_coordinator.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_utils.h"
 #import "ios/chrome/browser/bubble/ui_bundled/bubble_view_controller_presenter.h"
+#import "ios/chrome/browser/composebox/coordinator/composebox_availability.h"
 #import "ios/chrome/browser/content_suggestions/ui_bundled/content_suggestions_collection_utils.h"
 #import "ios/chrome/browser/content_suggestions/ui_bundled/content_suggestions_coordinator.h"
 #import "ios/chrome/browser/content_suggestions/ui_bundled/content_suggestions_delegate.h"
@@ -501,8 +502,7 @@
 
 - (void)focusFakebox {
   [self dismissCustomizationMenu];
-  if (MaybeShowAIMPrototype(self.browser,
-                            AIMPrototypeEntrypoint::kNTPFakebox)) {
+  if (MaybeShowComposebox(self.browser, ComposeboxEntrypoint::kNTPFakebox)) {
     return;
   }
   _fakeboxTapped = NO;
@@ -859,8 +859,7 @@
 - (void)fakeboxTapped {
   [self dismissCustomizationMenu];
   _fakeboxTapped = YES;
-  if (MaybeShowAIMPrototype(self.browser,
-                            AIMPrototypeEntrypoint::kNTPFakebox)) {
+  if (MaybeShowComposebox(self.browser, ComposeboxEntrypoint::kNTPFakebox)) {
     return;
   }
   [self.NTPViewController focusOmnibox];
@@ -904,10 +903,11 @@
                                               fullscreenPromo:NO
                                          continuationProvider:
                                              DoNothingContinuationProvider()];
-    _signinCoordinator.signinCompletion = ^(
-        SigninCoordinatorResult result, id<SystemIdentity> completionIdentity) {
-      [weakSelf showSigninCommandDidFinish];
-    };
+    _signinCoordinator.signinCompletion =
+        ^(SigninCoordinator* coordinator, SigninCoordinatorResult result,
+          id<SystemIdentity> completionIdentity) {
+          [weakSelf showSigninCommandDidFinishWithCoordinator:coordinator];
+        };
     [_signinCoordinator start];
   }
 }
@@ -939,21 +939,27 @@
     // giver of the command that the command is interrupted.
     SigninCoordinatorCompletionCallback completion = command.completion;
     if (completion) {
-      completion(SigninCoordinatorResultInterrupted, nil);
+      // The coordinator argument is `nil` because this completion has never
+      // been assigned to a signinCoordinator’s `signinCompletion`. It works
+      // because the part that check the coordinator value is in the
+      // `addSigninCompletion:` below, and so not integrated in the completion
+      // function yet.
+      completion(nil, SigninCoordinatorResultInterrupted, nil);
     }
     return;
   } else if (_signinCoordinator) {
     // There may be a signin-coordinator being presented. Due to uncertainty,
     // let’s close the current sign-in coordinator and start the new one.
-    _signinCoordinator.signinCompletion(SigninCoordinatorResultInterrupted,
-                                        nil);
+    _signinCoordinator.signinCompletion(
+        _signinCoordinator, SigninCoordinatorResultInterrupted, nil);
     // The signin-completion should have unset the sign-in coordinator.
     CHECK(!_signinCoordinator, base::NotFatalUntil::M146);
   }
   __weak __typeof(self) weakSelf = self;
-  [command addSigninCompletion:^(SigninCoordinatorResult result,
+  [command addSigninCompletion:^(SigninCoordinator* coordinator,
+                                 SigninCoordinatorResult result,
                                  id<SystemIdentity>) {
-    [weakSelf showSigninCommandDidFinish];
+    [weakSelf showSigninCommandDidFinishWithCoordinator:coordinator];
   }];
   _signinCoordinator =
       [SigninCoordinator signinCoordinatorWithCommand:command
@@ -1126,8 +1132,9 @@
                                       DoNothingContinuationProvider()];
   }
   _signinCoordinator.signinCompletion =
-      ^(SigninCoordinatorResult result, id<SystemIdentity> completionIdentity) {
-        [weakSelf showSigninCommandDidFinish];
+      ^(SigninCoordinator* coordinator, SigninCoordinatorResult result,
+        id<SystemIdentity> completionIdentity) {
+        [weakSelf showSigninCommandDidFinishWithCoordinator:coordinator];
       };
   [_signinCoordinator start];
   signin_metrics::RecordSigninUserActionForAccessPoint(accessPoint);
@@ -1490,8 +1497,9 @@
 
 // Update the state, to take into account that the signin coordinator
 // coordinator is stopped.
-- (void)showSigninCommandDidFinish {
-  CHECK(_signinCoordinator, base::NotFatalUntil::M140);
+- (void)showSigninCommandDidFinishWithCoordinator:
+    (SigninCoordinator*)coordinator {
+  CHECK_EQ(_signinCoordinator, coordinator, base::NotFatalUntil::M151);
   [self stopSigninCoordinator];
 }
 
@@ -1807,11 +1815,12 @@
 }
 
 - (void)openMIA {
-  if (MaybeShowAIMPrototype(self.browser,
-                            AIMPrototypeEntrypoint::kNTPAIMButton)) {
+  [self.NTPMetricsRecorder recordMIATapped];
+  if (contextual_search::ContextualSearchService::IsContextSharingEnabled(
+          self.prefService) &&
+      MaybeShowComposebox(self.browser, ComposeboxEntrypoint::kNTPAIMButton)) {
     return;
   }
-  [self.NTPMetricsRecorder recordMIATapped];
 
   GURL URL = GetUrlForAim(self.templateURLService,
                           /*query_start_time=*/base::Time::Now());

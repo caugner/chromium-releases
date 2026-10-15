@@ -61,6 +61,7 @@
 #include "ui/views/style/typography_provider.h"
 #include "ui/views/vector_icons.h"
 #include "ui/views/view_class_properties.h"
+#include "ui/views/view_tracker.h"
 #include "ui/views/view_utils.h"
 #include "ui/views/widget/widget.h"
 
@@ -540,7 +541,7 @@ void MenuItemView::SetSelected(bool selected) {
   selected_ = selected;
   UpdateAccessibleSelection();
   UpdateSelectionBasedStateIfChanged(PaintMode::kNormal);
-  OnPropertyChanged(&selected_, kPropertyEffectsPaint);
+  OnPropertyChanged(&selected_, PropertyEffects::kPaint);
 }
 
 base::CallbackListSubscription MenuItemView::AddSelectedChangedCallback(
@@ -571,6 +572,10 @@ void MenuItemView::SetIcon(const ui::ImageModel& icon) {
   if (icon.IsEmpty()) {
     SetIconView(nullptr);
     return;
+  }
+
+  if (icon.IsVectorIcon()) {
+    icon_color_ = icon.GetVectorIcon().color();
   }
 
   auto icon_view = std::make_unique<ImageView>();
@@ -1008,20 +1013,30 @@ void MenuItemView::UpdateEmptyMenusAndMetrics() {
   // visible items. Copy the children, since we may mutate them as we go.
   const Views children = submenu_->children();
   bool has_visible_menu_items = false;
+
+  // Making changes to selection, etc. can cause `this` to be deleted. Track the
+  // continued existence of this object while updating.
+  ViewTracker tracker(this);
+
   for (View* child : children) {
     MenuItemView* const child_menu = AsViewClass<MenuItemView>(child);
     if (!child_menu) {
       continue;
     }
     if (IsViewClass<EmptyMenuMenuItem>(child)) {
+      const bool selected = child_menu->IsSelected();
       // Prevent view destruction until selection is updated.
       // We remove the child before updating selection in case of re-entrancy.
       std::unique_ptr<View> removed_child = submenu_->RemoveChildViewT(child);
-      if (child_menu->IsSelected()) {
+      if (tracker && selected) {
         // Update selection to this menu before deleting the currently
         // selected child.
         GetMenuController()->SetSelection(
             this, MenuController::SELECTION_UPDATE_IMMEDIATELY);
+        // This can also delete `this`, so check for that.
+        if (!tracker) {
+          return;
+        }
       }
       submenu_
           ->InvalidateLayout();  // Ideally the submenu would have a layout
@@ -1578,20 +1593,38 @@ void MenuItemView::UpdateSelectionBasedState(bool paint_as_selected) {
         radio_icon, radio_icon_color, kMenuCheckSize));
   }
 
-  // Update any vector icons if a custom color is used or if the icon is
-  // disabled.
-  if ((!GetEnabledInViewsSubtree() || foreground_color_id_.has_value()) &&
-      icon_view_) {
+  // Update the main icon view color.
+  if (icon_view_) {
     ui::ImageModel icon_model = icon_view_->GetImageModel();
     if (!icon_model.IsEmpty() && icon_model.IsVectorIcon()) {
       ui::VectorIconModel model = icon_model.GetVectorIcon();
       const gfx::VectorIcon* icon = model.vector_icon();
-      const ui::ImageModel& image_model = ui::ImageModel::FromVectorIcon(
-          *icon,
-          GetEnabledInViewsSubtree()
-              ? GetColorProvider()->GetColor(foreground_color_id_.value())
-              : GetColorProvider()->GetColor(ui::kColorMenuIconDisabled),
-          model.icon_size());
+
+      ui::ColorVariant icon_color =
+          icon_color_.has_value() ? icon_color_.value() : colors.icon_color;
+
+      if (!GetEnabledInViewsSubtree()) {
+        // Disabled color.
+        icon_color = GetColorProvider()->GetColor(ui::kColorMenuIconDisabled);
+      } else if (paint_as_selected) {
+        // Selected color.
+        if (foreground_color_id_.has_value() &&
+            !selected_color_id_.has_value()) {
+          // Use foreground color if selected color is unset.
+          icon_color =
+              GetColorProvider()->GetColor(foreground_color_id_.value());
+        } else {
+          // Use calculated icon color if icon color is unset or default.
+          const bool is_default_icon =
+              !icon_color_.has_value() ||
+              icon_color_.value() == ui::kColorMenuIcon;
+          if (is_default_icon) {
+            icon_color = colors.icon_color;
+          }
+        }
+      }
+      const ui::ImageModel& image_model =
+          ui::ImageModel::FromVectorIcon(*icon, icon_color, model.icon_size());
       icon_view_->SetImage(image_model);
     }
   }

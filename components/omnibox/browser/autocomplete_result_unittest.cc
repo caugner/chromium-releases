@@ -119,6 +119,7 @@ class AutocompleteResultForTesting : public AutocompleteResult {
  public:
   using AutocompleteResult::DemoteOnDeviceSearchSuggestions;
   using AutocompleteResult::matches_;
+  using AutocompleteResult::max_url_matches_;
   using AutocompleteResult::MaybeCullTailSuggestions;
 };
 
@@ -2078,13 +2079,11 @@ TEST_F(AutocompleteResultTest, SortAndCullMaxURLMatches) {
   base::test::ScopedFeatureList feature_list;
   feature_list.InitWithFeaturesAndParameters(
       {{omnibox::kUIExperimentMaxAutocompleteMatches,
-        {{OmniboxFieldTrial::kUIMaxAutocompleteMatchesParam, "6"}}},
-       {omnibox::kOmniboxMaxURLMatches,
-        {{OmniboxFieldTrial::kOmniboxMaxURLMatchesParam, "3"}}}},
+        {{OmniboxFieldTrial::kUIMaxAutocompleteMatchesParam, "6"}}}},
       {omnibox::kGroupingFrameworkForNonZPS});
 
-  EXPECT_TRUE(OmniboxFieldTrial::IsMaxURLMatchesFeatureEnabled());
-  EXPECT_EQ(OmniboxFieldTrial::GetMaxURLMatches(), 3u);
+  AutocompleteResultForTesting result;
+  result.max_url_matches_ = 3;
 
   // Case 1: Eject URL match for a search.
   // Does not apply to Android and iOS which picks top N matches and performs
@@ -2107,7 +2106,6 @@ TEST_F(AutocompleteResultTest, SortAndCullMaxURLMatches) {
 
     AutocompleteInput input(u"a", metrics::OmniboxEventProto::OTHER,
                             TestSchemeClassifier());
-    AutocompleteResult result;
     result.AppendMatches(matches);
     result.SortAndCull(input, &template_url_service(),
                        triggered_feature_service(), /*is_lens_active=*/false,
@@ -2127,6 +2125,7 @@ TEST_F(AutocompleteResultTest, SortAndCullMaxURLMatches) {
     EXPECT_EQ(result.size(), AutocompleteResult::GetMaxMatches());
     for (size_t i = 0; i < result.size(); ++i)
       EXPECT_EQ(result.match_at(i)->type, expected_types[i]);
+    result.ClearMatches();
   }
 #endif
 
@@ -2148,7 +2147,6 @@ TEST_F(AutocompleteResultTest, SortAndCullMaxURLMatches) {
 
     AutocompleteInput input(u"a", metrics::OmniboxEventProto::OTHER,
                             TestSchemeClassifier());
-    AutocompleteResult result;
     result.AppendMatches(matches);
     result.SortAndCull(input, &template_url_service(),
                        triggered_feature_service(), /*is_lens_active=*/false,
@@ -2166,6 +2164,7 @@ TEST_F(AutocompleteResultTest, SortAndCullMaxURLMatches) {
     });
     for (size_t i = 0; i < result.size(); ++i)
       EXPECT_EQ(result.match_at(i)->type, expected_types[i]) << i;
+    result.ClearMatches();
   }
 }
 
@@ -3657,135 +3656,6 @@ TEST_F(AutocompleteResultTest, ContextualSearchAblateOthers_AblateUrlOnly) {
   AssertResultMatches(result, expected_data);
 }
 #endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
-
-#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
-TEST_F(AutocompleteResultTest, AttachAimAction) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(omnibox::kOmniboxAimShortcutTypedState);
-
-  TestData data[] = {
-      {0, 1, 1300, true, {}, AutocompleteMatchType::SEARCH_SUGGEST},
-      {1, 1, 1200, false, {}, AutocompleteMatchType::SEARCH_SUGGEST},
-  };
-
-  ACMatches matches;
-  PopulateAutocompleteMatches(data, &matches);
-  matches[0].contents = u"eligible for aim action";
-
-  AutocompleteInput input(u"eligible for aim action",
-                          metrics::OmniboxEventProto::OTHER,
-                          TestSchemeClassifier());
-  AutocompleteResult result;
-  result.AppendMatches(matches);
-  result.SortAndCull(input, &template_url_service(),
-                     triggered_feature_service(), /*is_lens_active=*/false,
-                     /*can_show_contextual_suggestions=*/false,
-                     /*mia_enabled=*/false, /*is_incognito=*/false);
-
-  ASSERT_EQ(2U, result.size());
-  EXPECT_TRUE(result.match_at(0)->actions.empty());
-  EXPECT_TRUE(result.match_at(1)->actions.empty());
-
-  FakeAutocompleteProviderClient client;
-  MockAimEligibilityService* mock_aim_eligibility_service =
-      static_cast<MockAimEligibilityService*>(
-          client.GetAimEligibilityService());
-  EXPECT_CALL(*mock_aim_eligibility_service, IsAimLocallyEligible())
-      .WillRepeatedly(testing::Return(true));
-  result.AttachAimAction(&template_url_service(), &client);
-
-  ui::DeviceFormFactor factor = ui::GetDeviceFormFactor();
-  if (factor == ui::DEVICE_FORM_FACTOR_PHONE ||
-      factor == ui::DEVICE_FORM_FACTOR_FOLDABLE) {
-    ASSERT_EQ(1U, result.match_at(0)->actions.size());
-    const auto* action_in_suggest = OmniboxActionInSuggest::FromAction(
-        result.match_at(0)->actions[0].get());
-    ASSERT_TRUE(action_in_suggest);
-    EXPECT_EQ(
-        action_in_suggest->template_action.action_type(),
-        omnibox::SuggestTemplateInfo_TemplateAction_ActionType_CHROME_AIM);
-    EXPECT_TRUE(result.match_at(1)->actions.empty());
-  } else {
-    ASSERT_EQ(0U, result.match_at(0)->actions.size());
-  }
-}
-
-TEST_F(AutocompleteResultTest, AttachAimAction_AimNotEligible) {
-  base::test::ScopedFeatureList feature_list;
-  // Not overriding the feature allows testing the eligibility service logic.
-
-  TestData data[] = {
-      {0, 1, 1300, true, {}, AutocompleteMatchType::SEARCH_SUGGEST},
-      {1, 1, 1200, false, {}, AutocompleteMatchType::SEARCH_SUGGEST},
-  };
-
-  ACMatches matches;
-  PopulateAutocompleteMatches(data, &matches);
-  matches[0].contents = u"eligible for aim action";
-
-  AutocompleteInput input(u"eligible for aim action",
-                          metrics::OmniboxEventProto::OTHER,
-                          TestSchemeClassifier());
-  AutocompleteResult result;
-  result.AppendMatches(matches);
-  result.SortAndCull(input, &template_url_service(),
-                     triggered_feature_service(), /*is_lens_active=*/false,
-                     /*can_show_contextual_suggestions=*/false,
-                     /*mia_enabled=*/false, /*is_incognito=*/false);
-
-  FakeAutocompleteProviderClient client;
-  MockAimEligibilityService* mock_aim_eligibility_service =
-      static_cast<MockAimEligibilityService*>(
-          client.GetAimEligibilityService());
-  EXPECT_CALL(*mock_aim_eligibility_service, IsServerEligibilityEnabled())
-      .WillRepeatedly(testing::Return(true));
-  EXPECT_CALL(*mock_aim_eligibility_service, IsAimLocallyEligible())
-      .WillRepeatedly(testing::Return(true));
-  EXPECT_CALL(*mock_aim_eligibility_service, IsAimEligible())
-      .WillRepeatedly(testing::Return(false));
-  result.AttachAimAction(&template_url_service(), &client);
-
-  ASSERT_EQ(0U, result.match_at(0)->actions.size());
-}
-
-TEST_F(AutocompleteResultTest, AttachAimAction_AimNotLocallyEligible) {
-  base::test::ScopedFeatureList feature_list;
-  // Not overriding the feature allows testing the eligibility service logic.
-
-  TestData data[] = {
-      {0, 1, 1300, true, {}, AutocompleteMatchType::SEARCH_SUGGEST},
-      {1, 1, 1200, false, {}, AutocompleteMatchType::SEARCH_SUGGEST},
-  };
-
-  ACMatches matches;
-  PopulateAutocompleteMatches(data, &matches);
-  matches[0].contents = u"eligible for aim action";
-
-  AutocompleteInput input(u"eligible for aim action",
-                          metrics::OmniboxEventProto::OTHER,
-                          TestSchemeClassifier());
-  AutocompleteResult result;
-  result.AppendMatches(matches);
-  result.SortAndCull(input, &template_url_service(),
-                     triggered_feature_service(), /*is_lens_active=*/false,
-                     /*can_show_contextual_suggestions=*/false,
-                     /*mia_enabled=*/false, /*is_incognito=*/false);
-
-  FakeAutocompleteProviderClient client;
-  MockAimEligibilityService* mock_aim_eligibility_service =
-      static_cast<MockAimEligibilityService*>(
-          client.GetAimEligibilityService());
-  EXPECT_CALL(*mock_aim_eligibility_service, IsServerEligibilityEnabled())
-      .WillRepeatedly(testing::Return(false));
-  EXPECT_CALL(*mock_aim_eligibility_service, IsAimLocallyEligible())
-      .WillRepeatedly(testing::Return(false));
-  EXPECT_CALL(*mock_aim_eligibility_service, IsAimEligible())
-      .WillRepeatedly(testing::Return(true));
-  result.AttachAimAction(&template_url_service(), &client);
-
-  ASSERT_EQ(0U, result.match_at(0)->actions.size());
-}
-#endif  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
 
 TEST_F(AutocompleteResultTest, AttachContextualSearchOpenLensActionToMatches) {
   AutocompleteResult result;

@@ -184,7 +184,7 @@ void ExtensionWebContentsObserver::SetUpRenderFrameHost(
   // Note: Keep this logic in sync with related logic in
   // ChromeContentBrowserClient::RegisterNonNetworkSubresourceURLLoaderFactories.
   if (type == Manifest::TYPE_EXTENSION ||
-      type == Manifest::TYPE_LEGACY_PACKAGED_APP) {
+      type == Manifest::Type::kLegacyPackagedApp) {
     util::InitializeFileSchemeAccessForExtension(
         render_frame_host->GetProcess()->GetDeprecatedID(), extension->id(),
         browser_context_);
@@ -205,6 +205,7 @@ void ExtensionWebContentsObserver::SetUpRenderFrameHost(
 void ExtensionWebContentsObserver::RenderFrameDeleted(
     content::RenderFrameHost* render_frame_host) {
   DCHECK(initialized_);
+  extension_frame_host_->RenderFrameDeleted(render_frame_host);
   local_frame_map_.erase(render_frame_host);
   ProcessManager::Get(browser_context_)
       ->UnregisterRenderFrameHost(render_frame_host);

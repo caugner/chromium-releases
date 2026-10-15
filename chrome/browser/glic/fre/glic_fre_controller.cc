@@ -9,7 +9,6 @@
 
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
-#include "base/functional/callback_forward.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/user_metrics.h"
@@ -92,6 +91,9 @@ void GlicFreController::Shutdown() {
 }
 
 bool GlicFreController::ShouldShowFreDialog() {
+  if (GlicEnabling::IsTrustFirstOnboardingEnabled()) {
+    return false;
+  }
   // If the given profile has not previously completed the FRE and is eligible,
   // then it should be shown.
   return GlicEnabling::IsEnabledForProfile(profile_) &&
@@ -171,8 +173,6 @@ void GlicFreController::ShowFreDialogAfterAuthCheck(
   // Note that this call to `CreateShowDialogAndBlockTabInteraction` is
   // necessarily preceded by a call to `CanShowModalUI`. See
   // `GlicFreController::CanShowFreDialog`.
-  // TODO(crbug.com/393400004): This returned widget should be configured to
-  // use a synchronous close.
   fre_widget_ = tab_showing_modal_->GetTabFeatures()
                     ->tab_dialog_manager()
                     ->CreateTabScopedDialog(fre_view_.release());
@@ -238,17 +238,7 @@ void GlicFreController::AcceptFre(GlicFrePageHandler* handler) {
   profile_->GetPrefs()->SetInteger(
       prefs::kGlicCompletedFre, static_cast<int>(prefs::FreStatus::kCompleted));
 
-  // Enable the launcher if it is still disabled by default and the browser
-  // is default or is on the stable channel.
-  bool is_enabled_default = false;
-  const bool is_launcher_enabled =
-      GlicLauncherConfiguration::IsEnabled(&is_enabled_default);
-  if (is_enabled_default && !is_launcher_enabled) {
-    base::MakeRefCounted<shell_integration::DefaultBrowserWorker>()
-        ->StartCheckIsDefault(
-            base::BindOnce(&GlicFreController::OnCheckIsDefaultBrowserFinished,
-                           chrome::GetChannel()));
-  }
+  GlicLauncherConfiguration::CheckDefaultBrowserToEnableLauncher();
 
   // Dismiss the FRE window and then show the Glic panel, but store source
   // browser before it is cleared.
@@ -488,26 +478,6 @@ void GlicFreController::MaybePreconnect() {
         GURL("https://www.gstatic.com/"), /*allow_credentials=*/true,
         anonymization_key, kGlicFrePreconnectTrafficAnnotation,
         &storage_partition_config);
-  }
-}
-
-// static
-void GlicFreController::OnCheckIsDefaultBrowserFinished(
-    version_info::Channel channel,
-    shell_integration::DefaultWebClientState state) {
-  // Don't do anything because a different channel is the default browser
-  if (state ==
-      shell_integration::DefaultWebClientState::OTHER_MODE_IS_DEFAULT) {
-    return;
-  }
-
-  // Enables the launcher if the current browser is the default or
-  // is on the stable channel.
-  if (g_browser_process &&
-      (state == shell_integration::DefaultWebClientState::IS_DEFAULT ||
-       channel == version_info::Channel::STABLE)) {
-    g_browser_process->local_state()->SetBoolean(prefs::kGlicLauncherEnabled,
-                                                 true);
   }
 }
 

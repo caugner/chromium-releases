@@ -7,12 +7,13 @@ package org.chromium.chrome.browser.omnibox.suggestions.base;
 import android.content.Context;
 import android.view.MotionEvent;
 import android.view.View;
+import android.widget.ImageView;
 
 import androidx.appcompat.widget.AppCompatImageView;
 
-import org.chromium.base.task.PostTask;
-import org.chromium.base.task.TaskTraits;
 import org.chromium.build.annotations.NullMarked;
+import org.chromium.chrome.browser.omnibox.R;
+import org.chromium.chrome.browser.omnibox.styles.OmniboxResourceProvider;
 
 /**
  * A View that is displayed as an action button.
@@ -24,10 +25,16 @@ public class ActionButtonView extends AppCompatImageView {
     private boolean mShowOnlyOnFocus;
     private boolean mParentHovered;
     private boolean mParentSelected;
-    private boolean mHovered;
 
     public ActionButtonView(Context context) {
         super(context);
+        // No background should be set to allow seeing through its parent view.
+        setClickable(true);
+        setFocusable(true);
+        setScaleType(ImageView.ScaleType.CENTER);
+        setForeground(
+                OmniboxResourceProvider.getDrawable(
+                        context, R.drawable.action_button_foreground_selector));
     }
 
     /**
@@ -48,7 +55,6 @@ public class ActionButtonView extends AppCompatImageView {
     public void onParentViewHoverChanged(boolean hovered) {
         mParentHovered = hovered;
         updateVisibility();
-        setHovered(hovered);
     }
 
     /**
@@ -65,33 +71,22 @@ public class ActionButtonView extends AppCompatImageView {
         if (!mShowOnlyOnFocus) {
             return;
         }
-        // Use post to decouple the input event stream from the view hierarchy state update in order
-        // to work around the timing problem that causes the system not to dispatch the touch event.
-        PostTask.postTask(
-                TaskTraits.UI_DEFAULT,
-                () -> {
-                    setVisibility(
-                            mParentHovered || mHovered || mParentSelected
-                                    ? View.VISIBLE
-                                    : View.GONE);
-                });
+        setVisibility(
+                mParentHovered || mParentSelected || isHovered() || isPressed()
+                        ? View.VISIBLE
+                        : View.GONE);
     }
 
     @Override
-    public boolean onHoverEvent(MotionEvent event) {
-        boolean result = super.onHoverEvent(event);
-
-        int action = event.getActionMasked();
-        if (action == MotionEvent.ACTION_HOVER_ENTER || action == MotionEvent.ACTION_HOVER_EXIT) {
-            mHovered = action == MotionEvent.ACTION_HOVER_ENTER;
-            updateVisibility();
-        }
-
-        return result;
+    public void setPressed(boolean pressed) {
+        super.setPressed(pressed);
+        updateVisibility();
     }
 
-    public boolean isActionButtonHovered() {
-        return mHovered;
+    @Override
+    public void setHovered(boolean hovered) {
+        super.setHovered(hovered);
+        updateVisibility();
     }
 
     void dispatchHoverEventForTesting(MotionEvent event) {

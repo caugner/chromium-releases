@@ -157,14 +157,14 @@ PaintTimingDetector::PaintTimingDetector(LocalFrameView* frame_view)
       image_paint_timing_detector_(
           MakeGarbageCollected<ImagePaintTimingDetector>(frame_view)) {
   if (PaintTimingVisualizer::IsTracingEnabled()) {
-    visualizer_.emplace();
+    visualizer_ = std::make_unique<PaintTimingVisualizer>();
   }
 }
 
 void PaintTimingDetector::NotifyPaintFinished() {
   if (PaintTimingVisualizer::IsTracingEnabled()) {
     if (!visualizer_) {
-      visualizer_.emplace();
+      visualizer_ = std::make_unique<PaintTimingVisualizer>();
     }
     visualizer_->RecordMainFrameViewport(*frame_view_);
   } else {
@@ -475,9 +475,7 @@ void PaintTimingDetector::UpdateLcpCandidate() {
 
 void PaintTimingDetector::ReportIgnoredContent() {
   text_paint_timing_detector_->ReportLargestIgnoredText();
-  if (image_paint_timing_detector_->IsRecordingLargestImagePaint()) {
-    image_paint_timing_detector_->ReportLargestIgnoredImage();
-  }
+  image_paint_timing_detector_->ReportLargestIgnoredImage();
 }
 
 const LargestContentfulPaintDetails&

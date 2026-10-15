@@ -1265,9 +1265,7 @@ void MediaSessionImpl::ScrubTo(base::TimeDelta seek_time) {
 }
 
 void MediaSessionImpl::EnterPictureInPicture() {
-  if (base::FeatureList::IsEnabled(
-          blink::features::kMediaSessionEnterPictureInPicture) &&
-      ShouldRouteAction(
+  if (ShouldRouteAction(
           media_session::mojom::MediaSessionAction::kEnterPictureInPicture)) {
     DidReceiveAction(
         media_session::mojom::MediaSessionAction::kEnterPictureInPicture,
@@ -1280,7 +1278,6 @@ void MediaSessionImpl::EnterPictureInPicture() {
     return;
   }
 
-  DCHECK_EQ(normal_players_.size(), 1u);
   if (normal_players_.size() != 1u) {
     // There should be one and only one player when we enter picture-in-picture.
     return;
@@ -1297,10 +1294,6 @@ void MediaSessionImpl::ExitPictureInPicture() {
 }
 
 void MediaSessionImpl::EnterAutoPictureInPicture() {
-  if (!base::FeatureList::IsEnabled(
-          blink::features::kMediaSessionEnterPictureInPicture)) {
-    return;
-  }
   if (!ShouldRouteAction(
           media_session::mojom::MediaSessionAction::kEnterPictureInPicture)) {
     MaybeEnterBrowserInitiatedAutomaticPictureInPicture();
@@ -1349,13 +1342,23 @@ void MediaSessionImpl::Raise() {
 }
 
 void MediaSessionImpl::SetMute(bool mute) {
-  DCHECK_EQ(normal_players_.size(), 1u);
+  // The SetMute action should only be available when there is one normal
+  // player, though due to the asynchronous nature of mojo, we may no longer
+  // have 1 normal player. In that case, just return.
+  if (normal_players_.size() != 1u) {
+    return;
+  }
   normal_players_.begin()->first.observer->OnSetMute(
       normal_players_.begin()->first.player_id, mute);
 }
 
 void MediaSessionImpl::RequestMediaRemoting() {
-  DCHECK_EQ(normal_players_.size(), 1u);
+  // The RequestMediaRemoting action should only be available when there is one
+  // normal player, though due to the asynchronous nature of mojo, we may no
+  // longer have 1 normal player. In that case, just return.
+  if (normal_players_.size() != 1u) {
+    return;
+  }
   normal_players_.begin()->first.observer->OnRequestMediaRemoting(
       normal_players_.begin()->first.player_id);
 }
@@ -1713,8 +1716,7 @@ RenderFrameHost* MediaSessionImpl::ComputeFrameForRouting(bool ensure_service) {
 
   // If we cannot find a suitable frame, take the top-most frame with an active
   // MediaSessionService.
-  if (!best_frame && base::FeatureList::IsEnabled(
-                         blink::features::kMediaSessionEnterPictureInPicture)) {
+  if (!best_frame) {
     // `FrameTree::Nodes()` iterates in breadth-first order, so this is
     // guaranteed to find the topmost (or tied topmost) frame with an active
     // MediaSessionService.
@@ -1828,9 +1830,7 @@ void MediaSessionImpl::RebuildAndNotifyActionsChanged() {
 
   // If the website has specified an action handler for 'enterpictureinpicture',
   // then we should expose EnterAutoPictureInPicture as an available action.
-  if (base::FeatureList::IsEnabled(
-          blink::features::kMediaSessionEnterPictureInPicture) &&
-      base::Contains(
+  if (base::Contains(
           actions,
           media_session::mojom::MediaSessionAction::kEnterPictureInPicture)) {
     actions.insert(
@@ -1839,20 +1839,17 @@ void MediaSessionImpl::RebuildAndNotifyActionsChanged() {
         media_session::mojom::MediaSessionAction::kExitPictureInPicture);
   }
 
-  if (base::FeatureList::IsEnabled(
-          media::kGlobalMediaControlsPictureInPicture)) {
-    if (IsPictureInPictureAvailable()) {
-      actions.insert(
-          media_session::mojom::MediaSessionAction::kEnterPictureInPicture);
-      actions.insert(
-          media_session::mojom::MediaSessionAction::kExitPictureInPicture);
-    } else if (web_contents()->HasPictureInPictureVideo() ||
-               web_contents()->HasPictureInPictureDocument()) {
-      // If the media is already in the picture-in-picture state, we allow the
-      // player to exit it.
-      actions.insert(
-          media_session::mojom::MediaSessionAction::kExitPictureInPicture);
-    }
+  if (IsPictureInPictureAvailable()) {
+    actions.insert(
+        media_session::mojom::MediaSessionAction::kEnterPictureInPicture);
+    actions.insert(
+        media_session::mojom::MediaSessionAction::kExitPictureInPicture);
+  } else if (web_contents()->HasPictureInPictureVideo() ||
+             web_contents()->HasPictureInPictureDocument()) {
+    // If the media is already in the picture-in-picture state, we allow the
+    // player to exit it.
+    actions.insert(
+        media_session::mojom::MediaSessionAction::kExitPictureInPicture);
   }
 
   // If the website could enter browser initiated automatic picture in picture,
@@ -2179,8 +2176,6 @@ bool MediaSessionImpl::CanEnterBrowserInitiatedAutomaticPictureInPicture()
   // If the website has specified an action handler for 'enterpictureinpicture',
   // then we should not enter browser initiated automatic picture-in-picture.
   if (routed_service_ &&
-      base::FeatureList::IsEnabled(
-          blink::features::kMediaSessionEnterPictureInPicture) &&
       base::Contains(
           routed_service_->actions(),
           media_session::mojom::MediaSessionAction::kEnterPictureInPicture)) {

@@ -59,6 +59,7 @@ import org.chromium.components.browser_ui.share.ShareHelper;
 import org.chromium.components.browser_ui.util.FirstDrawDetector;
 import org.chromium.components.omnibox.OmniboxFeatures;
 import org.chromium.ui.KeyboardVisibilityDelegate;
+import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.base.KeyNavigationUtil;
 import org.chromium.ui.display.DisplayAndroid;
 import org.chromium.ui.display.DisplayUtil;
@@ -105,6 +106,7 @@ public class UrlBar extends AutocompleteEditText {
     private @Nullable OnKeyListener mKeyDownListener;
     private @Nullable UrlBarTextContextMenuDelegate mTextContextMenuDelegate;
     private @Nullable Callback<Integer> mUrlDirectionListener;
+    private @Nullable Callback<Boolean> mUrlTextWrappingChangeListener;
 
     private final Rect mClipBounds = new Rect();
     @VisibleForTesting final Runnable mEnforceMaxTextHeight = this::enforceMaxTextHeight;
@@ -143,6 +145,7 @@ public class UrlBar extends AutocompleteEditText {
     private int mOriginEndIndex;
 
     private boolean mUseSmallTextHeight;
+    private boolean mTextIsWrapped;
 
     /** What scrolling action should be taken after the URL bar text changes. */
     @IntDef({ScrollType.NO_SCROLL, ScrollType.SCROLL_TO_TLD, ScrollType.SCROLL_TO_BEGINNING})
@@ -219,6 +222,15 @@ public class UrlBar extends AutocompleteEditText {
         setHorizontalFadingEdgeEnabled(true);
         setVerticalScrollBarEnabled(false);
         setElegantTextHeight(true);
+        if (OmniboxFeatures.sUrlBarWithoutLigatures.isEnabled()) {
+            // Explanation of Settings applied below:
+            // - liga=0 - disable conventional, standard ligatures (fi -> ﬀ ,fi -> ﬁ, ...)
+            // - clig=0 - disable contextual ligatures (st->ﬆ, ft-> ﬅ, ...)
+            // - calt=0 - disable contextual alternates (th, oo, tt, ...) - glyphs that may
+            //            look differently at the beginning / middle / end of a word
+            // - dlig=0 - disable decorative ligatures (sp, Th, ...)
+            setFontFeatureSettings("liga=0, clig=0, calt=0, dlig=0");
+        }
         // Use a global draw instead of View#onDraw in case this View is not visible.
         FirstDrawDetector.waitForFirstDraw(
                 this,
@@ -233,7 +245,8 @@ public class UrlBar extends AutocompleteEditText {
         setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         int verticalPadding =
                 getResources().getDimensionPixelSize(R.dimen.url_bar_vertical_padding);
-        setPaddingRelative(0, verticalPadding, 0, verticalPadding);
+        int endPadding = getResources().getDimensionPixelSize(R.dimen.url_bar_end_padding);
+        setPaddingRelative(0, verticalPadding, endPadding, verticalPadding);
 
         setTextClassifier(TextClassifier.NO_OP);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -332,10 +345,13 @@ public class UrlBar extends AutocompleteEditText {
         }
 
         mFocused = focused;
+
         if (!mFocused) mFocusEventEmitted = false;
         super.onFocusChanged(focused, direction, previouslyFocusedRect);
 
-        if (!mIsInCct && OmniboxFeatures.sMultilineEditField.isEnabled()) {
+        if (!mIsInCct
+                && !DeviceFormFactor.isNonMultiDisplayContextOnTablet(getContext())
+                && OmniboxFeatures.sMultilineEditField.isEnabled()) {
             setInputIsMultilineEligible(false);
             if (focused) {
                 setSingleLine(false);
@@ -478,6 +494,19 @@ public class UrlBar extends AutocompleteEditText {
         }
 
         limitDisplayableLength();
+
+        post(this::detectAndNotifyOnTextWrappingChanges);
+    }
+
+    private void detectAndNotifyOnTextWrappingChanges() {
+        var layout = getLayout();
+        boolean textIsWrapped = layout != null && layout.getLineCount() > 1;
+
+        if (mTextIsWrapped == textIsWrapped) return;
+        mTextIsWrapped = textIsWrapped;
+
+        if (mUrlTextWrappingChangeListener == null) return;
+        mUrlTextWrappingChangeListener.onResult(mTextIsWrapped);
     }
 
     @Override
@@ -625,6 +654,15 @@ public class UrlBar extends AutocompleteEditText {
         if (mUrlDirectionListener != null) {
             mUrlDirectionListener.onResult(mUrlDirection);
         }
+    }
+
+    /**
+     * Set the listener to be notified when the URL text wraps.
+     *
+     * @param listener The listener to be notified.
+     */
+    /* package */ void setUrlTextWrappingChangeListener(Callback<Boolean> listener) {
+        mUrlTextWrappingChangeListener = listener;
     }
 
     /**

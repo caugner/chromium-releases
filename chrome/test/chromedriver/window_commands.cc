@@ -666,6 +666,9 @@ Status ExecuteWindowCommand(const WindowCommand& command,
   Status status = session->GetTargetWindow(&web_view);
   if (status.IsError())
     return status;
+  std::unique_ptr<WebViewHolder> scoped_web_view_lock =
+      web_view->GetHolder();  // need to keep a handle, so that the webview
+                              // isn't disposed during execution
 
   status = web_view->HandleReceivedEvents();
   if (status.IsError())
@@ -2954,7 +2957,8 @@ Status ExecuteSetPermission(Session* session,
     return Status(kInvalidArgument, "unrecognized permission state");
 
   auto dict = std::make_unique<base::Value::Dict>(descriptor->Clone());
-  return session->chrome->SetPermission(std::move(dict), valid_state, web_view);
+  return session->chrome->SetPermission(std::move(dict), valid_state, web_view,
+                                        session->GetCurrentFrameId());
 }
 
 Status ExecuteSetDevicePosture(Session* session,

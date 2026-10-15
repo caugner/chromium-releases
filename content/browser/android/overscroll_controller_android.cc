@@ -297,6 +297,13 @@ void OverscrollControllerAndroid::Disable() {
   }
 }
 
+void OverscrollControllerAndroid::SetTouchpadOverscrollHistoryNavigation(
+    bool enabled) {
+  if (refresh_effect_) {
+    refresh_effect_->SetTouchpadOverscrollHistoryNavigation(enabled);
+  }
+}
+
 bool OverscrollControllerAndroid::ShouldHandleInputEvents() {
   if (!enabled_) {
     return false;
@@ -364,7 +371,8 @@ bool OverscrollControllerAndroid::OnTouchEvent(
 
 void OverscrollControllerAndroid::OnInputEvent(
     const RenderWidgetHost& widget,
-    const blink::WebInputEvent& input_event) {
+    const blink::WebInputEvent& input_event,
+    InputEventSource source) {
   if (!blink::WebInputEvent::IsGestureEventType(input_event.GetType())) {
     return;
   }

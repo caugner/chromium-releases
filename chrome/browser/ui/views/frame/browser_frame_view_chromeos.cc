@@ -138,7 +138,8 @@ bool UsePackagedAppHeaderStyle(const Browser* browser) {
     return false;
   }
 
-  return !browser->SupportsWindowFeature(Browser::FEATURE_TABSTRIP);
+  return !browser->SupportsWindowFeature(
+      Browser::WindowFeature::kFeatureTabStrip);
 }
 
 // Whether or not the window's title should show the avatar. Practically,
@@ -280,11 +281,11 @@ BrowserLayoutParams BrowserFrameViewChromeOS::GetBrowserLayoutParams() const {
   }
   if (GetShowCaptionButtonsWhenNotInOverview()) {
     const auto caption_bounds = caption_button_container_->bounds();
-    // Prefer to use the painted height of the caption buttons rather than the
-    // actual height, if it is specified.
-    const int height = frame_header_
-                           ? frame_header_->GetHeaderHeightForPainting()
-                           : caption_bounds.bottom();
+    // When the tabstrip is present, the caption button container is cut down to
+    // the preferred height of the tabstrip.
+    const int tabstrip_height = browser_view()->GetTabStripHeight();
+    const int height =
+        tabstrip_height ? tabstrip_height : caption_bounds.height();
     params.trailing_exclusion.content =
         gfx::SizeF(width() - caption_bounds.x(), height);
   }
@@ -451,9 +452,8 @@ int BrowserFrameViewChromeOS::NonClientHitTest(const gfx::Point& point) {
   // When the window is restored (and not in tablet split-view mode) we want a
   // large click target above the tabs to drag the window, so redirect clicks in
   // the tab's shadow to caption.
-  if (hit_test == HTCLIENT && !browser_widget()->IsMaximized() &&
-      !browser_widget()->IsFullscreen() &&
-      !display::Screen::Get()->InTabletMode()) {
+  if (hit_test == HTCLIENT &&
+      chromeos::ShouldShowResizeBorder(GetWidget()->GetNativeWindow())) {
     // TODO(crbug.com/40768579): Tab Strip hit calculation and bounds logic
     // should reside in the TabStrip class.
     gfx::Point client_point(point);

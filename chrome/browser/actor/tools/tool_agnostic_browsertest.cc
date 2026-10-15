@@ -33,11 +33,40 @@ using content::EvalJs;
 using content::GetDOMNodeId;
 using content::NavigateIframeToURL;
 using content::RenderFrameHost;
+using content::TestNavigationManager;
 using content::WebContents;
 
 namespace actor {
 
 namespace {
+
+class ExecutionEngineStateWaiter : public ExecutionEngine::StateObserver {
+ public:
+  ExecutionEngineStateWaiter(base::OnceClosure callback,
+                             ExecutionEngine* execution_engine,
+                             ExecutionEngine::State target_state)
+      : callback_(std::move(callback)),
+        execution_engine_(execution_engine),
+        target_state_(target_state) {
+    execution_engine_->AddObserver(this);
+  }
+  ~ExecutionEngineStateWaiter() override {
+    execution_engine_->RemoveObserver(this);
+  }
+
+  // `ExecutionEngine::StateObserver`:
+  void OnStateChanged(ExecutionEngine::State old_state,
+                      ExecutionEngine::State new_state) override {
+    if (new_state == target_state_) {
+      std::move(callback_).Run();
+    }
+  }
+
+ private:
+  base::OnceClosure callback_;
+  const raw_ptr<ExecutionEngine> execution_engine_;
+  ExecutionEngine::State target_state_;
+};
 
 class ActorToolAgnosticBrowserTest : public ActorToolsTest {
  public:
@@ -210,8 +239,16 @@ IN_PROC_BROWSER_TEST_F(ActorToolAgnosticBrowserTest,
 
 // Basic test to ensure sending a click to a coordinate in cross origin subframe
 // works.
+// TODO(crbug.com/460824293): Reenable on ChromeOS.
+#if BUILDFLAG(IS_CHROMEOS)
+#define MAYBE_InvokeToolCrossSiteSubframeWithCoordinateTarget \
+  DISABLED_InvokeToolCrossSiteSubframeWithCoordinateTarget
+#else
+#define MAYBE_InvokeToolCrossSiteSubframeWithCoordinateTarget \
+  InvokeToolCrossSiteSubframeWithCoordinateTarget
+#endif
 IN_PROC_BROWSER_TEST_F(ActorToolAgnosticBrowserTest,
-                       InvokeToolCrossSiteSubframeWithCoordinateTarget) {
+                       MAYBE_InvokeToolCrossSiteSubframeWithCoordinateTarget) {
   const GURL url = embedded_https_test_server().GetURL(
       "/actor/positioned_iframe_no_scroll.html");
   ASSERT_TRUE(content::NavigateToURL(web_contents(), url));
@@ -436,6 +473,144 @@ IN_PROC_BROWSER_TEST_F(ActorToolAgnosticBrowserTest,
   EXPECT_FALSE(actor_task().GetLastActedTabs().empty());
 }
 
+// Ensures that a Tool that would normally return !page_stabilization_required
+// still returns the requirement if an out-of-viewport scroll into view was
+// performed.
+IN_PROC_BROWSER_TEST_F(ActorToolAgnosticBrowserTest,
+                       ScrollIntoViewForcesPageStabilization) {
+  const GURL url = embedded_test_server()->GetURL("/actor/input.html");
+  ASSERT_TRUE(content::NavigateToURL(web_contents(), url));
+
+  const std::string_view selector = "#offscreen-disabled-input";
+  std::optional<int> input_id = GetDOMNodeId(*main_frame(), selector);
+  ASSERT_TRUE(input_id);
+
+  // We need an action that normally fails without page stabilization. Ensure
+  // that's the case to show the latter half of the test - which repeats but
+  // with the element offscreen - validates it's the scroll into view causing
+  // the page stability request.
+
+  {
+    // Bring the input into view first to ensure the tool invocation doesn't
+    // request a scroll.
+    ASSERT_TRUE(
+        ExecJs(web_contents(),
+               content::JsReplace("document.querySelector($1).scrollIntoView()",
+                                  selector)));
+    int scroll_before = EvalJs(web_contents(), "window.scrollY").ExtractInt();
+    ASSERT_GT(scroll_before, 0);
+
+    std::unique_ptr<ToolRequest> action =
+        MakeTypeRequest(*main_frame(), input_id.value(), "TEST",
+                        /*follow_by_enter=*/false);
+    ActResultFuture future;
+    actor_task().Act(ToRequestList(action), future.GetCallback());
+    const mojom::ActionResult& result = *(future.Get<0>());
+    ASSERT_EQ(result.code, mojom::ActionResultCode::kElementDisabled);
+    ASSERT_FALSE(result.requires_page_stabilization);
+    ASSERT_EQ(EvalJs(web_contents(), "window.scrollY"), scroll_before);
+  }
+
+  // Reset scroll so that repeating the action does cause a scroll into view.
+  ASSERT_TRUE(ExecJs(web_contents(), "window.scrollTo(0, 0)"));
+
+  {
+    ASSERT_EQ(EvalJs(web_contents(), "window.scrollY"), 0);
+    std::unique_ptr<ToolRequest> action =
+        MakeTypeRequest(*main_frame(), input_id.value(), "TEST",
+                        /*follow_by_enter=*/false);
+    ActResultFuture future;
+    actor_task().Act(ToRequestList(action), future.GetCallback());
+    const mojom::ActionResult& result = *(future.Get<0>());
+    ASSERT_EQ(result.code, mojom::ActionResultCode::kElementDisabled);
+    ASSERT_GT(EvalJs(web_contents(), "window.scrollY"), 0);
+
+    // This time - since a scroll was produced, the result should require page
+    // stabilization.
+    EXPECT_TRUE(result.requires_page_stabilization);
+  }
+}
+
+// This test is for behavior guarded by a killswitch.
+class ActorToolAgnosticBrowserTestWithDeferWhileInterrupted
+    : public ActorToolAgnosticBrowserTest {
+ public:
+  void SetUp() override {
+    feature_list_.InitAndEnableFeature(kGlicDeferActUntilUninterrupted);
+    ActorToolAgnosticBrowserTest::SetUp();
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(ActorToolAgnosticBrowserTestWithDeferWhileInterrupted,
+                       ActCallbackDeferredWhileInterrupted) {
+  const GURL next_url = embedded_test_server()->GetURL("/actor/blank.html");
+  const GURL start_url = embedded_test_server()->GetURL(base::StrCat(
+      {"/actor/link_full_page.html?href=", EncodeURI(next_url.spec())}));
+
+  ASSERT_TRUE(content::NavigateToURL(web_contents(), start_url));
+
+  const std::string_view selector = "#link";
+  std::optional<int> link = GetDOMNodeId(*main_frame(), selector);
+  ASSERT_TRUE(link);
+
+  base::test::TestFuture<void> tool_invoked_future;
+  actor_task()
+      .GetExecutionEngine()
+      ->set_tool_invoke_complete_callback_for_testing(
+          tool_invoked_future.GetCallback());
+
+  // Inject a click action that causes a navigation. However, the navigation
+  // blocks on start so the action doesn't finish; it should block on page
+  // stabilization because of the navigation.
+  TestNavigationManager navigation_manager(web_contents(), next_url);
+  std::unique_ptr<ToolRequest> action =
+      MakeClickRequest(*main_frame(), link.value());
+  ActResultFuture act_result;
+  actor_task().Act(ToRequestList(action), act_result.GetCallback());
+  ASSERT_TRUE(navigation_manager.WaitForRequestStart());
+  ASSERT_EQ(actor_task().GetState(), ActorTask::State::kActing);
+
+  // The action should be blocked on the in-progress navigation.
+  // Put the task into a state where it's waiting on a user action.
+  actor_task().Interrupt();
+  EXPECT_EQ(actor_task().GetState(), ActorTask::State::kWaitingOnUser);
+
+  TinyWait();
+  EXPECT_FALSE(act_result.IsReady());
+  EXPECT_FALSE(tool_invoked_future.IsReady());
+
+  // Now unblock the navigation. This should allow the click action to complete;
+  // however, because the task is waiting on a user action it shouldn't appear
+  // to complete yet.
+  ASSERT_TRUE(navigation_manager.WaitForNavigationFinished());
+  ASSERT_TRUE(tool_invoked_future.Wait());
+
+  // Ensure the execution engine doesn't consider the tool invocation to be
+  // complete since the actor task is paused. This also means the ActorTask::Act
+  // callback isn't replied to.
+  TinyWait();
+  EXPECT_EQ(actor_task().GetExecutionEngine()->state(),
+            ExecutionEngine::State::kToolInvoke);
+  EXPECT_FALSE(act_result.IsReady());
+
+  actor_task().GetExecutionEngine()->FailCurrentTool(
+      mojom::ActionResultCode::kNavigateCommittedErrorPage);
+
+  // Uninterrupting the task should unblock everything to completion.
+  base::test::TestFuture<void> completion_future;
+  ExecutionEngineStateWaiter waiter(completion_future.GetCallback(),
+                                    actor_task().GetExecutionEngine(),
+                                    ExecutionEngine::State::kComplete);
+  actor_task().Uninterrupt(ActorTask::State::kActing);
+  ASSERT_TRUE(completion_future.Wait());
+  ExpectErrorResult(act_result,
+                    mojom::ActionResultCode::kNavigateCommittedErrorPage);
+  EXPECT_EQ(actor_task().GetState(), ActorTask::State::kReflecting);
+}
+
 class ActorToolAgnosticBrowserTestWithCustomDelay
     : public ActorToolAgnosticBrowserTest {
  public:
@@ -443,7 +618,7 @@ class ActorToolAgnosticBrowserTestWithCustomDelay
     // Ensure tool doesn't finish before the tab is closed.
     feature_list_.InitAndEnableFeatureWithParameters(
         features::kGlicActor,
-        {{"glic-actor-page-stability-invoke-callback-delay", "500ms"}});
+        {{"glic-actor-page-stability-min-wait", "500ms"}});
     ActorToolAgnosticBrowserTest::SetUp();
   }
 
@@ -484,28 +659,6 @@ IN_PROC_BROWSER_TEST_F(ActorToolAgnosticBrowserTestWithCustomDelay,
   }
 }
 
-class ToolInvokeWaiter : public ExecutionEngine::StateObserver {
- public:
-  ToolInvokeWaiter(base::OnceClosure callback,
-                   ExecutionEngine* execution_engine)
-      : callback_(std::move(callback)), execution_engine_(execution_engine) {
-    execution_engine_->AddObserver(this);
-  }
-  ~ToolInvokeWaiter() override { execution_engine_->RemoveObserver(this); }
-
-  // `ExecutionEngine::StateObserver`:
-  void OnStateChanged(ExecutionEngine::State old_state,
-                      ExecutionEngine::State new_state) override {
-    if (new_state == ExecutionEngine::State::kToolInvoke) {
-      std::move(callback_).Run();
-    }
-  }
-
- private:
-  base::OnceClosure callback_;
-  const raw_ptr<ExecutionEngine> execution_engine_;
-};
-
 IN_PROC_BROWSER_TEST_F(ActorToolAgnosticBrowserTestWithCustomDelay,
                        RendererCrashesBeforeToolFinishes) {
   const GURL url =
@@ -517,8 +670,9 @@ IN_PROC_BROWSER_TEST_F(ActorToolAgnosticBrowserTestWithCustomDelay,
   ASSERT_TRUE(button_id);
 
   base::test::TestFuture<void> tool_invoke_future;
-  ToolInvokeWaiter waiter(tool_invoke_future.GetCallback(),
-                          actor_task().GetExecutionEngine());
+  ExecutionEngineStateWaiter waiter(tool_invoke_future.GetCallback(),
+                                    actor_task().GetExecutionEngine(),
+                                    ExecutionEngine::State::kToolInvoke);
   std::unique_ptr<ToolRequest> action =
       MakeClickRequest(*main_frame(), button_id.value());
   ActResultFuture result;
@@ -539,7 +693,7 @@ IN_PROC_BROWSER_TEST_F(ActorToolAgnosticBrowserTestWithCustomDelay,
     ASSERT_FALSE(crashed->GetView());
   }
 
-  ExpectErrorResult(result, mojom::ActionResultCode::kFrameWentAway);
+  ExpectErrorResult(result, mojom::ActionResultCode::kRendererCrashed);
 
   // Finish the callback from ToolController. No crashes.
   {

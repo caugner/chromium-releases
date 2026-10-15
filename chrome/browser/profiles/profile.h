@@ -81,8 +81,6 @@ class Profile : public content::BrowserContext {
   class OTRProfileID {
    public:
     // ID used by the Incognito and Guest profiles.
-    // TODO(crbug.com/40775669): To be replaced with |IncognitoID| if
-    // OTR Guest profiles are deprecated.
     static const OTRProfileID PrimaryID();
 
     // Creates a unique OTR profile id with the given profile id prefix.
@@ -554,7 +552,7 @@ class Profile : public content::BrowserContext {
 
   base::ObserverList<ProfileObserver,
                      /*check_empty=*/true,
-                     /*allow_reentrancy=*/false>
+                     base::ObserverListReentrancyPolicy::kDisallowReentrancy>
       observers_;
 
   class ChromeVariationsClient;

@@ -5,6 +5,7 @@
 #include "content/browser/file_system_access/file_system_access_change_source.h"
 
 #include "base/functional/callback.h"
+#include "storage/browser/file_system/sandbox_file_system_backend_delegate.h"
 
 namespace content {
 
@@ -71,13 +72,14 @@ void FileSystemAccessChangeSource::DidInitialize(
   CHECK(!initialization_result_.has_value());
   CHECK(!initialization_callbacks_.empty());
 
-  initialization_result_ = std::move(result);
+  // The callbacks may cause |this| to be deleted, so we should only use
+  // stack-based objects below.
+  initialization_result_ = result->Clone();
 
-  // Move the callbacks to the stack since they may cause |this| to be deleted.
   auto initialization_callbacks = std::move(initialization_callbacks_);
   initialization_callbacks_.clear();
   for (auto& callback : initialization_callbacks) {
-    std::move(callback).Run(initialization_result_->Clone());
+    std::move(callback).Run(result->Clone());
   }
 }
 
@@ -85,6 +87,18 @@ base::WeakPtr<FileSystemAccessChangeSource>
 FileSystemAccessChangeSource::AsWeakPtr() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return weak_factory_.GetWeakPtr();
+}
+
+storage::SandboxFileSystemBackendDelegate*
+FileSystemAccessChangeSource::sandbox_delegate() const {
+  base::AutoLock lock(file_system_context_lock_);
+  return file_system_context_ ? file_system_context_->sandbox_delegate()
+                              : nullptr;
+}
+
+void FileSystemAccessChangeSource::reset_file_system_context() {
+  base::AutoLock lock(file_system_context_lock_);
+  file_system_context_.reset();
 }
 
 size_t FileSystemAccessChangeSource::current_usage() const {
@@ -116,9 +130,18 @@ void FileSystemAccessChangeSource::NotifyOfChange(
   const storage::FileSystemURL& root_url = scope().root_url();
   CHECK(root_url.is_valid());
 
+  scoped_refptr<storage::FileSystemContext> file_system_context;
+  {
+    base::AutoLock lock(file_system_context_lock_);
+    if (!file_system_context_) {
+      return;
+    }
+    file_system_context = file_system_context_;
+  }
+
   for (RawChangeObserver& observer : observers_) {
     observer.OnRawChange(
-        ToFileSystemURL(*file_system_context_, root_url, relative_path), error,
+        ToFileSystemURL(*file_system_context, root_url, relative_path), error,
         change_info, scope());
   }
 }

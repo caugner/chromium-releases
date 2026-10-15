@@ -473,6 +473,31 @@ TEST_P(WaylandWindowTest, Shutdown) {
   window_->OnDragSessionClose(mojom::DragOperation::kNone);
 }
 
+// Regression test for https://crbug.com/495948109.
+TEST_P(WaylandWindowTest, DeleteWindowFromOnStateUpdate) {
+  delegate_.set_on_state_update_callback(base::BindLambdaForTesting([&]() {
+    window_.reset();
+    return false;
+  }));
+
+  window_->SetBoundsInDIP(gfx::Rect(1024, 768));
+}
+
+TEST_P(WaylandWindowTest, DeleteWindowFromOnStateUpdateDuringSurfaceConfigure) {
+  delegate_.set_on_state_update_callback(base::BindLambdaForTesting([&]() {
+    window_.reset();
+    return false;
+  }));
+
+  WaylandWindow* window = window_.get();
+  WaylandWindow::WindowStates window_states;
+  window_states.is_activated = true;
+  window->HandleToplevelConfigure(1024, 768, window_states);
+  window->HandleSurfaceConfigure(2);
+
+  EXPECT_FALSE(window_);
+}
+
 TEST_P(WaylandWindowTest, SetTitle) {
   window_->SetTitle(u"hello");
   PostToServerAndWait([id = surface_id_](wl::TestWaylandServerThread* server) {
@@ -4580,6 +4605,7 @@ TEST_P(WaylandWindowTest, ChangeFocusDuringDispatch) {
                 server->GetObject<wl::MockSurface>(other_id);
             ASSERT_TRUE(other_surface);
             auto* pointer = server->seat()->pointer();
+            // Leaving will trigger a synthesized release event on focus change.
             wl_pointer_send_leave(pointer->resource(), 3, surface->resource());
             wl_pointer_send_frame(pointer->resource());
 
@@ -4603,7 +4629,7 @@ TEST_P(WaylandWindowTest, ChangeFocusDuringDispatch) {
     wl_pointer_send_frame(pointer->resource());
   });
 
-  EXPECT_EQ(count, 3);
+  EXPECT_EQ(count, 4);
 }
 
 TEST_P(WaylandWindowTest, WindowMovedResized) {
@@ -4748,8 +4774,10 @@ TEST_P(WaylandWindowTest, ReentrantApplyStateWorks) {
     EXPECT_CALL(*xdg_surface, AckConfigure(_)).Times(0);
   });
 
-  delegate_.set_on_state_update_callback(
-      base::BindLambdaForTesting([&]() { window_->SetBoundsInDIP(kBounds3); }));
+  delegate_.set_on_state_update_callback(base::BindLambdaForTesting([&]() {
+    window_->SetBoundsInDIP(kBounds3);
+    return true;
+  }));
   window_->SetBoundsInDIP(kBounds2);
   AdvanceFrameToCurrent(window_.get(), delegate_);
   VerifyAndClearExpectations();
@@ -5381,6 +5409,141 @@ TEST_P(PerSurfaceScaleWaylandWindowTest, UiScale_ForceDeviceScaleFactor) {
   Mock::VerifyAndClearExpectations(&delegate_);
   EXPECT_EQ(2.0f, connection_->window_manager()->DetermineUiScale());
   EXPECT_EQ(window_->applied_state(), previous_state);
+}
+
+// Regression POC: WaylandToplevelWindow::HandleToplevelConfigure() continues to
+// use `this` after delegate()->OnActivationChanged() synchronously destroys the
+// platform window. This mirrors the production path documented at
+// DesktopWindowTreeHostPlatform::OnActivationChanged where
+// HandleActivationChanged() can synchronously close the widget, which in turn
+// calls SetPlatformWindow(nullptr) and frees the WaylandToplevelWindow while
+// the xdg_toplevel.configure handler is still on the stack.
+TEST_P(WaylandWindowTest, HandleToplevelConfigureSyncCloseOnDeactivate) {
+  // After SetUp(), |window_| has already received an activated configure, so
+  // is_xdg_active_ == is_active_ == true.
+  ASSERT_TRUE(window_);
+  WaylandWindow* raw_window = window_.get();
+
+  // Simulate a delegate that destroys the platform window inside
+  // OnActivationChanged(false) — exactly what happens in production when a
+  // WidgetObserver calls Widget::CloseNow() on deactivation, leading to
+  // DesktopWindowTreeHostPlatform::OnClosed -> SetPlatformWindow(nullptr).
+  EXPECT_CALL(delegate_, OnActivationChanged(Eq(false)))
+      .WillOnce(InvokeWithoutArgs([this]() { window_.reset(); }));
+
+  // Don't try to talk to the server after the window has been torn down
+  // mid-dispatch.
+  DisableSyncOnTearDown();
+
+  // Drive the standard xdg_toplevel.configure entry point with the activated
+  // bit cleared. This calls HandleToplevelConfigureWithOrigin() ->
+  // UpdateActivationState() -> delegate()->OnActivationChanged(false), which
+  // (via the mock above) frees `this`. Control then returns to
+  // HandleToplevelConfigure:469 which calls UpdateSessionStateIfNeeded() on
+  // the freed object.
+  WaylandWindow::WindowStates deactivated_states;
+  deactivated_states.is_activated = false;
+  raw_window->HandleToplevelConfigure(800, 600, deactivated_states);
+
+  // If we got here without ASAN reporting a heap-use-after-free, the bug is
+  // fixed.
+  EXPECT_FALSE(window_);
+}
+
+TEST_P(WaylandWindowTest, WaylandBubbleUpdateWindowScaleUaf) {
+  MockWaylandPlatformWindowDelegate bubble_delegate(connection_.get());
+  gfx::Rect bubble_bounds(10, 10, 50, 50);
+  auto wayland_bubble =
+      CreateWaylandWindowWithParams(PlatformWindowType::kBubble, bubble_bounds,
+                                    &bubble_delegate, window_->GetWidget());
+  ASSERT_TRUE(wayland_bubble);
+
+  bubble_delegate.set_on_state_update_callback(
+      base::BindLambdaForTesting([&]() {
+        wayland_bubble.reset();
+        return true;
+      }));
+
+  // This should not crash.
+  wayland_bubble->UpdateWindowScale(true);
+}
+
+TEST_P(WaylandWindowTest, WaylandBubbleShowUaf) {
+  MockWaylandPlatformWindowDelegate bubble_delegate(connection_.get());
+  PlatformWindowInitProperties properties;
+  properties.bounds = gfx::Rect(10, 10, 50, 50);
+  properties.type = PlatformWindowType::kBubble;
+  properties.parent_widget = window_->GetWidget();
+  auto wayland_bubble = bubble_delegate.CreateWaylandWindow(
+      connection_.get(), std::move(properties));
+  ASSERT_TRUE(wayland_bubble);
+
+  bubble_delegate.set_on_state_update_callback(
+      base::BindLambdaForTesting([&]() {
+        wayland_bubble.reset();
+        return true;
+      }));
+
+  // This should not crash.
+  wayland_bubble->Show(false);
+}
+
+TEST_P(WaylandWindowTest, WaylandPopupShowUaf) {
+  MockWaylandPlatformWindowDelegate popup_delegate(connection_.get());
+  PlatformWindowInitProperties properties;
+  properties.bounds = gfx::Rect(10, 10, 50, 50);
+  properties.type = PlatformWindowType::kPopup;
+  properties.parent_widget = window_->GetWidget();
+  auto wayland_popup = popup_delegate.CreateWaylandWindow(
+      connection_.get(), std::move(properties));
+  ASSERT_TRUE(wayland_popup);
+
+  popup_delegate.set_on_state_update_callback(base::BindLambdaForTesting([&]() {
+    wayland_popup.reset();
+    return true;
+  }));
+
+  // This should not crash.
+  wayland_popup->Show(false);
+}
+
+TEST_P(WaylandWindowTest, WaylandToplevelWindowOnPaintAsActiveChangedUaf) {
+  testing::NiceMock<MockWaylandPlatformWindowDelegate> toplevel_delegate(
+      connection_.get());
+  PlatformWindowInitProperties properties;
+  properties.bounds = gfx::Rect(10, 10, 100, 100);
+  properties.type = PlatformWindowType::kWindow;
+  auto toplevel_window = toplevel_delegate.CreateWaylandWindow(
+      connection_.get(), std::move(properties));
+  ASSERT_TRUE(toplevel_window);
+
+  EXPECT_CALL(toplevel_delegate, OnPaintAsActiveChanged(::testing::_))
+      .WillOnce(
+          ::testing::InvokeWithoutArgs([&]() { toplevel_window.reset(); }));
+
+  WaylandWindow::WindowStates window_states;
+  window_states.is_activated = true;
+  // This should not crash.
+  toplevel_window->HandleToplevelConfigure(100, 100, window_states);
+}
+
+TEST_P(WaylandWindowTest, WaylandToplevelWindowTriggerStateChangesUaf) {
+  testing::NiceMock<MockWaylandPlatformWindowDelegate> toplevel_delegate(
+      connection_.get());
+  PlatformWindowInitProperties properties;
+  properties.bounds = gfx::Rect(10, 10, 100, 100);
+  properties.type = PlatformWindowType::kWindow;
+  auto toplevel_window = toplevel_delegate.CreateWaylandWindow(
+      connection_.get(), std::move(properties));
+  ASSERT_TRUE(toplevel_window);
+
+  EXPECT_CALL(toplevel_delegate,
+              OnWindowStateChanged(::testing::_, ::testing::_))
+      .WillOnce(
+          ::testing::InvokeWithoutArgs([&]() { toplevel_window.reset(); }));
+
+  // This should not crash.
+  toplevel_window->Maximize();
 }
 
 INSTANTIATE_TEST_SUITE_P(XdgVersionStableTest,

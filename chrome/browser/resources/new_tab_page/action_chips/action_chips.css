@@ -36,6 +36,10 @@
   max-width: calc(var(--ntp-chips-container-width) + 2px);
 }
 
+:host([show-simplified-ui_]) .action-chips-wrapper {
+  width: calc(var(--ntp-chips-container-width) + 2px);
+}
+
 .action-chips-container {
   display: flex;
   flex-wrap: wrap;
@@ -44,9 +48,55 @@
   width: 100%;
 }
 
+:host([show-simplified-ui_]) .action-chips-container {
+  animation:
+    chips-slide var(--chip-slide-duration) 220ms
+      var(--chip-animation-curve) forwards,
+    chips-fade-in var(--chip-fade-duration) 370ms
+      var(--chip-animation-curve) forwards;
+  border-radius: 16px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: center;
+  opacity: 0;
+  padding: 10px;
+  transform: translateY(-56px);
+  width: 100%;
+}
+
+:host([show-simplified-ui_][theme-has-background-image])
+.action-chips-container {
+  background-color:
+    rgb(
+      from
+        var(--color-new-tab-page-action-chip-background, transparent) r g b
+        / 0.8
+    );
+  overflow: hidden;
+}
+
 .banana {
   background-image: url(chrome://new-tab-page/icons/banana.svg);
   background-size: 24px;
+}
+
+:host([show-simplified-ui_]) .banana {
+  background-size: 20px;
+  mask-size: 20px;
+}
+
+.deep-dive {
+  background-color: var(--color-sys-on-surface-subtle);
+  background-size: 24px;
+  -webkit-mask-image: url(chrome://new-tab-page/icons/suggestion.svg);
+}
+
+:host([show-simplified-ui_]) .deep-dive {
+  background-size: 20px;
+  mask-size: 20px;
 }
 
 .deep-search {
@@ -55,10 +105,15 @@
   -webkit-mask-image: url(chrome://new-tab-page/icons/deep_search.svg);
 }
 
+:host([show-simplified-ui_]) .deep-search {
+  background-size: 20px;
+  mask-size: 20px;
+}
+
 .action-chip {
   align-items: center;
   background-color: var(--chip-background-color);
-  border-radius: 12px;
+  border-radius: 16px;
   border: none;
   cursor: pointer;
   display: flex;
@@ -72,6 +127,15 @@
   position: relative;
   transform: translateY(-56px);
   width: 240px;
+}
+
+:host([show-simplified-ui_]) .action-chip {
+  background-color: transparent;
+  border-radius: 12px;
+  gap: 6px;
+  height: 36px;
+  padding: 0px 8px;
+  width: 100%;
 }
 
 .action-chip:focus-visible {
@@ -122,24 +186,45 @@
   width: 24px;
 }
 
+:host([show-simplified-ui_]) .action-chip-icon-container {
+  height: 20px;
+  width: 20px;
+}
+
 .action-chip-recent-tab-favicon {
   border-radius: 2px;
   height: 24px;
   width: 24px;
 }
 
+:host([show-simplified-ui_]) .action-chip-recent-tab-favicon {
+  height: 20px;
+  width: 20px;
+}
+
 .action-chip-text-container {
   align-items: flex-start;
   display: flex;
   flex-direction: column;
-  gap: 2px;
   min-width: 0;
+  width: 100%;
+}
+
+:host([show-simplified-ui_]) .action-chip-text-container {
+  flex-direction: row;
+  gap: 4px;
+}
+
+:host([show-simplified-ui_]) .action-chip-text-container {
+  flex-direction: row;
+  gap: 4px;
 }
 
 .chip-title {
   color: var(--color-sys-on-surface);
   font-size: 13px;
   font-weight: 500;
+  line-height: 20px;
   overflow: hidden;
   text-align: left;
   text-overflow: ellipsis;
@@ -147,10 +232,64 @@
   width: 100%;
 }
 
+:host([show-simplified-ui_]) .chip-title {
+  line-height: 18px;
+  overflow: visible;
+  width: fit-content;
+}
+
 .chip-body {
   color: var(--color-sys-on-surface-subtle);
   font-size: 12px;
   font-weight: 400;
+  line-height: 18px;
+  overflow: hidden;
+  text-align: start;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+
+:host([show-simplified-ui_]) .chip-body {
+  font-size: 13px;
+  mask-image:
+    linear-gradient(
+      to right,
+      var(--color-sys-on-surface-subtle) 90%,
+      transparent 98.5%
+    );
+  overflow: hidden;
+  text-align: start;
+  text-overflow: clip;
+  white-space: nowrap;
+  -webkit-mask-image:
+    linear-gradient(
+      to right,
+      var(--color-sys-on-surface-subtle) 90%,
+      transparent 98.5%
+    );
+}
+
+.deep-dive-chip .chip-body {
+  display: -webkit-box;
+  overflow: hidden;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.chip-remove-button {
+  --cr-icon-button-icon-size: 16px;
+  --cr-icon-button-size: 24px;
+  --cr-icon-image: url('chrome://resources/images/icon_clear.svg');
+  align-self: center;
+  display: none;
+  position: absolute;
+  right: 16px;
+}
+
+:host([show-simplified-ui_]) .action-chip:hover .chip-remove-button {
+  display: block;
 }
 
 @media (min-width: 560px) {

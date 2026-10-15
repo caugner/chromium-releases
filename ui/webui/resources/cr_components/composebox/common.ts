@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import {ComposeboxContextAddedMethod} from '//resources/cr_components/search/constants.js';
 import type {UnguessableToken} from '//resources/mojo/mojo/public/mojom/base/unguessable_token.mojom-webui.js';
 import type {Url} from '//resources/mojo/url/mojom/url.mojom-webui.js';
 
@@ -23,11 +24,33 @@ export interface FileUpload {
   file: File;
 }
 
+export enum TabUploadOrigin {
+  CONTEXT_MENU = 0,
+  RECENT_TAB_CHIP = 1,
+  ACTION_CHIP = 2,
+  OTHER = 3,
+}
+
 export interface TabUpload {
   tabId: number;
   url: Url;
   title: string;
   delayUpload: boolean;
+  origin: TabUploadOrigin;
 }
 
 export type ContextualUpload = TabUpload|FileUpload;
+
+// TODO(crbug.com/468329884): Consider making this a new contextual entry
+// source so the realbox and composebox don't both get logged as NTP.
+export function recordContextAdditionMethod(
+    additionMethod: ComposeboxContextAddedMethod, composeboxSource: string) {
+  // In rare cases chrome.metricsPrivate is not available.
+  if (!chrome.metricsPrivate) {
+    return;
+  }
+
+  chrome.metricsPrivate.recordEnumerationValue(
+      'ContextualSearch.ContextAdded.ContextAddedMethod.' + composeboxSource,
+      additionMethod, ComposeboxContextAddedMethod.MAX_VALUE + 1);
+}

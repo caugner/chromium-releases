@@ -275,6 +275,7 @@ static_library("common") {
     "api/declarative_net_request/dnr_manifest_handler.h",
     "api/extension_action/action_info.cc",
     "api/extension_action/action_info.h",
+    "api/messaging/message.cc",
     "api/messaging/message.h",
     "api/messaging/messaging_endpoint.cc",
     "api/messaging/messaging_endpoint.h",
@@ -747,7 +748,10 @@ source_set("unit_tests") {
   ]
 
   if (is_chromeos) {
-    sources += [ "manifest_handlers/file_handler_manifest_unittest.cc" ]
+    sources += [
+      "manifest_handlers/file_handler_manifest_unittest.cc",
+      "manifest_handlers/input_components_handler_unittest.cc",
+    ]
   }
 
   data = [

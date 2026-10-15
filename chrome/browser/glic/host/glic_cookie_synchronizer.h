@@ -8,9 +8,11 @@
 #include <memory>
 
 #include "base/functional/callback_forward.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/timer/timer.h"
+#include "components/signin/public/base/signin_buildflags.h"
 #include "components/signin/public/identity_manager/accounts_cookie_mutator.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "content/public/browser/browser_context.h"
@@ -57,6 +59,11 @@ class GlicCookieSynchronizer
       signin::IdentityManager* identity_manager) override;
 
  protected:
+  FRIEND_TEST_ALL_PREFIXES(GlicCookieSynchronizerTest,
+                           UnifiedFreUsesGlicPartitionWithBugfixFeature);
+  FRIEND_TEST_ALL_PREFIXES(GlicCookieSynchronizerTest,
+                           StandaloneFreUsesFrePartition);
+
   // Returns storage partition for this authentication request.
   // visible for testing.
   virtual content::StoragePartition* GetStoragePartition();
@@ -75,6 +82,10 @@ class GlicCookieSynchronizer
       GaiaAuthConsumer* consumer,
       const gaia::GaiaSource& source) override;
   network::mojom::CookieManager* GetCookieManagerForPartition() override;
+#if BUILDFLAG(ENABLE_DICE_SUPPORT)
+  network::mojom::DeviceBoundSessionManager*
+  GetDeviceBoundSessionManagerForPartition() override;
+#endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
 
   // Handles the webview authentication result.
   void OnAuthFinished(signin::SetAccountsInCookieResult cookie_result);
@@ -87,7 +98,7 @@ class GlicCookieSynchronizer
                           signin::IdentityManager::Observer>
       observation_{this};
 
-  // Whether to configure the storage partiion for use by the glic FRE webview.
+  // Whether to configure the storage partition for use by the glic FRE webview.
   bool use_for_fre_ = false;
 
   std::vector<base::OnceCallback<void(bool)>> callbacks_;

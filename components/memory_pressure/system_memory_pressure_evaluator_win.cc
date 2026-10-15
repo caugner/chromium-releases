@@ -5,6 +5,7 @@
 #include "components/memory_pressure/system_memory_pressure_evaluator_win.h"
 
 #include <windows.h>
+#include <winternl.h>
 
 #include <psapi.h>
 
@@ -20,6 +21,7 @@
 #include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "base/win/object_watcher.h"
+#include "base/win/windows_types.h"
 #include "components/memory_pressure/multi_source_memory_pressure_monitor.h"
 
 namespace memory_pressure {
@@ -102,7 +104,7 @@ MemoryPressureWatcherDelegate::MemoryPressureWatcherDelegate(
     base::win::ScopedHandle handle,
     base::OnceClosure callback)
     : handle_(std::move(handle)), callback_(std::move(callback)) {
-  DCHECK(handle_.IsValid());
+  DCHECK(handle_.is_valid());
   CHECK(watcher_.StartWatchingOnce(handle_.Get(), this));
 }
 
@@ -147,13 +149,16 @@ SystemMemoryPressureEvaluator::~SystemMemoryPressureEvaluator() {
   StopObserving();
 }
 
+
 void SystemMemoryPressureEvaluator::StartObserving() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
+  // base::Unretained is safe in this case because this class owns the
+  // timer, and will cancel the timer on destruction.
   timer_.Start(
       FROM_HERE, kWinMemoryPressurePeriodParam.Get(),
-      BindRepeating(&SystemMemoryPressureEvaluator::CheckMemoryPressure,
-                    weak_ptr_factory_.GetWeakPtr()));
+      base::BindRepeating(&SystemMemoryPressureEvaluator::CheckMemoryPressure,
+                          base::Unretained(this)));
 }
 
 void SystemMemoryPressureEvaluator::StopObserving() {
@@ -161,7 +166,6 @@ void SystemMemoryPressureEvaluator::StopObserving() {
 
   // If StartObserving failed, StopObserving will still get called.
   timer_.Stop();
-  weak_ptr_factory_.InvalidateWeakPtrs();
 }
 
 void SystemMemoryPressureEvaluator::CheckMemoryPressure() {
@@ -173,9 +177,14 @@ void SystemMemoryPressureEvaluator::CheckMemoryPressure() {
 
   // |notify| will be set to true if MemoryPressureListeners need to be
   // notified of a memory pressure level state change.
+
   bool notify = false;
   switch (current_vote()) {
     case base::MEMORY_PRESSURE_LEVEL_NONE:
+      // Always notify if the state changed.
+      if (old_vote != current_vote()) {
+        notify = true;
+      }
       break;
 
     case base::MEMORY_PRESSURE_LEVEL_MODERATE:
@@ -208,7 +217,7 @@ void SystemMemoryPressureEvaluator::CheckMemoryPressure() {
 base::MemoryPressureLevel
 SystemMemoryPressureEvaluator::CalculateCurrentPressureLevel() {
   MEMORYSTATUSEX mem_status = {};
-  bool got_system_memory_status = GetSystemMemoryStatus(&mem_status);
+  bool got_system_memory_status = GetSystemMemoryStatus(mem_status);
 
   if (!got_system_memory_status) {
     return base::MEMORY_PRESSURE_LEVEL_NONE;
@@ -268,10 +277,9 @@ SystemMemoryPressureEvaluator::CalculateCurrentPressureLevel() {
 }
 
 bool SystemMemoryPressureEvaluator::GetSystemMemoryStatus(
-    MEMORYSTATUSEX* mem_status) {
-  DCHECK(mem_status);
-  mem_status->dwLength = sizeof(*mem_status);
-  if (!::GlobalMemoryStatusEx(mem_status)) {
+    MEMORYSTATUSEX& mem_status) {
+  mem_status.dwLength = sizeof(mem_status);
+  if (!::GlobalMemoryStatusEx(&mem_status)) {
     return false;
   }
   return true;

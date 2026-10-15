@@ -69,15 +69,15 @@ bool AutocompleteProviderClient::in_background_state() const {
   return false;
 }
 
+bool AutocompleteProviderClient::IsOmniboxNextLensSearchChipEnabled() const {
+  return false;
+}
+
+bool AutocompleteProviderClient::IsOmniboxNextAimPopupEnabled() const {
+  return false;
+}
 
 base::WeakPtr<AutocompleteProviderClient>
 AutocompleteProviderClient::GetWeakPtr() {
   return nullptr;
 }
-
-#if BUILDFLAG(IS_IOS)
-GeminiPrototypeOmniboxService*
-AutocompleteProviderClient::GetGeminiPrototypeOmniboxService() const {
-  return nullptr;
-}
-#endif  // BUILDFLAG(IS_IOS)

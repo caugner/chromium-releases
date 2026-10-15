@@ -62,6 +62,7 @@
 namespace net {
 
 namespace test {
+class SpdyHttpStreamTest;
 class SpdyStreamTest;
 }
 
@@ -101,6 +102,13 @@ const spdy::SpdyStreamId kLastStreamId = 0x7fffffff;
 // virtually never be hit in practice, while still preventing an
 // attacker from growing this queue unboundedly.
 const int kSpdySessionMaxQueuedCappedFrames = 10000;
+
+// Default minimum time the connection must be idle before a "Preface Ping"
+// is sent upon subsequent write activity.
+// A "Preface Ping" is a PING frame proactively sent by the SPDY session
+// prior to enqueuing a DATA or HEADERS frame when the connection has been
+// idle, to verify that the network path is still alive.
+const int kSpdyDefaultConnectionAtRiskOfLossSeconds = 10;
 
 // Default time to delay sending small receive window updates (can be
 // configured through SetTimeToBufferSmallWindowUpdates()). Usually window
@@ -618,16 +626,16 @@ class NET_EXPORT SpdySession
   }
 
  private:
-  friend class test::SpdyStreamTest;
   friend class base::RefCounted<SpdySession>;
   friend class HttpNetworkTransactionTest;
   friend class HttpProxyClientSocketPoolTest;
-  friend class SpdyHttpStreamTest;
   friend class SpdyNetworkTransactionTest;
   friend class SpdyProxyClientSocketTest;
   friend class SpdySessionPoolTest;
   friend class SpdySessionTest;
   friend class SpdyStreamRequest;
+  friend class test::SpdyHttpStreamTest;
+  friend class test::SpdyStreamTest;
 
   using PendingStreamRequestQueue =
       base::circular_deque<base::WeakPtr<SpdyStreamRequest>>;
@@ -857,6 +865,15 @@ class NET_EXPORT SpdySession
   void DoDrainSession(Error err,
                       const std::string& description,
                       bool force_send_go_away = false);
+
+  // Immediately marks a session as unavailable, to prevent reuse, and posts a
+  // task to call DoDrainSession (if the session is drained for some other
+  // reason in the meantime, that is fine). This should be used instead of
+  // DoDrainSession when there may be a consumer of the SpdySession on the
+  // stack, so as to avoid reentrancy.
+  void DoDrainSessionAsync(Error err,
+                           std::string description,
+                           bool force_send_go_away = false);
 
   // Called right before closing a (possibly-inactive) stream for a
   // reason other than being requested to by the stream.

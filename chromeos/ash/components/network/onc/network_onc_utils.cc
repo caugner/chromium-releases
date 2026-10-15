@@ -51,8 +51,8 @@
 #include "net/base/proxy_string_util.h"
 #include "net/cert/x509_certificate.h"
 #include "net/cert/x509_util_nss.h"
-#include "net/proxy_resolution/proxy_bypass_rules.h"
 #include "net/proxy_resolution/proxy_config.h"
+#include "net/proxy_resolution/proxy_host_matching_rules.h"
 #include "third_party/boringssl/src/pki/pem.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 #include "url/gurl.h"
@@ -123,9 +123,9 @@ void AppendProxyServerForScheme(const base::Value::Dict& onc_manual,
                                                     spec);
 }
 
-net::ProxyBypassRules ConvertOncExcludeDomainsToBypassRules(
+net::ProxyHostMatchingRules ConvertOncExcludeDomainsToBypassRules(
     const base::Value::List& onc_exclude_domains) {
-  net::ProxyBypassRules rules;
+  net::ProxyHostMatchingRules rules;
   for (const base::Value& value : onc_exclude_domains) {
     if (!value.is_string()) {
       LOG(ERROR) << "Badly formatted ONC exclude domains";
@@ -398,7 +398,7 @@ std::optional<base::Value::Dict> ConvertOncProxySettingsToProxyConfig(
     AppendProxyServerForScheme(*manual_dict, ::onc::proxy::kHttps,
                                &manual_spec);
 
-    net::ProxyBypassRules bypass_rules;
+    net::ProxyHostMatchingRules bypass_rules;
     const base::Value::List* exclude_domains =
         onc_proxy_settings.FindList(::onc::proxy::kExcludeDomains);
     if (exclude_domains)
@@ -457,7 +457,7 @@ std::optional<base::Value::Dict> ConvertProxyConfigToOncProxySettings(
       // Convert the 'bypass_list' string into dictionary entries.
       std::string bypass_rules_string;
       if (proxy_config.GetBypassList(&bypass_rules_string)) {
-        net::ProxyBypassRules bypass_rules;
+        net::ProxyHostMatchingRules bypass_rules;
         bypass_rules.ParseFromString(bypass_rules_string);
         base::Value::List exclude_domains;
         for (const auto& rule : bypass_rules.rules())
@@ -526,6 +526,20 @@ int ImportNetworksForUser(const user_manager::User* user,
           NetworkHandler::Get()->network_state_handler()->FirstNetworkByType(
               NetworkTypePattern::Ethernet());
       if (ethernet) {
+        // SetProperties() writes to the profile that already owns the
+        // Ethernet service, which is the device-wide shared profile. Refuse
+        // to let a per-user ONC import (e.g. from a guest or non-owner via
+        // chrome://network) cross that boundary and persist
+        // ProxySettings / StaticIPConfig.NameServers for all users and the
+        // login screen.
+        if (ethernet->profile_path() != profile->path) {
+          NET_LOG(ERROR)
+              << "User ONC import refused to write Ethernet properties to "
+                 "non-user shill profile: "
+              << ethernet->profile_path();
+          *error = "Ethernet configuration via user import is not allowed.";
+          continue;
+        }
         managed_network_config_handler->SetProperties(
             ethernet->path(), normalized_network.Clone(), base::OnceClosure(),
             network_handler::ErrorCallback());

@@ -142,6 +142,7 @@ vs-chromium-project.txt
 /chrome/browser/resources/chromeos/mako/resources/
 /chrome/browser/resources/chromeos/seal/resources/
 /chrome/browser/resources/downloads/internal/
+/chrome/browser/resources/history/internal/
 /chrome/browser/resources/pdf/html_office
 /chrome/browser/resources/media_router/extension/src/
 /chrome/browser/resources/preinstalled_web_apps/internal/
@@ -306,8 +307,6 @@ vs-chromium-project.txt
 /ui/file_manager/integration_tests/tsconfig.json
 /ui/keyboard/keyboard_mojom_bindings.xml
 /ui/gl/resources/angle-metal
-/ui/surface/surface.xml
-/ui/surface/surface_gpu_tests.xml
 /webkit/data
 /webpagereplay_logs/
 /x86-generic_out/

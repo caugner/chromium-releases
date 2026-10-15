@@ -53,13 +53,16 @@
 #include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
 #include "chrome/browser/ui/views/location_bar/icon_label_bubble_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
+#include "chrome/browser/ui/views/omnibox/omnibox_popup_closer.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_result_view.h"
 #include "chrome/browser/ui/views/page_action/page_action_container_view.h"
 #include "chrome/browser/ui/views/page_action/page_action_icon_controller.h"
 #include "chrome/browser/ui/views/page_action/page_action_view.h"
 #include "chrome/browser/ui/views/send_tab_to_self/send_tab_to_self_bubble_controller.h"
+#include "chrome/common/webui_url_constants.h"
 #include "chrome/grit/branded_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/contextual_tasks/public/features.h"
 #include "components/lens/lens_features.h"
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_match.h"
@@ -82,6 +85,8 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/focused_node_details.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/common/constants.h"
@@ -360,6 +365,10 @@ void OmniboxViewViews::SaveStateToTab(content::WebContents* tab) {
 }
 
 void OmniboxViewViews::OnTabChanged(const content::WebContents* web_contents) {
+  // Observe the WebContents for title changes and navigations for updating the
+  // placeholder text.
+  Observe(const_cast<content::WebContents*>(web_contents));
+
   const OmniboxState* state = static_cast<OmniboxState*>(
       web_contents->GetUserData(&OmniboxState::kKey));
   controller()->edit_model()->RestoreState(state ? &state->model_state
@@ -407,6 +416,9 @@ void OmniboxViewViews::InstallPlaceholderText() {
     // not announced.
     GetViewAccessibility().SetPlaceholder(
         l10n_util::GetStringUTF8(IDS_ACC_AI_MODE_PLACEHOLDER_TEXT));
+  } else if (ShouldInstallContextualTasksPlaceholderText()) {
+    // For Contextual Tasks page, use the page title as placeholder text.
+    SetPlaceholderText(location_bar_view_->GetWebContents()->GetTitle());
   } else if (const auto* default_provider = controller()
                                                 ->client()
                                                 ->GetTemplateURLService()
@@ -506,6 +518,15 @@ void OmniboxViewViews::SelectAll(bool reversed) {
 void OmniboxViewViews::RevertAll() {
   saved_selection_for_focus_change_ = gfx::Range::InvalidRange();
   OmniboxView::RevertAll();
+  // This will stop the `AutocompleteController`. This should happen after
+  // `user_input_in_progress_` is cleared in `OmniboxView::RevertAll()`;
+  // otherwise, closing the popup will trigger unnecessary
+  // `AutocompleteClassifier::Classify()` calls to try to update the views
+  // which are unnecessary since they'll be thrown away during the model revert
+  // anyways.
+  if (auto* popup_closer = controller()->client()->GetOmniboxPopupCloser()) {
+    popup_closer->CloseWithReason(omnibox::PopupCloseReason::kRevertAll);
+  }
   UpdateAccessibleTextSelection();
 }
 
@@ -898,19 +919,19 @@ bool OmniboxViewViews::HandleEarlyTabActions(const ui::KeyEvent& event) {
     // When the popup is open, focus on the AI Mode page action icon is handled
     // by `OmniboxPopupSelection` and `OmniboxEditModel`. And normally, when the
     // popup is closed, the user can focus the AI Mode page action icon with
-    // standard keyboard navigation. However, when the popup is closed and the
-    // keyboard accessibility setting is disabled (which currently only is
-    // possible on Mac), tab traversal will move directly from the omnibox to
-    // the web contents. In order to keep the behavior of the AI Mode page
-    // action icon consistent with the popup open case, where it can always be
-    // focused with tab traversal, special logic is required. The approach used
-    // here is to retain focus in the omnibox but change the focus indicators to
-    // show the page action icon as focused. If the user attempts to activate
-    // the page action icon with <space> or <return>, these events will still be
-    // handled by the omnibox in `HandleKeyEvent`, which has a special cases for
-    // when the page action icon has this "fake" focus.
-    if (GetAiModePageActionIconView() &&
-        !GetFocusManager()->keyboard_accessible()) {
+    // standard keyboard navigation. However, on Mac only, when the popup is
+    // closed and the keyboard accessibility setting is disabled, tab traversal
+    // will move directly from the omnibox to the web contents. In order to keep
+    // the behavior of the AI Mode page action icon consistent with the popup
+    // open case, where it can always be focused with tab traversal, special
+    // logic is required. The approach used here is to retain focus in the
+    // omnibox but change the focus indicators to show the page action icon as
+    // focused. If the user attempts to activate the page action icon with
+    // <space> or <return>, these events will still be handled by the omnibox in
+    // `HandleKeyEvent`, which has a special cases for when the page action icon
+    // has this "fake" focus.
+#if BUILDFLAG(IS_MAC)
+    if (AimButtonVisible() && !GetFocusManager()->keyboard_accessible()) {
       if (!event.IsShiftDown()) {
         if (aim_page_action_icon_has_fake_focus_) {
           // If the page action icon already has focus and the user presses
@@ -940,6 +961,7 @@ bool OmniboxViewViews::HandleEarlyTabActions(const ui::KeyEvent& event) {
       }
       return true;
     }
+#endif
     return false;
   }
 }
@@ -1457,7 +1479,9 @@ bool OmniboxViewViews::OnMouseDragged(const ui::MouseEvent& event) {
   }
 
   if (HasTextBeingDragged()) {
-    CloseOmniboxPopup();
+    if (auto* popup_closer = controller()->client()->GetOmniboxPopupCloser()) {
+      popup_closer->CloseWithReason(omnibox::PopupCloseReason::kTextDrag);
+    }
   }
 
   const bool handled = views::Textfield::OnMouseDragged(event);
@@ -1557,22 +1581,25 @@ bool OmniboxViewViews::SkipDefaultKeyEventProcessing(
     // 1. Entering keyword mode.
     //    TODO(crbug.com/439564633): This case seems obsolete. Investigate
     //    whether it can be removed.
-    // 2. The popup is open (in this case, <tab> events will be handled by
+    // 2. On Mac only: The AIM page action icon is present and the keyboard
+    //    accessibility setting is disabled. See comments in
+    //    `HandleEarlyTabActions` for more details on this case.
+    // 3. The popup is open (in this case, <tab> events will be handled by
     //    `OmniboxPopupSelection`.
-    // 3. The AIM page action icon is present and the keyboard accessibility
-    //    setting is disabled. See comments in `HandleEarlyTabActions` for more
-    //    details on this case.
     if ((controller()->edit_model()->is_keyword_hint() &&
          !event.IsShiftDown()) ||
-        controller()->IsPopupOpen() ||
-        (GetAiModePageActionIconView() &&
-         !GetFocusManager()->keyboard_accessible())) {
+#if BUILDFLAG(IS_MAC)
+        (AimButtonVisible() && !GetFocusManager()->keyboard_accessible()) ||
+#endif
+        controller()->IsPopupOpen()) {
       return true;
     }
   }
+
   if (event.key_code() == ui::VKEY_ESCAPE && !event.IsShiftDown()) {
     return true;
   }
+
   return Textfield::SkipDefaultKeyEventProcessing(event);
 }
 
@@ -1670,18 +1697,18 @@ void OmniboxViewViews::OnBlur() {
 
   controller()->edit_model()->OnWillKillFocus();
 
-  // If ZeroSuggest is active, and there is evidence that there is a text
-  // update to show, revert to ensure that update is shown now.  Otherwise,
-  // at least call CloseOmniboxPopup(), so that if ZeroSuggest is in the
-  // midst of running but hasn't yet opened the popup, it will be halted.
-  // If we fully reverted in this case, we'd lose the cursor/highlight
-  // information saved above.
+  // If `ZeroSuggest` is active, and there is evidence that there is a text
+  // update to show, revert to ensure that update is shown now. Otherwise, at
+  // least close the popup so that if `ZeroSuggest` is in the midst of running
+  // but hasn't yet opened the popup, it will be halted. If we fully reverted in
+  // this case, we'd lose the cursor/highlight information saved above.
   if (!controller()->edit_model()->user_input_in_progress() &&
       controller()->IsPopupOpen() &&
       GetText() != controller()->edit_model()->GetPermanentDisplayText()) {
     RevertAll();
-  } else {
-    CloseOmniboxPopup();
+  } else if (auto* popup_closer =
+                 controller()->client()->GetOmniboxPopupCloser()) {
+    popup_closer->CloseWithReason(omnibox::PopupCloseReason::kBlur);
   }
 
   // Tell the model to reset itself.
@@ -2186,7 +2213,7 @@ void OmniboxViewViews::OnWriteDragData(ui::OSExchangeData* data) {
   controller()->edit_model()->AdjustTextForCopy(
       GetSelectedRange().GetMin(), &selected_text, &url, &write_url);
   data->SetString(selected_text);
-  if (write_url) {
+  if (write_url && url.is_valid()) {
     gfx::Image favicon;
     std::u16string title = selected_text;
     if (IsSelectAll()) {
@@ -2349,6 +2376,38 @@ void OmniboxViewViews::OnTemplateURLServiceChanged() {
   InstallPlaceholderText();
 }
 
+void OmniboxViewViews::DidFinishNavigation(
+    content::NavigationHandle* navigation_handle) {
+  // Update the placeholder text after primary main frame navigation of the
+  // currently displayed WebContents to ensure it reflects the current page,
+  // including cases like back/forward navigation between the New Tab Page and
+  // Contextual Tasks page.
+  if (!location_bar_view_ ||
+      location_bar_view_->GetWebContents() != web_contents()) {
+    return;
+  }
+
+  if (navigation_handle->IsInPrimaryMainFrame() &&
+      navigation_handle->HasCommitted()) {
+    InstallPlaceholderText();
+  }
+}
+
+void OmniboxViewViews::TitleWasSet(content::NavigationEntry* entry) {
+  // Update the placeholder text after title changes in the primary main frame
+  // of the currently displayed WebContents.
+  // For Contextual Tasks page, updates the placeholder text to the page title.
+  if (!location_bar_view_ ||
+      location_bar_view_->GetWebContents() != web_contents()) {
+    return;
+  }
+
+  if (entry &&
+      entry == web_contents()->GetController().GetLastCommittedEntry()) {
+    InstallPlaceholderText();
+  }
+}
+
 void OmniboxViewViews::PermitExternalProtocolHandler() {
   ExternalProtocolHandler::PermitLaunchUrl();
 }
@@ -2364,11 +2423,11 @@ void OmniboxViewViews::PerformDrop(
 
   const ui::OSExchangeData& data = event.data();
   std::u16string text;
-  if (std::optional<ui::OSExchangeData::UrlInfo> url_result =
-          data.GetURLAndTitle(ui::FilenameToURLPolicy::CONVERT_FILENAMES);
-      url_result.has_value()) {
+  const std::vector<ui::ClipboardUrlInfo> url_infos =
+      data.GetURLsAndTitles(ui::FilenameToURLPolicy::CONVERT_FILENAMES);
+  if (!url_infos.empty()) {
     text = omnibox::StripJavascriptSchemas(
-        base::UTF8ToUTF16(url_result->url.spec()));
+        base::UTF8ToUTF16(url_infos.front().url.spec()));
   } else if (const std::optional<std::u16string> text_result = data.GetString();
              text_result.has_value()) {
     text = omnibox::StripJavascriptSchemas(
@@ -2410,17 +2469,18 @@ void OmniboxViewViews::MaybeAddSendTabToSelfItem(
 }
 
 void OmniboxViewViews::UpdatePlaceholderTextColor() {
-  // AIM placeholder text and keyword placeholders are dim to differentiate from
-  // user input. DSE placeholders are not dim to draw attention to the omnibox
-  // and because the omnibox is unfocused so there's less risk of confusion with
-  // user input.
+  // AIM placeholder text, contextual tasks placeholder text, and keyword
+  // placeholders are dim to differentiate from user input. DSE placeholders are
+  // not dim to draw attention to the omnibox and because the omnibox is
+  // unfocused so there's less risk of confusion with user input.
   // Null in tests.
   if (!GetColorProvider()) {
     return;
   }
   bool dse_placeholder_installed =
       controller()->edit_model()->keyword_placeholder().empty() &&
-      !ShouldInstallAimPlaceholderText();
+      !ShouldInstallAimPlaceholderText() &&
+      !ShouldInstallContextualTasksPlaceholderText();
   set_placeholder_text_color(GetColorProvider()->GetColor(
       dse_placeholder_installed ? kColorOmniboxText : kColorOmniboxTextDimmed));
 }
@@ -2469,6 +2529,31 @@ bool OmniboxViewViews::ShouldInstallAimPlaceholderText() const {
 
   return is_aim_entrypoint_enabled &&
          controller()->edit_model()->is_caret_visible();
+}
+
+bool OmniboxViewViews::ShouldInstallContextualTasksPlaceholderText() const {
+  // `location_bar_view_` can be null in tests.
+  if (!location_bar_view_) {
+    return false;
+  }
+
+  content::WebContents* web_contents = location_bar_view_->GetWebContents();
+  if (!web_contents) {
+    return false;
+  }
+
+  content::NavigationEntry* entry =
+      web_contents->GetController().GetLastCommittedEntry();
+  if (!entry) {
+    return false;
+  }
+
+  const auto is_contextual_tasks = [](const GURL& url) {
+    return url.SchemeIs(content::kChromeUIScheme) &&
+           url.GetHost() == chrome::kChromeUIContextualTasksHost &&
+           base::FeatureList::IsEnabled(contextual_tasks::kContextualTasks);
+  };
+  return is_contextual_tasks(entry->GetURL());
 }
 
 void OmniboxViewViews::RecordAimHintImpression() {

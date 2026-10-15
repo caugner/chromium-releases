@@ -811,6 +811,9 @@ void HWNDMessageHandler::Hide() {
 }
 
 void HWNDMessageHandler::Maximize() {
+  if (IsFullscreen()) {
+    SetFullscreen(false, display::kInvalidDisplayId);
+  }
   ExecuteSystemMenuCommand(SC_MAXIMIZE);
 }
 
@@ -820,7 +823,11 @@ void HWNDMessageHandler::Minimize() {
 }
 
 void HWNDMessageHandler::Restore() {
-  ExecuteSystemMenuCommand(SC_RESTORE);
+  if (IsFullscreen()) {
+    SetFullscreen(false, display::kInvalidDisplayId);
+  } else {
+    ExecuteSystemMenuCommand(SC_RESTORE);
+  }
 }
 
 void HWNDMessageHandler::Activate() {

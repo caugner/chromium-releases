@@ -96,8 +96,6 @@ class NewTabPageHandler
                     segmentation_platform::SegmentationPlatformService*
                         segmentation_platform_service,
                     content::WebContents* web_contents,
-                    std::unique_ptr<NewTabPageFeaturePromoHelper>
-                        customize_chrome_feature_promo_helper,
                     const base::Time& ntp_navigation_start_time,
                     const std::vector<ntp::ModuleIdDetail>* module_id_details);
 
@@ -109,6 +107,12 @@ class NewTabPageHandler
   // Histograms being recorded when a module is dismissed or restored.
   static const char kModuleDismissedHistogram[];
   static const char kModuleRestoredHistogram[];
+  // Histograms being recorded when auto removal/undo event is triggered.
+  static const char kModuleAutoRemovalHistogram[];
+  static const char kModuleAutoRemovalUndoneHistogram[];
+  // Histograms being recorded when a module is automatically removed or undone.
+  static const char kModuleAutoRemovalModuleIdHistogram[];
+  static const char kModuleAutoRemovalUndoneModuleIdHistogram[];
 
   static void RegisterProfilePrefs(PrefRegistrySimple* registry);
 
@@ -132,18 +136,20 @@ class NewTabPageHandler
   void OnRestoreModule(const std::string& module_id) override;
   void SetModulesVisible(bool visible) override;
   void SetModuleDisabled(const std::string& module_id, bool disabled) override;
+  void SetModulesDisabled(const std::vector<std::string>& module_ids,
+                          bool disabled) override;
   void UpdateDisabledModules() override;
   void UpdateFooterVisibility() override;
   void OnModulesLoadedWithData(
       const std::vector<std::string>& module_ids) override;
   void OnModuleUsed(const std::string& module_id) override;
   void GetModulesIdNames(GetModulesIdNamesCallback callback) override;
+  void GetModulesEligibleForRemoval(
+      GetModulesEligibleForRemovalCallback callback) override;
   void SetModulesOrder(const std::vector<std::string>& module_ids) override;
   void GetModulesOrder(GetModulesOrderCallback callback) override;
   void UpdateModulesLoadable() override;
   void UpdateActionChipsVisibility() override;
-  void MaybeShowFeaturePromo(
-      new_tab_page::mojom::IphFeature iph_feature) override;
   void OnAppRendered(double time) override;
   void OnOneGoogleBarRendered(double time) override;
   void OnPromoRendered(double time,
@@ -162,6 +168,7 @@ class NewTabPageHandler
   void OnPromoLinkClicked() override;
   void IncrementComposeButtonShownCount() override;
   void MaybeTriggerAutomaticCustomizeChromePromo() override;
+  void RecordContextMenuClick() override;
 
  private:
   // ui::NativeThemeObserver:
@@ -197,15 +204,15 @@ class NewTabPageHandler
   void LogEvent(NTPLoggingEventType event);
 
   typedef base::OnceCallback<void(bool success,
-                                  std::unique_ptr<std::string> body)>
+                                  std::optional<std::string> body)>
       OnFetchResultCallback;
   void Fetch(const GURL& url, OnFetchResultCallback on_result);
   void OnFetchResult(const network::SimpleURLLoader* loader,
                      OnFetchResultCallback on_result,
-                     std::unique_ptr<std::string> body);
+                     std::optional<std::string> body);
   void OnLogFetchResult(OnDoodleImageRenderedCallback callback,
                         bool success,
-                        std::unique_ptr<std::string> body);
+                        std::optional<std::string> body);
 
   ntp_tiles::TileType GetTileType() const;
   bool IsActionChipsVisible() const;
@@ -214,6 +221,7 @@ class NewTabPageHandler
                                     const std::string& module_id,
                                     int delay_time_ms = 0);
   void MaybeShowWebstoreToast();
+  void RecordModuleInteraction(const std::string& module_id);
   void IncrementDictPrefKeyCount(const std::string& pref_name,
                                  const std::string& key);
 
@@ -227,6 +235,12 @@ class NewTabPageHandler
       const std::string& module_id);
 
   void SetModuleHidden(const std::string& module_id, bool hidden);
+
+  // Returns a list of module ids that are eligible for removal, which is
+  // determined the module staleness and the staleness threshold.
+  std::vector<std::string> GetModulesEligibleForRemoval() const;
+  void SetStaleModulesDisabled(const std::vector<std::string>& module_ids,
+                               bool disabled);
 
   // Synchronizes Microsoft module enablement with their current authentication
   // state. The return value indicates whether the modules should be considered

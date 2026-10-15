@@ -76,7 +76,7 @@ BASE_FEATURE(kLensSearchProtectedPage,
              base::FEATURE_DISABLED_BY_DEFAULT);
 #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
-BASE_FEATURE(kLensOverlayEduActionChip, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kLensOverlayEduActionChip, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kLensOverlayKeyboardSelection, base::FEATURE_ENABLED_BY_DEFAULT);
 
@@ -570,6 +570,9 @@ const base::FeatureParam<LensAimSuggestionsType> kLensAimSuggestionsType(
     "lens-aim-suggestions-type",    // Parameter Name in Field Trial
     LensAimSuggestionsType::kNone,  // Default Value
     &kLensAimSuggestionsTypeOptions);
+
+const base::FeatureParam<int> kLensOverlayNonBlockingPrivacyNoticeImpressionCap{
+    &kLensOverlayNonBlockingPrivacyNotice, "impression-cap", 0};
 
 std::string_view LensAimSuggestionModeToString(
     LensAimSuggestionsType type) {
@@ -1294,6 +1297,10 @@ bool IsLensOverlayOptimizationFilterEnabled() {
 
 bool IsLensOverlayNonBlockingPrivacyNoticeEnabled() {
   return base::FeatureList::IsEnabled(kLensOverlayNonBlockingPrivacyNotice);
+}
+
+int GetLensOverlayNonBlockingPrivacyNoticeImpressionCap() {
+  return kLensOverlayNonBlockingPrivacyNoticeImpressionCap.Get();
 }
 
 }  // namespace lens::features

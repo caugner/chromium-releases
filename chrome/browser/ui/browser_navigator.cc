@@ -15,6 +15,7 @@
 #include "base/notimplemented.h"
 #include "base/notreached.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "chrome/browser/apps/app_service/web_contents_app_id_utils.h"
@@ -113,7 +114,7 @@ bool WindowCanOpenTabs(const NavigateParams& params) {
   }
 
   return params.browser->GetBrowserForMigrationOnly()->CanSupportWindowFeature(
-             Browser::FEATURE_TABSTRIP) ||
+             Browser::WindowFeature::kFeatureTabStrip) ||
          params.browser->GetBrowserForMigrationOnly()
              ->tab_strip_model()
              ->empty();
@@ -156,7 +157,7 @@ bool AdjustNavigateParamsForURL(NavigateParams* params) {
     }
     params->disposition = WindowOpenDisposition::SINGLETON_TAB;
     params->browser = GetOrCreateBrowser(profile, params->user_gesture);
-    params->window_action = NavigateParams::SHOW_WINDOW;
+    params->window_action = NavigateParams::WindowAction::kShowWindow;
   }
 
   Browser* browser_for_migration =
@@ -375,8 +376,8 @@ void NormalizeDisposition(NavigateParams* params) {
     case WindowOpenDisposition::NEW_POPUP: {
       // Code that wants to open a new window typically expects it to be shown
       // automatically.
-      if (params->window_action == NavigateParams::NO_ACTION) {
-        params->window_action = NavigateParams::SHOW_WINDOW;
+      if (params->window_action == NavigateParams::WindowAction::kNoAction) {
+        params->window_action = NavigateParams::WindowAction::kShowWindow;
       }
       [[fallthrough]];
     }
@@ -423,12 +424,14 @@ class ScopedBrowserShower {
   ~ScopedBrowserShower() {
     BrowserWindow* window =
         params_->browser->GetBrowserForMigrationOnly()->window();
-    if (params_->window_action == NavigateParams::SHOW_WINDOW_INACTIVE) {
+    if (params_->window_action ==
+        NavigateParams::WindowAction::kShowWindowInactive) {
       // TODO(crbug.com/40284685): investigate if SHOW_WINDOW_INACTIVE needs to
       // be supported for tab modal popups.
       CHECK_EQ(params_->is_tab_modal_popup_deprecated, false);
       window->ShowInactive();
-    } else if (params_->window_action == NavigateParams::SHOW_WINDOW) {
+    } else if (params_->window_action ==
+               NavigateParams::WindowAction::kShowWindow) {
       if (params_->is_tab_modal_popup_deprecated) {
         CHECK_EQ(params_->disposition, WindowOpenDisposition::NEW_POPUP);
         CHECK_NE(source_contents_, nullptr);
@@ -514,13 +517,6 @@ base::WeakPtr<content::NavigationHandle> Navigate(NavigateParams* params) {
     params->initiating_profile = source_browser->profile();
   }
   DCHECK(params->initiating_profile);
-
-  // If the created window is a partitioned popin, a valid source exists, and
-  // the disposition is NEW_POPUP then the resulting popup should be tab-modal.
-  // See: https://explainers-by-googlers.github.io/partitioned-popins/
-  params->is_tab_modal_popup_deprecated |=
-      params->window_features.is_partitioned_popin && params->source_contents &&
-      params->disposition == WindowOpenDisposition::NEW_POPUP;
 
 #if BUILDFLAG(IS_CHROMEOS)
   if (params->initiating_profile->IsOffTheRecord() &&
@@ -702,7 +698,7 @@ base::WeakPtr<content::NavigationHandle> Navigate(NavigateParams* params) {
   }
   if (content::SiteIsolationPolicy::ShouldUrlUseApplicationIsolationLevel(
           params->initiating_profile, params->url)) {
-    CHECK(web_app::AppBrowserController::IsWebApp(params->browser));
+    CHECK(web_app::AppBrowserController::IsIsolatedWebApp(params->browser));
   }
 #if BUILDFLAG(IS_CHROMEOS)
   if (source_browser && source_browser != params->browser) {
@@ -750,19 +746,19 @@ base::WeakPtr<content::NavigationHandle> Navigate(NavigateParams* params) {
   NormalizeDisposition(params);
 
   // If a new window has been created, it needs to be shown.
-  if (params->window_action == NavigateParams::NO_ACTION &&
+  if (params->window_action == NavigateParams::WindowAction::kNoAction &&
       source_browser != params->browser &&
       params->browser->GetBrowserForMigrationOnly()
           ->tab_strip_model()
           ->empty()) {
-    params->window_action = NavigateParams::SHOW_WINDOW;
+    params->window_action = NavigateParams::WindowAction::kShowWindow;
   }
 
   // If we create a popup window from a non user-gesture, don't activate it.
-  if (params->window_action == NavigateParams::SHOW_WINDOW &&
+  if (params->window_action == NavigateParams::WindowAction::kShowWindow &&
       params->disposition == WindowOpenDisposition::NEW_POPUP &&
       params->user_gesture == false) {
-    params->window_action = NavigateParams::SHOW_WINDOW_INACTIVE;
+    params->window_action = NavigateParams::WindowAction::kShowWindowInactive;
   }
 
   // Determine if the navigation was user initiated. If it was, we need to
@@ -881,7 +877,7 @@ base::WeakPtr<content::NavigationHandle> Navigate(NavigateParams* params) {
     // If switching browsers, make sure it is shown.
     if (params->disposition == WindowOpenDisposition::SWITCH_TO_TAB &&
         params->browser != source_browser) {
-      params->window_action = NavigateParams::SHOW_WINDOW;
+      params->window_action = NavigateParams::WindowAction::kShowWindow;
     }
 
     if (contents_to_navigate_or_insert->IsCrashed()) {
@@ -943,4 +939,12 @@ base::WeakPtr<content::NavigationHandle> Navigate(NavigateParams* params) {
         navigation_handle.get());
   }
   return navigation_handle;
+}
+
+void Navigate(NavigateParams* params,
+              base::OnceCallback<void(base::WeakPtr<content::NavigationHandle>)>
+                  callback) {
+  base::WeakPtr<content::NavigationHandle> handle = Navigate(params);
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, base::BindOnce(std::move(callback), handle));
 }

@@ -13,14 +13,16 @@
 #include "base/check.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
-#include "base/functional/callback_forward.h"
 #include "base/logging.h"
+#include "base/metrics/user_metrics.h"
 #include "base/time/time.h"
 #include "chrome/browser/glic/fre/fre_util.h"
 #include "chrome/browser/glic/host/auth_controller.h"
+#include "chrome/browser/glic/public/glic_enabling.h"
 #include "chrome/common/chrome_features.h"
 #include "components/signin/public/base/consent_level.h"
 #include "components/signin/public/base/multilogin_parameters.h"
+#include "components/signin/public/base/signin_buildflags.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/set_accounts_in_cookie_result.h"
 #include "content/public/browser/browser_context.h"
@@ -32,6 +34,10 @@
 #include "net/cookies/cookie_util.h"
 #include "services/network/public/mojom/cookie_manager.mojom.h"
 #include "url/gurl.h"
+
+#if BUILDFLAG(ENABLE_DICE_SUPPORT)
+#include "components/signin/public/base/signin_switches.h"
+#endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
 
 namespace glic {
 
@@ -56,8 +62,15 @@ content::StoragePartitionConfig GetGlicMainStoragePartitionConfig(
 content::StoragePartitionConfig GetGlicStoragePartitionConfig(
     content::BrowserContext* browser_context,
     bool use_for_fre) {
-  return use_for_fre ? GetFreStoragePartitionConfig(browser_context)
-                     : GetGlicMainStoragePartitionConfig(browser_context);
+  bool use_main_partition_for_fre =
+      base::FeatureList::IsEnabled(
+          features::kGlicUseMainPartitionForUnifiedFre) &&
+      GlicEnabling::IsUnifiedFreEnabled(
+          Profile::FromBrowserContext(browser_context));
+
+  return (use_for_fre && !use_main_partition_for_fre)
+             ? GetFreStoragePartitionConfig(browser_context)
+             : GetGlicMainStoragePartitionConfig(browser_context);
 }
 
 }  // namespace
@@ -200,6 +213,18 @@ GlicCookieSynchronizer::GetCookieManagerForPartition() {
   return GetStoragePartition()->GetCookieManagerForBrowserProcess();
 }
 
+#if BUILDFLAG(ENABLE_DICE_SUPPORT)
+network::mojom::DeviceBoundSessionManager*
+GlicCookieSynchronizer::GetDeviceBoundSessionManagerForPartition() {
+  if (!base::FeatureList::IsEnabled(
+          switches::
+              kEnableOAuthMultiloginStandardCookiesBindingForGlicPartition)) {
+    return nullptr;
+  }
+  return GetStoragePartition()->GetDeviceBoundSessionManager();
+}
+#endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
+
 void GlicCookieSynchronizer::CopyCookiesToWebviewStoragePartition(
     OnWebviewAuth callback) {
   CHECK(!callback.is_null());
@@ -290,6 +315,8 @@ void GlicCookieSynchronizer::OnAuthFinished(
 }
 
 void GlicCookieSynchronizer::OnTimeout() {
+  base::RecordAction(
+      base::UserMetricsAction("Glic.CookieSynchronizer.Timeout"));
   CompleteAuth(/*is_success=*/false);
 }
 

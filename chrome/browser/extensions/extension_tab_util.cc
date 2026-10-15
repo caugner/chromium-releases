@@ -30,10 +30,12 @@
 #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
 #include "chrome/browser/ui/tabs/split_tab_metrics.h"
 #include "chrome/browser/ui/tabs/tab_list_interface.h"
+#include "chrome/browser/ui/tabs/tab_muted_utils.h"
 #include "chrome/common/webui_url_constants.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "components/tabs/public/split_tab_id.h"
 #include "components/tabs/public/split_tab_visual_data.h"
+#include "components/tabs/public/tab_interface.h"
 #include "components/url_formatter/url_fixer.h"
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/navigation_controller.h"
@@ -647,7 +649,6 @@ base::Value::Dict ExtensionTabUtil::CreateWindowValueForExtension(
       extension, populate_tab_behavior, context);
 }
 
-#if !BUILDFLAG(IS_ANDROID)
 // static
 api::tabs::MutedInfo ExtensionTabUtil::CreateMutedInfo(
     content::WebContents* contents) {
@@ -671,7 +672,6 @@ api::tabs::MutedInfo ExtensionTabUtil::CreateMutedInfo(
   }
   return info;
 }
-#endif
 
 // static
 ExtensionTabUtil::ScrubTabBehavior ExtensionTabUtil::GetScrubTabBehavior(
@@ -1239,7 +1239,7 @@ void ExtensionTabUtil::NavigateToURL(WindowOpenDisposition disposition,
   NavigateParams params(chrome::FindBrowserWithTab(web_contents), url,
                         ui::PAGE_TRANSITION_FROM_API);
   params.disposition = disposition;
-  params.window_action = NavigateParams::SHOW_WINDOW;
+  params.window_action = NavigateParams::WindowAction::kShowWindow;
   if (web_contents) {
     params.source_contents = web_contents;
   }
@@ -1386,7 +1386,7 @@ void ExtensionTabUtil::CreateTab(
 
   params.disposition = disposition;
   params.window_features = window_features;
-  params.window_action = NavigateParams::SHOW_WINDOW;
+  params.window_action = NavigateParams::WindowAction::kShowWindow;
   params.user_gesture = user_gesture;
   Navigate(&params);
 
@@ -1401,8 +1401,10 @@ void ExtensionTabUtil::CreateTab(
 void ExtensionTabUtil::ForEachTab(
     base::RepeatingCallback<void(WebContents*)> callback) {
 #if !BUILDFLAG(IS_ANDROID)
-  for (auto* web_contents : AllTabContentses())
-    callback.Run(web_contents);
+  tabs::ForEachTabInterface([&callback](tabs::TabInterface* tab) {
+    callback.Run(tab->GetContents());
+    return true;
+  });
 #else
   // Android has its own notion of the tab strip and cannot use the code above.
   for (TabModel* tab_model : TabModelList::models()) {
@@ -1476,6 +1478,7 @@ bool ExtensionTabUtil::OpenOptionsPageFromAPI(
     return false;
   return extensions::ExtensionTabUtil::OpenOptionsPage(extension, browser);
 }
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 // static
 bool ExtensionTabUtil::OpenOptionsPage(const Extension* extension,
@@ -1489,6 +1492,7 @@ bool ExtensionTabUtil::OpenOptionsPage(const Extension* extension,
                                                                open_in_tab);
 }
 
+#if !BUILDFLAG(IS_ANDROID)
 // static
 bool ExtensionTabUtil::BrowserSupportsTabs(BrowserWindowInterface* browser) {
   return browser && browser->GetType() != BrowserWindowInterface::TYPE_DEVTOOLS;

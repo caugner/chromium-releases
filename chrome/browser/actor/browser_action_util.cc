@@ -11,8 +11,10 @@
 
 #include "base/barrier_closure.h"
 #include "base/base64.h"
+#include "base/functional/callback.h"
 #include "base/functional/callback_helpers.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/no_destructor.h"
 #include "base/notimplemented.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/trace_event/trace_event.h"
@@ -46,6 +48,7 @@
 #include "chrome/common/actor/actor_constants.h"
 #include "chrome/common/actor/actor_logging.h"
 #include "chrome/common/actor/journal_details_builder.h"
+#include "chrome/common/chrome_features.h"
 #include "components/optimization_guide/content/browser/page_content_proto_provider.h"
 #include "components/optimization_guide/proto/features/actions_data.pb.h"
 #include "content/public/browser/browser_context.h"
@@ -82,6 +85,7 @@ using apc::SelectAction;
 using apc::TypeAction;
 using apc::WaitAction;
 using ::optimization_guide::DocumentIdentifierUserData;
+using ::page_content_annotations::FetchPageContextError;
 using ::page_content_annotations::FetchPageContextOptions;
 using ::page_content_annotations::FetchPageContextResult;
 using ::page_content_annotations::FetchPageContextResultCallbackArg;
@@ -89,6 +93,16 @@ using ::tabs::TabHandle;
 using ::tabs::TabInterface;
 
 namespace {
+
+// Test only callback for overriding the TabObservationResult provided from
+// BuildActionsResultWithObservations.
+base::RepeatingCallback<apc::TabObservation::TabObservationResult()>&
+GetTabObservationResultOverrideForTesting() {
+  static base::NoDestructor<
+      base::RepeatingCallback<apc::TabObservation::TabObservationResult()>>
+      callback;
+  return *callback;
+}
 
 struct PageScopedParams {
   std::string document_identifier;
@@ -455,6 +469,10 @@ std::unique_ptr<ToolRequest> CreateAttemptLoginRequest(
 
 std::unique_ptr<ToolRequest> CreateAttemptFormFillingRequest(
     const AttemptFormFillingAction& action) {
+  if (!base::FeatureList::IsEnabled(features::kGlicActorAutofill)) {
+    return nullptr;
+  }
+
   const tabs::TabHandle tab_handle = GetTabHandle(action);
   if (tab_handle == TabHandle::Null()) {
     return nullptr;
@@ -485,6 +503,10 @@ std::unique_ptr<ToolRequest> CreateAttemptFormFillingRequest(
       case optimization_guide::proto::
           FormFillingRequest_RequestedData_CREDIT_CARD:
         return AttemptFormFillingToolRequest::RequestedData::kCreditCard;
+      case optimization_guide::proto::
+          FormFillingRequest_RequestedData_CONTACT_INFORMATION:
+        return AttemptFormFillingToolRequest::RequestedData::
+            kContactInformation;
       default:
         // A default is needed:
         // 1. To ease importing the actions_data.proto from an external
@@ -538,8 +560,8 @@ std::unique_ptr<ToolRequest> CreateScriptToolRequest(
 
   return std::make_unique<ScriptToolRequest>(
       tab_handle,
-      PageTarget(DomNode{.node_id = kRootElementDomNodeId,
-                         .document_identifier = document_identifier}),
+      DomNode{.node_id = kRootElementDomNodeId,
+              .document_identifier = document_identifier},
       action.tool_name(), action.input_arguments());
 }
 
@@ -754,7 +776,7 @@ void FillInTabObservation(
     }
   }
 
-  if (fetch_result.annotated_page_content_result) {
+  if (fetch_result.annotated_page_content_result.has_value()) {
     *tab_observation.mutable_annotated_page_content() =
         fetch_result.annotated_page_content_result->proto;
     if (fetch_result.annotated_page_content_result->metadata) {
@@ -776,7 +798,21 @@ void FillInTabObservation(
 
 namespace {
 
+apc::TabObservation::TabObservationResult ToTabObservationResult(
+    FetchPageContextError error) {
+  switch (error) {
+    case FetchPageContextError::kUnknown:
+      return apc::TabObservation::TAB_OBSERVATION_UNKNOWN_ERROR;
+    case FetchPageContextError::kWebContentsChanged:
+      return apc::TabObservation::TAB_OBSERVATION_WEB_CONTENTS_CHANGED;
+    case FetchPageContextError::kPageContextNotEligible:
+      return apc::TabObservation::TAB_OBSERVATION_PAGE_CONTEXT_NOT_ELIGIBLE;
+      ;
+  }
+}
+
 void FetchCallback(
+    TabHandle tab_handle,
     base::WeakPtr<Profile> profile,
     TaskId task_id,
     base::RepeatingClosure barrier,
@@ -795,22 +831,69 @@ void FetchCallback(
     return;
   }
 
-  if (!result.has_value()) {
-    auto* actor_service = actor::ActorKeyedService::Get(profile.get());
-    actor_service->GetJournal().Log(
-        GURL(), task_id, result.error(),
-        JournalDetailsBuilder().Add("tabId", tab_observation->id()).Build());
-    // For now record everything as a timeout.
+  auto* actor_service = actor::ActorKeyedService::Get(profile.get());
+  TabInterface* const tab = tab_handle.Get();
+
+  if (!GetTabObservationResultOverrideForTesting().is_null()) {
     tab_observation->set_result(
-        apc::TabObservation::TAB_OBSERVATION_SCREENSHOT_TIMEOUT);
+        GetTabObservationResultOverrideForTesting().Run());
+    return;
+  }
+
+  if (!tab || !tab->GetContents()) {
+    actor_service->GetJournal().Log(GURL(), task_id, "FetchCallback",
+                                    JournalDetailsBuilder()
+                                        .Add("tabId", tab_observation->id())
+                                        .AddError("TabWentAway")
+                                        .Build());
+    tab_observation->set_result(
+        apc::TabObservation::TAB_OBSERVATION_TAB_WENT_AWAY);
+    return;
+  }
+
+  if (tab->GetContents()->IsCrashed()) {
+    actor_service->GetJournal().Log(GURL(), task_id, "FetchCallback",
+                                    JournalDetailsBuilder()
+                                        .Add("tabId", tab_observation->id())
+                                        .AddError("Page crashed")
+                                        .Build());
+    tab_observation->set_result(
+        apc::TabObservation::TAB_OBSERVATION_PAGE_CRASHED);
+    return;
+  }
+
+  if (std::optional<std::string> error_message =
+          ActorKeyedService::ExtractErrorMessageIfFailed(result)) {
+    actor_service->GetJournal().Log(
+        GURL(), task_id, *error_message,
+        JournalDetailsBuilder().Add("tabId", tab_observation->id()).Build());
+  }
+
+  if (!result.has_value()) {
+    tab_observation->set_result(
+        ToTabObservationResult(result.error().error_code));
     return;
   }
 
   FetchPageContextResult& fetch_result = **result;
 
-  // RequestTabObservation should return an error if these aren't filled in.
-  CHECK(fetch_result.screenshot_result.has_value());
-  CHECK(fetch_result.annotated_page_content_result.has_value());
+  bool has_apc = fetch_result.annotated_page_content_result.has_value();
+  tab_observation->set_annotated_page_content_result(
+      has_apc ? apc::TabObservation::ANNOTATED_PAGE_CONTENT_OK
+              : apc::TabObservation::ANNOTATED_PAGE_CONTENT_ERROR);
+
+  bool has_screenshot = fetch_result.screenshot_result.has_value();
+  tab_observation->set_screenshot_result(
+      has_screenshot ? apc::TabObservation::SCREENSHOT_OK
+                     : apc::TabObservation::SCREENSHOT_ERROR);
+
+  // Context for actor observations should always have an APC and a screenshot,
+  // return failure if either is missing.
+  if (!has_apc || !has_screenshot) {
+    tab_observation->set_result(
+        apc::TabObservation::TAB_OBSERVATION_FETCH_ERROR);
+    return;
+  }
 
   tab_observation->set_result(apc::TabObservation::TAB_OBSERVATION_OK);
   {
@@ -864,7 +947,13 @@ void BuildActionsResultWithObservations(
     const ActorTask& task,
     bool skip_async_observation_information,
     base::OnceCallback<
-        void(std::unique_ptr<apc::ActionsResult>,
+        void(base::TimeTicks actions_start_time,
+             mojom::ActionResultCode result_code,
+             std::optional<size_t> index_of_failed_action,
+             std::vector<actor::ActionResultWithLatencyInfo> action_results,
+             actor::TaskId task_id,
+             bool skip_async_observation_information,
+             std::unique_ptr<apc::ActionsResult>,
              std::unique_ptr<actor::AggregatedJournal::PendingAsyncEntry>)>
         callback) {
   TRACE_EVENT0("actor", "BuildActionsResultWithObservations");
@@ -879,7 +968,9 @@ void BuildActionsResultWithObservations(
           JournalDetailsBuilder()
               .Add("result_code", base::ToString(result_code))
               .Add("index_of_failed_action",
-                   (index_of_failed_action.has_value() ? *index_of_failed_action : -1))
+                   index_of_failed_action.has_value()
+                       ? base::ToString(*index_of_failed_action)
+                       : std::string("<empty>"))
               .Add("skip_async_observation_information",
                    skip_async_observation_information)
               .Add("action_results", action_results.size())
@@ -996,23 +1087,35 @@ void BuildActionsResultWithObservations(
                                tabs_to_fetch.size());
 
   if (skip_async_observation_information) {
-    std::move(callback).Run(std::move(response), std::move(journal_entry));
+    std::move(callback).Run(actions_start_time, result_code,
+                            index_of_failed_action, std::move(action_results),
+                            task.id(), skip_async_observation_information,
+                            std::move(response), std::move(journal_entry));
     return;
   }
   base::RepeatingClosure barrier = base::BarrierClosure(
       tabs_to_fetch.size(),
-      base::BindOnce(std::move(callback), std::move(response),
-                     std::move(journal_entry)));
+      base::BindOnce(std::move(callback), actions_start_time, result_code,
+                     index_of_failed_action, action_results,
+                     task.id(), skip_async_observation_information,
+                     std::move(response), std::move(journal_entry)));
   for (auto& [tab, tab_observation] : tabs_to_fetch) {
     // tab_observation can be Unretained because the underlying APC is owned
     // by the barrier which is ref-counted.
     actor_service->RequestTabObservation(
         *tab, task.id(),
-        base::BindOnce(FetchCallback, profile->GetWeakPtr(), task.id(), barrier,
-                       base::Unretained(tab_observation),
+        base::BindOnce(FetchCallback, tab->GetHandle(), profile->GetWeakPtr(),
+                       task.id(), barrier, base::Unretained(tab_observation),
                        action_results, actions_start_time,
                        base::TimeTicks::Now(), base::Unretained(latency_info)));
   }
+}
+
+void SetTabObservationResultOverrideForTesting(
+    base::RepeatingCallback<
+        optimization_guide::proto::TabObservation::TabObservationResult()>
+        callback) {
+  GetTabObservationResultOverrideForTesting() = callback;
 }
 
 apc::ActionsResult BuildErrorActionsResult(

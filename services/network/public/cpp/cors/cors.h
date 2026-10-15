@@ -39,8 +39,6 @@ extern const char kAccessControlAllowMethods[];
 COMPONENT_EXPORT(NETWORK_CPP)
 extern const char kAccessControlAllowOrigin[];
 COMPONENT_EXPORT(NETWORK_CPP)
-extern const char kAccessControlAllowPrivateNetwork[];
-COMPONENT_EXPORT(NETWORK_CPP)
 extern const char kAccessControlMaxAge[];
 // TODO(crbug.com/40202951): Remove this.
 COMPONENT_EXPORT(NETWORK_CPP)
@@ -49,12 +47,6 @@ COMPONENT_EXPORT(NETWORK_CPP)
 extern const char kAccessControlRequestHeaders[];
 COMPONENT_EXPORT(NETWORK_CPP)
 extern const char kAccessControlRequestMethod[];
-COMPONENT_EXPORT(NETWORK_CPP)
-extern const char kAccessControlRequestPrivateNetwork[];
-COMPONENT_EXPORT(NETWORK_CPP)
-extern const char kPrivateNetworkDeviceId[];
-COMPONENT_EXPORT(NETWORK_CPP)
-extern const char kPrivateNetworkDeviceName[];
 
 }  // namespace header_names
 
@@ -132,7 +124,7 @@ std::vector<std::string> PrivilegedNoCorsHeaderNames();
 
 // Checks forbidden method in the fetch spec.
 // See https://fetch.spec.whatwg.org/#forbidden-method.
-COMPONENT_EXPORT(NETWORK_CPP) bool IsForbiddenMethod(const std::string& name);
+COMPONENT_EXPORT(NETWORK_CPP) bool IsForbiddenMethod(std::string_view name);
 
 // Returns true if |type| is a response type which makes a response
 // CORS-same-origin. See https://html.spec.whatwg.org/C/#cors-same-origin.

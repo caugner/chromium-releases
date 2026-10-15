@@ -69,8 +69,8 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase,
 
   // RenderWidgetHostView:
   void InitAsChild(gfx::NativeView parent_view) override {}
-  void SetSize(const gfx::Size& size) override {}
-  void SetBounds(const gfx::Rect& rect) override {}
+  void SetSize(const gfx::Size& size) override;
+  void SetBounds(const gfx::Rect& rect) override;
   gfx::NativeView GetNativeView() override;
   gfx::NativeViewAccessible GetNativeViewAccessible() override;
   ui::TextInputClient* GetTextInputClient() override;
@@ -114,6 +114,8 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase,
   // ensures that stale surfaces are not presented to the user for an indefinite
   // period of time.
   void ResetFallbackToFirstNavigationSurface() override {}
+
+  void OnUnconfirmedTapConvertedToTap() override;
 
   void TakeFallbackContentFrom(RenderWidgetHostView* view) override;
   void EnsureSurfaceSynchronizedForWebTest() override;
@@ -211,6 +213,8 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase,
   raw_ptr<ui::Compositor, DanglingUntriaged> compositor_ = nullptr;
 
   input::CursorManager cursor_manager_;
+
+  gfx::Rect bounds_;
 };
 
 // TestRenderWidgetHostViewChildFrame -----------------------------------------

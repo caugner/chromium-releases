@@ -17,7 +17,6 @@
 #include "media/base/video_util.h"
 #include "media/base/wait_and_replace_sync_token_client.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_audio_data_init.h"
-#include "third_party/blink/renderer/modules/webaudio/audio_buffer.h"
 #include "third_party/blink/renderer/modules/webcodecs/video_frame_rect_util.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/shared_gpu_context.h"
@@ -57,18 +56,6 @@ gpu::raster::RasterInterface* GetSharedGpuRasterInterface() {
 
 namespace blink {
 
-template <>
-struct CrossThreadCopier<VideoFrameLayout>
-    : public CrossThreadCopierPassThrough<VideoFrameLayout> {
-  STATIC_ONLY(CrossThreadCopier);
-};
-
-template <>
-struct CrossThreadCopier<base::span<uint8_t>>
-    : public CrossThreadCopierPassThrough<base::span<uint8_t>> {
-  STATIC_ONLY(CrossThreadCopier);
-};
-
 // This is a part of BackgroundReadback that lives and dies on the worker's
 // thread and does all the actual work of creating GPU context and calling
 // sync readback functions.
@@ -90,10 +77,8 @@ class SyncReadbackThread : public ThreadSafeRefCounted<SyncReadbackThread> {
   THREAD_CHECKER(thread_checker_);
 };
 
-BackgroundReadback::BackgroundReadback(base::PassKey<BackgroundReadback> key,
-                                       ExecutionContext& context)
-    : Supplement<ExecutionContext>(context),
-      sync_readback_impl_(base::MakeRefCounted<SyncReadbackThread>()),
+BackgroundReadback::BackgroundReadback(base::PassKey<BackgroundReadback> key)
+    : sync_readback_impl_(base::MakeRefCounted<SyncReadbackThread>()),
       worker_task_runner_(base::ThreadPool::CreateSingleThreadTaskRunner(
           {base::WithBaseSyncPrimitives()},
           base::SingleThreadTaskRunnerThreadMode::DEDICATED)) {}
@@ -102,15 +87,13 @@ BackgroundReadback::~BackgroundReadback() {
   worker_task_runner_->ReleaseSoon(FROM_HERE, std::move(sync_readback_impl_));
 }
 
-const char BackgroundReadback::kSupplementName[] = "BackgroundReadback";
 // static
 BackgroundReadback* BackgroundReadback::From(ExecutionContext& context) {
-  BackgroundReadback* supplement =
-      Supplement<ExecutionContext>::From<BackgroundReadback>(context);
+  BackgroundReadback* supplement = context.GetBackgroundReadback();
   if (!supplement) {
     supplement = MakeGarbageCollected<BackgroundReadback>(
-        base::PassKey<BackgroundReadback>(), context);
-    Supplement<ExecutionContext>::ProvideTo(context, supplement);
+        base::PassKey<BackgroundReadback>());
+    context.SetBackgroundReadback(supplement);
   }
   return supplement;
 }
@@ -177,7 +160,8 @@ void BackgroundReadback::ReadbackRGBTextureBackedFrameToMemory(
     ReadbackToFrameDoneCallback result_cb) {
   DCHECK(CanUseRgbReadback(*txt_frame));
 
-  SkImageInfo info = GetImageInfoForFrame(*txt_frame, txt_frame->coded_size());
+  SkImageInfo info =
+      GetImageInfoForFrame(*txt_frame, txt_frame->visible_rect().size());
   const auto format = media::VideoPixelFormatFromSkColorType(
       info.colorType(), media::IsOpaque(txt_frame->format()));
 
@@ -201,7 +185,7 @@ void BackgroundReadback::ReadbackRGBTextureBackedFrameToMemory(
   int rgba_stide = result->stride(media::VideoFrame::Plane::kARGB);
   DCHECK_GT(rgba_stide, 0);
 
-  gfx::Point src_point;
+  gfx::Point src_point = txt_frame->visible_rect().origin();
   auto shared_image = txt_frame->shared_image();
   auto origin = shared_image->surface_origin();
   std::unique_ptr<gpu::RasterScopedAccess> ri_access =
@@ -214,8 +198,8 @@ void BackgroundReadback::ReadbackRGBTextureBackedFrameToMemory(
       texture_size, src_point, info, base::saturated_cast<GLuint>(rgba_stide),
       dst_pixels,
       blink::BindOnce(&BackgroundReadback::OnARGBPixelsFrameReadCompleted,
-                      WrapWeakPersistent(this), std::move(result_cb), txt_frame,
-                      std::move(result)));
+                      MakeUnwrappingCrossThreadWeakHandle(this),
+                      std::move(result_cb), txt_frame, std::move(result)));
   media::WaitAndReplaceSyncTokenClient client(ri, std::move(ri_access));
   txt_frame->UpdateReleaseSyncToken(&client);
 }
@@ -263,7 +247,7 @@ void BackgroundReadback::ReadbackRGBTextureBackedFrameToBuffer(
 
   base::span<uint8_t> dst_pixels = dest_buffer.subspan(offset);
   size_t max_bytes_written = stride * src_rect.height();
-  if (stride <= 0 || max_bytes_written > dest_buffer.size()) {
+  if (stride <= 0 || max_bytes_written > dst_pixels.size()) {
     DLOG(ERROR) << "Buffer is not sufficiently large for readback";
     base::BindPostTaskToCurrentDefault(std::move(std::move(done_cb)))
         .Run(false);
@@ -287,8 +271,9 @@ void BackgroundReadback::ReadbackRGBTextureBackedFrameToBuffer(
       texture_size, src_point, info, base::saturated_cast<GLuint>(stride),
       dst_pixels,
       blink::BindOnce(&BackgroundReadback::OnARGBPixelsBufferReadCompleted,
-                      WrapWeakPersistent(this), std::move(txt_frame), src_rect,
-                      dest_layout, dest_buffer, std::move(done_cb)));
+                      MakeUnwrappingCrossThreadWeakHandle(this),
+                      std::move(txt_frame), src_rect, dest_layout, dest_buffer,
+                      std::move(done_cb)));
   gpu::RasterScopedAccess::EndAccess(std::move(ri_access));
 }
 
