@@ -242,6 +242,7 @@ class InterceptedRequest : public network::mojom::URLLoader,
   // error didn't occur.
   int error_status_ = net::OK;
 
+  GURL last_url_;
   network::ResourceRequest request_;
 
   const net::MutableNetworkTrafficAnnotationTag traffic_annotation_;
@@ -363,6 +364,7 @@ InterceptedRequest::InterceptedRequest(
       options_(options),
       intercept_only_(intercept_only),
       security_options_(security_options),
+      last_url_(request.url),
       request_(std::move(request)),
       traffic_annotation_(traffic_annotation),
       proxied_loader_receiver_(this, std::move(loader_receiver)),
@@ -745,6 +747,7 @@ void InterceptedRequest::OnReceiveRedirect(
     network::mojom::URLResponseHeadPtr head) {
   // TODO(timvolodine): handle redirect override.
   request_was_redirected_ = true;
+  last_url_ = request_.url;
   target_client_->OnReceiveRedirect(redirect_info, std::move(head));
   request_.url = redirect_info.new_url;
   request_.method = redirect_info.new_method;
@@ -779,6 +782,14 @@ void InterceptedRequest::OnComplete(
 void InterceptedRequest::FollowRedirect(
     network::HttpRequestHeadersUpdateParams headers_update_params,
     const std::optional<GURL>& new_url) {
+  GURL target_url = new_url.value_or(request_.url);
+  if (request_was_redirected_ &&
+      !content::IsSafeRedirectTarget(last_url_, target_url)) {
+    target_loader_.reset();
+    SendErrorAndCompleteImmediately(net::ERR_UNSAFE_REDIRECT);
+    return;
+  }
+
   if (target_loader_) {
     if (!origin_matched_headers_.empty()) {
       ApplyOriginMatchedHeaders(&headers_update_params.removed_headers,

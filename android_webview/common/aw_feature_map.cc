@@ -61,7 +61,9 @@ const base::Feature* const kFeaturesExposedToJava[] = {
     &features::kWebViewMixedContentAutoupgrades,
     &features::kWebViewMoveWorkToProviderInit,
     &features::kWebViewMoveWorkToProviderInitThreadPool,
+    &features::kWebViewMultiProfileSkipDefaultProfile,
     &features::kWebViewNavigate,
+    &features::kWebViewNavigateDrainPrefetch,
     &features::kWebViewOptInToGmsBindServiceOptimization,
     &features::kWebViewPersistHttpServerProperties,
     &features::kWebViewPrefetchNativeLibrary,
@@ -78,6 +80,7 @@ const base::Feature* const kFeaturesExposedToJava[] = {
     &features::kWebViewStaticMethodsNotTriggerStartup,
     &features::kWebViewTestFeature,
     &features::kWebViewUseMetricsUploadServiceOnlySdkRuntime,
+    &features::kWebViewWarmupNetworkService,
     // keep-sorted end
 };
 

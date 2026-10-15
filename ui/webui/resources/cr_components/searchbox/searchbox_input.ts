@@ -16,6 +16,7 @@ import {SearchboxBrowserProxy} from './searchbox_browser_proxy.js';
 import type {SearchboxIconElement} from './searchbox_icon.js';
 import {getCss} from './searchbox_input.css.js';
 import {getHtml} from './searchbox_input.html.js';
+import type {InputKeywordModel} from './searchbox_mixin.js';
 
 // Register --placeholder-opacity as type <number> so that we can animate it.
 CSS.registerProperty({
@@ -69,6 +70,7 @@ export class SearchboxInputElement extends SearchboxInputElementBase {
       searchboxAriaDescription: {type: String},
       searchboxIcon: {type: String},
       selectedMatch: {type: Object},
+      inputKeywordModel: {type: Object},
       inputHasMatches: {type: Boolean},
       allowFilePaste: {type: Boolean},
     };
@@ -77,10 +79,11 @@ export class SearchboxInputElement extends SearchboxInputElementBase {
   accessor dropdownIsVisible: boolean = false;
   accessor inputAriaLive: string = '';
   accessor multiLineEnabled: boolean = false;
-  accessor placeholderText: string = '';
+  accessor placeholderText: string|undefined = undefined;
   accessor searchboxAriaDescription: string = '';
   accessor searchboxIcon: string = '';
   accessor selectedMatch: AutocompleteMatch|null = null;
+  accessor inputKeywordModel: InputKeywordModel|null = null;
   accessor inputHasMatches: boolean = false;
   accessor allowFilePaste: boolean = false;
 
@@ -241,7 +244,6 @@ export class SearchboxInputElement extends SearchboxInputElementBase {
   }
 
   protected onInputKeydown_(e: KeyboardEvent) {
-    this.fire('input-keydown', {key: e.key});
     // Ignore this event if the input does not have any inline autocompletion.
     if (!this.lastInput_.inline) {
       return;
@@ -279,7 +281,14 @@ export class SearchboxInputElement extends SearchboxInputElementBase {
           metricsReporter.mark('CharTyped');
         }
       }
+      // The above code already updated the text and selection. Prevent default
+      // keydown handling muddling the updated state.
       e.preventDefault();
+      // The above code already identified this is a text-changing keydown event
+      // and fired 'searchbox-input-text-updated' to update state accordingly
+      // text update. Prevent event bubbling from triggering other custom
+      // keydown handlers treating this as a generic keydown event.
+      e.stopPropagation();
     }
   }
 
@@ -289,7 +298,9 @@ export class SearchboxInputElement extends SearchboxInputElementBase {
     }
 
     // User is tabbing into the input element.
-    this.fire('input-focus-changed', {value: this.$.input.value});
+    this.fire(
+        'input-focus-changed',
+        {value: this.$.input.value, isOnFocus: !this.$.input.value});
   }
 
   protected onInputMousedown_(e: MouseEvent|null) {
@@ -297,11 +308,13 @@ export class SearchboxInputElement extends SearchboxInputElementBase {
     if (e && e.button !== 0) {
       return;
     }
-    this.fire('input-mousedown');
-    this.fire('input-focus-changed', {value: this.$.input.value});
+    this.fire(
+        'input-focus-changed',
+        {value: this.$.input.value, isOnFocus: !this.$.input.value});
   }
 
   protected onInputPaste_(e: ClipboardEvent) {
+    this.fire('searchbox-input-pasted');
     if (this.allowFilePaste && e.clipboardData?.files &&
         e.clipboardData.files.length > 0) {
       e.preventDefault();
@@ -349,7 +362,7 @@ export class SearchboxInputElement extends SearchboxInputElementBase {
   }
 
   protected computePlaceholderText_(): string {
-    return this.placeholderText || this.i18n('searchBoxHint');
+    return this.placeholderText ?? this.i18n('searchBoxHint');
   }
 }
 

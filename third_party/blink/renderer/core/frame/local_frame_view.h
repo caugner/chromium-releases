@@ -122,7 +122,6 @@ class PaintController;
 class PaintControllerPersistentData;
 class PaintLayer;
 class PaintLayerScrollableArea;
-class PaintTimingDetector;
 class RemoteFrameView;
 class RootFrameViewport;
 class ScrollableArea;
@@ -200,7 +199,7 @@ class CORE_EXPORT LocalFrameView final
   bool LifecycleUpdatesActive() const;
   void SetLifecycleUpdatesThrottledForTesting(bool throttled = true);
   void ScheduleRelayout();
-  void ScheduleRelayoutOfSubtree(LayoutObject*);
+  void ScheduleRelayoutOfSubtree(LayoutObject&);
   bool LayoutPending() const;
   bool IsInPerformLayout() const;
 
@@ -488,7 +487,9 @@ class CORE_EXPORT LocalFrameView final
   void SetIsVisuallyNonEmpty() { is_visually_non_empty_ = true; }
   void EnableAutoSizeMode(const gfx::Size& min_size, const gfx::Size& max_size);
   void DisableAutoSizeMode();
+  bool IsAutoSizeModeEnabled() const { return auto_size_info_; }
   bool IsBeingAutoSized() const { return is_being_auto_sized_; }
+  void SetNeedsAutoSizeForOverflow() { needs_autosize_for_overflow_ = true; }
 
   void ForceLayoutForPagination(float maximum_shrink_factor);
 
@@ -553,10 +554,9 @@ class CORE_EXPORT LocalFrameView final
 
   void OnCommitRequested();
 
-  // FIXME: This should probably be renamed as the 'inSubtreeLayout' parameter
-  // passed around the LocalFrameView layout methods can be true while this
-  // returns false.
-  bool IsSubtreeLayout() const { return !layout_subtree_root_list_.IsEmpty(); }
+  bool HasSubtreeLayoutRoots() const {
+    return !layout_subtree_root_list_.IsEmpty();
+  }
 
   // The window that hosts the LocalFrameView. The LocalFrameView will
   // communicate scrolls and repaints to the host window in the window's
@@ -786,9 +786,6 @@ class CORE_EXPORT LocalFrameView final
   cc::AnimationTimeline* GetScrollAnimationTimeline() const;
 
   LayoutShiftTracker& GetLayoutShiftTracker() { return *layout_shift_tracker_; }
-  PaintTimingDetector& GetPaintTimingDetector() const {
-    return *paint_timing_detector_;
-  }
 
   MobileFriendlinessChecker* GetMobileFriendlinessChecker() const {
     return mobile_friendliness_checker_.Get();
@@ -1220,6 +1217,8 @@ class CORE_EXPORT LocalFrameView final
   bool layout_size_fixed_to_frame_size_;
 
   bool is_being_auto_sized_ = false;
+  // Preserve overflow invalidation across style updates that do not lay out.
+  bool needs_autosize_for_overflow_ = false;
 
   bool needs_update_geometries_;
 
@@ -1331,7 +1330,6 @@ class CORE_EXPORT LocalFrameView final
 
   UniqueObjectId unique_id_;
   Member<LayoutShiftTracker> layout_shift_tracker_;
-  Member<PaintTimingDetector> paint_timing_detector_;
 
   // Non-null in the outermost main frame of an ordinary page only.
   Member<MobileFriendlinessChecker> mobile_friendliness_checker_;
@@ -1345,9 +1343,10 @@ class CORE_EXPORT LocalFrameView final
   // The set of children may be empty if the onpaint event has been requested
   // with `requestPaint`. This map is cleared at the end of the lifecycle
   // update.
-  HeapHashMap<Member<HTMLCanvasElement>,
-              Member<GCedHeapLinkedHashSet<Member<Element>>>>
-      canvas_elements_needing_onpaint_;
+  using CanvasOnpaintMap =
+      HeapHashMap<Member<HTMLCanvasElement>,
+                  Member<GCedHeapLinkedHashSet<Member<Element>>>>;
+  CanvasOnpaintMap canvas_elements_needing_onpaint_;
   bool did_run_post_lifecycle_steps_before_commit_ = false;
   scoped_refptr<const cc::AnimatedImageFrameIndexMap>
       animated_image_frame_indexes_;

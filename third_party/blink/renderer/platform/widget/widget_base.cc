@@ -1262,7 +1262,11 @@ void WidgetBase::UpdateTextInputStateInternal(bool show_virtual_keyboard,
       ime_event_guard_->set_show_virtual_keyboard(true);
     return;
   }
+  base::WeakPtr<WidgetBase> weak_this = weak_ptr_factory_.GetWeakPtr();
   ui::TextInputType new_type = GetTextInputType();
+  if (!weak_this) {
+    return;
+  }
   if (IsDateTimeInput(new_type))
     return;  // Not considered as a text input field in WebKit/Chromium.
 
@@ -1274,7 +1278,6 @@ void WidgetBase::UpdateTextInputStateInternal(bool show_virtual_keyboard,
   std::optional<gfx::Rect> control_bounds;
   std::optional<gfx::Rect> selection_bounds;
   if (frame_widget) {
-    base::WeakPtr<WidgetBase> weak_this = weak_ptr_factory_.GetWeakPtr();
     new_info = frame_widget->TextInputInfo();
     if (!weak_this) {
       return;
@@ -1457,11 +1460,16 @@ void WidgetBase::UpdateCompositionInfo(bool immediate_request) {
   gfx::Range range;
   Vector<gfx::Rect> character_bounds;
 
-  if (GetTextInputType() == ui::TextInputType::TEXT_INPUT_TYPE_NONE) {
+  base::WeakPtr<WidgetBase> weak_this = weak_ptr_factory_.GetWeakPtr();
+  ui::TextInputType text_input_type = GetTextInputType();
+  if (!weak_this) {
+    return;
+  }
+
+  if (text_input_type == ui::TextInputType::TEXT_INPUT_TYPE_NONE) {
     // Composition information is only available on editable node.
     range = gfx::Range::InvalidRange();
   } else {
-    base::WeakPtr<WidgetBase> weak_this = weak_ptr_factory_.GetWeakPtr();
     GetCompositionRange(&range);
     if (!weak_this) {
       return;
@@ -1485,8 +1493,7 @@ void WidgetBase::UpdateCompositionInfo(bool immediate_request) {
     frame_widget->UpdateCursorAnchorInfo(/*update_requested=*/true);
     return;
   }
-  if (mojom::blink::WidgetInputHandlerHost* host =
-          widget_input_handler_manager_->GetWidgetInputHandlerHost()) {
+  if (auto host = widget_input_handler_manager_->GetWidgetInputHandlerHost()) {
     host->ImeCompositionRangeChanged(composition_range_,
                                      composition_character_bounds_);
   }
@@ -1494,7 +1501,11 @@ void WidgetBase::UpdateCompositionInfo(bool immediate_request) {
 
 void WidgetBase::ForceTextInputStateUpdate() {
 #if BUILDFLAG(IS_ANDROID)
+  base::WeakPtr<WidgetBase> weak_this = weak_ptr_factory_.GetWeakPtr();
   UpdateSelectionBounds();
+  if (!weak_this) {
+    return;
+  }
   UpdateTextInputStateInternal(false, true /* reply_to_request */);
 #endif
 }
@@ -1660,7 +1671,7 @@ void WidgetBase::ImeSetComposition(
     // If we failed to set the composition text, then we need to let the browser
     // process to cancel the input method's ongoing composition session, to make
     // sure we are in a consistent state.
-    if (mojom::blink::WidgetInputHandlerHost* host =
+    if (auto host =
             widget_input_handler_manager_->GetWidgetInputHandlerHost()) {
       host->ImeCancelComposition();
     }
@@ -1697,6 +1708,15 @@ void WidgetBase::ImeCommitText(const String& text,
   }
   input_handler_.set_handling_input_event(false);
   UpdateCompositionInfo(false /* not an immediate request */);
+}
+
+void WidgetBase::PasteIntoNode(const String& text,
+                               DOMNodeIdType target_dom_node_id) {
+  FrameWidget* frame_widget = client_->FrameWidget();
+  if (!frame_widget) {
+    return;
+  }
+  frame_widget->PasteIntoNode(text, target_dom_node_id);
 }
 
 void WidgetBase::ImeFinishComposingText(bool keep_selection) {
@@ -1764,7 +1784,7 @@ void WidgetBase::FlushInputProcessedCallback() {
 }
 
 void WidgetBase::CancelComposition() {
-  if (mojom::blink::WidgetInputHandlerHost* host =
+  if (auto host =
           widget_input_handler_manager_->GetWidgetInputHandlerHost()) {
     host->ImeCancelComposition();
   }
@@ -1788,10 +1808,14 @@ void WidgetBase::OnImeEventGuardFinish(ImeEventGuard* guard) {
   // ime event.
   UpdateSelectionBounds();
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
-  if (guard->show_virtual_keyboard())
+  if (!guard->IsValid()) {
+    return;
+  }
+  if (guard->show_virtual_keyboard()) {
     ShowVirtualKeyboard();
-  else
+  } else {
     UpdateTextInputState();
+  }
 #endif
 }
 

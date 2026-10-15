@@ -97,8 +97,22 @@ class ContextualSearchSessionHandle {
   std::optional<bool> smart_tab_sharing_active() const {
     return smart_tab_sharing_active_;
   }
-  void set_smart_tab_sharing_active(std::optional<bool> active) {
-    smart_tab_sharing_active_ = active;
+  void set_smart_tab_sharing_active(std::optional<bool> active);
+
+  bool smart_tab_sharing_toggled_since_last_turn() const {
+    return smart_tab_sharing_toggled_since_last_turn_;
+  }
+  void set_smart_tab_sharing_toggled_since_last_turn(bool toggled) {
+    smart_tab_sharing_toggled_since_last_turn_ = toggled;
+  }
+
+  const std::vector<lens::LensOverlayRequestId>&
+  sts_toggled_removed_contexts() const {
+    return sts_toggled_removed_contexts_;
+  }
+  void set_sts_toggled_removed_contexts(
+      std::vector<lens::LensOverlayRequestId> contexts) {
+    sts_toggled_removed_contexts_ = std::move(contexts);
   }
 
   std::optional<lens::LensOverlayInvocationSource> invocation_source() const {
@@ -223,6 +237,8 @@ class ContextualSearchSessionHandle {
   // Clear all context controller files from this particular instance of the
   // session handle. This does not clear the internal state of the context
   // controller, which may be shared with other session handles.
+  // Moves uploaded file tokens that are tabs into `persisted_tabs_` if
+  // `query_submitted` is true.
   void ClearFiles(bool query_submitted = false);
 
   // Returns the search url for a new query for opening. If the request info
@@ -272,6 +288,10 @@ class ContextualSearchSessionHandle {
   // confirmation that they are available on the server.
   std::vector<base::UnguessableToken> GetSubmittedContextTokens() const;
 
+  // Returns true if any context tokens were submitted in any query in this
+  // session.
+  bool has_submitted_context() const { return has_submitted_context_; }
+
   // Clears the list of submitted context tokens for this particular instance of
   // the session. This is intended to be invoked when the server has responded
   // that it has received the submitted context.
@@ -281,15 +301,15 @@ class ContextualSearchSessionHandle {
   void set_submitted_context_tokens(
       const std::vector<base::UnguessableToken>& tokens);
 
-  using SubmittedTabsMap =
+  using PersistedTabsMap =
       std::map<SessionID,
                std::pair<base::UnguessableToken, lens::LensOverlayRequestId>>;
 
-  // Returns the map of submitted tabs.
-  const SubmittedTabsMap& submitted_tabs() const { return submitted_tabs_; }
+  // Returns the map of persisted tabs.
+  const PersistedTabsMap& persisted_tabs() const { return persisted_tabs_; }
 
-  // Sets the submitted tabs map.
-  void set_submitted_tabs(SubmittedTabsMap submitted_tabs);
+  // Sets the persisted tabs map.
+  void set_persisted_tabs(PersistedTabsMap persisted_tabs);
 
   // Returns the list of submitted FileInfo for this particular instance
   // of the session. These are uploaded and submitted, but we have not received
@@ -329,8 +349,8 @@ class ContextualSearchSessionHandle {
   // or an empty token if not found.
   base::UnguessableToken GetActiveTokenForTab(SessionID tab_session_id) const;
 
-  // Tracks a submitted tab if it is not superceded, deduplicating history.
-  void MaybeAddTabToSubmittedTabs(const base::UnguessableToken& token);
+  // Tracks a persisted tab if it is not superceded, deduplicating history.
+  void MaybeAddTabToPersistedTabs(const base::UnguessableToken& token);
 
   // Returns true if the token corresponds to a tab context.
   bool IsTabToken(const base::UnguessableToken& token) const;
@@ -350,11 +370,14 @@ class ContextualSearchSessionHandle {
   // the contextual tasks ui.
   std::vector<base::UnguessableToken> submitted_context_tokens_;
 
+  // Whether any context tokens were submitted in a query in this session.
+  bool has_submitted_context_ = false;
+
   // Map of tab session IDs to their latest submitted token and request ID.
   // Tracks active tabs in the session to detect their deletion or removal.
   std::map<SessionID,
            std::pair<base::UnguessableToken, lens::LensOverlayRequestId>>
-      submitted_tabs_;
+      persisted_tabs_;
 
   // Tracks tabs explicitly deselected by the user. Map key is the SessionID,
   // and value is the GURL of the tab at the time of deselection.
@@ -385,6 +408,17 @@ class ContextualSearchSessionHandle {
 
   // Whether smart tab sharing is active for this session.
   std::optional<bool> smart_tab_sharing_active_;
+
+  // Whether smart tab sharing was toggled since the last query submission
+  // (either smart tab sharing to manual or manual to smart tab sharing) and we
+  // need to clear the context on next query submission.
+  // This is reset after the next query submission.
+  bool smart_tab_sharing_toggled_since_last_turn_ = false;
+
+  // Request IDs of submitted and uploaded contexts collected when Smart Tab
+  // Sharing was toggled, to be sent to AIM via `removed_contexts` on the next
+  // query submission turn.
+  std::vector<lens::LensOverlayRequestId> sts_toggled_removed_contexts_;
 
   // This needs to be the last member to ensure all outstanding WeakPtrs are
   // invalidated before the rest of the members.

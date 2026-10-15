@@ -48,7 +48,7 @@
 #import "ios/chrome/browser/infobars/model/infobar_metrics_recorder.h"
 #import "ios/chrome/browser/intelligence/features/features.h"
 #import "ios/chrome/browser/lens/ui_bundled/lens_entrypoint.h"
-#import "ios/chrome/browser/lens_overlay/coordinator/lens_overlay_availability.h"
+#import "ios/chrome/browser/lens_overlay/public/lens_overlay_availability.h"
 #import "ios/chrome/browser/location_bar/badge/coordinator/location_bar_badge_coordinator.h"
 #import "ios/chrome/browser/location_bar/badge/coordinator/location_bar_badge_coordinator_delegate.h"
 #import "ios/chrome/browser/location_bar/badge/coordinator/location_bar_badge_mediator.h"
@@ -87,6 +87,7 @@
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/shared/public/commands/browser_coordinator_commands.h"
 #import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
+#import "ios/chrome/browser/shared/public/commands/custom_leading_view_type.h"
 #import "ios/chrome/browser/shared/public/commands/fullscreen_commands.h"
 #import "ios/chrome/browser/shared/public/commands/gemini_commands.h"
 #import "ios/chrome/browser/shared/public/commands/help_commands.h"
@@ -137,8 +138,8 @@ struct AIHubBadgeActiveWindowsData : public base::SupportsUserData::Data {
     LocationBarModelDelegateWebStateProvider,
     LocationBarSteadyViewConsumer,
     LocationBarViewControllerDelegate,
-    WebLocationBarDelegate,
-    URLDragDataSource> {
+    URLDragDataSource,
+    WebLocationBarDelegate> {
   // API endpoint for omnibox.
   std::unique_ptr<WebLocationBarImpl> _locationBar;
   // Observer that updates `viewController` for fullscreen events.
@@ -658,8 +659,8 @@ struct AIHubBadgeActiveWindowsData : public base::SupportsUserData::Data {
   [self.viewController focusSteadyViewForVoiceOver];
 }
 
-- (void)setCustomLeadingViewVisible:(BOOL)visible animated:(BOOL)animated {
-  [self.viewController setCustomLeadingViewVisible:visible animated:animated];
+- (void)setCustomLeadingViewType:(CustomLeadingViewType)type {
+  [self.viewController setCustomLeadingViewType:type];
 }
 
 - (void)cancelOmniboxEdit {
@@ -863,6 +864,11 @@ struct AIHubBadgeActiveWindowsData : public base::SupportsUserData::Data {
 - (void)markDisplayedBadgeAsUnread:(BOOL)read {
   CHECK(IsChromeNextIaEnabled());
   [self.locationBarBadgeCoordinator markDisplayedBadgeAsUnread:read];
+}
+
+- (void)setBadgeCustomLeadingViewType:(CustomLeadingViewType)type {
+  CHECK(IsChromeNextIaEnabled());
+  [self.viewController setCustomLeadingViewType:type];
 }
 
 - (void)togglePageActionMenuEntryPointHighlight:(BOOL)highlight {

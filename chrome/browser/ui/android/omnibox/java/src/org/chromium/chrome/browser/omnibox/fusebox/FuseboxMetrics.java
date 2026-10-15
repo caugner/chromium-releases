@@ -41,6 +41,10 @@ public class FuseboxMetrics {
     /* package */ static final String FILE_ATTACHMENT_SIZE_HISTOGRAM =
             "Omnibox.MobileFusebox.FileAttachmentSize";
 
+    @VisibleForTesting
+    /* package */ static final String ATTACHMENT_LOAD_OOM_HISTOGRAM =
+            "Omnibox.MobileFusebox.AttachmentLoadOOM";
+
     private static final String TOKEN_SEPARATOR = ".";
 
     @VisibleForTesting /* package */
@@ -48,7 +52,7 @@ public class FuseboxMetrics {
             "Omnibox.MobileFusebox.AttachmentSizeLimitCheck";
 
     // LINT.IfChange(ToolMode)
-    @VisibleForTesting /* package */ static final int TOOL_MODE_HISTOGRAM_BOUND = 11;
+    @VisibleForTesting /* package */ static final int TOOL_MODE_HISTOGRAM_BOUND = 12;
     // LINT.ThenChange(//tools/metrics/histograms/metadata/omnibox/enums.xml:OmniboxToolMode)
     // LINT.IfChange(ModelMode)
     @VisibleForTesting /* package */ static final int MODEL_MODE_HISTOGRAM_BOUND = 8;
@@ -289,6 +293,19 @@ public class FuseboxMetrics {
                 "Omnibox.MobileFusebox.ContextUploadError",
                 errorType,
                 ContextUploadErrorType.MAX_VALUE + 1);
+    }
+
+    static void recordAttachmentLoadOom(boolean oomOccurred, @MimeTypeUtils.Type int fileType) {
+        RecordHistogram.recordBooleanHistogram(ATTACHMENT_LOAD_OOM_HISTOGRAM, oomOccurred);
+        RecordHistogram.recordBooleanHistogram(
+                getAttachmentLoadOomHistogram(fileType), oomOccurred);
+    }
+
+    @VisibleForTesting
+    /* package */ static String getAttachmentLoadOomHistogram(@MimeTypeUtils.Type int fileType) {
+        return ATTACHMENT_LOAD_OOM_HISTOGRAM
+                + TOKEN_SEPARATOR
+                + getHistogramExtensionForMimeType(fileType);
     }
 
     @SuppressLint("SwitchIntDef") // COUNT entry missing

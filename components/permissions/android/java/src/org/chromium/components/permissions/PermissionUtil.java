@@ -13,6 +13,7 @@ import org.jni_zero.CalledByNative;
 import org.jni_zero.JniType;
 import org.jni_zero.NativeMethods;
 
+import org.chromium.base.ContextUtils;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.components.content_settings.ContentSetting;
@@ -24,6 +25,7 @@ import org.chromium.device.vr.XrFeatureStatus;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.permissions.ContextualNotificationPermissionRequester;
 import org.chromium.ui.permissions.PermissionCallback;
+import org.chromium.url.GURL;
 
 import java.util.Arrays;
 
@@ -74,6 +76,13 @@ public class PermissionUtil {
         ANDROID_PERMISSION_SCENE_UNDERSTANDING_FINE
     };
 
+    public static final String ANDROID_PERMISSION_ACCESS_LOCAL_NETWORK =
+            "android.permission.ACCESS_LOCAL_NETWORK";
+
+    private static final String[] LOCAL_NETWORK_PERMISSIONS = {
+        ANDROID_PERMISSION_ACCESS_LOCAL_NETWORK
+    };
+
     private static final String[] HAND_TRACKING_PERMISSIONS = {ANDROID_PERMISSION_HAND_TRACKING};
 
     /** Signifies there are no permissions associated. */
@@ -101,6 +110,22 @@ public class PermissionUtil {
 
     public static boolean handTrackingNeedsAdditionalPermissions() {
         return XrFeatureStatus.isXrDevice() && WebXrAndroidFeatureMap.isHandTrackingEnabled();
+    }
+
+    /**
+     * Returns whether Local Network Access permission is required.
+     *
+     * <p>Local Network Protection (LNP) runtime permission is only required when both:
+     * 1. The host device is running Android 17 (SDK 37) or higher (Build.VERSION.SDK_INT >= 37).
+     * 2. The application targets Android 17 (SDK 37) or higher (targetSdkVersion >= 37).
+     *
+     * <p>For apps targeting lower SDK versions (<37), local network access is implicitly granted
+     * by the OS using the INTERNET permission without requiring runtime prompts.
+     * See: https://developer.android.com/privacy-and-security/local-network-permission
+     */
+    private static boolean isLocalNetworkAccessPermissionRequired() {
+        return Build.VERSION.SDK_INT >= 37
+                && ContextUtils.getApplicationContext().getApplicationInfo().targetSdkVersion >= 37;
     }
 
     /**
@@ -147,6 +172,12 @@ public class PermissionUtil {
                     return Arrays.copyOf(
                             NOTIFICATION_PERMISSIONS_POST_T,
                             NOTIFICATION_PERMISSIONS_POST_T.length);
+                }
+                return EMPTY_PERMISSIONS;
+            case ContentSettingsType.LOCAL_NETWORK_ACCESS, ContentSettingsType.LOCAL_NETWORK:
+                if (isLocalNetworkAccessPermissionRequired()) {
+                    return Arrays.copyOf(
+                            LOCAL_NETWORK_PERMISSIONS, LOCAL_NETWORK_PERMISSIONS.length);
                 }
                 return EMPTY_PERMISSIONS;
             default:
@@ -288,10 +319,12 @@ public class PermissionUtil {
     public static void handlePermissionPromptAllow(
             @JniType("ui::WindowAndroid*") WindowAndroid window,
             @JniType("content::WebContents*") WebContents webContents,
+            @JniType("GURL") GURL requestingOrigin,
             @ContentSettingsType.EnumType int contentSettingsType) {
         requestAndResolveNotificationsPermissionRequest(
                 window,
                 webContents,
+                requestingOrigin,
                 () -> {
                     boolean granted = window.hasPermission(Manifest.permission.POST_NOTIFICATIONS);
                     PermissionDialogController.showLoudClapperDialogResultIcon(
@@ -310,11 +343,15 @@ public class PermissionUtil {
      *
      * @param window The WindowAndroid.
      * @param webContents The WebContents.
+     * @param requestingOrigin The GURL of the requesting origin.
      * @param onResolved Callback runnable executed when the OS level permission is resolved
      *     (granted or denied).
      */
     public static void requestAndResolveNotificationsPermissionRequest(
-            WindowAndroid window, WebContents webContents, Runnable onResolved) {
+            WindowAndroid window,
+            WebContents webContents,
+            GURL requestingOrigin,
+            Runnable onResolved) {
         // Either returns directly in case the OS level notifications permission was already
         // granted or asks for it asynchronously before granting/denying the request.
         boolean requestSent =
@@ -328,7 +365,9 @@ public class PermissionUtil {
                                         "Permissions.ClapperLoud.PageInfo.OsPromptResolved", true);
                                 PermissionUtilJni.get()
                                         .resolveNotificationsPermissionRequest(
-                                                webContents, ContentSetting.ALLOW);
+                                                webContents,
+                                                requestingOrigin,
+                                                ContentSetting.ALLOW);
                                 onResolved.run();
                             }
 
@@ -337,7 +376,8 @@ public class PermissionUtil {
                                 RecordHistogram.recordBooleanHistogram(
                                         "Permissions.ClapperLoud.PageInfo.OsPromptResolved", false);
                                 PermissionUtilJni.get()
-                                        .dismissNotificationsPermissionRequest(webContents);
+                                        .dismissNotificationsPermissionRequest(
+                                                webContents, requestingOrigin);
                                 onResolved.run();
                             }
                         });
@@ -345,7 +385,8 @@ public class PermissionUtil {
         // permission request can be allowed.
         if (!requestSent) {
             PermissionUtilJni.get()
-                    .resolveNotificationsPermissionRequest(webContents, ContentSetting.ALLOW);
+                    .resolveNotificationsPermissionRequest(
+                            webContents, requestingOrigin, ContentSetting.ALLOW);
             onResolved.run();
         }
     }
@@ -358,9 +399,10 @@ public class PermissionUtil {
      * permission row in PageInfo.
      */
     public static boolean resolveNotificationsPermissionRequest(
-            WebContents webContents, @ContentSetting int contentSetting) {
+            WebContents webContents, GURL requestingOrigin, @ContentSetting int contentSetting) {
         return PermissionUtilJni.get()
-                .resolveNotificationsPermissionRequest(webContents, contentSetting);
+                .resolveNotificationsPermissionRequest(
+                        webContents, requestingOrigin, contentSetting);
     }
 
     /**
@@ -372,18 +414,22 @@ public class PermissionUtil {
      * as Chrome doesn't have the Android OS level permission and hence the permission request is no
      * longer valid.
      */
-    public static void dismissNotificationsPermissionRequest(WebContents webContents) {
-        PermissionUtilJni.get().dismissNotificationsPermissionRequest(webContents);
+    public static void dismissNotificationsPermissionRequest(
+            WebContents webContents, GURL requestingOrigin) {
+        PermissionUtilJni.get()
+                .dismissNotificationsPermissionRequest(webContents, requestingOrigin);
     }
 
     @NativeMethods
     public interface Natives {
         boolean resolveNotificationsPermissionRequest(
                 @JniType("content::WebContents*") WebContents webContents,
+                @JniType("GURL") GURL requestingOrigin,
                 @ContentSetting int contentSetting);
 
         void dismissNotificationsPermissionRequest(
-                @JniType("content::WebContents*") WebContents webContents);
+                @JniType("content::WebContents*") WebContents webContents,
+                @JniType("GURL") GURL requestingOrigin);
 
         void notifyQuietIconDismissed(@JniType("content::WebContents*") WebContents webContents);
     }

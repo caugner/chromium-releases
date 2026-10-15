@@ -76,6 +76,9 @@ extern const char kSessionPromptCountHistogram[];
 // UMA histogram key for IOS.Gemini.Session.FirstPrompt.
 extern const char kSessionFirstPromptHistogram[];
 
+// UMA histogram key for IOS.Gemini.Session.TabSwitchCount.
+extern const char kSessionTabSwitchCountHistogram[];
+
 // UMA histogram key for IOS.Gemini.Floaty.TimeMinimized.
 extern const char kFloatyTimeMinimizedHistogram[];
 
@@ -110,6 +113,41 @@ void RecordFirstRunPromoAction(IOSGeminiFirstRunAction action);
 
 // Records the user action on the FRE Consent Screen.
 void RecordFirstRunConsentAction(IOSGeminiFirstRunAction action);
+
+// Enum for the IOS.Gemini.Live.FREOutcome histogram.
+// LINT.IfChange(IOSGeminiLiveFREOutcome)
+enum class IOSGeminiLiveFREOutcome {
+  kSuccess = 0,
+  kDismissedOnConsent = 1,
+  kDeniedOSMicPermission = 2,
+  kDeniedChromeMicPermission = 3,
+  kMaxValue = kDeniedChromeMicPermission,
+};
+// LINT.ThenChange(/tools/metrics/histograms/metadata/ios/enums.xml:IOSGeminiLiveFREOutcome)
+
+// Records the final outcome of the Gemini Live FRE flow.
+void RecordLiveFREOutcome(IOSGeminiLiveFREOutcome outcome);
+
+// Records that the user tapped the Live button to switch to Live mode.
+void RecordLiveButtonTapped();
+
+// Records that a Gemini Live session has started.
+void RecordLiveSessionStarted();
+
+// Records native OS microphone prompt events.
+void RecordLiveOSMicPromptShown();
+void RecordLiveOSMicPromptAllowed();
+void RecordLiveOSMicPromptDenied();
+
+// Records in-app Chrome side microphone permission prompt events.
+void RecordLiveChromeMicPromptShown();
+void RecordLiveChromeMicPromptAllowed();
+void RecordLiveChromeMicPromptDenied();
+
+// Records OS settings redirect alert events.
+void RecordLiveSettingsRedirectShown();
+void RecordLiveSettingsRedirectOpenSettings();
+void RecordLiveSettingsRedirectCancel();
 
 // Represents the type of page or WebState when a Gemini session is invoked.
 // These values are persisted to logs. Entries should not be renumbered and
@@ -249,7 +287,8 @@ enum class IOSGeminiFirstPromptSubmissionMethod {
   kEditMenuPrompt = 24,
   kOnboardingNoIAmDone = 25,
   kOnboardingKeepLearning = 26,
-  kMaxValue = kOnboardingKeepLearning,
+  kAppSwitcherSummarize = 27,
+  kMaxValue = kAppSwitcherSummarize,
 };
 // LINT.ThenChange(
 //   /tools/metrics/histograms/metadata/ios/enums.xml:IOSGeminiFirstPromptSubmissionMethod,
@@ -463,6 +502,9 @@ void RecordImageRemixContextMenuEntryPointTapped(double aspect_ratio);
 // Records user feedback on a Gemini response.
 void RecordGeminiFeedback(IOSGeminiFeedback feedback);
 
+// Records that the Gemini session/floaty UI was successfully opened.
+void RecordGeminiSessionOpened();
+
 // Records the duration of a Gemini session.
 void RecordGeminiSessionTime(base::TimeDelta session_duration);
 
@@ -523,6 +565,30 @@ void RecordGeminiTabPickerOpened();
 // Records that the Tab Picker was dismissed.
 void RecordGeminiTabPickerDismissed();
 
+// Records that the tab attachment limit error snackbar was shown in the Tab
+// Picker.
+void RecordGeminiTabPickerErrorAttachmentLimit();
+
+// Records that the cannot reload tab error snackbar was shown in the Tab
+// Picker.
+void RecordGeminiTabPickerErrorCannotReloadTab();
+
+// Records that the cannot attach tab error snackbar was shown in the Tab
+// Picker.
+void RecordGeminiTabPickerErrorCannotAttachTab();
+
+// Records that a shared (non-active) tab was detached from a Floaty chip in the
+// Gemini session.
+void RecordGeminiTabDetached();
+
+// Records that the active tab was attached from a Floaty chip in the Gemini
+// session.
+void RecordGeminiActiveTabAttached();
+
+// Records that the active tab was detached from a Floaty chip in the Gemini
+// session.
+void RecordGeminiActiveTabDetached();
+
 // Records the latency from prompt submission to response received, including
 // metadata about the prompt & response.
 void RecordResponseLatency(base::TimeDelta latency,
@@ -535,6 +601,9 @@ void RecordSessionPromptCount(int prompt_count);
 
 // Records if a first prompt was sent in a Gemini session.
 void RecordSessionFirstPrompt(bool had_first_prompt);
+
+// Records the total number of tab switches during a floaty session.
+void RecordSessionTabSwitchCount(int tab_switch_count);
 
 // Enum for the IOS.Gemini.ViewStateTransition histogram.
 // LINT.IfChange(IOSGeminiViewStateTransition)

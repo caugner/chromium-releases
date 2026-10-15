@@ -184,7 +184,7 @@ class VIEWS_EXPORT ViewMaskLayer : public ui::LayerDelegate,
   base::ScopedObservation<View, ViewObserver> observed_view_{this};
 
   SkPath path_;
-  ui::Layer layer_;
+  ui::LayerTextured layer_;
 };
 
 ViewMaskLayer::ViewMaskLayer(const SkPath& path, View* observed_view)
@@ -809,9 +809,11 @@ void View::RemoveLayerFromRegions(ui::Layer* old_layer) {
   RemoveLayerFromRegionsKeepInLayerTree(old_layer);
 
   // Note that |old_layer| may have already been removed from its parent.
-  ui::Layer* parent_layer = layer()->parent();
-  if (parent_layer && parent_layer == old_layer->parent()) {
-    parent_layer->Remove(old_layer);
+  if (layer()) {
+    ui::Layer* parent_layer = layer()->parent();
+    if (parent_layer && parent_layer == old_layer->parent()) {
+      parent_layer->Remove(old_layer);
+    }
   }
 
   CreateOrDestroyLayer();
@@ -829,9 +831,8 @@ void View::RemoveLayerFromRegionsKeepInLayerTree(ui::Layer* old_layer) {
         old_layer->RemoveObserver(this);
         return true;
       };
-  const bool layer_removed =
-      remove_layer(layers_below_) || remove_layer(layers_above_);
-  DCHECK(layer_removed) << "Attempted to remove a layer that was never added.";
+  remove_layer(layers_below_);
+  remove_layer(layers_above_);
 }
 
 std::vector<ui::Layer*> View::GetLayersInOrder(ViewLayer view_layer) {
@@ -3291,7 +3292,7 @@ void View::AddChildViewAtImpl(View* view, size_t index) {
   // events from being fired until accessibility is fully initialized, and if we
   // need to update the accessible focusable state before the cache is fully
   // initialized. If so, let's merge these two functions.
-  view->GetViewAccessibility().OnViewHasNewAncestor(this);
+  view->GetViewAccessibility().OnViewParentChanged();
 
   // Fire the live region event if needed on the parent of the added view, not
   // the view itself, so the right live region container is notified of the
@@ -3387,6 +3388,8 @@ void View::DoRemoveChildView(View* view,
   }
 
   view->parent_ = nullptr;
+  view->GetViewAccessibility().OnViewParentChanged();
+
   // Make sure the sub-tree of this view detaches from widget the same moment
   // they're removed from previous view hierarchy.
   if (is_removed_from_widget) {
@@ -3714,7 +3717,7 @@ void View::CreateLayer(ui::LayerType layer_type) {
     }
   }
 
-  SetLayer(std::make_unique<ui::Layer>(layer_type));
+  SetLayer(ui::Layer::Create(layer_type));
   layer()->set_delegate(this);
   layer()->SetName(std::string(GetClassName()));
 

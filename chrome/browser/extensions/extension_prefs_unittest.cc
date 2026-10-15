@@ -521,7 +521,7 @@ class ExtensionPrefsDelayedInstallInfo : public ExtensionPrefsTest {
       const syncer::StringOrdinal& expected_page_ordinal =
           syncer::StringOrdinal(),
       const std::string& expected_install_parameter = std::string()) {
-    std::optional<ExtensionInfo> info(
+    std::optional<ExtensionPrefs::InstallRecord> info(
         prefs()->GetDelayedInstallExtensionInfo(id));
     ASSERT_TRUE(info);
     const std::string* version =
@@ -543,12 +543,13 @@ class ExtensionPrefsDelayedInstallInfo : public ExtensionPrefsTest {
     EXPECT_TRUE(delayed_info.ruleset_install_prefs.empty());
   }
 
-  bool HasInfoForId(const ExtensionPrefs::ExtensionsInfo& info,
+  bool HasInfoForId(const ExtensionPrefs::InstallRecords& info,
                     const std::string& id) {
-    return std::ranges::find_if(info.begin(), info.end(),
-                                [&id](const ExtensionInfo& info) {
-                                  return info.extension_id == id;
-                                }) != info.end();
+    return std::ranges::find_if(
+               info.begin(), info.end(),
+               [&id](const ExtensionPrefs::InstallRecord& info) {
+                 return info.extension_id == id;
+               }) != info.end();
   }
 
   void Initialize() override {
@@ -564,7 +565,7 @@ class ExtensionPrefsDelayedInstallInfo : public ExtensionPrefsTest {
     SetIdleInfo(id2_, 2);
     VerifyIdleInfo(id1_, 1);
     VerifyIdleInfo(id2_, 2);
-    ExtensionPrefs::ExtensionsInfo info = prefs()->GetAllDelayedInstallInfo();
+    ExtensionPrefs::InstallRecords info = prefs()->GetAllDelayedInstallInfo();
     EXPECT_EQ(2u, info.size());
     EXPECT_TRUE(HasInfoForId(info, id1_));
     EXPECT_TRUE(HasInfoForId(info, id2_));
@@ -578,7 +579,7 @@ class ExtensionPrefsDelayedInstallInfo : public ExtensionPrefsTest {
 
   void Verify() override {
     // Make sure the info for the 4 extensions we expect is present.
-    ExtensionPrefs::ExtensionsInfo info = prefs()->GetAllDelayedInstallInfo();
+    ExtensionPrefs::InstallRecords info = prefs()->GetAllDelayedInstallInfo();
     EXPECT_EQ(4u, info.size());
     EXPECT_TRUE(HasInfoForId(info, id1_));
     EXPECT_TRUE(HasInfoForId(info, id2_));
@@ -1351,6 +1352,80 @@ TEST_F(ExtensionPrefsSimpleTest, CleanUpDuplicateSubEventFilters) {
     EXPECT_TRUE(host_suffix);
     EXPECT_EQ("bar.com", *host_suffix);
   }
+}
+
+// Tests that ExtensionPrefs initialization prunes empty filter lists and
+// malformed non-list values from preferences, preserves non-empty lists, and
+// removes the preference dictionary entirely when no valid entries remain (for
+// both installed and stale extensions).
+// Regression test for crbug.com/526929792.
+// TODO(andreaorru): Remove this after M157 alongside
+// CleanUpEmptyFilteredEventLists().
+TEST_F(ExtensionPrefsSimpleTest, CleanUpEmptyFilteredEventLists) {
+  content::BrowserTaskEnvironment task_environment;
+  TestExtensionPrefs prefs(base::SingleThreadTaskRunner::GetCurrentDefault(),
+                           std::make_unique<TestingProfile>());
+  const std::string installed_id = prefs.AddExtension("Test Extension")->id();
+  // A valid ID with no installed extension to test cleanup of stale entries.
+  const std::string stale_id(32, 'a');
+  ExtensionPrefs* extension_prefs = prefs.prefs();
+
+  for (const char* pref_key : {EventRouter::kFilteredEvents,
+                               EventRouter::kFilteredServiceWorkerEvents}) {
+    // Populate the installed extension with two empty filter lists, one
+    // non-empty list, and one malformed non-list value; populate the stale
+    // entry with only an empty list.
+    {
+      ExtensionPrefs::ScopedDictionaryUpdate update(extension_prefs,
+                                                    installed_id, pref_key);
+      auto filtered_events = update.Create();
+      filtered_events->SetKey("webRequest.onBeforeRequest/s0",
+                              base::Value(base::ListValue()));
+      base::ListValue filter_list;
+      base::DictValue filter;
+      filter.Set("hostSuffix", "foo.com");
+      filter_list.Append(std::move(filter));
+      filtered_events->SetKey("webRequest.onBeforeRequest/s1",
+                              base::Value(std::move(filter_list)));
+      filtered_events->SetKey("webNavigation.onCommitted",
+                              base::Value(base::ListValue()));
+      filtered_events->SetKey("webRequest.onCompleted/s2", base::Value(42));
+    }
+    {
+      ExtensionPrefs::ScopedDictionaryUpdate update(extension_prefs, stale_id,
+                                                    pref_key);
+      update.Create()->SetKey("webRequest.onBeforeRequest/s0",
+                              base::Value(base::ListValue()));
+    }
+  }
+
+  // Recreating ExtensionPrefs triggers cleanup in the constructor.
+  prefs.RecreateExtensionPrefs();
+  extension_prefs = prefs.prefs();
+
+  for (const char* pref_key : {EventRouter::kFilteredEvents,
+                               EventRouter::kFilteredServiceWorkerEvents}) {
+    // Only the non-empty list of the installed extension remains.
+    const base::DictValue* dict =
+        extension_prefs->ReadPrefAsDict(installed_id, pref_key);
+    ASSERT_TRUE(dict);
+    EXPECT_FALSE(dict->contains("webRequest.onBeforeRequest/s0"));
+    EXPECT_FALSE(dict->contains("webNavigation.onCommitted"));
+    EXPECT_FALSE(dict->contains("webRequest.onCompleted/s2"));
+    const base::ListValue* filter_list =
+        dict->FindList("webRequest.onBeforeRequest/s1");
+    ASSERT_TRUE(filter_list);
+    ASSERT_EQ(1u, filter_list->size());
+    const std::string* host_suffix =
+        (*filter_list)[0].GetDict().FindString("hostSuffix");
+    ASSERT_TRUE(host_suffix);
+    EXPECT_EQ("foo.com", *host_suffix);
+
+    // The stale entry had only an empty list, so its preference was deleted.
+    EXPECT_FALSE(extension_prefs->ReadPrefAsDict(stale_id, pref_key));
+  }
+  // Unrelated preferences should remain intact.
+  EXPECT_TRUE(extension_prefs->HasPrefForExtension(installed_id));
 }
 
 // Tests the generic Get/Set functions for profile wide extension prefs.

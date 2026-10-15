@@ -36,6 +36,7 @@
 #include "media/base/serial_runner.h"
 #include "media/base/timestamp_constants.h"
 #include "media/base/video_decoder_config.h"
+#include "media/base/video_transformation.h"
 
 #if BUILDFLAG(IS_WIN)
 #include "media/base/win/mf_feature_checks.h"
@@ -49,8 +50,9 @@ namespace media {
 namespace {
 
 gfx::Size GetRotatedVideoSize(VideoRotation rotation, gfx::Size natural_size) {
-  if (rotation == VIDEO_ROTATION_90 || rotation == VIDEO_ROTATION_270)
+  if (IsOrthogonal(rotation)) {
     return gfx::Size(natural_size.height(), natural_size.width());
+  }
   return natural_size;
 }
 
@@ -737,6 +739,8 @@ void PipelineImpl::RendererWrapper::CreateRendererInternal(
   if (!default_renderer_ ||
       (renderer_type &&
        default_renderer_->GetRendererType() != renderer_type.value())) {
+    default_renderer_.reset();
+
     // Create the Renderer asynchronously on the main task runner. Use
     // base::BindPostTaskToCurrentDefault to call OnRendererCreated() on the
     // media task runner.
@@ -1272,6 +1276,8 @@ void PipelineImpl::RendererWrapper::InitializeRenderer(
 
 void PipelineImpl::RendererWrapper::DestroyRenderer() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(shared_state_.media_sequence_checker);
+
+  default_renderer_.reset();
 
   // Destroy the renderer outside the lock scope to avoid holding the lock
   // while renderer is being destroyed (in case Renderer destructor is costly).

@@ -74,12 +74,12 @@
 #include "content/public/test/service_worker_test_helpers.h"
 #include "extensions/browser/api/web_request/extension_web_request_event_router.h"
 #include "extensions/browser/api/web_request/web_request_api_helpers.h"
-#include "extensions/browser/api/web_request/web_request_resource_type.h"
 #include "extensions/browser/browsertest_util.h"
 #include "extensions/browser/crx_installer.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_function_histogram_value.h"
 #include "extensions/browser/extension_host.h"
+#include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registrar.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/process_map.h"
@@ -88,6 +88,7 @@
 #include "extensions/browser/unpacked_installer.h"
 #include "extensions/buildflags/buildflags.h"
 #include "extensions/common/api/test.h"
+#include "extensions/common/api/web_request/web_request_resource_type.h"
 #include "extensions/common/extension_features.h"
 #include "extensions/common/extensions_client.h"
 #include "extensions/common/features/feature_channel.h"
@@ -1332,8 +1333,16 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerTest,
   EXPECT_EQ("true", ExecuteScriptInBackgroundPage(extension->id(), kScript));
 }
 
+// Flaky crashes during test setup. http://crbug.com/534230908
+#if BUILDFLAG(IS_ANDROID)
+#define MAYBE_ServiceWorkerSuspensionOnExtensionUnload \
+  DISABLED_ServiceWorkerSuspensionOnExtensionUnload
+#else
+#define MAYBE_ServiceWorkerSuspensionOnExtensionUnload \
+  ServiceWorkerSuspensionOnExtensionUnload
+#endif
 IN_PROC_BROWSER_TEST_F(ServiceWorkerTest,
-                       ServiceWorkerSuspensionOnExtensionUnload) {
+                       MAYBE_ServiceWorkerSuspensionOnExtensionUnload) {
   // For this test, only hold onto the extension's ID and URL + a function to
   // get a resource URL, because we're going to be disabling and uninstalling
   // it, which will invalidate the pointer.
@@ -2926,11 +2935,24 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerWebRequestPersistFilteredEventsTest,
                     profile(), "webRequest.onBeforeRequest"));
   EXPECT_EQ(0u, web_request_router()->GetListenerCountForTesting(
                     profile(), "webRequest.onBeforeRequest"));
+
+  // Removing the listener should not leave an empty filter list in prefs.
+  // Regression check for crbug.com/526929792.
+  const base::DictValue* filtered_events =
+      ExtensionPrefs::Get(profile())->ReadPrefAsDict(
+          extension->id(), EventRouter::kFilteredServiceWorkerEvents);
+  // Before restart, `RemoveFilterFromEvent` will empty the preference,
+  // but not delete it.
+  ASSERT_TRUE(filtered_events);
+  EXPECT_TRUE(filtered_events->empty());
 }
 
 // Step 2: test that filters are NOT restored post restart.
 IN_PROC_BROWSER_TEST_F(ServiceWorkerWebRequestPersistFilteredEventsTest,
                        WebRequestAfterRestart_RemoveListener) {
+  const Extension* extension = GetSingleLoadedExtension();
+  ASSERT_TRUE(extension);
+
   // No service worker should be running yet.
   EXPECT_EQ(process_manager()->GetAllWorkersIdsForTesting().size(), 0u);
 
@@ -2939,6 +2961,13 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerWebRequestPersistFilteredEventsTest,
                     profile(), "webRequest.onBeforeRequest"));
   EXPECT_EQ(0u, web_request_router()->GetListenerCountForTesting(
                     profile(), "webRequest.onBeforeRequest"));
+
+  const base::DictValue* filtered_events =
+      ExtensionPrefs::Get(profile())->ReadPrefAsDict(
+          extension->id(), EventRouter::kFilteredServiceWorkerEvents);
+  // After restart, `CleanUpEmptyFilteredEventLists` will have
+  // deleted the empty preference.
+  EXPECT_EQ(nullptr, filtered_events);
 }
 
 // Tests that chrome.action.onClicked sees user gesture.

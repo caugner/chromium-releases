@@ -7,6 +7,7 @@
 #include <tuple>
 #include <utility>
 
+#include "base/byte_size.h"
 #include "base/containers/span.h"
 #include "base/functional/bind.h"
 #include "base/numerics/safe_conversions.h"
@@ -301,7 +302,7 @@ void PluginResponseInterceptorURLLoaderThrottle::WillProcessResponse(
            producer_handle->WriteAllData(base::as_byte_span(payload)));
 
   network::URLLoaderCompletionStatus status(net::OK);
-  status.decoded_body_length = base::checked_cast<int64_t>(payload.size());
+  status.decoded_body_length = base::ByteSize(payload.size());
   new_client->OnComplete(status);
 
   mojo::PendingRemote<network::mojom::URLLoader> original_loader;
@@ -334,7 +335,10 @@ void PluginResponseInterceptorURLLoaderThrottle::WillProcessResponse(
   const std::string original_mime_type = response_head->mime_type;
 
   // Tell the navigation system that a plugin intercepted this response, so
-  // it does not trigger a download for unrecognized MIME types.
+  // it does not trigger a download for unrecognized MIME types. Blink also
+  // exempts inline style from CSP on documents committed from such
+  // responses; only set this bit on a navigation response whose body is
+  // replaced by UA-generated markup.
   response_head->intercepted_by_plugin = true;
 
   // For generic MIME handlers, override the MIME type to text/html so the
@@ -356,6 +360,9 @@ void PluginResponseInterceptorURLLoaderThrottle::WillProcessResponse(
       extensions::Extension::GetBaseURLFromExtensionId(extension_id).spec() +
       base::Uuid::GenerateRandomV4().AsLowercaseString());
   transferrable_loader->head = std::move(deep_copied_response);
+  // This head is only ever installed as a subresource override for the
+  // handler's stream fetch, never committed as a document, so the CSP
+  // exemption tied to this bit does not apply to it.
   transferrable_loader->head->intercepted_by_plugin = true;
 
   scoped_refptr<extensions::MimeHandlerBodyCache> body_cache;
@@ -379,13 +386,14 @@ void PluginResponseInterceptorURLLoaderThrottle::WillProcessResponse(
     // responses).
     network::URLLoaderCompletionStatus completion_status(net::OK);
     completion_status.decoded_body_length =
-        base::checked_cast<int64_t>(cached_body->decoded_body_size);
+        base::ByteSize(cached_body->decoded_body_size);
     if (response_head->content_length >= 0) {
-      completion_status.encoded_body_length = response_head->content_length;
+      completion_status.encoded_body_length =
+          base::ByteSize(base::as_unsigned(response_head->content_length));
     }
     if (response_head->encoded_data_length >= 0) {
       completion_status.encoded_data_length =
-          response_head->encoded_data_length;
+          base::ByteSize(base::as_unsigned(response_head->encoded_data_length));
     }
     completion_client->OnComplete(completion_status);
   } else {

@@ -2,13 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-
 #include "chrome/browser/ui/ash/login/webui_login_view.h"
 
 #include <memory>
 #include <utility>
 
 #include "ash/focus/scoped_arrow_key_traversal_controller.h"
+#include "ash/login/resources/grit/ash_login_strings.h"
 #include "ash/public/cpp/login_accelerators.h"
 #include "ash/public/cpp/login_screen.h"
 #include "base/functional/bind.h"
@@ -29,7 +29,6 @@
 #include "chrome/browser/ui/ash/login/login_screen_client_impl.h"
 #include "chrome/browser/ui/ash/system/system_tray_client_impl.h"
 #include "chrome/browser/ui/webui/ash/login/oobe_ui.h"
-#include "chrome/grit/generated_resources.h"
 #include "chromeos/ash/components/dbus/session_manager/session_manager_client.h"
 #include "chromeos/ash/components/network/network_state.h"
 #include "chromeos/ash/components/network/network_state_handler.h"
@@ -42,6 +41,7 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
+#include "content/public/browser/web_ui_controller.h"
 #include "extensions/browser/view_type_utils.h"
 #include "extensions/common/mojom/view_type.mojom.h"
 #include "third_party/blink/public/common/renderer_preferences/renderer_preferences.h"
@@ -162,6 +162,13 @@ void WebUILoginView::Init() {
   WebContentsModalDialogManager::FromWebContents(web_contents)
       ->SetDelegate(this);
   web_contents->SetDelegate(this);
+  content::WebContentsObserver::Observe(web_contents);
+}
+
+void WebUILoginView::PrimaryPageChanged(content::Page& page) {
+  if (GetWebUI() && GetWebUI()->GetController() && !GetOobeUI() && GetWidget()) {
+    GetWidget()->Close();
+  }
 }
 
 void WebUILoginView::RequestFocus() {
@@ -234,7 +241,7 @@ OobeUI* WebUILoginView::GetOobeUI() {
     return nullptr;
   }
 
-  return static_cast<OobeUI*>(GetWebUI()->GetController());
+  return GetWebUI()->GetController()->GetAs<OobeUI>();
 }
 
 void WebUILoginView::OnPostponedShow() {

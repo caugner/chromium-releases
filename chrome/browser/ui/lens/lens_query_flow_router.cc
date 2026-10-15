@@ -14,7 +14,6 @@
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service_factory.h"
 #include "chrome/browser/lens/core/mojom/lens.mojom.h"
-#include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/contextual_search/tab_contextualization_controller.h"
 #include "chrome/browser/ui/lens/lens_overlay_controller.h"
@@ -37,7 +36,6 @@
 #include "components/omnibox/browser/lens_suggest_inputs_utils.h"
 #include "components/omnibox/common/logger.h"
 #include "components/sessions/content/session_tab_helper.h"
-#include "components/signin/public/identity_manager/identity_manager.h"
 #include "mojo/public/cpp/bindings/clone_traits.h"
 #include "net/base/url_util.h"
 #include "third_party/lens_server_proto/lens_overlay_server.pb.h"
@@ -528,7 +526,6 @@ LensQueryFlowRouter::GetViewportEncodingOptions() {
   const auto& image_upload_config =
       ntp_composebox::FeatureConfig::Get().config.composebox().image_upload();
   return lens::ImageEncodingOptions{
-      .enable_webp_encoding = image_upload_config.enable_webp_encoding(),
       .max_size = image_upload_config.downscale_max_image_size(),
       .max_height = image_upload_config.downscale_max_image_height(),
       .max_width = image_upload_config.downscale_max_image_width(),
@@ -741,7 +738,10 @@ void LensQueryFlowRouter::OpenContextualTasksPanel(
   contextual_tasks::ContextualTasksUiServiceFactory::GetForBrowserContext(
       web_contents()->GetBrowserContext())
       ->StartTaskUiInSidePanel(browser_window_interface(), tab_interface(), url,
-                               std::move(pending_session_handle_), entry_point);
+                               std::move(pending_session_handle_),
+                               contextual_tasks::StartTaskUiOptions{
+                                   .entry_point = entry_point,
+                               });
   // Notify the overlay controller that the side panel was opened so it can
   // update its UI state.
   lens_overlay_controller()->NotifyResultsPanelOpened();
@@ -787,7 +787,6 @@ void LensQueryFlowRouter::UploadContextualInputData(
   auto image_upload_config =
       ntp_composebox::FeatureConfig::Get().config.composebox().image_upload();
   auto image_options = lens::ImageEncodingOptions{
-      .enable_webp_encoding = image_upload_config.enable_webp_encoding(),
       .max_size = image_upload_config.downscale_max_image_size(),
       .max_height = image_upload_config.downscale_max_image_height(),
       .max_width = image_upload_config.downscale_max_image_width(),
@@ -838,19 +837,13 @@ bool LensQueryFlowRouter::ShouldPopulateFullPageContext() const {
   if (!profile()) {
     return false;
   }
-  const bool is_cobrowse_eligible =
+  const bool can_add_page_content_to_query =
       lens::IsLensOverlayContextualSearchboxEnabled(profile());
   const bool is_permitted =
       lens::DidUserGrantLensOverlayNeededPermissions(profile()) ||
       (lens_overlay_query_controller() &&
        lens_overlay_query_controller()->HasPermissionForSession());
-  bool is_signed_in = false;
-  auto* identity_manager = IdentityManagerFactory::GetForProfile(profile());
-  if (identity_manager) {
-    is_signed_in =
-        identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSignin);
-  }
-  return is_signed_in && is_cobrowse_eligible && is_permitted;
+  return can_add_page_content_to_query && is_permitted;
 }
 
 std::unique_ptr<lens::ContextualInputData>

@@ -1407,7 +1407,8 @@ void DownloadManagerImpl::PostInitialization(
 
   // Download manager is only initialized if both history db and in progress
   // cache are initialized.
-  bool history_loaded = history_db_initialized_ || IsOffTheRecord();
+  bool history_loaded = history_db_initialized_ || IsOffTheRecord() ||
+                        !delegate_ || !delegate_->SupportsHistoryLoading();
   if (!history_loaded || !in_progress_cache_initialized_)
     return;
 
@@ -1635,8 +1636,9 @@ void DownloadManagerImpl::BeginResourceDownloadOnChecksComplete(
   } else if (rfh && params->url().SchemeIs(content::kChromeUIScheme)) {
     pending_url_loader_factory =
         std::make_unique<network::WrapperPendingSharedURLLoaderFactory>(
-            CreateWebUIURLLoaderFactory(rfh, params->url().GetScheme(),
-                                        base::flat_set<std::string>()));
+            CreateWebUIURLLoaderFactoryWithoutOriginLock(
+                WebUIURLLoaderFactoryPasskey::GetPassKey(), rfh,
+                params->url().GetScheme(), base::flat_set<std::string>()));
   } else if (rfh && params->url().SchemeIsFileSystem()) {
     StoragePartitionImpl* storage_partition = GetStoragePartitionForConfig(
         browser_context_, storage_partition_config);

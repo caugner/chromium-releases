@@ -20,15 +20,13 @@ import '//resources/cr_elements/cr_icon_button/cr_icon_button.js';
 
 import type {SearchAnimatedGlowElement} from '//resources/cr_components/search/animated_glow.js';
 import {ComposeboxContextAddedMethod, GlowAnimationState} from '//resources/cr_components/search/constants.js';
-import {DragAndDropHandler} from '//resources/cr_components/search/drag_drop_handler.js';
-import type {DragAndDropHost} from '//resources/cr_components/search/drag_drop_host.js';
 import {loadTimeData} from '//resources/js/load_time_data.js';
 import type {PropertyValues} from '//resources/lit/v3_0/lit.rollup.js';
 import {CrLitElement} from '//resources/lit/v3_0/lit.rollup.js';
 import type {AutocompleteResult, FileAttachment, PageCallbackRouter as SearchboxPageCallbackRouter, PageHandlerRemote as SearchboxPageHandlerRemote, SearchContext, TabAttachment, TabInfo} from '//resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
 import type {UnguessableToken} from '//resources/mojo/mojo/public/mojom/base/unguessable_token.mojom-webui.js';
 
-import {ComposeboxFile, getLoadTimeBoolean, GlifAnimationState, mapUploadErrorToProcessFilesError, ProcessFilesError, recordBoolean, recordContextAdditionMethod, recordUserAction, TabUploadOrigin} from './common.js';
+import {ComposeboxFile, GlifAnimationState, mapMojoSourceToOrigin, mapUploadErrorToProcessFilesError, ProcessFilesError, recordBoolean, recordContextAdditionMethod, recordUserAction, TabUploadOrigin} from './common.js';
 import type {TabUpload} from './common.js';
 import {getCss} from './composebox.css.js';
 import {getHtml} from './composebox.html.js';
@@ -71,7 +69,7 @@ export interface ComposeboxElement {
 
 // LINT.IfChange
 export class ComposeboxElement extends ComposeboxEmbedderMixin
-(CrLitElement) implements DragAndDropHost {
+(CrLitElement) {
   static get is() {
     return 'cr-composebox';
   }
@@ -178,7 +176,6 @@ export class ComposeboxElement extends ComposeboxEmbedderMixin
 
   // Retains the latest version of the pending automatic active tab's title.
   protected pendingAutomaticActiveTabTitle_: string = '';
-  protected dragAndDropHandler_: DragAndDropHandler;
 
   private get webUIOmniboxAskGAboutThisPageEnabled_(): boolean {
     return loadTimeData.valueExists('webUIOmniboxAskGAboutThisPageEnabled') &&
@@ -236,14 +233,6 @@ export class ComposeboxElement extends ComposeboxEmbedderMixin
         null;
   }
 
-  // TODO(crbug.com/497887993): Temporary override to maintain NTP compatibility
-  // when `useNtpComposeboxFork` is disabled. Remove once `ComposeboxElement`
-  // is deleted.
-  override get keepMenuOpenOnTabSelect(): boolean {
-    return this.composeboxSource === 'NewTabPage' &&
-        getLoadTimeBoolean('keepMenuOpenOnTabSelectForRealbox', false);
-  }
-
   override getLensButtonElement(): HTMLElement|null {
     return this.shadowRoot?.querySelector('#lensIcon') || null;
   }
@@ -254,8 +243,6 @@ export class ComposeboxElement extends ComposeboxEmbedderMixin
     this.searchboxCallbackRouter_ =
         ComposeboxProxyImpl.getInstance().searchboxCallbackRouter;
     this.searchboxHandler_ = ComposeboxProxyImpl.getInstance().searchboxHandler;
-    this.dragAndDropHandler_ =
-        new DragAndDropHandler(this, this.dragAndDropEnabled);
   }
 
   override getInputElement(): ComposeboxInputElement {
@@ -320,8 +307,7 @@ export class ComposeboxElement extends ComposeboxEmbedderMixin
 
   override willUpdate(changedProperties: PropertyValues<this>) {
     super.willUpdate(changedProperties);
-    if (changedProperties.has('smartTabSharingActive') &&
-        this.smartTabSharingActive) {
+    if (changedProperties.has('smartTabSharingActive')) {
       this.clearContextForSmartTabSharingActive_();
     }
     if (changedProperties.has('entrypointName') ||
@@ -347,15 +333,8 @@ export class ComposeboxElement extends ComposeboxEmbedderMixin
 
     // If it is the first render, or 'entrypointName' has changed from its default.
     if (!this.hasUpdated || changedProperties.has('entrypointName')) {
-      // TODO(crbug.com/511319142): Add this first branch's logic to
-      // contextual tasks specific composebox.
-      if (this.entrypointName === 'ContextualTasks') {
-        this.voiceSearchCoherenceEnabled = loadTimeData.getBoolean(
-            'voiceSearchCoherenceCobrowsingComposeboxEnabled');
-      } else {
-        this.voiceSearchCoherenceEnabled =
-            loadTimeData.getBoolean('voiceSearchCoherenceComposeboxesEnabled');
-      }
+      this.voiceSearchCoherenceEnabled =
+          this.computeVoiceSearchCoherenceEnabled();
     }
   }
 
@@ -366,11 +345,6 @@ export class ComposeboxElement extends ComposeboxEmbedderMixin
     }
   }
 
-  /* Used by drag/drop host interface so the
-  drag and drop handler can access addDroppedFiles(). */
-  getDropTarget() {
-    return this;
-  }
 
   playGlowAnimation() {
     // If |animationState_| were still EXPANDING, this function would have no
@@ -918,7 +892,7 @@ export class ComposeboxElement extends ComposeboxEmbedderMixin
       title: tabAttachment.title,
       url: tabAttachment.url,
       delayUpload: /*delay_upload=*/ false,
-      origin: TabUploadOrigin.OTHER,
+      origin: mapMojoSourceToOrigin(tabAttachment.source),
     } as TabUpload);
   }
 
@@ -947,7 +921,7 @@ export class ComposeboxElement extends ComposeboxEmbedderMixin
   private clearManualTabs_() {
     const fileMap = new Map(this.files);
     for (const [uuid, file] of fileMap.entries()) {
-      if (file.type === 'tab' &&
+      if ((file.type === 'tab' || !!file.tabId) &&
           (!this.automaticActiveTab_ ||
            file.uuid !== this.automaticActiveTab_.uuid)) {
         this.deleteFile(uuid, /*fromUserAction=*/ false);

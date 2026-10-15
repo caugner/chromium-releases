@@ -27,6 +27,7 @@
 #include "third_party/blink/renderer/core/fullscreen/fullscreen.h"
 #include "third_party/blink/renderer/core/html/html_document.h"
 #include "third_party/blink/renderer/core/html/html_head_element.h"
+#include "third_party/blink/renderer/core/html/html_source_element.h"
 #include "third_party/blink/renderer/core/html/media/html_audio_element.h"
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
 #include "third_party/blink/renderer/core/html/media/media_error.h"
@@ -42,6 +43,7 @@
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/thread_state_scopes.h"
+#include "third_party/blink/renderer/platform/mediastream/media_stream_descriptor.h"
 #include "third_party/blink/renderer/platform/network/network_state_notifier.h"
 #include "third_party/blink/renderer/platform/testing/empty_web_media_player.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
@@ -152,6 +154,9 @@ class MockWebMediaPlayer : public EmptyWebMediaPlayer {
   MOCK_CONST_METHOD0(DidLazyLoad, bool());
 
   MOCK_METHOD0(GetSrcAfterRedirects, GURL());
+
+  MOCK_CONST_METHOD0(HasAvailableVideoFrame, bool());
+  MOCK_CONST_METHOD0(HasReadableVideoFrame, bool());
 };
 
 class WebMediaStubLocalFrameClient : public EmptyLocalFrameClient {
@@ -295,6 +300,29 @@ class TestMediaPlayerObserver final
 
   void OnVideoVisibilityChanged(bool meets_visibility_threshold) override {}
 
+  void OnVideoFrameAvailabilityChanged(bool available) override {
+    received_video_frame_availability_ = available;
+    if (run_loop_) {
+      run_loop_->Quit();
+    }
+  }
+
+  void WaitForVideoFrameAvailability() {
+    if (received_video_frame_availability_.has_value()) {
+      return;
+    }
+    run_loop_ = std::make_unique<base::RunLoop>();
+    run_loop_->Run();
+  }
+
+  const std::optional<bool>& received_video_frame_availability() const {
+    return received_video_frame_availability_;
+  }
+
+  void ClearVideoFrameAvailability() {
+    received_video_frame_availability_.reset();
+  }
+
   // Getters used from HTMLMediaElementTest.
   bool received_media_playing() const { return received_media_playing_; }
 
@@ -331,6 +359,7 @@ class TestMediaPlayerObserver final
   std::optional<OnMetadataChangedResult> received_metadata_changed_result_;
   gfx::Size received_media_size_{0, 0};
   std::optional<bool> received_uses_audio_service_;
+  std::optional<bool> received_video_frame_availability_;
   media_session::mojom::blink::RemotePlaybackMetadataPtr
       received_remote_playback_metadata_;
 };
@@ -449,6 +478,10 @@ class HTMLMediaElementTest : public testing::TestWithParam<MediaTestParam> {
 
   void ReadyStateChanged() { Media()->ReadyStateChanged(); }
 
+  TestMediaPlayerObserver& media_player_observer() {
+    return media_player_host_.observer();
+  }
+
   bool MediaIsPlaying() const { return Media()->playing_; }
 
   void ResetWebMediaPlayer() const { Media()->web_media_player_.reset(); }
@@ -556,6 +589,11 @@ class HTMLMediaElementTest : public testing::TestWithParam<MediaTestParam> {
   }
 
  protected:
+  KURL SelectNextSourceChild(String* content_type,
+                             HTMLMediaElement::InvalidURLAction action) {
+    return Media()->SelectNextSourceChild(content_type, action);
+  }
+
   // Helpers to call MediaPlayerObserver mojo methods and check their results.
   void NotifyMediaPlaying() {
     media_->DidPlayerStartPlaying();
@@ -803,10 +841,6 @@ class HTMLMediaElementTest : public testing::TestWithParam<MediaTestParam> {
   std::unique_ptr<DummyPageHolder> dummy_page_holder_;
 
  private:
-  TestMediaPlayerObserver& media_player_observer() {
-    return media_player_host_.observer();
-  }
-
   Persistent<HTMLMediaElement> media_;
   Persistent<FullscreenMockChromeClient> chrome_client_;
 
@@ -825,6 +859,50 @@ INSTANTIATE_TEST_SUITE_P(Audio,
 INSTANTIATE_TEST_SUITE_P(Video,
                          HTMLMediaElementTest,
                          testing::Values(MediaTestParam::kVideo));
+
+TEST_P(HTMLMediaElementTest, VideoFrameAvailability) {
+  if (GetParam() != MediaTestParam::kVideo) {
+    return;
+  }
+
+  Media()->SetSrc(AtomicString("http://example.com/foo.mp4"));
+  test::RunPendingTasks();
+
+  auto* video = To<HTMLVideoElement>(Media());
+  auto* player = static_cast<MockWebMediaPlayer*>(video->GetWebMediaPlayer());
+
+  // Initially, video frame should be available.
+  EXPECT_CALL(*player, HasAvailableVideoFrame()).WillRepeatedly(Return(true));
+  EXPECT_CALL(*player, HasReadableVideoFrame()).WillRepeatedly(Return(true));
+  video->UpdateVideoFrameAvailabilityForTest();
+  media_player_observer().WaitForVideoFrameAvailability();
+  EXPECT_TRUE(
+      media_player_observer().received_video_frame_availability().value());
+
+  // If encrypted, video frame should not be available.
+  media_player_observer().ClearVideoFrameAvailability();
+  video->SetIsEncryptedForTesting(true);
+  video->UpdateVideoFrameAvailabilityForTest();
+  media_player_observer().WaitForVideoFrameAvailability();
+  EXPECT_FALSE(
+      media_player_observer().received_video_frame_availability().value());
+
+  // If not encrypted, video frame should be available again.
+  media_player_observer().ClearVideoFrameAvailability();
+  video->SetIsEncryptedForTesting(false);
+  video->UpdateVideoFrameAvailabilityForTest();
+  media_player_observer().WaitForVideoFrameAvailability();
+  EXPECT_TRUE(
+      media_player_observer().received_video_frame_availability().value());
+
+  // If no readable frame, video frame should not be available.
+  media_player_observer().ClearVideoFrameAvailability();
+  EXPECT_CALL(*player, HasReadableVideoFrame()).WillRepeatedly(Return(false));
+  video->UpdateVideoFrameAvailabilityForTest();
+  media_player_observer().WaitForVideoFrameAvailability();
+  EXPECT_FALSE(
+      media_player_observer().received_video_frame_availability().value());
+}
 
 TEST_P(HTMLMediaElementTest, effectiveMediaVolume) {
   struct TestData {
@@ -3361,6 +3439,71 @@ TEST_P(HTMLMediaElementTest, MediaShouldBeOpaque_NetworkState) {
   // opaque.
   SetNetworkState(WebMediaPlayer::kNetworkStateIdle);
   EXPECT_TRUE(MediaShouldBeOpaque());
+}
+
+TEST_P(HTMLMediaElementTest, SelectNextSourceChildMediaQueryMatching) {
+  auto* source1 =
+      Media()->GetDocument().CreateRawElement(html_names::kSourceTag);
+  source1->setAttribute(html_names::kSrcAttr,
+                        AtomicString("http://example.com/not_matched.mp4"));
+  source1->setAttribute(html_names::kMediaAttr, AtomicString("not all"));
+  // Fill up inline attribute vector capacity to verify attribute stability.
+  for (int i = 0; i < 6; ++i) {
+    source1->setAttribute(AtomicString("data-attr" + String::Number(i)),
+                          AtomicString("val"));
+  }
+  Media()->AppendChild(source1);
+
+  auto* source2 =
+      Media()->GetDocument().CreateRawElement(html_names::kSourceTag);
+  source2->setAttribute(html_names::kSrcAttr,
+                        AtomicString("http://example.com/matched.mp4"));
+  source2->setAttribute(html_names::kMediaAttr, AtomicString("all"));
+  Media()->AppendChild(source2);
+
+  String content_type;
+  KURL url = SelectNextSourceChild(&content_type, HTMLMediaElement::kDoNothing);
+  EXPECT_EQ(url.GetString(), "http://example.com/matched.mp4");
+}
+
+TEST_P(HTMLMediaElementTest, SourceWasAddedIgnoredWithSrcObject) {
+  MediaStreamComponentVector audio_components;
+  MediaStreamComponentVector video_components;
+  auto* descriptor = MakeGarbageCollected<MediaStreamDescriptor>(
+      audio_components, video_components);
+  Media()->SetSrcObjectVariant(descriptor);
+  EXPECT_TRUE(Media()->HasSrcObject());
+
+  // With srcObject set, appending a <source> child element must be ignored.
+  auto* source =
+      Media()->GetDocument().CreateRawElement(html_names::kSourceTag);
+  source->setAttribute(html_names::kSrcAttr,
+                       AtomicString("http://example.com/test.mp4"));
+  Media()->appendChild(source);
+
+  test::RunPendingTasks();
+
+  EXPECT_TRUE(Media()->HasSrcObject());
+}
+
+TEST_P(HTMLMediaElementTest, SourceWasAddedIgnoredWhenNetworkStateNotNoSource) {
+  Media()->SetSrc(SrcSchemeToURL(TestURLScheme::kHttp));
+  test::RunPendingTasks();
+  ASSERT_TRUE(Media()->GetWebMediaPlayer());
+
+  SetReadyState(HTMLMediaElement::kHaveMetadata);
+  SetNetworkState(WebMediaPlayer::kNetworkStateDecodeError);
+  EXPECT_EQ(Media()->getNetworkState(), HTMLMediaElement::kNetworkIdle);
+
+  auto* source =
+      Media()->GetDocument().CreateRawElement(html_names::kSourceTag);
+  source->setAttribute(html_names::kSrcAttr,
+                       AtomicString("http://example.com/test.mp4"));
+  Media()->appendChild(source);
+
+  test::RunPendingTasks();
+
+  EXPECT_EQ(Media()->getNetworkState(), HTMLMediaElement::kNetworkIdle);
 }
 
 }  // namespace blink

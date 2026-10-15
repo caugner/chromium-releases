@@ -23,12 +23,13 @@ class MockAutofillSuggestionDelegate : public AutofillSuggestionDelegate {
 
   MOCK_METHOD(
       (std::variant<AutofillDriver*, password_manager::PasswordManagerDriver*>),
-      GetDriver,
+      GetDriver_DoNotUse,
       (),
       (override));
   MOCK_METHOD(void,
               OnSuggestionsShown,
-              (base::span<const Suggestion>),
+              (base::span<const Suggestion>,
+               base::optional_ref<const SuggestionMetadata>),
               (override));
   MOCK_METHOD(void, OnSuggestionsHidden, (SuggestionHidingReason), (override));
   MOCK_METHOD(bool,
@@ -53,6 +54,7 @@ class MockAutofillSuggestionDelegate : public AutofillSuggestionDelegate {
   MOCK_METHOD(void, ClearPreviewedForm, (), (override));
   MOCK_METHOD(FillingProduct, GetMainFillingProduct, (), (const override));
   MOCK_METHOD(void, OnTabSelected, (TabbedPaneTabType tab_type), (override));
+  MOCK_METHOD(FieldGlobalId, GetQueriedFieldId, (), (const override));
 
   base::WeakPtr<MockAutofillSuggestionDelegate> GetWeakPtr();
 

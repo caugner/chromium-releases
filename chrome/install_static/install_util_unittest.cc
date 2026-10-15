@@ -2,17 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40285824): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "chrome/install_static/install_util.h"
 
 #include <objbase.h>
 
+#include <guiddef.h>
+
 #include <tuple>
 
+#include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/strings/string_util.h"
@@ -27,9 +25,11 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using ::testing::Contains;
 using ::testing::ElementsAre;
 using ::testing::Eq;
 using ::testing::HasSubstr;
+using ::testing::Not;
 using ::testing::Optional;
 using ::testing::StrCaseEq;
 using ::testing::StrNe;
@@ -422,7 +422,7 @@ TEST_P(InstallStaticUtilTest, GetChromeInstallSubDirectory) {
   static_assert(std::size(kInstallDirs) == NUM_INSTALL_MODES,
                 "kInstallDirs out of date.");
   EXPECT_THAT(GetChromeInstallSubDirectory(),
-              StrCaseEq(kInstallDirs[std::get<0>(GetParam())]));
+              StrCaseEq(UNSAFE_TODO(kInstallDirs[std::get<0>(GetParam())])));
 }
 
 TEST_P(InstallStaticUtilTest, GetRegistryPath) {
@@ -451,7 +451,7 @@ TEST_P(InstallStaticUtilTest, GetRegistryPath) {
   static_assert(std::size(kRegistryPaths) == NUM_INSTALL_MODES,
                 "kRegistryPaths out of date.");
   EXPECT_THAT(GetRegistryPath(),
-              StrCaseEq(kRegistryPaths[std::get<0>(GetParam())]));
+              StrCaseEq(UNSAFE_TODO(kRegistryPaths[std::get<0>(GetParam())])));
 }
 
 TEST_P(InstallStaticUtilTest, GetUninstallRegistryPath) {
@@ -483,8 +483,9 @@ TEST_P(InstallStaticUtilTest, GetUninstallRegistryPath) {
 #endif
   static_assert(std::size(kUninstallRegistryPaths) == NUM_INSTALL_MODES,
                 "kUninstallRegistryPaths out of date.");
-  EXPECT_THAT(GetUninstallRegistryPath(),
-              StrCaseEq(kUninstallRegistryPaths[std::get<0>(GetParam())]));
+  EXPECT_THAT(
+      GetUninstallRegistryPath(),
+      StrCaseEq(UNSAFE_TODO(kUninstallRegistryPaths[std::get<0>(GetParam())])));
 }
 
 TEST_P(InstallStaticUtilTest, GetAppGuid) {
@@ -502,7 +503,8 @@ TEST_P(InstallStaticUtilTest, GetAppGuid) {
   };
   static_assert(std::size(kAppGuids) == NUM_INSTALL_MODES,
                 "kAppGuids out of date.");
-  EXPECT_THAT(GetAppGuid(), StrCaseEq(kAppGuids[std::get<0>(GetParam())]));
+  EXPECT_THAT(GetAppGuid(),
+              StrCaseEq(UNSAFE_TODO(kAppGuids[std::get<0>(GetParam())])));
 #else
   FAIL() << "Not implemented.";
 #endif
@@ -530,7 +532,8 @@ TEST_P(InstallStaticUtilTest, GetBaseAppId) {
 #endif
   static_assert(std::size(kBaseAppIds) == NUM_INSTALL_MODES,
                 "kBaseAppIds out of date.");
-  EXPECT_THAT(GetBaseAppId(), StrCaseEq(kBaseAppIds[std::get<0>(GetParam())]));
+  EXPECT_THAT(GetBaseAppId(),
+              StrCaseEq(UNSAFE_TODO(kBaseAppIds[std::get<0>(GetParam())])));
 }
 
 TEST_P(InstallStaticUtilTest, GetToastActivatorClsid) {
@@ -599,11 +602,12 @@ TEST_P(InstallStaticUtilTest, GetToastActivatorClsid) {
                 "kToastActivatorClsids out of date.");
 
   EXPECT_EQ(GetToastActivatorClsid(),
-            kToastActivatorClsids[std::get<0>(GetParam())]);
+            UNSAFE_TODO(kToastActivatorClsids[std::get<0>(GetParam())]));
 
   auto clsid_str = base::win::WStringFromGUID(GetToastActivatorClsid());
   EXPECT_THAT(clsid_str.c_str(),
-              StrCaseEq(kToastActivatorClsidsString[std::get<0>(GetParam())]));
+              StrCaseEq(UNSAFE_TODO(
+                  kToastActivatorClsidsString[std::get<0>(GetParam())])));
 }
 
 TEST_P(InstallStaticUtilTest, GetElevatorClsid) {
@@ -667,11 +671,13 @@ TEST_P(InstallStaticUtilTest, GetElevatorClsid) {
   static_assert(std::size(kElevatorClsids) == NUM_INSTALL_MODES,
                 "kElevatorClsids needs to be updated for any new modes.");
 
-  EXPECT_EQ(GetElevatorClsid(), kElevatorClsids[std::get<0>(GetParam())]);
+  EXPECT_EQ(GetElevatorClsid(),
+            UNSAFE_TODO(kElevatorClsids[std::get<0>(GetParam())]));
 
   auto clsid_str = base::win::WStringFromGUID(GetElevatorClsid());
-  EXPECT_THAT(clsid_str.c_str(),
-              StrCaseEq(kElevatorClsidsString[std::get<0>(GetParam())]));
+  EXPECT_THAT(
+      clsid_str.c_str(),
+      StrCaseEq(UNSAFE_TODO(kElevatorClsidsString[std::get<0>(GetParam())])));
 }
 
 TEST_P(InstallStaticUtilTest, GetElevatorIid) {
@@ -749,11 +755,24 @@ TEST_P(InstallStaticUtilTest, GetElevatorIid) {
   static_assert(std::size(kElevatorIids) == NUM_INSTALL_MODES,
                 "kElevatorIids needs to be updated for any new modes.");
 
-  EXPECT_EQ(GetElevatorIid(), kElevatorIids[std::get<0>(GetParam())]);
+  EXPECT_EQ(GetElevatorIid(),
+            UNSAFE_TODO(kElevatorIids[std::get<0>(GetParam())]));
 
   auto iid_str = base::win::WStringFromGUID(GetElevatorIid());
-  EXPECT_THAT(iid_str.c_str(),
-              StrCaseEq(kElevatorIidsString[std::get<0>(GetParam())]));
+  EXPECT_THAT(
+      iid_str.c_str(),
+      StrCaseEq(UNSAFE_TODO(kElevatorIidsString[std::get<0>(GetParam())])));
+}
+
+TEST_P(InstallStaticUtilTest, GetOldElevatorIids) {
+  EXPECT_THAT(GetOldElevatorIids(), Not(Contains(GetElevatorIid())));
+  EXPECT_THAT(GetOldElevatorIids(), Not(Contains(GUID_NULL)));
+}
+
+TEST_P(InstallStaticUtilTest, GetOldTracingServiceIids) {
+  EXPECT_THAT(GetOldTracingServiceIids(),
+              Not(Contains(GetTracingServiceIid())));
+  EXPECT_THAT(GetOldTracingServiceIids(), Not(Contains(GUID_NULL)));
 }
 
 TEST_P(InstallStaticUtilTest, UsageStatsAbsent) {
@@ -843,7 +862,8 @@ TEST_P(InstallStaticUtilTest, GetSandboxSidPrefix) {
       L"924012148-",  // Chromium.
   };
 #endif
-  EXPECT_STREQ(GetSandboxSidPrefix(), kSandBoxSids[std::get<0>(GetParam())]);
+  EXPECT_STREQ(GetSandboxSidPrefix(),
+               UNSAFE_TODO(kSandBoxSids[std::get<0>(GetParam())]));
 }
 
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)

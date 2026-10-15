@@ -20,6 +20,7 @@
 #include "chrome/browser/dictation/session_ui.h"
 #include "chrome/browser/dictation/stream_provider.h"
 #include "chrome/browser/dictation/target.h"
+#include "content/public/browser/editable_level.h"
 #include "content/public/browser/focused_node_details.h"
 #include "content/public/browser/global_dom_node_id.h"
 #include "content/public/browser/global_routing_id.h"
@@ -46,7 +47,7 @@ namespace dictation {
 
 SessionController::SessionController(SessionControllerDelegate& delegate)
     : delegate_(delegate) {
-  VT_LOG() << "=== Session Started";
+  VT_LOG(GetBrowserContext()) << "=== Session Started";
 }
 
 SessionController::~SessionController() {
@@ -55,17 +56,18 @@ SessionController::~SessionController() {
   if (attached_stream_provider_) {
     EndDictationStream();
   }
-  VT_LOG() << "=== Session Ended";
+  VT_LOG(GetBrowserContext()) << "=== Session Ended";
 }
 
-void SessionController::Initialize() {
+void SessionController::ResetUi() {
   ui_ = delegate_->CreateUi(*this);
 }
 
 void SessionController::StartDictationStream(
-    const content::GlobalDOMNodeId& target_id,
+    const TargetDetails& target_details,
     DictationStreamStartTrigger trigger) {
-  VT_LOG() << "Starting DictationStream on target " << target_id;
+  VT_LOG(GetBrowserContext())
+      << "Starting DictationStream on target " << target_details.target_id;
   // TODO(b/525856380): Add support for "swapping in" a new stream. That is,
   // end the current stream and start a new one without entering the
   // finalization state which could flash states the UI.
@@ -73,19 +75,29 @@ void SessionController::StartDictationStream(
         state_ == SessionState::kFinalizing);
   CHECK(!attached_stream_provider_);
 
+  if (is_shutting_down_) {
+    VT_LOG(GetBrowserContext()) << "\tAborting session shutdown";
+    is_shutting_down_ = false;
+  }
+
   Observe(content::WebContents::FromRenderFrameHost(
-      target_id.document.AsRenderFrameHostIfValid()));
+      target_details.target_id.document.AsRenderFrameHostIfValid()));
 
   RecordDictationStreamStartTrigger(trigger);
 
   std::unique_ptr<StreamProvider> stream_provider =
       delegate_->CreateStreamProvider(*this);
-  stream_provider->BindToTargetAndConnect(std::make_unique<Target>(target_id));
+  stream_provider->BindToTargetAndConnect(
+      std::make_unique<Target>(target_details));
   attached_stream_provider_ = std::move(stream_provider);
 
-  last_used_target_id_ = target_id;
+  last_used_target_details_ = target_details;
 
   MoveToState(SessionState::kStreamInitializing);
+
+  if (ui_) {
+    ui_->OnStartedStream(target_details.target_id);
+  }
 }
 
 void SessionController::OnFocusChangedInPage(
@@ -108,7 +120,7 @@ void SessionController::OnFocusChangedInPage(
     EndDictationStream();
   }
 
-  if (!details.is_editable_node ||
+  if (details.editable_level == content::EditableLevel::kNotEditable ||
       !details.global_dom_node_id.document.AsRenderFrameHostIfValid()) {
     return;
   }
@@ -132,9 +144,12 @@ void SessionController::OnFocusChangedInPage(
                    newly_focused_target_id.target_element_dom_id;
       });
 
-  if (!is_finalizing_for_same_element) {
-    StartDictationStream(newly_focused_target_id,
-                         DictationStreamStartTrigger::kFocusChange);
+  if (!is_finalizing_for_same_element && !is_shutting_down_) {
+    StartDictationStream(
+        TargetDetails(
+            newly_focused_target_id,
+            details.editable_level == content::EditableLevel::kRichlyEditable),
+        DictationStreamStartTrigger::kFocusChange);
   }
 }
 
@@ -148,7 +163,7 @@ void SessionController::PrimaryPageChanged(content::Page& page) {
 }
 
 void SessionController::EndDictationStream() {
-  VT_LOG() << __func__;
+  VT_LOG(GetBrowserContext()) << __func__;
   CHECK(attached_stream_provider_);
   CHECK(state_ == SessionState::kStreamInitializing ||
         state_ == SessionState::kTranscribing);
@@ -157,6 +172,12 @@ void SessionController::EndDictationStream() {
   // immediately moved to deletion, rather than finalizing.
   finalizing_stream_providers_.insert(std::move(attached_stream_provider_));
   MoveToState(SessionState::kFinalizing);
+}
+
+void SessionController::UpdateAudioLevel(float audio_level) {
+  if (ui_) {
+    ui_->UpdateAudioLevel(audio_level);
+  }
 }
 
 void SessionController::UiRequestEndSession() {
@@ -170,7 +191,7 @@ void SessionController::UiRequestEndActiveStream() {
 }
 
 void SessionController::FinalizeAndShutdown() {
-  VT_LOG() << __func__;
+  VT_LOG(GetBrowserContext()) << __func__;
   is_shutting_down_ = true;
   if (attached_stream_provider_) {
     EndDictationStream();
@@ -184,12 +205,13 @@ void SessionController::FinalizeAndShutdown() {
 void SessionController::UiRequestStartStream() {
   CHECK(!attached_stream_provider_);
   CHECK_EQ(state_, SessionState::kInactive);
+  CHECK(!is_shutting_down_);
 
   // A stream is always started when the session is created using an explicit
   // target. Starting from UI can only happen after that.
-  CHECK(last_used_target_id_.has_value());
+  CHECK(last_used_target_details_.has_value());
 
-  StartDictationStream(*last_used_target_id_,
+  StartDictationStream(*last_used_target_details_,
                        DictationStreamStartTrigger::kStartButton);
 }
 
@@ -280,7 +302,8 @@ void SessionController::MoveToState(SessionState new_state) {
     return;
   }
 
-  VT_LOG() << "SessionState: " << state_ << " --> " << new_state;
+  VT_LOG(GetBrowserContext())
+      << "SessionState: " << state_ << " --> " << new_state;
 
   using enum SessionState;
 #if DCHECK_IS_ON()
@@ -318,6 +341,10 @@ void SessionController::EndSessionAsynchronously() {
 
 void SessionController::PurgeToDeleteStreamProviders() {
   to_delete_stream_providers_.clear();
+}
+
+content::BrowserContext* SessionController::GetBrowserContext() const {
+  return delegate_->GetBrowserContext();
 }
 
 }  // namespace dictation

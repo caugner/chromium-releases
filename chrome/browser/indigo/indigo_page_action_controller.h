@@ -87,6 +87,19 @@ enum class IndigoTriggerSource {
 };
 // LINT.ThenChange(//tools/metrics/histograms/metadata/indigo/enums.xml:IndigoTriggerSource)
 
+// Entry points / presentation styles for the Indigo page action metrics.
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+// LINT.IfChange(IndigoPageActionEntryPoint)
+enum class IndigoPageActionEntryPoint {
+  kSuggestionChip = 0,
+  kProactiveAnchoredMessage = 1,
+  kReactiveAnchoredMessage = 2,
+  kErrorToast = 3,
+  kMaxValue = kErrorToast,
+};
+// LINT.ThenChange(//tools/metrics/histograms/metadata/indigo/enums.xml:IndigoPageActionEntryPoint)
+
 enum class ResetType {
   kResetReplacementsAndContentScript,
   kResetReplacementsOnly,
@@ -130,6 +143,7 @@ class IndigoPageActionController : public tabs::ContentsObservingTabFeature,
   static IndigoPageActionController* From(tabs::TabInterface* tab);
 
   void InvokeAction(EntryPoint entry_point);
+  void DeleteOriginalPhoto();
 
   // Resets all image replacements and hides the toolbar.
   void Reset(ResetType reset_type);
@@ -183,6 +197,8 @@ class IndigoPageActionController : public tabs::ContentsObservingTabFeature,
   // page_actions::PageActionObserver:
   void OnPageActionAnchoredMessageShown(
       const page_actions::PageActionState& page_action) override;
+  void OnPageActionChipShown(
+      const page_actions::PageActionState& page_action) override;
 
   class TestApi {
    public:
@@ -203,6 +219,11 @@ class IndigoPageActionController : public tabs::ContentsObservingTabFeature,
 
     void SetOnboardingDialogFactory(OnboardingDialogFactory factory) {
       controller_->onboarding_dialog_factory_for_testing_ = std::move(factory);
+    }
+
+    void SetLastAnchoredMessagePriority(
+        page_actions::PageActionPriorityCategory priority) {
+      controller_->last_anchored_message_priority_ = priority;
     }
 
    private:
@@ -231,6 +252,10 @@ class IndigoPageActionController : public tabs::ContentsObservingTabFeature,
   // Called when eligibility is known and onboarding is completed (if needed).
   void ContinueInvoke(bool skip_glic_invoke,
                       const CombinedEligibility& eligibility);
+
+  // Checks whether we should skip Indigo invocation and invoke Glic instead.
+  // Returns true if Glic will be invoked.
+  bool MaybeInvokeGlic();
 
   // Helper to invoke IndigoAgent.
   void TriggerIndigoAgent();
@@ -299,6 +324,10 @@ class IndigoPageActionController : public tabs::ContentsObservingTabFeature,
   // The floating toolbar, if shown.
   std::unique_ptr<IndigoToolbar> toolbar_;
 
+  // The priority of the most recently shown anchored message.
+  std::optional<page_actions::PageActionPriorityCategory>
+      last_anchored_message_priority_;
+
   // The latest tracked bounds of the primary image, in DIPs.
   std::optional<gfx::Rect> tracked_bounds_;
 
@@ -328,6 +357,9 @@ class IndigoPageActionController : public tabs::ContentsObservingTabFeature,
 
   // Remote to the Blink-side metadata extraction service.
   mojo::Remote<blink::mojom::DocumentMetadata> metadata_remote_;
+
+  // True if a delete original photo request is currently in flight.
+  bool delete_photo_in_flight_ = false;
 
   // Weak pointer factory used for the invocation flow. This is invalidated on
   // navigation to ensure that if a user starts an action (like onboarding) and

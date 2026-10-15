@@ -516,6 +516,11 @@ void RenderWidgetHostViewMac::InitAsPopup(
     const gfx::Rect& pos,
     const gfx::Rect& anchor_rect) {
   CHECK_EQ(widget_type_, WidgetType::kPopup, base::NotFatalUntil::M152);
+  // A popup cannot be parented by a child frame view. Its parent must be the
+  // top-level outer view (RenderWidgetHostViewMac). Match the Aura
+  // implementation and refuse to proceed if the parent is a child frame.
+  CHECK(!static_cast<RenderWidgetHostViewBase*>(parent_host_view)
+             ->IsRenderWidgetHostViewChildFrame());
 
   popup_parent_host_view_ =
       static_cast<RenderWidgetHostViewMac*>(parent_host_view);
@@ -1523,7 +1528,7 @@ void RenderWidgetHostViewMac::TransformPointToRootSurface(gfx::PointF* point) {
   browser_compositor_->TransformPointToRootSurface(point);
 }
 
-gfx::Rect RenderWidgetHostViewMac::GetBoundsInRootWindow() {
+gfx::Rect RenderWidgetHostViewMac::GetBoundsInScreen() {
   return window_frame_in_screen_dip_;
 }
 
@@ -2364,6 +2369,11 @@ bool RenderWidgetHostViewMac::SyncGetFirstRectForRange(
     // which means we have to scale the rect by the device scale factor.
     *rect = gfx::ScaleToEnclosingRect(blink_rect, 1.f / device_scale_factor);
   }
+
+  // Ensure the returned rect is clamped to the viewport to prevent a
+  // compromised renderer from placing IME windows outside the page.
+  // See https://crbug.com/519210950.
+  rect->AdjustToFit(gfx::Rect(GetVisibleViewportSize()));
   return true;
 }
 
@@ -2690,9 +2700,13 @@ RenderWidgetHostViewMac::MaybeUpdateScreenInfosForHiDPI() {
 void RenderWidgetHostViewMac::CreateUnboundedSurface(
     mojo::PendingAssociatedReceiver<blink::mojom::UnboundedSurfaceHost> host,
     mojo::PendingAssociatedRemote<blink::mojom::UnboundedSurfaceClient> client,
-    const gfx::Rect& bounds_in_dips) {
+    const gfx::Rect& bounds_in_dips,
+    base::WeakPtr<RenderWidgetHostViewBase> subframe_view) {
+  gfx::Rect bounds_in_screen =
+      ConvertSubframeBoundsToScreen(bounds_in_dips, subframe_view.get());
   unbounded_surface_window_ = std::make_unique<UnboundedSurfaceWindowMac>(
-      this, std::move(host), std::move(client), bounds_in_dips);
+      this, std::move(host), std::move(client), bounds_in_screen,
+      std::move(subframe_view));
 }
 
 bool RenderWidgetHostViewMac::IsHeadless() const {

@@ -109,6 +109,9 @@ export class OmniboxAimAppElement extends CrLitElement {
 
   override connectedCallback() {
     super.connectedCallback();
+    // Force an initial refresh to avoid the race condition where the profile
+    // theme loads after the page, but before the listener is ready.
+    ColorChangeUpdater.forDocument().refreshColorsCss();
 
     this.listenerIds_ = [
       this.browserProxy_.callbackRouter.onPopupShown.addListener(
@@ -227,6 +230,10 @@ export class OmniboxAimAppElement extends CrLitElement {
   private addContext_(context: SearchContext) {
     this.$.composebox.addSearchContext(context);
     this.focusInput_();
+    // Reset `preserveContextOnClose_` so subsequent popup closes correctly
+    // clear searchbox state (e.g. after adding context via Drive picker while
+    // popup stayed open).
+    this.setPreserveContextOnClose_(false);
   }
 
   private focusInput_() {
@@ -236,12 +243,7 @@ export class OmniboxAimAppElement extends CrLitElement {
   private async clearPopup_(): Promise<{input: string}> {
     const input = this.$.composebox.input;
     if (!this.preserveContextOnClose_) {
-      this.$.composebox.clearAllInputs(
-          /* querySubmitted= */ false,
-          /* shouldBlockAutoSuggestedTabs= */ false);
-      this.$.composebox.clearAutocompleteMatches();
-      this.$.composebox.resetModes();
-      this.$.composebox.resetToolsAndModels();
+      this.$.composebox.resetSession();
     }
     await this.updateComplete;
     // Transfer input text to the location bar.

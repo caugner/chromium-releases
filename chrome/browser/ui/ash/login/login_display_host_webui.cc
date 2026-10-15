@@ -69,7 +69,6 @@
 #include "chrome/browser/ui/ash/system/system_tray_client_impl.h"
 #include "chrome/browser/ui/ash/wallpaper/wallpaper_controller_client_impl.h"
 #include "chrome/browser/ui/webui/ash/login/app_launch_splash_screen_handler.h"
-#include "chrome/browser/ui/webui/ash/login/arc_vm_data_migration_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/core_oobe_handler.h"
 #include "chrome/browser/ui/webui/ash/login/device_disabled_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/gaia_screen_handler.h"
@@ -310,13 +309,6 @@ void ShowLoginWizardFinish(
         local_state, application_locale_storage, shared_url_loader_factory,
         browser_policy_connector_ash, DisplayedScreen::SIGN_IN_SCREEN,
         /*update_geolocation_usage_allowed=*/true);
-  } else if (first_screen == ArcVmDataMigrationScreenView::kScreenId) {
-    display_host = new LoginDisplayHostMojo(
-        local_state, application_locale_storage, shared_url_loader_factory,
-        browser_policy_connector_ash, DisplayedScreen::SIGN_IN_SCREEN,
-        /*update_geolocation_usage_allowed=*/true);
-    DCHECK(session_manager::SessionManager::Get());
-    session_manager::SessionManager::Get()->NotifyLoginOrLockScreenVisible();
   } else {
     display_host = new LoginDisplayHostWebUI(
         local_state, application_locale_storage, shared_url_loader_factory,
@@ -849,7 +841,9 @@ void LoginDisplayHostWebUI::OnViewsBootingAnimationPlayed() {
 void LoginDisplayHostWebUI::FinishBootingAnimation() {
   CHECK(features::IsBootAnimationEnabled());
   ash::Shell::Get()->booting_animation_controller()->Finish();
-  GetOobeUI()->GetCoreOobe()->TriggerDown();
+  if (GetOobeUI()) {
+    GetOobeUI()->GetCoreOobe()->TriggerDown();
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -900,9 +894,11 @@ void LoginDisplayHostWebUI::OnCurrentScreenChanged(OobeScreenId current_screen,
     // Notify that the OOBE page is ready and the first screen is shown. It
     // might happen that front-end part isn't fully initialized yet, so wait for
     // it to happen before notifying.
-    GetOobeUI()->IsJSReady(base::BindOnce(
-        &session_manager::SessionManager::NotifyLoginOrLockScreenVisible,
-        base::Unretained(session_manager::SessionManager::Get())));
+    if (GetOobeUI()) {
+      GetOobeUI()->IsJSReady(base::BindOnce(
+          &session_manager::SessionManager::NotifyLoginOrLockScreenVisible,
+          base::Unretained(session_manager::SessionManager::Get())));
+    }
   }
 }
 
@@ -914,7 +910,9 @@ void LoginDisplayHostWebUI::OnBackdropLoaded() {
 }
 
 void LoginDisplayHostWebUI::OnDestroyingOobeUI() {
-  GetOobeUI()->RemoveObserver(this);
+  if (GetOobeUI()) {
+    GetOobeUI()->RemoveObserver(this);
+  }
 }
 
 bool LoginDisplayHostWebUI::IsOobeUIDialogVisible() const {
@@ -1134,7 +1132,9 @@ void LoginDisplayHostWebUI::UpdateOobeDialogState(OobeDialogState state) {
 }
 
 void LoginDisplayHostWebUI::HandleDisplayCaptivePortal() {
-  GetOobeUI()->GetErrorScreen()->FixCaptivePortal();
+  if (GetOobeUI()) {
+    GetOobeUI()->GetErrorScreen()->FixCaptivePortal();
+  }
 }
 
 void LoginDisplayHostWebUI::OnCancelPasswordChangedFlow() {}
@@ -1278,7 +1278,7 @@ void ShowLoginWizard(OobeScreenId first_screen) {
   // TODO(b/338302062): Determine whether we should wait on OOBE config
   // retrieval before calling GetPrescribedEnrollmentConfig here.
   const policy::EnrollmentConfig enrollment_config =
-      policy::EnrollmentConfig::GetPrescribedEnrollmentConfig();
+      policy::EnrollmentConfig::GetPrescribedEnrollmentConfig(local_state);
   if (enrollment_config.should_enroll() &&
       first_screen == ash::OOBE_SCREEN_UNKNOWN) {
     // Manages its own lifetime. See ShutdownDisplayHost().
@@ -1365,8 +1365,10 @@ void ShowLoginWizard(OobeScreenId first_screen) {
 }
 
 void SwitchWebUItoMojo() {
-  DCHECK_EQ(LoginDisplayHost::default_host()->GetOobeUI()->display_type(),
-            OobeUI::kOobeDisplay);
+  auto* oobe_ui = LoginDisplayHost::default_host()->GetOobeUI();
+  if (oobe_ui) {
+    DCHECK_EQ(oobe_ui->display_type(), OobeUI::kOobeDisplay);
+  }
 
   // This replaces WebUI host with the Mojo (views) host.
   ShowLoginWizard(ash::OOBE_SCREEN_UNKNOWN);

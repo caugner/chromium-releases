@@ -275,9 +275,16 @@ class NtpRealboxUiTestBase
   }
 
   auto WaitForDialogStateChange(const DeepQuery& where, bool expected_open) {
-    return WaitForJsConditionAt(
-        kNtpElementId, where,
-        expected_open ? "(el) => el && el.open" : "(el) => el && !el.open");
+    DEFINE_LOCAL_CUSTOM_ELEMENT_EVENT_TYPE(kDialogStateChangeEvent);
+    WebContentsInteractionTestUtil::StateChange state_change;
+    state_change.event = kDialogStateChangeEvent;
+    state_change.where = where;
+    state_change.type =
+        expected_open
+            ? WebContentsInteractionTestUtil::StateChange::Type::kExists
+            : WebContentsInteractionTestUtil::StateChange::Type::kDoesNotExist;
+
+    return WaitForStateChange(kNtpElementId, state_change);
   }
 
   auto WaitForElementVisibilityChange(const DeepQuery& where,
@@ -421,8 +428,12 @@ INSTANTIATE_TEST_SUITE_P(
       return info.param.ToString();
     });
 
-// TODO(crbug.com/454761015): Re-enable after fixing.
-IN_PROC_BROWSER_TEST_P(NtpRealboxUiScreenshotTest, DISABLED_Screenshots) {
+#if BUILDFLAG(IS_WIN)
+#define MAYBE_Screenshots DISABLED_Screenshots
+#else
+#define MAYBE_Screenshots Screenshots
+#endif
+IN_PROC_BROWSER_TEST_P(NtpRealboxUiScreenshotTest, MAYBE_Screenshots) {
   // Force a consistent window size to exercise realbox layout within New Tab
   // Page bounds.
   auto screen_size = gfx::Size(1000, 1200);
@@ -436,7 +447,7 @@ IN_PROC_BROWSER_TEST_P(NtpRealboxUiScreenshotTest, DISABLED_Screenshots) {
   }
 
   // Disable compose button animation to prevent screenshot variations.
-  browser()->profile()->GetPrefs()->SetInteger(
+  browser()->GetProfile()->GetPrefs()->SetInteger(
       prefs::kNtpComposeButtonShownCountPrefName,
       ntp_composebox::FeatureConfig::Get()
           .config.entry_point()
@@ -843,7 +854,7 @@ IN_PROC_BROWSER_TEST_F(NtpRealboxTabFlyoverInteractiveTest,
 
   RunTestSequence(
       Do([this]() {
-        browser()->profile()->GetPrefs()->SetInteger(
+        browser()->GetProfile()->GetPrefs()->SetInteger(
             contextual_search::kSearchContentSharingSettings,
             static_cast<int>(contextual_search::
                                  SearchContentSharingSettingsValue::kEnabled));
@@ -870,6 +881,9 @@ IN_PROC_BROWSER_TEST_F(NtpRealboxTabFlyoverInteractiveTest,
                   "el => el.click()"),
       // Wait for the WebUI menu trigger to render and click/hover it.
       WaitForElementToRender(kNtpElementId, kShareTabsTrigger),
+      ExecuteJsAt(kNtpElementId, kShareTabsTrigger,
+                  "el => el.dispatchEvent(new MouseEvent('mouseover', "
+                  "{bubbles: true}))"),
       MoveMouseTo(kNtpElementId, kShareTabsTrigger),
       // Set pointerOverFlyout_ to true via JS to prevent the flyout from
       // closing due to async mouse move events in tests.

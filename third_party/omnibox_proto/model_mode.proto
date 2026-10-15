@@ -24,7 +24,7 @@ enum ModelMode {
   MODEL_MODE_GEMINI_REGULAR = 1;
   // Gemini pro model mode.
   MODEL_MODE_GEMINI_PRO = 2;
-  // Autoroute mode.
+  // Autoroute. Same URL mapping as regular but used for relabeling.
   MODEL_MODE_GEMINI_PRO_AUTOROUTE = 3;
   // Gemini Pro model without generative UI.
   MODEL_MODE_GEMINI_PRO_NO_GEN_UI = 4;

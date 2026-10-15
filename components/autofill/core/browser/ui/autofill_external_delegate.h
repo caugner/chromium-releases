@@ -76,8 +76,10 @@ class AutofillExternalDelegate : public AutofillSuggestionDelegate {
 
   // AutofillSuggestionDelegate implementation.
   std::variant<AutofillDriver*, password_manager::PasswordManagerDriver*>
-  GetDriver() override;
-  void OnSuggestionsShown(base::span<const Suggestion> suggestions) override;
+  GetDriver_DoNotUse() override;
+  void OnSuggestionsShown(base::span<const Suggestion> suggestions,
+                          base::optional_ref<const SuggestionMetadata>
+                              parent_suggestion_metadata) override;
   void OnSuggestionsHidden(SuggestionHidingReason reason) override;
   bool OnFilterChanged(const std::u16string& filter) override;
   bool OnSearchSubmitted(const std::u16string& filter) override;
@@ -94,6 +96,8 @@ class AutofillExternalDelegate : public AutofillSuggestionDelegate {
   FillingProduct GetMainFillingProduct() const override;
 
   void OnTabSelected(TabbedPaneTabType tab_type) override;
+
+  FieldGlobalId GetQueriedFieldId() const override;
 
   // Called when the renderer posts an Autofill query to the browser. We might
   // not want to display the warning if a website has disabled Autocomplete

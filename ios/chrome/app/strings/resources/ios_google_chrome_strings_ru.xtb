@@ -265,6 +265,7 @@
 <translation id="7038674195294813388">Откройте "Приложения по умолчанию" в настройках iOS, нажмите "Приложение браузера" и выберите Chrome.</translation>
 <translation id="7056826488869329999">Начнется проверка безопасности в Chrome.</translation>
 <translation id="7061455974939528301">Нажмите на значок Chrome и удерживайте его, затем выберите "Изменить экран "Домой"</translation>
+<translation id="7095110968493193530">В Google Менеджере паролей для аккаунта <ph name="EMAIL" /></translation>
 <translation id="7124339256045485976">Обновляет Chrome до последней версии</translation>
 <translation id="7145599899567697473">Сохраняйте пароли и пользуйтесь автозаполнением в Chrome.</translation>
 <translation id="7161390184744336561">Версия Google Chrome устарела.</translation>
@@ -371,7 +372,7 @@
 <translation id="9004772704776174843">Вы вышли из Chrome</translation>
 <translation id="9068336935206019333">Открыть в Chrome инкогнито</translation>
 <translation id="9082304295862405388">В зависимости от того, какие разрешения вы предоставили Chrome, Gemini может использовать ваше точное местоположение.</translation>
-<translation id="909127538042363610">Настройте максимальную защиту в Chrome</translation>
+<translation id="909127538042363610">Настройте максимальную защиту</translation>
 <translation id="9113725809421872108">Подтвердите личность, чтобы сохранить пароль и получить доступ к данным Chrome на всех устройствах.</translation>
 <translation id="9122931302567044771">Chrome всегда будет запрашивать версию сайта для ПК.</translation>
 <translation id="9176561303811134420">Настроить способы оплаты в Chrome</translation>

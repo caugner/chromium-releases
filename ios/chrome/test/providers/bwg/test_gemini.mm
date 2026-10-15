@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#import <UIKit/UIKit.h>
+
 #import "ios/public/provider/chrome/browser/bwg/gemini_api.h"
 
 namespace ios::provider {
@@ -9,8 +11,7 @@ namespace ios::provider {
 void ConfigureWithStartupConfiguration(
     GeminiStartupConfiguration* gemini_startup_configuration) {}
 
-// TODO(crbug.com/478259873): Replace with StartGeminiOverlay
-void StartBwgOverlay(GeminiConfiguration* gemini_configuration) {}
+void StartGeminiOverlay(GeminiConfiguration* gemini_configuration) {}
 
 const std::u16string GetPageContextShouldDetachScript() {
   return uR"JS(
@@ -26,15 +27,20 @@ const std::u16string GetPageContextShouldDetachScript() {
   )JS";
 }
 
-// TODO(crbug.com/478259873): Replace with CreateGeminiGateway
-id<BWGGatewayProtocol> CreateBWGGateway() {
+id<BWGGatewayProtocol> CreateGeminiGateway() {
   return nil;
 }
 
 void CheckGeminiEligibility(AuthenticationService* auth_service,
                             GeminiEligibilityCallback completion) {}
 
-void ResetGemini() {}
+static GeminiViewState g_current_view_state = GeminiViewState::kUnknown;
+static GeminiViewMode g_current_mode = GeminiViewMode::kUnknown;
+
+void ResetGemini() {
+  g_current_mode = GeminiViewMode::kUnknown;
+  g_current_view_state = GeminiViewState::kUnknown;
+}
 
 void UpdatePageAttachmentState(
     GeminiPageContextAttachmentState gemini_attachment_state) {}
@@ -69,15 +75,21 @@ GeminiSettingsAction* ActionForSettingsContext(GeminiSettingsContext context) {
 
 void UpdateOverlayOffsetWithOpacity(CGFloat offset, CGFloat opacity) {}
 
-void UpdateGeminiViewState(GeminiViewState view_state) {}
+void UpdateDetentHeights(CGFloat collapsed_height, CGFloat extended_height) {}
 
-void UpdateGeminiViewState(GeminiViewState view_state, bool animated) {}
+void UpdateGeminiViewState(GeminiViewState view_state) {
+  g_current_view_state = view_state;
+}
+
+void UpdateGeminiViewState(GeminiViewState view_state, bool animated) {
+  g_current_view_state = view_state;
+}
 
 void UpdatePromptAction(gemini::EntryPoint entry_point,
                         NSString* prepopulated_prompt) {}
 
 GeminiViewState GetCurrentGeminiViewState() {
-  return GeminiViewState::kUnknown;
+  return g_current_view_state;
 }
 
 void RequestUIChange(GeminiUIElementType ui_element_type) {}
@@ -92,10 +104,17 @@ GeminiPageContextAttachmentState GetCurrentPageContextAttachmentState() {
   return GeminiPageContextAttachmentState::kUnknown;
 }
 
-static GeminiViewMode g_current_mode = GeminiViewMode::kUnknown;
-
 void SwitchToMode(GeminiViewMode mode, bool animated) {
   g_current_mode = mode;
+}
+
+void SwitchToMode(GeminiViewMode mode,
+                  GeminiViewState target_state,
+                  bool animated) {
+  g_current_mode = mode;
+  if (target_state != GeminiViewState::kUnknown) {
+    g_current_view_state = target_state;
+  }
 }
 
 GeminiViewMode GetCurrentMode() {
@@ -114,9 +133,17 @@ int GetLiveCaptionsNumberOfLines() {
   return 0;
 }
 
+void SetShouldShowSuggestionChips(bool should_show) {}
+
+void ShowAccountSnackbar() {}
+
 UIViewController* GetFloatyViewControllerWithConfiguration(
     GeminiConfiguration* gemini_configuration) {
-  return nil;
+  UIViewController* viewController = [[UIViewController alloc] init];
+  UITextField* textField = [[UITextField alloc] init];
+  textField.accessibilityIdentifier = @"GeminiTestTextField";
+  [viewController.view addSubview:textField];
+  return viewController;
 }
 
 }  // namespace ios::provider

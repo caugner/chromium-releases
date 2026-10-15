@@ -273,7 +273,7 @@ public class Features {
 
     // WebSettingsCompat.setAttributionBehavior
     // WebSettingsCompat.getAttributionBehavior
-    public static final String ATTRIBUTION_BEHAVIOR = "ATTRIBUTION_BEHAVIOR";
+    @Deprecated public static final String ATTRIBUTION_BEHAVIOR = "ATTRIBUTION_BEHAVIOR";
 
     // WebSettingsCompat.setWebViewMediaIntegrityApiStatus
     // WebSettingsCompat.getWebViewMediaIntegrityApiDefaultStatus
@@ -485,6 +485,9 @@ public class Features {
     // WebViewCompat.navigate
     public static final String WEBVIEW_NAVIGATE_V1 = "WEBVIEW_NAVIGATE_V1";
 
+    // Prefetch queue is drained prior to loading the URL in the WebView Navigate method.
+    public static final String WEBVIEW_NAVIGATE_DRAIN_PREFETCH = "WEBVIEW_NAVIGATE_DRAIN_PREFETCH";
+
     // WebSettingsCompat.setDownloadFaviconsEnabled
     // WebSettingsCompat.getDownloadFaviconsEnabled
     public static final String DOWNLOAD_FAVICONS_ENABLED = "DOWNLOAD_FAVICONS_ENABLED";
@@ -496,4 +499,9 @@ public class Features {
     // HttpCache.getQuotaBytes
     // HttpCache.setQuotaBytes
     public static final String HTTP_CACHE_MANAGER = "HTTP_CACHE_MANAGER";
+
+    // Profile.setCrossOriginIsolatedAllowList
+    // Profile.getCrossOriginIsolatedAllowList
+    public static final String CROSS_ORIGIN_ISOLATED_ALLOW_LIST =
+            "CROSS_ORIGIN_ISOLATED_ALLOW_LIST";
 }

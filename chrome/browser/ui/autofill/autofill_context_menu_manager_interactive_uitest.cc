@@ -2,13 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/ui/autofill/autofill_context_menu_manager.h"
+
 #include "base/json/json_reader.h"
 #include "base/run_loop.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/media/webrtc/desktop_capture_access_handler.h"
+#include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
 #include "chrome/browser/renderer_context_menu/render_view_context_menu_test_util.h"
-#include "chrome/browser/ui/autofill/autofill_context_menu_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_model.h"
 #include "chrome/browser/ui/webui/feedback/feedback_dialog.h"
@@ -17,6 +20,7 @@
 #include "components/autofill/content/browser/content_autofill_driver.h"
 #include "components/autofill/content/browser/test_autofill_manager_injector.h"
 #include "components/autofill/core/browser/autofill_feedback_data.h"
+#include "components/autofill/core/browser/foundations/autofill_manager_test_api.h"
 #include "components/autofill/core/browser/foundations/browser_autofill_manager.h"
 #include "components/autofill/core/browser/foundations/test_autofill_manager_waiter.h"
 #include "components/autofill/core/browser/test_utils/autofill_test_utils.h"
@@ -25,6 +29,7 @@
 #include "components/feature_engagement/public/feature_constants.h"
 #include "components/prefs/testing_pref_service.h"
 #include "content/public/test/browser_test.h"
+#include "third_party/blink/public/common/dom/dom_node_id.h"
 
 namespace autofill {
 namespace {
@@ -39,9 +44,9 @@ content::ContextMenuParams CreateContextMenuParams(
   rv.page_url = GURL("http://test.page/");
   rv.form_control_type = blink::mojom::FormControlType::kInputText;
   if (form_renderer_id) {
-    rv.form_renderer_id = form_renderer_id->value();
+    rv.form_renderer_id = blink::DOMNodeIdType(form_renderer_id->value());
   }
-  rv.field_renderer_id = field_render_id.value();
+  rv.field_renderer_id = blink::DOMNodeIdType(field_render_id.value());
   return rv;
 }
 
@@ -73,11 +78,17 @@ class AutofillContextMenuManagerFeedbackUIBrowserTest
         std::make_unique<AutofillContextMenuManager>(
             render_view_context_menu_.get(), nullptr);
 
-    browser()->profile()->GetPrefs()->SetBoolean(prefs::kUserFeedbackAllowed,
-                                                 true);
+    browser()->GetProfile()->GetPrefs()->SetBoolean(prefs::kUserFeedbackAllowed,
+                                                    true);
+    MediaCaptureDevicesDispatcher::GetInstance()
+        ->desktop_capture_access_handler_for_test()
+        ->SetRequestApprovedForTest(true);
   }
 
   void TearDownOnMainThread() override {
+    MediaCaptureDevicesDispatcher::GetInstance()
+        ->desktop_capture_access_handler_for_test()
+        ->SetRequestApprovedForTest(false);
     autofill_context_menu_manager_.reset();
     render_view_context_menu_.reset();
 
@@ -167,7 +178,7 @@ IN_PROC_BROWSER_TEST_F(AutofillContextMenuManagerFeedbackUIBrowserTest,
 IN_PROC_BROWSER_TEST_F(AutofillContextMenuManagerFeedbackUIBrowserTest,
                        TabMoveToOtherBrowserDoesNotCrash) {
   // Create another browser.
-  Browser* other_browser = CreateBrowser(browser()->profile());
+  Browser* other_browser = CreateBrowser(browser()->GetProfile());
 
   // Move the tab to the other browser.
   other_browser->tab_strip_model()->InsertDetachedTabAt(
@@ -216,7 +227,7 @@ IN_PROC_BROWSER_TEST_F(AutofillContextMenuManagerFeedbackUIBrowserTest,
       test::CreateTestAddressFormData(), frame_token);
   GetAutofillManager()->OnFormsSeen(
       /*updated_forms=*/{form},
-      /*removed_forms=*/{});
+      /*removed_forms=*/{}, autofill::AutofillManagerTestApi::pass_key());
   ASSERT_TRUE(GetAutofillManager()->WaitForFormsSeen(1));
   ASSERT_TRUE(GetAutofillManager()->FindCachedFormById(form.global_id()));
 

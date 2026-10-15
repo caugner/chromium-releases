@@ -1778,6 +1778,15 @@ void PdfViewWebPlugin::HasMeaningfulText(HasMeaningfulTextCallback callback) {
   std::move(callback).Run(engine_ && engine_->HasMeaningfulText());
 }
 
+void PdfViewWebPlugin::HasJavaScript(HasJavaScriptCallback callback) {
+  std::move(callback).Run(engine_ && engine_->HasJavaScript());
+}
+
+void PdfViewWebPlugin::IsPasswordProtected(
+    IsPasswordProtectedCallback callback) {
+  std::move(callback).Run(engine_ && engine_->IsPasswordProtected());
+}
+
 void PdfViewWebPlugin::GetPageText(int32_t page_index,
                                    GetPageTextCallback callback) {
   if (page_index < 0 || page_index >= engine_->GetNumberOfPages()) {
@@ -1796,6 +1805,12 @@ void PdfViewWebPlugin::GetSaveDataBufferHandlerForDrive(
     buffer_handler = std::make_unique<OriginalDataHandlerForDrive>(this);
   } else {
     buffer_handler = std::make_unique<ModifiedDataBufferHandlerForDrive>(this);
+#if BUILDFLAG(ENABLE_PDF_INK2)
+    if (request_type == pdf::mojom::SaveRequestType::kAnnotation &&
+        ink_module_) {
+      ink_module_->RecordMetricsOnSave();
+    }
+#endif  // BUILDFLAG(ENABLE_PDF_INK2)
   }
   const uint32_t file_size = buffer_handler->GetFileSize();
   if (!file_size) {
@@ -2249,6 +2264,12 @@ void PdfViewWebPlugin::SaveToBuffer(pdf::mojom::SaveRequestType request_type,
 
   engine_->KillFormFocus();
 
+#if BUILDFLAG(ENABLE_PDF_INK2)
+  if (request_type == pdf::mojom::SaveRequestType::kAnnotation && ink_module_) {
+    ink_module_->RecordMetricsOnSave();
+  }
+#endif  // BUILDFLAG(ENABLE_PDF_INK2)
+
   auto message = base::DictValue()
                      .Set("type", "saveData")
                      .Set("token", token)
@@ -2355,6 +2376,12 @@ PdfViewWebPlugin::SaveDataBlock PdfViewWebPlugin::SaveBlockToBuffer(
 
   if (offset == 0) {
     PopulateBufferWithModifiedFileData(save_data_buffer_);
+#if BUILDFLAG(ENABLE_PDF_INK2)
+    if (request_type == pdf::mojom::SaveRequestType::kAnnotation &&
+        ink_module_) {
+      ink_module_->RecordMetricsOnSave();
+    }
+#endif  // BUILDFLAG(ENABLE_PDF_INK2)
   } else {
     CHECK(save_data_buffer_.size());
   }
@@ -2885,8 +2912,10 @@ void PdfViewWebPlugin::RecordDocumentMetrics() {
   if (ink_module_) {
     // Use a timeout limit of 100ms, which will capture over 90 percent of PDFs
     // without increasing the PDF load time a significant amount.
-    RecordPdfLoadedWithV2InkAnnotations(
-        engine_->ContainsV2InkPath(base::Milliseconds(100)));
+    PDFiumEngine::InkIdentifiers ink_identifiers =
+        engine_->ScanForInkAnnotations(base::Milliseconds(100));
+    RecordPdfLoadedWithV2InkAnnotations(ink_identifiers.v2_ink_path);
+    RecordPdfLoadedWithInkTextAnnotations(ink_identifiers.ink_text_annotations);
   }
 #endif  // BUILDFLAG(ENABLE_PDF_INK2)
 }

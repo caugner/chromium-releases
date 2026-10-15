@@ -7,6 +7,7 @@
 
 #include <memory>
 
+#include "base/functional/function_ref.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -365,20 +366,6 @@ class FedCmAccountSelectionView : public AccountSelectionView,
     LOADING,
   };
 
-  // This enum describes the outcome of the mismatch dialog and is used for
-  // histograms. Do not remove or modify existing values, but you may add new
-  // values at the end.
-  // LINT.IfChange(MismatchDialogResult)
-
-  enum class MismatchDialogResult {
-    kContinued = 0,
-    kDismissedByCloseIcon = 1,
-    kDismissedForOtherReasons = 2,
-    kMaxValue = kDismissedForOtherReasons
-  };
-
-  // LINT.ThenChange(//tools/metrics/histograms/metadata/blink/enums.xml:FedCmMismatchDialogResult)
-
   // This enum describes the outcome of the pop-up window and is used for
   // histograms. Do not remove or modify existing values, but you may add new
   // values at the end.
@@ -406,11 +393,10 @@ class FedCmAccountSelectionView : public AccountSelectionView,
   // the background, becomes foregrounded.
   void BackgroundTaskTabForegrounded(tabs::TabInterface* tab);
 
+  // Calls a delegate method while guarding against `this` being deleted.
   // Returns false if `this` got deleted. In that case, the caller must early
   // return.
-  bool NotifyDelegateOfAccountSelection(
-      const Account& account,
-      const content::IdentityProviderData& idp_data);
+  [[nodiscard]] bool NotifyDelegate(base::FunctionRef<void()> notify_callback);
 
   // Shows the verifying sheet.
   void ShowVerifyingSheet(const IdentityRequestAccountPtr& account);

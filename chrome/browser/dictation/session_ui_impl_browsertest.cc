@@ -19,21 +19,46 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
+#include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
 #include "chrome/browser/ui/interaction/browser_elements.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toasts/api/toast_id.h"
 #include "chrome/browser/ui/toasts/toast_controller.h"
 #include "chrome/browser/ui/views/dictation/dictation_bubble_ui.h"
+#include "chrome/browser/ui/views/dictation/dictation_overlay_view.h"
+#include "chrome/browser/ui/views/dictation/ui_state.h"
+#include "chrome/browser/ui/views/dictation/waveform_view.h"
+#include "chrome/browser/ui/views/dictation/waveform_view_button.h"
 #include "chrome/common/extensions/api/dictation_private.h"
 #include "chrome/test/base/chrome_test_utils.h"
 #include "chrome/test/interaction/interactive_browser_test.h"
 #include "content/public/test/browser_test.h"
 #include "extensions/common/switches.h"
 #include "ui/base/interaction/element_tracker.h"
+#include "ui/base/interaction/state_observer.h"
 #include "ui/views/controls/button/label_button.h"
 #include "url/gurl.h"
 
 namespace dictation {
+
+class SessionStateObserver : public ui::test::StateObserver<SessionState> {
+ public:
+  explicit SessionStateObserver(SessionController* controller) {
+    subscription_ = controller->AddSessionStateChangedCallback(
+        base::BindRepeating(&SessionStateObserver::OnStateObserverStateChanged,
+                            base::Unretained(this)));
+  }
+
+  SessionState GetStateObserverInitialState() const override {
+    return SessionState::kInactive;
+  }
+
+ private:
+  base::CallbackListSubscription subscription_;
+};
+
+DECLARE_STATE_IDENTIFIER_VALUE(SessionStateObserver, kSessionStateIdentifier);
+DEFINE_STATE_IDENTIFIER_VALUE(SessionStateObserver, kSessionStateIdentifier);
 
 class DictationSessionUiImplBrowserTest
     : public DictationInteractiveBrowserTestBase {
@@ -59,6 +84,16 @@ class DictationSessionUiImplBrowserTest
     return [this]() {
       return dictation_service().session_controller()->GetState();
     };
+  }
+
+  auto ObserveSessionStateChanges() {
+    return ObserveState(kSessionStateIdentifier, [this]() {
+      return dictation_service().session_controller();
+    });
+  }
+
+  auto WaitForSessionState(SessionState state) {
+    return WaitForState(kSessionStateIdentifier, state);
   }
 
   auto HasAttachedStreamProvider() {
@@ -93,8 +128,14 @@ class DictationSessionUiImplBrowserTest
     });
   }
 
+  auto StartDictationStream(DictationStreamStartTrigger trigger) {
+    return Do([this, trigger]() {
+      dictation_service().session_controller()->StartDictationStream(
+          DefaultInPageTarget(web_contents()), trigger);
+    });
+  }
+
  private:
-  base::WeakPtr<ListenerStreamProvider> last_started_provider_ = nullptr;
   base::test::ScopedFeatureList scoped_feature_list_;
 };
 
@@ -103,8 +144,8 @@ IN_PROC_BROWSER_TEST_F(DictationSessionUiImplBrowserTest,
   // clang-format off
   RunTestSequence(
     StartSession(),
+    ObserveSessionStateChanges(),
     WaitForShow(DictationBubbleUi::kViewElementIdForTesting),
-    WaitForShow(DictationBubbleUi::kWaveformElementIdForTesting),
 
     // kStreamInitializing.
     CheckResult(GetSessionState(), SessionState::kStreamInitializing),
@@ -115,6 +156,7 @@ IN_PROC_BROWSER_TEST_F(DictationSessionUiImplBrowserTest,
 
     // kTranscribing.
     ExtensionAPISetStreamState(ExtensionStreamState::kTranscribing),
+    WaitForShow(DictationBubbleUi::kWaveformElementIdForTesting),
     CheckResult(GetSessionState(), SessionState::kTranscribing),
     CheckViewProperty(DictationBubbleUi::kToggleButtonElementIdForTesting,
                       &views::LabelButton::GetText, u"Done"),
@@ -133,11 +175,56 @@ IN_PROC_BROWSER_TEST_F(DictationSessionUiImplBrowserTest,
 
     // kInactive
     ExtensionAPISetStreamState(ExtensionStreamState::kComplete),
-    CheckResult(GetSessionState(), SessionState::kInactive),
+    WaitForSessionState(SessionState::kInactive),
     CheckViewProperty(DictationBubbleUi::kToggleButtonElementIdForTesting,
                       &views::LabelButton::GetText, u"Start"),
     CheckViewProperty(DictationBubbleUi::kToggleButtonElementIdForTesting,
                       &views::View::GetEnabled, true)
+  );
+  // clang-format on
+}
+
+IN_PROC_BROWSER_TEST_F(DictationSessionUiImplBrowserTest, UpdateAudioLevel) {
+  // clang-format off
+  RunTestSequence(
+    StartSession(),
+    WaitForShow(DictationBubbleUi::kViewElementIdForTesting),
+    Do([this]{
+      SessionUi* ui = session_ui();
+      ASSERT_TRUE(ui);
+      ui->UpdateAudioLevel(0.5f);
+    })
+  );
+  // clang-format on
+}
+
+IN_PROC_BROWSER_TEST_F(DictationSessionUiImplBrowserTest,
+                       ToastIsActivatableAfterCreation) {
+  DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kWebContentsElementId);
+  const GURL url =
+      embedded_test_server()->GetURL("/textinput/simple_textarea.html");
+
+  // clang-format off
+  RunTestSequence(
+    InstrumentTab(kWebContentsElementId),
+    NavigateWebContents(kWebContentsElementId, url),
+    StartSessionWithTarget(kWebContentsElementId, "#text_id"),
+    WaitForShow(DictationBubbleUi::kViewElementIdForTesting),
+    // Ensure that showing the bubble did not steal focus from the page.
+    CheckView(DictationBubbleUi::kViewElementIdForTesting,
+              [](views::View* view) {
+                views::Widget* widget = view->GetWidget();
+                return widget && !widget->IsActive();
+              }),
+    // Ensure that the bubble can be activated. This is needed on Windows,
+    // otherwise we'd discard mouse activation messages from the OS and the
+    // buttons wouldn't be clickable. See https://crbug.com/542199776
+    CheckView(DictationBubbleUi::kViewElementIdForTesting,
+              [](views::View* view) {
+                views::Widget* widget = view->GetWidget();
+                return widget && widget->widget_delegate() &&
+                       widget->widget_delegate()->CanActivate();
+              })
   );
   // clang-format on
 }
@@ -179,6 +266,7 @@ IN_PROC_BROWSER_TEST_F(DictationSessionUiImplBrowserTest,
   RunTestSequence(
     // Open the session ui.
     StartSession(),
+    ObserveSessionStateChanges(),
     WaitForShow(DictationBubbleUi::kViewElementIdForTesting),
 
     // Move to transcribing state
@@ -192,7 +280,7 @@ IN_PROC_BROWSER_TEST_F(DictationSessionUiImplBrowserTest,
     PressButton(DictationBubbleUi::kToggleButtonElementIdForTesting),
     CheckResult(GetSessionState(), SessionState::kFinalizing),
     ExtensionAPISetStreamState(ExtensionStreamState::kComplete),
-    CheckResult(GetSessionState(), SessionState::kInactive),
+    WaitForSessionState(SessionState::kInactive),
 
     // The button should become "Start"; click it.
     CheckViewProperty(DictationBubbleUi::kToggleButtonElementIdForTesting,
@@ -261,7 +349,7 @@ IN_PROC_BROWSER_TEST_F(DictationSessionUiImplBrowserTest,
   browser()->tab_strip_model()->ActivateTabAt(0);
 
   // Create a second browser window.
-  Browser* second_browser = CreateBrowser(browser()->profile());
+  Browser* second_browser = CreateBrowser(browser()->GetProfile());
 
   // clang-format off
   RunTestSequence(
@@ -290,6 +378,7 @@ IN_PROC_BROWSER_TEST_F(DictationSessionUiImplBrowserTest,
   // clang-format off
   RunTestSequence(
     StartSession(),
+    ObserveSessionStateChanges(),
     WaitForShow(DictationBubbleUi::kViewElementIdForTesting),
 
     // Switch to the second tab. The session should be ended but only after
@@ -301,6 +390,7 @@ IN_PROC_BROWSER_TEST_F(DictationSessionUiImplBrowserTest,
 
     // Once the finalization completes the sesison should be ended.
     ExtensionAPISetStreamState(ExtensionStreamState::kComplete),
+    WaitForSessionState(SessionState::kInactive),
     CheckHasSession(false),
 
     // Switch back to the first tab and ensure the UI does not reappear.
@@ -378,6 +468,71 @@ IN_PROC_BROWSER_TEST_F(DictationSessionUiImplBrowserTest, ShowsToastOnError) {
 }
 
 IN_PROC_BROWSER_TEST_F(DictationSessionUiImplBrowserTest,
+                       FailedStreamInitAllowsOngoingFinalizing) {
+  base::WeakPtr<ListenerStreamProvider> finalizing_stream;
+  StreamId finalizing_stream_id;
+
+  // clang-format off
+  RunTestSequence(
+    StartSession(),
+    WaitForShow(DictationBubbleUi::kViewElementIdForTesting),
+
+    ExtensionAPISetStreamState(ExtensionStreamState::kTranscribing),
+    CheckResult(GetSessionState(), SessionState::kTranscribing),
+
+    // End active stream to transition the first stream to finalization.
+    Do([&finalizing_stream, &finalizing_stream_id, this] {
+      finalizing_stream = last_started_provider_;
+      ASSERT_NE(finalizing_stream, nullptr);
+      finalizing_stream_id = finalizing_stream->stream_id_for_testing();
+      dictation_service().session_controller()->EndDictationStream();
+    }),
+    CheckResult(GetSessionState(), SessionState::kFinalizing),
+    CheckResult(HasAttachedStreamProvider(), false),
+
+    // Start a second stream while the first stream is finalizing.
+    StartDictationStream(DictationStreamStartTrigger::kFocusChange),
+    CheckResult(GetSessionState(), SessionState::kStreamInitializing),
+    CheckResult(HasAttachedStreamProvider(), true),
+    ExtensionAPIWaitForStreamStart(),
+
+    CheckShowingDictationErrorToast(false),
+
+    // Simulate the second stream failing to initialize.
+    ExtensionAPISetStreamState(ExtensionStreamState::kFailed),
+
+    // The second stream failure should show the error toast. However, because
+    // the first stream is still finalizing, the session should remain active in
+    // the finalizing state rather than immediately ending.
+    CheckShowingDictationErrorToast(true),
+    CheckHasSession(true),
+    CheckResult(GetSessionState(), SessionState::kFinalizing),
+    CheckResult(HasAttachedStreamProvider(), false),
+    EnsurePresent(DictationBubbleUi::kViewElementIdForTesting),
+    CheckViewProperty(DictationBubbleUi::kToggleButtonElementIdForTesting,
+                      &views::View::GetEnabled, false),
+
+    // The finalizing stream should still be able to accept final text.
+    ExtensionAPIUpdateTranscription(finalizing_stream_id,
+                                    ExtensionTranscriptionType::kFinal,
+                                    "Final text"),
+    Check([&finalizing_stream] {
+      return finalizing_stream &&
+             finalizing_stream->GetLatestTranscriptionForTesting() ==
+                 "Final text" &&
+             finalizing_stream->IsTranscriptionFinalForTesting();
+    }),
+
+    // Once the finalizing stream completes, the session should end.
+    ExtensionAPISetStreamState(finalizing_stream_id,
+                               ExtensionStreamState::kComplete),
+    WaitForHide(DictationBubbleUi::kViewElementIdForTesting),
+    CheckHasSession(false)
+  );
+  // clang-format on
+}
+
+IN_PROC_BROWSER_TEST_F(DictationSessionUiImplBrowserTest,
                        NavigationEndsSession) {
   // clang-format off
   RunTestSequence(
@@ -394,6 +549,187 @@ IN_PROC_BROWSER_TEST_F(DictationSessionUiImplBrowserTest,
     WaitForHide(DictationBubbleUi::kViewElementIdForTesting),
     CheckHasSession(false),
     CheckShowingDictationStoppedToast(true)
+  );
+  // clang-format on
+}
+
+IN_PROC_BROWSER_TEST_F(DictationSessionUiImplBrowserTest,
+                       SecondWindowInvokesDictationMovesUI) {
+  // Create a second browser window.
+  Browser* second_browser = CreateBrowser(browser()->GetProfile());
+  content::WebContents* window2_contents =
+      second_browser->tab_strip_model()->GetActiveWebContents();
+  ASSERT_NE(window2_contents, nullptr);
+
+  // clang-format off
+  RunTestSequence(
+    // Start dictation session in Window 1.
+    StartSession(),
+    WaitForShow(DictationBubbleUi::kViewElementIdForTesting),
+
+    // Invoke dictation from the context menu in Window 2.
+    Do([this, window2_contents] {
+      dictation_service().ContextMenuHandler(
+          DefaultInPageTarget(window2_contents));
+    }),
+
+    // Verify UI is showing in Window 2 and not showing in Window 1.
+    InContext(BrowserElements::From(second_browser)->GetContext(),
+              WaitForShow(DictationBubbleUi::kViewElementIdForTesting)),
+    InContext(BrowserElements::From(browser())->GetContext(),
+              EnsureNotPresent(DictationBubbleUi::kViewElementIdForTesting)),
+    CheckHasSession(true)
+  );
+  // clang-format on
+}
+
+IN_PROC_BROWSER_TEST_F(DictationSessionUiImplBrowserTest,
+                       OverlayButtonAppearsOnSessionStart) {
+  DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kWebContentsElementId);
+  const GURL url =
+      embedded_test_server()->GetURL("/textinput/simple_textarea.html");
+  gfx::Rect target_bounds;
+
+  // clang-format off
+  RunTestSequence(
+    InstrumentTab(kWebContentsElementId),
+    NavigateWebContents(kWebContentsElementId, url),
+    StartSessionWithTarget(kWebContentsElementId, "#text_id"),
+    InAnyContext(WaitForShow(DictationOverlayView::kViewElementIdForTesting)),
+    WithElement(
+        kWebContentsElementId,
+        [&target_bounds](ui::TrackedElement* el) {
+          target_bounds = AsInstrumentedWebContents(el)
+                              ->GetElementBoundsInScreen("#text_id");
+        }),
+    InAnyContext(CheckElement(
+        DictationOverlayView::kViewElementIdForTesting,
+        [&target_bounds](ui::TrackedElement* el) {
+          const views::View* const overlay_view = AsView(el);
+          const gfx::Rect overlay_bounds = overlay_view->GetBoundsInScreen();
+          return target_bounds.Contains(overlay_bounds.origin());
+        }))
+  );
+  // clang-format on
+}
+
+IN_PROC_BROWSER_TEST_F(DictationSessionUiImplBrowserTest,
+                       OverlayButtonUpdatesOnStreamStateChange) {
+  DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kWebContentsElementId);
+  const GURL url =
+      embedded_test_server()->GetURL("/textinput/simple_textarea.html");
+
+  // clang-format off
+  RunTestSequence(
+    InstrumentTab(kWebContentsElementId),
+    NavigateWebContents(kWebContentsElementId, url),
+    StartSessionWithTarget(kWebContentsElementId, "#text_id"),
+    ObserveSessionStateChanges(),
+    InAnyContext(WaitForShow(DictationOverlayView::kViewElementIdForTesting)),
+
+    // Initial state (kStreamInitializing): Mic icon button present, others absent.
+    CheckResult(GetSessionState(), SessionState::kStreamInitializing),
+    InAnyContext(EnsurePresent(
+        DictationOverlayView::kMicButtonElementIdForTesting)),
+    InAnyContext(EnsureNotPresent(
+        DictationOverlayView::kWaveformElementIdForTesting)),
+
+    // Transition to kTranscribing: WaveformView shown, others absent.
+    ExtensionAPISetStreamState(ExtensionStreamState::kTranscribing),
+    CheckResult(GetSessionState(), SessionState::kTranscribing),
+    InAnyContext(WaitForShow(
+        DictationOverlayView::kWaveformElementIdForTesting)),
+    InAnyContext(EnsureNotPresent(
+        DictationOverlayView::kMicButtonElementIdForTesting)),
+
+    // Transition to kFinalizing: WaveformView shown, others absent.
+    Do([this] {
+      dictation_service().session_controller()->EndDictationStream();
+    }),
+    CheckResult(GetSessionState(), SessionState::kFinalizing),
+    InAnyContext(WaitForShow(
+        DictationOverlayView::kWaveformElementIdForTesting)),
+    InAnyContext(EnsureNotPresent(
+        DictationOverlayView::kMicButtonElementIdForTesting)),
+
+    // Transition to kInactive: Mic icon button shown again, others absent.
+    ExtensionAPISetStreamState(ExtensionStreamState::kComplete),
+    WaitForSessionState(SessionState::kInactive),
+    InAnyContext(WaitForShow(
+        DictationOverlayView::kMicButtonElementIdForTesting)),
+    InAnyContext(EnsureNotPresent(
+        DictationOverlayView::kWaveformElementIdForTesting))
+  );
+  // clang-format on
+}
+
+IN_PROC_BROWSER_TEST_F(DictationSessionUiImplBrowserTest,
+                       OverlayWaveformReceivesAudioLevelUpdates) {
+  DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kWebContentsElementId);
+  const GURL url =
+      embedded_test_server()->GetURL("/textinput/simple_textarea.html");
+
+  // clang-format off
+  RunTestSequence(
+    InstrumentTab(kWebContentsElementId),
+    NavigateWebContents(kWebContentsElementId, url),
+    StartSessionWithTarget(kWebContentsElementId, "#text_id"),
+    InAnyContext(WaitForShow(DictationOverlayView::kViewElementIdForTesting)),
+    ExtensionAPISetStreamState(ExtensionStreamState::kTranscribing),
+    InAnyContext(WaitForShow(
+        DictationOverlayView::kWaveformElementIdForTesting)),
+    Do([this] {
+      static_cast<SessionUi*>(session_ui())->UpdateAudioLevel(0.05f);
+    }),
+    InAnyContext(CheckViewProperty(
+        DictationOverlayView::kWaveformElementIdForTesting,
+        &WaveformViewButton::audio_level_for_testing, 0.5f))
+  );
+  // clang-format on
+}
+
+IN_PROC_BROWSER_TEST_F(DictationSessionUiImplBrowserTest,
+                       OverlayButtonsToggleStreamState) {
+  DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kWebContentsElementId);
+  const GURL url =
+      embedded_test_server()->GetURL("/textinput/simple_textarea.html");
+
+  // clang-format off
+  RunTestSequence(
+    InstrumentTab(kWebContentsElementId),
+    NavigateWebContents(kWebContentsElementId, url),
+    StartSessionWithTarget(kWebContentsElementId, "#text_id"),
+    ObserveSessionStateChanges(),
+    InAnyContext(WaitForShow(DictationOverlayView::kViewElementIdForTesting)),
+
+    CheckResult(GetSessionState(), SessionState::kStreamInitializing),
+    InAnyContext(WaitForShow(
+        DictationOverlayView::kMicButtonElementIdForTesting)),
+
+    // Pressing the mic button while initializing ends the stream.
+    InAnyContext(PressButton(
+        DictationOverlayView::kMicButtonElementIdForTesting)),
+    CheckResult(GetSessionState(), SessionState::kFinalizing),
+
+    ExtensionAPISetStreamState(ExtensionStreamState::kComplete),
+    WaitForSessionState(SessionState::kInactive),
+
+    // Pressing the mic button while inactive starts a stream.
+    InAnyContext(WaitForShow(
+        DictationOverlayView::kMicButtonElementIdForTesting)),
+    InAnyContext(PressButton(
+        DictationOverlayView::kMicButtonElementIdForTesting)),
+    CheckResult(GetSessionState(), SessionState::kStreamInitializing),
+
+    ExtensionAPISetStreamState(ExtensionStreamState::kTranscribing),
+    CheckResult(GetSessionState(), SessionState::kTranscribing),
+    InAnyContext(WaitForShow(
+        DictationOverlayView::kWaveformElementIdForTesting)),
+
+    // Pressing the waveform button ends the stream.
+    InAnyContext(PressButton(
+        DictationOverlayView::kWaveformElementIdForTesting)),
+    CheckResult(GetSessionState(), SessionState::kFinalizing)
   );
   // clang-format on
 }

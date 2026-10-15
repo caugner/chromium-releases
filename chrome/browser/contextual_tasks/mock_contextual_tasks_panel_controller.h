@@ -30,7 +30,10 @@ class MockContextualTasksPanelController
 
   MOCK_METHOD(void,
               Show,
-              (bool, omnibox::ChromeAimEntryPoint, bool),
+              (bool,
+               omnibox::ChromeAimEntryPoint,
+               bool,
+               std::optional<base::TimeTicks>),
               (override));
   MOCK_METHOD(void, Close, (), (override));
   MOCK_METHOD(void, OpenInZeroState, (), (override));
@@ -54,6 +57,10 @@ class MockContextualTasksPanelController
               (override));
   MOCK_METHOD(content::WebContents*,
               GetActiveWebContents,
+              (),
+              (const override));
+  MOCK_METHOD(content::WebContents*,
+              GetToolbarWebContents,
               (),
               (const override));
   MOCK_METHOD(std::vector<content::WebContents*>,
@@ -82,6 +89,7 @@ class MockContextualTasksPanelController
   MOCK_METHOD(void, MoveTaskUiToNewTab, (), (override));
   MOCK_METHOD(void, NotifyExpandToFullTabStateChanged, (), (override));
   MOCK_METHOD(bool, CanExpandToFullTab, (), (const, override));
+  MOCK_METHOD(void, ShowPageInfoBubble, (), (override));
   MOCK_METHOD(void, AddObserver, (Observer*), (override));
   MOCK_METHOD(void, RemoveObserver, (Observer*), (override));
 };

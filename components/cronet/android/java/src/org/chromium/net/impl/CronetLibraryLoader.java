@@ -21,6 +21,7 @@ import org.jni_zero.NativeMethods;
 
 import org.chromium.base.CommandLine;
 import org.chromium.base.ContextUtils;
+import org.chromium.base.JniAndroid;
 import org.chromium.base.Log;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.metrics.ScopedSysTraceEvent;
@@ -110,6 +111,17 @@ public class CronetLibraryLoader {
 
     private static void loadLibraryInternal(LibraryLoaderLambda loadLibraryFunction) {
         sLibAlreadyLoaded = true;
+
+        // Ensure this code contains a reference to JniAndroid. This makes it so that when ProGuard
+        // runs, it will correctly catch issues where the JniAndroid class is missing from the APK.
+        // This is especially relevant for the cronet_package_with_nativejava_apk test. If we didn't
+        // have this, we run a high risk of the absence of this class going unnoticed because:
+        //  - It has no other Java references to it (it is only called from native code);
+        //  - It is only used for crash handling, which is not easy to test;
+        //  - The consequences of the class being missing are only visible when Cronet crashes - it
+        //    will not affect normal operation.
+        var unused = JniAndroid.class;
+
         if (BuildConfig.CRONET_FOR_AOSP_BUILD) {
             // For AOSP we have only one library name, and exceptions should propagate.
             loadLibraryFunction.loadLibrary(getLibraryName(LIBRARY_NAME_HTTPENGINE));
@@ -223,9 +235,10 @@ public class CronetLibraryLoader {
                 }
                 Log.i(
                         TAG,
-                        "Cronet version: %s, arch: %s",
+                        "Cronet version: %s, arch: %s, source: %s",
                         implVersion,
-                        System.getProperty("os.arch"));
+                        System.getProperty("os.arch"),
+                        NativeCronetEngineBuilderImpl.getCronetSource());
                 setNativeLoggingLevel();
                 TraceEvent.onNativeTracingReady();
                 sWaitForLibLoad.open();
@@ -423,7 +436,7 @@ public class CronetLibraryLoader {
 
     @CalledByNative
     private static void setNetworkThreadPriorityOnNetworkThread(int priority) {
-        Log.d(TAG, "Setting network thread priority to " + priority);
+        Log.d(TAG, "Setting network thread priority to %d", priority);
         Process.setThreadPriority(priority);
     }
 

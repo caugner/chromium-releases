@@ -27,6 +27,9 @@ BASE_DECLARE_FEATURE(kContextualTasksContextLibrary);
 BASE_DECLARE_FEATURE(kContextualTasksContextLogging);
 BASE_DECLARE_FEATURE(kContextualTasksShowOnboardingTooltip);
 
+// Bypasses the dismissed cap for contextual tasks tooltips.
+BASE_DECLARE_FEATURE(kContextualTasksBypassDismissedCap);
+
 // Enables prefetching of cookies for contextual tasks.
 BASE_DECLARE_FEATURE(kContextualTasksCookiePrefetch);
 
@@ -85,6 +88,9 @@ BASE_DECLARE_FEATURE(kContextualTasksRoundedClipPath);
 // panel. The menu is still shown for lens flows.
 BASE_DECLARE_FEATURE(kContextualTasksHideMenuOnAiPage);
 
+// Enables painting dropdown menus outside WebUI boundaries.
+BASE_DECLARE_FEATURE(kContextualTasksUnboundedMenu);
+
 // Enables hiding the close button when in vertical tabs or immersive mode.
 BASE_DECLARE_FEATURE(kContextualTasksHideCloseButtonInVerticalTabs);
 
@@ -98,6 +104,9 @@ BASE_DECLARE_FEATURE(kContextualTasksPdfCitations);
 
 // When enabled, the back button can expand the side panel.
 BASE_DECLARE_FEATURE(kContextualTasksBackButtonExpandsSidePanel);
+
+// When enabled, close tab actions can expand the side panel.
+BASE_DECLARE_FEATURE(kContextualTasksCloseTabExpandsSidePanel);
 
 // Enables lazy fetching of cluster info for multimodal queries.
 BASE_DECLARE_FEATURE(kContextualTasksLazyFetchClusterInfo);
@@ -242,6 +251,10 @@ extern const base::FeatureParam<std::string> kQueryEmbeddingTask;
 extern const base::FeatureParam<double>
     kContextualTasksContextLoggingSampleRate;
 
+// The minimum number of words required in a query for contextual tasks context
+// tab relevancy selection.
+extern const base::FeatureParam<int> kMinQueryWords;
+
 // Controls whether we set the upload type in CreateSearchUrl.
 extern const base::FeatureParam<bool> kSendContextualInputUploadTypeInSearchUrl;
 
@@ -286,6 +299,10 @@ extern const base::FeatureParam<std::string> kContextualTasksHelpUrl;
 extern const base::FeatureParam<std::string>
     kContextualTasksOnboardingTooltipHelpUrl;
 
+// The URL for the help center article linked from the overflow menu.
+extern const base::FeatureParam<std::string>
+    kContextualTasksOverflowMenuHelpUrl;
+
 // Enables suggestions rendered on contextual tasks side, instead of from AIM
 // webpage.
 extern const base::FeatureParam<bool>
@@ -306,6 +323,14 @@ extern int GetContextualTasksLensSearchTooltipDismissedCap();
 // The maximum number of times the lens search tooltip can be shown to the user
 // in a single session before it no longer shows up.
 extern int GetContextualTasksLensSearchTooltipSessionImpressionCap();
+
+// The maximum number of times the AskG tooltip can be dismissed by the
+// user before it no longer shows up.
+extern int GetContextualTasksAskGTooltipDismissedCap();
+
+// The maximum number of times the AskG tooltip can be shown to the user
+// in a single session before it no longer shows up.
+extern int GetContextualTasksAskGTooltipSessionImpressionCap();
 
 // The delay in milliseconds before the onboarding tooltip is considered shown.
 extern int GetContextualTasksOnboardingTooltipImpressionDelay();
@@ -398,6 +423,9 @@ extern std::string GetContextualTasksOnboardingTooltipHelpUrl();
 // Returns the help URL for the help center article from the toolbar.
 extern std::string GetContextualTasksHelpUrl();
 
+// Returns the help URL for the overflow menu help center article.
+extern std::string GetContextualTasksOverflowMenuHelpUrl();
+
 // Returns whether smart compose is enabled for Contextual Tasks.
 extern bool GetEnableContextualTasksSmartCompose();
 
@@ -448,6 +476,9 @@ extern int GetContextualTasksNumSessionsBeforeRequestPinPromo();
 // Returns whether the webpage APC comparison is enabled.
 extern bool GetIsWebpageApcComparisonEnabled();
 
+extern bool IsContextualTasksRearchitectureEnabled();
+extern bool IsContextualTasksSidePanelRearchitectureEnabled();
+
 namespace flag_descriptions {
 
 extern const char kContextualTasksPrivateApiNoAnimationName[];
@@ -468,6 +499,8 @@ extern const char kContextualTasksJavaFuseboxName[];
 extern const char kContextualTasksJavaFuseboxDescription[];
 extern const char kContextualTasksBackButtonExpandsSidePanelName[];
 extern const char kContextualTasksBackButtonExpandsSidePanelDescription[];
+extern const char kContextualTasksCloseTabExpandsSidePanelName[];
+extern const char kContextualTasksCloseTabExpandsSidePanelDescription[];
 extern const char kContextualTasksOverrideShowBottomSheetOnLargeScreenName[];
 extern const char
     kContextualTasksOverrideShowBottomSheetOnLargeScreenDescription[];
@@ -485,6 +518,8 @@ extern const char kContextualTasksEphemeralBrandedEntryPointName[];
 extern const char kContextualTasksEphemeralBrandedEntryPointDescription[];
 extern const char kContextualTasksSidePanelRearchitectureName[];
 extern const char kContextualTasksSidePanelRearchitectureDescription[];
+extern const char kContextualTasksBypassDismissedCapName[];
+extern const char kContextualTasksBypassDismissedCapDescription[];
 
 }  // namespace flag_descriptions
 

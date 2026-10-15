@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/frame/local_frame_mojo_handler.h"
 
+#include "base/command_line.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/time/time.h"
@@ -18,6 +19,7 @@
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/frame/frame_owner_element_type.h"
 #include "third_party/blink/public/common/page_state/page_state.h"
+#include "third_party/blink/public/common/switches.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/devtools/inspector_issue.mojom-blink.h"
 #include "third_party/blink/public/mojom/frame/frame_owner_properties.mojom-blink.h"
@@ -428,6 +430,12 @@ mojom::blink::DevicePostureType LocalFrameMojoHandler::GetDevicePosture() {
     return current_device_posture_;
   }
 
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          blink::switches::kTopChromeWebUI) &&
+      base::FeatureList::IsEnabled(features::kWebUIBypassMojoConnections)) {
+    return current_device_posture_;
+  }
+
   auto task_runner = frame_->GetTaskRunner(TaskType::kInternalDefault);
   DevicePostureProvider()->AddListenerAndGetCurrentPosture(
       device_posture_receiver_.BindNewPipeAndPassRemote(task_runner),
@@ -791,15 +799,6 @@ void LocalFrameMojoHandler::DidUpdateFramePolicy(
   To<RemoteFrameOwner>(frame_->Owner())->SetFramePolicy(frame_policy);
 }
 
-void LocalFrameMojoHandler::OnFrameVisibilityChanged(
-    mojom::blink::FrameVisibility visibility) {
-  if (frame_->Client() && frame_->Client()->GetWebFrame() &&
-      frame_->Client()->GetWebFrame()->Client()) {
-    frame_->Client()->GetWebFrame()->Client()->OnFrameVisibilityChanged(
-        visibility);
-  }
-}
-
 void LocalFrameMojoHandler::OnPostureChanged(
     mojom::blink::DevicePostureType posture) {
   if (!RuntimeEnabledFeatures::DevicePostureEnabled(
@@ -996,8 +995,7 @@ void LocalFrameMojoHandler::InvokeScriptToolForInspector(
               FROM_HERE,
               blink::BindOnce(base::IgnoreResult(&ModelContext::ExecuteTool),
                               WrapPersistent(model_context), invocation_id,
-                              tool_name, input_arguments,
-                              /*signal=*/nullptr, base::DoNothing()));
+                              tool_name, input_arguments, base::DoNothing()));
       std::move(callback).Run(true);
       return;
     }

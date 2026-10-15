@@ -281,6 +281,13 @@ GURL AddLensOverlaySuggestInputsDataToEndpointUrl(
           lens_overlay_suggest_inputs->search_session_id());
     }
   }
+
+  if (lens_overlay_suggest_inputs->has_encoded_contextual_inputs()) {
+    modified_url = net::AppendOrReplaceQueryParameter(
+        modified_url, "cinpts",
+        lens_overlay_suggest_inputs->encoded_contextual_inputs());
+  }
+
   return modified_url;
 }
 
@@ -439,10 +446,12 @@ GURL RemoteSuggestionsService::EndpointUrl(
                                                "chrome-multimodal");
       break;
     }
+    case metrics::OmniboxEventProto::COMPOSEBOX_EVERYWHERE:
     case metrics::OmniboxEventProto::NTP_REALBOX:
     case metrics::OmniboxEventProto::NTP_COMPOSEBOX:
     case metrics::OmniboxEventProto::CO_BROWSING_COMPOSEBOX:
     case metrics::OmniboxEventProto::NTP_OMNIBOX_COMPOSEBOX:
+    case metrics::OmniboxEventProto::OMNIBOX_EVERYWHERE:
     case metrics::OmniboxEventProto::SRP_OMNIBOX_COMPOSEBOX:
     case metrics::OmniboxEventProto::OTHER_OMNIBOX_COMPOSEBOX:
       if (search_terms_args.lens_overlay_suggest_inputs.has_value() &&

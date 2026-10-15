@@ -1780,13 +1780,15 @@ void WebBluetoothServiceImpl::RequestDeviceImpl(
     return;
   }
 
-  // Calls to requestDevice() require user activation (user gestures).  We
-  // should close any opened chooser when a duplicate requestDevice call is
-  // made with the same user activation or when any gesture occurs outside
-  // of the opened chooser. This does not happen on all platforms so we
-  // don't DCHECK that the old one is closed.  We destroy the old chooser
-  // before constructing the new one to make sure they can't conflict.
+  // Close any opened chooser before constructing a new one. Destroying the
+  // chooser UI may trigger activation observers that synchronously destroy the
+  // hosting WebContents (and therefore `this`). Guard with a WeakPtr.
+  base::WeakPtr<WebBluetoothServiceImpl> weak_this =
+      weak_ptr_factory_.GetWeakPtr();
   device_chooser_controller_.reset();
+  if (!weak_this) {
+    return;
+  }
 
   device_chooser_controller_ =
       std::make_unique<BluetoothDeviceChooserController>(
@@ -2064,8 +2066,11 @@ void WebBluetoothServiceImpl::OnCreateGATTConnection(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (base::FeatureList::IsEnabled(
-          blink::features::kWebBluetoothCancelConnect)) {
-    pending_connection_device_ids_.erase(device_id);
+          blink::features::kWebBluetoothCancelConnect) &&
+      pending_connection_device_ids_.erase(device_id) == 0) {
+    std::move(callback).Run(
+        blink::mojom::WebBluetoothResult::CONNECT_CONN_FAILED);
+    return;
   }
   if (error_code.has_value()) {
     std::move(callback).Run(TranslateConnectErrorAndRecord(error_code.value()));

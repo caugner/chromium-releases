@@ -137,6 +137,9 @@
       <message name="IDS_INDIGO_TOOLBAR_COLLAPSE" desc="Tooltip for collapsing the Indigo toolbar." translateable="false">
         Collapse
       </message>
+      <message name="IDS_INDIGO_TOOLBAR_CLOSE_ACCESSIBLE_NAME" desc="Accessible name for a button which, when clicked, closes the indigo toolbar and generated image." translateable="false">
+        Close generated image
+      </message>
       <message name="IDS_INDIGO_TOOLBAR_REGENERATE" desc="Button label to regenerate the Indigo content." translateable="false">
         Regenerate
       </message>
@@ -152,6 +155,17 @@
         Something went wrong
       </message>
       <message name="IDS_INDIGO_INVOKE_ERROR_TOAST_TRY_AGAIN_BUTTON" desc="Text for the try again button on the Indigo invocation error toast notification." translateable="false">
+        Try again
+      </message>
+
+      <!-- Delete Uploaded Photo Toasts -->
+      <message name="IDS_INDIGO_DELETE_SUCCESS_TOAST_BODY" desc="Text on a toast notification that is shown when the uploaded photo is successfully deleted." translateable="false">
+        Photo deleted
+      </message>
+      <message name="IDS_INDIGO_DELETE_ERROR_TOAST_BODY" desc="Text on a toast notification that is shown when Indigo fails to delete the uploaded photo." translateable="false">
+        Something went wrong
+      </message>
+      <message name="IDS_INDIGO_DELETE_ERROR_TOAST_TRY_AGAIN_BUTTON" desc="Text for the try again button on the Indigo delete error toast notification." translateable="false">
         Try again
       </message>
 

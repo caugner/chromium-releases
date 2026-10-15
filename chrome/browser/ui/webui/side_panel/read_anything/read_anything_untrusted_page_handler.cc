@@ -39,6 +39,7 @@
 #include "chrome/common/read_anything/read_anything.mojom-shared.h"
 #include "chrome/common/read_anything/read_anything.mojom.h"
 #include "chrome/common/read_anything/read_anything_util.h"
+#include "chrome/common/webui_url_constants.h"
 #include "components/dom_distiller/content/browser/distiller_javascript_utils.h"
 #include "components/dom_distiller/content/browser/distiller_page_web_contents.h"
 #include "components/dom_distiller/core/distiller_page.h"
@@ -49,10 +50,12 @@
 #include "components/language/core/common/locale_util.h"
 #include "components/language_detection/core/constants.h"
 #include "components/pdf/browser/pdf_frame_util.h"
+#include "components/pdf/common/constants.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/translate/core/browser/language_state.h"
 #include "components/translate/core/browser/translate_driver.h"
+#include "components/translate/core/browser/translate_manager.h"
 #include "content/public/browser/browser_accessibility_state.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
@@ -82,6 +85,7 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 #include "url/url_constants.h"
 
 #if BUILDFLAG(ENABLE_PDF)
@@ -174,6 +178,13 @@ constexpr int PDF_LOAD_DELAY_MS = 1000;
 // Prefix definition for logging.
 constexpr char kReadAnythingPrefix[] = "Read Anything";
 
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+// chrome://whats-new renders its content in a single https://www.google.com
+// child frame (see the frame-src CSP in WhatsNewUI). Reading mode distills that
+// frame directly.
+constexpr char kWhatsNewEmbeddedContentOrigin[] = "https://www.google.com";
+#endif
+
 #if BUILDFLAG(IS_CHROMEOS)
 
 InstallationState GetInstallationStateFromStatusCode(
@@ -246,15 +257,46 @@ InstallationState GetInstallationStateFromStatusCode(
 #endif
 
 constexpr std::string_view kRendererLinkRequestHistogram =
-    "Accessibility.ReadAnything.RendererRequestForLinkClick.IsFromObservedTree";
+    "Accessibility.ReadAnything.RendererRequestForLinkClick.Result";
 constexpr std::string_view kRendererImageRequestHistogram =
-    "Accessibility.ReadAnything.RendererRequestForImageDataDownload."
-    "IsFromObservedTree";
+    "Accessibility.ReadAnything.RendererRequestForImageDataDownload.Result";
 constexpr std::string_view kRendererScrollRequestHistogram =
-    "Accessibility.ReadAnything.RendererRequestForScrollToTargetNode."
-    "IsFromObservedTree";
+    "Accessibility.ReadAnything.RendererRequestForScrollToTargetNode.Result";
 constexpr std::string_view kRendererSelectionRequestHistogram =
-    "Accessibility.ReadAnything.RendererRequestForSelection.IsFromObservedTree";
+    "Accessibility.ReadAnything.RendererRequestForSelection.Result";
+
+// The contents MIME type is fixed when the main frame commits, so this reliably
+// identifies full-page PDFs before their content frame exists.
+bool IsFullPagePdf(content::WebContents* contents) {
+  return contents && contents->GetContentsMimeType() == pdf::kPDFMimeType;
+}
+
+// Returns whether `rfh` is a subframe of the primary page that the primary main
+// frame can already script, i.e. it is same-origin with it. Opaque main frame
+// origins are excluded because opaque-origin frames cannot script each other.
+// file:// main frame origins are excluded because all file:// URLs share one
+// url::Origin even though Blink isolates local files from each other.
+bool IsSameOriginSubframe(content::RenderFrameHost* rfh,
+                          content::RenderFrameHost* main_frame) {
+  const url::Origin& main_origin = main_frame->GetLastCommittedOrigin();
+  return rfh->GetMainFrame() == main_frame && !main_origin.opaque() &&
+         main_origin.scheme() != url::kFileScheme &&
+         rfh->GetLastCommittedOrigin().IsSameOriginWith(main_origin);
+}
+
+// chrome://whats-new only exists on Windows, Mac and Linux.
+bool IsWhatsNewEmbeddedContentFrame(content::RenderFrameHost* rfh,
+                                    content::RenderFrameHost* main_frame) {
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+  return rfh->GetParent() == main_frame &&
+         main_frame->GetLastCommittedOrigin().IsSameOriginWith(
+             GURL(chrome::kChromeUIWhatsNewURL)) &&
+         rfh->GetLastCommittedOrigin().IsSameOriginWith(
+             GURL(kWhatsNewEmbeddedContentOrigin));
+#else
+  return false;
+#endif
+}
 
 }  // namespace
 
@@ -536,6 +578,12 @@ void ReadAnythingUntrustedPageHandler::WebContentsDestroyed() {
 
 void ReadAnythingUntrustedPageHandler::AccessibilityEventReceived(
     const ui::AXUpdatesAndEvents& details) {
+  // Only forward accessibility data for frames that Reading Mode distills.
+  if (!IsObservingTree(details.ax_tree_id)) {
+    DVLOG(2) << "Dropping accessibility event for tree " << details.ax_tree_id;
+    return;
+  }
+  forwarded_tree_ids_.insert(details.ax_tree_id);
   page_->AccessibilityEventReceived(details.ax_tree_id, details.updates,
                                     details.events);
 }
@@ -553,7 +601,11 @@ void ReadAnythingUntrustedPageHandler::AccessibilityLocationChangesReceived(
 ///////////////////////////////////////////////////////////////////////////////
 
 void ReadAnythingUntrustedPageHandler::TreeRemoved(ui::AXTreeID ax_tree_id) {
-  page_->OnAXTreeDestroyed(ax_tree_id);
+  // The registry reports removals for every tree in the browser; only tell the
+  // renderer about trees it was sent.
+  if (forwarded_tree_ids_.erase(ax_tree_id)) {
+    page_->OnAXTreeDestroyed(ax_tree_id);
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -562,6 +614,11 @@ void ReadAnythingUntrustedPageHandler::TreeRemoved(ui::AXTreeID ax_tree_id) {
 
 void ReadAnythingUntrustedPageHandler::GetDependencyParserModel(
     GetDependencyParserModelCallback callback) {
+  if (!features::IsReadAnythingReadAloudPhraseHighlightingEnabled()) {
+    std::move(callback).Run(base::File());
+    return;
+  }
+
   DependencyParserModelLoader* loader =
       DependencyParserModelLoaderFactory::GetForProfile(profile_);
   if (!loader) {
@@ -806,9 +863,26 @@ void ReadAnythingUntrustedPageHandler::UninstallVoice(
 }
 
 void ReadAnythingUntrustedPageHandler::OnCopy() {
+  if (!HasTransientUserActivation()) {
+    VLOG(1) << "OnCopy failed with no transient user activation";
+    return;
+  }
+
   if (main_observer_ && main_observer_->web_contents()) {
     main_observer_->web_contents()->Copy();
   }
+}
+
+content::WebContents* ReadAnythingUntrustedPageHandler::GetWebContents() const {
+  // Target the PDF observer's WebContents if available instead of the outer
+  // container frame.
+  if (pdf_observer_ != nullptr) {
+    return pdf_observer_->web_contents();
+  }
+  if (main_observer_ != nullptr) {
+    return main_observer_->web_contents();
+  }
+  return nullptr;
 }
 
 bool ReadAnythingUntrustedPageHandler::IsObservingTree(
@@ -834,14 +908,46 @@ bool ReadAnythingUntrustedPageHandler::IsObservingTree(
           : !!pdf_observer_;
 
   if (!are_contents_pdf) {
-    return rfh == contents->GetPrimaryMainFrame();
+    // `contents` is the main observed contents here.
+    content::RenderFrameHost* main_frame = contents->GetPrimaryMainFrame();
+    return rfh == main_frame || IsSameOriginSubframe(rfh, main_frame) ||
+           IsWhatsNewEmbeddedContentFrame(rfh, main_frame);
   }
 
   content::RenderFrameHost* pdf_rfh =
       chrome_pdf::features::IsOopifPdfEnabled()
           ? pdf_frame_util::FindFullPagePdfExtensionHost(contents)
           : pdf_frame_util::FindPdfChildFrame(contents->GetPrimaryMainFrame());
-  return pdf_rfh && rfh == pdf_rfh;
+  if (!pdf_rfh) {
+    return false;
+  }
+  if (rfh == pdf_rfh) {
+    return true;
+  }
+
+  // For OOPIF PDFs, `pdf_rfh` is the extension host, while PDF content lives
+  // in its child frame. Accept both so requests targeting either the extension
+  // host or the content frame succeed.
+  return chrome_pdf::features::IsOopifPdfEnabled() &&
+         rfh == pdf_frame_util::FindPdfChildFrame(pdf_rfh);
+}
+
+bool ReadAnythingUntrustedPageHandler::AreActionsAllowedInTree(
+    const ui::AXTreeID& tree_id) const {
+  content::RenderFrameHost* rfh =
+      content::RenderFrameHost::FromAXTreeID(tree_id);
+  if (!rfh) {
+    return false;
+  }
+
+  content::WebContents* contents = GetWebContents();
+  bool are_contents_pdf =
+      chrome_pdf::features::IsOopifPdfEnabled()
+          ? !!extensions::mime_handler::MimeHandlerStreamManager::
+                 FromWebContents(contents)
+          : !!pdf_observer_;
+
+  return are_contents_pdf || rfh->GetLastCommittedURL().SchemeIsHTTPOrHTTPS();
 }
 
 void ReadAnythingUntrustedPageHandler::OnLineSpaceChange(
@@ -869,6 +975,30 @@ void ReadAnythingUntrustedPageHandler::OnFontSizeChange(double font_size) {
 void ReadAnythingUntrustedPageHandler::OnLinksEnabledChanged(bool enabled) {
   profile_->GetPrefs()->SetBoolean(
       prefs::kAccessibilityReadAnythingLinksEnabled, enabled);
+}
+
+void ReadAnythingUntrustedPageHandler::OnTranslationRequested() {
+  if (!features::IsReadAnythingTranslateEntryPointEnabled()) {
+    mojo::ReportBadMessage("Translate entry point not enabled");
+    return;
+  }
+  content::WebContents* contents = GetWebContents();
+  if (!contents) {
+    return;
+  }
+
+  ChromeTranslateClient* translate_client =
+      ChromeTranslateClient::FromWebContents(contents);
+  if (!translate_client) {
+    return;
+  }
+
+  translate::TranslateManager* translate_manager =
+      translate_client->GetTranslateManager();
+  if (translate_manager) {
+    translate_manager->ShowTranslateUI(/*auto_translate=*/true,
+                                       /*triggered_from_menu=*/true);
+  }
 }
 
 void ReadAnythingUntrustedPageHandler::OnImagesEnabledChanged(bool enabled) {
@@ -947,13 +1077,31 @@ void ReadAnythingUntrustedPageHandler::OnReadAloudAudioStateChange(
 void ReadAnythingUntrustedPageHandler::OnLinkClicked(
     const ui::AXTreeID& target_tree_id,
     ui::AXNodeID target_node_id) {
-  bool is_observing_tree = IsObservingTree(target_tree_id);
-  base::UmaHistogramBoolean(kRendererLinkRequestHistogram, is_observing_tree);
-  if (!is_observing_tree) {
+  if (!HasTransientUserActivation()) {
+    VLOG(1) << "OnLinkClicked failed with no transient user activation";
+    return;
+  }
+
+  if (!IsObservingTree(target_tree_id)) {
+    base::UmaHistogramEnumeration(
+        kRendererLinkRequestHistogram,
+        ReadAnythingRendererRequestResult::kNotObservedTree);
     VLOG(1) << "Received link click request for tree_id " << target_tree_id
             << " which is not currently being observed";
     return;
   }
+
+  if (!AreActionsAllowedInTree(target_tree_id)) {
+    base::UmaHistogramEnumeration(
+        kRendererLinkRequestHistogram,
+        ReadAnythingRendererRequestResult::kDisallowedActionOnPageType);
+    VLOG(1) << "Ignoring link click on non-HTTP/HTTPS frame";
+    return;
+  }
+
+  base::UmaHistogramEnumeration(kRendererLinkRequestHistogram,
+                                ReadAnythingRendererRequestResult::kAllowed);
+
   if (!ui::IsValidAXNodeIDFromRenderer(target_node_id)) {
     VLOG(1) << "Received link click request with invalid target_node_id "
             << target_node_id;
@@ -970,18 +1118,32 @@ void ReadAnythingUntrustedPageHandler::OnLinkClicked(
 void ReadAnythingUntrustedPageHandler::OnImageDataRequested(
     const ui::AXTreeID& target_tree_id,
     ui::AXNodeID target_node_id) {
-  bool is_observing_tree = IsObservingTree(target_tree_id);
-  base::UmaHistogramBoolean(kRendererImageRequestHistogram, is_observing_tree);
-  if (!is_observing_tree) {
+  if (!IsObservingTree(target_tree_id)) {
+    base::UmaHistogramEnumeration(
+        kRendererImageRequestHistogram,
+        ReadAnythingRendererRequestResult::kNotObservedTree);
     VLOG(1) << "Received image data request for tree_id " << target_tree_id
             << " which is not currently being observed";
     return;
   }
+
+  if (!AreActionsAllowedInTree(target_tree_id)) {
+    base::UmaHistogramEnumeration(
+        kRendererImageRequestHistogram,
+        ReadAnythingRendererRequestResult::kDisallowedActionOnPageType);
+    VLOG(1) << "Ignoring image data request on non-HTTP/HTTPS frame";
+    return;
+  }
+
+  base::UmaHistogramEnumeration(kRendererImageRequestHistogram,
+                                ReadAnythingRendererRequestResult::kAllowed);
+
   if (!ui::IsValidAXNodeIDFromRenderer(target_node_id)) {
     VLOG(1) << "Received image data request with invalid target_node_id "
             << target_node_id;
     return;
   }
+
   main_observer_->web_contents()->DownloadImageFromAxNode(
       target_tree_id, target_node_id,
       /*preferred_size=*/gfx::Size(),
@@ -999,7 +1161,11 @@ void ReadAnythingUntrustedPageHandler::OnImageDataDownloaded(
     const GURL& image_url,
     const std::vector<SkBitmap>& bitmaps,
     const std::vector<gfx::Size>& sizes) {
-  CHECK(IsObservingTree(target_tree_id));
+  // The target frame may have been removed or navigated while the image was
+  // downloading.
+  if (!IsObservingTree(target_tree_id)) {
+    return;
+  }
   if (!ui::IsValidAXNodeIDFromRenderer(node_id)) {
     VLOG(1) << "Received image data download notification with invalid node_id "
             << node_id;
@@ -1025,13 +1191,17 @@ void ReadAnythingUntrustedPageHandler::OnImageDataDownloaded(
 void ReadAnythingUntrustedPageHandler::ScrollToTargetNode(
     const ui::AXTreeID& target_tree_id,
     ui::AXNodeID target_node_id) {
-  bool is_observing_tree = IsObservingTree(target_tree_id);
-  base::UmaHistogramBoolean(kRendererScrollRequestHistogram, is_observing_tree);
-  if (!is_observing_tree) {
+  if (!IsObservingTree(target_tree_id)) {
+    base::UmaHistogramEnumeration(
+        kRendererScrollRequestHistogram,
+        ReadAnythingRendererRequestResult::kNotObservedTree);
     VLOG(1) << "Received scroll request for tree_id " << target_tree_id
             << " which is not currently being observed";
     return;
   }
+
+  base::UmaHistogramEnumeration(kRendererScrollRequestHistogram,
+                                ReadAnythingRendererRequestResult::kAllowed);
   if (!ui::IsValidAXNodeIDFromRenderer(target_node_id)) {
     VLOG(1) << "Received scroll request with invalid target_node_id "
             << target_node_id;
@@ -1125,14 +1295,30 @@ void ReadAnythingUntrustedPageHandler::OnSelectionChange(
     int anchor_offset,
     ui::AXNodeID focus_node_id,
     int focus_offset) {
-  bool is_observing_tree = IsObservingTree(target_tree_id);
-  base::UmaHistogramBoolean(kRendererSelectionRequestHistogram,
-                            is_observing_tree);
-  if (!is_observing_tree) {
+  if (!HasTransientUserActivation()) {
+    VLOG(1) << "OnSelectionChange failed with no transient user activation";
+    return;
+  }
+
+  if (!IsObservingTree(target_tree_id)) {
+    base::UmaHistogramEnumeration(
+        kRendererSelectionRequestHistogram,
+        ReadAnythingRendererRequestResult::kNotObservedTree);
     VLOG(1) << "Received selection request for tree_id " << target_tree_id
             << " which is not currently being observed";
     return;
   }
+
+  if (!AreActionsAllowedInTree(target_tree_id)) {
+    base::UmaHistogramEnumeration(
+        kRendererSelectionRequestHistogram,
+        ReadAnythingRendererRequestResult::kDisallowedActionOnPageType);
+    VLOG(1) << "Ignoring selection change on non-HTTP/HTTPS frame";
+    return;
+  }
+
+  base::UmaHistogramEnumeration(kRendererSelectionRequestHistogram,
+                                ReadAnythingRendererRequestResult::kAllowed);
   if (!ui::IsValidAXNodeIDFromRenderer(anchor_node_id)) {
     VLOG(1) << "Received selection request with invalid anchor_node_id "
             << anchor_node_id;
@@ -1155,6 +1341,11 @@ void ReadAnythingUntrustedPageHandler::OnSelectionChange(
 }
 
 void ReadAnythingUntrustedPageHandler::OnCollapseSelection() {
+  if (!HasTransientUserActivation()) {
+    VLOG(1) << "OnCollapseSelection failed with no transient user activation";
+    return;
+  }
+
   if (main_observer_ && main_observer_->web_contents()) {
     main_observer_->web_contents()->CollapseSelection();
   }
@@ -1163,10 +1354,9 @@ void ReadAnythingUntrustedPageHandler::OnCollapseSelection() {
 void ReadAnythingUntrustedPageHandler::OnDistillationStatus(
     read_anything::mojom::DistillationStatus status,
     int word_count) {
-  if (last_open_trigger_.has_value() &&
-      last_open_trigger_.value() == ReadAnythingOpenTrigger::kOmniboxChip) {
+  if (last_open_trigger_ == ReadAnythingOpenTrigger::kOmniboxChip) {
     if (status != read_anything::mojom::DistillationStatus::kStillRunning) {
-      last_open_trigger_.reset();
+      last_open_trigger_ = ReadAnythingOpenTrigger::kUnknown;
       base::UmaHistogramEnumeration(
           "Accessibility.ReadAnything.DistillationStatusAfterOmnibox", status);
       base::UmaHistogramCustomCounts(
@@ -1197,11 +1387,14 @@ void ReadAnythingUntrustedPageHandler::SetDefaultLanguageCode(
 
 void ReadAnythingUntrustedPageHandler::Activate(
     bool active,
-    std::optional<ReadAnythingOpenTrigger> open_trigger,
+    ReadAnythingOpenTrigger open_trigger,
     std::optional<base::TimeDelta> completed_session_duration) {
   active_ = active;
   if (active_) {
     last_open_trigger_ = open_trigger;
+    page_->OnReadingModeShown(
+        static_cast<read_anything::mojom::ReadAnythingOpenTrigger>(
+            open_trigger));
     tab_will_detach_ = false;
     if (features::IsImmersiveReadAnythingEnabled()) {
       // Signal that reading mode has been re-opened and is no longer hidden if
@@ -1317,7 +1510,10 @@ void ReadAnythingUntrustedPageHandler::SetUpPdfObserver() {
   // TODO(crbug.com/340272378): When removing this feature flag, delete
   // `pdf_observer_` and integrate ReadAnythingWebContentsObserver with
   // ReadAnythingUntrustedPageHandler.
-  if (!chrome_pdf::features::IsOopifPdfEnabled()) {
+  // Only adopt the PDF guest when the tab itself is a full-page PDF. An
+  // embedded PDF on an HTML page is not distilled as a PDF.
+  if (!chrome_pdf::features::IsOopifPdfEnabled() &&
+      IsFullPagePdf(main_contents)) {
     std::vector<content::WebContents*> inner_contents =
         main_contents ? main_contents->GetInnerWebContents()
                       : std::vector<content::WebContents*>();
@@ -1352,6 +1548,7 @@ void ReadAnythingUntrustedPageHandler::CheckIfActiveAXTreeChangedToPdf() {
     is_pdf_with_frame_ = true;
     is_waiting_for_pdf_frame_ = false;
     VLOG(1) << "Sending pdf tree with id " << pdf_rfh->GetAXTreeID();
+    forwarded_tree_ids_.insert(pdf_rfh->GetAXTreeID());
     page_->OnActiveAXTreeIDChanged(
         pdf_rfh->GetAXTreeID(), pdf_rfh->GetPageUkmSourceId(), /*is_pdf=*/true);
   } else {
@@ -1447,6 +1644,7 @@ void ReadAnythingUntrustedPageHandler::OnActiveAXTreeIDChanged() {
 
   // When IsReadAnythingWithReadabilityEnabled is true, we still send AX tree
   // for text selection.
+  forwarded_tree_ids_.insert(rfh->GetAXTreeID());
   page_->OnActiveAXTreeIDChanged(rfh->GetAXTreeID(), rfh->GetPageUkmSourceId(),
                                  /*is_pdf=*/false);
 
@@ -1599,7 +1797,7 @@ void ReadAnythingUntrustedPageHandler::EvaluateDistillationQuality(
   tab_->GetContents()->RequestAXTreeSnapshot(
       base::BindOnce(
           &ReadAnythingUntrustedPageHandler::OnAXTreeSnapshotReceived,
-          weak_factory_.GetSafeRef(), distilled_html),
+          weak_factory_.GetWeakPtr(), distilled_html),
       ui::kAXModeWebContentsOnly,
       /* max_nodes= */ kMaxNodesForDistillationQualityEvaluation,
       /* timeout= */ {}, content::WebContents::AXTreeSnapshotPolicy::kAll);
@@ -1633,7 +1831,7 @@ void ReadAnythingUntrustedPageHandler::OnAXTreeSnapshotReceived(
       snapshot, distilled_html,
       base::BindOnce(
           &ReadAnythingUntrustedPageHandler::OnQualityMetricsEvaluated,
-          weak_factory_.GetSafeRef()));
+          weak_factory_.GetWeakPtr()));
 }
 
 void ReadAnythingUntrustedPageHandler::OnQualityMetricsEvaluated(
@@ -1654,7 +1852,11 @@ void ReadAnythingUntrustedPageHandler::OnQualityMetricsEvaluated(
   }
 
   const auto& metrics = result.value();
+  LogDistillationQualityMetrics(metrics);
+}
 
+void ReadAnythingUntrustedPageHandler::LogDistillationQualityMetrics(
+    const reading_mode::mojom::DistillationMetricsPtr& metrics) {
   if (tab_ && tab_->GetContents()) {
     ukm::SourceId source_id =
         tab_->GetContents()->GetPrimaryMainFrame()->GetPageUkmSourceId();
@@ -1670,6 +1872,28 @@ void ReadAnythingUntrustedPageHandler::OnQualityMetricsEvaluated(
             static_cast<int>(metrics->link_density_ratio * 100.0))
         .Record(ukm::UkmRecorder::Get());
   }
+
+  base::UmaHistogramPercentage(
+      "Accessibility.ReadAnything.DistillationQuality.RougeLF1",
+      static_cast<int>(metrics->rouge_l_f1 * 100.0));
+  base::UmaHistogramPercentage(
+      "Accessibility.ReadAnything.DistillationQuality.RougeLPrecision",
+      static_cast<int>(metrics->rouge_l_precision * 100.0));
+  base::UmaHistogramPercentage(
+      "Accessibility.ReadAnything.DistillationQuality.RougeLRecall",
+      static_cast<int>(metrics->rouge_l_recall * 100.0));
+  base::UmaHistogramPercentage(
+      "Accessibility.ReadAnything.DistillationQuality.RougeLF2",
+      static_cast<int>(metrics->rouge_l_f2 * 100.0));
+  base::UmaHistogramPercentage(
+      "Accessibility.ReadAnything.DistillationQuality.StructScore",
+      static_cast<int>(metrics->struct_score * 100.0));
+  base::UmaHistogramPercentage(
+      "Accessibility.ReadAnything.DistillationQuality.FormatScore",
+      static_cast<int>(metrics->format_score * 100.0));
+  base::UmaHistogramPercentage(
+      "Accessibility.ReadAnything.DistillationQuality.LinkDensityRatio",
+      static_cast<int>(metrics->link_density_ratio * 100.0));
 }
 
 void ReadAnythingUntrustedPageHandler::SetLanguageCode(
@@ -1815,3 +2039,8 @@ void ReadAnythingUntrustedPageHandler::OnLockStateChanged(bool locked) {
   }
 }
 #endif
+
+bool ReadAnythingUntrustedPageHandler::HasTransientUserActivation() const {
+  return web_ui_ && web_ui_->GetRenderFrameHost() &&
+         web_ui_->GetRenderFrameHost()->HasTransientUserActivation();
+}

@@ -172,11 +172,10 @@ void ReparentToAppBrowser(content::WebContents* old_web_contents,
                            /*user_gesture=*/true));
   }
   CHECK(AppBrowserController::IsWebApp(target_browser));
-  ReparentWebContentsIntoBrowserImpl(
-      main_browser, old_web_contents, target_browser,
-      AppBrowserController::From(target_browser)
-          ->IsUrlInHomeTabScope(target_url));
-  CHECK(old_web_contents);
+  ReparentWebContentsIntoBrowserImpl(main_browser, old_web_contents,
+                                     target_browser,
+                                     AppBrowserController::From(target_browser)
+                                         ->IsUrlInHomeTabScope(target_url));
 }
 
 void ReparentWebContentsToTabbedBrowser(content::WebContents* old_web_contents,
@@ -335,9 +334,8 @@ NavigationCapturingProcess::MaybeHandleAppNavigation(
   const std::optional<ash::SystemWebAppType> capturing_system_app_type =
       ash::GetCapturingSystemAppForURL(profile, params.url);
   if (capturing_system_app_type.has_value()) {
-    if (params.browser && ash::IsBrowserForSystemWebApp(
-                              params.browser->GetBrowserForMigrationOnly(),
-                              capturing_system_app_type.value())) {
+    if (params.browser && GetSystemWebAppType(params.browser) ==
+                              capturing_system_app_type.value()) {
       RecordInitialNavigationCapturingResult(
           NavigationCapturingInitialResult::kNotHandled);
       return nullptr;
@@ -1089,7 +1087,13 @@ NavigationCapturingProcess::HandleRedirect() {
   const std::optional<webapps::AppId> initial_launched_app_id =
       launched_app_id_;
 
+  base::WeakPtr<NavigationCapturingProcess> self =
+      weak_ptr_factory_.GetWeakPtr();
   RedirectDecision decision = HandleRedirectImpl();
+
+  if (!self) {
+    return decision.action;
+  }
 
   // If we cancel the current navigation, that target window will manage its own
   // launch state. We exit early here to prevent recording duplicate launches on
@@ -1208,11 +1212,11 @@ NavigationCapturingProcess::HandleRedirectImpl() {
         initial_nav_handling_result_ ==
             NavigationCapturingInitialResult::kNewAppWindow) {
       debug_data_.Set("!redirection_result", "Reparent, btab");
+      redirection_result_ =
+          NavigationCapturingRedirectionResult::kReparentBrowserTabToBrowserTab;
       ReparentWebContentsToTabbedBrowser(web_contents_for_navigation,
                                          disposition_,
                                          navigation_params_browser_);
-      redirection_result_ =
-          NavigationCapturingRedirectionResult::kReparentBrowserTabToBrowserTab;
     } else {
       debug_data_.Set("!redirection_result", "Noop1");
       redirection_result_ = NavigationCapturingRedirectionResult::kSameContext;
@@ -1241,11 +1245,11 @@ NavigationCapturingProcess::HandleRedirectImpl() {
     // standalone-app -> browser-tab-app.
     if (target_display_mode == blink::mojom::DisplayMode::kBrowser) {
       debug_data_.Set("!redirection_result", "app to btab");
+      redirection_result_ =
+          NavigationCapturingRedirectionResult::kReparentAppToBrowserTab;
       ReparentWebContentsToTabbedBrowser(web_contents_for_navigation,
                                          disposition_,
                                          navigation_params_browser_);
-      redirection_result_ =
-          NavigationCapturingRedirectionResult::kReparentAppToBrowserTab;
       return {content::NavigationThrottle::PROCEED, *target_app_id};
     }
     debug_data_.Set("!redirection_result", "app to app");
@@ -1365,11 +1369,11 @@ NavigationCapturingProcess::HandleRedirectImpl() {
     if (initial_nav_handling_result_ ==
         NavigationCapturingInitialResult::kNewAppWindow) {
       debug_data_.Set("!redirection_result", "btab");
+      redirection_result_ =
+          NavigationCapturingRedirectionResult::kAppBrowserTabOpened;
       ReparentWebContentsToTabbedBrowser(web_contents_for_navigation,
                                          disposition_,
                                          navigation_params_browser_);
-      redirection_result_ =
-          NavigationCapturingRedirectionResult::kAppBrowserTabOpened;
     }
     return {content::NavigationThrottle::PROCEED, *target_app_id};
   }

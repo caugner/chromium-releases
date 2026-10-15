@@ -139,6 +139,10 @@
 #include "ui/gl/gl_switches.h"
 #include "url/gurl.h"
 
+#if defined(USE_AURA)
+#include "ui/views/views_features.h"
+#endif
+
 #if !BUILDFLAG(IS_ANDROID)
 #include "chrome/browser/lifetime/application_lifetime_desktop.h"
 #include "chrome/browser/ui/browser.h"
@@ -955,7 +959,7 @@ class WorkerDevToolsTest : public InProcessBrowserTest {
   }
 
   void OpenDevToolsWindow(scoped_refptr<DevToolsAgentHost> agent_host) {
-    Profile* profile = browser()->profile();
+    Profile* profile = browser()->GetProfile();
     window_ =
         DevToolsWindowTesting::OpenDevToolsWindowSync(profile, agent_host);
   }
@@ -2487,6 +2491,36 @@ IN_PROC_BROWSER_TEST_F(DevToolsTest, TestDispatchKeyEventDoesNotCrash) {
   RunTest("testDispatchKeyEventDoesNotCrash", "about:blank");
 }
 
+#if defined(USE_AURA)
+class DevToolsVisibilityTest : public DevToolsTest {
+ public:
+  DevToolsVisibilityTest() {
+    feature_list_.InitAndEnableFeature(
+        views::features::kNativeViewHostManagesLayers);
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(DevToolsVisibilityTest,
+                       TestMainWebContentsVisibilityWithDockedDevTools) {
+  content::WebContents* web_contents = GetInspectedTab();
+  OpenDevToolsWindow("about:blank", true);
+
+  content::WebContents* devtools_contents =
+      DevToolsWindow::GetInTabWebContents(web_contents, nullptr);
+  ASSERT_TRUE(devtools_contents);
+
+  EXPECT_EQ(web_contents->GetVisibility(), content::Visibility::VISIBLE);
+  EXPECT_EQ(devtools_contents->GetVisibility(), content::Visibility::VISIBLE);
+
+  CloseDevToolsWindow();
+
+  EXPECT_EQ(web_contents->GetVisibility(), content::Visibility::VISIBLE);
+}
+#endif
+
 #if !BUILDFLAG(IS_ANDROID)
 class BrowserAutofillManagerTestDelegateDevtoolsImpl
     : public autofill::BrowserAutofillManagerTestDelegate {
@@ -2691,7 +2725,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsAutoOpenerTest, MAYBE_TestAutoOpenForTabs) {
   Browser* new_browser = nullptr;
   {
     DevToolsWindowCreationObserver observer;
-    new_browser = CreateBrowser(browser()->profile());
+    new_browser = CreateBrowser(browser()->GetProfile());
     observer.WaitForLoad();
   }
   {
@@ -2933,6 +2967,48 @@ class DevToolsDisallowedForForceInstalledExtensionsPolicyTest
                             out_web_contents);
   }
 };
+
+IN_PROC_BROWSER_TEST_F(DevToolsDisallowedForForceInstalledExtensionsPolicyTest,
+                       AllowedForEmbeddedPdfViewer) {
+  // DevTools are disallowed for policy-installed extensions by default,
+  // but embedding a component extension like PDF viewer should not block
+  // DevTools for the embedding page.
+
+  // Set profile to managed.
+  profile()->GetProfilePolicyConnector()->OverrideIsManagedForTesting(true);
+
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  // Navigate to a page with an embedded PDF.
+  GURL main_url = embedded_test_server()->GetURL("/pdf/test-iframe.html");
+  ASSERT_TRUE(NavigateToURL(GetActiveWebContents(), main_url));
+
+  content::WebContents* web_contents = GetActiveWebContents();
+
+  // Wait until ANY child frame commits a non-empty, non-about URL.
+  ASSERT_TRUE(base::test::RunUntil([&] {
+    bool found_valid_child = false;
+    web_contents->GetPrimaryMainFrame()->ForEachRenderFrameHostWithAction(
+        [&](content::RenderFrameHost* frame) {
+          if (frame != web_contents->GetPrimaryMainFrame() &&
+              !frame->GetLastCommittedURL().is_empty() &&
+              !frame->GetLastCommittedURL().SchemeIs(url::kAboutScheme)) {
+            found_valid_child = true;
+            return content::RenderFrameHost::FrameIterationAction::kStop;
+          }
+          return content::RenderFrameHost::FrameIterationAction::kContinue;
+        });
+    return found_valid_child;
+  }));
+
+  // Try to open DevTools for the main page.
+  DevToolsWindow::OpenDevToolsWindow(web_contents,
+                                     DevToolsOpenedByAction::kUnknown);
+  auto agent_host = GetOrCreateDevToolsHostForWebContents(web_contents);
+
+  // It should be allowed.
+  EXPECT_TRUE(DevToolsWindow::FindDevToolsWindow(agent_host.get()));
+}
 
 IN_PROC_BROWSER_TEST_F(DevToolsDisallowedForForceInstalledExtensionsPolicyTest,
                        DisallowedForExternalPolicyDownloadExtension) {
@@ -3191,7 +3267,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsTest, TestRawHeadersWithRedirectAndHSTS) {
   bool include_subdomains = false;
   mojo::ScopedAllowSyncCallForTesting allow_sync_call;
   content::StoragePartition* partition =
-      browser()->profile()->GetDefaultStoragePartition();
+      browser()->GetProfile()->GetDefaultStoragePartition();
   base::RunLoop run_loop;
   partition->GetNetworkContext()->AddHSTS(
       https_url.GetHost(), expiry, include_subdomains, run_loop.QuitClosure());
@@ -3608,7 +3684,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsPolicyTest, IframeBlocked) {
 
   // Check that devtools are not allowed.
   EXPECT_FALSE(
-      DevToolsWindow::AllowDevToolsFor(browser()->profile(), web_contents));
+      DevToolsWindow::AllowDevToolsFor(browser()->GetProfile(), web_contents));
 
   // Try to open devtools and verify it's not opened.
   DevToolsWindow::OpenDevToolsWindow(web_contents,
@@ -3653,7 +3729,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsPolicyTest, IframeOnAllowlistAndBlocklist) {
 
   // Check that devtools are allowed.
   EXPECT_TRUE(
-      DevToolsWindow::AllowDevToolsFor(browser()->profile(), web_contents));
+      DevToolsWindow::AllowDevToolsFor(browser()->GetProfile(), web_contents));
 
   // Try to open devtools and verify it's opened.
   DevToolsWindowTesting::OpenDevToolsWindowSync(web_contents, false);
@@ -3699,7 +3775,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsPolicyTest,
 
   // Check that devtools are allowed and open them.
   EXPECT_TRUE(
-      DevToolsWindow::AllowDevToolsFor(browser()->profile(), web_contents));
+      DevToolsWindow::AllowDevToolsFor(browser()->GetProfile(), web_contents));
   DevToolsWindow::OpenDevToolsWindow(web_contents,
                                      DevToolsOpenedByAction::kUnknown);
   auto agent_host = GetOrCreateDevToolsHostForWebContents(web_contents);
@@ -3747,7 +3823,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsPolicyTest, IframeBlockedBecauseNotOnAllowlist) {
 
   // Check that devtools are not allowed because iframe is not on allowlist.
   EXPECT_FALSE(
-      DevToolsWindow::AllowDevToolsFor(browser()->profile(), web_contents));
+      DevToolsWindow::AllowDevToolsFor(browser()->GetProfile(), web_contents));
 
   // Try to open devtools and verify it's not opened.
   DevToolsWindow::OpenDevToolsWindow(web_contents,
@@ -3779,7 +3855,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsPolicyTest, AllowlistedUrlStaysOpenOnReload) {
 
   // Check that devtools are allowed and open them.
   EXPECT_TRUE(
-      DevToolsWindow::AllowDevToolsFor(browser()->profile(), web_contents));
+      DevToolsWindow::AllowDevToolsFor(browser()->GetProfile(), web_contents));
   DevToolsWindowTesting::OpenDevToolsWindowSync(web_contents, false);
   auto agent_host = GetOrCreateDevToolsHostForWebContents(web_contents);
   EXPECT_TRUE(DevToolsWindow::FindDevToolsWindow(agent_host.get()));
@@ -3837,7 +3913,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsPolicyBFCacheTest,
 
   // Check that devtools are allowed and open them.
   EXPECT_TRUE(
-      DevToolsWindow::AllowDevToolsFor(browser()->profile(), web_contents));
+      DevToolsWindow::AllowDevToolsFor(browser()->GetProfile(), web_contents));
   DevToolsWindowTesting::OpenDevToolsWindowSync(web_contents, false);
   auto agent_host = GetOrCreateDevToolsHostForWebContents(web_contents);
   EXPECT_TRUE(DevToolsWindow::FindDevToolsWindow(agent_host.get()));
@@ -3856,7 +3932,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsPolicyBFCacheTest,
 
   // Check that devtools are allowed again for the allowlisted URL and open them.
   EXPECT_TRUE(
-      DevToolsWindow::AllowDevToolsFor(browser()->profile(), web_contents));
+      DevToolsWindow::AllowDevToolsFor(browser()->GetProfile(), web_contents));
   DevToolsWindowTesting::OpenDevToolsWindowSync(web_contents, false);
   EXPECT_TRUE(DevToolsWindow::FindDevToolsWindow(agent_host.get()));
 }
@@ -4231,7 +4307,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsTest,
       browser()->tab_strip_model()->GetWebContentsAt(0), true);
   DispatchOnTestSuite(window, "waitForDebuggerPaused");
 
-  Browser* another_browser = CreateBrowser(browser()->profile());
+  Browser* another_browser = CreateBrowser(browser()->GetProfile());
   ASSERT_TRUE(ui_test_utils::NavigateToURL(another_browser, pause_url));
   DevToolsWindow* another_window =
       DevToolsWindowTesting::OpenDevToolsWindowSync(
@@ -4299,10 +4375,10 @@ IN_PROC_BROWSER_TEST_F(DevToolsProcessPerSiteUpToMainFrameThresholdTest,
 
   OpenDevToolsWindow(kDebuggerTestPage, false);
 
-  Browser* browser1 = CreateBrowser(browser()->profile());
+  Browser* browser1 = CreateBrowser(browser()->GetProfile());
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser1, url));
 
-  Browser* browser2 = CreateBrowser(browser()->profile());
+  Browser* browser2 = CreateBrowser(browser()->GetProfile());
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser2, url));
 
   ASSERT_NE(browser1->tab_strip_model()
@@ -4359,10 +4435,10 @@ IN_PROC_BROWSER_TEST_F(DevToolsProcessPerSiteTest,
                        MAYBE_DevToolsSharedProcessInfobar) {
   const GURL url = embedded_test_server()->GetURL("foo.test", "/hello.html");
 
-  Browser* browser1 = CreateBrowser(browser()->profile());
+  Browser* browser1 = CreateBrowser(browser()->GetProfile());
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser1, url));
 
-  Browser* browser2 = CreateBrowser(browser()->profile());
+  Browser* browser2 = CreateBrowser(browser()->GetProfile());
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser2, url));
 
   ASSERT_EQ(browser1->tab_strip_model()
