@@ -57,6 +57,7 @@
 #include "ui/events/keycodes/dom/keycode_converter.h"
 #include "ui/events/platform/platform_event_source.h"
 #include "ui/gfx/mac/coordinate_conversion.h"
+#include "ui/gfx/native_widget_types.h"
 
 using blink::WebGestureEvent;
 using blink::WebInputEvent;
@@ -183,8 +184,6 @@ void ExtractUnderlines(NSAttributedString* string,
 @property(getter=isAutomaticDashSubstitutionEnabled)
     BOOL automaticDashSubstitutionEnabled;
 
-- (void)processedWheelEvent:(const blink::WebMouseWheelEvent&)event
-                   consumed:(BOOL)consumed;
 - (void)keyEvent:(NSEvent*)theEvent wasKeyEquivalent:(BOOL)equiv;
 - (void)windowDidChangeScreenOrBackingProperties:(NSNotification*)notification;
 - (void)windowChangedGlobalFrame:(NSNotification*)notification;
@@ -729,11 +728,6 @@ void ExtractUnderlines(NSAttributedString* string,
 - (void)resetCursorRects {
   if (_currentCursor)
     [self addCursorRect:[self visibleRect] cursor:_currentCursor];
-}
-
-- (void)processedWheelEvent:(const blink::WebMouseWheelEvent&)event
-                   consumed:(BOOL)consumed {
-  [_responderDelegate rendererHandledWheelEvent:event consumed:consumed];
 }
 
 - (void)processedGestureScrollEvent:(const blink::WebGestureEvent&)event
@@ -1756,7 +1750,7 @@ void ExtractUnderlines(NSAttributedString* string,
   auto* screen = display::Screen::GetScreen();
   const display::ScreenInfos newScreenInfos =
       screen->GetScreenInfosNearestDisplay(
-          screen->GetDisplayNearestView(self).id());
+          screen->GetDisplayNearestView(gfx::NativeView(self)).id());
   _host->OnScreenInfosChanged(newScreenInfos);
 }
 
@@ -2491,6 +2485,21 @@ extern NSString* NSTextInputReplacementRangeAttributeName;
     _textToBeInserted.append(base::SysNSStringToUTF16(imText));
     _shouldRequestTextSubstitutions = YES;
   } else {
+    // Fix the issue that Apple intelligence's writing tools not working. The
+    // writing tools bubble will grab the focus from browser after the user
+    // clicks replace button in the bubble which causes the replaced text can
+    // not be inserted into browser IME since the content's NSView loses focus.
+    // Please note that this is a workaround fix and should be removed after the
+    // issue is finally fixed by Apple which is tracked via FB16872510.
+    NSResponder* firstResponder = [self.window firstResponder];
+    if ([firstResponder isKindOfClass:NSClassFromString(@"NSRemoteView")]) {
+      NSView* firstResponderView = (NSView*)firstResponder;
+      NSView* superView = firstResponderView.superview;
+      if ([superView isKindOfClass:NSClassFromString(@"WTWritingToolsView")]) {
+        [self becomeFirstResponder];
+      }
+    }
+
     // The user uses mouse or touch bar to select a word on the IME.
     gfx::Range replacementGfxRange =
         gfx::Range::FromPossiblyInvalidNSRange(replacementRange);

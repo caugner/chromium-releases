@@ -40,6 +40,11 @@
       'ChromeOS FYI Release Skylab (jacuzzi)': 'gpu_tests_chromeos_jacuzzi_release_trybot_dcheck_off_no_symbols_remoteexec_skylab',
     },
 
+    'chrome.orderfile': {
+      'android-arm32-orderfile': 'official_android_arm32_orderfile',
+      'android-arm64-orderfile': 'official_android_arm64_orderfile',
+    },
+
     'chrome.pgo': {
       'android-arm32-pgo': 'official_android_arm32_pgo',
       'android-arm64-pgo': 'official_android_arm64_pgo',
@@ -161,7 +166,6 @@
     'internal.chrome.fyi': {
       'android-buildspeed-dbg': 'android_debug_bot_remoteexec_fastbuild',
       'android-emulator-finch-smoke-chrome': 'android_release_bot_minimal_symbols_x86_fastbuild_webview_trichrome_remoteexec',
-      'chromeos-arm-generic-cfi-thin-lto-chrome-remoteexec': 'chromeos_arm-generic_cfi_thin_lto_official_remoteexec',
       'linux-finch-smoke-chrome': 'official_remoteexec',
       'lorenz-graph-dbg': 'android_debug_bot_remoteexec_external_fastbuild',
       'mac-arm64-finch-smoke-chrome': 'official_remoteexec_mac_arm',
@@ -217,6 +221,11 @@
 
     'tryserver.chrome.gpu': {
       'gpu-fyi-try-chromeos-skylab-jacuzzi': 'gpu_tests_chromeos_jacuzzi_release_trybot_dcheck_off_no_symbols_remoteexec_skylab',
+    },
+
+    'tryserver.chrome.orderfile': {
+      'android-arm32-orderfile': 'official_android_arm32_orderfile',
+      'android-arm64-orderfile': 'official_android_arm64_orderfile',
     },
 
     'tryserver.chrome.pgo': {
@@ -278,7 +287,7 @@
     'tryserver.webrtc': {
       'android_chromium_compile': 'android_release_trybot_remoteexec',
       'linux_chromium_compile': 'release_trybot_remoteexec',
-      'linux_chromium_compile_dbg': 'debug_bot_remoteexec',
+      'linux_chromium_compile_dbg': 'debug_bot_remoteexec_reclient',
       'mac_chromium_compile': 'gpu_tests_release_trybot_remoteexec',
       'webrtc_linux_chromium': 'release_trybot_blink',
       'win_chromium_compile': 'gpu_tests_release_trybot_resource_allowlisting_remoteexec',
@@ -293,7 +302,7 @@
   # is not necessarily so.
   'configs': {
     'android_debug_bot_remoteexec': [
-      'android', 'debug_bot_remoteexec', 'use_siso',
+      'android', 'debug_bot_remoteexec', 'use_siso', 'reclient',
     ],
 
     'android_debug_bot_remoteexec_external_fastbuild': [
@@ -311,11 +320,11 @@
     ],
 
     'android_release_trybot_remoteexec': [
-      'android', 'release_trybot_remoteexec', 'strip_debug_info',
+      'android', 'release_trybot_remoteexec', 'strip_debug_info', 'reclient',
     ],
 
     'asan_lsan_release_trybot_remoteexec': [
-      'asan', 'lsan', 'release_trybot_minimal_symbols_remoteexec', 'use_siso'
+      'asan', 'lsan', 'release_trybot_minimal_symbols_remoteexec', 'use_siso', 'reclient',
     ],
 
     'cast_binary_size_remoteexec': [
@@ -324,10 +333,6 @@
 
     'chrome_branded_remoteexec_minimal_symbols': [
       'chrome_branded', 'minimal_symbols', 'release_bot_remoteexec',
-    ],
-
-    'chromeos_arm-generic_cfi_thin_lto_official_remoteexec': [
-      'chromeos_device_remoteexec', 'arm-generic', 'cfi_full', 'thin_lto', 'official', 'full_symbols', 'ozone_headless'
     ],
 
     'chromeos_kevin_include_unwind_tables_official_remoteexec': [
@@ -347,7 +352,8 @@
     ],
 
     'codesearch_gen_chrome_android_bot_remoteexec': [
-      'codesearch_remoteexec', 'android_without_codecs', 'static', 'chrome_branded',
+      'codesearch_remoteexec', 'android_without_codecs', 'static',
+      'chrome_branded', 'android_desktop'
     ],
 
     'codesearch_gen_chrome_bot_remoteexec': [
@@ -356,6 +362,7 @@
 
     'codesearch_gen_chromium_android_bot_remoteexec': [
       'codesearch_remoteexec', 'android_without_codecs', 'static',
+      'android_desktop'
     ],
 
     'codesearch_gen_chromium_bot_remoteexec': [
@@ -385,15 +392,19 @@
     ],
 
     'debug_bot_blink': [
-      'debug_bot_blink', 'use_siso',
+      'debug_bot_blink', 'use_siso', 'reclient',
     ],
 
     'debug_bot_remoteexec': [
       'debug_bot_remoteexec',
     ],
 
+    'debug_bot_remoteexec_reclient': [
+      'debug_bot_remoteexec', 'reclient',
+    ],
+
     'gpu_tests_android_release_trybot_arm64_remoteexec': [
-      'gpu_tests', 'android', 'release_trybot_minimal_symbols_remoteexec', 'arm64', 'static_angle', 'use_siso',
+      'gpu_tests', 'android', 'release_trybot_minimal_symbols_remoteexec', 'arm64', 'static_angle', 'use_siso', 'reclient',
     ],
 
     'gpu_tests_chromeos_jacuzzi_release_trybot_dcheck_off_no_symbols_remoteexec_skylab': [
@@ -401,35 +412,43 @@
     ],
 
     'gpu_tests_debug_bot_x86_no_symbols_remoteexec': [
-      'gpu_tests', 'debug_bot_remoteexec', 'x86', 'no_symbols'
+      'gpu_tests', 'debug_bot_remoteexec', 'x86', 'no_symbols', 'reclient',
     ],
 
     'gpu_tests_release_trybot_minimal_symbol_x86_resource_allowlisting_remoteexec': [
-      'gpu_tests', 'release_trybot_minimal_symbols_remoteexec', 'x86', 'resource_allowlisting', 'use_siso',
+      'gpu_tests', 'release_trybot_minimal_symbols_remoteexec', 'x86', 'resource_allowlisting', 'use_siso', 'reclient',
     ],
 
     'gpu_tests_release_trybot_minimal_symbols_remoteexec': [
-      'gpu_tests', 'release_trybot_minimal_symbols_remoteexec', 'use_siso',
+      'gpu_tests', 'release_trybot_minimal_symbols_remoteexec', 'use_siso', 'reclient',
     ],
 
     'gpu_tests_release_trybot_ptr_comp_remoteexec': [
-      'gpu_tests', 'release_trybot_minimal_symbols_remoteexec', 'v8_pointer_compression', 'use_siso',
+      'gpu_tests', 'release_trybot_minimal_symbols_remoteexec', 'v8_pointer_compression', 'use_siso', 'reclient',
     ],
 
     'gpu_tests_release_trybot_remoteexec': [
-      'gpu_tests', 'release_trybot_remoteexec',
+      'gpu_tests', 'release_trybot_remoteexec', 'reclient',
     ],
 
     'gpu_tests_release_trybot_resource_allowlisting_remoteexec': [
-      'gpu_tests', 'release_trybot_remoteexec', 'resource_allowlisting',
+      'gpu_tests', 'release_trybot_remoteexec', 'reclient', 'resource_allowlisting',
     ],
 
     'mac_clang_tot_official': [
       'clang_tot', 'official', 'no_widevine_cdm_host_verification', 'x64', 'mac'
     ],
 
+    'official_android_arm32_orderfile': [
+      'official', 'remoteexec', 'android', 'android_external', 'arm', 'minimal_symbols', 'orderfile',
+    ],
+
     'official_android_arm32_pgo': [
       'official', 'remoteexec', 'android', 'android_external', 'arm', 'minimal_symbols', 'no_default_afdo', 'pgo_phase_1', 'stable_version_code',
+    ],
+
+    'official_android_arm64_orderfile': [
+      'official', 'remoteexec', 'android', 'android_external', 'arm64', 'minimal_symbols', 'orderfile',
     ],
 
     'official_android_arm64_pgo': [
@@ -622,39 +641,39 @@
     ],
 
     'release_bot_blink': [
-      'release_bot_blink', 'use_siso',
+      'release_bot_blink', 'use_siso', 'reclient',
     ],
 
     'release_bot_blink_v8_debug_remoteexec': [
-      'release_bot_blink', 'v8_enable_debugging_features', 'use_siso',
+      'release_bot_blink', 'v8_enable_debugging_features', 'use_siso', 'reclient'
     ],
 
     'release_bot_remoteexec': [
-      'release_bot_remoteexec',
+      'release_bot_remoteexec', 'reclient',
     ],
 
     'release_bot_remoteexec_siso': [
-      'release_bot_remoteexec', 'use_siso',
+      'release_bot_remoteexec', 'use_siso', 'reclient',
     ],
 
     'release_trybot_blink': [
-      'release_trybot_blink',
+      'release_trybot_blink', 'reclient',
     ],
 
     'release_trybot_blink_do_typecheck': [
-      'release_trybot_blink', 'devtools_do_typecheck', 'use_siso',
+      'release_trybot_blink', 'devtools_do_typecheck', 'use_siso', 'reclient',
     ],
 
     'release_trybot_blink_siso': [
-      'release_trybot_blink', 'use_siso',
+      'release_trybot_blink', 'use_siso', 'reclient',
     ],
 
     'release_trybot_remoteexec': [
-      'release_trybot_remoteexec',
+      'release_trybot_remoteexec', 'reclient',
     ],
 
     'release_trybot_remoteexec_siso': [
-      'release_trybot_remoteexec', 'use_siso',
+      'release_trybot_remoteexec', 'use_siso', 'reclient',
     ],
   },
 
@@ -667,6 +686,10 @@
     # which are not allowed to have proprietary codecs enabled.
     'android': {
       'mixins': ['android_without_codecs', 'chrome_with_codecs'],
+    },
+
+    'android_desktop': {
+      'gn_args': 'is_desktop_android=true',
     },
 
     'android_external': {
@@ -693,10 +716,6 @@
 
     'arm': {
       'gn_args': 'target_cpu="arm"',
-    },
-
-    'arm-generic': {
-      'args_file': '//build/args/chromeos/arm-generic.gni',
     },
 
     'arm64': {
@@ -730,15 +749,6 @@
 
     'cast_receiver_size_optimized_internal': {
       'args_file': '//build/config/fuchsia/size_optimized_cast_receiver_args_internal.gn',
-    },
-
-    'cfi': {
-      'gn_args': 'is_cfi=true',
-    },
-
-    'cfi_full': {
-      'mixins': ['cfi'],
-      'gn_args': 'use_cfi_cast=true',
     },
 
     'chrome_branded': {
@@ -808,23 +818,24 @@
     # Keep in sync with //infra/build/recipes/recipe_modules/chromium_android/chromium_config.py
     'cronet_android': {
       'mixins': ['cronet_common'],
-      'gn_args': ('use_partition_alloc=false enable_reporting=true '
+      # LINT.IfChange(cronet_android)
+      'gn_args': ('use_partition_alloc=false '
                   'use_hashed_jni_names=true '
                   'default_min_sdk_version=23 '
-                  'enable_base_tracing=false '
                   'clang_use_default_sample_profile=false '
-                  'media_use_ffmpeg = false'
                   'use_thin_lto=false '  # https://crbug.com/1136963
                   'enable_resource_allowlist_generation=false '),
+      # LINT.ThenChange(//infra/config/gn_args/gn_args.star:cronet_android)
     },
 
     # Keep in sync with //infra/build/recipes/recipe_modules/chromium_android/chromium_config.py
     'cronet_common': {
-      'gn_args': ('disable_file_support=true '
-                  'enable_websockets=false '
+      # LINT.IfChange(cronet_common)
+      'gn_args': ('enable_websockets=false '
                   'include_transport_security_state_preload_list=false '
                   'is_cronet_build=true '
                   'use_platform_icu_alternatives=true ')
+      # LINT.ThenChange(//infra/config/gn_args/gn_args.star:cronet_common)
     },
 
     'custom_args': {
@@ -854,6 +865,10 @@
     # Representative GN args for developer builds.
     'devtools_do_typecheck': {
       'gn_args': 'devtools_skip_typecheck=false',
+    },
+
+    'devtools_instrumentation_dumping': {
+      'gn_args': 'devtools_instrumentation_dumping=true',
     },
 
     'disable_stripping': {
@@ -957,6 +972,10 @@
       'gn_args': 'enable_keystone_registration_framework=false',
     },
 
+    'no_proguard_obfuscation': {
+      'gn_args': 'enable_proguard_obfuscation=false',
+    },
+
     'no_symbols': {
       'gn_args': 'symbol_level=0',
     },
@@ -978,6 +997,14 @@
         'gn_args': 'build_with_internal_optimization_guide=true'
     },
 
+    'order_profiling': {
+      'gn_args': 'use_order_profiling=true',
+    },
+
+    'orderfile': {
+      'mixins': ['no_proguard_obfuscation', 'devtools_instrumentation_dumping', 'order_profiling'],
+    },
+
     'ozone_headless': {
       'gn_args': 'ozone_platform_headless=true',
     },
@@ -996,6 +1023,11 @@
     # chrome_with_codecs or chromeos_with_codecs mixins.
     'proprietary_codecs': {
       'gn_args': 'proprietary_codecs=true',
+    },
+
+    # TODO: crbug.com/379584977 - Remove this mixin after dropping reclient.
+    'reclient': {
+      'gn_args': 'use_reclient=true',
     },
 
     # Historically, a 'release' bot had DCHECKs turned off. DCHECKs are now
@@ -1020,10 +1052,6 @@
       'mixins': ['release_bot_blink', 'minimal_symbols', 'dcheck_always_on'],
     },
 
-    'release_trybot_blink': {
-      'mixins': ['release_bot_blink', 'minimal_symbols', 'dcheck_always_on'],
-    },
-
     'release_trybot_dcheck_off_remoteexec': {
       'mixins': ['release_trybot_remoteexec', 'dcheck_off'],
     },
@@ -1037,12 +1065,13 @@
     },
 
     'remoteexec': {
-      'gn_args': 'use_remoteexec=true use_reclient=false use_siso=true',
+      'gn_args': 'use_remoteexec=true use_reclient=false',
     },
 
     # windows cross. crbug.com/1213717 crbug.com/1407983
     'remoteexec_win_cross': {
-      'gn_args': 'use_remoteexec=true remoteexec_cfg_dir="//buildtools/remoteexec_cfgs/win-cross"',
+      'mixins': ['remoteexec'],
+      'gn_args': 'reclient_cfg_dir="//buildtools/reclient_cfgs/win-cross"',
     },
 
     'resource_allowlisting': {
@@ -1077,10 +1106,6 @@
 
     'test_isolate_no_emulator': {
       'gn_args': 'test_isolate_uses_emulator=false',
-    },
-
-    'thin_lto': {
-      'gn_args': 'use_thin_lto=true',
     },
 
     'thin_lto_opt': {

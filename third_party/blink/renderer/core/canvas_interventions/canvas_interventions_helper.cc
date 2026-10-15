@@ -8,29 +8,152 @@
 
 #include "base/containers/span.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/metrics/histogram_functions.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/notreached.h"
+#include "base/time/time.h"
+#include "third_party/blink/public/common/fingerprinting_protection/canvas_noise_token.h"
+#include "third_party/blink/public/mojom/devtools/console_message.mojom-shared.h"
+#include "third_party/blink/renderer/core/canvas_interventions/noise_hash.h"
+#include "third_party/blink/renderer/core/canvas_interventions/noise_helper.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/inspector/console_message.h"
+#include "third_party/blink/renderer/platform/graphics/canvas_resource_host.h"
 #include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/graphics/unaccelerated_static_bitmap_image.h"
-#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/mojo/mojo_binding_context.h"
 #include "third_party/blink/renderer/platform/runtime_feature_state/runtime_feature_state_override_context.h"
-#include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
 #include "ui/gfx/skia_span_util.h"
 
 namespace blink {
 
+namespace {
+
+// Returns true when all criteria to apply noising are met. Currently this
+// entails that
+//   1) an operation was made on the canvas that triggers an
+//   2) the render context is 2d
+//   3) the raster mode is GPU unless an exception is made
+//   4) the CanvasInterventions RuntimeEnabledFeature is force enabled for
+//      testing.
+bool ShouldApplyNoise(CanvasRenderingContext* rendering_context,
+                      RasterMode raster_mode,
+                      ExecutionContext* execution_context) {
+  CanvasNoiseReason noise_reason = CanvasNoiseReason::kAllConditionsMet;
+  if (!rendering_context) {
+    noise_reason |= CanvasNoiseReason::kNoRenderContext;
+  }
+  if (rendering_context && !rendering_context->ShouldTriggerIntervention()) {
+    noise_reason |= CanvasNoiseReason::kNoTrigger;
+  }
+  if (rendering_context && !rendering_context->IsRenderingContext2D()) {
+    noise_reason |= CanvasNoiseReason::kNo2d;
+  }
+  if (!(raster_mode == RasterMode::kGPU ||
+        RuntimeEnabledFeatures::CanvasInterventionsOnCpuForTestingEnabled())) {
+    noise_reason |= CanvasNoiseReason::kNoGpu;
+  }
+  if (!execution_context) {
+    noise_reason |= CanvasNoiseReason::kNoExecutionContext;
+  }
+  if (execution_context &&
+      !execution_context->GetRuntimeFeatureStateOverrideContext()
+           ->IsCanvasInterventionsForceEnabled()) {
+    noise_reason |= CanvasNoiseReason::kNotEnabledInMode;
+  }
+
+  // When all conditions are met, none of the other reasons are possible.
+  static constexpr int exclusive_max =
+      static_cast<int>(CanvasNoiseReason::kMaxValue) << 1;
+
+  UMA_HISTOGRAM_EXACT_LINEAR(
+      "FingerprintingProtection.CanvasNoise.InterventionReason",
+      static_cast<int>(noise_reason), exclusive_max);
+
+  return noise_reason == CanvasNoiseReason::kAllConditionsMet;
+}
+
+}  // namespace
+
 // static
 const char CanvasInterventionsHelper::kSupplementName[] =
     "CanvasInterventionsHelper";
 
-CanvasInterventionsHelper::CanvasInterventionsHelper(ExecutionContext& context)
-    : Supplement<ExecutionContext>(context), execution_context_(context) {}
+// static
+bool CanvasInterventionsHelper::MaybeNoiseSnapshot(
+    CanvasRenderingContext* rendering_context,
+    ExecutionContext* execution_context,
+    scoped_refptr<StaticBitmapImage>& snapshot,
+    RasterMode raster_mode) {
+  base::TimeTicks start_time = base::TimeTicks::Now();
+  CHECK(snapshot);
+
+  if (!ShouldApplyNoise(rendering_context, raster_mode, execution_context)) {
+    return false;
+  }
+
+  // Use kUnpremul_SkAlphaType as alpha type as we are changing the pixel values
+  // of all channels, including the alpha channel.
+  auto info = SkImageInfo::Make(
+      snapshot->GetSize().width(), snapshot->GetSize().height(),
+      snapshot->GetSkColorType(), kUnpremul_SkAlphaType,
+      snapshot->GetSkColorSpace());
+  SkBitmap bm;
+  if (!bm.tryAllocPixels(info)) {
+    return false;
+  }
+
+  // Copy the original pixels from snapshot to the modifiable SkPixmap. SkBitmap
+  // should already allocate the correct amount of pixels, so this shouldn't
+  // fail because of memory allocation.
+  auto pixmap_to_noise = bm.pixmap();
+  PaintImage paint_image = snapshot->PaintImageForCurrentFrame();
+  if (!paint_image.readPixels(bm.info(), pixmap_to_noise.writable_addr(),
+                              bm.rowBytes(), 0, 0)) {
+    return false;
+  }
+
+  base::span<uint8_t> modify_pixels =
+      gfx::SkPixmapToWritableSpan(pixmap_to_noise);
+
+  auto token_hash = NoiseHash(CanvasNoiseToken::Get(),
+                              execution_context->GetSecurityOrigin()
+                                  ->GetOriginOrPrecursorOriginIfOpaque()
+                                  ->RegistrableDomain()
+                                  .Utf8());
+  NoisePixels(token_hash, modify_pixels, pixmap_to_noise.width(),
+              pixmap_to_noise.height());
+
+  auto noised_image = bm.asImage();
+  snapshot = blink::UnacceleratedStaticBitmapImage::Create(
+      std::move(noised_image), snapshot->CurrentFrameOrientation());
+
+  execution_context->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
+      mojom::blink::ConsoleMessageSource::kIntervention,
+      mojom::blink::ConsoleMessageLevel::kInfo,
+      "Noise was added to a canvas readback. If this has caused breakage, "
+      "please file a bug at https://issues.chromium.org/issues/"
+      "new?component=1456351&title=Canvas%20noise%20breakage. This "
+      "feature can be disabled through chrome://flags/#enable-canvas-noise"));
+
+  base::TimeDelta elapsed_time = base::TimeTicks::Now() - start_time;
+
+  UMA_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(
+      "FingerprintingProtection.CanvasNoise.NoiseDuration", elapsed_time,
+      base::Microseconds(50), base::Milliseconds(10), 50);
+  UMA_HISTOGRAM_COUNTS_1M(
+      "FingerprintingProtection.CanvasNoise.NoisedCanvasSize",
+      pixmap_to_noise.width() * pixmap_to_noise.height());
+  auto* helper = CanvasInterventionsHelper::From(execution_context);
+  helper->IncrementNoisedCanvasReadbacks();
+
+  return true;
+}
 
 // static
-// TODO(https://crbug.com/392627601): Pipe session seeds.
-CanvasInterventionsHelper* CanvasInterventionsHelper::Create(
+CanvasInterventionsHelper* CanvasInterventionsHelper::From(
     ExecutionContext* context) {
   CanvasInterventionsHelper* helper =
       Supplement<ExecutionContext>::From<CanvasInterventionsHelper>(context);
@@ -41,63 +164,16 @@ CanvasInterventionsHelper* CanvasInterventionsHelper::Create(
   return helper;
 }
 
-scoped_refptr<StaticBitmapImage>
-CanvasInterventionsHelper::MaybeGetNoisedSnapshot(
-    scoped_refptr<StaticBitmapImage> input_snapshot) {
-  CHECK(input_snapshot);
+CanvasInterventionsHelper::CanvasInterventionsHelper(
+    ExecutionContext& execution_context)
+    : Supplement<ExecutionContext>(execution_context),
+      ExecutionContextLifecycleObserver(&execution_context) {}
 
-  auto original_info = SkImageInfo::Make(
-      input_snapshot->GetSize().width(), input_snapshot->GetSize().height(),
-      input_snapshot->GetSkColorType(), input_snapshot->GetAlphaType(),
-      input_snapshot->GetSkColorSpace());
-  SkBitmap bm;
-  if (!bm.tryAllocPixels(original_info)) {
-    return input_snapshot;
-  }
-
-  // Copy the original pixels from snapshot to the modifiable SkPixmap. SkBitmap
-  // should already allocate the correct amount of pixels, so this shouldn't
-  // fail because of memory allocation.
-  auto pixmap_to_noise = bm.pixmap();
-  PaintImage paint_image = input_snapshot->PaintImageForCurrentFrame();
-  if (!paint_image.readPixels(original_info, pixmap_to_noise.writable_addr(),
-                              original_info.minRowBytes(), 0, 0)) {
-    return input_snapshot;
-  }
-
-  base::span<uint8_t> modify_pixels =
-      gfx::SkPixmapToWritableSpan(pixmap_to_noise);
-
-  if (MaybeNoisePixels(modify_pixels, pixmap_to_noise.width(),
-                       pixmap_to_noise.height())) {
-    auto noised_image = bm.asImage();
-    scoped_refptr<blink::StaticBitmapImage> noised_snapshot =
-        blink::UnacceleratedStaticBitmapImage::Create(
-            std::move(noised_image), input_snapshot->CurrentFrameOrientation());
-    return noised_snapshot;
-  }
-
-  return input_snapshot;
+void CanvasInterventionsHelper::ContextDestroyed() {
+  CHECK_GT(num_noised_canvas_readbacks_, 0);
+  UMA_HISTOGRAM_COUNTS_100(
+      "FingerprintingProtection.CanvasNoise.NoisedReadbacksPerContext",
+      num_noised_canvas_readbacks_);
 }
 
-bool CanvasInterventionsHelper::MaybeNoisePixels(
-    base::span<uint8_t> source_pixels,
-    uint32_t sw,
-    uint32_t sh) {
-  // TODO(https://crbug.com/380463018): We are currently unconditionally
-  // noising. Once signatures have been implemented, add conditional logic here.
-  if (!ShouldApplyNoise()) {
-    return false;
-  }
-
-  // TODO(https://crbug.com/385739564): Apply noising algorithm here.
-  return true;
-}
-
-bool CanvasInterventionsHelper::ShouldApplyNoise() const {
-  // TODO(https://crbug.com/392627601): Ensure session seed is initialized.
-  return GetExecutionContext()
-      ->GetRuntimeFeatureStateOverrideContext()
-      ->IsCanvasInterventionsForceEnabled();
-}
 }  // namespace blink

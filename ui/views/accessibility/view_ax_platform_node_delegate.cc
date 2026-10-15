@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/check_op.h"
 #include "base/containers/adapters.h"
 #include "base/functional/bind.h"
 #include "base/i18n/rtl.h"
@@ -515,23 +516,6 @@ const ui::AXSelection ViewAXPlatformNodeDelegate::GetUnignoredSelection()
   return selection;
 }
 
-const ui::AXSelection ViewAXPlatformNodeDelegate::GetHypertextSelection()
-    const {
-  const ui::AXSelection& selection = GetUnignoredSelection();
-  // In Views, the selection is purely used for textfields, and therefore the
-  // does not need to be adjusted away from leaf node endpoints for
-  // text/hypertext interfaces.
-#if DCHECK_IS_ON()
-  if (selection.anchor_offset != ax::mojom::kNoSelectionOffset) {
-    DCHECK_EQ(data_.id, selection.anchor_object_id);
-    DCHECK_EQ(data_.id, selection.focus_object_id);
-    DCHECK(data_.IsAtomicTextField());
-  }
-#endif
-
-  return selection;
-}
-
 // Since AtomicViewAXTreeManager only ever contains a single node, we can be
 // sure that we are in a leaf node and only need to return a text position.
 ui::AXNodePosition::AXPositionInstance
@@ -670,7 +654,9 @@ gfx::Rect ViewAXPlatformNodeDelegate::GetInnerTextRangeBoundsRect(
 gfx::RectF ViewAXPlatformNodeDelegate::GetInlineTextRect(
     const int start_offset,
     const int end_offset) const {
-  DCHECK(start_offset >= 0 && end_offset >= 0 && start_offset <= end_offset);
+  DCHECK_GE(start_offset, 0);
+  DCHECK_GE(end_offset, 0);
+  DCHECK_LE(start_offset, end_offset);
   const std::vector<int32_t>& character_offsets =
       data_.GetIntListAttribute(ax::mojom::IntListAttribute::kCharacterOffsets);
   if (character_offsets.empty()) {

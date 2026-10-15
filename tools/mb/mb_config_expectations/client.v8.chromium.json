@@ -4,9 +4,8 @@
       "dcheck_always_on": false,
       "is_component_build": false,
       "is_debug": false,
-      "use_reclient": false,
-      "use_remoteexec": true,
-      "use_siso": true
+      "use_reclient": true,
+      "use_remoteexec": true
     }
   }
 }

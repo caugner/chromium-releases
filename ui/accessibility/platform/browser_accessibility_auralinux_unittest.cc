@@ -57,18 +57,13 @@ void BrowserAccessibilityAuraLinuxTest::SetUp() {
 TEST_F(BrowserAccessibilityAuraLinuxTest, TestSimpleAtkText) {
   AXNodeData root_data;
   root_data.id = 1;
-  root_data.role = ax::mojom::Role::kParagraph;
-  root_data.child_ids = {2};
-
-  AXNodeData static_text1;
-  static_text1.id = 2;
-  static_text1.role = ax::mojom::Role::kStaticText;
-  static_text1.SetName("\xE2\x98\xBA Multiple Words");
+  root_data.role = ax::mojom::Role::kStaticText;
+  root_data.SetName("\xE2\x98\xBA Multiple Words");
 
   std::unique_ptr<BrowserAccessibilityManager> manager(
       BrowserAccessibilityManager::Create(
-          MakeAXTreeUpdateForTesting(root_data, static_text1),
-          node_id_delegate_, test_browser_accessibility_delegate_.get()));
+          MakeAXTreeUpdateForTesting(root_data), node_id_delegate_,
+          test_browser_accessibility_delegate_.get()));
 
   AXPlatformNodeAuraLinux* root_obj =
       ToBrowserAccessibilityAuraLinux(manager->GetBrowserAccessibilityRoot())
@@ -537,11 +532,12 @@ TEST_F(BrowserAccessibilityAuraLinuxTest,
   }
 
   // Test the style of the link.
-  AtkObject* ax_link_atk_object = ax_link->GetNode()->GetNativeViewAccessible();
+  AtkObject* ax_link_text_atk_object =
+      ax_link_text->GetNode()->GetNativeViewAccessible();
   for (int offset = 0; offset < 3; offset++) {
     start_offset = end_offset = -1;
     attributes = atk_text_get_run_attributes(
-        ATK_TEXT(ax_link_atk_object), offset, &start_offset, &end_offset);
+        ATK_TEXT(ax_link_text_atk_object), offset, &start_offset, &end_offset);
 
     EXPECT_EQ(0, start_offset);
     EXPECT_EQ(3, end_offset);
@@ -580,6 +576,37 @@ TEST_F(BrowserAccessibilityAuraLinuxTest,
 
     atk_attribute_set_free(attributes);
   }
+
+  // Test the style of the static text nodes.
+  AtkObject* ax_before_atk_object =
+      ax_before->GetNode()->GetNativeViewAccessible();
+  start_offset = end_offset = -1;
+  attributes = atk_text_get_run_attributes(ATK_TEXT(ax_before_atk_object), 6,
+                                           &start_offset, &end_offset);
+  EXPECT_EQ(0, start_offset);
+  EXPECT_EQ(7, end_offset);
+  ASSERT_TRUE(
+      has_attribute(attributes, ATK_TEXT_ATTR_FAMILY_NAME, "Helvetica"));
+  ASSERT_TRUE(has_attribute(attributes, ATK_TEXT_ATTR_WEIGHT, "700"));
+  ASSERT_TRUE(has_attribute(attributes, ATK_TEXT_ATTR_STYLE, "italic"));
+  ASSERT_FALSE(
+      has_attribute(attributes, ATK_TEXT_ATTR_UNDERLINE, std::nullopt));
+  ASSERT_FALSE(has_attribute(attributes, ATK_TEXT_ATTR_INVALID, std::nullopt));
+  atk_attribute_set_free(attributes);
+
+  AtkObject* ax_after_atk_object =
+      ax_after->GetNode()->GetNativeViewAccessible();
+  attributes = atk_text_get_run_attributes(ATK_TEXT(ax_after_atk_object), 6,
+                                           &start_offset, &end_offset);
+  EXPECT_EQ(0, start_offset);
+  EXPECT_EQ(7, end_offset);
+  ASSERT_TRUE(
+      has_attribute(attributes, ATK_TEXT_ATTR_FAMILY_NAME, "Helvetica"));
+  ASSERT_FALSE(has_attribute(attributes, ATK_TEXT_ATTR_WEIGHT, std::nullopt));
+  ASSERT_FALSE(has_attribute(attributes, ATK_TEXT_ATTR_STYLE, "italic"));
+  ASSERT_FALSE(
+      has_attribute(attributes, ATK_TEXT_ATTR_UNDERLINE, std::nullopt));
+  atk_attribute_set_free(attributes);
 
   manager.reset();
 }
@@ -814,22 +841,15 @@ TEST_F(BrowserAccessibilityAuraLinuxTest, TextAtkStaticTextChange) {
   EXPECT_STREQ(base::UTF16ToUTF8(div_node->GetHypertext()).c_str(), "Text2");
 }
 
-TEST_F(BrowserAccessibilityAuraLinuxTest, TestAtkTextGetOffsetAtPoint) {
-  AXNodeData root;
-  root.id = 1;
-  root.role = ax::mojom::Role::kParagraph;
-  root.relative_bounds.bounds = gfx::RectF(0, 0, 100, 100);
-  root.child_ids = {2};
-
+TEST_F(BrowserAccessibilityAuraLinuxTest, TestAtkTextGetOffesetAtPoint) {
   AXNodeData static_text1;
-  static_text1.id = 2;
+  static_text1.id = 1;
   static_text1.role = ax::mojom::Role::kStaticText;
   static_text1.SetName("Hello");
-  static_text1.relative_bounds.bounds = gfx::RectF(0, 0, 100, 100);
-  static_text1.child_ids = {3};
+  static_text1.child_ids = {2};
 
   AXNodeData inline_box1;
-  inline_box1.id = 3;
+  inline_box1.id = 2;
   inline_box1.role = ax::mojom::Role::kInlineTextBox;
   inline_box1.SetName("Hello");
   inline_box1.relative_bounds.bounds = gfx::RectF(0, 50, 25, 30);
@@ -849,7 +869,7 @@ TEST_F(BrowserAccessibilityAuraLinuxTest, TestAtkTextGetOffsetAtPoint) {
 
   std::unique_ptr<BrowserAccessibilityManager> manager(
       BrowserAccessibilityManager::Create(
-          MakeAXTreeUpdateForTesting(root, static_text1, inline_box1),
+          MakeAXTreeUpdateForTesting(static_text1, inline_box1),
           node_id_delegate_, test_browser_accessibility_delegate_.get()));
 
   ASSERT_NE(nullptr, manager->GetBrowserAccessibilityRoot());
@@ -870,11 +890,211 @@ TEST_F(BrowserAccessibilityAuraLinuxTest, TestAtkTextGetOffsetAtPoint) {
     atk_text_get_character_extents(atk_text, offset, &x, &y, &width, &height,
                                    ATK_XY_SCREEN);
     int result = atk_text_get_offset_at_point(atk_text, x, y, ATK_XY_SCREEN);
-    ASSERT_EQ(offset, result) << "Result at position (" << x << ", " << y
-                              << ") was " << result << ", should be " << offset;
+    ASSERT_EQ(offset, result);
   }
   g_object_unref(root_atk_object);
   manager.reset();
+}
+
+TEST_F(BrowserAccessibilityAuraLinuxTest, CreateExtraAnnouncementNodes) {
+  AXNodeData root_data;
+  root_data.id = 1;
+  root_data.role = ax::mojom::Role::kGenericContainer;
+  root_data.child_ids = {2};
+
+  AXNodeData button;
+  button.id = 2;
+  button.role = ax::mojom::Role::kButton;
+
+  std::unique_ptr<BrowserAccessibilityManager> manager(
+      BrowserAccessibilityManager::Create(
+          MakeAXTreeUpdateForTesting(root_data, button), node_id_delegate_,
+          test_browser_accessibility_delegate_.get()));
+
+  AXTree* tree = const_cast<AXTree*>(manager->ax_tree());
+  tree->CreateExtraAnnouncementNodes();
+  ASSERT_TRUE(tree->extra_announcement_nodes());
+  EXPECT_EQ(2, tree->extra_announcement_nodes()->Count());
+
+  BrowserAccessibilityAuraLinux* root_node =
+      ToBrowserAccessibilityAuraLinux(manager->GetBrowserAccessibilityRoot());
+  EXPECT_EQ(3U, root_node->PlatformChildCount());
+
+  // Only the root node should have the extra announcement nodes as children.
+  BrowserAccessibilityAuraLinux* button_node =
+      ToBrowserAccessibilityAuraLinux(root_node->PlatformGetChild(0));
+  EXPECT_EQ(0U, button_node->PlatformChildCount());
+}
+
+TEST_F(BrowserAccessibilityAuraLinuxTest, GetExtraAnnouncementNodes) {
+  AXNodeData root_data;
+  root_data.id = 1;
+  root_data.role = ax::mojom::Role::kGenericContainer;
+
+  std::unique_ptr<BrowserAccessibilityManager> manager(
+      BrowserAccessibilityManager::Create(
+          MakeAXTreeUpdateForTesting(root_data), node_id_delegate_,
+          test_browser_accessibility_delegate_.get()));
+
+  AXTree* tree = const_cast<AXTree*>(manager->ax_tree());
+  tree->CreateExtraAnnouncementNodes();
+  ASSERT_TRUE(tree->extra_announcement_nodes());
+  EXPECT_EQ(2, tree->extra_announcement_nodes()->Count());
+
+  BrowserAccessibilityAuraLinux* root_node =
+      ToBrowserAccessibilityAuraLinux(manager->GetBrowserAccessibilityRoot());
+  EXPECT_EQ(2U, root_node->PlatformChildCount());
+
+  BrowserAccessibilityAuraLinux* assertive_node =
+      root_node->GetExtraAnnouncementNode(
+          ax::mojom::AriaNotificationPriority::kHigh);
+  EXPECT_EQ(assertive_node->GetData().GetStringAttribute(
+                ax::mojom::StringAttribute::kContainerLiveStatus),
+            "assertive");
+
+  BrowserAccessibilityAuraLinux* polite_node =
+      root_node->GetExtraAnnouncementNode(
+          ax::mojom::AriaNotificationPriority::kNormal);
+  EXPECT_EQ(polite_node->GetData().GetStringAttribute(
+                ax::mojom::StringAttribute::kContainerLiveStatus),
+            "polite");
+}
+
+TEST_F(BrowserAccessibilityAuraLinuxTest, PlatformGetChild) {
+  AXNodeData root_data;
+  root_data.id = 1;
+  root_data.role = ax::mojom::Role::kGenericContainer;
+  root_data.child_ids = {2};
+
+  AXNodeData button;
+  button.id = 2;
+  button.role = ax::mojom::Role::kButton;
+
+  std::unique_ptr<BrowserAccessibilityManager> manager(
+      BrowserAccessibilityManager::Create(
+          MakeAXTreeUpdateForTesting(root_data, button), node_id_delegate_,
+          test_browser_accessibility_delegate_.get()));
+
+  AXTree* tree = const_cast<AXTree*>(manager->ax_tree());
+  tree->CreateExtraAnnouncementNodes();
+  ASSERT_TRUE(tree->extra_announcement_nodes());
+  EXPECT_EQ(2, tree->extra_announcement_nodes()->Count());
+
+  BrowserAccessibilityAuraLinux* root_node =
+      ToBrowserAccessibilityAuraLinux(manager->GetBrowserAccessibilityRoot());
+  EXPECT_EQ(3U, root_node->PlatformChildCount());
+
+  BrowserAccessibilityAuraLinux* button_node =
+      ToBrowserAccessibilityAuraLinux(root_node->PlatformGetChild(0));
+  EXPECT_EQ(button_node->GetData().id, 2);
+  EXPECT_EQ(button_node->GetData().role, ax::mojom::Role::kButton);
+
+  BrowserAccessibilityAuraLinux* assertive_node =
+      ToBrowserAccessibilityAuraLinux(root_node->PlatformGetChild(1));
+  EXPECT_EQ(assertive_node->GetData().id, -1);
+  EXPECT_EQ(assertive_node->GetData().GetStringAttribute(
+                ax::mojom::StringAttribute::kContainerLiveStatus),
+            "assertive");
+
+  BrowserAccessibilityAuraLinux* polite_node =
+      ToBrowserAccessibilityAuraLinux(root_node->PlatformGetChild(2));
+  EXPECT_EQ(polite_node->GetData().id, -2);
+  EXPECT_EQ(polite_node->GetData().GetStringAttribute(
+                ax::mojom::StringAttribute::kContainerLiveStatus),
+            "polite");
+
+  EXPECT_EQ(nullptr, root_node->PlatformGetChild(3));
+}
+
+TEST_F(BrowserAccessibilityAuraLinuxTest, PlatformGetLastChild) {
+  AXNodeData root_data;
+  root_data.id = 1;
+  root_data.role = ax::mojom::Role::kGenericContainer;
+  root_data.child_ids = {2};
+
+  AXNodeData button;
+  button.id = 2;
+  button.role = ax::mojom::Role::kButton;
+
+  std::unique_ptr<BrowserAccessibilityManager> manager(
+      BrowserAccessibilityManager::Create(
+          MakeAXTreeUpdateForTesting(root_data, button), node_id_delegate_,
+          test_browser_accessibility_delegate_.get()));
+
+  BrowserAccessibilityAuraLinux* root_node =
+      ToBrowserAccessibilityAuraLinux(manager->GetBrowserAccessibilityRoot());
+  EXPECT_EQ(1U, root_node->PlatformChildCount());
+
+  BrowserAccessibilityAuraLinux* last_child =
+      ToBrowserAccessibilityAuraLinux(root_node->PlatformGetLastChild());
+  EXPECT_EQ(last_child->GetData().id, 2);
+  EXPECT_EQ(last_child->GetData().role, ax::mojom::Role::kButton);
+
+  AXTree* tree = const_cast<AXTree*>(manager->ax_tree());
+  tree->CreateExtraAnnouncementNodes();
+  ASSERT_TRUE(tree->extra_announcement_nodes());
+  EXPECT_EQ(2, tree->extra_announcement_nodes()->Count());
+  EXPECT_EQ(3U, root_node->PlatformChildCount());
+
+  last_child =
+      ToBrowserAccessibilityAuraLinux(root_node->PlatformGetLastChild());
+  EXPECT_EQ(last_child->GetData().id, -2);
+  EXPECT_EQ(last_child->GetData().GetStringAttribute(
+                ax::mojom::StringAttribute::kContainerLiveStatus),
+            "polite");
+}
+
+TEST_F(BrowserAccessibilityAuraLinuxTest, PlatformGetSiblings) {
+  AXNodeData root_data;
+  root_data.id = 1;
+  root_data.role = ax::mojom::Role::kGenericContainer;
+  root_data.child_ids = {2};
+
+  AXNodeData button;
+  button.id = 2;
+  button.role = ax::mojom::Role::kButton;
+
+  std::unique_ptr<BrowserAccessibilityManager> manager(
+      BrowserAccessibilityManager::Create(
+          MakeAXTreeUpdateForTesting(root_data, button), node_id_delegate_,
+          test_browser_accessibility_delegate_.get()));
+
+  BrowserAccessibilityAuraLinux* root_node =
+      ToBrowserAccessibilityAuraLinux(manager->GetBrowserAccessibilityRoot());
+  EXPECT_EQ(1U, root_node->PlatformChildCount());
+
+  BrowserAccessibilityAuraLinux* button_node =
+      ToBrowserAccessibilityAuraLinux(root_node->PlatformGetChild(0));
+  EXPECT_EQ(button_node->GetData().id, 2);
+  EXPECT_EQ(button_node->GetData().role, ax::mojom::Role::kButton);
+  EXPECT_EQ(nullptr, button_node->PlatformGetNextSibling());
+  EXPECT_EQ(nullptr, button_node->PlatformGetPreviousSibling());
+
+  AXTree* tree = const_cast<AXTree*>(manager->ax_tree());
+  tree->CreateExtraAnnouncementNodes();
+  ASSERT_TRUE(tree->extra_announcement_nodes());
+  EXPECT_EQ(2, tree->extra_announcement_nodes()->Count());
+  EXPECT_EQ(3U, root_node->PlatformChildCount());
+
+  BrowserAccessibilityAuraLinux* assertive_node =
+      ToBrowserAccessibilityAuraLinux(button_node->PlatformGetNextSibling());
+  ASSERT_NE(nullptr, assertive_node);
+  EXPECT_EQ(assertive_node->GetData().id, -1);
+  EXPECT_EQ(assertive_node->GetData().GetStringAttribute(
+                ax::mojom::StringAttribute::kContainerLiveStatus),
+            "assertive");
+  EXPECT_EQ(button_node, assertive_node->PlatformGetPreviousSibling());
+
+  BrowserAccessibilityAuraLinux* polite_node =
+      ToBrowserAccessibilityAuraLinux(assertive_node->PlatformGetNextSibling());
+  ASSERT_NE(nullptr, polite_node);
+  EXPECT_EQ(polite_node->GetData().id, -2);
+  EXPECT_EQ(polite_node->GetData().GetStringAttribute(
+                ax::mojom::StringAttribute::kContainerLiveStatus),
+            "polite");
+  EXPECT_EQ(assertive_node, polite_node->PlatformGetPreviousSibling());
+
+  EXPECT_EQ(nullptr, polite_node->PlatformGetNextSibling());
 }
 
 }  // namespace ui

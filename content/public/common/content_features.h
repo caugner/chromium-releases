@@ -60,7 +60,6 @@ CONTENT_EXPORT BASE_DECLARE_FEATURE(
 CONTENT_EXPORT BASE_DECLARE_FEATURE(
     kBrokerFileOperationsOnDiskCacheInNetworkService);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kCacheControlNoStoreEnterBackForwardCache);
-CONTENT_EXPORT BASE_DECLARE_FEATURE(kCapturedSurfaceControlStickyPermissions);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kCapturedSurfaceControlKillswitch);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(
     kClearCrossSiteCrossBrowsingContextGroupWindowName);
@@ -86,8 +85,6 @@ CONTENT_EXPORT BASE_DECLARE_FEATURE(
     kDeviceBoundSessionTerminationEvictBackForwardCache);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kDevToolsPrivacyUI);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kDigitalGoodsApi);
-// TODO(crbug.com/364900088): Refactor BTM feature flags and parameters into
-// their own features file.
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kBtm);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kBtmTtl);
 CONTENT_EXPORT extern const base::FeatureParam<bool>
@@ -101,6 +98,7 @@ CONTENT_EXPORT extern const base::FeatureParam<content::BtmTriggeringAction>
     kBtmTriggeringAction;
 CONTENT_EXPORT extern const base::FeatureParam<base::TimeDelta>
     kBtmClientBounceDetectionTimeout;
+CONTENT_EXPORT BASE_DECLARE_FEATURE(kBtmDualUse);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kWebContentsDiscard);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kDocumentIsolationPolicyOriginTrial);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kDrawCutoutEdgeToEdge);
@@ -110,6 +108,7 @@ CONTENT_EXPORT BASE_DECLARE_FEATURE(kEnableServiceWorkersForChromeScheme);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kEnableServiceWorkersForChromeUntrusted);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kEnsureExistingRendererAlive);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kFedCm);
+CONTENT_EXPORT BASE_DECLARE_FEATURE(kFedCmAlternativeIdentifiers);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kFedCmAuthz);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kFedCmButtonMode);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kFedCmCooldownOnIgnore);
@@ -146,7 +145,6 @@ CONTENT_EXPORT BASE_DECLARE_FEATURE(kIsolateFencedFrames);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kIsolateOrigins);
 CONTENT_EXPORT extern const char kIsolateOriginsFieldTrialParamName[];
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kLazyInitializeMediaControls);
-CONTENT_EXPORT BASE_DECLARE_FEATURE(kLocalNetworkAccessChecks);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kLogJsConsoleMessages);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kLowerPAMemoryLimitForNonMainRenderers);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kMBIMode);
@@ -245,13 +243,13 @@ enum class FontDataServiceTypefaceType {
 };
 extern const base::FeatureParam<FontDataServiceTypefaceType>
     kFontDataServiceTypefaceType;
-CONTENT_EXPORT BASE_DECLARE_FEATURE(kUtilityWithUiPumpInitializesCom);
 #endif  // BUILDFLAG(IS_WIN)
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kDisableProcessReuse);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kServiceWorkerAutoPreload);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(
     kServiceWorkerStaticRouterRaceNetworkRequestPerformanceImprovement);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kUserMediaCaptureOnFocus);
+CONTENT_EXPORT BASE_DECLARE_FEATURE(kWebAppEnableUpdateTokenParsing);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kWebLockScreenApi);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kWebOTP);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kSpareRendererForSitePerProcess);
@@ -262,6 +260,7 @@ CONTENT_EXPORT extern const base::FeatureParam<double>
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kSuppressDifferentOriginSubframeJSDialogs);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kSyntheticPointerActions);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kTouchDragAndContextMenu);
+CONTENT_EXPORT BASE_DECLARE_FEATURE(kTrackEmptyRendererProcessesForReuse);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kUseBrowserCalculatedOrigin);
 #if BUILDFLAG(IS_ANDROID)
 CONTENT_EXPORT extern const base::FeatureParam<int>
@@ -288,6 +287,8 @@ CONTENT_EXPORT BASE_DECLARE_FEATURE(kWebOtpBackendAuto);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kWebPayments);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kWebUICodeCache);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kWebUIBundledCodeCache);
+CONTENT_EXPORT extern const base::FeatureParam<bool>
+    kWebUIBundledCodeCacheGenerateResourceMap;
 #if !BUILDFLAG(IS_ANDROID)
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kWebUIJSErrorReportingExtended);
 #endif

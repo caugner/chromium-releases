@@ -12,7 +12,6 @@
       "thin_lto_enable_optimizations": true,
       "use_reclient": false,
       "use_remoteexec": true,
-      "use_siso": true,
       "use_thin_lto": true
     }
   },
@@ -30,7 +29,6 @@
       "thin_lto_enable_optimizations": true,
       "use_reclient": false,
       "use_remoteexec": true,
-      "use_siso": true,
       "use_thin_lto": true
     }
   },
@@ -44,8 +42,7 @@
       "is_official_build": true,
       "ozone_platform_headless": true,
       "use_reclient": false,
-      "use_remoteexec": true,
-      "use_siso": true
+      "use_remoteexec": true
     }
   },
   "fuchsia-builder-perf-arm64": {
@@ -67,8 +64,7 @@
       "target_os": "fuchsia",
       "test_isolate_uses_emulator": false,
       "use_reclient": false,
-      "use_remoteexec": true,
-      "use_siso": true
+      "use_remoteexec": true
     }
   },
   "win-arm64-builder-perf": {
@@ -76,10 +72,11 @@
       "chrome_pgo_phase": 0,
       "is_chrome_branded": true,
       "is_official_build": true,
-      "remoteexec_cfg_dir": "//buildtools/remoteexec_cfgs/win-cross",
+      "reclient_cfg_dir": "//buildtools/reclient_cfgs/win-cross",
       "strip_absolute_paths_from_debug_symbols": true,
       "symbol_level": 1,
       "target_cpu": "arm64",
+      "use_reclient": false,
       "use_remoteexec": true
     }
   }

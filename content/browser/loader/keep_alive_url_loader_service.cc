@@ -45,6 +45,7 @@ KeepAliveURLLoaderService::FactoryContext::FactoryContext(
     const std::unique_ptr<FactoryContext>& other)
     : factory(other->factory),
       weak_document_ptr(other->weak_document_ptr),
+      ukm_source_id(other->ukm_source_id),
       policy_container_host(other->policy_container_host),
       attribution_context(other->attribution_context) {}
 
@@ -59,6 +60,9 @@ void KeepAliveURLLoaderService::FactoryContext::OnDidCommitNavigation(
   auto* rfh = static_cast<RenderFrameHostImpl*>(
       weak_document_ptr.AsRenderFrameHostIfValid());
   CHECK(rfh);
+  // Not using `RenderFrameHostImpl::GetPageUkmSourceId()` which returns nothing
+  // on prerendering page.
+  ukm_source_id = navigation_handle->GetNextPageUkmSourceId();
   policy_container_host = rfh->policy_container_host();
 
   // `attribution_context` is needed for all kinds of keepalive requests, as
@@ -82,6 +86,16 @@ void KeepAliveURLLoaderService::FactoryContext::
   CHECK(rfh);
 
   attribution_context = AttributionSuitableContext::Create(rfh);
+}
+
+void KeepAliveURLLoaderService::FactoryContext::
+    OnBeforeKeepAliveURLLoaderCreated(
+        const network::ResourceRequest& resource_request) {
+  if (auto* rfh = static_cast<RenderFrameHostImpl*>(
+          weak_document_ptr.AsRenderFrameHostIfValid());
+      rfh) {
+    rfh->OnKeepAliveRequestCreated(resource_request);
+  }
 }
 
 void KeepAliveURLLoaderService::FactoryContext::UpdateFactory(
@@ -177,6 +191,10 @@ class KeepAliveURLLoaderService::KeepAliveURLLoaderFactoriesBase {
       return nullptr;
     }
 
+    // Notifies RenderFrameHostImpl (if any) that a fetch keepalive request is
+    // created.
+    context->OnBeforeKeepAliveURLLoaderCreated(resource_request);
+
     // Passes in the pending remote of `client` from a renderer so that `loader`
     // can forward response back to the renderer.
     CHECK(context->policy_container_host);
@@ -187,7 +205,7 @@ class KeepAliveURLLoaderService::KeepAliveURLLoaderFactoriesBase {
         // caller renderer is already unloaded, meaning `loader` also needs to
         // hold another refptr to ensure `PolicyContainerHost` alive.
         context->policy_container_host, context->weak_document_ptr,
-        service_->browser_context_,
+        context->ukm_source_id, service_->browser_context_,
         base::BindRepeating(&KeepAliveURLLoaderFactoriesBase::CreateThrottles,
                             base::Unretained(this), resource_request),
         base::PassKey<KeepAliveURLLoaderService>(),

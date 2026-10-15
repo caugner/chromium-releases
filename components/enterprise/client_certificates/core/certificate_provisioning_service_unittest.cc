@@ -89,7 +89,8 @@ class CertificateProvisioningServiceTest : public testing::Test {
   }
 
   void VerifySuccessState(scoped_refptr<PrivateKey> expected_private_key,
-                          scoped_refptr<net::X509Certificate> expected_cert) {
+                          scoped_refptr<net::X509Certificate> expected_cert,
+                          bool was_uploaded = true) {
     ASSERT_TRUE(service_);
 
     base::test::TestFuture<std::optional<ClientIdentity>> test_future;
@@ -105,8 +106,11 @@ class CertificateProvisioningServiceTest : public testing::Test {
     EXPECT_FALSE(status.is_provisioning);
     ASSERT_TRUE(status.identity.has_value());
     EXPECT_EQ(status.identity.value(), managed_identity.value());
-    ASSERT_TRUE(status.last_upload_code.has_value());
-    EXPECT_EQ(status.last_upload_code.value(), kSuccessUploadCode);
+
+    ASSERT_EQ(status.last_upload_code.has_value(), was_uploaded);
+    if (was_uploaded) {
+      EXPECT_EQ(status.last_upload_code.value(), kSuccessUploadCode);
+    }
   }
 
   void VerifyIdleWithCache(scoped_refptr<PrivateKey> expected_private_key,
@@ -279,18 +283,16 @@ TEST_F(CertificateProvisioningServiceTest,
 }
 
 // When the service is created, the policy is enabled and the store has an
-// existing identity, the service will simply load it up and sync the key.
+// existing identity, the service will simply load it up.
 TEST_F(CertificateProvisioningServiceTest,
        CreatedWithPref_ExistingIdentityLoaded) {
   SetPolicyPref(true);
 
   auto mock_context_delegate =
-      std::make_unique<StrictMock<MockContextDelegate>>();
+      std::make_unique<MockContextDelegate>();
   EXPECT_CALL(*mock_context_delegate, GetPolicyPref())
-      .Times(7)
       .WillRepeatedly(Return(pref()));
   EXPECT_CALL(*mock_context_delegate, GetIdentityName())
-      .Times(2)
       .WillRepeatedly(Return(kIdentityName));
 
   auto mocked_private_key = base::MakeRefCounted<StrictMock<MockPrivateKey>>();
@@ -301,29 +303,19 @@ TEST_F(CertificateProvisioningServiceTest,
   EXPECT_CALL(mock_store_, GetIdentity(kIdentityName, _))
       .WillOnce(RunOnceCallback<1>(existing_permanent_identity));
 
-  auto mock_client = std::make_unique<StrictMock<MockKeyUploadClient>>();
-  EXPECT_CALL(*mock_client, SyncKey(testing::Eq(mocked_private_key), _))
-      .WillOnce(RunOnceCallback<1>(kSuccessUploadCode));
+  CreateProvisioningService(
+      std::move(mock_context_delegate),
+      std::make_unique<StrictMock<MockKeyUploadClient>>());
 
-  CreateProvisioningService(std::move(mock_context_delegate),
-                            std::move(mock_client));
-
-  VerifySuccessState(mocked_private_key, fake_cert);
-
+  VerifySuccessState(mocked_private_key, fake_cert, /*was_uploaded=*/false);
   histogram_tester_.ExpectUniqueSample(
-      "Enterprise.ClientCertificate.Profile.PublicKeySync.UploadCode",
-      kSuccessUploadCode, 1);
-  histogram_tester_.ExpectUniqueSample(
-      "Enterprise.ClientCertificate.Profile.Provisioning.PublicKeySync.Outcome",
+      "Enterprise.ClientCertificate.Profile.Provisioning.ExistingIdentity."
+      "Outcome",
       true, 1);
   histogram_tester_.ExpectTotalCount(
-      "Enterprise.ClientCertificate.Profile.Provisioning.PublicKeySync.Success."
-      "Latency",
+      "Enterprise.ClientCertificate.Profile.Provisioning.ExistingIdentity."
+      "Success.Latency",
       1);
-  EXPECT_EQ(
-      histogram_tester_.GetTotalCountsForPrefix("Enterprise.ClientCertificate")
-          .size(),
-      3U);
 }
 
 // When the service is created, the policy is enabled and the store has an

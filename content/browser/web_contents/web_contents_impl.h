@@ -119,6 +119,10 @@ namespace input {
 class RenderWidgetHostInputEventRouter;
 }  // namespace input
 
+namespace network {
+struct ResourceRequest;
+}  // namespace network
+
 namespace network::mojom {
 class SharedDictionaryAccessDetails;
 }  // namespace network::mojom
@@ -392,11 +396,12 @@ class CONTENT_EXPORT WebContentsImpl
   WebContentsDelegate* GetDelegate() final;
   void SetDelegate(WebContentsDelegate* delegate) override;
   NavigationControllerImpl& GetController() override;
+  const NavigationControllerImpl& GetController() const override;
   BrowserContext* GetBrowserContext() override;
   base::WeakPtr<WebContents> GetWeakPtr() override;
   const GURL& GetURL() override;
   const GURL& GetVisibleURL() override;
-  const GURL& GetLastCommittedURL() override;
+  const GURL& GetLastCommittedURL() const override;
   const RenderFrameHostImpl* GetPrimaryMainFrame() const override;
   RenderFrameHostImpl* GetPrimaryMainFrame() override;
   PageImpl& GetPrimaryPage() override;
@@ -785,11 +790,12 @@ class CONTENT_EXPORT WebContentsImpl
       bool is_new_browsing_instance,
       bool has_user_gesture,
       SessionStorageNamespace* session_storage_namespace) override;
-  void ShowCreatedWindow(RenderFrameHostImpl* opener,
-                         int main_frame_widget_route_id,
-                         WindowOpenDisposition disposition,
-                         const blink::mojom::WindowFeatures& window_features,
-                         bool user_gesture) override;
+  WebContents* ShowCreatedWindow(
+      RenderFrameHostImpl* opener,
+      int main_frame_widget_route_id,
+      WindowOpenDisposition disposition,
+      const blink::mojom::WindowFeatures& window_features,
+      bool user_gesture) override;
   void PrimaryMainDocumentElementAvailable() override;
   void PassiveInsecureContentFound(const GURL& resource_url) override;
   bool ShouldAllowRunningInsecureContent(bool allowed_per_prefs,
@@ -944,8 +950,12 @@ class CONTENT_EXPORT WebContentsImpl
 
   media::PictureInPictureEventsInfo::AutoPipReason GetAutoPipReason()
       const override;
+  void OnKeepAliveRequestCreated(
+      const network::ResourceRequest& resource_request,
+      RenderFrameHostImpl* initiator_rfh) override;
 
-  // RenderViewHostDelegate ----------------------------------------------------
+  // RenderViewHostDelegate
+  // ----------------------------------------------------
   RenderViewHostDelegateView* GetDelegateView() override;
   void RenderViewReady(RenderViewHost* render_view_host) override;
   void RenderViewTerminated(RenderViewHost* render_view_host,
@@ -996,6 +1006,8 @@ class CONTENT_EXPORT WebContentsImpl
       bool use_prefetch_proxy,
       const blink::mojom::Referrer& referrer,
       const std::optional<url::Origin>& referring_origin,
+      std::optional<net::HttpNoVarySearchData> no_vary_search_hint,
+      scoped_refptr<PreloadPipelineInfo> preload_pipeline_info,
       base::WeakPtr<PreloadingAttempt> attempt,
       std::optional<PreloadingHoldbackStatus> holdback_status_override)
       override;
@@ -1009,6 +1021,7 @@ class CONTENT_EXPORT WebContentsImpl
       bool should_warm_up_compositor,
       bool should_prepare_paint_tree,
       PreloadingHoldbackStatus holdback_status_override,
+      scoped_refptr<PreloadPipelineInfo> preload_pipeline_info,
       PreloadingAttempt* preloading_attempt,
       base::RepeatingCallback<bool(const GURL&,
                                    const std::optional<UrlMatchType>&)>,
@@ -1184,6 +1197,9 @@ class CONTENT_EXPORT WebContentsImpl
   void OnInputIgnored(const blink::WebInputEvent& event) override;
   input::mojom::RenderInputRouterDelegate* GetRenderInputRouterDelegateRemote()
       override;
+#if BUILDFLAG(IS_ANDROID)
+  float GetCurrentTouchSequenceYOffset() override;
+#endif
 
   // RenderFrameHostManager::Delegate ------------------------------------------
 
@@ -1466,6 +1482,9 @@ class CONTENT_EXPORT WebContentsImpl
   // Called by WebContentsAndroid to send the Display Cutout safe area to
   // DisplayCutoutHostImpl.
   void SetDisplayCutoutSafeArea(gfx::Insets insets);
+  // Called by WebContentsAndroid to send the context menu insets over to
+  // the RenderWidgetHostView, and on to the Page.
+  void SetContextMenuInsets(gfx::Rect);
 #endif
 
   // Notify observers that the viewport fit value changed. This is called by
@@ -1594,6 +1613,17 @@ class CONTENT_EXPORT WebContentsImpl
   void ClearPartitionedPopinOpenerForTesting();
 
   WebContents* GetOpenedPartitionedPopin() const override;
+
+  // Returns the origin of the popin's opener if this is a partitioned popin.
+  // CHECKS if this is not a partitioned popin, as it should never be called
+  // in that case. This is used in permissions checks.
+  // See https://explainers-by-googlers.github.io/partitioned-popins/
+  GURL GetPartitionedPopinEmbedderOrigin(
+      base::PassKey<StorageAccessGrantPermissionContext>) const override;
+
+  // Same as GetPartitionedPopinEmbedderOrigin but for testing to bypass
+  // PassKey requirements.
+  GURL GetPartitionedPopinEmbedderOriginForTesting() const;
 
  private:
   using FrameTreeIterationCallback = base::FunctionRef<void(FrameTree&)>;
@@ -2173,6 +2203,9 @@ class CONTENT_EXPORT WebContentsImpl
   // Sets up RenderInputRouterDelegate mojo connections with InputManager on
   // the VizCompositorThread for input handling with InputVizard.
   void SetupRenderInputRouterDelegateConnection();
+
+  // See GetPartitionedPopinEmbedderOrigin for details.
+  GURL GetPartitionedPopinEmbedderOriginImpl() const;
 
   // Data for core operation ---------------------------------------------------
 

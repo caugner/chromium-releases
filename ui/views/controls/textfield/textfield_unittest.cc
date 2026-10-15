@@ -1807,11 +1807,9 @@ TEST_F(TextfieldTest, OnKeyPressBinding) {
 
     ~TestDelegate() override = default;
 
-    bool GetTextEditCommandsForEvent(
-        const ui::Event& event,
-        int text_flags,
-        std::vector<ui::TextEditCommandAuraLinux>* commands) override {
-      return false;
+    ui::TextEditCommand GetTextEditCommandForEvent(const ui::Event& event,
+                                                   int text_flags) override {
+      return ui::TextEditCommand::INVALID_COMMAND;
     }
   };
 
@@ -4309,6 +4307,17 @@ TEST_F(TextfieldTest, SetAccessibleNameNotifiesAccessibilityEvent) {
   // for which there are other `NameFrom` values). `NameFrom::kContents` is
   // typically not an appropriate value.
   EXPECT_EQ(data.GetNameFrom(), ax::mojom::NameFrom::kAttribute);
+}
+
+// Changing the value of the textfield should trigger a kTextChanged event.
+TEST_F(TextfieldTest, SetValueAccessibilityEvents) {
+  InitTextfield();
+  std::u16string value = u"hello world";
+  test::AXEventCounter counter(views::AXUpdateNotifier::Get());
+  EXPECT_EQ(0, counter.GetCount(ax::mojom::Event::kTextChanged));
+  textfield_->GetViewAccessibility().SetValue(value);
+  EXPECT_EQ(1, counter.GetCount(ax::mojom::Event::kTextChanged));
+  EXPECT_EQ(value, textfield_->GetViewAccessibility().GetValue());
 }
 
 #if BUILDFLAG(IS_WIN)

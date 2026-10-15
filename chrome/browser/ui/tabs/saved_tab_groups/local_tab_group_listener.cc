@@ -13,7 +13,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/tabs/public/tab_features.h"
-#include "chrome/browser/ui/tabs/public/tab_interface.h"
 #include "chrome/browser/ui/tabs/saved_tab_groups/most_recent_shared_tab_update_store.h"
 #include "chrome/browser/ui/tabs/saved_tab_groups/saved_tab_group_utils.h"
 #include "chrome/browser/ui/tabs/saved_tab_groups/saved_tab_group_web_contents_listener.h"
@@ -23,6 +22,7 @@
 #include "components/saved_tab_groups/public/features.h"
 #include "components/saved_tab_groups/public/saved_tab_group_tab.h"
 #include "components/saved_tab_groups/public/utils.h"
+#include "components/tab_collections/public/tab_interface.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
 
@@ -213,7 +213,11 @@ LocalTabGroupListener::MaybeRemoveWebContentsFromLocal(
   const LocalTabID local_tab_id = local_tab->GetHandle().raw_value();
   const std::optional<SavedTabGroup> saved_group =
       service_->GetGroup(saved_guid_);
-  CHECK(saved_group);
+  if (!saved_group) {
+    // This can happen if the saved group was removed before the tab.
+    return Liveness::kGroupDeleted;
+  }
+
   const SavedTabGroupTab* saved_tab = saved_group->GetTab(local_tab_id);
   if (!saved_tab) {
     // The tab that was removed didn't belong to this group. This is natural

@@ -101,7 +101,7 @@ class AX_EXPORT AXNode final {
          AXNodeID id,
          size_t index_in_parent,
          size_t unignored_index_in_parent = 0u);
-  virtual ~AXNode();
+  ~AXNode();
 
   // Accessors.
   AXTree* tree() const { return tree_; }
@@ -315,10 +315,7 @@ class AX_EXPORT AXNode final {
   // Gets the unignored selection from the accessibility tree, meaning the
   // selection whose endpoints are on unignored nodes. (An "ignored" node is a
   // node that is not exposed to platform APIs: See `IsIgnored`.)
-  // If non_text_endpoints is true, returns an unignored selection but the
-  // endpoints are adjusted so that they never fall on text objects, but are
-  // moved to the text nodes' parents instead.
-  AXSelection GetUnignoredSelection(bool non_text_endpoints = false) const;
+  AXSelection GetUnignoredSelection() const;
 
   //
   // Methods for accessing accessibility attributes including attributes that
@@ -589,6 +586,11 @@ class AX_EXPORT AXNode final {
   // table header container node, or nullptr if not applicable.
   const std::vector<raw_ptr<AXNode, VectorExperimental>>* GetExtraMacNodes()
       const;
+
+#if BUILDFLAG(IS_LINUX)
+  AXNode* GetExtraAnnouncementNode(
+      ax::mojom::AriaNotificationPriority priority_property) const;
+#endif  // BUILDFLAG(IS_LINUX)
 
   // Return true for mock nodes added to the map, such as extra mac nodes.
   bool IsGenerated() const;

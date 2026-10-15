@@ -7,6 +7,8 @@
 #ifndef GOOGLE_APIS_GAIA_GAIA_CONSTANTS_H_
 #define GOOGLE_APIS_GAIA_GAIA_CONSTANTS_H_
 
+#include <string_view>
+
 #include "base/component_export.h"
 
 namespace GaiaConstants {
@@ -62,6 +64,7 @@ COMPONENT_EXPORT(GOOGLE_APIS) extern const char kCryptAuthOAuth2Scope[];
 COMPONENT_EXPORT(GOOGLE_APIS) extern const char kDriveOAuth2Scope[];
 COMPONENT_EXPORT(GOOGLE_APIS)
 extern const char kExperimentsAndConfigsOAuth2Scope[];
+COMPONENT_EXPORT(GOOGLE_APIS) extern const char kClientChannelOAuth2Scope[];
 COMPONENT_EXPORT(GOOGLE_APIS) extern const char kDriveReadOnlyOAuth2Scope[];
 COMPONENT_EXPORT(GOOGLE_APIS) extern const char kAssistantOAuth2Scope[];
 COMPONENT_EXPORT(GOOGLE_APIS)
@@ -133,6 +136,13 @@ COMPONENT_EXPORT(GOOGLE_APIS) extern const char kInvalidRefreshToken[];
 
 // Name of the Google authentication cookie.
 COMPONENT_EXPORT(GOOGLE_APIS) extern const char kGaiaSigninCookieName[];
+
+// Constants for the Chrome Refresh Token Binding.
+inline constexpr std::string_view kTokenBindingAssertionSentinel =
+    "DBSC_CHALLENGE_IF_REQUIRED";
+inline constexpr std::string_view kTokenBindingAssertionFailedPlaceholder =
+    "SIGNATURE_FAILED";
+
 }  // namespace GaiaConstants
 
 #endif  // GOOGLE_APIS_GAIA_GAIA_CONSTANTS_H_

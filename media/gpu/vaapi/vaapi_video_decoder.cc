@@ -5,6 +5,10 @@
 #include "media/gpu/vaapi/vaapi_video_decoder.h"
 
 #include <vulkan/vulkan.h>
+// vulkan.h includes <X11/Xlib.h> when VK_USE_PLATFORM_XLIB_KHR is defined
+// after https://github.com/KhronosGroup/Vulkan-Headers/pull/534.
+// This defines some macros which break build, so undefine them here.
+#undef Status
 
 #include <limits>
 #include <vector>
@@ -553,7 +557,7 @@ void VaapiVideoDecoder::SurfaceReady(VASurfaceID va_surface_id,
   // produces multiple surfaces with the same |buffer_id|, so we shouldn't
   // remove the timestamp from the cache.
   const auto it = buffer_id_to_timestamp_.Peek(buffer_id);
-  CHECK(it != buffer_id_to_timestamp_.end(), base::NotFatalUntil::M130);
+  CHECK(it != buffer_id_to_timestamp_.end());
   base::TimeDelta timestamp = it->second;
 
   // Find the frame associated with the surface. We won't erase it from
@@ -893,7 +897,7 @@ VaapiVideoDecoder::AllocateCustomFrame(VideoPixelFormat format,
     case PIXEL_FORMAT_ARGB: {
       surface = vaapi_wrapper_->CreateVASurfaceWithUsageHints(
           VA_RT_FORMAT_RGB32, coded_size,
-          {VaapiWrapper::SurfaceUsageHint::kVideoProcessWrite});
+          {VaapiWrapper::SurfaceUsageHint::kGeneric});
       break;
     }
     default: {
