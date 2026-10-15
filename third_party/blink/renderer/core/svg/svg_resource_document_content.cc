@@ -22,7 +22,6 @@
 
 #include "third_party/blink/renderer/core/svg/svg_resource_document_content.h"
 
-#include "base/auto_reset.h"
 #include "base/notreached.h"
 #include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -36,6 +35,7 @@
 #include "third_party/blink/renderer/core/svg/svg_svg_element.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
+#include "third_party/blink/renderer/platform/supplementable.h"
 
 namespace blink {
 
@@ -157,7 +157,9 @@ SVGResourceDocumentContent::UpdateDocument(scoped_refptr<SharedBuffer> data,
 }
 
 void SVGResourceDocumentContent::LoadingFinished() {
-  UpdateLifecycleForUse();
+  LocalFrame* frame = document_host_->GetFrame();
+  frame->View()->UpdateAllLifecyclePhasesExceptPaint(
+      DocumentUpdateReason::kSVGImage);
   UpdateStatus(ResourceStatus::kCached);
 }
 
@@ -242,22 +244,7 @@ SVGResourceTarget* SVGResourceDocumentContent::GetResourceTarget(
   return &svg_target->EnsureResourceTarget();
 }
 
-void SVGResourceDocumentContent::UpdateLifecycleForUse() {
-  if (!document_host_) {
-    return;
-  }
-  // Temporarily disable content-changed notifications triggered by the
-  // lifecycle update.
-  base::AutoReset validate_scope(&inhibit_content_change_, true);
-  LocalFrame* frame = document_host_->GetFrame();
-  frame->View()->UpdateAllLifecyclePhasesExceptPaint(
-      DocumentUpdateReason::kSVGImage);
-}
-
 void SVGResourceDocumentContent::ContentChanged() {
-  if (inhibit_content_change_) {
-    return;
-  }
   for (auto& observer : observers_) {
     observer->ResourceContentChanged(this);
   }

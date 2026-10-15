@@ -7,10 +7,8 @@ package org.chromium.chrome.browser.compositor;
 import static org.chromium.build.NullUtil.assumeNonNull;
 
 import android.app.Activity;
-import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
@@ -26,7 +24,8 @@ import org.jni_zero.JNINamespace;
 import org.jni_zero.JniType;
 import org.jni_zero.NativeMethods;
 
-import org.chromium.base.ContextUtils;
+import org.chromium.base.ScreenOffBroadcastReceiver;
+import org.chromium.base.ScreenOffBroadcastReceiver.ScreenOffListener;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
 import org.chromium.build.annotations.Initializer;
@@ -103,26 +102,21 @@ public class CompositorView extends FrameLayout
     // On P and above, toggling the screen off gets us in a state where the Surface is destroyed but
     // it is never recreated when it is turned on again. This is the only workaround that seems to
     // be working, see crbug.com/931195.
-    class ScreenStateReceiverWorkaround extends BroadcastReceiver {
+    class ScreenStateReceiverWorkaround implements ScreenOffListener {
         // True indicates we should destroy and recreate the surface manager.
         private boolean mNeedsReset;
 
         ScreenStateReceiverWorkaround() {
-            IntentFilter filter = new IntentFilter(Intent.ACTION_SCREEN_OFF);
-            ContextUtils.registerProtectedBroadcastReceiver(
-                    getContext().getApplicationContext(), this, filter);
+            ScreenOffBroadcastReceiver.addListener(this);
         }
 
         void shutDown() {
-            getContext().getApplicationContext().unregisterReceiver(this);
+            ScreenOffBroadcastReceiver.removeListener(this);
         }
 
         @Override
-        public void onReceive(Context context, Intent intent) {
-            if (Intent.ACTION_SCREEN_OFF.equals(intent.getAction())
-                    && mCompositorSurfaceManager != null
-                    && !mIsInXr
-                    && mNativeCompositorView != 0) {
+        public void onScreenOff(Context context, Intent intent) {
+            if (mCompositorSurfaceManager != null && !mIsInXr && mNativeCompositorView != 0) {
                 mNeedsReset = true;
             }
         }
@@ -356,13 +350,28 @@ public class CompositorView extends FrameLayout
     }
 
     /**
+     * Updates the InputTransferHandler of the current mSurfaceId with the current state of mIsInXr.
+     */
+    @SuppressWarnings("NewApi")
+    private void updateXrStateForCurrentSurfaceInputTransferHandler() {
+        if (InputUtils.isTransferInputToVizSupported() && mSurfaceId != null) {
+            InputTransferHandler handler = SurfaceInputTransferHandlerMap.getMap().get(mSurfaceId);
+            assert handler != null;
+            handler.setIsInXr(mIsInXr);
+        }
+    }
+
+    /**
      * Enables/disables immersive AR overlay mode, a variant of overlay video mode.
+     *
      * @param enabled Whether to enter or leave overlay immersive ar mode.
      */
     public void setOverlayImmersiveArMode(boolean enabled, boolean domSurfaceNeedsConfiguring) {
         // Disable SurfaceControl for the duration of the session. This works around a black
         // screen after activating the screen keyboard (IME), see https://crbug.com/1166248.
         mIsInXr = enabled;
+
+        updateXrStateForCurrentSurfaceInputTransferHandler();
 
         if (domSurfaceNeedsConfiguring) {
             setOverlayVideoMode(enabled);
@@ -383,6 +392,8 @@ public class CompositorView extends FrameLayout
      */
     public void setOverlayVrMode(boolean enabled) {
         mIsInXr = enabled;
+
+        updateXrStateForCurrentSurfaceInputTransferHandler();
 
         // We're essentially entering OverlayVideo mode because we're going to be rendering to an
         // overlay, but we don't actually need a new composite or to adjust the alpha blend.
@@ -504,6 +515,9 @@ public class CompositorView extends FrameLayout
             assert mSurfaceId == null;
             mSurfaceId = surfaceId;
             SurfaceInputTransferHandlerMap.getMap().put(mSurfaceId, handler);
+            // WebXR can trigger a re-creation of the surface, in that case, we need to ensure that
+            // the InputTransferHandler is aware that we are in Xr.
+            handler.setIsInXr(mIsInXr);
         }
     }
 

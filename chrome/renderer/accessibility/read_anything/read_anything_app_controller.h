@@ -15,7 +15,6 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/safe_ref.h"
 #include "base/scoped_observation.h"
-#include "base/threading/sequence_bound.h"
 #include "chrome/common/read_anything/read_anything.mojom.h"
 #include "chrome/renderer/accessibility/read_anything/read_aloud_app_model.h"
 #include "chrome/renderer/accessibility/read_anything/read_anything_app_model.h"
@@ -143,10 +142,14 @@ class ReadAnythingAppController
       double speech_rate,
       base::Value::Dict voices,
       base::Value::List languages_enabled_in_pref,
-      read_anything::mojom::HighlightGranularity granularity) override;
+      read_anything::mojom::HighlightGranularity granularity,
+      read_anything::mojom::LineFocus line_focus) override;
   void SetLanguageCode(const std::string& code) override;
   void SetDefaultLanguageCode(const std::string& code) override;
   void ScreenAIServiceReady() override;
+  void OnGetPresentationState(
+      read_anything::mojom::ReadAnythingPresentationState presentation_state)
+      override;
   void OnGetVoicePackInfo(
       read_anything::mojom::VoicePackInfoPtr voice_pack_info) override;
   void OnReadingModeHidden(bool tab_active) override;
@@ -197,6 +200,7 @@ class ReadAnythingAppController
   int LineSpacing() const;
   int ColorTheme() const;
   int HighlightGranularity() const;
+  int LineFocus() const;
   bool IsHighlightOn();
   int StandardLineSpacing() const;
   int LooseLineSpacing() const;
@@ -224,7 +228,15 @@ class ReadAnythingAppController
   int EngineErrorStopSource() const;
   int ContentFinishedStopSource() const;
   int UnexpectedUpdateContentStopSource() const;
+  int LineFocusOff() const;
+  int LineFocusOneLineWindow() const;
+  int LineFocusThreeLineWindow() const;
+  int LineFocusFiveLineWindow() const;
+  int LineFocusStaticLine() const;
+  int LineFocusCursorLine() const;
   int MaxLineWidth() const;
+  int InSidePanelPresentationState() const;
+  int InImmersiveOverlayPresentationState() const;
   std::string GetStoredVoice() const;
   std::vector<std::string> GetLanguagesEnabledInPref() const;
   std::vector<ui::AXNodeID> GetChildren(ui::AXNodeID ax_node_id) const;
@@ -236,7 +248,12 @@ class ReadAnythingAppController
   std::string GetTextDirection(ui::AXNodeID ax_node_id) const;
   std::string GetUrl(ui::AXNodeID ax_node_id) const;
   std::string GetAltText(ui::AXNodeID ax_node_id) const;
+  // Will only return a state if IsImmersiveReadAnythingEnabled() is true.
+  // Returns the presentation through the OnGetPresentationState callback.
+  void SendGetPresentationStateRequest() const;
   // The results of these are sent back via UntrustedPage::OnGetVoicePackInfo.
+
+  void SendPinStateRequest();
   void SendGetVoicePackInfoRequest(const std::string& language) const;
   void SendInstallVoicePackRequest(const std::string& language) const;
   void SendUninstallVoiceRequest(const std::string& language) const;
@@ -245,6 +262,7 @@ class ReadAnythingAppController
   bool ShouldBold(ui::AXNodeID ax_node_id) const;
   bool IsOverline(ui::AXNodeID ax_node_id) const;
   bool IsLeafNode(ui::AXNodeID ax_node_id) const;
+  bool IsReadAnythingPinned() const;
   void OnConnected();
   void OnCopy() const;
   void OnScroll(bool on_selection) const;
@@ -257,8 +275,10 @@ class ReadAnythingAppController
   void OnDistilled(int word_count);
   bool IsGoogleDocs() const;
   bool IsReadAloudEnabled() const;
+  bool IsImmersiveEnabled() const;
   bool IsTsTextSegmentationEnabled() const;
   bool IsReadabilityEnabled() const;
+  bool IsLineFocusEnabled() const;
   bool IsChromeOsAsh() const;
   bool IsPhraseHighlightingEnabled() const;
   void OnLetterSpacingChange(int value);
@@ -271,6 +291,7 @@ class ReadAnythingAppController
   void OnLanguagePrefChange(const std::string& lang, bool enabled);
   bool RequiresDistillation();
   void OnHighlightGranularityChanged(int granularity);
+  void OnLineFocusChanged(int line_focus);
   double GetLineSpacingValue(int line_spacing) const;
   double GetLetterSpacingValue(int letter_spacing) const;
   std::vector<std::string> GetSupportedFonts();
@@ -286,6 +307,10 @@ class ReadAnythingAppController
   void UpdateWordsSeen(int words_seen);
   void UpdateWordsHeard(int words_heard);
   void LogEmptyState();
+  void CloseUI();
+  void TogglePresentation();
+  void TogglePinState();
+  void OnPinStatusReceived(bool pin_state) override;
 
   // The language code that should be used to determine which voices are
   // supported for speech.
@@ -314,10 +339,7 @@ class ReadAnythingAppController
   // available.
   void UpdateDependencyParserModel(base::File model_file);
 
-  void OnDependencyParserModelAvailabilityChecked(bool is_available);
-
-  base::SequenceBound<DependencyParserModel>&
-  GetDependencyParserModelForTesting();
+  DependencyParserModel& GetDependencyParserModelForTesting();
 
   // Called when distillation has completed.
   void OnAXTreeDistilled(const ui::AXTreeID& tree_id,
@@ -390,6 +412,10 @@ class ReadAnythingAppController
   // processed accessibility events.
   void SendEventUpdates();
 
+  // Helper for forwarding reading mode hide events to the webui so we can
+  // perform cleaning operations on it.
+  void ReadingModeWillClose();
+
   // Records the number of selections that occurred for the active page. Called
   // when the active tree changes.
   void RecordNumSelections();
@@ -427,6 +453,14 @@ class ReadAnythingAppController
   void IncrementMetricCount(const std::string& metric);
 
   void LogSpeechStop(int source);
+
+  // Methods for logging line focus session info.
+  void StartLineFocusSession();
+  void LogLineFocusSession();
+  void AddLineFocusScrollDistance(int distance);
+  void AddLineFocusMouseDistance(int distance);
+  void IncrementLineFocusKeyboardLines();
+  void IncrementLineFocusSpeechLines();
 
   void OnUrlInformationSet();
 

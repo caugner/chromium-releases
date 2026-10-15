@@ -113,13 +113,8 @@ int64_t DependencyParserModel::GetModelVersion() const {
 }
 
 std::vector<size_t> DependencyParserModel::GetDependencyHeads(
-    const std::vector<std::string>& input) {
-  // IsAvailable() might return false if the model file is not completely
-  // downloaded yet, if the file was invalid, or if the underlying TFLite engine
-  // failed to initialize.
-  if (!IsAvailable()) {
-    return {};
-  }
+    base::span<const std::string> input) {
+  DCHECK(IsAvailable());
   base::ElapsedTimer timer;
 
   // Perform the following operations to identify the dependency heads for each

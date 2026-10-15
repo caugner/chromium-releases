@@ -8,6 +8,5 @@ include_rules = [
 specific_include_rules = {
   ".*unittest\.cc": [
     "+cc/test",
-    "+third_party/fuzztest",
   ],
 }

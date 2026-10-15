@@ -56,13 +56,20 @@ KeepAliveURLLoaderService::FactoryContext::FactoryContext(
   CHECK(policy_container_host);
 }
 
+KeepAliveURLLoaderService::FactoryContext::FactoryContext(
+    const std::unique_ptr<FactoryContext>& other)
+    : factory(other->factory),
+      weak_document_ptr(other->weak_document_ptr),
+      ukm_source_id(other->ukm_source_id),
+      policy_container_host(other->policy_container_host),
+      attribution_context(other->attribution_context),
+      network_isolation_key(other->network_isolation_key) {}
 
 KeepAliveURLLoaderService::FactoryContext::~FactoryContext() = default;
 
 void KeepAliveURLLoaderService::FactoryContext::OnDidCommitNavigation(
     NavigationHandle* navigation_handle) {
   CHECK(navigation_handle);
-  did_commit_navigation = true;
   weak_document_ptr =
       navigation_handle->GetRenderFrameHost()->GetWeakDocumentPtr();
   network_isolation_key =
@@ -97,11 +104,6 @@ void KeepAliveURLLoaderService::FactoryContext::
   CHECK(rfh);
 
   attribution_context = AttributionSuitableContext::Create(rfh);
-}
-
-bool KeepAliveURLLoaderService::FactoryContext::WasInitiatorDocumentDestroyed()
-    const {
-  return did_commit_navigation && !weak_document_ptr.AsRenderFrameHostIfValid();
 }
 
 void KeepAliveURLLoaderService::FactoryContext::
@@ -225,7 +227,7 @@ class KeepAliveURLLoaderService::KeepAliveURLLoaderFactoriesBase {
   // loader is ensured to exist.
   raw_ptr<KeepAliveURLLoader> CreateKeepAliveURLLoader(
       PendingReceiverType<Interface> receiver,
-      const scoped_refptr<FactoryContext>& context,
+      const std::unique_ptr<FactoryContext>& context,
       int32_t request_id,
       uint32_t options,
       const network::ResourceRequest& resource_request,
@@ -254,13 +256,7 @@ class KeepAliveURLLoaderService::KeepAliveURLLoaderFactoriesBase {
     context->OnBeforeKeepAliveURLLoaderCreated(resource_request);
 
     // Passes in the pending remote of `client` from a renderer so that `loader`
-    // can forward response back to the renderer. If the initiator document has
-    // already been destroyed, drop `client` so that the response is handled
-    // entirely in the browser, the same as for a request whose renderer
-    // disconnects after starting it.
-    if (context->WasInitiatorDocumentDestroyed()) {
-      client.reset();
-    }
+    // can forward response back to the renderer.
     CHECK(context->policy_container_host);
     auto loader = std::make_unique<KeepAliveURLLoader>(
         request_id, options, resource_request, std::move(client),
@@ -434,7 +430,7 @@ class KeepAliveURLLoaderService::KeepAliveURLLoaderFactories final
     // Adds a new factory receiver to the set, binding the pending `receiver`
     // from to `this` with a new context that has frame-specific data and keeps
     // reference to `subresource_proxying_factory_bundle`.
-    auto context = base::MakeRefCounted<FactoryContext>(
+    auto context = std::make_unique<FactoryContext>(
         std::move(subresource_proxying_factory_bundle),
         std::move(policy_container_host));
     auto weak_context = context->weak_ptr_factory.GetWeakPtr();
@@ -486,8 +482,10 @@ class KeepAliveURLLoaderService::KeepAliveURLLoaderFactories final
       override {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-    loader_factory_receivers_.Add(this, std::move(receiver),
-                                  loader_factory_receivers_.current_context());
+    loader_factory_receivers_.Add(
+        this, std::move(receiver),
+        std::make_unique<FactoryContext>(
+            loader_factory_receivers_.current_context()));
   }
 
  private:
@@ -499,7 +497,7 @@ class KeepAliveURLLoaderService::KeepAliveURLLoaderFactories final
   // be removed once it is disconnected from the corresponding remote (usually
   // in a renderer).
   mojo::ReceiverSet<network::mojom::URLLoaderFactory,
-                    scoped_refptr<FactoryContext>>
+                    std::unique_ptr<FactoryContext>>
       loader_factory_receivers_;
 };
 
@@ -533,7 +531,7 @@ class KeepAliveURLLoaderService::FetchLaterLoaderFactories final
     // Adds a new factory receiver to the set, binding the pending `receiver`
     // from to `this` with a new context that has frame-specific data and keeps
     // reference to `shared_url_loader_factory`.
-    auto context = base::MakeRefCounted<FactoryContext>(
+    auto context = std::make_unique<FactoryContext>(
         std::move(shared_url_loader_factory), std::move(policy_container_host));
     auto weak_context = context->weak_ptr_factory.GetWeakPtr();
     loader_factory_receivers_.Add(this, std::move(receiver),
@@ -577,8 +575,10 @@ class KeepAliveURLLoaderService::FetchLaterLoaderFactories final
           receiver) override {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-    loader_factory_receivers_.Add(this, std::move(receiver),
-                                  loader_factory_receivers_.current_context());
+    loader_factory_receivers_.Add(
+        this, std::move(receiver),
+        std::make_unique<FactoryContext>(
+            loader_factory_receivers_.current_context()));
   }
 
  private:
@@ -587,7 +587,7 @@ class KeepAliveURLLoaderService::FetchLaterLoaderFactories final
   // be removed once it is disconnected from the corresponding remote in a
   // renderer.
   mojo::AssociatedReceiverSet<blink::mojom::FetchLaterLoaderFactory,
-                              scoped_refptr<FactoryContext>>
+                              std::unique_ptr<FactoryContext>>
       loader_factory_receivers_;
 };
 

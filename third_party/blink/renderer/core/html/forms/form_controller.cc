@@ -24,6 +24,7 @@
 #include <utility>
 
 #include "base/memory/ptr_util.h"
+#include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/events/scoped_event_queue.h"
@@ -487,10 +488,8 @@ void FormController::RestoreControlStateIn(HTMLFormElement& form) {
   if (!document_->HasFinishedParsing())
     return;
   EventQueueScope scope;
-  // Make a copy of the list because the DOM could be modified during
-  // restoration of a <select> with a <selectedcontent> element.
-  ListedElement::List elements_copy(form.ListedElements());
-  for (const auto& control : elements_copy) {
+  const ListedElement::List& elements = form.ListedElements();
+  for (const auto& control : elements) {
     if (!control->ClassSupportsStateRestore())
       continue;
     if (OwnerFormForState(*control) != &form)
@@ -547,11 +546,7 @@ void FormController::RestoreAllControlsInDocumentOrder() {
     return;
   HeapHashSet<Member<HTMLFormElement>> finished_forms;
   EventQueueScope scope;
-  // Make a copy of the list because the DOM could be modified during
-  // restoration of a <select> with a <selectedcontent> element.
-  DocumentState::ControlList control_list_copy(
-      document_state_->GetControlList());
-  for (auto& control : control_list_copy) {
+  for (auto& control : document_state_->GetControlList()) {
     auto* owner = OwnerFormForState(*control);
     if (!owner)
       RestoreControlStateFor(*control);

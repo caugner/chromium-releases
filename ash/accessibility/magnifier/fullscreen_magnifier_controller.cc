@@ -487,10 +487,6 @@ const std::string& FullscreenMagnifierController::GetName() const {
   return name;
 }
 
-base::WeakPtr<ui::GestureConsumer> FullscreenMagnifierController::GetWeakPtr() {
-  return weak_ptr_factory_.GetWeakPtr();
-}
-
 bool FullscreenMagnifierController::Redraw(
     const gfx::PointF& position_in_physical_pixels,
     float scale,

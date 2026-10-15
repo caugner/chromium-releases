@@ -28,6 +28,14 @@ const SkImageInfo StructTraits<viz::mojom::BitmapInSharedMemoryDataView,
 }
 
 // static
+uint64_t StructTraits<viz::mojom::BitmapInSharedMemoryDataView,
+                      viz::CopyOutputResult::ScopedSkBitmap>::
+    row_bytes(const viz::CopyOutputResult::ScopedSkBitmap& scoped_bitmap) {
+  auto sk_bitmap = scoped_bitmap.bitmap();
+  return sk_bitmap.info().minRowBytes();
+}
+
+// static
 std::optional<base::WritableSharedMemoryRegion>
 StructTraits<viz::mojom::BitmapInSharedMemoryDataView,
              viz::CopyOutputResult::ScopedSkBitmap>::
@@ -83,6 +91,8 @@ bool StructTraits<viz::mojom::BitmapInSharedMemoryDataView, SkBitmap>::Read(
   SkImageInfo image_info;
   if (!data.ReadImageInfo(&image_info))
     return false;
+  if (!image_info.validRowBytes(data.row_bytes()))
+    return false;
 
   std::optional<base::WritableSharedMemoryRegion> region_opt;
   if (!data.ReadPixels(&region_opt))
@@ -90,26 +100,23 @@ bool StructTraits<viz::mojom::BitmapInSharedMemoryDataView, SkBitmap>::Read(
 
   *sk_bitmap = SkBitmap();
   if (!region_opt)
-    return sk_bitmap->setInfo(image_info, image_info.minRowBytes());
+    return sk_bitmap->setInfo(image_info, data.row_bytes());
 
   auto mapping_ptr =
       std::make_unique<base::WritableSharedMemoryMapping>(region_opt->Map());
   if (!mapping_ptr->IsValid())
     return false;
 
-  if (mapping_ptr->size() <
-      image_info.computeByteSize(image_info.minRowBytes())) {
+  if (mapping_ptr->size() < image_info.computeByteSize(data.row_bytes())) {
     return false;
   }
 
-  // Skia guarantees that it will call release proc, so we pass release()'ed
-  // pointer into it.
-  void* bitmap_memory = mapping_ptr->memory();
-  if (!sk_bitmap->installPixels(
-          image_info, bitmap_memory, image_info.minRowBytes(),
-          &DeleteSharedMemoryMapping, mapping_ptr.release())) {
+  if (!sk_bitmap->installPixels(image_info, mapping_ptr->memory(),
+                                data.row_bytes(), &DeleteSharedMemoryMapping,
+                                mapping_ptr.get())) {
     return false;
   }
+  mapping_ptr.release();
   return true;
 }
 

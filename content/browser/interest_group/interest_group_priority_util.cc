@@ -89,12 +89,6 @@ double CalculateInterestGroupPriority(
       break;
     }
   }
-
-  // Ignore non-finite results.
-  if (!std::isfinite(caclulated_priority)) {
-    return -1;
-  }
-
   return caclulated_priority;
 }
 

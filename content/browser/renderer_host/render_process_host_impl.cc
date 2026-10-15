@@ -293,18 +293,6 @@
 
 namespace features {
 
-// When enabled, the IPC channel will not be paused when launching non-guest
-// renderer processes. This makes it possible for all kinds of mojo calls
-// to be sent to the renderer process before OnProcessLaunched fires. When the
-// feature is disabled, those messages are instead queued because the IPC
-// channel is paused, and only flushed at OnProcessLaunched.
-BASE_FEATURE(kSkipIPCChannelPausingForNonGuests,
-             base::FEATURE_DISABLED_BY_DEFAULT);
-
-const base::FeatureParam<bool> skip_channel_pausing_for_internal_webui_only{
-    &features::kSkipIPCChannelPausingForNonGuests, "internal_webui_only",
-    false};
-
 #if BUILDFLAG(IS_ANDROID)
 // The feature flag is added for a holdback experiment to estimate
 // the performance impace of the first spare renderer not using the warm-up
@@ -833,7 +821,7 @@ class SiteProcessCountTracker : public base::SupportsUserData::Data,
       // "about:" in that case.  This looks like a bug that needs to be fixed!
       if (!SiteInstance::ShouldAssignSiteForURL(iter.first.site_url()) &&
           !iter.first.site_url().IsAboutBlank() &&
-          base::Contains(iter.second, host->GetID())) {
+          iter.second.contains(host->GetID())) {
         return true;
       }
     }
@@ -1624,7 +1612,8 @@ RenderProcessHostImpl::RenderProcessHostImpl(
                 false /* boost_for_discard */,
 #if BUILDFLAG(IS_ANDROID)
                 is_spare_renderer,
-                ChildProcessImportance::NORMAL
+                ChildProcessImportance::NORMAL,
+                false /* has_active_clients */
 #else
                 std::nullopt
 #endif
@@ -1885,8 +1874,7 @@ bool RenderProcessHostImpl::Init() {
   TRACE_EVENT("navigation", "RenderProcessHostImpl::Init",
               perfetto::Flow::Global(trace_id));
   GetRendererInterface()->InitializeRenderer(
-      GetContentClient()->browser()->GetUserAgentBasedOnPolicy(
-          browser_context_),
+      GetContentClient()->browser()->GetUserAgent(),
       GetContentClient()->browser()->GetUserAgentMetadata(),
       storage_partition_impl_->cors_exempt_header_list(),
       GetContentClient()->browser()->GetOriginTrialsSettings(),
@@ -2106,6 +2094,12 @@ void RenderProcessHostImpl::InitializeChannelProxy() {
     channel_->Pause();
   }
   InitializeSharedMemoryRegionsOnceChannelIsUp();
+
+  // Must register after binding `child_process_`.
+  if (!run_renderer_in_process()) {
+    memory_pressure_listener_registration_.emplace(
+        base::MemoryPressureListenerTag::kRenderProcessHostImpl, this);
+  }
 }
 
 void RenderProcessHostImpl::InitializeSharedMemoryRegionsOnceChannelIsUp() {
@@ -2506,13 +2500,13 @@ void RenderProcessHostImpl::SetVideoDecoderEventCBForTesting(
 }
 #endif  // BUILDFLAG(ALLOW_OOP_VIDEO_DECODER)
 
-void RenderProcessHostImpl::DelayProcessShutdown(
+base::ScopedClosureRunner RenderProcessHostImpl::DelayProcessShutdown(
     const base::TimeDelta& subframe_shutdown_timeout,
     const base::TimeDelta& unload_handler_timeout,
     const SiteInfo& site_info) {
   // No need to delay shutdown if the process is already shutting down.
   if (AreRefCountsDisabled() || deleting_soon_ || fast_shutdown_started_) {
-    return;
+    return base::ScopedClosureRunner();
   }
 
   shutdown_delay_ref_count_++;
@@ -2527,16 +2521,25 @@ void RenderProcessHostImpl::DelayProcessShutdown(
     delayed_shutdown_tracker->IncrementSiteProcessCount(site_info, GetID());
   }
 
+  // Create a callback shared between the delayed task and the returned
+  // ScopedClosureRunner. Since callbacks are internally ref-counted, the
+  // `base::OwnedRef` boolean is shared between both paths to ensure the
+  // cancellation logic runs exactly once (whether triggered by the timeout or
+  // the runner).
+  auto callback = base::BindRepeating(
+      &RenderProcessHostImpl::CancelProcessShutdownDelay,
+      instance_weak_factory_.GetWeakPtr(), site_info, base::OwnedRef(false));
+
   // Don't delay shutdown longer than the maximum delay for renderer process,
   // enforced for security reasons (https://crbug.com/1177674).
   GetUIThreadTaskRunner({})->PostDelayedTask(
-      FROM_HERE,
-      base::BindOnce(&RenderProcessHostImpl::CancelProcessShutdownDelay,
-                     instance_weak_factory_.GetWeakPtr(), site_info),
+      FROM_HERE, callback,
       std::min(subframe_shutdown_timeout + unload_handler_timeout,
                kKeepAliveHandleFactoryTimeout));
 
   time_spent_running_unload_handlers_ = unload_handler_timeout;
+
+  return base::ScopedClosureRunner(callback);
 }
 
 bool RenderProcessHostImpl::IsProcessShutdownDelayedForTesting() {
@@ -2774,6 +2777,16 @@ void RenderProcessHostImpl::RegisterCoordinatorClient(
   coordinator_connector_receiver_.reset();
 }
 
+void RenderProcessHostImpl::OnMemoryPressure(
+    base::MemoryPressureLevel memory_pressure_level) {
+  // Match the existing behavior of only sending the memory pressure level on
+  // select platforms.
+  // TODO(pmonette): Enable for all platforms.
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CASTOS)
+  child_process_->OnMemoryPressure(memory_pressure_level);
+#endif  // BUILDFLAG(IS_ANDROID)
+}
+
 void RenderProcessHostImpl::CreateRendererHost(
     mojo::PendingAssociatedReceiver<mojom::RendererHost> receiver) {
   renderer_host_receiver_.Bind(std::move(receiver));
@@ -2916,7 +2929,7 @@ void RenderProcessHostImpl::ForEachRenderFrameHost(
 void RenderProcessHostImpl::RegisterRenderFrameHost(
     const GlobalRenderFrameHostId& render_frame_host_id,
     bool is_outermost_main_frame) {
-  DCHECK(!base::Contains(render_frame_host_id_set_, render_frame_host_id));
+  DCHECK(!render_frame_host_id_set_.contains(render_frame_host_id));
 
   if (is_outermost_main_frame) {
     ++outermost_main_frame_count_;
@@ -2934,7 +2947,7 @@ void RenderProcessHostImpl::RegisterRenderFrameHost(
 void RenderProcessHostImpl::UnregisterRenderFrameHost(
     const GlobalRenderFrameHostId& render_frame_host_id,
     bool is_outermost_main_frame) {
-  DCHECK(base::Contains(render_frame_host_id_set_, render_frame_host_id));
+  DCHECK(render_frame_host_id_set_.contains(render_frame_host_id));
   render_frame_host_id_set_.erase(render_frame_host_id);
   prerendering_frame_host_id_set_.erase(render_frame_host_id);
   if (is_outermost_main_frame) {
@@ -2946,7 +2959,7 @@ void RenderProcessHostImpl::UnregisterRenderFrameHost(
 void RenderProcessHostImpl::OnRenderFrameHostPrerenderStateChanged(
     const GlobalRenderFrameHostId& render_frame_host_id,
     bool is_prerendering) {
-  CHECK(base::Contains(render_frame_host_id_set_, render_frame_host_id));
+  CHECK(render_frame_host_id_set_.contains(render_frame_host_id));
   if (is_prerendering) {
     prerendering_frame_host_id_set_.insert(render_frame_host_id);
   } else {
@@ -3117,9 +3130,6 @@ void RenderProcessHostImpl::ShutdownForBadMessage(
 
     SCOPED_CRASH_KEY_STRING32("RPH.BadMessageKill", "isolation_mode",
                               site_isolation_mode);
-
-    ChildProcessSecurityPolicyImpl::GetInstance()->LogKilledProcessOriginLock(
-        GetDeprecatedID());
 
     // Report a crash, since none will be generated by the killed renderer.
     base::debug::DumpWithoutCrashing();
@@ -3404,7 +3414,7 @@ void RenderProcessHostImpl::SetProcessLock(
   TRACE_EVENT_BEGIN("shutdown", "Lock process", tracing_track_,
                     ChromeTrackEvent::kRenderProcessHost, *this);
   ChildProcessSecurityPolicyImpl::GetInstance()->LockProcess(
-      isolation_context, GetDeprecatedID(), !IsUnused(), process_lock);
+      isolation_context, GetID(), !IsUnused(), process_lock);
 
   // Note that SetProcessLock is only called on ProcessLock state transitions.
   // (e.g. invalid -> allows_any_site and allows_any_site -> locked_to_site).
@@ -3513,7 +3523,7 @@ bool RenderProcessHostImpl::ShouldPauseChannelUntilProcessLaunched() {
 
   if (base::FeatureList::IsEnabled(
           features::kSkipIPCChannelPausingForNonGuests)) {
-    if (features::skip_channel_pausing_for_internal_webui_only.Get()) {
+    if (features::kSkipIPCChannelPausingForNonGuestsInternalWebUiOnly.Get()) {
 #if !BUILDFLAG(IS_ANDROID)
       // Skip pausing if we're on initial WebUI, so return false in that case.
       return !IsForInitialWebUI();
@@ -4486,14 +4496,14 @@ void RenderProcessHostImpl::RemovePendingView() {
 
 void RenderProcessHostImpl::AddPriorityClient(
     RenderProcessHostPriorityClient* priority_client) {
-  DCHECK(!base::Contains(priority_clients_, priority_client));
+  DCHECK(!priority_clients_.contains(priority_client));
   priority_clients_.insert(priority_client);
   UpdateProcessPriorityInputs();
 }
 
 void RenderProcessHostImpl::RemovePriorityClient(
     RenderProcessHostPriorityClient* priority_client) {
-  DCHECK(base::Contains(priority_clients_, priority_client));
+  DCHECK(priority_clients_.contains(priority_client));
   priority_clients_.erase(priority_client);
   UpdateProcessPriorityInputs();
 }
@@ -5607,6 +5617,7 @@ void RenderProcessHostImpl::UpdateProcessPriorityInputs() {
 #if BUILDFLAG(IS_ANDROID)
   ChildProcessImportance new_effective_importance =
       ChildProcessImportance::NORMAL;
+  bool new_has_active_clients = false;
 #endif
   for (RenderProcessHostPriorityClient* client : priority_clients_) {
     RenderProcessHostPriorityClient::Priority priority = client->GetPriority();
@@ -5635,6 +5646,8 @@ void RenderProcessHostImpl::UpdateProcessPriorityInputs() {
 #if BUILDFLAG(IS_ANDROID)
     new_effective_importance =
         std::max(new_effective_importance, priority.importance);
+    new_has_active_clients =
+        new_has_active_clients || priority.has_active_clients;
 #endif
   }
 
@@ -5647,9 +5660,11 @@ void RenderProcessHostImpl::UpdateProcessPriorityInputs() {
   intersects_viewport_ = new_intersects_viewport;
   is_discarding_ = new_is_discarding;
 #if BUILDFLAG(IS_ANDROID)
-  inputs_changed =
-      inputs_changed || new_effective_importance != effective_importance_;
+  inputs_changed = inputs_changed ||
+                   new_effective_importance != effective_importance_ ||
+                   new_has_active_clients != has_active_clients_;
   effective_importance_ = new_effective_importance;
+  has_active_clients_ = new_has_active_clients;
 #endif
   if (inputs_changed)
     UpdateProcessPriority();
@@ -5674,7 +5689,7 @@ void RenderProcessHostImpl::UpdateProcessPriority() {
       boost_for_loading_count_ > 0, is_discarding_,
 #if BUILDFLAG(IS_ANDROID)
       spare_renderer_priority_status_ == SpareRendererPriorityStatus::kSpare,
-      GetEffectiveImportance()
+      GetEffectiveImportance(), has_active_clients_
 #else
       priority_override_
 #endif
@@ -6049,9 +6064,17 @@ void RenderProcessHostImpl::GetBrowserHistogram(
 }
 
 void RenderProcessHostImpl::CancelProcessShutdownDelay(
-    const SiteInfo& site_info) {
-  if (AreRefCountsDisabled())
+    const SiteInfo& site_info,
+    bool& did_run_cancel_process_shutdown_delay) {
+  if (AreRefCountsDisabled()) {
     return;
+  }
+
+  // Early return if the shutdown delay has already been cancelled.
+  if (did_run_cancel_process_shutdown_delay) {
+    return;
+  }
+  did_run_cancel_process_shutdown_delay = true;
 
   // Remove from the delayed-shutdown tracker. This may have already been done
   // in StopTrackingProcessForShutdownDelay() if the process was reused before
@@ -6148,15 +6171,6 @@ void RenderProcessHostImpl::ProvideSwapFileForRenderer() {
           },
           std::move(allocator)));
 }
-
-#if BUILDFLAG(IS_ANDROID)
-
-void RenderProcessHostImpl::NotifyMemoryPressureToRenderer(
-    base::MemoryPressureLevel level) {
-  child_process_->OnMemoryPressure(level);
-}
-
-#endif
 
 void RenderProcessHostImpl::GetBoundInterfacesForTesting(
     std::vector<std::string>& out) {

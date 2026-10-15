@@ -302,13 +302,13 @@ void MojoVideoDecoderService::Initialize(const VideoDecoderConfig& config,
   auto gfx_cs = config.color_space_info().ToGfxColorSpace();
   codec_string_ = base::StringPrintf(
       "name=%s:codec=%s:profile=%d:size=%s:cs=[%d,%d,%d,%d]:hdrm=%d",
-      GetDecoderName(decoder_->GetDecoderType()).c_str(),
+      GetDecoderName(decoder_->GetDecoderType()),
       GetCodecName(config.codec()).c_str(), config.profile(),
       config.coded_size().ToString().c_str(),
       static_cast<int>(gfx_cs.GetPrimaryID()),
       static_cast<int>(gfx_cs.GetTransferID()),
       static_cast<int>(gfx_cs.GetMatrixID()),
-      static_cast<int>(gfx_cs.GetRangeID()), config.hdr_metadata().has_value());
+      static_cast<int>(gfx_cs.GetRangeID()), !config.hdr_metadata().IsEmpty());
 
   using Self = MojoVideoDecoderService;
   decoder_->Initialize(
@@ -418,9 +418,10 @@ void MojoVideoDecoderService::OnReaderRead(
     scoped_refptr<DecoderBuffer> buffer) {
   DVLOG(3) << __func__;
   if (trace_event) {
-    TRACE_EVENT_ASYNC_STEP_PAST1(
-        "media", kDecodeTraceName, trace_event.get(), "ReadDecoderBuffer",
-        "decoder_buffer", buffer ? buffer->AsHumanReadableString() : "null");
+    TRACE_EVENT_INSTANT("media", "ReadDecoderBuffer",
+                        perfetto::Track::FromPointer(trace_event.get()),
+                        "decoder_buffer",
+                        buffer ? buffer->AsHumanReadableString() : "null");
   }
 
   if (!buffer) {
@@ -433,20 +434,6 @@ void MojoVideoDecoderService::OnReaderRead(
       !std::holds_alternative<VideoDecoderConfig>(*buffer->next_config())) {
     std::move(bad_message_callback)
         .Run("Invalid DecoderBuffer::next_config() for video.");
-    return;
-  }
-
-  // The renderer must never set secure_handle. Legitimate secure handles are
-  // always attached on the GPU side by V4L2VideoDecoder::AttachSecureBuffer
-  // (via the V4L2_CID_MPEG_MTK_GET_SECURE_HANDLE ioctl) AFTER the buffer has
-  // crossed the Mojo boundary. A non-zero handle arriving from the renderer is
-  // a forgery: it would cause DecoderBufferTranscryptor::DecryptPendingBuffer
-  // to skip AttachSecureBuffer and propagate an attacker-chosen value through
-  // the browser process to the cdm-oemcrypto daemon and the TrustZone TA.
-  if (!buffer->end_of_stream() && buffer->side_data() &&
-      buffer->side_data()->secure_handle) {
-    std::move(bad_message_callback)
-        .Run("Renderer sent non-zero DecoderBufferSideData.secure_handle.");
     return;
   }
 
@@ -467,8 +454,8 @@ void MojoVideoDecoderService::OnDecoderDecoded(
     media::DecoderStatus status) {
   DVLOG(3) << __func__;
   if (trace_event) {
-    TRACE_EVENT_ASYNC_STEP_PAST0("media", kDecodeTraceName, trace_event.get(),
-                                 "Decode");
+    TRACE_EVENT_INSTANT("media", "Decode",
+                        perfetto::Track::FromPointer(trace_event.get()));
     trace_event->EndTrace(status);
   }
 

@@ -17,7 +17,6 @@
 #include "base/check_op.h"
 #include "base/command_line.h"
 #include "base/containers/adapters.h"
-#include "base/containers/contains.h"
 #include "base/containers/flat_set.h"
 #include "base/containers/map_util.h"
 #include "base/debug/crash_logging.h"
@@ -371,7 +370,7 @@ struct AXTreeUpdateState {
 
   // Returns whether this update creates a node marked by |node_id|.
   bool IsCreatedNode(AXNodeID node_id) const {
-    return base::Contains(new_node_ids, node_id);
+    return new_node_ids.contains(node_id);
   }
 
   // Returns whether this update creates |node|.
@@ -613,7 +612,7 @@ struct AXTreeUpdateState {
   // Returns whether this update must invalidate the unignored cached
   // values for |node_id|.
   bool InvalidatesUnignoredCachedValues(AXNodeID node_id) const {
-    return base::Contains(invalidate_unignored_cached_values_ids, node_id);
+    return invalidate_unignored_cached_values_ids.contains(node_id);
   }
 
   // Adds the parent of |node_id| to the list of nodes to invalidate unignored
@@ -1328,8 +1327,8 @@ bool AXTree::Unserialize(const AXTreeUpdate& update) {
       // the same ignored state.
       bool is_root_of_ignored_change =
           !node->parent() ||
-          !base::Contains(update_state.ignored_state_changed_ids,
-                          node->parent()->id()) ||
+          !update_state.ignored_state_changed_ids.contains(
+              node->parent()->id()) ||
           node->IsIgnored() != node->parent()->IsIgnored();
       observers_.Notify(&AXTreeObserver::OnIgnoredWillChange, this, node,
                         will_be_ignored, is_root_of_ignored_change);
@@ -1707,7 +1706,7 @@ AXNode* AXTree::CreateNode(AXNode* parent,
   [[maybe_unused]] bool inserted =
       id_map_.try_emplace(id, std::move(node)).second;
   // There should not have been a node already in the map with the same id.
-  CHECK(inserted);
+  DCHECK(inserted);
   return node_raw;
 }
 
@@ -1770,10 +1769,8 @@ bool AXTree::ComputePendingChanges(const AXTreeUpdate& update,
   // on the tree during the update.
   int number_of_inline_textboxes = 0;
   for (const AXNodeData& new_data : update_state->pending_tree_update->nodes) {
-    if (new_data.id == kInvalidAXNodeID) {
-      RecordError(*update_state, "Node ID is invalid.");
-      return false;
-    }
+    if (new_data.id == kInvalidAXNodeID)
+      continue;
     bool is_new_root =
         update_state->root_will_be_created && new_data.id == update.root_id;
     if (!ComputePendingChangesToNode(new_data, is_new_root, update_state)) {
@@ -1807,10 +1804,6 @@ bool AXTree::ComputePendingChangesToNode(const AXNodeData& new_data,
   // unignored index in parent.
   size_t j = 0;
   for (auto child_id : new_data.child_ids) {
-    if (child_id == kInvalidAXNodeID) {
-      RecordError(*update_state, "Child ID is invalid.");
-      return false;
-    }
     if (const AXNode* node = GetFromId(child_id);
         node && node->GetIndexInParent() != j) {
       update_state->InvalidateParentNodeUnignoredCacheValues(node->id());
@@ -1969,7 +1962,7 @@ bool AXTree::ComputePendingChangesToNode(const AXNodeData& new_data,
   }
 
   for (AXNodeID child_id : create_or_destroy_ids) {
-    if (base::Contains(new_child_id_set, child_id)) {
+    if (new_child_id_set.contains(child_id)) {
       // This is a serious error - nodes should never be reparented without
       // first being removed from the tree. If a node exists in the tree already
       // then adding it to a new parent would mean stealing the node from its
@@ -2090,8 +2083,7 @@ void AXTree::NotifySubtreeWillBeReparentedOrDeleted(
   // Don't fire redundant remove notification in the case where the parent
   // will become ignored at the same time.
   if (notify_removed && node->parent() &&
-      base::Contains(update_state->ignored_state_changed_ids,
-                     node->parent()->id()) &&
+      update_state->ignored_state_changed_ids.contains(node->parent()->id()) &&
       !node->parent()->IsIgnored()) {
     notify_removed = false;
   }
@@ -2283,7 +2275,7 @@ void AXTree::NotifyNodeAttributesHaveBeenChanged(
   observers_.Notify(&AXTreeObserver::OnNodeDataChanged, this, old_data,
                     new_data);
 
-  if (base::Contains(update_state.ignored_state_changed_ids, new_data.id)) {
+  if (update_state.ignored_state_changed_ids.contains(new_data.id)) {
     observers_.Notify(&AXTreeObserver::OnIgnoredChanged, this, node,
                       node->IsIgnored());
   }
@@ -2583,7 +2575,7 @@ void AXTree::DeleteOldChildren(AXNode* node,
 
   // Delete the old children.
   for (AXNode* child : node->children()) {
-    if (!base::Contains(new_child_id_set, child->id()))
+    if (!new_child_id_set.contains(child->id()))
       DestroySubtree(child, update_state);
   }
 }
@@ -2968,6 +2960,18 @@ std::optional<int> AXTree::GetPosInSet(const AXNode& node) {
     return std::nullopt;
   }
 
+  if (node.GetRole() == ax::mojom::Role::kRadioButton &&
+      !node.HasIntAttribute(ax::mojom::IntAttribute::kPosInSet) &&
+      node.HasIntListAttribute(ax::mojom::IntListAttribute::kRadioGroupIds)) {
+    const std::vector<int32_t>& ids =
+        node.GetIntListAttribute(ax::mojom::IntListAttribute::kRadioGroupIds);
+    for (size_t i = 0; i < ids.size(); ++i) {
+      if (ids[i] == node.id()) {
+        return static_cast<int>(i + 1);
+      }
+    }
+  }
+
   if ((node.GetRole() == ax::mojom::Role::kComboBoxSelect ||
        node.GetRole() == ax::mojom::Role::kPopUpButton) &&
       node.GetUnignoredChildCount() == 0 &&
@@ -3007,6 +3011,14 @@ std::optional<int> AXTree::GetSetSize(const AXNode& node) {
   if (node.IsIgnored()) {
     return std::nullopt;
   };
+
+  if (node.GetRole() == ax::mojom::Role::kRadioButton &&
+      !node.HasIntAttribute(ax::mojom::IntAttribute::kSetSize) &&
+      node.HasIntListAttribute(ax::mojom::IntListAttribute::kRadioGroupIds)) {
+    return static_cast<int>(
+        node.GetIntListAttribute(ax::mojom::IntListAttribute::kRadioGroupIds)
+            .size());
+  }
 
   if ((node.GetRole() == ax::mojom::Role::kComboBoxSelect ||
        node.GetRole() == ax::mojom::Role::kPopUpButton) &&

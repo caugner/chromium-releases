@@ -22,7 +22,7 @@
 #include "components/tabs/public/tab_interface.h"
 #include "ui/views/view_observer.h"
 
-class Browser;
+class BrowserWindowInterface;
 
 namespace content {
 class WebContents;
@@ -45,7 +45,9 @@ class TabUnderlineViewControllerImpl
   ~TabUnderlineViewControllerImpl() override;
 
   // TabUnderlineViewController overrides:
-  void Initialize(TabUnderlineView* underline_view, Browser* browser) override;
+  void Initialize(TabUnderlineView* underline_view,
+                  BrowserWindowInterface* browser_window_interface,
+                  tabs::TabHandle tab_handle) override;
 
   // contextual_tasks::ActiveTaskContextProvider::Observer overrides:
   // Handles updates from the contextual Tasks backend.
@@ -114,7 +116,7 @@ class TabUnderlineViewControllerImpl
 
   // Returns the TabInterface corresponding to `underline_view_`, if it is
   // valid.
-  base::WeakPtr<tabs::TabInterface> GetTabInterface();
+  tabs::TabInterface* GetTabInterface();
 
   bool IsUnderlineTabPinned();
 
@@ -155,7 +157,7 @@ class TabUnderlineViewControllerImpl
 
   // The pointer to the browser in which the underline view lives. Outlives the
   // underline view.
-  raw_ptr<Browser> browser_;
+  raw_ptr<BrowserWindowInterface> browser_window_interface_;
 
   // The Glic keyed service. This is only assigned if
   // ShouldUseSignalsForGlicUnderlines() returns true. Otherwise, it will stay
@@ -177,6 +179,9 @@ class TabUnderlineViewControllerImpl
 
   static constexpr size_t kNumReasonsToKeep = 10u;
   std::list<std::string> underline_update_reasons_;
+
+  // TODO(crbug.com/469102481): Remove after missing underlines cause is found.
+  int32_t tab_handle_id_ = 0;
 
   // The current showing state of the underline, used to differentiate between
   // underlines that were shown due to signals from Glic vs Contextual Tasks.

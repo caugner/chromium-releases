@@ -4,9 +4,11 @@
 
 import './composebox.js';
 import './error_page.js';
+import './ghost_loader.js';
 import './top_toolbar.js';
 
 import type {ChromeEvent} from '/tools/typescript/definitions/chrome_event.js';
+import {EventTracker} from 'chrome://resources/js/event_tracker.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 import {CrLitElement} from 'chrome://resources/lit/v3_0/lit.rollup.js';
 import type {PropertyValues} from 'chrome://resources/lit/v3_0/lit.rollup.js';
@@ -16,10 +18,15 @@ import type {Url} from 'chrome://resources/mojo/url/mojom/url.mojom-webui.js';
 import {getCss} from './app.css.js';
 import {getHtml} from './app.html.js';
 import type {ContextualTasksComposeboxElement} from './composebox.js';
-import type {Tab} from './contextual_tasks.mojom-webui.js';
 import type {BrowserProxy} from './contextual_tasks_browser_proxy.js';
 import {BrowserProxyImpl} from './contextual_tasks_browser_proxy.js';
 import {PostMessageHandler} from './post_message_handler.js';
+
+declare global {
+  interface HTMLElementEventMap {
+    'newwindow': chrome.webviewTag.NewWindowEvent;
+  }
+}
 
 type ChromeEventFunctionType<T> =
     T extends ChromeEvent<infer ListenerType>? ListenerType : never;
@@ -33,6 +40,8 @@ export interface ContextualTasksAppElement {
     threadFrame: chrome.webviewTag.WebView,
     composebox: ContextualTasksComposeboxElement,
     composeboxHeaderWrapper: HTMLElement,
+    composeboxHeader: HTMLElement,
+    flexCenterContainer: HTMLElement,
   };
 }
 
@@ -42,6 +51,7 @@ function updateTaskDetailsInUrl(
     taskId: Uuid, threadId: string, turnId: string) {
   const url = new URL(window.location.href);
 
+  const existingTaskId = url.searchParams.get('task');
   url.searchParams.set('task', taskId.value);
 
   threadId ? url.searchParams.set('thread', threadId) :
@@ -50,7 +60,13 @@ function updateTaskDetailsInUrl(
   turnId ? url.searchParams.set('turn', turnId) :
            url.searchParams.delete('turn');
 
-  window.history.replaceState({}, '', url.href);
+  // Allow back navigation if the task ID changes. Other changes to the URL
+  // represent state changes for the current task.
+  if (existingTaskId !== taskId.value) {
+    window.history.pushState({}, '', url.href);
+  } else {
+    window.history.replaceState({}, '', url.href);
+  }
 }
 
 // Updates param for the title in the WebUI URL. This facilitates the restore
@@ -107,7 +123,6 @@ export class ContextualTasksAppElement extends CrLitElement {
         reflect: true,
       },
       threadTitle_: {type: String},
-      contextTabs_: {type: Array},
       darkMode_: {
         type: Boolean,
         reflect: true,
@@ -124,10 +139,23 @@ export class ContextualTasksAppElement extends CrLitElement {
       },
       isAiPage_: {type: Boolean, reflect: true},
       isLensOverlayShowing_: {type: Boolean},
+      isGhostLoaderVisible_: {type: Boolean, reflect: true},
+      enableNativeZeroStateSuggestions: {
+        type: Boolean,
+        reflect: true,
+      },
+      enableBasicModeZOrder_: {
+        type: Boolean,
+        reflect: true,
+      },
     };
   }
 
+  accessor enableNativeZeroStateSuggestions: boolean =
+      loadTimeData.getBoolean('enableNativeZeroStateSuggestions');
   private browserProxy_: BrowserProxy = BrowserProxyImpl.getInstance();
+  protected accessor enableBasicModeZOrder_: boolean =
+      loadTimeData.getBoolean('enableBasicModeZOrder');
   protected accessor isAiPage_: boolean = true;
   protected accessor isLensOverlayShowing_: boolean = false;
   // Indicates if in tab mode. Most start in a tab.
@@ -135,7 +163,6 @@ export class ContextualTasksAppElement extends CrLitElement {
   protected accessor darkMode_: boolean = loadTimeData.getBoolean('darkMode');
   private pendingUrl_: string = '';
   protected accessor threadTitle_: string = '';
-  protected accessor contextTabs_: Tab[] = [];
   protected accessor isInBasicMode_: boolean = false;
   protected accessor isErrorPageVisible_: boolean = false;
   protected accessor isZeroState_: boolean = false;
@@ -144,16 +171,25 @@ export class ContextualTasksAppElement extends CrLitElement {
       loadTimeData.getString('friendlyZeroStateSubtitle');
   protected friendlyZeroStateTitle: string =
       loadTimeData.getString('friendlyZeroStateTitle');
+  protected accessor isGhostLoaderVisible_: boolean = false;
+  // Tracks whether the frame is currently loading. Needed to avoid race
+  // condition while awaiting isAiPage.
+  private isFrameLoading: boolean = false;
   private listenerIds_: number[] = [];
-  // The OAuth token to use for embedded page requests. Null if not yet set.
-  // Can be empty if the user is not signed in or the token couldn't be fetched.
-  private oauthToken_: string|null = null;
+  private eventTracker_: EventTracker = new EventTracker();
   private commonSearchParams_: {[key: string]: string} = {};
   private postMessageHandler_!: PostMessageHandler;
   private forcedEmbeddedPageHost =
       loadTimeData.getString('forcedEmbeddedPageHost');
   private signInDomains_: string[] =
       loadTimeData.getString('contextualTasksSignInDomains').split(',');
+  private enableGhostLoader_: boolean =
+      loadTimeData.getBoolean('enableGhostLoader');
+  // A callback to allow tests to wait until the popstate handler in this class
+  // has finished running.
+  private popStateFinishedCallbackForTesting_: (() => void)|null = null;
+  private forceBasicModeIfOpeningThreadHistory_: boolean =
+      loadTimeData.getBoolean('forceBasicModeIfOpeningThreadHistory');
 
   override firstUpdated() {
     this.postMessageHandler_ =
@@ -166,7 +202,17 @@ export class ContextualTasksAppElement extends CrLitElement {
     chrome.metricsPrivate.recordBoolean(
         'ContextualTasks.WebUI.UserAction.OpenNewThread', true);
     const {url} = await this.browserProxy_.handler.getThreadUrl();
-    this.$.threadFrame.src = url.url;
+    const newThreadUrl = new URL(url.url);
+    const currentUrl = new URL(this.$.threadFrame.src);
+    const source = currentUrl.searchParams.get('source');
+    if (source) {
+      newThreadUrl.searchParams.set('source', source);
+    }
+    const aep = currentUrl.searchParams.get('aep');
+    if (aep) {
+      newThreadUrl.searchParams.set('aep', aep);
+    }
+    this.$.threadFrame.src = newThreadUrl.href;
     this.$.composebox.startExpandAnimation();
     this.$.composebox.clearInputAndFocus();
   }
@@ -194,13 +240,7 @@ export class ContextualTasksAppElement extends CrLitElement {
           this.postMessageToWebview.bind(this)),
       callbackRouter.onHandshakeComplete.addListener(
           this.onHandshakeComplete.bind(this)),
-      callbackRouter.onContextUpdated.addListener((tabs: Tab[]) => {
-        this.contextTabs_ = tabs;
-      }),
-      callbackRouter.setOAuthToken.addListener((oauthToken: string) => {
-        this.oauthToken_ = oauthToken;
-        this.maybeLoadPendingUrl_();
-      }),
+
       // TODO(crbug.com/474359572): Rename this to be more descriptive of what
       // it actually does.
       callbackRouter.hideInput.addListener(() => {
@@ -211,7 +251,15 @@ export class ContextualTasksAppElement extends CrLitElement {
       }),
       callbackRouter.setTaskDetails.addListener(updateTaskDetailsInUrl),
       callbackRouter.onZeroStateChange.addListener((isZeroState: boolean) => {
+        const wasZeroState = this.isZeroState_;
         this.isZeroState_ = isZeroState;
+        // If we just changed to zero state, that means
+        // it is a new thread or new AIM page. Otherwise,
+        // we are not in zero state anymore, or not in an AIM URL. In
+        // both thread/AIM cases for zero state, we clear input.
+        if (isZeroState && !wasZeroState) {
+          this.$.composebox.clearInputAndFocus();
+        }
       }),
       callbackRouter.onLensOverlayStateChanged.addListener(
           (isOverlayShowing: boolean) => {
@@ -225,10 +273,58 @@ export class ContextualTasksAppElement extends CrLitElement {
       }),
     ];
 
+    this.eventTracker_.add(window, 'popstate', async () => {
+      // The back button may pop state that was pushed by a task change. If that
+      // is the case, fetch the URL for the task ID and load that in the frame.
+      const taskUuid = new URLSearchParams(location.search).get('task');
+      if (taskUuid) {
+        const {url} =
+            await this.browserProxy_.handler.getUrlForTask({value: taskUuid});
+
+        // Do nothing if the app element is no longer attached to the page. This
+        // can occur in tests where awaiting the call above will delay the rest
+        // of this handler and affect other tests in the suite.
+        if (!this.isConnected) {
+          return;
+        }
+
+        this.browserProxy_.handler.setTaskId({value: taskUuid});
+        this.$.threadFrame.src = url.url;
+
+        // Allow tests to wait for this callback to complete.
+        if (this.popStateFinishedCallbackForTesting_) {
+          this.popStateFinishedCallbackForTesting_();
+        }
+      }
+    });
+
     this.updateSidePanelState();
 
     // Fetch the initial common search params.
     this.updateCommonSearchParams();
+
+    // Listeners for ghost loader
+    if (this.enableGhostLoader_) {
+      this.$.threadFrame.addEventListener('contentload', () => {
+        this.isFrameLoading = false;
+        this.setIsGhostLoaderVisible(false);
+      });
+      this.$.threadFrame.addEventListener('loadabort', () => {
+        this.isFrameLoading = false;
+        this.setIsGhostLoaderVisible(false);
+      });
+      this.$.threadFrame.addEventListener('loadstart', async (ev: any) => {
+        if (!ev.isTopLevel) {
+          return;
+        }
+        this.isFrameLoading = true;
+        const { isAiPage } =
+          await this.browserProxy_.handler.isAiPage({url: ev.url} as Url);
+        if (this.isFrameLoading && !isAiPage) {
+          this.setIsGhostLoaderVisible(true);
+        }
+      });
+    }
 
     // Setup the webview request overrides before loading the first URL.
     this.setupWebviewRequestOverrides();
@@ -252,6 +348,11 @@ export class ContextualTasksAppElement extends CrLitElement {
     }
 
     const threadUrlAsUrl = new URL(threadUrl);
+    // If the thread URL has parameters to open history, set basic mode.
+    if (this.hasThreadHistoryParams(threadUrlAsUrl) &&
+        this.forceBasicModeIfOpeningThreadHistory_) {
+      this.isInBasicMode_ = true;
+    }
 
     // If the "open_history" param has any value, open the history panel.
     if (webUiUrlOnLoad.searchParams.has('open_history')) {
@@ -281,10 +382,9 @@ export class ContextualTasksAppElement extends CrLitElement {
     super.disconnectedCallback();
     this.listenerIds_.forEach(
         id => this.browserProxy_.callbackRouter.removeListener(id));
-    this.$.threadFrame.request.onBeforeSendHeaders.removeListener(
-        this.onBeforeSendHeaders);
     this.$.threadFrame.request.onBeforeRequest.removeListener(
         this.onBeforeRequest);
+    this.eventTracker_.removeAll();
   }
 
   override updated(changedProperties: PropertyValues<this>) {
@@ -329,11 +429,8 @@ export class ContextualTasksAppElement extends CrLitElement {
 
   private maybeLoadPendingUrl_() {
     // If all the data needed to make the initial request is available, load the
-    // pending URL. If the OAuth token is empty, that signifies that the user is
-    // not signed in, so the URL can still be loaded. If the OAuth token is
-    // null, and therefore not yet set, do not load the URL.
-    if (this.pendingUrl_ && this.commonSearchParams_ &&
-        this.oauthToken_ != null) {
+    // pending URL.
+    if (this.pendingUrl_ && this.commonSearchParams_) {
       this.$.threadFrame.src = this.pendingUrl_;
       this.pendingUrl_ = '';
     }
@@ -358,22 +455,20 @@ export class ContextualTasksAppElement extends CrLitElement {
   }
 
   private setupWebviewRequestOverrides() {
-    // Setup the webview request overrides to add the OAuth token to the request
-    // headers.
-    this.$.threadFrame.request.onBeforeSendHeaders.addListener(
-        this.onBeforeSendHeaders, {
-          // These should be valid values from web_request.d.ts.
-          types: 'main_frame,xmlhttprequest,websocket'.split(',') as any,
-          urls: ['<all_urls>'],
-        },
-        ['blocking', 'requestHeaders', 'extraHeaders']);
-
     this.$.threadFrame.request.onBeforeRequest.addListener(
         this.onBeforeRequest, {
           types: ['main_frame'] as any,
           urls: ['<all_urls>'],
         },
         ['blocking']);
+
+    // Allow downloading files. This is necessary since aim can generate images
+    // for download.
+    this.$.threadFrame.addEventListener('permissionrequest', (e: any) => {
+      if (e.permission === 'download') {
+        e.request.allow();
+      }
+    });
 
     // Sets the user agent to the default user agent + the contextual tasks
     // custom suffix.
@@ -423,22 +518,21 @@ export class ContextualTasksAppElement extends CrLitElement {
             return {};
           };
 
-  private onBeforeSendHeaders:
-      ChromeEventFunctionType<typeof chrome.webRequest.onBeforeSendHeaders> =
-          (details): chrome.webRequest.BlockingResponse => {
-            // Return a promise that will be resolved with the new request
-            // headers. This will block the request until the OAuth token is
-            // fetched.
-            const requestHeaders = details.requestHeaders || [];
-            requestHeaders.push({
-              'name': 'Authorization',
-              'value': `Bearer ${this.oauthToken_}`,
-            });
-            return {requestHeaders};
-          };
+  getThreadUrlForTesting() {
+    return this.$.threadFrame.src;
+  }
 
-  getPendingUrlForTesting() {
-    return this.pendingUrl_;
+  private setIsGhostLoaderVisible(isVisible: boolean) {
+    this.isGhostLoaderVisible_ = isVisible;
+  }
+
+  private hasThreadHistoryParams(url: URL): boolean {
+    return url.searchParams.get('atvm') === '1' ||
+        url.searchParams.get('atvm') === '3';
+  }
+
+  setPopStateFinishedCallbackForTesting(callback: () => void) {
+    this.popStateFinishedCallbackForTesting_ = callback;
   }
 }
 

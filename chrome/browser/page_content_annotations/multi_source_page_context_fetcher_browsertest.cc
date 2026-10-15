@@ -7,15 +7,21 @@
 #include <optional>
 
 #include "base/path_service.h"
+#include "base/strings/strcat.h"
 #include "base/test/gmock_expected_support.h"
+#include "base/test/metrics/histogram_tester.h"
+#include "base/test/run_until.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/test_future.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/optimization_guide/content/browser/no_response_ai_page_content_agent.h"
 #include "components/optimization_guide/content/browser/page_content_proto_provider.h"
+#include "components/optimization_guide/core/optimization_guide_features.h"
 #include "components/page_content_annotations/core/page_content_annotations_common.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
@@ -199,6 +205,56 @@ IN_PROC_BROWSER_TEST_P(
                           // TODO(b/438825957): add test coverage for the output
                           // of the CopyFromSurface screenshot.
                           _));
+}
+
+class ScreenshotTimeoutMultiSourcePageContextFetcherBrowserTest
+    : public MultiSourcePageContextFetcherBrowserTest {
+ public:
+  ScreenshotTimeoutMultiSourcePageContextFetcherBrowserTest() {
+    std::vector<base::test::FeatureRefAndParams> enabled_features{
+        {kGlicTabScreenshotExperiment,
+         {
+             {"screenshot_timeout_ms", "1us"},
+         }},
+    };
+    std::vector<base::test::FeatureRef> disabled_features;
+
+    features_.InitWithFeaturesAndParameters(enabled_features,
+                                            disabled_features);
+  }
+
+ private:
+  base::test::ScopedFeatureList features_;
+};
+
+IN_PROC_BROWSER_TEST_F(
+    ScreenshotTimeoutMultiSourcePageContextFetcherBrowserTest,
+    TakesScreenshot) {
+  GURL url = embedded_https_test_server().GetURL("/empty.html");
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
+
+  SetBackground(web_contents()->GetPrimaryMainFrame(), "red");
+
+  while (true) {
+    base::HistogramTester histograms;
+    base::test::TestFuture<FetchPageContextResultCallbackArg> future;
+
+    FetchPageContextOptions options;
+    options.screenshot_options =
+        ScreenshotOptions::ViewportOnly(/*paint_preview_options=*/std::nullopt);
+    FetchPageContext(*web_contents(), options, nullptr, future.GetCallback());
+
+    ASSERT_OK_AND_ASSIGN(std::unique_ptr<FetchPageContextResult> result,
+                         future.Take());
+
+    ASSERT_TRUE(result);
+    if (result->screenshot_result.has_value()) {
+      continue;
+    }
+    histograms.ExpectUniqueSample("Glic.PageContextFetcher.GetScreenshotError",
+                                  content::CopyFromSurfaceError::kTimeout, 1);
+    break;
+  }
 }
 
 class RedactingMultiSourcePageContextFetcherBrowserTest
@@ -461,7 +517,15 @@ class PasswordRedactionMultiSourcePageContextFetcherBrowserTest
   PasswordRedactionMultiSourcePageContextFetcherBrowserTest() {
     std::vector<base::test::FeatureRefAndParams> enabled_features{
         {kGlicScreenshotPasswordRedaction, {}},
-    };
+        // Effectively disables timeouts.
+        {kGlicTabScreenshotExperiment,
+         {
+             {"screenshot_timeout_ms", "30s"},
+         }},
+        {optimization_guide::features::kGetAIPageContentMainFrameTimeoutEnabled,
+         {{"timeout", "30s"}}
+
+        }};
     features_.InitWithFeaturesAndParameters(enabled_features,
                                             /*disabled_features=*/{});
   }
@@ -478,15 +542,9 @@ class PasswordRedactionMultiSourcePageContextFetcherBrowserTest
   base::test::ScopedFeatureList features_;
 };
 
-#if defined(ADDRESS_SANITIZER) || defined(MEMORY_SANITIZER)
-// TODO(crbug.com/469749590): Fix ASAN/MSAN failures on trybot.
-#define MAYBE_BasicRedaction DISABLED_BasicRedaction
-#else
-#define MAYBE_BasicRedaction BasicRedaction
-#endif
 IN_PROC_BROWSER_TEST_F(
     PasswordRedactionMultiSourcePageContextFetcherBrowserTest,
-    MAYBE_BasicRedaction) {
+    BasicRedaction) {
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(),
                                            GetURL(kHostA, "/password.html")));
 
@@ -498,6 +556,53 @@ IN_PROC_BROWSER_TEST_F(
   options.screenshot_options =
       ScreenshotOptions::ViewportOnly(/*paint_preview_options=*/std::nullopt);
   FetchPageContext(*web_contents(), options, nullptr, future.GetCallback());
+
+  ASSERT_OK_AND_ASSIGN(std::unique_ptr<FetchPageContextResult> result,
+                       future.Take());
+
+  ASSERT_TRUE(result);
+  ASSERT_TRUE(result->screenshot_result.has_value());
+
+  ScreenshotResult& screenshot = result->screenshot_result.value();
+  EXPECT_FALSE(screenshot.dimensions.IsZero());
+  ASSERT_GT(screenshot.screenshot_data.size(), 0);
+  ASSERT_EQ(screenshot.mime_type, "image/jpeg");
+
+  SkBitmap bitmap = gfx::JPEGCodec::Decode(screenshot.screenshot_data);
+
+  EXPECT_FALSE(bitmap.isNull());
+  EXPECT_FALSE(bitmap.empty());
+  EXPECT_THAT(bitmap.getColor(10, 10),
+              IsColorWithinTolerance(SK_ColorBLACK, 0x20));
+}
+
+IN_PROC_BROWSER_TEST_F(
+    PasswordRedactionMultiSourcePageContextFetcherBrowserTest,
+    RedactionWhenScreenshotReceivedFirst) {
+  base::HistogramTester histograms;
+
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(),
+                                           GetURL(kHostA, "/password.html")));
+
+  optimization_guide::NoResponseAIPageContentAgent interceptor(
+      web_contents()->GetPrimaryMainFrame());
+
+  base::test::TestFuture<FetchPageContextResultCallbackArg> future;
+  FetchPageContextOptions options;
+  options.annotated_page_content_options =
+      optimization_guide::DefaultAIPageContentOptions(true);
+  options.screenshot_options =
+      ScreenshotOptions::ViewportOnly(/*paint_preview_options=*/std::nullopt);
+  FetchPageContext(*web_contents(), options, nullptr, future.GetCallback());
+
+  // Wait until the screenshot is received.
+  ASSERT_TRUE(base::test::RunUntil([&] {
+    return histograms.GetTotalSum("Glic.PageContextFetcher.GetScreenshot") > 0;
+  }));
+
+  EXPECT_FALSE(future.IsReady());
+
+  interceptor.Respond();
 
   ASSERT_OK_AND_ASSIGN(std::unique_ptr<FetchPageContextResult> result,
                        future.Take());

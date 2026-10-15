@@ -19,11 +19,9 @@
 
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/containers/contains.h"
 #include "base/containers/flat_map.h"
 #include "base/debug/leak_annotations.h"
 #include "base/environment.h"
-#include "base/files/file_path.h"
 #include "base/functional/bind.h"
 #include "base/logging.h"
 #include "base/nix/mime_util_xdg.h"
@@ -104,16 +102,10 @@ namespace gtk {
 
 namespace {
 
-// Stores the GtkUi singleton instance
-const GtkUi* g_gtk_ui = nullptr;
-
-const double kDefaultDPI = 96;
-
-// Number of app indicators used (used as part of app-indicator id).
-int indicators_count;
+constexpr double kDefaultDPI = 96;
 
 // The unknown content type.
-const char kUnknownContentType[] = "application/octet-stream";
+constexpr char kUnknownContentType[] = "application/octet-stream";
 
 // Returns a gfx::FontRenderParams corresponding to GTK's configuration.
 gfx::FontRenderParams GetGtkFontRenderParams() {
@@ -296,41 +288,11 @@ bool IsValidSchema(ui::LinuxUiBackend backend) {
   return true;
 }
 
-bool IsValidIconThemeName(const std::string& theme) {
-  base::FilePath theme_path(theme);
-  return !theme.empty() && theme != "." && !theme_path.IsAbsolute() &&
-         !theme_path.ReferencesParent() && theme_path.BaseName() == theme_path;
-}
-
-std::string GetIconThemeName() {
-  gchar* theme = nullptr;
-  g_object_get(gtk_settings_get_default(), "gtk-icon-theme-name", &theme,
-               nullptr);
-  std::string theme_string;
-  if (theme) {
-    theme_string = theme;
-    g_free(theme);
-  }
-  return theme_string;
-}
-
 }  // namespace
 
-GtkUi::GtkUi() : window_frame_actions_() {
-  DCHECK(!g_gtk_ui);
-  g_gtk_ui = this;
-}
+GtkUi::GtkUi() : window_frame_actions_() {}
 
-GtkUi::~GtkUi() {
-  DCHECK_EQ(g_gtk_ui, this);
-  g_gtk_ui = nullptr;
-}
-
-// static
-GtkUiPlatform* GtkUi::GetPlatform() {
-  DCHECK(g_gtk_ui) << "GtkUi instance is not set.";
-  return g_gtk_ui->platform_.get();
-}
+GtkUi::~GtkUi() = default;
 
 bool GtkUi::Initialize() {
   const auto* delegate = ui::LinuxUiDelegate::GetInstance();
@@ -383,10 +345,6 @@ bool GtkUi::Initialize() {
   };
 
   GtkSettings* settings = gtk_settings_get_default();
-  // Pin `gtk-modules` to an empty string with APPLICATION source priority
-  // to prevent XSETTINGS updates from loading GTK modules.
-  g_object_set(settings, "gtk-modules", "", nullptr);
-  SanitizeIconThemeName();
   connect(settings, "notify::gtk-theme-name", &GtkUi::OnThemeChanged);
   connect(settings, "notify::gtk-icon-theme-name", &GtkUi::OnThemeChanged);
   connect(settings, "notify::gtk-application-prefer-dark-theme",
@@ -428,8 +386,6 @@ bool GtkUi::Initialize() {
 
   // We must build this after GTK gets initialized.
   settings_provider_ = std::make_unique<SettingsProviderGtk>(this);
-
-  indicators_count = 0;
 
   platform_->OnInitialized();
 
@@ -539,10 +495,6 @@ void GtkUi::GetInactiveSelectionFgColor(SkColor* color) const {
 gfx::Image GtkUi::GetIconForContentType(const std::string& content_type,
                                         int dip_size,
                                         float scale) const {
-  if (!IsValidIconThemeName(GetIconThemeName())) {
-    return gfx::Image();
-  }
-
   // This call doesn't take a reference.
   GtkIconTheme* theme = GetDefaultIconTheme();
 
@@ -647,7 +599,7 @@ std::unique_ptr<ui::LinuxInputMethodContext> GtkUi::CreateInputMethodContext(
           switches::kDisableGtkIme)) {
     return nullptr;
   }
-  return GetPlatform()->CreateInputMethodContext(delegate);
+  return platform_->CreateInputMethodContext(delegate);
 }
 
 gfx::FontRenderParams GtkUi::GetDefaultFontRenderParams() {
@@ -659,8 +611,8 @@ ui::SelectFileDialog* GtkUi::CreateSelectFileDialog(
     void* listener,
     std::unique_ptr<ui::SelectFilePolicy> policy) const {
   return new SelectFileDialogLinuxGtk(
-      static_cast<ui::SelectFileDialog::Listener*>(listener),
-      std::move(policy));
+      static_cast<ui::SelectFileDialog::Listener*>(listener), std::move(policy),
+      platform_.get());
 }
 
 ui::LinuxUi::WindowFrameAction GtkUi::GetWindowFrameAction(
@@ -673,6 +625,13 @@ bool GtkUi::PrimaryPasteEnabled() const {
   g_object_get(gtk_settings_get_default(), "gtk-enable-primary-paste",
                &paste_enabled, nullptr);
   return paste_enabled;
+}
+
+int GtkUi::GetWindowDragThresholdPx() const {
+  gint threshold = kDefaultWindowDragThreshold;
+  g_object_get(gtk_settings_get_default(), "gtk-dnd-drag-threshold", &threshold,
+               nullptr);
+  return threshold;
 }
 
 bool GtkUi::PreferDarkTheme() const {
@@ -810,16 +769,6 @@ std::string GtkUi::GetCursorThemeName() {
   return theme_string;
 }
 
-bool GtkUi::SanitizeIconThemeName() {
-  std::string theme = GetIconThemeName();
-  if (!IsValidIconThemeName(theme)) {
-    g_object_set(gtk_settings_get_default(), "gtk-icon-theme-name", "hicolor",
-                 nullptr);
-    return true;
-  }
-  return false;
-}
-
 int GtkUi::GetCursorThemeSize() {
   gint size = 0;
   g_object_get(gtk_settings_get_default(), "gtk-cursor-theme-size", &size,
@@ -859,9 +808,9 @@ ui::TextEditCommand GtkUi::GetTextEditCommandForEvent(const ui::Event& event,
 }
 
 #if BUILDFLAG(ENABLE_PRINTING)
-printing::PrintDialogLinuxInterface* GtkUi::CreatePrintDialog(
+std::unique_ptr<printing::PrintDialogLinuxInterface> GtkUi::CreatePrintDialog(
     printing::PrintingContextLinux* context) {
-  return PrintDialogGtk::CreatePrintDialog(context);
+  return std::make_unique<PrintDialogGtk>(context, platform_.get());
 }
 
 gfx::Size GtkUi::GetPdfPaperSize(printing::PrintingContextLinux* context) {
@@ -870,9 +819,6 @@ gfx::Size GtkUi::GetPdfPaperSize(printing::PrintingContextLinux* context) {
 #endif
 
 void GtkUi::OnThemeChanged(GtkSettings* settings, GtkParamSpec* param) {
-  if (SanitizeIconThemeName()) {
-    return;  // Exit early; modifying the setting re-triggered this function
-  }
   colors_.clear();
   custom_frame_colors_.clear();
   native_frame_colors_.clear();
@@ -942,13 +888,13 @@ void GtkUi::OnMonitorsChanged(GListModel* list,
   std::unordered_set<GdkMonitor*> monitors;
   for (size_t i = 0; i < n_monitors; ++i) {
     auto* monitor = static_cast<GdkMonitor*>(g_list_model_get_item(list, i));
-    if (!base::Contains(monitor_signals_, monitor)) {
+    if (!monitor_signals_.contains(monitor)) {
       TrackMonitor(monitor);
     }
     monitors.insert(monitor);
   }
   std::erase_if(monitor_signals_, [&](const auto& pair) {
-    return !base::Contains(monitors, pair.first);
+    return !monitors.contains(pair.first);
   });
   UpdateDeviceScaleFactor();
 }

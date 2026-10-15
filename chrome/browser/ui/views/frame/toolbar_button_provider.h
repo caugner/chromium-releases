@@ -21,6 +21,7 @@ class PageActionIconView;
 class ReloadButton;
 class ReloadControl;
 class ToolbarButton;
+class WebUIToolbarWebView;
 
 namespace gfx {
 class Rect;
@@ -98,7 +99,7 @@ class ToolbarButtonProvider {
   virtual ToolbarButton* GetBackButton() = 0;
 
   // Returns the reload button delegate, it can be either `ReloadButton` or
-  // `ReloadButtonWebView` depending on the enabled features.
+  // `WebUIToolbarWebView` depending on the enabled features.
   virtual ReloadControl* GetReloadButton() = 0;
 
   // Returns the intent chip button, if present.
@@ -106,6 +107,9 @@ class ToolbarButtonProvider {
 
   // Returns the download button.
   virtual ToolbarButton* GetDownloadButton() = 0;
+
+  // Returns the WebUIToolbarWebView (if any) for testing.
+  virtual WebUIToolbarWebView* GetWebUIToolbarViewForTesting() = 0;
 
   // TODO(calamity): Move other buttons and button actions into here.
  protected:

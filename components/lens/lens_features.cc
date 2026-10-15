@@ -62,7 +62,7 @@ BASE_FEATURE(kLensSearchSidePanelNewFeedback, base::FEATURE_ENABLED_BY_DEFAULT);
 // experimented with independently.
 BASE_FEATURE(kLensOverlayOmniboxEntryPoint, base::FEATURE_DISABLED_BY_DEFAULT);
 
-BASE_FEATURE(kLensOverlayUploadChunking, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kLensOverlayUploadChunking, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kLensOverlayRecontextualizeOnQuery,
              base::FEATURE_DISABLED_BY_DEFAULT);
@@ -113,14 +113,20 @@ BASE_FEATURE(kLensAimSuggestionsGradientBackground,
 
 BASE_FEATURE(kLensSearchZeroStateCsb, base::FEATURE_DISABLED_BY_DEFAULT);
 
-BASE_FEATURE(kLensVideoCitations, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kLensVideoCitations, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kLensUpdatedFeedbackEntrypoint, base::FEATURE_ENABLED_BY_DEFAULT);
 
-BASE_FEATURE(kLensOverlayOptimizationFilter, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kLensOverlayOptimizationFilter, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kLensOverlayNonBlockingPrivacyNotice,
              base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kLensUseSeparateRequestIdForViewportImages,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kLensSendVitForSingleContextNextQueries,
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 constexpr base::FeatureParam<int> kLensUpdatedFeedbackToastTimeoutMs{
     &kLensUpdatedFeedbackEntrypoint, "feedback-toast-timeout-ms", 8000};
@@ -522,6 +528,15 @@ const base::FeatureParam<bool> kLensOverlayEduActionChipDisabledByGlic{
 
 const base::FeatureParam<int> kLensOverlayEduActionChipMaxShownCount{
     &kLensOverlayEduActionChip, "max-shown-count", 3};
+
+const base::FeatureParam<base::TimeDelta> kLensOverlayEduActionChipShowInterval{
+    &kLensOverlayEduActionChip, "lens-action-chip-show-interval",
+    base::Hours(0)};
+
+const base::FeatureParam<base::TimeDelta>
+    kLensOverlayEduActionChipShowDebounceInterval{
+        &kLensOverlayEduActionChip, "lens-action-chip-show-debounce-interval",
+        base::Seconds(1)};
 
 constexpr base::FeatureParam<std::string> kLensOverlayStraightToSrpQuery{
     &kLensOverlayStraightToSrp, "query", ""};
@@ -1228,6 +1243,14 @@ bool IsLensOverlayEduActionChipDisabledByGlic() {
 
 int GetLensOverlayEduActionChipMaxShownCount() {
   return kLensOverlayEduActionChipMaxShownCount.Get();
+}
+
+base::TimeDelta GetLensOverlayEduActionChipShowInterval() {
+  return kLensOverlayEduActionChipShowInterval.Get();
+}
+
+base::TimeDelta GetLensOverlayEduActionChipShowDebounceInterval() {
+  return kLensOverlayEduActionChipShowDebounceInterval.Get();
 }
 
 bool IsLensOverlayKeyboardSelectionEnabled() {

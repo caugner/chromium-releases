@@ -326,11 +326,10 @@ void ViewTransitionSupplement::OnTransitionCaptured(
   if (--in_flight_capture_requests_ == 0) {
     std::sort(captured_transitions_.begin(), captured_transitions_.end(),
               CompareTransitions);
-    HeapVector<Member<ViewTransition>> local_copy(captured_transitions_);
-    captured_transitions_.clear();
-    for (auto captured_transition : local_copy) {
+    for (auto captured_transition : captured_transitions_) {
       captured_transition->OnCapturePhaseComplete();
     }
+    captured_transitions_.clear();
   }
 }
 
@@ -353,13 +352,14 @@ ViewTransition* ViewTransitionSupplement::GetTransition(
 
 void ViewTransitionSupplement::ForEachTransition(
     base::FunctionRef<void(ViewTransition&)> function) {
-  if (!RuntimeEnabledFeatures::ScopedViewTransitionsEnabled()) {
+  if (element_transitions_.empty()) {
     if (ViewTransition* document_transition = GetTransition()) {
       function(*document_transition);
     }
-    DCHECK(element_transitions_.empty());
     return;
   }
+
+  DCHECK(RuntimeEnabledFeatures::ScopedViewTransitionsEnabled());
 
   // Local copy of the list, since the function may modify the transition map.
   HeapVector<Member<ViewTransition>> transitions;

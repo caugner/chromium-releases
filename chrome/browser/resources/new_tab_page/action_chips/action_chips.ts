@@ -5,22 +5,18 @@ import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.js';
 
 import type {ContextualUpload, TabUpload} from 'chrome://resources/cr_components/composebox/common.js';
 import {TabUploadOrigin} from 'chrome://resources/cr_components/composebox/common.js';
-import {ComposeboxMode} from 'chrome://resources/cr_components/composebox/contextual_entrypoint_and_carousel.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 import type {PropertyValues} from 'chrome://resources/lit/v3_0/lit.rollup.js';
 import {CrLitElement} from 'chrome://resources/lit/v3_0/lit.rollup.js';
+import {ToolMode} from 'chrome://resources/mojo/components/omnibox/composebox/composebox_query.mojom-webui.js';
 
-import type {ActionChip, ActionChipsHandlerInterface, PageCallbackRouter, TabInfo} from '../action_chips.mojom-webui.js';
+import type {ActionChip, ActionChipsHandlerInterface, PageCallbackRouter} from '../action_chips.mojom-webui.js';
 import {ChipType} from '../action_chips.mojom-webui.js';
 import {WindowProxy} from '../window_proxy.js';
 
 import {getCss} from './action_chips.css.js';
 import {getHtml} from './action_chips.html.js';
 import {ActionChipsApiProxyImpl} from './action_chips_proxy.js';
-
-namespace ActionChipsConstants {
-  export const EMPTY_QUERY_STRING = '';
-}  // namespace
 
 // Records a click metric for the given action chip type.
 function recordClick(chipType: ChipType) {
@@ -75,14 +71,14 @@ export class ActionChipsElement extends CrLitElement {
         type: Boolean,
         reflect: true,
       },
-      themeHasBackgroundImage: {type: Boolean, reflect: true},
+      showBackground: {type: Boolean, reflect: true},
     };
   }
 
   private handler: ActionChipsHandlerInterface;
   private callbackRouter: PageCallbackRouter;
   protected accessor actionChips_: ActionChip[] = [];
-  accessor themeHasBackgroundImage: boolean = false;
+  accessor showBackground: boolean = false;
   protected accessor showSimplifiedUI_: boolean =
       loadTimeData.getBoolean('ntpNextShowSimplificationUIEnabled');
   protected accessor showDismissalUI_: boolean =
@@ -167,11 +163,9 @@ export class ActionChipsElement extends CrLitElement {
     }
   }
 
-  protected onCreateImageClick_() {
+  protected onCreateImageClick_(chip: ActionChip) {
     recordClick(ChipType.kImage);
-    this.onActionChipClick_(
-        ActionChipsConstants.EMPTY_QUERY_STRING, [],
-        ComposeboxMode.CREATE_IMAGE);
+    this.onActionChipClick_(chip.suggestion, [], ToolMode.kImageGen);
   }
 
   protected onDeepDiveClick_(chip: ActionChip) {
@@ -185,18 +179,17 @@ export class ActionChipsElement extends CrLitElement {
       origin: TabUploadOrigin.ACTION_CHIP,
     };
     this.onActionChipClick_(
-        chip.suggestion, [deepDiveTabInfo], ComposeboxMode.DEFAULT);
+        chip.suggestion, [deepDiveTabInfo], ToolMode.kUnspecified);
   }
 
-  protected onDeepSearchClick_() {
+  protected onDeepSearchClick_(chip: ActionChip) {
     recordClick(ChipType.kDeepSearch);
-    this.onActionChipClick_(
-        ActionChipsConstants.EMPTY_QUERY_STRING, [],
-        ComposeboxMode.DEEP_SEARCH);
+    this.onActionChipClick_(chip.suggestion, [], ToolMode.kDeepSearch);
   }
 
-  protected onTabContextClick_(tab: TabInfo) {
+  protected onTabContextClick_(chip: ActionChip) {
     recordClick(ChipType.kRecentTab);
+    const tab = chip.tab!;
     const recentTabInfo: TabUpload = {
       tabId: tab.tabId,
       url: tab.url,
@@ -205,22 +198,27 @@ export class ActionChipsElement extends CrLitElement {
       origin: TabUploadOrigin.ACTION_CHIP,
     };
     this.onActionChipClick_(
-        ActionChipsConstants.EMPTY_QUERY_STRING, [recentTabInfo],
-        ComposeboxMode.DEFAULT);
+        chip.suggestion, [recentTabInfo], ToolMode.kUnspecified);
   }
 
-  protected handleClick_(chip: ActionChip): void {
+  protected handleClick_(e: Event): void {
+    const index = Number((e.currentTarget as HTMLElement).dataset['index']);
+    const chip = this.actionChips_[index]!;
     switch (chip.type) {
       case ChipType.kImage:
-        this.onCreateImageClick_();
+        this.handler.activateMetricsFunnel('CreateImageChip');
+        this.onCreateImageClick_(chip);
         break;
       case ChipType.kDeepSearch:
-        this.onDeepSearchClick_();
+        this.handler.activateMetricsFunnel('DeepSearchChip');
+        this.onDeepSearchClick_(chip);
         break;
       case ChipType.kRecentTab:
-        this.onTabContextClick_(chip.tab!);
+        this.handler.activateMetricsFunnel('RecentTabChip');
+        this.onTabContextClick_(chip);
         break;
       case ChipType.kDeepDive:
+        this.handler.activateMetricsFunnel('DeepDiveChip');
         this.onDeepDiveClick_(chip);
         break;
       default:
@@ -228,9 +226,11 @@ export class ActionChipsElement extends CrLitElement {
     }
   }
 
-  protected removeChip_(chip: ActionChip, e: MouseEvent) {
+  protected removeChip_(e: MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
+    const index = Number((e.currentTarget as HTMLElement).dataset['index']);
+    const chip = this.actionChips_[index]!;
     this.actionChips_ =
         this.actionChips_.filter((c) => c.suggestion !== chip.suggestion);
   }
@@ -249,7 +249,7 @@ export class ActionChipsElement extends CrLitElement {
   }
 
   private onActionChipClick_(
-      query: string, contextFiles: ContextualUpload[], mode: ComposeboxMode) {
+      query: string, contextFiles: ContextualUpload[], mode: ToolMode) {
     this.fire('action-chip-click', {searchboxText: query, contextFiles, mode});
   }
 
@@ -259,7 +259,7 @@ export class ActionChipsElement extends CrLitElement {
     }
     const url = new URL(chip.tab.url.url);
     const domain = url.hostname.replace(/^www\./, '');
-    return `${chip.suggestion} - ${domain}`;
+    return `${chip.subtitle} - ${domain}`;
   }
 
   protected isDeepDiveChip_(chip: ActionChip) {
@@ -274,6 +274,17 @@ export class ActionChipsElement extends CrLitElement {
     return chip.type !== ChipType.kDeepDive && this.showSimplifiedUI_;
   }
 
+  protected getChipSubtitle_(chip: ActionChip): string {
+    const subtitle = (this.showSimplifiedUI_ &&
+                      (chip.type === ChipType.kImage ||
+                       chip.type === ChipType.kDeepSearch) &&
+                      chip.suggestion) ?
+        chip.suggestion :
+        chip.subtitle;
+    const prefix = (subtitle && this.showDashSimplifiedUI_(chip)) ? ' - ' : '';
+    return `${prefix}${subtitle}`;
+  }
+
   protected getChipTitle_(chip: ActionChip) {
     const suggestion = chip.suggestion;
 
@@ -286,11 +297,11 @@ export class ActionChipsElement extends CrLitElement {
     const domain = url.hostname.replace(/^www\./, '');
 
     if (this.isRecentTabChip_(chip)) {
-      return `${suggestion} - ${domain}`;
+      return `${tabTitle}\n${domain}`;
     }
 
     if (this.isDeepDiveChip_(chip)) {
-      return `${tabTitle} - ${domain} - ${suggestion}`;
+      return `${suggestion}\n${domain}`;
     }
 
     return suggestion;

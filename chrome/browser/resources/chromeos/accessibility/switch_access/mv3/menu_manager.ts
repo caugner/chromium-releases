@@ -135,7 +135,7 @@ export class MenuManager {
       this.jumpToMenu_(this.menuAutomationNode_);
       return;
     }
-    SwitchAccess.findNodeInDesktopTree(
+    SwitchAccess.findNodeMatching(
         {
           role: RoleType.MENU,
           attributes: {className: 'SwitchAccessMenuView'},

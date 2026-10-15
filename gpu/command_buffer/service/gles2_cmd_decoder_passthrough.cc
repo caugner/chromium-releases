@@ -14,6 +14,7 @@
 #include "base/containers/span.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
+#include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
 #include "base/notimplemented.h"
 #include "base/strings/string_split.h"
@@ -1320,7 +1321,6 @@ gpu::Capabilities GLES2DecoderPassthroughImpl::GetCapabilities() {
   }
   caps.render_buffer_format_bgra8888 =
       feature_info_->feature_flags().ext_render_buffer_format_bgra8888;
-  caps.gpu_rasterization = false;
   caps.msaa_is_slow = MSAAIsSlow(feature_info_->workarounds());
   caps.avoid_stencil_buffers =
       feature_info_->workarounds().avoid_stencil_buffers;
@@ -1539,6 +1539,11 @@ bool GLES2DecoderPassthroughImpl::ClearLevel3D(Texture* texture,
 
 gpu::gles2::ErrorState* GLES2DecoderPassthroughImpl::GetErrorState() {
   return nullptr;
+}
+
+void GLES2DecoderPassthroughImpl::BindFramebuffer(unsigned target,
+                                                  uint32_t service_id) const {
+  NOTREACHED();
 }
 
 void GLES2DecoderPassthroughImpl::WaitForReadPixels(

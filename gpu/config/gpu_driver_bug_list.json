@@ -3453,21 +3453,6 @@
       ]
     },
     {
-      "id": 445,
-      "description": "Disable shared D3D device for MFVEA on Intel ",
-      "comment":[
-        "Video encoder MFT acquires device lock and does not release it, leading to",
-        "gpu process stall."
-      ],
-      "os": {
-        "type": "win"
-      },
-      "vendor_id": "0x8086",
-      "features": [
-        "disable_mfvea_shared_device"
-      ]
-    },
-    {
       "id": 446,
       "description": "Video jitter happens during letterboxing on old Qualcomm GPUs",
       "cr_bugs": [406175378],
@@ -3820,15 +3805,28 @@
       ]
     },
     {
-      "id": 486,
-      "cr_bugs": [534903095],
-      "description": "Changing BASE_LEVEL of NPOT immutable texture triggers driver bug on PowerVR GPUs.",
+      "id": 470,
+      "description": "Disable D3D12 video encoder on Windows versions older 11 24H2",
+      "os": {
+        "type": "win",
+        "version": {
+          "op": "<",
+          "value": "10.0.26100.2033"
+        }
+      },
+      "features": [
+        "disable_d3d12_video_encoder"
+      ]
+    },
+    {
+      "id": 471,
+      "description": "IMG drivers can sometimes reference previously bound complete framebuffers.",
       "os": {
         "type": "android"
       },
       "gl_vendor": "Imagination.*",
       "features": [
-        "dont_change_base_level_for_npot_immutable_textures"
+        "ensure_previous_framebuffer_not_deleted"
       ]
     }
   ]

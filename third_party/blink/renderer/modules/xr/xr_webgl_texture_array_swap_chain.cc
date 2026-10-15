@@ -23,6 +23,7 @@ XRWebGLSwapChain::Descriptor MakeLayerDescriptor(
   CHECK_EQ(descriptor.width % layers, 0ul);
   descriptor.width /= layers;
   descriptor.layers = layers;
+  descriptor.is_texture_array = true;
   return descriptor;
 }
 
@@ -39,7 +40,7 @@ XRWebGLTextureArraySwapChain::XRWebGLTextureArraySwapChain(
   CHECK(webgl2());  // Texture arrays are only available in WebGL 2
 }
 
-void XRWebGLTextureArraySwapChain::Dispose() {
+XRWebGLTextureArraySwapChain::~XRWebGLTextureArraySwapChain() {
   if (owned_texture_) {
     gpu::gles2::GLES2Interface* gl = context()->ContextGL();
     if (!gl) {

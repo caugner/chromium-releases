@@ -10,7 +10,6 @@
 
 #include "base/base64.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
 #include "base/json/json_reader.h"
@@ -462,9 +461,6 @@ class ExtensionWebRequestApiTest : public ExtensionApiTest {
                            bool use_web_socket,
                            scoped_refptr<net::X509Certificate> certificate,
                            GURL request_url) {
-    std::string sha256_string =
-        base::HexEncode(net::X509Certificate::CalculateFingerprint256(
-            certificate->cert_buffer()));
     std::string pem_string;
     net::X509Certificate::GetPEMEncoded(certificate->cert_buffer(),
                                         &pem_string);
@@ -472,7 +468,6 @@ class ExtensionWebRequestApiTest : public ExtensionApiTest {
     base::Value::Dict custom_args;
     custom_args.Set("request_url", request_url.spec());
     custom_args.Set("certificate_bytes", std::move(pem_string));
-    custom_args.Set("certificate_sha256", std::move(sha256_string));
     custom_args.Set("expect_state", std::move(expect_state));
     custom_args.Set("use_web_socket", use_web_socket);
 
@@ -2904,110 +2899,6 @@ IN_PROC_BROWSER_TEST_F(
 }
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
-// Verifies that for child-process requests, the proxying `URLLoaderFactory`
-// generates and forwards a unique, non-zero request ID to the underlying
-// factory, even when the client passes duplicate IDs or 0. For
-// browser-initiated navigations (`render_process_id == -1`), verifies that the
-// original negative request ID is preserved without modification.
-IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest,
-                       ProxyingFactoryAssignsUniqueRequestId) {
-  ASSERT_TRUE(StartEmbeddedTestServer());
-
-  // Make sure the WebRequest proxy is inserted into the `URLLoaderFactory`
-  // chain for subresource and navigation requests.
-  auto* web_request_api =
-      BrowserContextKeyedAPIFactory<WebRequestAPI>::Get(profile());
-  ASSERT_TRUE(web_request_api);
-  web_request_api->ForceProxyForTesting();
-  profile()->GetDefaultStoragePartition()->FlushNetworkInterfaceForTesting();
-
-  const GURL navigation_url = embedded_test_server()->GetURL("/simple.html");
-  const GURL url_a = embedded_test_server()->GetURL("/echo?a");
-  const GURL url_b = embedded_test_server()->GetURL("/echo?b");
-  const GURL url_c = embedded_test_server()->GetURL("/echo?c");
-
-  // Intercept requests exiting the WebRequest proxy and record the forwarded
-  // network service request ID for each target URL.
-  std::map<GURL, int32_t> forwarded_request_ids;
-  content::URLLoaderInterceptor interceptor(base::BindLambdaForTesting(
-      [&](content::URLLoaderInterceptor::RequestParams* params) {
-        const GURL& url = params->url_request.url;
-        if (url == navigation_url || url == url_a || url == url_b ||
-            url == url_c) {
-          forwarded_request_ids[url] = params->request_id;
-        }
-        return false;
-      }));
-
-  // Perform a main-frame navigation. Because navigations are browser-initiated
-  // (`render_process_id == -1`), `GlobalRequestID::MakeBrowserInitiated()`
-  // generates a negative request ID.
-  ASSERT_TRUE(NavigateToURL(GetActiveWebContents(), navigation_url));
-  content::RenderFrameHost* frame =
-      GetActiveWebContents()->GetPrimaryMainFrame();
-
-  // Bind a WebRequest-proxied `URLLoaderFactory` for subresource requests and
-  // drive it directly to simulate a client submitting duplicate or zero IDs.
-  mojo::Remote<network::mojom::URLLoaderFactory> factory;
-  ASSERT_TRUE(frame->CreateNetworkServiceDefaultFactory(
-      factory.BindNewPipeAndPassReceiver()));
-
-  constexpr int32_t kClientRequestId = 42;
-
-  auto make_request = [&](const GURL& url) {
-    network::ResourceRequest request;
-    request.url = url;
-    request.request_initiator = frame->GetLastCommittedOrigin();
-    return request;
-  };
-
-  network::TestURLLoaderClient client_a;
-  mojo::PendingRemote<network::mojom::URLLoader> loader_a;
-  factory->CreateLoaderAndStart(
-      loader_a.InitWithNewPipeAndPassReceiver(), kClientRequestId,
-      network::mojom::kURLLoadOptionNone, make_request(url_a),
-      client_a.CreateRemote(),
-      net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS));
-
-  network::TestURLLoaderClient client_b;
-  mojo::PendingRemote<network::mojom::URLLoader> loader_b;
-  factory->CreateLoaderAndStart(
-      loader_b.InitWithNewPipeAndPassReceiver(), kClientRequestId,
-      network::mojom::kURLLoadOptionNone, make_request(url_b),
-      client_b.CreateRemote(),
-      net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS));
-
-  network::TestURLLoaderClient client_c;
-  mojo::PendingRemote<network::mojom::URLLoader> loader_c;
-  factory->CreateLoaderAndStart(
-      loader_c.InitWithNewPipeAndPassReceiver(), 0 /* request_id */,
-      network::mojom::kURLLoadOptionNone, make_request(url_c),
-      client_c.CreateRemote(),
-      net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS));
-
-  client_a.RunUntilComplete();
-  client_b.RunUntilComplete();
-  client_c.RunUntilComplete();
-
-  // Verify that the browser-initiated navigation (`render_process_id == -1`)
-  // forwarded its original negative request ID unmodified.
-  ASSERT_TRUE(forwarded_request_ids.contains(navigation_url));
-  EXPECT_LT(forwarded_request_ids[navigation_url], 0);
-
-  // Verify that untrusted child-process requests receive unique, non-zero
-  // network service request IDs, even when the client reuses an ID (`url_a` vs
-  // `url_b`) or passes 0 (`url_c`).
-  ASSERT_TRUE(forwarded_request_ids.contains(url_a));
-  ASSERT_TRUE(forwarded_request_ids.contains(url_b));
-  ASSERT_TRUE(forwarded_request_ids.contains(url_c));
-  EXPECT_NE(forwarded_request_ids[url_a], 0);
-  EXPECT_NE(forwarded_request_ids[url_b], 0);
-  EXPECT_NE(forwarded_request_ids[url_c], 0);
-  EXPECT_NE(forwarded_request_ids[url_a], forwarded_request_ids[url_b]);
-  EXPECT_NE(forwarded_request_ids[url_a], forwarded_request_ids[url_c]);
-  EXPECT_NE(forwarded_request_ids[url_b], forwarded_request_ids[url_c]);
-}
-
 // Tests that webRequest API can inspect window.open() requests initiated from
 // chrome-untrusted:// pages to Web origins, but not other WebUI origins.
 IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest,
@@ -4286,7 +4177,7 @@ IN_PROC_BROWSER_TEST_P(ServiceWorkerWebRequestApiTest,
         base::AutoLock auto_lock(lock);
         ++served_service_worker_count;
         foo_header_value.clear();
-        if (base::Contains(request.headers, "foo")) {
+        if (request.headers.contains("foo")) {
           foo_header_value = request.headers.at("foo");
         }
 
@@ -4366,7 +4257,7 @@ IN_PROC_BROWSER_TEST_P(ServiceWorkerWebRequestApiTest,
           base::AutoLock auto_lock(lock);
           ++served_service_worker_count;
           foo_header_value.clear();
-          if (base::Contains(request.headers, "foo")) {
+          if (request.headers.contains("foo")) {
             foo_header_value = request.headers.at("foo");
           }
           auto response =
@@ -4675,9 +4566,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest,
   std::string body =
       content::EvalJs(tab, "document.body.textContent").ExtractString();
 
-  EXPECT_TRUE(
-      base::Contains(body, "This page has been blocked by an extension"));
-  EXPECT_TRUE(base::Contains(body, "Try disabling your extensions."));
+  EXPECT_TRUE(body.contains("This page has been blocked by an extension"));
+  EXPECT_TRUE(body.contains("Try disabling your extensions."));
 }
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
@@ -7836,8 +7726,11 @@ class OnAuthRequiredApiTest : public ExtensionApiTest {
     host_resolver()->AddRule("*", "127.0.0.1");
 
     embedded_test_server()->ServeFilesFromSourceDirectory("chrome/test/data");
+    RegisterAdditionalHandlers();
     ASSERT_TRUE(StartEmbeddedTestServer());
   }
+
+  virtual void RegisterAdditionalHandlers() {}
 
   // Returns a URL which requires username/password
   GURL MakeAuthUrl() {
@@ -7848,8 +7741,11 @@ class OnAuthRequiredApiTest : public ExtensionApiTest {
   }
 
   // Loads an extension that implements onAuthRequired. `additional_js` will be
-  // concatenated to the background.js.
-  void LoadExtensionWithAdditionalJs(const std::string& additional_js) {
+  // concatenated to the background.js. If provided, `expected_request_type`
+  // will be used to verify the request type.
+  void LoadExtensionWithAdditionalJs(
+      const std::string& additional_js,
+      const std::optional<std::string>& expected_request_type = std::nullopt) {
     static constexpr char kManifest[] =
         R"({
              "name": "MV3 WebRequest",
@@ -7859,7 +7755,15 @@ class OnAuthRequiredApiTest : public ExtensionApiTest {
              "host_permissions": [ "http://127.0.0.1/*", "https://a.test/*" ],
              "background": {"service_worker": "background.js"}
            })";
-    static constexpr char kBackgroundJs[] =
+
+    std::string type_check;
+    if (expected_request_type) {
+      type_check =
+          base::StringPrintf("chrome.test.assertEq('%s', details.type);\n",
+                             *expected_request_type);
+    }
+
+    std::string background_js = base::StringPrintf(
         R"(
             let didInterceptAuth = false;
             chrome.webRequest.onAuthRequired.addListener(
@@ -7867,13 +7771,14 @@ class OnAuthRequiredApiTest : public ExtensionApiTest {
                  didInterceptAuth = true;
                  chrome.test.assertEq('mv3authprovider', details.realm);
                  chrome.test.assertEq(401, details.statusCode);
+                 %s
                  const authCredentials = {username: 'foo', password: 'secret'};
                  callback({authCredentials});
                },
                {urls: ['<all_urls>']},
                ['asyncBlocking']);
-          )";
-    std::string background_js(kBackgroundJs);
+          )",
+        type_check);
     background_js += additional_js;
 
     test_extension_dir_.WriteManifest(kManifest);
@@ -7950,6 +7855,78 @@ IN_PROC_BROWSER_TEST_F(OnAuthRequiredApiTest,
           .ExtractString();
   EXPECT_THAT(fetch_response, testing::HasSubstr("<title>"));
 }
+
+#if !BUILDFLAG(IS_ANDROID)
+class ServiceWorkerAuthTest : public OnAuthRequiredApiTest {
+ public:
+  void RegisterAdditionalHandlers() override {
+    // Register a custom request handler to simulate an HTTP "401 Unauthorized"
+    // response with a "WWW-Authenticate" header. This forces the browser to
+    // issue an auth challenge, which should be intercepted by the extension.
+    embedded_test_server()->RegisterRequestHandler(base::BindLambdaForTesting(
+        [](const net::test_server::HttpRequest& request)
+            -> std::unique_ptr<net::test_server::HttpResponse> {
+          if (request.relative_url != "/service_worker/auth") {
+            return nullptr;
+          }
+
+          auto response =
+              std::make_unique<net::test_server::BasicHttpResponse>();
+          // If request doesn't have the "Authorization" header, return 401.
+          if (request.headers.find("Authorization") == request.headers.end()) {
+            response->set_code(net::HTTP_UNAUTHORIZED);
+            response->AddCustomHeader("WWW-Authenticate",
+                                      "Basic realm=\"mv3authprovider\"");
+          } else {
+            // If "Authorization" header is present (supplied by extension),
+            // return 200 OK.
+            response->set_code(net::HTTP_OK);
+            response->set_content("Auth success");
+          }
+          return response;
+        }));
+  }
+};
+
+// Tests authentication flow when a service worker intercepts a navigation
+// and issues a network request that requires authentication.
+// This ensures that the `OnAuthRequired` event is correctly fired and handled
+// even when the request originates from a service worker.
+// Regression test for b/457210267.
+IN_PROC_BROWSER_TEST_F(ServiceWorkerAuthTest,
+                       ServiceWorkerInterceptedNavigationAuth) {
+  // Load an extension that listens for "onAuthRequired" events and provides
+  // credentials when the realm matches "mv3authprovider". Also check that
+  // the request type for the proxied request is "xmlhttprequest", which
+  // indicates it's not a navigation request. This is expected because,
+  // technically speaking, the proxied request is a `fetch()` from a service
+  // worker.
+  LoadExtensionWithAdditionalJs("", "xmlhttprequest");
+
+  // Navigate to a setup page and register a service worker that intercepts
+  // fetch events. "fetch_event_respond_with_fetch.js" responds to fetch events
+  // by issuing a new `fetch()` to the network, effectively acting as a proxy.
+  GURL sw_setup_url = embedded_test_server()->GetURL(
+      kTestDomain, "/service_worker/create_service_worker.html");
+  ASSERT_TRUE(NavigateToURL(GetActiveWebContents(), sw_setup_url));
+  // Register service worker which uses `respondWith(fetch(event.request))`.
+  EXPECT_EQ("DONE",
+            EvalJs(GetActiveWebContents(),
+                   "register('fetch_event_respond_with_fetch.js', './');"));
+
+  // This navigation is intercepted by the service worker registered above.
+  // The service worker issues a `fetch()` for "/service_worker/auth".
+  // The server returns 401, triggering `OnAuthRequired`.
+  // The extension provides credentials, and the request is retried with
+  // "Authorization".
+  GURL auth_url =
+      embedded_test_server()->GetURL(kTestDomain, "/service_worker/auth");
+  ASSERT_TRUE(NavigateToURL(GetActiveWebContents(), auth_url));
+
+  EXPECT_EQ("Auth success",
+            EvalJs(GetActiveWebContents(), "document.body.textContent"));
+}
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 // Tests the behavior of an extension that registers an event listener
 // asynchronously.
@@ -8599,6 +8576,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest, SecurityInfo_Secure) {
                       embedded_test_server()->GetURL("/simple.html"));
 }
 
+// Tests that fetch('http://') results in web request listener
+// getting SecurityInfo with state='insecure' and all other fields not set.
 IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest, SecurityInfo_Insecure) {
   ASSERT_TRUE(StartEmbeddedTestServer());
 
@@ -8628,6 +8607,43 @@ IN_PROC_BROWSER_TEST_F(SecurityInfoBrokenWebRequestApiTest,
   RunSecurityInfoTest("broken", /*use_web_socket=*/false,
                       embedded_test_server()->GetCertificate(),
                       embedded_test_server()->GetURL("/simple.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest,
+                       SecurityInfo_WebSocket_Secure) {
+  ASSERT_TRUE(StartEmbeddedTestServer());
+
+  InitWebSocketHttpsServer();
+  ASSERT_TRUE(StartWebSocketServer());
+
+  RunSecurityInfoTest("secure", /*use_web_socket=*/true,
+                      GetWebSocketServer().GetCertificate(),
+                      GetWebSocketServer().GetURL("/echo-with-no-extension"));
+}
+
+// Tests that new Websocket('ws://') results in web request listener
+// getting SecurityInfo with state='insecure' and all other fields not set.
+IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest,
+                       SecurityInfo_WebSocket_Insecure) {
+  ASSERT_TRUE(StartEmbeddedTestServer());
+  ASSERT_TRUE(StartWebSocketServer());
+
+  RunSecurityInfoInsecureTest(
+      /*use_web_socket=*/true,
+      GetWebSocketServer().GetURL("/echo-with-no-extension"));
+}
+
+IN_PROC_BROWSER_TEST_F(SecurityInfoBrokenWebRequestApiTest,
+                       SecurityInfo_WebSocket_Broken) {
+  ASSERT_TRUE(StartEmbeddedTestServer());
+
+  InitWebSocketHttpsServer(
+      net::test_server::EmbeddedTestServer::ServerCertificate::CERT_EXPIRED);
+  ASSERT_TRUE(StartWebSocketServer());
+
+  RunSecurityInfoTest("broken", /*use_web_socket=*/true,
+                      GetWebSocketServer().GetCertificate(),
+                      GetWebSocketServer().GetURL("/echo-with-no-extension"));
 }
 
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)

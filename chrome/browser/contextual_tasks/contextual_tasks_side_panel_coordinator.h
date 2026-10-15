@@ -9,8 +9,10 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/views/side_panel/side_panel_entry.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_entry_observer.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "third_party/omnibox_proto/chrome_aim_entry_point.pb.h"
 #include "ui/base/unowned_user_data/scoped_unowned_user_data.h"
 
 class BrowserWindowInterface;
@@ -62,6 +64,9 @@ class ContextualTasksSidePanelCoordinator : public TabStripModelObserver,
     // Whether the side panel is open. Only used when FeatureParam
     // `kTaskScopedSidePanel` is set to true.
     bool is_open;
+
+    // The time when the WebContents becomes inactive.
+    base::TimeTicks last_active_time_ticks;
   };
   DECLARE_USER_DATA(ContextualTasksSidePanelCoordinator);
 
@@ -86,7 +91,9 @@ class ContextualTasksSidePanelCoordinator : public TabStripModelObserver,
 
   // Show the side panel. If |transition_from_tab| is true, trigger the side
   // panel content to animate from the active tab content's bounds.
-  void Show(bool transition_from_tab = false);
+  void Show(bool transition_from_tab = false,
+            omnibox::ChromeAimEntryPoint entry_point =
+                omnibox::ChromeAimEntryPoint::UNKNOWN_AIM_ENTRY_POINT);
 
   // Close the side panel.
   void Close();
@@ -138,11 +145,17 @@ class ContextualTasksSidePanelCoordinator : public TabStripModelObserver,
   void OnEntryShown(SidePanelEntry* entry) override;
   void OnEntryHidden(SidePanelEntry* entry) override;
 
- private:
-  friend class ContextualTasksSidePanelCoordinatorInteractiveUiTest;
+  // Get the WebContentsCacheItem for web_contents, return nullptr if not found.
+  ContextualTasksSidePanelCoordinator::WebContentsCacheItem*
+  GetWebContentsCacheItemForWebContents(content::WebContents* web_contents);
 
   // Get the task associated with the active tab.
   std::optional<ContextualTask> GetCurrentTask();
+
+  void SetSidePanelIdNotToOverrideForTesting(SidePanelEntry::Id side_panel_id);
+
+ private:
+  friend class ContextualTasksSidePanelCoordinatorInteractiveUiTest;
 
   // Hide or show side panel base on open state of the current task.
   void UpdateSidePanelVisibility();
@@ -173,7 +186,7 @@ class ContextualTasksSidePanelCoordinator : public TabStripModelObserver,
   content::WebContents* GetSidePanelWebContentsForActiveTab();
 
   // Create a cached WebContents if one does not exist for the current task.
-  void MaybeCreateCachedWebContents();
+  void MaybeCreateCachedWebContents(omnibox::ChromeAimEntryPoint entry_point);
 
   // Create a cached WebContents for a task. For tests only.
   void CreateCachedWebContentsForTesting(base::Uuid task_id, bool is_open);
@@ -251,6 +264,10 @@ class ContextualTasksSidePanelCoordinator : public TabStripModelObserver,
   // The tab scoped side panel open state map. Only used when FeatureParam
   // `kTaskScopedSidePanel` is set to false.
   std::map<SessionID, bool> tab_scoped_open_state_;
+
+  // If the side panel with this specific id is open, do not override it with
+  // the contextual tasks side panel when active tab is changed.
+  SidePanelEntry::Id side_panel_id_not_to_override_ = SidePanelEntry::Id::kGlic;
 
   ui::ScopedUnownedUserData<ContextualTasksSidePanelCoordinator>
       scoped_unowned_user_data_;

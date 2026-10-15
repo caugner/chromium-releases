@@ -9,8 +9,6 @@
 
 #include "base/feature_list.h"
 #include "base/functional/callback.h"
-#include "base/memory/ptr_util.h"
-#include "base/observer_list.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/renderer/platform/bindings/source_location.h"
 #include "v8/include/v8-isolate.h"
@@ -18,12 +16,8 @@
 namespace blink {
 
 FrameOrWorkerScheduler::LifecycleObserverHandle::LifecycleObserverHandle(
-    FrameOrWorkerScheduler* scheduler,
-    ObserverType observer_type,
-    OnLifecycleStateChangedCallback callback)
-    : scheduler_(scheduler->GetWeakPtr()),
-      observer_type_(observer_type),
-      callback_(std::move(callback)) {}
+    FrameOrWorkerScheduler* scheduler)
+    : scheduler_(scheduler->GetWeakPtr()) {}
 
 FrameOrWorkerScheduler::LifecycleObserverHandle::~LifecycleObserverHandle() {
   if (scheduler_)
@@ -121,27 +115,36 @@ FrameOrWorkerScheduler::AddLifecycleObserver(
     ObserverType type,
     OnLifecycleStateChangedCallback callback) {
   callback.Run(CalculateLifecycleState(type));
-  auto handle = base::WrapUnique(
-      new LifecycleObserverHandle(this, type, std::move(callback)));
-  lifecycle_observers_.AddObserver(handle.get());
+  auto handle = std::make_unique<LifecycleObserverHandle>(this);
+  lifecycle_observers_.Set(
+      handle.get(), std::make_unique<ObserverState>(type, std::move(callback)));
   return handle;
 }
 
 void FrameOrWorkerScheduler::RemoveLifecycleObserver(
     LifecycleObserverHandle* handle) {
-  CHECK(handle);
-  DCHECK(lifecycle_observers_.HasObserver(handle));
-  lifecycle_observers_.RemoveObserver(handle);
+  DCHECK(handle);
+  const auto found = lifecycle_observers_.find(handle);
+  CHECK(lifecycle_observers_.end() != found);
+  lifecycle_observers_.erase(found);
 }
 
 void FrameOrWorkerScheduler::NotifyLifecycleObservers() {
-  for (auto& observer : lifecycle_observers_) {
-    observer.callback_.Run(CalculateLifecycleState(observer.observer_type_));
+  for (const auto& observer : lifecycle_observers_) {
+    observer.value->GetCallback().Run(
+        CalculateLifecycleState(observer.value->GetObserverType()));
   }
 }
 
 base::WeakPtr<FrameOrWorkerScheduler> FrameOrWorkerScheduler::GetWeakPtr() {
   return weak_factory_.GetWeakPtr();
 }
+
+FrameOrWorkerScheduler::ObserverState::ObserverState(
+    FrameOrWorkerScheduler::ObserverType observer_type,
+    FrameOrWorkerScheduler::OnLifecycleStateChangedCallback callback)
+    : observer_type_(observer_type), callback_(callback) {}
+
+FrameOrWorkerScheduler::ObserverState::~ObserverState() = default;
 
 }  // namespace blink

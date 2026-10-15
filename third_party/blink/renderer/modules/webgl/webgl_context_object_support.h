@@ -7,13 +7,16 @@
 
 #include <bitset>
 
-#include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_extension_name.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
 #include "third_party/khronos/GLES3/gl31.h"
+
+namespace base {
+class SingleThreadTaskRunner;
+}
 
 namespace gpu::gles2 {
 class GLES2Interface;
@@ -33,10 +36,10 @@ class MODULES_EXPORT WebGLContextObjectSupport : public ScriptWrappable {
   bool IsWebGL2() const { return is_webgl2_; }
   bool IsLost() const { return is_lost_; }
 
-  // Which "generation" the context is on (essentially, how many times it has
-  // been restored), to check whether a WebGLObject was created since the last
-  // context restoration, or before that (and hence invalid to use).
-  uint64_t GetContextGeneration() const { return context_generation_; }
+  // How many context losses there were, to check whether a WebGLObject was
+  // created since the last context resoration or before that (and hence invalid
+  // to use).
+  uint32_t NumberOfContextLosses() const { return number_of_context_losses_; }
 
   bool ExtensionEnabled(WebGLExtensionName name) const {
     return extensions_enabled_.test(name);
@@ -65,7 +68,7 @@ class MODULES_EXPORT WebGLContextObjectSupport : public ScriptWrappable {
   std::bitset<kWebGLExtensionNameCount> extensions_enabled_ = {};
   raw_ptr<gpu::gles2::GLES2Interface> gles2_interface_ = nullptr;
 
-  uint64_t context_generation_ = 0;
+  uint32_t number_of_context_losses_ = 0;
   bool is_lost_ = true;
   bool is_webgl2_;
 };

@@ -13,6 +13,8 @@
 #include "base/memory/raw_ptr.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "build/build_config.h"
+#include "chrome/browser/glic/glic_enums.h"
 #include "chrome/browser/glic/host/context/glic_tab_data.h"
 #include "chrome/browser/glic/host/glic.mojom.h"
 #include "chrome/browser/glic/public/glic_instance.h"
@@ -186,7 +188,15 @@ enum class ResponseSegmentation {
   kHandoffButtonAttachedAudio = 54,
   kHandoffButtonDetachedText = 55,
   kHandoffButtonDetachedAudio = 56,
-  kMaxValue = kHandoffButtonDetachedAudio,
+  kAutoOpenedByContextualCueAttachedText = 65,
+  kAutoOpenedByContextualCueAttachedAudio = 66,
+  kAutoOpenedByContextualCueDetachedText = 67,
+  kAutoOpenedByContextualCueDetachedAudio = 68,
+  kPdfSummarizeButtonAttachedText = 69,
+  kPdfSummarizeButtonAttachedAudio = 70,
+  kPdfSummarizeButtonDetachedText = 71,
+  kPdfSummarizeButtonDetachedAudio = 72,
+  kMaxValue = kPdfSummarizeButtonDetachedAudio,
 };
 // LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:GlicResponseSegmentation)
 
@@ -224,22 +234,6 @@ enum class GlicRequestEvent {
   kMaxValue = kRequestReceivedWhileHidden,
 };
 // LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:GlicRequestEvent)
-
-// Error types for when attempting to extract context from a tab.
-// LINT.IfChange(GlicGetContextFromTabError)
-enum class GlicGetContextFromTabError {
-  kUnknown = 0,
-  // Tab context requests when the panel is hidden are now reported as both as
-  // "hidden" and "error" in Glic.Api.* histograms.
-  kPermissionDeniedWindowNotShowing_DEPRECATED = 1,
-  kTabNotFound = 2,
-  kPermissionDeniedContextPermissionNotEnabled = 3,
-  kPermissionDenied = 4,
-  kWebContentsChanged = 5,
-  kPageContextNotEligible = 6,
-  kMaxValue = kPageContextNotEligible,
-};
-// LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:GlicGetContextFromTabError)
 
 // LINT.IfChange(GlicTabPinnedForSharingResult)
 enum class GlicTabPinnedForSharingResult {
@@ -420,16 +414,17 @@ class GlicMetrics {
       std::optional<display::Display> display,
       const gfx::Point& glic_center_point);
 
+#if !BUILDFLAG(IS_ANDROID)
   // Returns the area relative to the given chrome browser a given center point
   // is.
   ChromeRelativePosition GetChromeRelativePositionOfPoint(
       Browser* browser,
       const gfx::Point& glic_center_point);
-
   // Returns the percent overlap of the given glic bounds and the given chrome
   // browser.
   PercentOverlap GetPercentOverlapWithBrowser(Browser* browser,
                                               const gfx::Rect& glic_bounds);
+#endif
 
   base::TimeTicks fre_accepted_time_;
 

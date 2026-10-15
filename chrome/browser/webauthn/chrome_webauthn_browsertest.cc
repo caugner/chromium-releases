@@ -20,14 +20,13 @@
 #include "base/task/sequenced_task_runner.h"
 #include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/test/test_future.h"
 #include "base/test/values_test_util.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/actor/actor_keyed_service.h"
 #include "chrome/browser/actor/actor_task.h"
 #include "chrome/browser/actor/execution_engine.h"
-#include "chrome/browser/actor/ui/mocks/mock_event_dispatcher.h"
+#include "chrome/browser/actor/ui/test_support/mock_event_dispatcher.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/browser/password_manager/chrome_webauthn_credentials_delegate.h"
@@ -56,14 +55,13 @@
 #include "content/public/test/browser_test_utils.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
 #include "device/bluetooth/test/mock_bluetooth_adapter.h"
-#include "device/fido/cable/cable_discovery_data.h"
 #include "device/fido/discoverable_credential_metadata.h"
-#include "device/fido/features.h"
 #include "device/fido/fido_parsing_utils.h"
 #include "device/fido/fido_request_handler_base.h"
-#include "device/fido/fido_transport_protocol.h"
-#include "device/fido/fido_types.h"
-#include "device/fido/public_key_credential_user_entity.h"
+#include "device/fido/public/features.h"
+#include "device/fido/public/fido_transport_protocol.h"
+#include "device/fido/public/fido_types.h"
+#include "device/fido/public/public_key_credential_user_entity.h"
 #include "device/fido/virtual_ctap2_device.h"
 #include "device/fido/virtual_fido_device.h"
 #include "device/fido/virtual_fido_device_factory.h"
@@ -83,6 +81,8 @@
 #endif  // BUILDFLAG(IS_WIN)
 
 namespace {
+
+using ShadowedCredentials = ::webauthn::PasskeyModel::ShadowedCredentials;
 
 static constexpr uint8_t kCredentialID[] = {1, 2,  3,  4,  5,  6,  7,  8,
                                             9, 10, 11, 12, 13, 14, 15, 16};
@@ -399,7 +399,6 @@ class WinWebAuthnBrowserTest
   WinWebAuthnBrowserTest() {
     scoped_feature_list_.InitWithFeatures(
         {device::kWebAuthnHelloSignal,
-         device::kWebAuthenticationFixWindowsHelloRdp,
          device::kWebAuthenticationWindowsHints,
          device::kWebAuthnSignalApiHidePasskeys},
         /*disabled_features=*/{});
@@ -679,9 +678,10 @@ IN_PROC_BROWSER_TEST_F(WebAuthnBrowserTest,
 
   // After reporting the passkey, it should be marked as hidden.
   std::optional<sync_pb::WebauthnCredentialSpecifics> credential =
-      (passkey_model->GetPasskeyByCredentialId(
+      (passkey_model->GetPasskey(
           "www.example.com",
-          std::string(reinterpret_cast<const char*>(kCredentialID), 16)));
+          std::string(reinterpret_cast<const char*>(kCredentialID), 16),
+          ShadowedCredentials::kExclude));
   ASSERT_TRUE(credential);
   EXPECT_TRUE(credential->hidden());
 }
@@ -705,9 +705,10 @@ IN_PROC_BROWSER_TEST_F(WebAuthnBrowserTest,
 
   // Check that the passkey with kCredentialID was not hidden.
   std::optional<sync_pb::WebauthnCredentialSpecifics> credential =
-      (passkey_model->GetPasskeyByCredentialId(
+      (passkey_model->GetPasskey(
           "www.example.com",
-          std::string(reinterpret_cast<const char*>(kCredentialID), 16)));
+          std::string(reinterpret_cast<const char*>(kCredentialID), 16),
+          ShadowedCredentials::kExclude));
   ASSERT_TRUE(credential);
   EXPECT_FALSE(credential->hidden());
 
@@ -746,9 +747,10 @@ IN_PROC_BROWSER_TEST_F(WebAuthnBrowserTest,
 
   // Check that the passkey with kCredentialID2 was hidden.
   std::optional<sync_pb::WebauthnCredentialSpecifics> credential =
-      (passkey_model->GetPasskeyByCredentialId(
+      (passkey_model->GetPasskey(
           "www.example.com",
-          std::string(reinterpret_cast<const char*>(kCredentialID2), 16)));
+          std::string(reinterpret_cast<const char*>(kCredentialID2), 16),
+          ShadowedCredentials::kExclude));
   ASSERT_TRUE(credential);
   EXPECT_TRUE(credential->hidden());
 
@@ -843,9 +845,10 @@ IN_PROC_BROWSER_TEST_F(WebAuthnBrowserTest,
   }).then(c => 'webauthn: OK', e => 'error ' + e);
   )"));
 
-  auto passkey = passkey_model->GetPasskeyByCredentialId(
+  auto passkey = passkey_model->GetPasskey(
       "www.example.com",
-      std::string(reinterpret_cast<const char*>(kCredentialID), 16));
+      std::string(reinterpret_cast<const char*>(kCredentialID), 16),
+      ShadowedCredentials::kExclude);
 
   // Check if the name and displayName of the passkey reported was updated.
   EXPECT_EQ(passkey->user_name(), "Pepito");
@@ -897,9 +900,10 @@ IN_PROC_BROWSER_TEST_F(WebAuthnBrowserTest, SignalCurrentUserDetailsQuota) {
           base::ReplaceStringPlaceholders(kRequest, {kUsername1}, nullptr)));
 
   // Check that the name hasn't been updated.
-  auto passkey = passkey_model->GetPasskeyByCredentialId(
+  auto passkey = passkey_model->GetPasskey(
       "www.example.com",
-      std::string(reinterpret_cast<const char*>(kCredentialID), 16));
+      std::string(reinterpret_cast<const char*>(kCredentialID), 16),
+      ShadowedCredentials::kExclude);
   EXPECT_NE(passkey->user_name(), kUsername1);
 }
 
@@ -928,9 +932,10 @@ IN_PROC_BROWSER_TEST_F(WebAuthnBrowserTest,
   }).then(c => 'webauthn: OK', e => 'error ' + e);
   )"));
 
-  auto passkey = passkey_model->GetPasskeyByCredentialId(
+  auto passkey = passkey_model->GetPasskey(
       "www.example.com",
-      std::string(reinterpret_cast<const char*>(kCredentialID), 16));
+      std::string(reinterpret_cast<const char*>(kCredentialID), 16),
+      ShadowedCredentials::kExclude);
 
   // Check if the name and displayName of the passkey reported did not change.
   EXPECT_EQ(passkey->user_name(), kUsername1);
@@ -1688,9 +1693,9 @@ class WebAuthnActorBrowserTest : public WebAuthnBrowserTest {
 };
 
 IN_PROC_BROWSER_TEST_F(WebAuthnActorBrowserTest, MakeCredentialsActorIsActive) {
-  CreateActingTask();
   ASSERT_TRUE(ui_test_utils::NavigateToURL(
       browser(), https_server_.GetURL("www.example.com", "/title1.html")));
+  CreateActingTask();
 
   content::EvalJsResult result =
       content::EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
@@ -1699,11 +1704,11 @@ IN_PROC_BROWSER_TEST_F(WebAuthnActorBrowserTest, MakeCredentialsActorIsActive) {
 }
 
 IN_PROC_BROWSER_TEST_F(WebAuthnActorBrowserTest, GetCredentialsActorIsActive) {
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
+      browser(), https_server_.GetURL("www.example.com", "/title1.html")));
   CreateActingTask();
   virtual_device_factory_->mutable_state()->InjectRegistration(
       kCredentialID, "www.example.com");
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(
-      browser(), https_server_.GetURL("www.example.com", "/title1.html")));
   content::EvalJsResult result =
       content::EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
                       kGetAssertionCredID1234);
@@ -1721,154 +1726,6 @@ IN_PROC_BROWSER_TEST_F(WebAuthnActorBrowserTest,
       "webauthn: OK",
       content::EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
                       kGetAssertionCredID1234));
-}
-
-// Reproduction test for Use-After-Free in AuthenticatorRequestDialogController
-// (crbug.com/522566295).
-class WebAuthnUAFReproductionTest
-    : public WebAuthnBrowserTest,
-      public ChromeAuthenticatorRequestDelegate::TestObserver,
-      public AuthenticatorRequestDialogModel::Observer {
- public:
-  WebAuthnUAFReproductionTest() {
-#if BUILDFLAG(IS_WIN)
-    win_api_.set_available(false);
-#endif
-  }
-  ~WebAuthnUAFReproductionTest() override = default;
-
-  // ChromeAuthenticatorRequestDelegate::TestObserver:
-  void Created(ChromeAuthenticatorRequestDelegate* delegate) override {
-    delegate_ = delegate;
-    model_ = delegate_->dialog_model();
-    model_->AddObserver(this);
-  }
-
-  void UIShown(ChromeAuthenticatorRequestDelegate* delegate) override {
-    delegate_shown_future_.SetValue(delegate);
-  }
-
-  void OnDestroy(ChromeAuthenticatorRequestDelegate* delegate) override {
-    delegate_ = nullptr;
-  }
-
-  // AuthenticatorRequestDialogModel::Observer:
-  void OnStepTransition() override {
-    if (model_ &&
-        (model_->step() == AuthenticatorRequestDialogModel::Step::kClosed ||
-         model_->step() ==
-             AuthenticatorRequestDialogModel::Step::kPlatformAuthenticator)) {
-      DeleteWebContents();
-    }
-  }
-
-  void OnModelDestroyed(AuthenticatorRequestDialogModel* model) override {
-    if (model_ == model) {
-      model_ = nullptr;
-    }
-  }
-
-  void DeleteWebContents() {
-    if (web_contents_deleted_) {
-      return;
-    }
-    web_contents_deleted_ = true;
-    auto* tab_strip_model = browser()->tab_strip_model();
-    int active_index = tab_strip_model->active_index();
-    tab_strip_model->DetachAndDeleteWebContentsAt(active_index);
-  }
-
-  void SetUpOnMainThread() override {
-    WebAuthnBrowserTest::SetUpOnMainThread();
-    ChromeAuthenticatorRequestDelegate::SetGlobalObserverForTesting(this);
-  }
-
-  void TearDownOnMainThread() override {
-    if (model_) {
-      model_->RemoveObserver(this);
-    }
-    ChromeAuthenticatorRequestDelegate::SetGlobalObserverForTesting(nullptr);
-    WebAuthnBrowserTest::TearDownOnMainThread();
-  }
-
-  raw_ptr<ChromeAuthenticatorRequestDelegate> delegate_ = nullptr;
-  raw_ptr<AuthenticatorRequestDialogModel> model_ = nullptr;
-  base::test::TestFuture<ChromeAuthenticatorRequestDelegate*>
-      delegate_shown_future_;
-  bool web_contents_deleted_ = false;
-#if BUILDFLAG(IS_WIN)
-  device::FakeWinWebAuthnApi win_api_;
-  device::WinWebAuthnApi::ScopedOverride win_webauthn_api_override_{&win_api_};
-#endif
-};
-
-IN_PROC_BROWSER_TEST_F(WebAuthnUAFReproductionTest, CancelUAF) {
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(
-      browser(), https_server_.GetURL("www.example.com", "/title1.html")));
-
-  content::WebContents* web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-
-  // Trigger WebAuthn flow asynchronously
-  content::ExecuteScriptAsync(web_contents, R"(
-    navigator.credentials.create({
-      publicKey: {
-        challenge: new Uint8Array([1, 2, 3, 4]),
-        rp: { name: "Example" },
-        user: {
-          id: new Uint8Array([1, 2, 3, 4]),
-          name: "test",
-          displayName: "test"
-        },
-        pubKeyCredParams: [{ type: "public-key", alg: -7 }],
-        timeout: 60000
-      }
-    });
-  )");
-
-  ASSERT_TRUE(delegate_shown_future_.Wait());
-  ASSERT_TRUE(delegate_);
-  ASSERT_TRUE(delegate_->dialog_controller());
-
-  // Force controller step to an error state where is_request_complete() is true
-  delegate_->dialog_controller()->SetCurrentStepForTesting(
-      AuthenticatorRequestDialogModel::Step::kKeyNotRegistered);
-
-  // Trigger UAF
-  delegate_->dialog_controller()->CancelAuthenticatorRequest();
-}
-
-IN_PROC_BROWSER_TEST_F(WebAuthnUAFReproductionTest, HideDialogUAF) {
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(
-      browser(), https_server_.GetURL("www.example.com", "/title1.html")));
-
-  content::WebContents* web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-
-  // Trigger WebAuthn flow asynchronously
-  content::ExecuteScriptAsync(web_contents, R"(
-    navigator.credentials.create({
-      publicKey: {
-        challenge: new Uint8Array([1, 2, 3, 4]),
-        rp: { name: "Example" },
-        user: {
-          id: new Uint8Array([1, 2, 3, 4]),
-          name: "test",
-          displayName: "test"
-        },
-        pubKeyCredParams: [{ type: "public-key", alg: -7 }],
-        timeout: 60000
-      }
-    });
-  )");
-
-  ASSERT_TRUE(delegate_shown_future_.Wait());
-  ASSERT_TRUE(delegate_);
-  ASSERT_TRUE(delegate_->dialog_controller());
-
-  // Trigger UAF
-  delegate_->dialog_controller()->HideDialogAndDispatchToPlatformAuthenticator(
-      std::nullopt);
 }
 
 }  // namespace

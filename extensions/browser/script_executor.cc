@@ -20,7 +20,6 @@
 #include "base/pickle.h"
 #include "base/strings/stringprintf.h"
 #include "base/types/pass_key.h"
-#include "components/sessions/content/session_tab_helper.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
@@ -30,10 +29,8 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_web_contents_observer.h"
 #include "extensions/browser/script_injection_tracker.h"
-#include "extensions/browser/scripting_utils.h"
 #include "extensions/common/mojom/host_id.mojom.h"
 #include "extensions/common/mojom/match_origin_as_fallback.mojom-shared.h"
-#include "extensions/common/permissions/permissions_data.h"
 #include "pdf/buildflags.h"
 
 #if BUILDFLAG(ENABLE_PDF)
@@ -60,12 +57,10 @@ class Handler : public content::WebContentsObserver {
           mojom::ExecuteCodeParamsPtr params,
           ScriptExecutor::FrameScope scope,
           const std::set<int>& frame_ids,
-          const Extension* extension,
           ScriptExecutor::ScriptFinishedCallback callback)
       : content::WebContentsObserver(web_contents),
         observer_(std::move(observer)),
         host_id_(params->host_id->type, params->host_id->id),
-        is_web_view_(params->is_web_view),
         callback_(std::move(callback)) {
     for (int frame_id : frame_ids) {
       content::RenderFrameHost* frame =
@@ -115,18 +110,13 @@ class Handler : public content::WebContentsObserver {
     // `pending_render_frames_` and add them if they are alive (and not already
     // contained in `pending_frames`).
     if (scope == ScriptExecutor::INCLUDE_SUB_FRAMES) {
-      int tab_id = -1;
-      if (host_id_.type == mojom::HostID::HostType::kExtensions) {
-        tab_id = sessions::SessionTabHelper::IdForTab(web_contents).id();
-      }
-
       // We iterate over the requested frames. Note we can't use an iterator
       // as the for loop will mutate `pending_render_frames_`.
       const size_t requested_frame_count = pending_render_frames_.size();
       for (size_t i = 0; i < requested_frame_count; ++i) {
         pending_render_frames_.at(i)->ForEachRenderFrameHost(
-            [this, extension, tab_id](content::RenderFrameHost* frame) {
-              MaybeAddSubFrame(frame, extension, tab_id);
+            [this](content::RenderFrameHost* frame) {
+              MaybeAddSubFrame(frame);
             });
       }
     }
@@ -179,9 +169,7 @@ class Handler : public content::WebContentsObserver {
   }
 
   content::RenderFrameHost::FrameIterationAction MaybeAddSubFrame(
-      content::RenderFrameHost* frame,
-      const Extension* extension,
-      int tab_id) {
+      content::RenderFrameHost* frame) {
     // Avoid inner web contents. If we need to execute scripts on inner
     // WebContents this class needs to be updated.
     // See https://crbug.com/1301320.
@@ -209,18 +197,6 @@ class Handler : public content::WebContentsObserver {
       return content::RenderFrameHost::FrameIterationAction::kContinue;
     }
 
-    if (!is_web_view_ &&
-        host_id_.type == mojom::HostID::HostType::kExtensions) {
-      // TODO(crbug.com/502262220): We do permission checks in at least three
-      // different places (here, in `scripting_api.cc`, and in the renderer).
-      // That is not ideal and we should find a way to clean it up.
-      std::string error;
-      if (!scripting::HasPermissionToInjectIntoFrame(
-              *extension->permissions_data(), tab_id, frame, &error)) {
-        return content::RenderFrameHost::FrameIterationAction::kContinue;
-      }
-    }
-
     PushPendingRenderFrame(frame, ExtensionApiFrameIdMap::GetFrameId(frame));
     return content::RenderFrameHost::FrameIterationAction::kContinue;
   }
@@ -237,7 +213,7 @@ class Handler : public content::WebContentsObserver {
     ScriptExecutor::FrameResult result;
     result.frame_id = frame_id;
     result.document_id = ExtensionApiFrameIdMap::GetDocumentId(frame);
-    DCHECK(!base::Contains(results_, frame->GetFrameToken()));
+    DCHECK(!results_.contains(frame->GetFrameToken()));
     results_[frame->GetFrameToken()] = std::move(result);
   }
 
@@ -268,7 +244,7 @@ class Handler : public content::WebContentsObserver {
 
   ScriptExecutor::FrameResult& GetFrameResult(
       const blink::LocalFrameToken& frame_token) {
-    DCHECK(base::Contains(results_, frame_token));
+    DCHECK(results_.contains(frame_token));
     return results_[frame_token];
   }
 
@@ -362,9 +338,6 @@ class Handler : public content::WebContentsObserver {
   // The id of the host (the extension or the webui) doing the injection.
   mojom::HostID host_id_;
 
-  // True if the injection is for a <webview> guest.
-  bool is_web_view_;
-
   // The the root frame key to search FrameResult, if only a single frame is
   // explicitly specified.
   std::optional<blink::LocalFrameToken> root_frame_token_;
@@ -430,12 +403,12 @@ void ScriptExecutor::ExecuteScript(
     ScriptExecutor::ProcessType process_type,
     const GURL& webview_src,
     ScriptFinishedCallback callback) {
-  const Extension* extension = nullptr;
   if (host_id.type == mojom::HostID::HostType::kExtensions) {
     // Don't execute if the extension has been unloaded.
-    extension = ExtensionRegistry::Get(web_contents_->GetBrowserContext())
-                    ->enabled_extensions()
-                    .GetByID(host_id.id);
+    const Extension* extension =
+        ExtensionRegistry::Get(web_contents_->GetBrowserContext())
+            ->enabled_extensions()
+            .GetByID(host_id.id);
     if (!extension) {
       return;
     }
@@ -470,8 +443,7 @@ void ScriptExecutor::ExecuteScript(
 
   // Handler handles IPCs and deletes itself on completion.
   new Handler(base::PassKey<ScriptExecutor>(), observer_, web_contents_,
-              std::move(params), frame_scope, frame_ids, extension,
-              std::move(callback));
+              std::move(params), frame_scope, frame_ids, std::move(callback));
 }
 
 }  // namespace extensions

@@ -9,6 +9,7 @@
 
 #include "ash/public/cpp/app_types_util.h"
 #include "base/memory/ref_counted_memory.h"
+#include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ash/arc/arc_util.h"
@@ -38,9 +39,6 @@
 #include "ui/base/data_transfer_policy/data_transfer_endpoint.h"
 
 namespace ash {
-
-BASE_FEATURE(kChromeSecurityDelegateIgnoreArcVm,
-             base::FEATURE_ENABLED_BY_DEFAULT);
 
 namespace {
 
@@ -115,12 +113,6 @@ base::FilePath GetVmMount(const std::string& vm_name) {
 // Translate |vm_paths| from |source| VM to host paths.
 std::vector<FileInfo> TranslateVMToHost(const std::string& vm_name,
                                         std::vector<ui::FileInfo> vm_paths) {
-  // Arc doesn't currently support drag-drop or clipboard via exo.
-  // If Arc ever adds support, we must map paths correctly like other VMs.
-  if (vm_name == arc::kArcVmName &&
-      base::FeatureList::IsEnabled(kChromeSecurityDelegateIgnoreArcVm)) {
-    return {};
-  }
   std::vector<FileInfo> file_infos;
   Profile* primary_profile = ProfileManager::GetPrimaryUserProfile();
   bool is_crostini = vm_name == crostini::kCrostiniDefaultVmName;
@@ -314,14 +306,6 @@ ChromeSecurityDelegate::SetBoundsPolicy ChromeSecurityDelegate::CanSetBounds(
   } else {
     return SetBoundsPolicy::IGNORE;
   }
-}
-
-bool ChromeSecurityDelegate::CanAccessRemoteShell() const {
-  return true;
-}
-
-bool ChromeSecurityDelegate::CanSetSystemModal() const {
-  return true;
 }
 
 std::vector<ui::FileInfo> ChromeSecurityDelegate::GetFilenames(

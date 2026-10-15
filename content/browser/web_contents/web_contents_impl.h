@@ -406,7 +406,6 @@ class CONTENT_EXPORT WebContentsImpl
   RenderWidgetHostView* GetRenderWidgetHostView() override;
   RenderWidgetHostView* GetTopLevelRenderWidgetHostView() override;
   RenderWidgetHost* FindWidgetAtPoint(const gfx::PointF& point) override;
-  std::vector<RenderWidgetHostView*> GetPopupWidgets() override;
   void ClosePage() override;
   std::optional<SkColor> GetThemeColor() override;
   std::optional<SkColor> GetBackgroundColor() override;
@@ -973,6 +972,8 @@ class CONTENT_EXPORT WebContentsImpl
       RenderViewHostImpl* render_view_host) override;
   void DidReceiveInputEvent(RenderWidgetHostImpl* render_widget_host,
                             const blink::WebInputEvent& event) override;
+  void SimulateUserInteraction(RenderWidgetHostImpl* render_widget_host,
+                               const blink::WebInputEvent& event) override;
   bool ShouldIgnoreWebInputEvents(const blink::WebInputEvent& event) override;
   bool ShouldIgnoreInputEvents() override;
   void OnIgnoredUIEvent() override;
@@ -1189,6 +1190,7 @@ class CONTENT_EXPORT WebContentsImpl
   bool OnRenderFrameProxyVisibilityChanged(
       RenderFrameProxyHost* render_frame_proxy_host,
       blink::mojom::FrameVisibility visibility) override;
+  PrerenderHostId GetPrerenderHostId() override;
   void SendScreenRects() override;
   void SendActiveState(bool active) override;
   TextInputManager* GetTextInputManager() override;
@@ -1290,7 +1292,6 @@ class CONTENT_EXPORT WebContentsImpl
 
   //  RenderWidgetHostInputEventRouter::Delegate -------------------------------
   input::TouchEmulator* GetTouchEmulator(bool create_if_necessary) override;
-  void CancelAutoscroll(input::RenderWidgetHostViewInput* view) override;
 
   // Invoked before a form repost warning is shown.
   void NotifyBeforeFormRepostWarningShow() override;
@@ -1463,7 +1464,7 @@ class CONTENT_EXPORT WebContentsImpl
   // Called when a file selection is to be done.
   void RunFileChooser(
       base::WeakPtr<FileChooserImpl> file_chooser,
-      RenderFrameHostImpl* render_frame_host,
+      RenderFrameHost* render_frame_host,
       scoped_refptr<FileChooserImpl::FileSelectListenerImpl> listener,
       const blink::mojom::FileChooserParams& params);
 
@@ -2139,6 +2140,13 @@ class CONTENT_EXPORT WebContentsImpl
   // have a distinct RenderFrameHostImpl in this result.
   std::vector<RenderFrameHostImpl*> GetOutermostMainFrames();
 
+  // Returns the main frames that should have their views updated when
+  // WebContents's view changes. This includes the primary main frame, its
+  // associated speculative render frame host, main frames of prerendering frame
+  // trees, and main frames of any bfcached pages. Used when attaching
+  // WebContents to an embedder or detaching from one.
+  std::vector<RenderFrameHostImpl*> GetOutermostMainFramesForViewChange();
+
   // Called when the base::ScopedClosureRunner returned by
   // IncrementCapturerCount() is destructed.
   void DecrementCapturerCount(bool stay_hidden,
@@ -2195,6 +2203,12 @@ class CONTENT_EXPORT WebContentsImpl
   // the given |node|.
   void RecursivelyConstructAXTree(ui::AXNode* node,
                                   std::vector<ui::AXNodeData>& nodes);
+
+  // Performs some checks before sending user interaction notification to
+  // observers for a given `WebInputEvent`.
+  void HandleUserInteractionForInputEvent(
+      RenderWidgetHostImpl* render_widget_host,
+      const blink::WebInputEvent& event);
 
 #if BUILDFLAG(IS_ANDROID)
   // Apply the cached primary subframe importance to the primary frame tree.

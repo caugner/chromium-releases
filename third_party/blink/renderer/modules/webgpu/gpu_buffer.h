@@ -18,6 +18,7 @@ namespace blink {
 class DOMArrayBuffer;
 class GPUBufferDescriptor;
 class GPUMappedDOMArrayBuffer;
+struct BoxedMappableWGPUBufferHandles;
 class ScriptState;
 class V8GPUBufferMapState;
 class WebGPUMailboxBuffer;
@@ -45,6 +46,15 @@ class GPUBuffer : public DawnObject<wgpu::Buffer> {
   void Trace(Visitor* visitor) const override;
 
   // gpu_buffer.idl {{{
+  void mapSync(ScriptState* script_state,
+               uint32_t mode,
+               uint64_t offset,
+               ExceptionState& exception_state);
+  void mapSync(ScriptState* script_state,
+               uint32_t mode,
+               uint64_t offset,
+               uint64_t size,
+               ExceptionState& exception_state);
   ScriptPromise<IDLUndefined> mapAsync(ScriptState* script_state,
                                        uint32_t mode,
                                        uint64_t offset,
@@ -75,6 +85,11 @@ class GPUBuffer : public DawnObject<wgpu::Buffer> {
   scoped_refptr<WebGPUMailboxBuffer> GetMailboxBuffer();
 
  private:
+  void MapSyncImpl(ScriptState* script_state,
+                   uint32_t mode,
+                   uint64_t offset,
+                   std::optional<uint64_t> size,
+                   ExceptionState& exception_state);
   ScriptPromise<IDLUndefined> MapAsyncImpl(ScriptState* script_state,
                                            uint32_t mode,
                                            uint64_t offset,
@@ -100,10 +115,16 @@ class GPUBuffer : public DawnObject<wgpu::Buffer> {
   }
 
   uint64_t size_;
+  std::optional<wgpu::Future> map_async_future_;
 
   // Holds onto any ArrayBuffers returned by getMappedRange, mapReadAsync, or
   // mapWriteAsync.
   HeapVector<Member<GPUMappedDOMArrayBuffer>> mapped_array_buffers_;
+
+  // Mappable buffers remove themselves from this set on destruction.
+  // It tracks the set of buffers that need to be destroyed in the
+  // GPU::ContextDestroyed notification.
+  scoped_refptr<BoxedMappableWGPUBufferHandles> mappable_buffer_handles_;
 
   // List of ranges currently returned by getMappedRange, to avoid overlaps.
   Vector<std::pair<size_t, size_t>> mapped_ranges_;

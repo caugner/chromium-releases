@@ -35,7 +35,6 @@ class PLATFORM_EXPORT SkiaImageDecoderBase : public ImageDecoder {
 
   // ImageDecoder:
   void OnSetData(scoped_refptr<SegmentReader> data) final;
-  std::optional<gfx::HDRMetadata> GetHDRMetadata() const final;
   int RepetitionCount() const final;
   bool FrameIsReceivedAtIndex(wtf_size_t) const final;
   base::TimeDelta FrameDurationAtIndex(wtf_size_t) const final;
@@ -99,13 +98,9 @@ class PLATFORM_EXPORT SkiaImageDecoderBase : public ImageDecoder {
   const wtf_size_t reading_offset_ = 0;
 
   // Number of a frame for which calling `SkCodec::incrementalDecode` is okay.
-  // Set after calling `SkCodec::startIncrementalDecode` and reset after either
-  // 1) the memory buffer of that frame was reset or 2) the frame was completely
-  // decoded (successfully, or with a non-resumable error).
+  // Set after calling `SkCodec::startIncrementalDecode` and reset after
+  // `SkCodec::incrementalDecode` succeeds or encounters a non-resumable error.
   std::optional<wtf_size_t> already_started_frame_;
-
-  // The HDR metadata that was read from the codec.
-  std::optional<gfx::HDRMetadata> hdr_metadata_;
 };
 
 }  // namespace blink

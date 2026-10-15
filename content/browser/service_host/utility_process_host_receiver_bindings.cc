@@ -40,8 +40,7 @@ void UtilityProcessHost::BindHostReceiver(
     }
   }
 #endif  // BUILDFLAG(ENABLE_GPU_CHANNEL_MEDIA_CAPTURE)
-  GetContentClient()->browser()->BindUtilityHostReceiver(
-      GetServiceName().value_or(""), std::move(receiver));
+  GetContentClient()->browser()->BindUtilityHostReceiver(std::move(receiver));
 }
 
 }  // namespace content

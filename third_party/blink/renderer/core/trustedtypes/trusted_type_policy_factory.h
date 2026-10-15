@@ -78,10 +78,6 @@ class CORE_EXPORT TrustedTypePolicyFactory final
   static bool IsEventHandlerAttributeName(const AtomicString& attributeName);
 
  private:
-  friend class CoreInitializer;
-
-  static void EagerlyInitializeOnMainThread();
-
   Member<TrustedHTML> empty_html_;
   Member<TrustedScript> empty_script_;
   HeapHashMap<String, Member<TrustedTypePolicy>> policy_map_;

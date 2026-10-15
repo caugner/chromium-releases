@@ -46,7 +46,11 @@
 #include "ui/gfx/geometry/mask_filter_info.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/rrect_f.h"
+#include "ui/gfx/geometry/size.h"
+#include "ui/gfx/geometry/size_f.h"
 #include "ui/gfx/hdr_metadata.h"
+#include "ui/gfx/overlay_transform.h"
+#include "ui/gfx/overlay_transform_utils.h"
 #include "ui/gfx/video_types.h"
 #include "ui/gl/gl_switches.h"
 
@@ -155,10 +159,11 @@ TextureDrawQuad* CreateTextureQuadAt(
   quad->SetNew(shared_quad_state, rect, /*visible_rect=*/rect,
                /*needs_blending=*/false, resource_id,
                /*top_left=*/gfx::PointF(0, 0),
-               /*bottom_right=*/gfx::PointF(1, 1),
+               /*bottom_right=*/gfx::PointF(rect.width(), rect.height()),
                /*background=*/SkColors::kBlack,
                /*nearest=*/false, /*secure_output=*/false,
-               gfx::ProtectedVideoType::kClear);
+               gfx::ProtectedVideoType::kClear,
+               /*is_tex_coords_normalized=*/false);
   return quad;
 }
 
@@ -178,10 +183,11 @@ TextureDrawQuad* CreateLowLatencyTextureQuadAt(
   quad->SetNew(shared_quad_state, rect, /*visible_rect=*/rect,
                /*needs_blending=*/false, resource_id,
                /*top_left=*/gfx::PointF(0, 0),
-               /*bottom_right=*/gfx::PointF(1, 1),
+               /*bottom_right=*/gfx::PointF(rect.width(), rect.height()),
                /*background=*/SkColors::kBlack,
                /*nearest=*/false, /*secure_output=*/false,
-               gfx::ProtectedVideoType::kClear);
+               gfx::ProtectedVideoType::kClear,
+               /*is_tex_coords_normalized=*/false);
   return quad;
 }
 
@@ -218,10 +224,13 @@ TextureDrawQuad* CreateYUVTextureQuadAt(
                        /*visible_rect=*/quad_rect,
                        /*needs_blending=*/false, resource_id,
                        /*top_left=*/gfx::PointF(0, 0),
-                       /*bottom_right=*/gfx::PointF(1, 1),
+                       /*bottom_right=*/
+                       gfx::PointF(resource_size_in_pixels.width(),
+                                   resource_size_in_pixels.height()),
                        /*background=*/SkColors::kBlack,
                        /*nearest=*/false, /*secure_output=*/false,
-                       gfx::ProtectedVideoType::kClear);
+                       gfx::ProtectedVideoType::kClear,
+                       /*is_tex_coords_normalized=*/false);
   // Content is video frame type.
   overlay_quad->is_video_frame = true;
 
@@ -256,8 +265,7 @@ AggregatedRenderPassDrawQuad* CreateRenderPassDrawQuadAt(
   AggregatedRenderPassDrawQuad* quad =
       render_pass->CreateAndAppendDrawQuad<AggregatedRenderPassDrawQuad>();
   quad->SetNew(shared_quad_state, rect, rect, render_pass_id, ResourceId(2),
-               gfx::RectF(), gfx::Size(), gfx::Vector2dF(1, 1), gfx::PointF(),
-               gfx::RectF(), false, 1.f);
+               gfx::RectF(), gfx::Size(), gfx::RectF(), false);
   return quad;
 }
 
@@ -2592,7 +2600,6 @@ class OverlayProcessorWinTest : public OverlayProcessorTestBase {
         /*allowed_yuv_overlay_count=*/1,
         /*disable_video_overlay_if_moving=*/false);
     overlay_processor_->SetUsingDCLayersForTesting(kDefaultRootPassId, true);
-    overlay_processor_->SetViewportSize(gfx::Size(256, 256));
 
     EXPECT_TRUE(overlay_processor_->IsOverlaySupported());
 
@@ -2712,11 +2719,8 @@ class OverlayProcessorWinSurfacePlaneTest
             /*mask_resource_id=*/kInvalidResourceId,
             /*mask_uv_rect=*/gfx::RectF(),
             /*mask_texture_size=*/gfx::Size(),
-            /*filters_scale=*/gfx::Vector2dF(1.0f, 1.0f),
-            /*filters_origin=*/gfx::PointF(),
             /*tex_coord_rect=*/gfx::RectF(pass_list_->back()->output_rect),
-            /*force_anti_aliasing_off=*/false,
-            /*backdrop_filter_quality=*/1.0f);
+            /*force_anti_aliasing_off=*/false);
 
         // Pretend that our old root pass is actually the root pass of a
         // surface.
@@ -3599,6 +3603,118 @@ TEST_F(OverlayProcessorWinFullScreenTest, VideoIsLetterboxedDueToClipping) {
               }));
 }
 
+// This tests the case where:
+//
+// - A video is full screen
+// - The video has the same aspect ratio of the screen
+// - The monitor the video is on has a non-integer device scale factor. This
+//   test simulates a 2400x1600 monitor at 1.5x scaling.
+//
+// In this case, we want the video to be "snapped" to the monitor size, instead
+// of the video quad size that is slightly larger due to rounding up when
+// calculating the root rame size in the browser.
+TEST_F(OverlayProcessorWinFullScreenTest,
+       FullScreenVideoSlightlyLargerThanScreen) {
+  AggregatedRenderPassList pass_list;
+  auto pass = CreateRenderPass();
+  pass->output_rect = gfx::Rect(2400, 1600);
+
+  const gfx::Rect slightly_larger_than_pass = gfx::Rect(2400, 1601);
+
+  auto* sqs = CreateSharedQuadStateWithLayerNamespaceId(pass.get());
+  sqs->clip_rect = slightly_larger_than_pass;
+  CreateYUVTextureQuadAt(resource_provider_.get(),
+                         child_resource_provider_.get(), child_provider_.get(),
+                         sqs, pass.get(), slightly_larger_than_pass);
+  CreateSolidColorQuadAt(CreateSharedQuadStateWithLayerNamespaceId(pass.get()),
+                         SkColors::kBlack, pass.get(), pass->output_rect);
+  pass_list.push_back(std::move(pass));
+
+  auto result = TryProcessForDelegatedOverlays(pass_list);
+  result.ExpectDelegationSuccess();
+
+  EXPECT_THAT(
+      result.candidates(),
+      CandidatesAreSortedAndElementsAre({
+          testing::AllOf(test::OverlayIsFullScreen(),
+                         test::OverlayTargetRectIs(gfx::RectF(2400, 1600))),
+      }));
+}
+
+MATCHER(TransformHasRotationOrFlip, "") {
+  return !arg.IsPositiveScaleOrTranslation();
+}
+
+// Test full screen optimization behavior in the presence of a rotated/flipped
+// video, e.g. added by the video metadata.
+TEST_F(OverlayProcessorWinFullScreenTest, LetterboxVideoHasRotation) {
+  const gfx::Rect video_rect = gfx::Rect(0, 96, 256, 64);
+
+  const auto ProcessFrameWithVideoRotation =
+      [&](gfx::OverlayTransform video_rotation) {
+        AggregatedRenderPassList pass_list;
+        auto pass = CreateRenderPass();
+        pass->output_rect = gfx::Rect(256, 256);
+
+        // We want the result of the transform to be `video_rect`, so we need to
+        // pre-rotate the size of our imagined video. We also imagine the video
+        // to be smaller than the target so we ensure the full screen code
+        // handles scaled videos as well.
+        const float video_to_target_scale = 2;
+        const gfx::Size pre_rotated_video_size = gfx::ScaleToRoundedSize(
+            gfx::OverlayTransformToTransform(video_rotation, gfx::SizeF())
+                .MapRect(video_rect)
+                .size(),
+            1 / video_to_target_scale);
+
+        auto* sqs = CreateSharedQuadStateWithLayerNamespaceId(pass.get());
+        // Offset added by e.g. the embedder of a video.
+        sqs->quad_to_target_transform.Translate(video_rect.OffsetFromOrigin());
+        sqs->quad_to_target_transform.Scale(video_to_target_scale);
+        // Rotation added by e.g. the encoding in a video.
+        sqs->quad_to_target_transform.PreConcat(
+            gfx::OverlayTransformToTransform(
+                video_rotation, gfx::SizeF(pre_rotated_video_size)));
+
+        CreateYUVTextureQuadAt(resource_provider_.get(),
+                               child_resource_provider_.get(),
+                               child_provider_.get(), sqs, pass.get(),
+                               gfx::Rect(pre_rotated_video_size));
+        CreateSolidColorQuadAt(
+            CreateSharedQuadStateWithLayerNamespaceId(pass.get()),
+            SkColors::kBlack, pass.get(), pass->output_rect);
+        pass_list.push_back(std::move(pass));
+
+        auto result = TryProcessForDelegatedOverlays(pass_list);
+        result.ExpectDelegationSuccess();
+
+        return result;
+      };
+
+  {
+    // Test that this setup succeeds when there is no buffer rotation.
+    auto result = ProcessFrameWithVideoRotation(gfx::OVERLAY_TRANSFORM_NONE);
+    EXPECT_THAT(result.candidates(), CandidatesAreSortedAndElementsAre(
+                                         {test::OverlayIsFullScreen()}));
+  }
+
+  {
+    auto result = ProcessFrameWithVideoRotation(
+        gfx::OVERLAY_TRANSFORM_ROTATE_CLOCKWISE_90);
+    EXPECT_THAT(
+        result.candidates(),
+        CandidatesAreSortedAndElementsAre({
+            test::IsSolidColorOverlay(SkColors::kBlack),
+            testing::AllOf(
+                testing::Not(test::OverlayIsFullScreen()),
+                test::OverlayTargetRectIs(gfx::RectF(video_rect)),
+                testing::Field("transform", &OverlayCandidate::transform,
+                               testing::VariantWith<gfx::Transform>(
+                                   TransformHasRotationOrFlip()))),
+        }));
+  }
+}
+
 class OverlayProcessorWinFullScreenWithAdjustmentTest
     : public OverlayProcessorWinDelegatedCompositingTest {
  public:
@@ -3651,7 +3767,7 @@ TEST_F(OverlayProcessorWinFullScreenWithAdjustmentTest, AdjustToLetterbox) {
   CreateYUVTextureQuadAt(resource_provider_.get(),
                          child_resource_provider_.get(), child_provider_.get(),
                          CreateSharedQuadStateWithLayerNamespaceId(pass.get()),
-                         pass.get(), gfx::Rect(0, 90, 255, 64));
+                         pass.get(), gfx::Rect(0, 90, 256, 64));
 
   CreateSolidColorQuadAt(CreateSharedQuadStateWithLayerNamespaceId(pass.get()),
                          SkColors::kBlack, pass.get(), pass->output_rect);
@@ -3664,7 +3780,7 @@ TEST_F(OverlayProcessorWinFullScreenWithAdjustmentTest, AdjustToLetterbox) {
       result.candidates(),
       CandidatesAreSortedAndElementsAre({
           testing::AllOf(test::OverlayIsFullScreen(),
-                         test::OverlayTargetRectIs(gfx::RectF(0, 96, 255, 64))),
+                         test::OverlayTargetRectIs(gfx::RectF(0, 96, 256, 64))),
       }));
 }
 

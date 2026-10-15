@@ -729,7 +729,6 @@ bool ResourceBundle::HasDataResource(int resource_id) const {
   if (delegate_ && delegate_->HasDataResource(resource_id)) {
     return true;
   }
-  base::AutoLock lock_scope(*resource_handles_lock_);
   for (const auto& resource_handle : resource_handles_) {
     if (resource_handle->HasResource(static_cast<uint16_t>(resource_id))) {
       return true;
@@ -792,8 +791,6 @@ std::string_view ResourceBundle::GetRawDataResourceForScale(
       return data;
     }
   }
-
-  base::AutoLock lock_scope(*resource_handles_lock_);
 
   if (scale_factor != ui::k100Percent) {
     for (const auto& resource_handle : resource_handles_) {
@@ -1016,7 +1013,6 @@ void ResourceBundle::CheckCanOverrideStringResources() {
 ResourceBundle::ResourceBundle(Delegate* delegate)
     : delegate_(delegate),
       locale_resources_data_lock_(new base::Lock),
-      resource_handles_lock_(new base::Lock),
       max_scale_factor_(k100Percent) {
   mangle_localized_strings_ = base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kMangleLocalizedStrings);
@@ -1108,7 +1104,6 @@ void ResourceBundle::AddDataPackFromPathInternal(
 
 void ResourceBundle::AddResourceHandle(
     std::unique_ptr<ResourceHandle> resource_handle) {
-  base::AutoLock lock_scope(*resource_handles_lock_);
 #if DCHECK_IS_ON()
   resource_handle->CheckForDuplicateResources(resource_handles_);
 #endif
@@ -1142,13 +1137,7 @@ void ResourceBundle::InitDefaultFontList() {
 }
 
 gfx::ImageSkia ResourceBundle::CreateImageSkia(int resource_id) {
-#if DCHECK_IS_ON()
-  {
-    base::AutoLock lock_scope(*resource_handles_lock_);
-    DCHECK(!resource_handles_.empty())
-        << "Missing call to SetResourcesDataDLL?";
-  }
-#endif
+  DCHECK(!resource_handles_.empty()) << "Missing call to SetResourcesDataDLL?";
 
   std::optional<LottieData> data = GetLottieData(resource_id);
   if (data) {
@@ -1207,7 +1196,6 @@ bool ResourceBundle::LoadBitmap(int resource_id,
                                 SkBitmap* bitmap,
                                 bool* fell_back_to_1x) const {
   DCHECK(fell_back_to_1x);
-  base::AutoLock lock_scope(*resource_handles_lock_);
   for (const auto& pack : resource_handles_) {
     if (pack->GetResourceScaleFactor() == ui::kScaleFactorNone &&
         LoadBitmap(*pack, resource_id, bitmap, fell_back_to_1x)) {

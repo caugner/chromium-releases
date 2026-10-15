@@ -18,7 +18,6 @@
 #include "base/notreached.h"
 #include "base/thread_annotations.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
-#include "third_party/blink/renderer/platform/heap/cross_thread_handle.h"
 
 namespace blink {
 
@@ -30,25 +29,24 @@ class BarrierCallbackInfo {
   BarrierCallbackInfo(wtf_size_t num_callbacks,
                       base::OnceCallback<void(DoneArg)> done_callback)
       : num_callbacks_left_(num_callbacks),
-        results_(MakeCrossThreadHandle(
-            MakeGarbageCollected<GCedHeapVector<Member<T>>>())),
+        results_(MakeGarbageCollected<GCedHeapVector<Member<T>>>()),
         done_callback_(std::move(done_callback)) {
-    results_.GetOnCreationThread()->reserve(num_callbacks);
+    results_->reserve(num_callbacks);
   }
 
   void Run(T* t) {
     DCHECK_NE(num_callbacks_left_, 0U);
-    results_.GetOnCreationThread()->push_back(std::move(t));
+    results_->push_back(std::move(t));
     --num_callbacks_left_;
 
     if (num_callbacks_left_ == 0) {
-      std::move(done_callback_).Run(*results_.GetOnCreationThread());
+      std::move(done_callback_).Run(*results_.Get());
     }
   }
 
  private:
   wtf_size_t num_callbacks_left_;
-  UnwrappingCrossThreadHandle<GCedHeapVector<Member<T>>> results_;
+  Persistent<GCedHeapVector<Member<T>>> results_;
   base::OnceCallback<void(DoneArg)> done_callback_;
 };
 

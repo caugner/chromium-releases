@@ -19,10 +19,12 @@
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/omnibox/browser/aim_eligibility_service_features.h"
 #include "components/prefs/pref_change_registrar.h"
+#include "components/search_engines/template_url_service_observer.h"
 #include "components/signin/public/identity_manager/accounts_in_cookie_jar_info.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "net/base/network_change_notifier.h"
+#include "third_party/omnibox_proto/aim_eligibility_client_request.pb.h"
 #include "third_party/omnibox_proto/aim_eligibility_response.pb.h"
 
 class PrefRegistrySimple;
@@ -42,7 +44,8 @@ class SharedURLLoaderFactory;
 class AimEligibilityService
     : public KeyedService,
       public net::NetworkChangeNotifier::NetworkChangeObserver,
-      public signin::IdentityManager::Observer {
+      public signin::IdentityManager::Observer,
+      public TemplateURLServiceObserver {
  public:
   // Helper that individual AIM features can use to check if they should be
   // enabled. Unlike most chrome features, which simply check if the
@@ -80,12 +83,24 @@ class AimEligibilityService
   static std::string EligibilityResponseSourceToString(
       EligibilityResponseSource source);
 
+  // Enum describing the eligibility request mode.
+  enum class ServerEligibilityRequestMode {
+    kLegacyGet = 0,
+    kGetWithLocale = 1,
+    kPostWithProto = 2,
+  };
+
+  // Returns the current server eligibility request mode based on the feature
+  // flag configuration.
+  static ServerEligibilityRequestMode GetServerEligibilityRequestMode();
+
   AimEligibilityService(
       PrefService& pref_service,
       TemplateURLService* template_url_service,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       signin::IdentityManager* identity_manager,
-      bool is_off_the_record);
+      bool is_off_the_record,
+      const std::string& locale);
   ~AimEligibilityService() override;
 
   // Checks if the application country matches the given country.
@@ -128,11 +143,18 @@ class AimEligibilityService
   // Checks if user is eligible for Canvas in AIM features.
   virtual bool IsCanvasEligible() const;
 
+  // Determining whether the provided URL is an AI page based on server-provided
+  // params.
+  virtual bool HasAimUrlParams(const GURL& url) const;
+
   // Returns the most recent eligibility response proto.
-  const omnibox::AimEligibilityResponse& GetMostRecentResponse() const;
+  virtual const omnibox::AimEligibilityResponse& GetMostRecentResponse() const;
 
   // Returns the source of the most recent eligibility response.
   EligibilityResponseSource GetMostRecentResponseSource() const;
+
+  // Returns the `SearchboxConfig` from the AIMEligibilityResponse.
+  const omnibox::SearchboxConfig* GetSearchboxConfig() const;
 
   // NOTE: Following methods are intended for chrome://aim-eligibility-internals
   // for debugging purposes only:
@@ -196,6 +218,16 @@ class AimEligibilityService
   void OnNetworkChanged(
       net::NetworkChangeNotifier::ConnectionType type) override;
 
+  // TemplateURLServiceObserver:
+  void OnTemplateURLServiceChanged() override;
+  void OnTemplateURLServiceShuttingDown() override;
+
+  // Callback for when the DSE changes.
+  void OnDseChanged();
+
+  // Callback for when the AIM policy changes.
+  void OnPolicyChanged();
+
   // Callback for when the eligibility response changes. Notifies observers.
   void OnEligibilityResponseChanged();
 
@@ -203,6 +235,7 @@ class AimEligibilityService
   void UpdateMostRecentResponse(
       const omnibox::AimEligibilityResponse& response_proto,
       EligibilityResponseSource response_source);
+
   // Loads `most_recent_response_` from the prefs, if valid.
   void LoadMostRecentResponse();
 
@@ -210,10 +243,12 @@ class AimEligibilityService
   // e.g., Google is not the default search provider.
   GURL GetRequestUrl(RequestSource request_source,
                      const TemplateURLService* template_url_service,
-                     signin::IdentityManager* identity_manager);
+                     signin::IdentityManager* identity_manager,
+                     const std::string& locale);
 
   // Fetch eligibility from the server.
-  void StartServerEligibilityRequest(RequestSource request_source);
+  void StartServerEligibilityRequest(RequestSource request_source,
+                                     const std::string& locale);
   void OnServerEligibilityResponse(
       std::unique_ptr<network::SimpleURLLoader> loader,
       RequestSource request_source,
@@ -258,11 +293,12 @@ class AimEligibilityService
 
   const raw_ref<PrefService, DanglingUntriaged> pref_service_;
   // Outlives `this` due to BCKSF dependency. Can be nullptr in tests.
-  const raw_ptr<TemplateURLService, DanglingUntriaged> template_url_service_;
+  raw_ptr<TemplateURLService> template_url_service_;
   const scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
   // Outlives `this` due to BCKSF dependency. Can be nullptr in tests.
   const raw_ptr<signin::IdentityManager, DanglingUntriaged> identity_manager_;
   const bool is_off_the_record_;
+  bool is_dse_google_ = false;
 
   PrefChangeRegistrar pref_change_registrar_;
   base::CallbackListSubscription template_url_service_subscription_;
@@ -279,6 +315,9 @@ class AimEligibilityService
 
   // Tracks whether the startup request has been sent.
   bool startup_request_sent_ = false;
+
+  // Used to store the default config when the response doesn't have one.
+  mutable omnibox::SearchboxConfig fallback_config_;
 
   // For binding the `OnServerEligibilityResponse()` callback.
   base::WeakPtrFactory<AimEligibilityService> weak_factory_{this};

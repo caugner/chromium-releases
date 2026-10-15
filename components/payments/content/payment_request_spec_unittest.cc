@@ -10,7 +10,6 @@
 #include "base/memory/weak_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
-#include "components/payments/content/initialization_task.h"
 #include "components/strings/grit/components_strings.h"
 #include "content/public/common/content_features.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -48,7 +47,6 @@ class PaymentRequestSpecTest : public testing::Test,
   }
 
   PaymentRequestSpec* spec() { return spec_.get(); }
-  void ResetSpec() { spec_.reset(); }
 
  private:
   std::unique_ptr<PaymentRequestSpec> spec_;
@@ -314,29 +312,4 @@ TEST_F(PaymentRequestSpecTest, RetryWithPayerErrors) {
 
   EXPECT_TRUE(spec()->has_payer_error());
 }
-
-class PaymentRequestSpecSynchronousDestructionTest
-    : public PaymentRequestSpecTest,
-      public InitializationTask::Observer {
- public:
-  // InitializationTask::Observer:
-  void OnInitialized(InitializationTask* initialization_task) override {
-    ResetSpec();
-  }
-};
-
-TEST_F(PaymentRequestSpecSynchronousDestructionTest, RecomputeSpecForDetails) {
-  RecreateSpecWithOptionsAndDetails(mojom::PaymentOptions::New(),
-                                    mojom::PaymentDetails::New());
-
-  spec()->AddInitializationObserver(this);
-  spec()->StartWaitingForUpdateWith(
-      PaymentRequestSpec::UpdateReason::INITIAL_PAYMENT_DETAILS);
-  spec()->RecomputeSpecForDetails();
-
-  // RecomputeSpecForDetails will have synchronously torn down the spec object,
-  // but should not cause a UAF.
-  EXPECT_FALSE(spec());
-}
-
 }  // namespace payments

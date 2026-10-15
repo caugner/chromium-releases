@@ -27,7 +27,6 @@
 #include "ui/compositor/layer_animation_sequence.h"
 #include "ui/compositor/layer_animator_collection.h"
 #include "ui/compositor/layer_owner.h"
-#include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/compositor/test/layer_animator_test_controller.h"
 #include "ui/compositor/test/test_compositor_host.h"
@@ -37,6 +36,7 @@
 #include "ui/compositor/test/test_utils.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/transform.h"
+#include "ui/gfx/scoped_animation_duration_scale_mode.h"
 
 namespace ui {
 
@@ -2585,8 +2585,8 @@ TEST(LayerAnimatorTest, ObserverDetachedBeforeAnimationFinished) {
 // causes the second to be deleted, we should not attempt to animate the second
 // animation.
 TEST(LayerAnimatorTest, ObserverDeletesAnimationsOnEnd) {
-  ScopedAnimationDurationScaleMode normal_duration_mode(
-      ScopedAnimationDurationScaleMode::NORMAL_DURATION);
+  gfx::ScopedAnimationDurationScaleMode normal_duration_mode(
+      gfx::ScopedAnimationDurationScaleMode::NORMAL_DURATION);
   scoped_refptr<LayerAnimator> animator(new TestLayerAnimator());
   animator->set_disable_timer_for_test(true);
   TestLayerAnimationDelegate delegate;
@@ -2657,8 +2657,8 @@ TEST(LayerAnimatorTest, CallbackDeletesAnimationInProgress) {
     // Allow copy and assign.
   };
 
-  ScopedAnimationDurationScaleMode normal_duration_mode(
-      ScopedAnimationDurationScaleMode::NORMAL_DURATION);
+  gfx::ScopedAnimationDurationScaleMode normal_duration_mode(
+      gfx::ScopedAnimationDurationScaleMode::NORMAL_DURATION);
   scoped_refptr<LayerAnimator> animator(new TestLayerAnimator());
   animator->set_disable_timer_for_test(true);
   TestLayerAnimationDeletingDelegate delegate(animator.get(), 30);
@@ -2699,8 +2699,8 @@ TEST(LayerAnimatorTest, CallbackDeletesAnimationInProgress) {
 // tests the behavior when the OnLayerAnimationAborted() callback causes
 // all of the animator's other animations to be deleted.
 TEST(LayerAnimatorTest, ObserverDeletesAnimationsOnAbort) {
-  ScopedAnimationDurationScaleMode test_duration_mode(
-      ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
+  gfx::ScopedAnimationDurationScaleMode test_duration_mode(
+      gfx::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
   scoped_refptr<LayerAnimator> animator(new TestLayerAnimator());
   animator->set_disable_timer_for_test(true);
   TestLayerAnimationDelegate delegate;
@@ -3822,57 +3822,6 @@ TEST(LayerAnimatorObserverNotificationOrderTest,
 
     animator->RemoveObserver(&observer);
   }
-}
-
-// Regression test for heap-use-after-free in LayerAnimationSequence::Progress.
-class PreemptingDelegate : public TestLayerAnimationDelegate {
- public:
-  PreemptingDelegate() = default;
-  ~PreemptingDelegate() override = default;
-
-  void set_animator(LayerAnimator* animator) { animator_ = animator; }
-  void Arm() { armed_ = true; }
-
-  void SetBrightnessFromAnimation(float brightness,
-                                  PropertyChangeReason reason) override {
-    TestLayerAnimationDelegate::SetBrightnessFromAnimation(brightness, reason);
-    // Re-enter the animator to stop the sequence and trigger deletion.
-    if (!armed_ || reentered_ ||
-        reason != PropertyChangeReason::FROM_ANIMATION) {
-      return;
-    }
-    reentered_ = true;
-    animator_->StopAnimatingProperty(LayerAnimationElement::BRIGHTNESS);
-  }
-
- private:
-  raw_ptr<LayerAnimator> animator_ = nullptr;
-  bool armed_ = false;
-  bool reentered_ = false;
-};
-
-TEST(LayerAnimatorTest, ProgressToEndInWhileLoopFreesSequenceUAF) {
-  scoped_refptr<LayerAnimator> animator = CreateDefaultTestAnimator(nullptr);
-  PreemptingDelegate delegate;
-  animator->SetDelegate(&delegate);
-  delegate.set_animator(animator.get());
-
-  // Create a two-element sequence where the first element is finished on
-  // Step().
-  LayerAnimationSequence* seq = new LayerAnimationSequence();
-  seq->AddElement(LayerAnimationElement::CreateBrightnessElement(
-      0.5f, base::Milliseconds(10)));
-  seq->AddElement(LayerAnimationElement::CreateBrightnessElement(
-      1.0f, base::Milliseconds(1000)));
-
-  animator->StartAnimation(seq);
-  ASSERT_TRUE(animator->is_animating());
-
-  base::TimeTicks start_time = animator->last_step_time();
-  delegate.Arm();
-
-  // Step far enough to finish the first element and trigger the UAF path.
-  animator->Step(start_time + base::Milliseconds(50));
 }
 
 }  // namespace ui

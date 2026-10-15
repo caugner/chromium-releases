@@ -56,7 +56,7 @@ BASE_FEATURE_PARAM(bool,
                    kGlicConfirmNavigationToNewOrigins,
                    &kGlicCrossOriginNavigationGating,
                    "confirm_navigation_to_new_origins",
-                   false);
+                   true);
 BASE_FEATURE_PARAM(bool,
                    kGlicPromptUserForNavigationToNewOrigins,
                    &kGlicCrossOriginNavigationGating,
@@ -102,6 +102,8 @@ BASE_FEATURE(kGlicNavigateWithoutUserGesture, base::FEATURE_ENABLED_BY_DEFAULT);
 // performAction return first when a task is stopped or paused.
 BASE_FEATURE(kGlicPerformActionsReturnsBeforeStateChange,
              base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kGlicEarlyAddTaskTabs, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kGlicSkipBeforeUnloadDialogAndNavigate,
              base::FEATURE_DISABLED_BY_DEFAULT);

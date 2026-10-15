@@ -8,7 +8,6 @@
 
 #include "base/bits.h"
 #include "base/compiler_specific.h"
-#include "base/containers/contains.h"
 #include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_macros.h"
@@ -393,7 +392,7 @@ error::Error GLES2DecoderPassthroughImpl::DoBindBuffer(GLenum target,
     return error::kNoError;
   }
 
-  DCHECK(base::Contains(bound_buffers_, target));
+  DCHECK(bound_buffers_.contains(target));
   bound_buffers_[target] = buffer;
   if (target == GL_ELEMENT_ARRAY_BUFFER) {
     bound_element_array_buffer_dirty_ = false;
@@ -412,7 +411,7 @@ error::Error GLES2DecoderPassthroughImpl::DoBindBufferBase(GLenum target,
     return error::kNoError;
   }
 
-  DCHECK(base::Contains(bound_buffers_, target));
+  DCHECK(bound_buffers_.contains(target));
   bound_buffers_[target] = buffer;
   if (target == GL_ELEMENT_ARRAY_BUFFER) {
     bound_element_array_buffer_dirty_ = false;
@@ -434,7 +433,7 @@ error::Error GLES2DecoderPassthroughImpl::DoBindBufferRange(GLenum target,
     return error::kNoError;
   }
 
-  DCHECK(base::Contains(bound_buffers_, target));
+  DCHECK(bound_buffers_.contains(target));
   bound_buffers_[target] = buffer;
   if (target == GL_ELEMENT_ARRAY_BUFFER) {
     bound_element_array_buffer_dirty_ = false;
@@ -629,10 +628,6 @@ error::Error GLES2DecoderPassthroughImpl::DoBufferData(GLenum target,
   CheckErrorCallbackState();
   api()->glBufferDataFn(target, size, data, usage);
   if (CheckErrorCallbackState()) {
-    // Calling buffer data on a mapped buffer will implicitly unmap it
-    // (https://registry.khronos.org/OpenGL-Refpages/es3.1/html/glMapBufferRange.xhtml)
-    // Even if it returns an error.
-    resources_->mapped_buffer_map.erase(bound_buffers_[target]);
     return error::kNoError;
   }
 
@@ -3884,7 +3879,7 @@ error::Error GLES2DecoderPassthroughImpl::DoBeginQueryEXT(
     linking_program_service_id_ = 0u;
   }
   if (IsEmulatedQueryTarget(target)) {
-    if (base::Contains(active_queries_, target)) {
+    if (active_queries_.contains(target)) {
       InsertError(GL_INVALID_OPERATION, "Query already active on target.");
       return error::kNoError;
     }
@@ -3976,7 +3971,7 @@ error::Error GLES2DecoderPassthroughImpl::DoEndQueryEXT(GLenum target,
     }
   }
 
-  CHECK(base::Contains(active_queries_, target));
+  CHECK(active_queries_.contains(target));
   ActiveQuery active_query = std::move(active_queries_[target]);
   active_queries_.erase(target);
 
@@ -4072,12 +4067,10 @@ error::Error GLES2DecoderPassthroughImpl::DoGenVertexArraysOES(
 error::Error GLES2DecoderPassthroughImpl::DoDeleteVertexArraysOES(
     GLsizei n,
     const volatile GLuint* arrays) {
-  error::Error err = DeleteHelper(n, arrays, &vertex_array_id_map_,
-                                  [this](GLsizei n, GLuint* arrays) {
-                                    api()->glDeleteVertexArraysOESFn(n, arrays);
-                                  });
-  bound_element_array_buffer_dirty_ = true;
-  return err;
+  return DeleteHelper(n, arrays, &vertex_array_id_map_,
+                      [this](GLsizei n, GLuint* arrays) {
+                        api()->glDeleteVertexArraysOESFn(n, arrays);
+                      });
 }
 
 error::Error GLES2DecoderPassthroughImpl::DoIsVertexArrayOES(GLuint array,

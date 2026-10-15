@@ -21,9 +21,7 @@ namespace onc {
 
 // Translates a hierarchical ONC dictionary |onc_object| to a flat Shill
 // dictionary. The |signature| declares the type of |onc_object| and must point
-// to one of the signature objects in "onc_signature.h". |onc_source| describes
-// where |onc_object| originates from and is used to gate translation of fields
-// that are restricted to policy-provided configurations. The resulting Shill
+// to one of the signature objects in "onc_signature.h". The resulting Shill
 // dictionary is returned.
 //
 // This function is used to translate network settings from ONC to Shill's
@@ -31,8 +29,7 @@ namespace onc {
 COMPONENT_EXPORT(CHROMEOS_NETWORK)
 base::Value::Dict TranslateONCObjectToShill(
     const chromeos::onc::OncValueSignature* signature,
-    const base::Value::Dict& onc_object,
-    ::onc::ONCSource onc_source);
+    const base::Value::Dict& onc_object);
 
 // Translates a |shill_dictionary| to an ONC object according to the given
 // |onc_signature|. |onc_signature| must point to a signature object in

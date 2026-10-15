@@ -12,24 +12,23 @@
 #include <stddef.h>
 
 #include "base/compiler_specific.h"
-#include "base/containers/span.h"
 #include "base/logging.h"
 
 namespace {
 
 // Returns the RMS (quadratic mean) of the input signal.
-float RMS(base::span<const int16_t> samples) {
+float RMS(const int16_t* samples, int num_samples) {
   int64_t ssq_int64 = 0;
   int64_t sum_int64 = 0;
-  for (int16_t sample : samples) {
-    sum_int64 += sample;
-    ssq_int64 += static_cast<int64_t>(sample) * sample;
+  for (int i = 0; i < num_samples; ++i) {
+    sum_int64 += UNSAFE_TODO(samples[i]);
+    ssq_int64 += UNSAFE_TODO(samples[i]) * UNSAFE_TODO(samples[i]);
   }
   // now convert to floats.
   double sum = static_cast<double>(sum_int64);
-  sum /= samples.size();
+  sum /= num_samples;
   double ssq = static_cast<double>(ssq_int64);
-  return static_cast<float>(sqrt((ssq / samples.size()) - (sum * sum)));
+  return static_cast<float>(sqrt((ssq / num_samples) - (sum * sum)));
 }
 
 int64_t Secs2Usecs(float seconds) {
@@ -243,10 +242,11 @@ void EnergyEndpointer::SetUserInputMode() {
 }
 
 void EnergyEndpointer::ProcessAudioFrame(int64_t time_us,
-                                         base::span<const int16_t> samples,
+                                         const int16_t* samples,
+                                         int num_samples,
                                          float* rms_out) {
   endpointer_time_us_ = time_us;
-  float rms = RMS(samples);
+  float rms = RMS(samples, num_samples);
 
   // Check that this is user input audio vs. pre-input adaptation audio.
   // Input audio starts when the user indicates start of input, by e.g.

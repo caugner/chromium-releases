@@ -12,7 +12,6 @@
 #include "base/files/file.h"
 #include "base/functional/bind.h"
 #include "base/memory/ptr_util.h"
-#include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/stl_util.h"
@@ -251,8 +250,8 @@ class MHTMLGenerationManager::Job {
   // choices.
   MHTMLGenerationParams params_;
 
-  // The documents that still need to be processed.
-  base::queue<base::WeakPtr<RenderFrameHostImpl>> pending_render_frame_hosts_;
+  // The IDs of frames that still need to be processed.
+  base::queue<FrameTreeNodeId> pending_frame_tree_node_ids_;
 
   // Identifies a frame to which we've sent through
   // MhtmlFileWriter::SerializeAsMHTML but for which we didn't yet process
@@ -331,12 +330,13 @@ void MHTMLGenerationManager::Job::initializeJob(WebContents* web_contents) {
       // Skip inner tree placeholder nodes.
       continue;
     }
-    pending_render_frame_hosts_.push(node->current_frame_host()->GetWeakPtr());
+    pending_frame_tree_node_ids_.push(node->frame_tree_node_id());
   }
 
   // Main frame needs to be processed first.
-  CHECK(!pending_render_frame_hosts_.empty());
-  CHECK(pending_render_frame_hosts_.front().get()->is_main_frame());
+  DCHECK(!pending_frame_tree_node_ids_.empty());
+  DCHECK(FrameTreeNode::GloballyFindByID(pending_frame_tree_node_ids_.front())
+             ->parent() == nullptr);
 
   // Save off any extra data.
   auto* extra_parts = static_cast<MHTMLExtraPartsImpl*>(
@@ -367,14 +367,16 @@ MHTMLGenerationManager::Job::CreateMojoParams() {
 }
 
 mojom::MhtmlSaveStatus MHTMLGenerationManager::Job::SendToNextRenderFrame() {
-  CHECK(browser_file_.IsValid());
-  CHECK(!pending_render_frame_hosts_.empty());
+  DCHECK(browser_file_.IsValid());
+  DCHECK(!pending_frame_tree_node_ids_.empty());
 
-  RenderFrameHostImpl* rfh = pending_render_frame_hosts_.front().get();
-  pending_render_frame_hosts_.pop();
-  if (!rfh) {  // The contents went away.
+  FrameTreeNodeId frame_tree_node_id = pending_frame_tree_node_ids_.front();
+  pending_frame_tree_node_ids_.pop();
+
+  FrameTreeNode* ftn = FrameTreeNode::GloballyFindByID(frame_tree_node_id);
+  if (!ftn)  // The contents went away.
     return mojom::MhtmlSaveStatus::kFrameNoLongerExists;
-  }
+  RenderFrameHost* rfh = ftn->current_frame_host();
 
   if (writer_) {
     // If we reached here, means the work for previous frame is done, so it is
@@ -399,8 +401,7 @@ mojom::MhtmlSaveStatus MHTMLGenerationManager::Job::SendToNextRenderFrame() {
 
   // Send a Mojo request to Renderer to serialize its frame.
   DCHECK(frame_tree_node_id_of_busy_frame_.is_null());
-  frame_tree_node_id_of_busy_frame_ =
-      rfh->frame_tree_node()->frame_tree_node_id();
+  frame_tree_node_id_of_busy_frame_ = frame_tree_node_id;
 
   auto response_callback = base::BindOnce(&Job::SerializeAsMHTMLResponse,
                                           weak_factory_.GetWeakPtr());
@@ -539,7 +540,7 @@ void MHTMLGenerationManager::Job::MaybeSendToNextRenderFrame(
   // If current operation is successful and there are more frames to process,
   // let save status depend on the result of sending the next request.
   if (save_status == mojom::MhtmlSaveStatus::kSuccess &&
-      !pending_render_frame_hosts_.empty() && CurrentFrameDone()) {
+      !pending_frame_tree_node_ids_.empty() && CurrentFrameDone()) {
     save_status = SendToNextRenderFrame();
   }
 
@@ -552,9 +553,8 @@ void MHTMLGenerationManager::Job::MaybeSendToNextRenderFrame(
 
   // Otherwise report completion if there are no more frames to process
   // and Job is done processing the current frame.
-  if (pending_render_frame_hosts_.empty() && CurrentFrameDone()) {
+  if (pending_frame_tree_node_ids_.empty() && CurrentFrameDone())
     Finalize(mojom::MhtmlSaveStatus::kSuccess);
-  }
 }
 
 bool MHTMLGenerationManager::Job::CurrentFrameDone() const {

@@ -46,7 +46,7 @@ class TestWebUIDataSourceImpl : public TestWebUIDataSource {
   }
 
   const ui::TemplateReplacements* GetReplacements() override {
-    return source_->GetReplacements();
+    return source_->source()->GetReplacements();
   }
 
   int URLToIdrOrDefault(const GURL& url) override {

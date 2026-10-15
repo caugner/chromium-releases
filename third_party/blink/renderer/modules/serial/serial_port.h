@@ -12,7 +12,6 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
-#include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
@@ -39,10 +38,9 @@ class SerialPortUnderlyingSink;
 class SerialPortUnderlyingSource;
 class WritableStream;
 
-class MODULES_EXPORT SerialPort final
-    : public EventTarget,
-      public ActiveScriptWrappable<SerialPort>,
-      public device::mojom::blink::SerialPortClient {
+class SerialPort final : public EventTarget,
+                         public ActiveScriptWrappable<SerialPort>,
+                         public device::mojom::blink::SerialPortClient {
   DEFINE_WRAPPERTYPEINFO();
 
  public:

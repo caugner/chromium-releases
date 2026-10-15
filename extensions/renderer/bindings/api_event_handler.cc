@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "base/check.h"
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
@@ -20,7 +19,6 @@
 #include "base/values.h"
 #include "content/public/renderer/v8_value_converter.h"
 #include "extensions/common/mojom/event_dispatcher.mojom.h"
-#include "extensions/renderer/bindings/api_binding_util.h"
 #include "extensions/renderer/bindings/api_response_validator.h"
 #include "extensions/renderer/bindings/event_emitter.h"
 #include "extensions/renderer/bindings/get_per_context_data.h"
@@ -82,8 +80,8 @@ void DispatchEvent(const v8::FunctionCallbackInfo<v8::Value>& info) {
   }
 
   v8::Local<v8::Context> context = isolate->GetCurrentContext();
-  APIEventPerContextData* data =
-      APIEventPerContextData::GetFrom(context, kDontCreateIfMissing);
+  APIEventPerContextData* data = APIEventPerContextData::GetFrom(
+      context, CreatePerContextData::kDontCreateIfMissing);
   DCHECK(data);
 
   v8::Local<v8::Object> dispatch_data = info.Data().As<v8::Object>();
@@ -105,24 +103,15 @@ void DispatchEvent(const v8::FunctionCallbackInfo<v8::Value>& info) {
   if (iter == data->emitters.end()) {
     return;
   }
-  v8::Local<v8::Object> v8_emitter = iter->second.Get(isolate);
+  v8::Global<v8::Object>& v8_emitter = iter->second;
 
-  // Converting `info[0]` to a vector of arguments can fail if script execution
-  // (such as running getters during property conversion) throws an exception.
   v8::LocalVector<v8::Value> args(isolate);
-  if (!gin::Converter<v8::LocalVector<v8::Value>>::FromV8(isolate, info[0],
-                                                          &args)) {
-    return;
-  }
-
-  // The conversion above re-enters JS (e.g., via getters on array properties)
-  // which can synchronously invalidate the context (e.g., detaching an iframe).
-  if (!binding::IsContextValid(context)) {
-    return;
-  }
+  CHECK(gin::Converter<v8::LocalVector<v8::Value>>::FromV8(isolate, info[0],
+                                                           &args));
 
   EventEmitter* emitter = nullptr;
-  gin::Converter<EventEmitter*>::FromV8(isolate, v8_emitter, &emitter);
+  gin::Converter<EventEmitter*>::FromV8(isolate, v8_emitter.Get(isolate),
+                                        &emitter);
   CHECK(emitter);
   // Note: It's safe to use EventEmitter::FireSync() here because this should
   // only be triggered from a JS call, so we know JS is running.
@@ -163,8 +152,8 @@ v8::Local<v8::Object> APIEventHandler::CreateEventInstance(
   // context directly.
   v8::Context::Scope context_scope(context);
 
-  APIEventPerContextData* data =
-      APIEventPerContextData::GetFrom(context, kCreateIfMissing);
+  APIEventPerContextData* data = APIEventPerContextData::GetFrom(
+      context, CreatePerContextData::kCreateIfMissing);
   DCHECK(data->emitters.find(event_name) == data->emitters.end());
 
   APIEventListeners::ListenersUpdated updated =
@@ -194,8 +183,8 @@ v8::Local<v8::Object> APIEventHandler::CreateEventInstance(
 v8::Local<v8::Object> APIEventHandler::CreateAnonymousEventInstance(
     v8::Local<v8::Context> context) {
   v8::Context::Scope context_scope(context);
-  APIEventPerContextData* data =
-      APIEventPerContextData::GetFrom(context, kCreateIfMissing);
+  APIEventPerContextData* data = APIEventPerContextData::GetFrom(
+      context, CreatePerContextData::kCreateIfMissing);
   bool supports_filters = false;
 
   // Anonymous events are not tracked, and thus don't need a name or a context
@@ -220,8 +209,8 @@ v8::Local<v8::Object> APIEventHandler::CreateAnonymousEventInstance(
 void APIEventHandler::InvalidateCustomEvent(v8::Local<v8::Context> context,
                                             v8::Local<v8::Object> event) {
   EventEmitter* emitter = nullptr;
-  APIEventPerContextData* data =
-      APIEventPerContextData::GetFrom(context, kDontCreateIfMissing);
+  APIEventPerContextData* data = APIEventPerContextData::GetFrom(
+      context, CreatePerContextData::kDontCreateIfMissing);
   // This could happen if a port (or JS) invalidates an event following
   // context destruction.
   // TODO(devlin): Is it better to fail gracefully here, or track all these
@@ -286,8 +275,8 @@ void APIEventHandler::FireEventInContext(
     mojom::EventFilteringInfoPtr filter,
     v8::Local<v8::Function> on_dispatched_callback,
     v8::Local<v8::Function> listener_error_callback) {
-  APIEventPerContextData* data =
-      APIEventPerContextData::GetFrom(context, kDontCreateIfMissing);
+  APIEventPerContextData* data = APIEventPerContextData::GetFrom(
+      context, CreatePerContextData::kDontCreateIfMissing);
   if (!data) {
     return;
   }
@@ -367,16 +356,16 @@ void APIEventHandler::RegisterArgumentMassager(
     v8::Local<v8::Context> context,
     const std::string& event_name,
     v8::Local<v8::Function> massager) {
-  APIEventPerContextData* data =
-      APIEventPerContextData::GetFrom(context, kCreateIfMissing);
-  DCHECK(!base::Contains(data->massagers, event_name));
+  APIEventPerContextData* data = APIEventPerContextData::GetFrom(
+      context, CreatePerContextData::kCreateIfMissing);
+  DCHECK(!data->massagers.contains(event_name));
   data->massagers[event_name].Reset(v8::Isolate::GetCurrent(), massager);
 }
 
 bool APIEventHandler::HasListenerForEvent(const std::string& event_name,
                                           v8::Local<v8::Context> context) {
-  APIEventPerContextData* data =
-      APIEventPerContextData::GetFrom(context, kDontCreateIfMissing);
+  APIEventPerContextData* data = APIEventPerContextData::GetFrom(
+      context, CreatePerContextData::kDontCreateIfMissing);
   if (!data) {
     return false;
   }
@@ -396,8 +385,8 @@ bool APIEventHandler::HasListenerForEvent(const std::string& event_name,
 void APIEventHandler::InvalidateContext(v8::Local<v8::Context> context) {
   DCHECK(gin::PerContextData::From(context))
       << "Trying to invalidate an already-invalid context.";
-  APIEventPerContextData* data =
-      APIEventPerContextData::GetFrom(context, kDontCreateIfMissing);
+  APIEventPerContextData* data = APIEventPerContextData::GetFrom(
+      context, CreatePerContextData::kDontCreateIfMissing);
   if (!data) {
     return;
   }

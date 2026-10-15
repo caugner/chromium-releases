@@ -4,6 +4,8 @@
 
 #include "third_party/blink/renderer/modules/webgl/webgl_context_object_support.h"
 
+#include "base/task/single_thread_task_runner.h"
+
 namespace blink {
 
 scoped_refptr<base::SingleThreadTaskRunner>
@@ -22,10 +24,7 @@ WebGLContextObjectSupport::WebGLContextObjectSupport(
 
 void WebGLContextObjectSupport::OnContextLost() {
   DCHECK(!is_lost_);
-  // Invalidate all past objects.
-  // (It may not be strictly necessary to do this here, since it's also done in
-  // OnContextRestored, but we did it historically, and there's no harm in it.)
-  context_generation_++;
+  number_of_context_losses_++;
   is_lost_ = true;
   gles2_interface_ = nullptr;
   extensions_enabled_.reset();
@@ -34,8 +33,6 @@ void WebGLContextObjectSupport::OnContextLost() {
 void WebGLContextObjectSupport::OnContextRestored(
     gpu::gles2::GLES2Interface* gl) {
   DCHECK(is_lost_);
-  // Invalidate all past objects.
-  context_generation_++;
   is_lost_ = false;
   gles2_interface_ = gl;
 }

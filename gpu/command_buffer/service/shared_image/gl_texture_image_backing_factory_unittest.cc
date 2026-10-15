@@ -165,33 +165,6 @@ class GLTextureImageBackingFactoryWithUploadTest
 using GLTextureImageBackingFactoryWithReadbackTest =
     GLTextureImageBackingFactoryWithUploadTest;
 
-TEST_F(GLTextureImageBackingFactoryTest, CompressedFormatRequiresInitialData) {
-  if (!supports_etc1_) {
-    GTEST_SKIP();
-  }
-
-  auto format = viz::SinglePlaneFormat::kETC1;
-  gfx::Size size(64, 64);
-  // Note: The specific usage doesn't matter here as long as it's supported by
-  // GLTextureImageBacking.
-  gpu::SharedImageUsageSet usage = SHARED_IMAGE_USAGE_GLES2_READ;
-
-  // Compressed textures cannot be cleared so they must be created with initial
-  // pixel data.
-  bool supported = backing_factory_->CanCreateSharedImage(
-      usage, format, size, /*thread_safe=*/false, gfx::EMPTY_BUFFER,
-      GrContextType::kGL, {});
-  EXPECT_FALSE(supported);
-
-  // With correctly sized initial data the format is supported.
-  size_t required_size = format.MaybeEstimatedSizeInBytes(size).value();
-  std::vector<uint8_t> initial_data(required_size);
-  supported = backing_factory_->CanCreateSharedImage(
-      usage, format, size, /*thread_safe=*/false, gfx::EMPTY_BUFFER,
-      GrContextType::kGL, initial_data);
-  EXPECT_TRUE(supported);
-}
-
 TEST_F(GLTextureImageBackingFactoryTest, InvalidFormat) {
   auto format = viz::SinglePlaneFormat::kBGR_565;
   gfx::Size size(256, 256);
@@ -386,7 +359,9 @@ TEST_F(GLTextureImageBackingFactoryTest, ProduceVideo) {
       d3d11_device, mailbox, &memory_type_tracker_);
   EXPECT_NE(representation, nullptr);
   auto read_access = representation->BeginScopedReadAccess();
-  EXPECT_NE(read_access->GetD3D11Texture(), nullptr);
+  D3D11TextureAndArrayIndex input_texture = read_access->GetD3D11Texture();
+  EXPECT_NE(input_texture.texture, nullptr);
+  EXPECT_EQ(input_texture.array_index, 0u);
 }
 #endif
 

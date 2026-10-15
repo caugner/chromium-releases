@@ -11,7 +11,6 @@
 #include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
-#include "third_party/blink/renderer/platform/heap/prefinalizer.h"
 
 namespace blink {
 
@@ -28,6 +27,7 @@ class XRWebGLSwapChain : public XRSwapChain<WebGLUnownedTexture> {
     uint16_t width;
     uint16_t height;
     uint16_t layers;
+    bool is_texture_array;
   };
 
   XRWebGLSwapChain(WebGLRenderingContextBase*,
@@ -62,15 +62,11 @@ class XRWebGLSwapChain : public XRSwapChain<WebGLUnownedTexture> {
 // A texture swap chain that is not communicated back to the compositor, used
 // for things like depth/stencil attachments that don't assist reprojection.
 class XRWebGLStaticSwapChain final : public XRWebGLSwapChain {
-  USING_PRE_FINALIZER(XRWebGLStaticSwapChain, Dispose);
-
  public:
   XRWebGLStaticSwapChain(WebGLRenderingContextBase*,
                          const XRWebGLSwapChain::Descriptor&,
                          bool webgl2);
-  ~XRWebGLStaticSwapChain() override = default;
-
-  void Dispose();
+  ~XRWebGLStaticSwapChain() override;
 
   WebGLUnownedTexture* ProduceTexture() override;
 

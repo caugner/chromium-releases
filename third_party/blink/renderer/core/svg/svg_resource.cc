@@ -120,17 +120,10 @@ void SVGResource::NotifyContentChanged() {
     client->ResourceContentChanged(this);
 }
 
-Element* SVGResource::Target() const {
-  UpdateContentLifecycleForUse();
-  return target_.Get();
-}
-
 LayoutSVGResourceContainer* SVGResource::ResourceContainerNoCycleCheck() const {
-  Element* target = Target();
-  if (!target) {
+  if (!target_)
     return nullptr;
-  }
-  return DynamicTo<LayoutSVGResourceContainer>(target->GetLayoutObject());
+  return DynamicTo<LayoutSVGResourceContainer>(target_->GetLayoutObject());
 }
 
 LayoutSVGResourceContainer* SVGResource::ResourceContainer(
@@ -326,13 +319,6 @@ Element* ExternalSVGResourceDocumentContent::ResolveTarget() {
   return external_document->getElementById(decoded_fragment);
 }
 
-void ExternalSVGResourceDocumentContent::UpdateContentLifecycleForUse() const {
-  if (!document_content_) {
-    return;
-  }
-  document_content_->UpdateLifecycleForUse();
-}
-
 void ExternalSVGResourceDocumentContent::Trace(Visitor* visitor) const {
   visitor->Trace(document_content_);
   SVGResource::Trace(visitor);
@@ -367,17 +353,7 @@ Element* ExternalSVGResourceImageContent::ResolveTarget() {
   }
   AtomicString decoded_fragment(
       DecodeURLEscapeSequences(fragment_, DecodeURLMode::kUTF8OrIsomorphic));
-  return svg_image->GetResourceElement(
-      base::PassKey<ExternalSVGResourceImageContent>(), decoded_fragment);
-}
-
-void ExternalSVGResourceImageContent::UpdateContentLifecycleForUse() const {
-  auto* svg_image = DynamicTo<SVGImage>(image_content_->GetImage());
-  if (!svg_image) {
-    return;
-  }
-  svg_image->UpdateLifecycleForUse(
-      base::PassKey<ExternalSVGResourceImageContent>());
+  return svg_image->GetResourceElement(decoded_fragment);
 }
 
 void ExternalSVGResourceImageContent::ImageNotifyFinished(

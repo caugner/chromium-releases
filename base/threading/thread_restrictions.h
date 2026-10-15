@@ -136,6 +136,9 @@ class PartnerBookmarksReader;
 class Profile;
 class ProfileImpl;
 class ScopedAllowBlockingForProfile;
+#if BUILDFLAG(IS_WIN)
+class ScopedAllowBlockingForMediaFoundation;
+#endif
 class StartupTabProviderImpl;
 class WebEngineBrowserMainParts;
 struct StartupProfilePathInfo;
@@ -438,14 +441,15 @@ namespace updater {
 class SystemctlLauncherScopedAllowBaseSyncPrimitives;
 }
 namespace viz {
-class HostGpuMemoryBufferManager;
-class ClientGpuMemoryBufferManager;
 class DisplayCompositorMemoryAndTaskController;
 class SkiaOutputSurfaceImpl;
 class SharedImageInterfaceProvider;
 }  // namespace viz
 namespace vr {
 class VrShell;
+}
+namespace webnn {
+class WebNNTensorImpl;
 }
 namespace web {
 class WebMainLoop;
@@ -578,6 +582,9 @@ class BASE_EXPORT ScopedAllowBlocking {
   friend class ::GaiaConfig;
   friend class ::ProfileImpl;
   friend class ::ScopedAllowBlockingForProfile;
+#if BUILDFLAG(IS_WIN)
+  friend class ::ScopedAllowBlockingForMediaFoundation;
+#endif
   friend class ::StartupTabProviderImpl;
   friend class ::WebEngineBrowserMainParts;
   friend class android_webview::AwBrowserContext;
@@ -788,6 +795,7 @@ class BASE_EXPORT ScopedAllowBaseSyncPrimitives {
   friend class syncer::HttpBridge;
   friend class syncer::GetLocalChangesRequest;
   friend class updater::SystemctlLauncherScopedAllowBaseSyncPrimitives;
+  friend class webnn::WebNNTensorImpl;
 
   // Usage that should be fixed:
   // Sorted by class name (with namespace).
@@ -870,8 +878,6 @@ class BASE_EXPORT
   friend class mojo::core::ipcz_driver::MojoTrap;
   friend class net::NetworkConfigWatcherAppleThread;
   friend class ui::DrmThreadProxy;
-  friend class viz::ClientGpuMemoryBufferManager;
-  friend class viz::HostGpuMemoryBufferManager;
   friend class vr::VrShell;
 
   // Usage that should be fixed:

@@ -14,6 +14,7 @@
 
 #include "base/base_paths.h"
 #include "base/command_line.h"
+#include "base/debug/dump_without_crashing.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/important_file_writer.h"
@@ -21,12 +22,15 @@
 #include "base/numerics/safe_conversions.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
+#include "base/rand_util.h"
+#include "base/strings/strcat.h"
 #include "base/strings/strcat_win.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
+#include "base/version_info/channel.h"
 #include "base/win/shortcut.h"
 #include "chrome/install_static/install_details.h"
 #include "chrome/install_static/install_util.h"
@@ -85,8 +89,6 @@ void LogShortcutOperation(ShellUtil::ShortcutLocation location,
     case ShellUtil::SHORTCUT_LOCATION_START_MENU_ROOT:
       message.append("Start menu ");
       break;
-    case ShellUtil::SHORTCUT_LOCATION_START_MENU_CHROME_DIR_DEPRECATED:
-      NOTREACHED();
     case ShellUtil::SHORTCUT_LOCATION_START_MENU_CHROME_APPS_DIR:
       message.append(
           "Start menu/" +
@@ -165,6 +167,30 @@ void CopyPreferenceFileForFirstRun(const InstallerState& installer_state,
   }
 }
 
+// Returns true if a diagnostic crash dump should be uploaded in case of a
+// failure while installing or updating the browser.
+bool ShouldSampleFailures() {
+  // Sample across channels based on historic error rates.
+  double report_probability = 0.0;
+  switch (install_static::GetChromeChannel()) {
+    case version_info::Channel::CANARY:
+      report_probability = 0.05;
+      break;
+    case version_info::Channel::DEV:
+      report_probability = 0.01;
+      break;
+    case version_info::Channel::BETA:
+      report_probability = 0.03;
+      break;
+    case version_info::Channel::STABLE:
+      report_probability = 0.00005;
+      break;
+    default:
+      return false;
+  }
+  return base::RandDouble() < report_probability;
+}
+
 // This function installs a new version of Chrome to the specified location.
 //
 // install_params: See install_params.h
@@ -196,6 +222,10 @@ InstallStatus InstallNewVersion(const InstallParams& install_params,
   installer_state.SetStage(EXECUTING);
 
   if (!install_list->Do()) {
+    if (ShouldSampleFailures()) {
+      // TODO(crbug.com/40462942): Remove after analyzing results.
+      base::debug::DumpWithoutCrashing();
+    }
     installer_state.SetStage(ROLLINGBACK);
     InstallStatus result = base::PathExists(new_chrome_exe) &&
                                    current_version.IsValid() &&
@@ -451,22 +481,6 @@ void CreateOrUpdateShortcuts(const base::FilePath& target,
   const CLSID toast_activator_clsid = install_static::GetToastActivatorClsid();
   if (toast_activator_clsid != CLSID_NULL)
     start_menu_properties.set_toast_activator_clsid(toast_activator_clsid);
-
-  // The attempt below to update the stortcut will fail if it does not already
-  // exist at the expected location on disk.  First check if it exists in the
-  // previous location (under a subdirectory) and, if so, move it to the new
-  // location.
-  base::FilePath old_shortcut_path;
-  if (!ShellUtil::GetShortcutPath(
-          ShellUtil::SHORTCUT_LOCATION_START_MENU_CHROME_DIR_DEPRECATED,
-          shortcut_level, &old_shortcut_path)) {
-    return;
-  }
-  if (base::PathExists(old_shortcut_path)) {
-    ShellUtil::MoveExistingShortcut(
-        ShellUtil::SHORTCUT_LOCATION_START_MENU_CHROME_DIR_DEPRECATED,
-        ShellUtil::SHORTCUT_LOCATION_START_MENU_ROOT, start_menu_properties);
-  }
 
   ExecuteAndLogShortcutOperation(ShellUtil::SHORTCUT_LOCATION_START_MENU_ROOT,
                                  start_menu_properties, shortcut_operation);

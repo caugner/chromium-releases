@@ -53,10 +53,6 @@ class MockInputDispositionHandler : public input::InputDispositionHandler {
     touch_followup_event_ = std::move(event);
   }
 
-  void set_on_touch_event_ack_closure(base::OnceClosure closure) {
-    on_touch_event_ack_closure_ = std::move(closure);
-  }
-
   blink::mojom::InputEventResultState ack_state() const { return ack_state_; }
 
   blink::mojom::InputEventResultState acked_wheel_event_state() const {
@@ -104,7 +100,6 @@ class MockInputDispositionHandler : public input::InputDispositionHandler {
 
   std::unique_ptr<input::GestureEventWithLatencyInfo> gesture_followup_event_;
   std::unique_ptr<input::TouchEventWithLatencyInfo> touch_followup_event_;
-  base::OnceClosure on_touch_event_ack_closure_;
 };
 
 }  // namespace content

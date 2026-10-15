@@ -31,8 +31,6 @@
 #include "chrome/browser/ui/lens/lens_search_feature_flag_utils.h"
 #include "chrome/browser/ui/lens/lens_searchbox_controller.h"
 #include "chrome/browser/ui/lens/lens_session_metrics_logger.h"
-#include "chrome/browser/ui/promos/ios_promo_trigger_service.h"
-#include "chrome/browser/ui/promos/ios_promo_trigger_service_factory.h"
 #include "chrome/browser/ui/tabs/public/tab_features.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_entry_key.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_ui.h"
@@ -40,7 +38,6 @@
 #include "chrome/browser/ui/webui/webui_embedding_context.h"
 #include "chrome/grit/branded_strings.h"
 #include "components/contextual_tasks/public/features.h"
-#include "components/desktop_to_mobile_promos/features.h"
 #include "components/lens/lens_features.h"
 #include "components/lens/lens_overlay_permission_utils.h"
 #include "components/lens/lens_url_utils.h"
@@ -190,7 +187,8 @@ LensSearchController* LensSearchController::FromTabWebContents(
 }
 
 void LensSearchController::OpenLensOverlay(
-    lens::LensOverlayInvocationSource invocation_source) {
+    lens::LensOverlayInvocationSource invocation_source,
+    bool should_show_csb) {
   CheckInitialized(initialized_);
 
   // The overlay can only be reinvoked if the feature is enabled.
@@ -202,7 +200,8 @@ void LensSearchController::OpenLensOverlay(
           invocation_source,
           /*permission_granted_callback=*/base::BindRepeating(
               &LensSearchController::OpenLensOverlay,
-              weak_ptr_factory_.GetWeakPtr(), invocation_source))) {
+              weak_ptr_factory_.GetWeakPtr(), invocation_source,
+              should_show_csb))) {
     return;
   }
 
@@ -233,6 +232,7 @@ void LensSearchController::OpenLensOverlay(
     StartLensSession(invocation_source);
   }
 
+  should_show_csb_ = should_show_csb;
   lens_overlay_controller_->ShowUI(invocation_source);
 }
 
@@ -267,6 +267,7 @@ void LensSearchController::OpenLensOverlayWithPendingRegion(
   // Setup all state necessary for this Lens session.
   StartLensSession(invocation_source);
 
+  should_show_csb_ = false;
   lens_overlay_controller_->ShowUIWithPendingRegion(
       invocation_source, std::move(region), region_bitmap);
 }
@@ -717,21 +718,32 @@ LensSearchController::CreateLensQueryController(
       gen204_controller_.get());
 }
 
+bool LensSearchController::ShouldEnableContextualTasksRouting(
+    lens::LensOverlayInvocationSource invocation_source) {
+  // Check if contextual tasks is currently available. If so, route through
+  // results to the contextual tasks side panel.
+  auto* const entry_point_eligibility_manager =
+      contextual_tasks::EntryPointEligibilityManager::From(
+          tab_->GetBrowserWindowInterface());
+
+  const bool are_entry_points_eligible =
+      entry_point_eligibility_manager &&
+      entry_point_eligibility_manager->AreEntryPointsEligible();
+
+  return are_entry_points_eligible &&
+         (contextual_tasks::GetEnableLensInContextualTasks() ||
+          invocation_source ==
+              lens::LensOverlayInvocationSource::kContextualTasksComposebox);
+}
+
 void LensSearchController::StartLensSession(
     lens::LensOverlayInvocationSource invocation_source,
     bool suppress_contextualization) {
   state_ = State::kInitializing;
   invocation_source_ = invocation_source;
 
-  // Check if contextual tasks is currently available. If so, route through
-  // results to the contextual tasks side panel.
-  auto* const entry_point_eligibility_manager =
-      contextual_tasks::EntryPointEligibilityManager::From(
-          tab_->GetBrowserWindowInterface());
   should_route_to_contextual_tasks_ =
-      contextual_tasks::GetEnableLensInContextualTasks() &&
-      entry_point_eligibility_manager &&
-      entry_point_eligibility_manager->AreEntryPointsEligible();
+      ShouldEnableContextualTasksRouting(invocation_source);
 
   // Create the query controller to be used for the current invocation.
   CHECK(!lens_overlay_query_controller_);
@@ -757,6 +769,7 @@ void LensSearchController::StartLensSession(
   // Reset session state.
   hats_triggered_in_session_ = false;
   is_handshake_complete_ = false;
+  should_show_csb_ = true;
 }
 
 bool LensSearchController::RunLensEligibilityChecks(
@@ -839,6 +852,10 @@ void LensSearchController::OnThumbnailProcessed(
 
 void LensSearchController::CloseLensPart2(
     lens::LensOverlayDismissalSource dismissal_source) {
+  if (state_ == State::kOff) {
+    return;
+  }
+
   // Let the controllers know to cleanup.
   // TODO(crbug.com/404941800): Move logging to a shared location to not be
   // dependent on the overlay controller.
@@ -946,7 +963,6 @@ void LensSearchController::HandleStartQueryResponse(
 void LensSearchController::HandleInteractionURLResponse(
     lens::proto::LensOverlayUrlResponse response) {
   lens_overlay_controller_->HandleInteractionURLResponse(response);
-  MaybeShowMobilePromo();
 }
 
 void LensSearchController::OnSuggestInputsReady() {
@@ -1110,16 +1126,3 @@ void LensSearchController::OnPageContextUpdatedForZeroStateRequest(
   }
 }
 
-void LensSearchController::MaybeShowMobilePromo() {
-  if (MobilePromoOnDesktopTypeEnabled(
-          MobilePromoOnDesktopPromoType::kLensPromo)) {
-    IOSPromoTriggerService* service =
-        IOSPromoTriggerServiceFactory::GetForProfile(
-            Profile::FromBrowserContext(
-                tab_->GetContents()->GetBrowserContext()));
-    if (service) {
-      service->NotifyPromoShouldBeShown(
-          desktop_to_mobile_promos::PromoType::kLens);
-    }
-  }
-}

@@ -6,7 +6,6 @@
 
 #include <utility>
 
-#include "base/containers/contains.h"
 #include "base/format_macros.h"
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
@@ -32,6 +31,9 @@ PointerActionType ToSyntheticPointerActionType(const std::string& action_type) {
     return PointerActionType::RELEASE;
   if (action_type == "pointerLeave")
     return PointerActionType::LEAVE;
+  if (action_type == "pointerCancel") {
+    return PointerActionType::CANCEL;
+  }
   if (action_type == "pause")
     return PointerActionType::IDLE;
   return PointerActionType::NOT_INITIALIZED;
@@ -361,7 +363,7 @@ bool ActionsParser::ParsePointerParameters(
     return false;
   }
 
-  if (base::Contains(pointer_name_set_, *pointer_name)) {
+  if (pointer_name_set_.contains(*pointer_name)) {
     error_message_ = std::string("pointer name already exists");
     return false;
   }

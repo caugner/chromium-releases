@@ -49,8 +49,8 @@ class Surface;
 class SurfaceManager;
 
 // Possible outcomes of MaybeSubmitCompositorFrame().
-// These values were previously persisted to logs. Entries should not be
-// renumbered and numeric values should never be reused.
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
 enum class SubmitResult {
   ACCEPTED = 0,
   COPY_OUTPUT_REQUESTS_NOT_ALLOWED = 1,
@@ -58,9 +58,8 @@ enum class SubmitResult {
   SIZE_MISMATCH = 3,
   SURFACE_ID_DECREASED = 4,
   SURFACE_OWNED_BY_ANOTHER_CLIENT = 5,
-  HIT_TEST_DATA_INVALID = 6,
   // Magic constant used by the histogram macros.
-  kMaxValue = HIT_TEST_DATA_INVALID,
+  kMaxValue = SURFACE_OWNED_BY_ANOTHER_CLIENT,
 };
 
 class VIZ_SERVICE_EXPORT CompositorFrameSinkSupport
@@ -160,13 +159,13 @@ class VIZ_SERVICE_EXPORT CompositorFrameSinkSupport
   void OnSurfaceWillDraw(Surface* surface) override;
   void RefResources(
       const std::vector<TransferableResource>& resources) override;
-  void UnrefResources(std::vector<ReturnedResource> resources) override;
+  void UnrefResources(std::vector<ReturnedResourceViz> resources) override;
   void ReturnResources(std::vector<ReturnedResource> resources) override;
   void ReceiveFromChild(
       const std::vector<TransferableResource>& resources) override;
   // Takes the CopyOutputRequests that were requested for a surface with at
   // most |local_surface_id|.
-  std::vector<PendingCopyOutputRequest> TakeCopyOutputRequests(
+  std::vector<std::unique_ptr<PendingCopyOutputRequest>> TakeCopyOutputRequests(
       const LocalSurfaceId& local_surface_id) override;
   void OnFrameTokenChanged(uint32_t frame_token) override;
   void SendCompositorFrameAck() override;
@@ -234,8 +233,8 @@ class VIZ_SERVICE_EXPORT CompositorFrameSinkSupport
       const VideoCaptureSubTarget& sub_target) const override;
   void OnClientCaptureStarted() override;
   void OnClientCaptureStopped() override;
-  void RequestCopyOfOutput(
-      PendingCopyOutputRequest pending_copy_output_request) override;
+  void RequestCopyOfOutput(std::unique_ptr<PendingCopyOutputRequest>
+                               pending_copy_output_request) override;
   const CompositorFrameMetadata* GetLastActivatedFrameMetadata() override;
 
   HitTestAggregator* GetHitTestAggregator();
@@ -252,7 +251,7 @@ class VIZ_SERVICE_EXPORT CompositorFrameSinkSupport
   // string.
   static const char* GetSubmitResultAsString(SubmitResult result);
 
-  const std::vector<PendingCopyOutputRequest>&
+  const std::vector<std::unique_ptr<PendingCopyOutputRequest>>&
   copy_output_requests_for_testing() const {
     return copy_output_requests_;
   }
@@ -431,7 +430,7 @@ class VIZ_SERVICE_EXPORT CompositorFrameSinkSupport
   // PendingCopyOutputRequest::local_surface_id will not. Note that if the
   // PendingCopyOutputRequest::local_surface_id is default initialized, then the
   // next surface will take it regardless of its LocalSurfaceId.
-  std::vector<PendingCopyOutputRequest> copy_output_requests_;
+  std::vector<std::unique_ptr<PendingCopyOutputRequest>> copy_output_requests_;
 
   bool callback_received_begin_frame_ = true;
   bool callback_received_receive_ack_ = true;

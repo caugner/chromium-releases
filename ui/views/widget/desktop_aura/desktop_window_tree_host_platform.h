@@ -148,6 +148,9 @@ class VIEWS_EXPORT DesktopWindowTreeHostPlatform
   gfx::Rect CalculateRootWindowBounds() const override;
   gfx::Rect GetBoundsInDIP() const override;
 
+  void OnVideoCaptureLockCreated() override;
+  void OnVideoCaptureLockDestroyed() override;
+
   // CompositorObserver:
   void OnCompositorVisibilityChanging(ui::Compositor* compositor,
                                       bool visible) override;
@@ -246,6 +249,8 @@ class VIEWS_EXPORT DesktopWindowTreeHostPlatform
 
   bool is_active_ = false;
 
+  bool has_video_capture_ = false;
+
   std::u16string window_title_;
 
   // We can optionally have a parent which can order us to close, or own
@@ -264,7 +269,6 @@ class VIEWS_EXPORT DesktopWindowTreeHostPlatform
 
   base::WeakPtrFactory<DesktopWindowTreeHostPlatform> close_widget_factory_{
       this};
-  base::WeakPtrFactory<DesktopWindowTreeHostPlatform> weak_factory_{this};
 };
 
 }  // namespace views

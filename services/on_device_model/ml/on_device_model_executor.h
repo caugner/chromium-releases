@@ -121,7 +121,6 @@ class COMPONENT_EXPORT(ON_DEVICE_MODEL_ML) SessionImpl final
 class COMPONENT_EXPORT(ON_DEVICE_MODEL_ML) OnDeviceModelExecutor final
     : public on_device_model::BackendModel {
  public:
-
   explicit OnDeviceModelExecutor(base::PassKey<OnDeviceModelExecutor>,
                                  const ChromeML& chrome_ml);
   ~OnDeviceModelExecutor() override;

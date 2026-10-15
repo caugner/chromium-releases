@@ -89,12 +89,15 @@ void LensQueryFlowRouter::StartQueryFlow(
     // remove the observer before creating a new session handle.
     file_upload_status_observation_.Reset();
 
-    pending_session_handle_ = CreateContextualSearchSessionHandle();
-    pending_session_handle_->NotifySessionStarted();
-
-    // Add observer to listen for file upload status changes.
-    file_upload_status_observation_.Observe(
-        pending_session_handle_->GetController());
+    if (!GetContextualSearchSessionHandle()) {
+      pending_session_handle_ = CreateContextualSearchSessionHandle();
+      pending_session_handle_->NotifySessionStarted();
+      // Add observer to listen for file upload status changes. This is only
+      // needed when a new session handle is created as part of this flow as
+      // the response is not used by the overlay otherwise.
+      file_upload_status_observation_.Observe(
+          GetContextualSearchSessionHandle()->GetController());
+    }
 
     // If permissions have been granted, start uploading the current viewport
     // and page content. If not, store as a callback to be run later.
@@ -312,7 +315,8 @@ LensQueryFlowRouter::CreateContextualSearchSessionHandle() {
   // requests.
   auto session_handle = contextual_search_service->CreateSession(
       ntp_composebox::CreateQueryControllerConfigParams(),
-      contextual_search::ContextualSearchSource::kLens);
+      contextual_search::ContextualSearchSource::kLens,
+      lens_search_controller_->invocation_source());
   // TODO(crbug.com/469875837): Determine what to do with the return value
   // of this call, or move this call to a different location.
   session_handle->CheckSearchContentSharingSettings(profile()->GetPrefs());
@@ -401,11 +405,7 @@ void LensQueryFlowRouter::SendInteractionToContextualTasks(
     pending_session_handle_->NotifySessionStarted();
   }
 
-  bool needs_overlay_tab_context =
-      lens_search_controller_->invocation_source() !=
-      lens::LensOverlayInvocationSource::kContextualTasksComposebox;
-  if (needs_overlay_tab_context &&
-      !overlay_tab_context_file_token_.has_value()) {
+  if (!overlay_tab_context_file_token_.has_value()) {
     pending_search_url_request_ = std::move(request_info);
     // Upload the page context when creating a session handle.
     if (auto* controller =
@@ -446,17 +446,7 @@ void LensQueryFlowRouter::OpenContextualTasksPanel(GURL url) {
 void LensQueryFlowRouter::UploadContextualInputData(
     std::unique_ptr<lens::ContextualInputData> contextual_input_data) {
   auto* session_handle = GetContextualSearchSessionHandle();
-  GetContextualSearchSessionHandle()->AddTabContext(
-      sessions::SessionTabHelper::IdForTab(web_contents()).id(),
-      base::BindOnce(&LensQueryFlowRouter::OnFinishedAddingTabContext,
-                     weak_factory_.GetWeakPtr(), session_handle,
-                     std::move(contextual_input_data)));
-}
-
-void LensQueryFlowRouter::OnFinishedAddingTabContext(
-    contextual_search::ContextualSearchSessionHandle* session_handle,
-    std::unique_ptr<lens::ContextualInputData> contextual_input_data,
-    const base::UnguessableToken& token) {
+  auto token = GetContextualSearchSessionHandle()->CreateContextToken();
   overlay_tab_context_file_token_ = token;
   // TODO(crbug.com/463400248): Use contextual tasks image upload config params
   // for Lens requests.

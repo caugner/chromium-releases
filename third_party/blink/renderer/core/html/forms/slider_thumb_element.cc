@@ -53,6 +53,7 @@ namespace blink {
 SliderThumbElement::SliderThumbElement(Document& document)
     : HTMLDivElement(document), in_drag_mode_(false) {
   SetHasCustomStyleCallbacks();
+  setAttribute(html_names::kIdAttr, shadow_element_names::kIdSliderThumb);
 }
 
 void SliderThumbElement::SetPositionFromValue() {
@@ -407,7 +408,11 @@ bool SliderContainerElement::CanSlide() {
       }
     }
   }
-  bool is_horizontal = GetComputedStyle()->IsHorizontalWritingMode();
+  const ComputedStyle* container_style = GetComputedStyle();
+  if (!container_style) {
+    return false;
+  }
+  bool is_horizontal = container_style->IsHorizontalWritingMode();
   if ((sliding_direction_ == Direction::kVertical && is_horizontal) ||
       (sliding_direction_ == Direction::kHorizontal && !is_horizontal)) {
     return false;

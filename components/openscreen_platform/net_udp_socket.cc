@@ -47,21 +47,17 @@ NetUdpSocket::~NetUdpSocket() = default;
 void NetUdpSocket::SendErrorToClient(openscreen::Error::Code openscreen_error,
                                      int net_error) {
   DVLOG(1) << __func__;
-  RunClientCallback([this, openscreen_error, net_error](Client& client) {
-    client.OnError(this, openscreen::Error(openscreen_error,
-                                           net::ErrorToString(net_error)));
-  });
+  client_->OnError(
+      this, openscreen::Error(openscreen_error, net::ErrorToString(net_error)));
 }
 
 void NetUdpSocket::DoRead() {
   DVLOG(3) << __func__;
-  base::WeakPtr<NetUdpSocket> weak_this = weak_ptr_factory_.GetWeakPtr();
-  while (weak_this &&
-         HandleRecvFromResult(udp_socket_.RecvFrom(
-             read_buffer_.get(), openscreen::UdpPacket::kUdpMaxPacketSize,
-             &from_address_,
-             base::BindOnce(&NetUdpSocket::OnRecvFromCompleted,
-                            weak_ptr_factory_.GetWeakPtr())))) {
+  while (HandleRecvFromResult(udp_socket_.RecvFrom(
+      read_buffer_.get(), openscreen::UdpPacket::kUdpMaxPacketSize,
+      &from_address_,
+      base::BindOnce(&NetUdpSocket::OnRecvFromCompleted,
+                     base::Unretained(this))))) {
   }
 }
 
@@ -73,11 +69,9 @@ bool NetUdpSocket::HandleRecvFromResult(int result) {
   }
 
   if (result < 0) {
-    RunClientCallback([this, result](Client& client) {
-      client.OnRead(
-          this, openscreen::Error(openscreen::Error::Code::kSocketReadFailure,
-                                  net::ErrorToString(result)));
-    });
+    client_->OnRead(
+        this, openscreen::Error(openscreen::Error::Code::kSocketReadFailure,
+                                net::ErrorToString(result)));
     return false;
   }
 
@@ -86,9 +80,8 @@ bool NetUdpSocket::HandleRecvFromResult(int result) {
   openscreen::UdpPacket packet(read_buffer_->data(),
                                UNSAFE_TODO(read_buffer_->data() + result));
   packet.set_source(openscreen_platform::ToOpenScreenEndPoint(from_address_));
-  return RunClientCallback([this, &packet](Client& client) {
-    client.OnRead(this, std::move(packet));
-  });
+  client_->OnRead(this, std::move(packet));
+  return true;
 }
 
 void NetUdpSocket::OnRecvFromCompleted(int result) {
@@ -102,11 +95,9 @@ void NetUdpSocket::OnSendToCompleted(int result) {
   DVLOG(3) << __func__;
   send_pending_ = false;
   if (result < 0) {
-    RunClientCallback([this, result](Client& client) {
-      client.OnSendError(
-          this, openscreen::Error(openscreen::Error::Code::kSocketSendFailure,
-                                  net::ErrorToString(result)));
-    });
+    client_->OnSendError(
+        this, openscreen::Error(openscreen::Error::Code::kSocketSendFailure,
+                                net::ErrorToString(result)));
   }
 }
 
@@ -130,9 +121,12 @@ void NetUdpSocket::Bind() {
   net::IPEndPoint endpoint =
       openscreen_platform::ToNetEndPoint(local_endpoint_);
   int result = udp_socket_.Open(endpoint.GetFamily());
-  if (result == net::OK) {
-    result = udp_socket_.Bind(endpoint);
+  if (result != net::OK) {
+    SendErrorToClient(openscreen::Error::Code::kSocketBindFailure, result);
+    return;
   }
+
+  result = udp_socket_.Bind(endpoint);
   net::IPEndPoint local_endpoint;
   if (result == net::OK) {
     result = udp_socket_.GetLocalAddress(&local_endpoint);
@@ -144,9 +138,8 @@ void NetUdpSocket::Bind() {
   }
 
   local_endpoint_ = openscreen_platform::ToOpenScreenEndPoint(local_endpoint);
-  if (RunClientCallback([this](Client& client) { client.OnBound(this); })) {
-    DoRead();
-  }
+  client_->OnBound(this);
+  DoRead();
 }
 
 void NetUdpSocket::SetMulticastOutboundInterface(
@@ -177,25 +170,17 @@ void NetUdpSocket::SendMessage(openscreen::ByteView data,
   DVLOG(3) << __func__;
 
   if (send_pending_) {
-    RunClientCallback([this](Client& client) {
-      client.OnSendError(this,
+    client_->OnSendError(this,
                          openscreen::Error(openscreen::Error::Code::kAgain));
-    });
     return;
   }
 
   auto buffer = base::MakeRefCounted<net::IOBufferWithSize>(data.size());
   UNSAFE_TODO(memcpy(buffer->data(), data.data(), data.size()));
 
-  base::WeakPtr<NetUdpSocket> weak_this = weak_ptr_factory_.GetWeakPtr();
   const int result = udp_socket_.SendTo(
       buffer.get(), data.size(), openscreen_platform::ToNetEndPoint(dest),
-      base::BindOnce(&NetUdpSocket::OnSendToCompleted,
-                     weak_ptr_factory_.GetWeakPtr()));
-  if (!weak_this) {
-    return;
-  }
-
+      base::BindOnce(&NetUdpSocket::OnSendToCompleted, base::Unretained(this)));
   send_pending_ = true;
 
   if (result != net::ERR_IO_PENDING) {

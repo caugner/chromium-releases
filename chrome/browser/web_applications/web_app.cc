@@ -31,7 +31,8 @@
 #include "build/build_config.h"
 #include "chrome/browser/web_applications/generated_icon_fix_util.h"
 #include "chrome/browser/web_applications/isolated_web_apps/isolation_data.h"
-#include "chrome/browser/web_applications/mojom/user_display_mode.mojom-data-view.h"
+#include "chrome/browser/web_applications/model/display_override.h"
+#include "chrome/browser/web_applications/mojom/user_display_mode.mojom-shared.h"
 #include "chrome/browser/web_applications/proto/web_app.equal.h"
 #include "chrome/browser/web_applications/proto/web_app.ostream.h"
 #include "chrome/browser/web_applications/proto/web_app.pb.h"
@@ -275,8 +276,14 @@ WebApp::WebApp(const webapps::ManifestId& manifest_id,
       << manifest_id_.spec() << " vs " << start_url_.spec();
   CHECK(url::IsSameOriginWith(start_url_, scope_))
       << start_url_.spec() << " vs " << scope_.spec();
-  CHECK(!scope_.has_ref() && !scope_.has_query());
   CHECK(!manifest_id_.has_ref());
+
+  // Must drop the fragments and queries per `scope` rules
+  // https://w3c.github.io/manifest/#scope-member
+  GURL::Replacements replacements;
+  replacements.ClearRef();
+  replacements.ClearQuery();
+  scope_ = scope.ReplaceComponents(replacements);
   CHECK(base::StartsWith(start_url_.spec(), scope_.spec(),
                          base::CompareCase::SENSITIVE))
       << "Start URL " << start_url_ << " must be nested in scope " << scope_;
@@ -507,7 +514,7 @@ void WebApp::SetUserDisplayMode(mojom::UserDisplayMode user_display_mode) {
 }
 
 void WebApp::SetDisplayModeOverride(
-    std::vector<DisplayMode> display_mode_override) {
+    std::vector<DisplayOverride> display_mode_override) {
   display_mode_override_ = std::move(display_mode_override);
 }
 
@@ -889,6 +896,44 @@ void WebApp::SetStoredTrustedIconSizes(IconPurpose purpose,
   }
 }
 
+namespace {
+void ValidateMigrationSources(
+    const std::vector<proto::WebAppMigrationSource>& sources) {
+  for (const auto& source : sources) {
+    GURL manifest_id(source.manifest_id());
+    CHECK(manifest_id.is_valid());
+    CHECK(!url::Origin::Create(manifest_id).opaque());
+    if (source.has_install_url()) {
+      GURL install_url(source.install_url());
+      CHECK(install_url.is_valid());
+      CHECK(url::IsSameOriginWith(manifest_id, install_url));
+    }
+  }
+}
+}  // namespace
+
+void WebApp::SetUnvalidatedMigrationSources(
+    std::vector<proto::WebAppMigrationSource> sources) {
+  ValidateMigrationSources(sources);
+  unvalidated_migration_sources_ = std::move(sources);
+}
+
+void WebApp::SetValidatedMigrationSources(
+    std::vector<proto::WebAppMigrationSource> sources) {
+  ValidateMigrationSources(sources);
+  validated_migration_sources_ = std::move(sources);
+}
+
+void WebApp::SetPendingMigrationInfo(
+    std::vector<proto::PendingMigrationInfo> info) {
+  for (const auto& entry : info) {
+    GURL manifest_id(entry.manifest_id());
+    CHECK(manifest_id.is_valid());
+    CHECK(!url::Origin::Create(manifest_id).opaque());
+  }
+  pending_migration_info_ = std::move(info);
+}
+
 void WebApp::SetInstalledBy(InstalledByPassKey,
                             std::deque<AppInstalledBy> installed_by) {
   for (const AppInstalledBy& data : installed_by) {
@@ -1069,7 +1114,10 @@ bool WebApp::operator==(const WebApp& other) const {
         app.trusted_icons_,
         app.stored_trusted_icon_sizes_any_,
         app.stored_trusted_icon_sizes_maskable_,
-        app.installed_by_
+        app.installed_by_,
+        app.unvalidated_migration_sources_,
+        app.validated_migration_sources_,
+        app.pending_migration_info_
         // clang-format on
     );
   };
@@ -1129,11 +1177,9 @@ base::Value WebApp::AsDebugValueWithOnlyPlatformAgnosticFields() const {
 
   root.Set("display_mode", blink::DisplayModeToString(display_mode_));
 
-  base::Value::List display_override;
-  for (const DisplayMode& mode : display_mode_override_) {
-    display_override.Append(blink::DisplayModeToString(mode));
-  }
-  root.Set("display_override", std::move(display_override));
+  root.Set("display_override",
+           base::ToValueList(display_mode_override_,
+                             &DisplayOverride::ToDebugValue));
 
   base::Value::Dict downloaded_icon_sizes_json;
   for (IconPurpose purpose : kIconPurposes) {
@@ -1243,8 +1289,6 @@ base::Value WebApp::AsDebugValueWithOnlyPlatformAgnosticFields() const {
 
   root.Set("start_url", base::ToString(start_url_));
 
-  root.Set("sync_proto", syncer::WebAppSpecificsToValue(sync_proto_));
-
   root.Set("theme_color", ColorToString(theme_color_));
 
   root.Set("manifest_id", manifest_id_.spec());
@@ -1297,6 +1341,22 @@ base::Value WebApp::AsDebugValueWithOnlyPlatformAgnosticFields() const {
   }
   root.Set("installed_by", std::move(installed_by_list));
 
+  root.Set("unvalidated_migration_sources",
+           base::ToValueList(unvalidated_migration_sources_,
+                             [](const proto::WebAppMigrationSource& source) {
+                               return proto::ToValue(source);
+                             }));
+  root.Set("validated_migration_sources",
+           base::ToValueList(validated_migration_sources_,
+                             [](const proto::WebAppMigrationSource& source) {
+                               return proto::ToValue(source);
+                             }));
+  root.Set("pending_migration_info",
+           base::ToValueList(pending_migration_info_,
+                             [](const proto::PendingMigrationInfo& info) {
+                               return proto::ToValue(info);
+                             }));
+
   base::Value::Dict stored_trusted_icon_sizes_json;
   for (IconPurpose purpose : kIconPurposes) {
     // There can never be trusted monochrome icons.
@@ -1323,6 +1383,8 @@ base::Value WebApp::AsDebugValue() const {
   root.Set("chromeos_data", OptionalAsDebugValue(chromeos_data_));
 
   root.Set("client_data", client_data_.AsDebugValue());
+
+  root.Set("sync_proto", syncer::WebAppSpecificsToValue(sync_proto_));
 
   // The user_display_mode getter CHECK fails if sync_proto_ isn't initialized.
   if (sync_proto_.has_start_url()) {

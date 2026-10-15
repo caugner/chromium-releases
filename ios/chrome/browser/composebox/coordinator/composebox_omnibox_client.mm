@@ -196,7 +196,7 @@ void ComposeboxOmniboxClient::ProcessExtensionMatch(
 
 void ComposeboxOmniboxClient::OnFocusChanged(OmniboxFocusState state,
                                              OmniboxFocusChangeReason reason) {
-  // TODO(crbug.com/40534385): OnFocusChanged is not the correct place to be
+  // TODO(crbug.com/467566659): OnFocusChanged is not the correct place to be
   // canceling prerenders, but this is the closest match to the original
   // location of this code, which was in OmniboxViewIOS::OnDidEndEditing().  The
   // goal of this code is to cancel prerenders when the omnibox loses focus.
@@ -354,6 +354,8 @@ base::WeakPtr<OmniboxClient> ComposeboxOmniboxClient::AsWeakPtr() {
   return weak_factory_.GetWeakPtr();
 }
 
-omnibox::ChromeAimToolsAndModels ComposeboxOmniboxClient::AimToolMode() const {
-  return [delegate_ composeboxToolMode];
+omnibox::InputState ComposeboxOmniboxClient::GetInputState() const {
+  omnibox::InputState input_state;
+  input_state.active_tool = [delegate_ composeboxToolMode];
+  return input_state;
 }

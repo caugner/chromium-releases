@@ -29,8 +29,8 @@
 #include "chrome/common/renderer_configuration.mojom.h"
 #include "components/file_access/scoped_file_access.h"
 #include "components/guest_view/buildflags/buildflags.h"
+#include "components/on_device_translation/buildflags/buildflags.h"
 #include "components/safe_browsing/buildflags.h"
-#include "components/services/on_device_translation/buildflags/buildflags.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/digital_identity_provider.h"
@@ -281,6 +281,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   std::vector<url::Origin> GetOriginsRequiringDedicatedProcess() override;
   void WillComputeSiteForNavigation(content::BrowserContext* browser_context,
                                     const GURL& url) override;
+  bool IsAndroidAdvancedProtectionEnabled() override;
   bool ShouldEnableStrictSiteIsolation() override;
   std::optional<bool> GetOverrideValueForOriginKeyedProcesses() override;
   bool ShouldDisableSiteIsolation(
@@ -435,12 +436,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::BrowserContext* browser_context,
       const url::Origin& top_frame_origin,
       const url::Origin& reporting_origin) override;
-  bool IsCookieDeprecationLabelAllowed(
-      content::BrowserContext* browser_context) override;
-  bool IsCookieDeprecationLabelAllowedForContext(
-      content::BrowserContext* browser_context,
-      const url::Origin& top_frame_origin,
-      const url::Origin& context_origin) override;
   bool IsFullCookieAccessAllowed(
       content::BrowserContext* browser_context,
       content::WebContents* web_contents,
@@ -616,7 +611,9 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   void RegisterBrowserInterfaceBindersForFrame(
       content::RenderFrameHost* render_frame_host,
       mojo::BinderMapWithContext<content::RenderFrameHost*>* map) override;
-  void RegisterWebUIInterfaceBrokers(
+  void RegisterTrustedWebUIInterfaceBrokers(
+      content::WebUIBrowserInterfaceBrokerRegistry& registry) override;
+  void RegisterUntrustedWebUIInterfaceBrokers(
       content::WebUIBrowserInterfaceBrokerRegistry& registry) override;
   void RegisterMojoBinderPoliciesForSameOriginPrerendering(
       content::MojoBinderPolicyMap& policy_map) override;
@@ -634,8 +631,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::RenderFrameHost& render_frame_host,
       blink::AssociatedInterfaceRegistry& associated_registry) override;
   void BindGpuHostReceiver(mojo::GenericPendingReceiver receiver) override;
-  void BindUtilityHostReceiver(const std::string& service_name,
-                               mojo::GenericPendingReceiver receiver) override;
+  void BindUtilityHostReceiver(mojo::GenericPendingReceiver receiver) override;
   void BindHostReceiverForRenderer(
       content::RenderProcessHost* render_process_host,
       mojo::GenericPendingReceiver receiver) override;
@@ -852,8 +848,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   void OnNetworkServiceDataUseUpdate(
       content::GlobalRenderFrameHostId render_frame_host_id,
       int32_t network_traffic_annotation_id_hash,
-      int64_t recv_bytes,
-      int64_t sent_bytes) override;
+      base::ByteSize recv_bytes,
+      base::ByteSize sent_bytes) override;
   base::FilePath GetSandboxedStorageServiceDataDirectory() override;
   bool ShouldSandboxAudioService() override;
   bool ShouldSandboxNetworkService() override;
@@ -867,8 +863,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
 
   std::string GetProduct() override;
   std::string GetUserAgent() override;
-  std::string GetUserAgentBasedOnPolicy(
-      content::BrowserContext* context) override;
   blink::UserAgentMetadata GetUserAgentMetadata() override;
 
   std::optional<gfx::ImageSkia> GetProductLogo() override;
@@ -1010,10 +1004,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   CreateAnchorElementPreconnectDelegate(
       content::RenderFrameHost& render_frame_host) override;
 
-  std::unique_ptr<content::SpeculationHostDelegate>
-  CreateSpeculationHostDelegate(
-      content::RenderFrameHost& render_frame_host) override;
-
   std::unique_ptr<content::PrefetchServiceDelegate>
   CreatePrefetchServiceDelegate(
       content::BrowserContext* browser_context) override;
@@ -1058,12 +1048,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   bool IsThirdPartyStoragePartitioningAllowed(
       content::BrowserContext* browser_context,
       const url::Origin& top_level_origin) override;
-
-  bool IsUnpartitionedStorageAccessAllowedByUserPreference(
-      content::BrowserContext* browser_context,
-      const GURL& url,
-      const net::SiteForCookies& site_for_cookies,
-      const url::Origin& top_frame_origin) override;
 
   bool AreDeprecatedAutomaticBeaconCredentialsAllowed(
       content::BrowserContext* browser_context,
@@ -1216,6 +1200,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
 
   std::optional<bool> GetOverrideValueForStaticStorageQuota(
       content::BrowserContext* browser_context) override;
+
+  std::string GetDnsTxtResolverUrlPrefix() override;
 
  protected:
   static bool HandleWebUI(GURL* url, content::BrowserContext* browser_context);

@@ -237,8 +237,7 @@ class WaylandEventSource : public PlatformEventSource,
   gfx::Vector2dF ComputeFlingVelocity();
 
   // Wrap up method to support async pointer down/up event processing.
-  void OnPointerButtonEventInternal(base::WeakPtr<WaylandWindow> window,
-                                    EventType type);
+  void OnPointerButtonEventInternal(WaylandWindow* window, EventType type);
 
   // Wrap up method to support async touch release processing.
   void OnTouchReleaseInternal(PointerId id);

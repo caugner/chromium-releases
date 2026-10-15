@@ -12,18 +12,22 @@
 #include "chrome/browser/glic/widget/glic_window_controller.h"
 #include "chrome/browser/status_icons/status_icon_menu_model.h"
 #include "chrome/browser/status_icons/status_icon_observer.h"
-#include "chrome/browser/ui/browser_list_observer.h"
+#include "chrome/browser/ui/browser_window/public/browser_collection_observer.h"
 
 #if BUILDFLAG(IS_WIN)
 #include "base/win/registry.h"
+#endif  // BUILDFLAG(IS_WIN)
+
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS)
 #include "ui/native_theme/native_theme.h"
 #include "ui/native_theme/native_theme_observer.h"
-#endif
+#endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS)
 
 class StatusIcon;
 class StatusIconMenuModel;
 class StatusTray;
-class Browser;
+class BrowserWindowInterface;
+class GlobalBrowserCollection;
 
 namespace glic {
 
@@ -35,10 +39,10 @@ class GlicController;
 // status icon being clicked or menu item being triggered.
 class GlicStatusIcon : public StatusIconObserver,
                        public StatusIconMenuModel::Delegate,
-#if BUILDFLAG(IS_WIN)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS)
                        public ui::NativeThemeObserver,
 #endif
-                       public BrowserListObserver,
+                       public BrowserCollectionObserver,
                        public GlicProfileManager::Observer,
                        public GlicWindowController::StateObserver {
  public:
@@ -51,13 +55,14 @@ class GlicStatusIcon : public StatusIconObserver,
   // StatusIconMenuModel::Delegate:
   void ExecuteCommand(int command_id, int event_flags) override;
 
-#if BUILDFLAG(IS_WIN)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS)
+  // ui::NativeThemeObserver
   void OnNativeThemeUpdated(ui::NativeTheme* observed_theme) override;
-#endif
+#endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS)
 
-  // BrowserListObserver:
-  void OnBrowserAdded(Browser* browser) override;
-  void OnBrowserRemoved(Browser* browser) override;
+  // BrowserCollectionObserver:
+  void OnBrowserCreated(BrowserWindowInterface* browser) override;
+  void OnBrowserClosed(BrowserWindowInterface* browser) override;
 
   // GlicProfileManager::Observer
   void OnLastActiveGlicProfileChanged(Profile* profile) override;
@@ -85,7 +90,9 @@ class GlicStatusIcon : public StatusIconObserver,
 
   // System light/dark mode registry key.
   base::win::RegKey hkcu_themes_regkey_;
+#endif  // BUILDFLAG(IS_WIN)
 
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS)
   // Theme change observer. Used only if registry key cannot be opened.
   base::ScopedObservation<ui::NativeTheme, ui::NativeThemeObserver>
       native_theme_observer_{this};
@@ -95,7 +102,7 @@ class GlicStatusIcon : public StatusIconObserver,
   bool in_dark_mode_ =
       ui::NativeTheme::GetInstanceForNativeUi()->preferred_color_scheme() ==
       ui::NativeTheme::PreferredColorScheme::kDark;
-#endif
+#endif  // BUILDFLAG(IS_WIN) ||  BUILDFLAG(IS_CHROMEOS)
 
   raw_ptr<GlicController> controller_;
 
@@ -104,6 +111,8 @@ class GlicStatusIcon : public StatusIconObserver,
   base::ScopedObservation<GlicWindowController,
                           GlicWindowController::StateObserver>
       panel_state_observer_{this};
+  base::ScopedObservation<GlobalBrowserCollection, BrowserCollectionObserver>
+      browser_collection_observation_{this};
 
   raw_ptr<StatusTray> status_tray_;
   raw_ptr<StatusIcon> status_icon_;

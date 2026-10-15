@@ -12,7 +12,6 @@
 
 #include "base/callback_list.h"
 #include "base/check.h"
-#include "base/containers/contains.h"
 #include "base/dcheck_is_on.h"
 #include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
@@ -59,7 +58,7 @@ class ElementTracker::ElementData {
   ElementContext context() const { return context_; }
 
   bool HasElement(const TrackedElement* element) const {
-    return base::Contains(element_lookup_, element);
+    return element_lookup_.contains(element);
   }
 
   bool empty() const {
@@ -93,8 +92,7 @@ class ElementTracker::ElementData {
     return custom_event_callbacks_.Add(callback);
   }
 
-  void NotifyElementShown(
-      const raw_ptr<TrackedElement, CtnExperimental>& element) {
+  void NotifyElementShown(raw_ptr<TrackedElement, CtnExperimental>& element) {
     DCHECK(element);
     DCHECK_EQ(identifier(), element->identifier());
     // Zero context data is the "all contexts" entry and doesn't actually store
@@ -110,14 +108,13 @@ class ElementTracker::ElementData {
   }
 
   void NotifyElementActivated(
-      const raw_ptr<TrackedElement, CtnExperimental>& element) {
+      raw_ptr<TrackedElement, CtnExperimental>& element) {
     // Note: "All contexts" does not require the element to be present here.
-    DCHECK(!context_ || base::Contains(element_lookup_, element));
+    DCHECK(!context_ || element_lookup_.contains(element));
     activated_callbacks_.Notify(element);
   }
 
-  void NotifyElementHidden(
-      const raw_ptr<TrackedElement, CtnExperimental>& element) {
+  void NotifyElementHidden(TrackedElement* element) {
     if (context_) {
       const auto it = element_lookup_.find(element);
       CHECK(it != element_lookup_.end());
@@ -127,8 +124,7 @@ class ElementTracker::ElementData {
     hidden_callbacks_.Notify(element);
   }
 
-  void NotifyCustomEvent(
-      const raw_ptr<TrackedElement, CtnExperimental>& element) {
+  void NotifyCustomEvent(TrackedElement* element) {
     custom_event_callbacks_.Notify(element);
   }
 

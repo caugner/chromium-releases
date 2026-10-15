@@ -62,8 +62,6 @@ constexpr gfx::Size kDefaultSize(640, 480);
 // Maximum number of buffers that we will queue in |pending_buffers_|.
 constexpr int32_t kMaxPendingBuffers = 8;
 
-std::optional<base::TimeDelta> g_init_timeout_for_testing;
-
 // Maximum number of timestamps that will be maintained in |decode_timestamps_|.
 // Really only needs to be a bit larger than the maximum reorder distance (which
 // is presumably 0 for WebRTC), but being larger doesn't hurt much.
@@ -238,9 +236,6 @@ class RTCVideoDecoderAdapter::Impl {
   void DecodePendingBuffers();
   void OnDecodeDone(media::DecoderStatus status);
   void OnOutput(scoped_refptr<media::VideoFrame> frame);
-  void OnInitializeDone(CrossThreadOnceFunction<void(bool)> init_cb,
-                        media::VideoDecoderType* decoder_type,
-                        media::DecoderStatus status);
 
   const raw_ptr<media::GpuVideoAcceleratorFactories> gpu_factories_;
   const scoped_refptr<WebRtcVideoFrameAdapter::SharedResources>
@@ -298,26 +293,20 @@ void RTCVideoDecoderAdapter::Impl::Initialize(
   media::VideoDecoder::OutputCB output_cb =
       ConvertToBaseRepeatingCallback(CrossThreadBindRepeating(
           &RTCVideoDecoderAdapter::Impl::OnOutput, weak_decoder_this_));
-  // Safe to use CrossThreadUnretained(decoder_type) because `decoder_type`
-  // points to the `RTCVideoDecoderAdapter::decoder_type_` member variable,
-  // which is guaranteed to outlive `Impl` since the adapter's destructor
-  // blocks synchronously on the media thread while destroying `Impl` in
-  // `Release()`.
   video_decoder_->Initialize(
-      config, /*low_delay=*/true, /*cdm_context=*/nullptr,
-      ConvertToBaseOnceCallback(CrossThreadBindOnce(
-          &RTCVideoDecoderAdapter::Impl::OnInitializeDone, weak_decoder_this_,
-          std::move(init_cb), CrossThreadUnretained(decoder_type))),
+      config, /*low_delay=*/true,
+      /*cdm_context=*/nullptr,
+      base::BindOnce(
+          [](base::OnceCallback<void(bool)> cb,
+             media::VideoDecoderType* decoder_type,
+             media::VideoDecoder* video_decoder, media::DecoderStatus status) {
+            *decoder_type = video_decoder->GetDecoderType();
+            std::move(cb).Run(status.is_ok());
+          },
+          ConvertToBaseOnceCallback(std::move(init_cb)),
+          CrossThreadUnretained(decoder_type),
+          CrossThreadUnretained(video_decoder_.get())),
       output_cb, base::DoNothing());
-}
-
-void RTCVideoDecoderAdapter::Impl::OnInitializeDone(
-    CrossThreadOnceFunction<void(bool)> init_cb,
-    media::VideoDecoderType* decoder_type,
-    media::DecoderStatus status) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(media_sequence_checker_);
-  *decoder_type = video_decoder_->GetDecoderType();
-  std::move(init_cb).Run(status.is_ok());
 }
 
 void RTCVideoDecoderAdapter::Impl::Decode(
@@ -641,8 +630,8 @@ bool RTCVideoDecoderAdapter::InitializeSync(
                               weak_impl_, config, std::move(init_cb),
                               start_time,
                               CrossThreadUnretained(&decoder_type_)))) {
-    if (!async_init_waiter_->TimedWait(
-            g_init_timeout_for_testing.value_or(base::Seconds(10)))) {
+    // TODO(crbug.com/1076817) Remove if a root cause is found.
+    if (!async_init_waiter_->TimedWait(base::Seconds(10))) {
       RecordInitializationLatency(base::TimeTicks::Now() - start_time);
       return false;
     }
@@ -651,7 +640,8 @@ bool RTCVideoDecoderAdapter::InitializeSync(
   }
 
   decoder_info_.implementation_name =
-      "ExternalDecoder (" + media::GetDecoderName(decoder_type_) + ")";
+      "ExternalDecoder (" + std::string(media::GetDecoderName(decoder_type_)) +
+      ")";
   return async_init_result_;
 }
 
@@ -954,11 +944,6 @@ void RTCVideoDecoderAdapter::IncrementCurrentDecoderCountForTesting() {
 
 void RTCVideoDecoderAdapter::DecrementCurrentDecoderCountForTesting() {
   g_num_decoders_--;
-}
-
-void RTCVideoDecoderAdapter::SetInitializeSyncTimeoutForTesting(
-    std::optional<base::TimeDelta> timeout) {
-  g_init_timeout_for_testing = timeout;
 }
 
 }  // namespace blink

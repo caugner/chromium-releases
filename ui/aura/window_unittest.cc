@@ -21,7 +21,6 @@
 #include "cc/trees/layer_tree_frame_sink.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/aura/client/capture_client.h"
-#include "ui/aura/client/cursor_client.h"
 #include "ui/aura/client/focus_change_observer.h"
 #include "ui/aura/client/visibility_client.h"
 #include "ui/aura/client/window_parenting_client.h"
@@ -30,7 +29,6 @@
 #include "ui/aura/scoped_window_event_targeting_blocker.h"
 #include "ui/aura/test/aura_test_base.h"
 #include "ui/aura/test/aura_test_utils.h"
-#include "ui/aura/test/test_cursor_client.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/test/test_windows.h"
 #include "ui/aura/test/window_test_api.h"
@@ -46,7 +44,6 @@
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animation_observer.h"
 #include "ui/compositor/layer_animator.h"
-#include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/compositor/test/layer_animator_test_controller.h"
 #include "ui/compositor/test/test_layers.h"
@@ -60,6 +57,7 @@
 #include "ui/gfx/geometry/skia_conversions.h"
 #include "ui/gfx/geometry/vector2d.h"
 #include "ui/gfx/overlay_transform_utils.h"
+#include "ui/gfx/scoped_animation_duration_scale_mode.h"
 
 DEFINE_UI_CLASS_PROPERTY_TYPE(const char*)
 
@@ -2058,8 +2056,8 @@ TEST_F(WindowTest, DeleteLayoutManagerBeforeOwnedProps) {
 
 TEST_F(WindowTest, SetBoundsInternalShouldCheckTargetBounds) {
   // We cannot short-circuit animations in this test.
-  ui::ScopedAnimationDurationScaleMode test_duration_mode(
-      ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
+  gfx::ScopedAnimationDurationScaleMode test_duration_mode(
+      gfx::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
 
   std::unique_ptr<Window> w1(
       CreateTestWindow({.parent = root_window(), .bounds = {100, 100}}));
@@ -2464,8 +2462,8 @@ TEST_F(WindowObserverTest, WindowBoundsChangedAnimation) {
   const gfx::Rect step_bounds =
       gfx::Tween::RectValueBetween(0.5, initial_bounds, kTargetBounds);
 
-  ui::ScopedAnimationDurationScaleMode scoped_animation_duration_scale_mode(
-      ui::ScopedAnimationDurationScaleMode::NORMAL_DURATION);
+  gfx::ScopedAnimationDurationScaleMode scoped_animation_duration_scale_mode(
+      gfx::ScopedAnimationDurationScaleMode::NORMAL_DURATION);
   ui::ScopedLayerAnimationSettings settings(window->layer()->GetAnimator());
   window->layer()->SetBounds(kTargetBounds);
   ASSERT_EQ(0, window_opacity_info().changed_count);
@@ -2510,8 +2508,8 @@ TEST_F(WindowObserverTest, WindowOpacityChangedAnimation) {
       {.parent = root_window(), .bounds = {100, 100}, .window_id = 1}));
   window->AddObserver(this);
 
-  ui::ScopedAnimationDurationScaleMode scoped_animation_duration_scale_mode(
-      ui::ScopedAnimationDurationScaleMode::NORMAL_DURATION);
+  gfx::ScopedAnimationDurationScaleMode scoped_animation_duration_scale_mode(
+      gfx::ScopedAnimationDurationScaleMode::NORMAL_DURATION);
   ui::ScopedLayerAnimationSettings settings(window->layer()->GetAnimator());
   window->layer()->SetOpacity(0.5f);
   ASSERT_EQ(1, window_opacity_info().changed_count);
@@ -2574,8 +2572,8 @@ TEST_F(WindowObserverTest, SetTransformAnimation) {
       {.parent = root_window(), .bounds = {100, 100}, .window_id = 1}));
   window->AddObserver(this);
 
-  ui::ScopedAnimationDurationScaleMode scoped_animation_duration_scale_mode(
-      ui::ScopedAnimationDurationScaleMode::NORMAL_DURATION);
+  gfx::ScopedAnimationDurationScaleMode scoped_animation_duration_scale_mode(
+      gfx::ScopedAnimationDurationScaleMode::NORMAL_DURATION);
   ui::ScopedLayerAnimationSettings settings(window->layer()->GetAnimator());
   gfx::Transform target_transform;
   target_transform.Skew(10.0, 5.0);
@@ -2614,8 +2612,8 @@ TEST_F(WindowObserverTest, OnWindowLayerRecreatedWithOpacityAnimation) {
   std::unique_ptr<Window> window(CreateTestWindow(
       {.parent = root_window(), .bounds = {100, 100}, .window_id = 1}));
 
-  ui::ScopedAnimationDurationScaleMode scoped_animation_duration_scale_mode(
-      ui::ScopedAnimationDurationScaleMode::NORMAL_DURATION);
+  gfx::ScopedAnimationDurationScaleMode scoped_animation_duration_scale_mode(
+      gfx::ScopedAnimationDurationScaleMode::NORMAL_DURATION);
   ui::ScopedLayerAnimationSettings settings(window->layer()->GetAnimator());
   window->layer()->SetOpacity(0.5);
   EXPECT_TRUE(window->layer()->GetAnimator()->IsAnimatingProperty(
@@ -2638,8 +2636,8 @@ TEST_F(WindowObserverTest, OnWindowLayerRecreatedWithTransformAnimation) {
   std::unique_ptr<Window> window(CreateTestWindow(
       {.parent = root_window(), .bounds = {100, 100}, .window_id = 1}));
 
-  ui::ScopedAnimationDurationScaleMode scoped_animation_duration_scale_mode(
-      ui::ScopedAnimationDurationScaleMode::NORMAL_DURATION);
+  gfx::ScopedAnimationDurationScaleMode scoped_animation_duration_scale_mode(
+      gfx::ScopedAnimationDurationScaleMode::NORMAL_DURATION);
   ui::ScopedLayerAnimationSettings settings(window->layer()->GetAnimator());
   gfx::Transform target_transform;
   target_transform.Skew(10.0, 5.0);
@@ -3085,8 +3083,8 @@ TEST_F(WindowTest, RootWindowSetWhenReparenting) {
   parent1.AddChild(&child);
 
   // We need animations to start in order to observe the bounds changes.
-  ui::ScopedAnimationDurationScaleMode test_duration_mode(
-      ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
+  gfx::ScopedAnimationDurationScaleMode test_duration_mode(
+      gfx::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
   ui::ScopedLayerAnimationSettings settings1(child.layer()->GetAnimator());
   settings1.SetTransitionDuration(base::Milliseconds(100));
   gfx::Rect new_bounds(gfx::Rect(35, 35, 50, 50));
@@ -3250,8 +3248,8 @@ TEST_F(WindowTest, DelegateNotifiedAsBoundsChange) {
   BoundsChangeDelegate delegate;
 
   // We cannot short-circuit animations in this test.
-  ui::ScopedAnimationDurationScaleMode test_duration_mode(
-      ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
+  gfx::ScopedAnimationDurationScaleMode test_duration_mode(
+      gfx::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
 
   std::unique_ptr<Window> window(
       aura::test::CreateTestWindow({.delegate = &delegate,
@@ -3287,8 +3285,8 @@ TEST_F(WindowTest, DelegateNotifiedAsBoundsChangeInHiddenLayer) {
   BoundsChangeDelegate delegate;
 
   // We cannot short-circuit animations in this test.
-  ui::ScopedAnimationDurationScaleMode test_duration_mode(
-      ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
+  gfx::ScopedAnimationDurationScaleMode test_duration_mode(
+      gfx::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
 
   std::unique_ptr<Window> window(
       aura::test::CreateTestWindow({.delegate = &delegate,
@@ -3632,8 +3630,8 @@ class TestLayerAnimationObserver : public ui::LayerAnimationObserver {
 };
 
 TEST_F(WindowTest, WindowDestroyCompletesAnimations) {
-  ui::ScopedAnimationDurationScaleMode test_duration_mode(
-      ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
+  gfx::ScopedAnimationDurationScaleMode test_duration_mode(
+      gfx::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
   scoped_refptr<ui::LayerAnimator> animator =
       ui::LayerAnimator::CreateImplicitAnimator();
   TestLayerAnimationObserver observer;
@@ -3978,8 +3976,8 @@ INSTANTIATE_TEST_SUITE_P(All, WindowActualScreenBoundsTest, testing::Bool());
 // Verifies that the function to get the window's screen bounds works as
 // expected during layer animation.
 TEST_P(WindowActualScreenBoundsTest, VerifyWindowActualBoundsDuringAnimation) {
-  ui::ScopedAnimationDurationScaleMode test_duration_mode(
-      ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
+  gfx::ScopedAnimationDurationScaleMode test_duration_mode(
+      gfx::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
 
   auto* viewport_layer = viewport_->layer();
   gfx::Transform initial_transform;
@@ -4028,106 +4026,6 @@ TEST_P(WindowActualScreenBoundsTest, VerifyWindowActualBoundsDuringAnimation) {
           &WindowActualScreenBoundsTest::OnTranslationAnimationProgressed,
           base::Unretained(this), child_initial_bounds));
   bounds_checker.WaitForAnimationCompletion();
-}
-
-class ReentrantDisplayScreen : public display::Screen {
- public:
-  explicit ReentrantDisplayScreen(display::Screen* original_screen,
-                                  base::RepeatingClosure on_get_display)
-      : original_screen_(original_screen),
-        on_get_display_(std::move(on_get_display)) {
-    set_shutdown(true);
-  }
-
-  ReentrantDisplayScreen(const ReentrantDisplayScreen&) = delete;
-  ReentrantDisplayScreen& operator=(const ReentrantDisplayScreen&) = delete;
-
-  ~ReentrantDisplayScreen() override = default;
-
-  // Overridden from display::Screen:
-  gfx::Point GetCursorScreenPoint() override {
-    return original_screen_->GetCursorScreenPoint();
-  }
-  bool IsWindowUnderCursor(gfx::NativeWindow window) override {
-    return original_screen_->IsWindowUnderCursor(window);
-  }
-  gfx::NativeWindow GetWindowAtScreenPoint(const gfx::Point& point) override {
-    return original_screen_->GetWindowAtScreenPoint(point);
-  }
-  gfx::NativeWindow GetLocalProcessWindowAtPoint(
-      const gfx::Point& point,
-      const std::set<gfx::NativeWindow>& ignore) override {
-    return original_screen_->GetLocalProcessWindowAtPoint(point, ignore);
-  }
-  int GetNumDisplays() const override {
-    return original_screen_->GetNumDisplays();
-  }
-  const std::vector<display::Display>& GetAllDisplays() const override {
-    return original_screen_->GetAllDisplays();
-  }
-  display::Display GetDisplayNearestWindow(
-      gfx::NativeWindow window) const override {
-    on_get_display_.Run();
-    return original_screen_->GetDisplayNearestWindow(window);
-  }
-  display::Display GetDisplayNearestPoint(
-      const gfx::Point& point) const override {
-    return original_screen_->GetDisplayNearestPoint(point);
-  }
-  display::Display GetDisplayMatching(
-      const gfx::Rect& match_rect) const override {
-    return original_screen_->GetDisplayMatching(match_rect);
-  }
-  display::Display GetPrimaryDisplay() const override {
-    return original_screen_->GetPrimaryDisplay();
-  }
-  void AddObserver(display::DisplayObserver* observer) override {
-    original_screen_->AddObserver(observer);
-  }
-  void RemoveObserver(display::DisplayObserver* observer) override {
-    original_screen_->RemoveObserver(observer);
-  }
-
- private:
-  raw_ptr<display::Screen> original_screen_;
-  base::RepeatingClosure on_get_display_;
-};
-
-TEST_F(WindowTest, ScopedCursorHiderCursorClientFreedDuringGetDisplay) {
-  display::Screen* original_screen = display::Screen::Get();
-
-  std::unique_ptr<Window> test_root = std::make_unique<Window>(nullptr);
-  test_root->Init(ui::LAYER_NOT_DRAWN);
-  test_root->set_host(host());
-  test_root->SetBounds(gfx::Rect(0, 0, 800, 600));
-
-  TestCursorClient cursor_client(root_window());
-  client::SetCursorClient(root_window(), nullptr);
-  client::SetCursorClient(test_root.get(), &cursor_client);
-
-  Env::GetInstance()->SetLastMouseLocation(gfx::Point(10, 10));
-
-  cursor_client.ShowCursor();
-  EXPECT_TRUE(cursor_client.IsCursorVisible());
-
-  ReentrantDisplayScreen reentrant_screen(
-      original_screen,
-      base::BindLambdaForTesting([&]() { test_root.reset(); }));
-
-  display::Screen::SetScreenInstance(&reentrant_screen);
-
-  // This call synchronously destroys `test_root` during the nested display
-  // nearest window query. With the fix, the ScopedCursorHider destructor
-  // detects this destruction via `WindowTracker` and avoids dereferencing the
-  // freed `CursorClient` pointer or `test_root`, so this call should complete
-  // without crashing.
-  test_root->OnDeviceScaleFactorChanged(1.0f, 2.0f);
-
-  display::Screen::SetScreenInstance(nullptr);
-  display::Screen::SetScreenInstance(original_screen);
-
-  // Restore cursor client.
-  client::SetCursorClient(root_window(), &cursor_client);
 }
 
 }  // namespace

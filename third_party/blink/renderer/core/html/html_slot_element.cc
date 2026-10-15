@@ -94,8 +94,7 @@ HeapVector<Member<Node>> CollectFlattenedAssignedNodes(
     const HTMLSlotElement& slot) {
   DCHECK(slot.SupportsAssignment());
 
-  // Copy the array - code inside the loop can modify assigned nodes.
-  const HeapVector<Member<Node>> assigned_nodes = slot.AssignedNodes();
+  const HeapVector<Member<Node>>& assigned_nodes = slot.AssignedNodes();
   HeapVector<Member<Node>> nodes;
   if (assigned_nodes.empty()) {
     // Fallback contents.
@@ -200,7 +199,7 @@ void HTMLSlotElement::Assign(const HeapVector<Member<Node>>& nodes) {
 
   HeapLinkedHashSet<WeakMember<Node>> removed_nodes;
   for (Node* node : manually_assigned_nodes_) {
-    if (!base::Contains(added_nodes, node)) {
+    if (!added_nodes.Contains(node)) {
       removed_nodes.insert(node);
     }
   }
@@ -263,8 +262,7 @@ void HTMLSlotElement::ClearAssignedNodesAndFlatTreeChildren() {
 
 void HTMLSlotElement::UpdateFlatTreeNodeDataForAssignedNodes() {
   Node* previous = nullptr;
-  const HeapVector<Member<Node>> assigned_nodes = assigned_nodes_;
-  for (auto& current : assigned_nodes) {
+  for (auto& current : assigned_nodes_) {
     bool mark_parent_slot_changed = false;
     if (!current->NeedsStyleRecalc() && !current->GetLayoutObject()) {
       if (current->IsTextNode() ||
@@ -311,8 +309,7 @@ void HTMLSlotElement::DetachDisplayLockedAssignedNodesLayoutTreeIfNeeded() {
   // detach the node's layout tree.
   StyleEngine& style_engine = GetDocument().GetStyleEngine();
   StyleEngine::DetachLayoutTreeScope detach_scope(style_engine);
-  const HeapVector<Member<Node>> assigned_nodes = assigned_nodes_;
-  for (auto& current : assigned_nodes) {
+  for (auto& current : assigned_nodes_) {
     if (current->GetForceReattachLayoutTree()) {
       current->DetachLayoutTree();
       // Restore the force-reattach state for when it's no longer display
@@ -361,9 +358,7 @@ AtomicString HTMLSlotElement::GetName() const {
 }
 
 void HTMLSlotElement::AttachLayoutTreeForSlotChildren(AttachContext& context) {
-  // Defensive copy to prevent UAF from sync recalc. See crbug.com/520167277.
-  const HeapVector<Member<Node>> flat_tree_children = flat_tree_children_;
-  for (Node* child : flat_tree_children) {
+  for (Node* child : flat_tree_children_) {
     child->AttachLayoutTree(context);
   }
 }
@@ -396,9 +391,7 @@ void HTMLSlotElement::RebuildDistributedChildrenLayoutTrees(
 
   // This loop traverses the nodes from right to left for the same reason as the
   // one described in ContainerNode::RebuildChildrenLayoutTrees().
-  // Defensive copy to prevent UAF from sync recalc. See crbug.com/520167277.
-  const HeapVector<Member<Node>> flat_tree_children = flat_tree_children_;
-  for (const auto& child : base::Reversed(flat_tree_children)) {
+  for (const auto& child : base::Reversed(flat_tree_children_)) {
     RebuildLayoutTreeForChild(child, whitespace_attacher);
   }
 }
@@ -507,9 +500,7 @@ void HTMLSlotElement::RemovedFrom(ContainerNode& insertion_point) {
 void HTMLSlotElement::RecalcStyleForSlotChildren(
     const StyleRecalcChange change,
     const StyleRecalcContext& style_recalc_context) {
-  // Defensive copy to prevent UAF from sync recalc. See crbug.com/520167277.
-  const HeapVector<Member<Node>> flat_tree_children = flat_tree_children_;
-  for (auto& node : flat_tree_children) {
+  for (auto& node : flat_tree_children_) {
     if (!change.TraverseChild(*node))
       continue;
     if (auto* element = DynamicTo<Element>(node.Get()))

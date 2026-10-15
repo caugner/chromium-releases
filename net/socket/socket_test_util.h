@@ -41,6 +41,7 @@
 #include "net/socket/client_socket_pool.h"
 #include "net/socket/datagram_client_socket.h"
 #include "net/socket/socket_performance_watcher.h"
+#include "net/socket/socket_pool_additional_capacity.h"
 #include "net/socket/socket_tag.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/socket/transport_client_socket.h"
@@ -446,12 +447,6 @@ class SocketDataProvider {
   MockConnect connect_data() const { return connect_; }
   void set_connect_data(const MockConnect& connect) { connect_ = connect; }
 
-  // Makes IsConnected() start returning false for any socket using `this`,
-  // without any read or write error. Useful for simulating cases where an
-  // IsConnected() call is the first time a socket is revealed to be closed.
-  void set_silently_closed() { silently_closed_ = true; }
-  bool silently_closed() const { return silently_closed_; }
-
  private:
   // Called to inform subclasses of initialization.
   virtual void Reset() = 0;
@@ -463,8 +458,6 @@ class SocketDataProvider {
   int send_buffer_size_ = -1;
   // This reflects the default state of TCPClientSockets.
   bool no_delay_ = true;
-
-  bool silently_closed_ = false;
 
   KeepAliveState keep_alive_state_ = KeepAliveState::kDefault;
   int keep_alive_delay_ = 0;
@@ -1557,6 +1550,20 @@ bool CanGetTaggedBytes();
 // |expected_tag| for our UID.  Return the count of received bytes.
 uint64_t GetTaggedBytes(int32_t expected_tag);
 #endif
+
+// This should be kept in sync with the field trial config's default pool.
+const SocketPoolAdditionalCapacity kFieldTrialPool =
+    SocketPoolAdditionalCapacity::CreateForTest(0.000001, 256, 0.01, 0.2);
+
+// The goal of this test is to walk a pool back and forth between being
+// capped and uncapped, tracking at what point the transition occurs
+// and using that data to validate expected behavior. We take this walk
+// about 100 times as there is randomization in the transition points.
+void ValidateAdditionalCapacityForSocketPool(
+    base::RepeatingCallback<SocketPoolState()> request_socket,
+    base::RepeatingCallback<void()> wait_for_socket_initialization,
+    base::RepeatingCallback<SocketPoolState()> release_socket,
+    base::RepeatingCallback<size_t()> sockets_in_use);
 
 }  // namespace net
 

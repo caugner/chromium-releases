@@ -175,13 +175,13 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) SandboxFileSystemBackendDelegate
   // Adds an observer for the secified |type| of a file system, bound to
   // |task_runner|.
   virtual void AddFileUpdateObserver(FileSystemType type,
-                                     scoped_refptr<FileUpdateObserver> observer,
+                                     FileUpdateObserver* observer,
                                      base::SequencedTaskRunner* task_runner);
   virtual void AddFileChangeObserver(FileSystemType type,
-                                     scoped_refptr<FileChangeObserver> observer,
+                                     FileChangeObserver* observer,
                                      base::SequencedTaskRunner* task_runner);
   virtual void AddFileAccessObserver(FileSystemType type,
-                                     scoped_refptr<FileAccessObserver> observer,
+                                     FileAccessObserver* observer,
                                      base::SequencedTaskRunner* task_runner);
 
   // Returns observer lists for the specified |type| of a file system.
@@ -274,7 +274,7 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) SandboxFileSystemBackendDelegate
 
   std::unique_ptr<AsyncFileUtil> sandbox_file_util_;
   std::unique_ptr<FileSystemUsageCache> file_system_usage_cache_;
-  const scoped_refptr<SandboxQuotaObserver> quota_observer_;
+  std::unique_ptr<SandboxQuotaObserver> quota_observer_;
   std::unique_ptr<QuotaReservationManager> quota_reservation_manager_;
 
   const scoped_refptr<SpecialStoragePolicy> special_storage_policy_;

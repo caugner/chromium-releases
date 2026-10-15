@@ -4,7 +4,6 @@
 
 #include "chrome/browser/glic/browser_ui/tab_underline_view_controller_impl.h"
 
-#include "base/containers/contains.h"
 #include "base/debug/crash_logging.h"
 #include "chrome/browser/glic/browser_ui/tab_underline_view.h"
 #include "chrome/browser/glic/public/context/glic_sharing_manager.h"
@@ -41,13 +40,15 @@ TabUnderlineViewControllerImpl::~TabUnderlineViewControllerImpl() {
 // conflicting terminology.
 void TabUnderlineViewControllerImpl::Initialize(
     TabUnderlineView* underline_view,
-    Browser* browser) {
+    BrowserWindowInterface* browser_window_interface,
+    tabs::TabHandle tab_handle) {
   underline_view_ = underline_view;
-  browser_ = browser;
+  browser_window_interface_ = browser_window_interface;
+  tab_handle_id_ = tab_handle.raw_value();
 
   if (ShouldUseSignalsForGlicUnderlines()) {
-    glic_service_ =
-        GlicKeyedServiceFactory::GetGlicKeyedService(browser_->GetProfile());
+    glic_service_ = GlicKeyedServiceFactory::GetGlicKeyedService(
+        browser_window_interface_->GetProfile());
 
     GlicSharingManager& sharing_manager = glic_service_->sharing_manager();
 
@@ -83,8 +84,8 @@ void TabUnderlineViewControllerImpl::Initialize(
 
   if (ShouldUseSignalsForContextualTasks()) {
     contextual_tasks::ActiveTaskContextProvider* active_task_context_provider =
-        browser_->browser_window_features()
-            ->contextual_tasks_active_task_context_provider();
+        contextual_tasks::ActiveTaskContextProvider::From(
+            browser_window_interface_);
     contextual_task_observation_.Observe(active_task_context_provider);
   }
 
@@ -110,7 +111,7 @@ void TabUnderlineViewControllerImpl::OnFocusedTabChanged(
   auto* current_focus = glic_current_focused_contents_.get();
 
   base::WeakPtr<content::WebContents> underline_contents;
-  if (auto tab_interface = GetTabInterface()) {
+  if (auto* tab_interface = GetTabInterface()) {
     underline_contents = tab_interface->GetContents()->GetWeakPtr();
   } else {
     return;
@@ -164,30 +165,34 @@ void TabUnderlineViewControllerImpl::OnPinnedTabsChanged(
   if (!GetTabInterface()) {
     // If the TabInterface is invalid at this point, there is no relevant UI
     // to handle.
+    // TODO(crbug.com/469102481): Remove logs after missing underlines cause is
+    // found.
+    VLOG(1) << tab_handle_id_ << " OnPinnedTabsChanged | no TabInterface";
     return;
   }
 
   // Triggering is handled based on whether the tab is in the pinned set.
   if (IsUnderlineTabPinned()) {
+    VLOG(1) << tab_handle_id_ << " OnPinnedTabsChanged | pinned";
     UpdateUnderlineView(
         UpdateUnderlineReason::kPinnedTabsChanged_TabInPinnedSet);
     return;
   }
+  VLOG(1) << tab_handle_id_ << " OnPinnedTabsChanged | not pinned";
   UpdateUnderlineView(
       UpdateUnderlineReason::kPinnedTabsChanged_TabNotInPinnedSet);
 }
 
 void TabUnderlineViewControllerImpl::OnContextTabsChanged(
     const std::set<tabs::TabHandle>& context_tabs) {
-  auto tab_interface = GetTabInterface();
+  auto* tab_interface = GetTabInterface();
   if (!tab_interface) {
     // If the TabInterface is invalid at this point, there is no relevant UI
     // to handle.
     return;
   }
 
-  bool should_underline =
-      base::Contains(context_tabs, tab_interface->GetHandle());
+  bool should_underline = context_tabs.contains(tab_interface->GetHandle());
   UpdateUnderlineView(
       should_underline
           ? UpdateUnderlineReason::kContextualTask_TabInContext
@@ -207,13 +212,12 @@ void TabUnderlineViewControllerImpl::OnUserInputSubmitted() {
   UpdateUnderlineView(UpdateUnderlineReason::kUserInputSubmitted);
 }
 
-base::WeakPtr<tabs::TabInterface>
-TabUnderlineViewControllerImpl::GetTabInterface() {
+tabs::TabInterface* TabUnderlineViewControllerImpl::GetTabInterface() {
   return underline_view_ ? underline_view_->GetTabInterface() : nullptr;
 }
 
 bool TabUnderlineViewControllerImpl::IsUnderlineTabPinned() {
-  if (auto tab_interface = GetTabInterface()) {
+  if (auto* tab_interface = GetTabInterface()) {
     return glic_service_ && glic_service_->sharing_manager().IsTabPinned(
                                 tab_interface->GetHandle());
   }
@@ -225,9 +229,9 @@ bool TabUnderlineViewControllerImpl::IsUnderlineTabSharedThroughActiveFollow() {
     return false;
   }
 
-  if (auto tab_interface = GetTabInterface()) {
+  if (auto* tab_interface = GetTabInterface()) {
     return (glic_service_->sharing_manager().GetFocusedTabData().focus() ==
-            tab_interface.get()) &&
+            tab_interface) &&
            context_access_indicator_enabled_;
   }
   return false;
@@ -245,6 +249,10 @@ void TabUnderlineViewControllerImpl::UpdateUnderlineView(
                         !!glic_current_focused_contents_);
   SCOPED_CRASH_KEY_BOOL("crbug-398319435", "is_glic_window_showing",
                         glic_service_ && IsGlicWindowShowing());
+
+  // TODO(crbug.com/469102481): Remove logs after missing underlines cause is
+  // found.
+  VLOG(1) << tab_handle_id_ << " " << UpdateReasonToString(reason);
 
   switch (reason) {
     case UpdateUnderlineReason::kContextAccessIndicatorOn: {
@@ -397,15 +405,23 @@ void TabUnderlineViewControllerImpl::HideUnderline(bool triggered_by_glic) {
 
   state_ = UnderlineState::kHidden;
 
-  underline_view_->StartRampingDown();
+  if (base::FeatureList::IsEnabled(features::kGlicDisableUnderlineAnimations)) {
+    underline_view_->StopShowing();
+  } else {
+    underline_view_->StartRampingDown();
+  }
 }
 
 void TabUnderlineViewControllerImpl::AnimateUnderline() {
+  if (base::FeatureList::IsEnabled(features::kGlicDisableUnderlineAnimations)) {
+    return;
+  }
+
   if (!underline_view_->IsShowing()) {
     // There is be a chance that the underline view has already stopped showing.
     // In that case, gracefully handle the crash case in crbug.com/398319435 by
     // closing(minimizing) the glic window.
-    glic_service_->window_controller().Close();
+    glic_service_->window_controller().Close({});
   }
 
   underline_view_->ResetAnimationCycle();
@@ -437,7 +453,7 @@ bool TabUnderlineViewControllerImpl::IsGlicWindowShowing() const {
 
 bool TabUnderlineViewControllerImpl::IsTabInCurrentWindow(
     const content::WebContents* tab) const {
-  auto* model = browser_->GetTabStripModel();
+  auto* model = browser_window_interface_->GetTabStripModel();
   CHECK(model);
   int index = model->GetIndexOfWebContents(tab);
   return index != TabStripModel::kNoTab;
@@ -495,7 +511,8 @@ std::string TabUnderlineViewControllerImpl::UpdateReasonsToString() const {
 
 bool TabUnderlineViewControllerImpl::ShouldUseSignalsForGlicUnderlines() {
   return base::FeatureList::IsEnabled(features::kGlicMultitabUnderlines) &&
-         glic::GlicEnabling::IsProfileEligible(browser_->GetProfile());
+         glic::GlicEnabling::IsProfileEligible(
+             browser_window_interface_->GetProfile());
 }
 
 bool TabUnderlineViewControllerImpl::ShouldUseSignalsForContextualTasks() {

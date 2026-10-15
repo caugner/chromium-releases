@@ -12,7 +12,6 @@
 #include "base/memory/weak_ptr.h"
 #include "base/task/sequenced_task_runner_helpers.h"
 #include "content/browser/webui/url_data_manager.h"
-#include "ui/base/template_expressions.h"
 
 namespace content {
 class URLDataManagerBackend;
@@ -56,9 +55,6 @@ class URLDataSourceImpl
   URLDataSource* source() const { return source_.get(); }
 
   virtual bool IsWebUIDataSourceImpl() const;
-
-  // Replacements for i18n or null if no replacements are desired.
-  virtual const ui::TemplateReplacements* GetReplacements() const;
 
  protected:
   virtual ~URLDataSourceImpl();

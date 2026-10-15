@@ -332,23 +332,22 @@ bool DawnCopyStrategy::CopyFromTextureToBacking(wgpu::Texture src_texture,
        plane_index < static_cast<int>(staging_buffers.size()); ++plane_index) {
     const auto& staging_buffer_entry = staging_buffers[plane_index];
 
+    bool success = false;
     wgpu::FutureWaitInfo wait_info = {staging_buffer_entry.buffer.MapAsync(
         wgpu::MapMode::Read, 0, wgpu::kWholeMapSize,
         wgpu::CallbackMode::WaitAnyOnly,
-        [](wgpu::MapAsyncStatus status, wgpu::StringView) {
-          // MapAsync requires a callback, but we don't need to do anything in
-          // it since we check the map state via GetMapState() after waiting.
-        })};
+        [](wgpu::MapAsyncStatus status, wgpu::StringView, bool* success) {
+          *success = status == wgpu::MapAsyncStatus::Success;
+        },
+        &success)};
 
     if (device.GetAdapter().GetInstance().WaitAny(1, &wait_info, UINT64_MAX) !=
         wgpu::WaitStatus::Success) {
       LOG(ERROR) << "WaitAny failed while mapping staging buffer for read.";
-      staging_buffer_entry.buffer.Unmap();
       return false;
     }
 
-    if (!wait_info.completed || staging_buffer_entry.buffer.GetMapState() !=
-                                    wgpu::BufferMapState::Mapped) {
+    if (!wait_info.completed || !success) {
       LOG(ERROR) << "MapAsync did not yield a readable mapping.";
       return false;
     }

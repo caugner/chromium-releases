@@ -42,7 +42,6 @@
 #include <memory>
 #include <vector>
 
-#include "base/containers/span.h"
 #include "components/speech/endpointer/energy_endpointer_params.h"
 
 namespace speech {
@@ -86,7 +85,8 @@ class EnergyEndpointer {
   // Computes the next input frame and modifies EnergyEndpointer status as
   // appropriate based on the computation.
   void ProcessAudioFrame(int64_t time_us,
-                         base::span<const int16_t> samples,
+                         const int16_t* samples,
+                         int num_samples,
                          float* rms_out);
 
   // Returns the current state of the EnergyEndpointer and the time

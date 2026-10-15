@@ -75,7 +75,6 @@
 #include "third_party/blink/renderer/core/layout/layout_inline.h"
 #include "third_party/blink/renderer/core/layout/layout_text.h"
 #include "third_party/blink/renderer/core/layout/layout_text_combine.h"
-#include "third_party/blink/renderer/core/patching/patch_supplement.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/core/timing/soft_navigation_heuristics.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
@@ -188,12 +187,6 @@ void ContainerNode::ParserTakeAllChildrenFrom(ContainerNode& old_parent) {
   }
 }
 
-void ContainerNode::ParserRemoveAllChildren() {
-  while (Node* child = firstChild()) {
-    ParserRemoveChild(*child);
-  }
-}
-
 void ContainerNode::ParserReplaceChild(Node& new_child, Node& old_child) {
   CHECK_EQ(old_child.parentNode(), this);
   Node* next = old_child.nextSibling();
@@ -276,20 +269,6 @@ bool ContainerNode::EnsurePreInsertionValidity(
     }
   }
 
-  // Node::ConvertNodeUnionsIntoNodes behaves differently depending on
-  // whether there is one node or more than one, since it simulates
-  // insertion into a DocumentFragment for the latter case.  If it handled
-  // more than one node, then it already removed the children from their old
-  // parent.  Check here that those removals didn't do anything bad.  (We
-  // could potentially make this faster by using a DOMMutationDetector in
-  // ConvertNodeUnionsIntoNodes and storing whether we need to do this.)
-  if (new_children && new_children->size() != 1u &&
-      RuntimeEnabledFeatures::RecheckParentDuringNodeVectorInsertionEnabled() &&
-      !RecheckNodeInsertionStructuralPrereq(*new_children, next,
-                                            exception_state)) {
-    return false;
-  }
-
   if (auto* document = DynamicTo<Document>(this)) {
     // Step 2 is unnecessary. No one can have a Document child.
     // Step 3:
@@ -362,7 +341,7 @@ bool ContainerNode::EnsurePreInsertionValidity(
 bool ContainerNode::RecheckNodeInsertionStructuralPrereq(
     const NodeVector& new_children,
     const Node* next,
-    ExceptionState& exception_state) const {
+    ExceptionState& exception_state) {
   for (const auto& child : new_children) {
     if (child->parentNode()) {
       // A new child was added to another parent before adding to this
@@ -402,10 +381,20 @@ void ContainerNode::InsertNodeVector(
       Node& child = *target_node;
       mutator(*this, child, next);
       ChildListMutationScope(*this).ChildAdded(child);
-      if (GetDocument().MayContainShadowRoots())
-        child.CheckSlotChangeAfterInserted();
-      probe::DidInsertDOMNode(&child);
-      NotifyNodeInsertedInternal(child, post_insertion_notification_targets);
+      if (RuntimeEnabledFeatures::
+              SendSlotChangeSignalAfterNodeInsertedEnabled()) {
+        probe::DidInsertDOMNode(&child);
+        NotifyNodeInsertedInternal(child, post_insertion_notification_targets);
+        if (GetDocument().MayContainShadowRoots()) {
+          child.CheckSlotChangeAfterInserted();
+        }
+      } else {
+        if (GetDocument().MayContainShadowRoots()) {
+          child.CheckSlotChangeAfterInserted();
+        }
+        probe::DidInsertDOMNode(&child);
+        NotifyNodeInsertedInternal(child, post_insertion_notification_targets);
+      }
     }
   }
 }
@@ -1922,54 +1911,21 @@ String ContainerNode::getHTML(const GetHTMLOptions* options,
                       shadow_root_inclusion);
 }
 
-WritableStream* ContainerNode::patchSelf(ScriptState* script_state,
-                                         ExceptionState& exception_state) {
-  if (!IsElementNode() && !parentElement()) {
-    exception_state.ThrowDOMException(
-        DOMExceptionCode::kHierarchyRequestError,
-        "Patching an orphan DocumentFragment is not allowed");
-    return nullptr;
-  }
-  return PatchSupplement::From(GetDocument())
-      ->CreateSinglePatchStream(script_state, *this, /*previous_child=*/nullptr,
-                                /*next_child=*/nullptr);
-}
-
-WritableStream* ContainerNode::patchAfter(ScriptState* script_state,
-                                          Node* a,
-                                          ExceptionState& exception_state) {
-  return patchBetween(script_state, a, nullptr, exception_state);
-}
-
 WritableStream* ContainerNode::streamAppendHTMLUnsafe(
     ScriptState* script_state,
     ExceptionState& exception_state) {
   return HTMLStream::Create(script_state, this, exception_state);
 }
 
-WritableStream* ContainerNode::patchBefore(ScriptState* script_state,
-                                           Node* b,
-                                           ExceptionState& exception_state) {
-  return patchBetween(script_state, nullptr, b, exception_state);
-}
-WritableStream* ContainerNode::patchBetween(ScriptState* script_state,
-                                            Node* a,
-                                            Node* b,
-                                            ExceptionState& exception_state) {
-  if ((a && a->parentNode() != this) || (b && b->parentNode() != this)) {
-    exception_state.ThrowDOMException(
-        DOMExceptionCode::kHierarchyRequestError,
-        "Reference nodes have to be children of the target node when patching");
-    return nullptr;
+WritableStream* ContainerNode::streamHTMLUnsafe(
+    ScriptState* script_state,
+    ExceptionState& exception_state) {
+  WritableStream* stream =
+      HTMLStream::Create(script_state, this, exception_state);
+  if (!exception_state.HadException()) {
+    RemoveChildren();
   }
-
-  return PatchSupplement::From(GetDocument())
-      ->CreateSinglePatchStream(script_state, *this, a, b);
-}
-
-WritableStream* ContainerNode::patchAll(ScriptState* script_state) {
-  return PatchSupplement::From(GetDocument())
-      ->CreateSubtreePatchStream(script_state, *this);
+  return stream;
 }
 
 }  // namespace blink

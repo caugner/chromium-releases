@@ -9,7 +9,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/location.h"
@@ -211,14 +210,7 @@ void PaymentRequestState::OnDoneCreatingPaymentApps() {
       [](const auto& app) { return app->HasEnrolledInstrument(); });
   are_requested_methods_supported_ |= !available_apps_.empty();
   NotifyOnGetAllPaymentAppsFinished();
-
-  // NotifyInitialized() can synchronously trigger observers that destroy the
-  // payment window's WebContents and delete `this`.
-  auto weak_this = weak_ptr_factory_.GetWeakPtr();
   NotifyInitialized();
-  if (!weak_this) {
-    return;
-  }
 
   // Fulfill the pending CanMakePayment call.
   if (can_make_payment_callback_)
@@ -358,8 +350,8 @@ void PaymentRequestState::CheckRequestedMethodsSupported(
 
   if (!are_requested_methods_supported_ &&
       get_all_payment_apps_error_.empty() &&
-      base::Contains(spec_->payment_method_identifiers_set(),
-                     methods::kGooglePlayBilling) &&
+      spec_->payment_method_identifiers_set().contains(
+          methods::kGooglePlayBilling) &&
       !IsInTwa()) {
     get_all_payment_apps_error_ = errors::kAppStoreMethodOnlySupportedInTwa;
   }

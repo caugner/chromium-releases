@@ -124,6 +124,7 @@
 #include "third_party/blink/public/mojom/drag/drag.mojom.h"
 #include "third_party/blink/public/mojom/frame/intrinsic_sizing_info.mojom.h"
 #include "third_party/blink/public/mojom/input/touch_event.mojom.h"
+#include "third_party/perfetto/include/perfetto/tracing/track_event_args.h"
 #include "ui/accessibility/platform/browser_accessibility_manager.h"
 #include "ui/base/clipboard/clipboard_constants.h"
 #include "ui/base/cursor/cursor.h"
@@ -394,6 +395,7 @@ RenderWidgetHostImpl::RenderWidgetHostImpl(
       last_view_screen_rect_(kInvalidScreenRect),
       last_window_screen_rect_(kInvalidScreenRect),
       new_content_rendering_delay_(blink::kNewContentRenderingDelay),
+      hung_renderer_delay_(input::features::kRendererHangWatcherDelay.Get()),
       render_frame_metadata_provider_(
 #if BUILDFLAG(IS_MAC)
           ui::WindowResizeHelperMac::Get()->task_runner()
@@ -836,10 +838,8 @@ void RenderWidgetHostImpl::SetIsLoading(bool is_loading) {
   }
 }
 
-void RenderWidgetHostImpl::WillSendInputEventToRenderer(
-    const WebInputEvent& event) {
-  GetRenderInputRouter()->GetDispatchToRendererCallback().Run(
-      event, input::DispatchToRendererResult::kDispatched);
+void RenderWidgetHostImpl::SimulateUserInteraction(const WebInputEvent& event) {
+  delegate_->SimulateUserInteraction(this, event);
 }
 
 void RenderWidgetHostImpl::WasHidden() {
@@ -896,8 +896,7 @@ void RenderWidgetHostImpl::WasShown(
     return;
   }
 
-  TRACE_EVENT_WITH_FLOW0("renderer_host", "RenderWidgetHostImpl::WasShown",
-                         routing_id_, TRACE_EVENT_FLAG_FLOW_OUT);
+  TRACE_EVENT("renderer_host", "RenderWidgetHostImpl::WasShown");
   is_hidden_ = false;
   latest_shown_time_ = base::TimeTicks::Now();
   if (!was_ever_shown_) {
@@ -1350,12 +1349,12 @@ bool RenderWidgetHostImpl::SynchronizeVisualProperties(
   // TODO(jonross): Untangle startup so that we don't have this invalid partial
   // state. (https://crbug.com/1185286) (https://crbug.com/419087)
   if (visual_properties->local_surface_id.has_value()) {
-    TRACE_EVENT_WITH_FLOW2(
+    TRACE_EVENT_INSTANT(
         TRACE_DISABLED_BY_DEFAULT("viz.surface_id_flow"),
         "RenderWidgetHostImpl::SynchronizeVisualProperties send message",
-        visual_properties->local_surface_id->submission_trace_id(),
-        TRACE_EVENT_FLAG_FLOW_OUT, "message",
-        "WidgetMsg_SynchronizeVisualProperties", "local_surface_id",
+        perfetto::Flow::ProcessScoped(
+            visual_properties->local_surface_id->submission_trace_id()),
+        "message", "WidgetMsg_SynchronizeVisualProperties", "local_surface_id",
         visual_properties->local_surface_id->ToString());
   }
   visual_properties_ack_pending_ =
@@ -2105,6 +2104,15 @@ void RenderWidgetHostImpl::InsertVisualStateCallback(
       mojo::WrapCallbackWithDefaultInvokeIfNotRun(std::move(callback), false)));
 }
 
+void RenderWidgetHostImpl::SetHungRendererDelay(const base::TimeDelta& delay) {
+  hung_renderer_delay_ = delay;
+  GetRenderInputRouter()->SetHungRendererDelay(delay);
+}
+
+base::TimeDelta RenderWidgetHostImpl::GetHungRendererDelayForTesting() {
+  return hung_renderer_delay_;
+}
+
 RenderProcessHostPriorityClient::Priority RenderWidgetHostImpl::GetPriority() {
   RenderProcessHostPriorityClient::Priority priority = {
       is_hidden_,  frame_depth_, intersects_viewport_, is_discarding_,
@@ -2129,6 +2137,11 @@ RenderProcessHostPriorityClient::Priority RenderWidgetHostImpl::GetPriority() {
                         owner_delegate_->ShouldContributePriorityToProcess();
   }
 
+#if BUILDFLAG(IS_ANDROID)
+  // should_contribute represents whether the RenderWidgetHost is active or not.
+  // For example, RenderWidgetHost is inactive if it is in BFCache.
+  priority.has_active_clients = should_contribute;
+#endif
   if (!should_contribute) {
     priority.is_hidden = true;
     priority.frame_depth = RenderProcessHostImpl::kMaxFrameDepthForPriority;
@@ -2186,7 +2199,7 @@ void RenderWidgetHostImpl::GetSnapshotFromBrowser(
       // 3. Create a copy request from the newest surface. This
       // should wait until the requested repaint has arrived.
       GetView()->CopyFromSurface(
-          gfx::Rect(), gfx::Size(),
+          gfx::Rect(), gfx::Size(), base::TimeDelta(),
           base::BindOnce(&RenderWidgetHostImpl::OnSnapshotFromSurfaceReceived,
                          weak_factory_.GetWeakPtr(), snapshot_id, 0));
     } else {
@@ -2323,11 +2336,12 @@ void RenderWidgetHostImpl::ImeSetComposition(
     const std::vector<ui::ImeTextSpan>& ime_text_spans,
     const gfx::Range& replacement_range,
     int selection_start,
-    int selection_end) {
+    int selection_end,
+    blink::mojom::ImeState ime_state) {
   // Passing null callback since it is only needed for Devtools
   GetWidgetInputHandler()->ImeSetComposition(
       text, ime_text_spans, replacement_range, selection_start, selection_end,
-      base::OnceClosure());
+      ime_state, base::OnceClosure());
 #if BUILDFLAG(IS_ANDROID)
   for (auto& observer : ime_input_event_observers_) {
     observer.OnImeSetComposingTextEvent(text);
@@ -2364,7 +2378,8 @@ void RenderWidgetHostImpl::ImeCancelComposition() {
   // Passing null callback since it is only needed for Devtools
   GetWidgetInputHandler()->ImeSetComposition(
       std::u16string(), std::vector<ui::ImeTextSpan>(),
-      gfx::Range::InvalidRange(), 0, 0, base::OnceClosure());
+      gfx::Range::InvalidRange(), 0, 0, blink::mojom::ImeState::kNone,
+      base::OnceClosure());
 }
 
 void RenderWidgetHostImpl::RejectPointerLockOrUnlockIfNecessary(
@@ -2490,9 +2505,8 @@ void RenderWidgetHostImpl::OnInputEventAckTimeout(
 
   // If a widget's visibility changed mid-input sequence handling and an ack
   // later times out, defer marking the renderer unresponsive until the widget
-  // has been shown for at least `kRendererHangWatcherDelay`.
-  if ((ack_timeout_ts - latest_shown_time_) <
-      input::features::kRendererHangWatcherDelay.Get()) {
+  // has been shown for at least `hung_renderer_delay_`.
+  if ((ack_timeout_ts - latest_shown_time_) < hung_renderer_delay_) {
     return;
   }
 
@@ -2631,11 +2645,10 @@ void RenderWidgetHostImpl::ForwardDelegatedInkPoint(
     return;
   }
 
-  TRACE_EVENT_WITH_FLOW1("delegated_ink_trails",
-                         "Forwarding delegated ink point from browser.",
-                         TRACE_ID_GLOBAL(delegated_ink_point.trace_id()),
-                         TRACE_EVENT_FLAG_FLOW_OUT, "delegated point",
-                         delegated_ink_point.ToString());
+  TRACE_EVENT("delegated_ink_trails",
+              "Forwarding delegated ink point from browser.",
+              perfetto::Flow::Global(delegated_ink_point.trace_id()),
+              "delegated point", delegated_ink_point.ToString());
 
   // Calling this will result in IPC calls to get |delegated_ink_point| to
   // viz. The decision to do this here was made with the understanding that
@@ -2808,14 +2821,15 @@ void RenderWidgetHostImpl::OnRenderFrameSubmission() {}
 
 void RenderWidgetHostImpl::OnLocalSurfaceIdChanged(
     const cc::RenderFrameMetadata& metadata) {
-  TRACE_EVENT_WITH_FLOW1(
+  TRACE_EVENT(
       "renderer_host," TRACE_DISABLED_BY_DEFAULT("viz.surface_id_flow"),
       "RenderWidgetHostImpl::OnLocalSurfaceIdChanged",
-      metadata.local_surface_id && metadata.local_surface_id->is_valid()
-          ? metadata.local_surface_id->submission_trace_id() +
-                metadata.local_surface_id->embed_trace_id()
-          : 0,
-      TRACE_EVENT_FLAG_FLOW_IN, "local_surface_id",
+      perfetto::TerminatingFlow::ProcessScoped(
+          metadata.local_surface_id && metadata.local_surface_id->is_valid()
+              ? metadata.local_surface_id->submission_trace_id() +
+                    metadata.local_surface_id->embed_trace_id()
+              : 0),
+      "local_surface_id",
       metadata.local_surface_id ? metadata.local_surface_id->ToString()
                                 : "null");
 
@@ -2881,34 +2895,6 @@ void RenderWidgetHostImpl::StartDragging(
     process->FilterURL(true, &url_info.url);
   }
   process->FilterURL(false, &filtered_data.html_base_url);
-
-  // Propagate the FilterURL results back into `drag_data` so that the DevTools
-  // intercept path (Input.dragIntercepted) sees the same filtered values as the
-  // OS-drag path. Without this, a CDP client following the documented
-  // dragIntercepted -> dispatchDragEvent round-trip would replay the
-  // pre-filter renderer-supplied URLs into DragTargetDrop.
-  for (auto& item : drag_data->items) {
-    if (!item->is_string()) {
-      continue;
-    }
-    auto& s = item->get_string();
-    if (s->string_type == ui::kMimeTypeUriList) {
-      std::u16string rebuilt;
-      for (const auto& url_info : filtered_data.url_infos) {
-        if (!rebuilt.empty()) {
-          rebuilt.append(u"\r\n");
-        }
-        rebuilt.append(base::UTF8ToUTF16(url_info.url.spec()));
-      }
-      s->string_data = std::move(rebuilt);
-    } else if (s->string_type == ui::kMimeTypeHtml) {
-      s->base_url = filtered_data.html_base_url;
-    } else if (s->string_type == ui::kMimeTypeDownloadUrl &&
-               filtered_data.download_metadata.empty()) {
-      s->string_data.clear();
-    }
-  }
-
   // Filter out any paths that the renderer didn't have access to. This prevents
   // the following attack on a malicious renderer:
   // 1. StartDragging IPC sent with renderer-specified filesystem paths that it
@@ -3087,31 +3073,15 @@ bool RenderWidgetHostImpl::StoredVisualPropertiesNeedsUpdate(
 }
 
 void RenderWidgetHostImpl::AutoscrollStart(const gfx::PointF& position) {
-  input::RenderWidgetTargeter::AutoscrollStatus status =
-      delegate()->GetInputEventRouter()->SetAutoScrollInProgress(GetView(),
-                                                                 true);
-  if (status == input::RenderWidgetTargeter::AutoscrollStatus::kFailed) {
-    return;
-  }
-
-  if (status == input::RenderWidgetTargeter::AutoscrollStatus::kDeferred) {
-    autoscroll_targeting_pending_ = true;
-    autoscroll_start_position_ = position;
-    return;
-  }
-
   GetView()->OnAutoscrollStart();
   sent_autoscroll_scroll_begin_ = false;
   autoscroll_in_progress_ = true;
+  delegate()->GetInputEventRouter()->SetAutoScrollInProgress(
+      autoscroll_in_progress_);
   autoscroll_start_position_ = position;
 }
 
 void RenderWidgetHostImpl::AutoscrollFling(const gfx::Vector2dF& velocity) {
-  if (autoscroll_targeting_pending_) {
-    pending_autoscroll_fling_velocity_ = velocity;
-    return;
-  }
-
   CHECK(autoscroll_in_progress_);
   if (!sent_autoscroll_scroll_begin_ && velocity != gfx::Vector2dF()) {
     // Send a GSB event with valid delta hints.
@@ -3143,7 +3113,7 @@ void RenderWidgetHostImpl::AutoscrollEnd() {
   autoscroll_in_progress_ = false;
 
   delegate()->GetInputEventRouter()->SetAutoScrollInProgress(
-      GetView(), autoscroll_in_progress_);
+      autoscroll_in_progress_);
   // Don't send a GFC if no GSB is sent.
   if (!sent_autoscroll_scroll_begin_) {
     return;
@@ -3158,27 +3128,6 @@ void RenderWidgetHostImpl::AutoscrollEnd() {
 
   GetRenderInputRouter()->ForwardGestureEventWithLatencyInfo(cancel_event,
                                                              ui::LatencyInfo());
-}
-
-void RenderWidgetHostImpl::OnAutoscrollTargetResolved(bool success) {
-  if (!autoscroll_targeting_pending_) {
-    return;
-  }
-
-  autoscroll_targeting_pending_ = false;
-
-  if (!success) {
-    pending_autoscroll_fling_velocity_.reset();
-    return;
-  }
-
-  AutoscrollStart(autoscroll_start_position_);
-
-  if (pending_autoscroll_fling_velocity_) {
-    gfx::Vector2dF velocity = *pending_autoscroll_fling_velocity_;
-    pending_autoscroll_fling_velocity_.reset();
-    AutoscrollFling(velocity);
-  }
 }
 
 bool RenderWidgetHostImpl::IsAutoscrollInProgress() {
@@ -3404,7 +3353,7 @@ void RenderWidgetHostImpl::RequestKeyboardLock(
 
   const bool esc_requested =
       !keyboard_keys_to_lock_.has_value() ||
-      base::Contains(keyboard_keys_to_lock_.value(), ui::DomCode::ESCAPE);
+      keyboard_keys_to_lock_.value().contains(ui::DomCode::ESCAPE);
   delegate_->RequestKeyboardLock(this, esc_requested);
 }
 
@@ -3588,7 +3537,7 @@ void RenderWidgetHostImpl::GotResponseToForceRedraw(int snapshot_id) {
   // Snapshots from surface do not need to wait for the screen update.
   if (!pending_surface_browser_snapshots_.empty()) {
     GetView()->CopyFromSurface(
-        gfx::Rect(), gfx::Size(),
+        gfx::Rect(), gfx::Size(), base::TimeDelta(),
         base::BindOnce(&RenderWidgetHostImpl::OnSnapshotFromSurfaceReceived,
                        weak_factory_.GetWeakPtr(), snapshot_id, 0));
   }
@@ -3640,12 +3589,11 @@ void RenderWidgetHostImpl::WindowSnapshotReachedScreen(int snapshot_id) {
 void RenderWidgetHostImpl::OnSnapshotFromSurfaceReceived(
     int snapshot_id,
     int retry_count,
-    const viz::CopyOutputBitmapWithMetadata& result) {
+    const content::CopyFromSurfaceResult& result) {
   static constexpr int kMaxRetries = 5;
-  const SkBitmap& bitmap = result.bitmap;
-  if (bitmap.drawsNothing() && retry_count < kMaxRetries) {
+  if (!result.has_value() && retry_count < kMaxRetries) {
     GetView()->CopyFromSurface(
-        gfx::Rect(), gfx::Size(),
+        gfx::Rect(), gfx::Size(), base::TimeDelta(),
         base::BindOnce(&RenderWidgetHostImpl::OnSnapshotFromSurfaceReceived,
                        weak_factory_.GetWeakPtr(), snapshot_id,
                        retry_count + 1));
@@ -3653,8 +3601,8 @@ void RenderWidgetHostImpl::OnSnapshotFromSurfaceReceived(
   }
   // If all retries have failed, we return an empty image.
   gfx::Image image;
-  if (!bitmap.drawsNothing()) {
-    image = gfx::Image::CreateFrom1xBitmap(bitmap);
+  if (result.has_value()) {
+    image = gfx::Image::CreateFrom1xBitmap(result->bitmap);
   }
   // Any pending snapshots with a lower ID than the one received are considered
   // to be implicitly complete, and returned the same snapshot data.
@@ -3853,6 +3801,7 @@ void RenderWidgetHostImpl::SetupRenderInputRouter() {
   render_input_router_ = std::make_unique<input::RenderInputRouter>(
       this, MakeFlingScheduler(), this,
       GetUIThreadTaskRunner({BrowserTaskType::kUserInput}));
+  render_input_router_->SetHungRendererDelay(hung_renderer_delay_);
   SetupInputRouter();
 }
 

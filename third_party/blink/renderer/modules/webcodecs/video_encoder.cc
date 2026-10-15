@@ -23,7 +23,6 @@
 #include "components/viz/common/gpu/raster_context_provider.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/raster_interface.h"
-#include "gpu/config/gpu_finch_features.h"
 #include "media/base/async_destroy_video_encoder.h"
 #include "media/base/limits.h"
 #include "media/base/media_log.h"
@@ -603,14 +602,14 @@ const char* VideoEncoderTraits::GetName() {
 }
 
 String VideoEncoderTraits::ParsedConfig::ToString() {
-  return String::Format(
-      "{codec: %s, profile: %s, level: %d, hw_pref: %s, "
-      "options: {%s}, codec_string: %s, display_size: %s}",
-      media::GetCodecName(codec).c_str(),
-      media::GetProfileName(profile).c_str(), level,
-      HardwarePreferenceToIdlEnum(hw_pref).AsCStr(), options.ToString().c_str(),
-      codec_string.Utf8().c_str(),
-      display_size ? display_size->ToString().c_str() : "");
+  return UNSAFE_TODO(
+      String::Format("{codec: %s, profile: %s, level: %d, hw_pref: %s, "
+                     "options: {%s}, codec_string: %s, display_size: %s}",
+                     media::GetCodecName(codec).c_str(),
+                     media::GetProfileName(profile).c_str(), level,
+                     HardwarePreferenceToIdlEnum(hw_pref).AsCStr(),
+                     options.ToString().c_str(), codec_string.Utf8().c_str(),
+                     display_size ? display_size->ToString().c_str() : ""));
 }
 
 // static
@@ -1096,11 +1095,8 @@ void VideoEncoder::ProcessEncode(Request* request) {
   request->StartTracingVideoEncode(encode_options.key_frame,
                                    frame->timestamp());
 
-  bool mappable = frame->IsMappable() || frame->HasMappableGpuBuffer();
+  bool mappable = frame->IsMappable() || frame->HasMappableSharedImage();
   bool can_handle_shared_image =
-#if BUILDFLAG(IS_WIN)
-      !base::FeatureList::IsEnabled(features::kSkiaGraphite) &&
-#endif  // BUILDFLAG(IS_WIN)
       encoder_info_.DoesSupportGpuSharedImages(frame->format()) &&
       frame->HasSharedImage();
 
@@ -1117,11 +1113,9 @@ void VideoEncoder::ProcessEncode(Request* request) {
     // resolve synchronously.
     blocking_request_in_progress_ = request;
 
-    auto readback_done_callback =
-        blink::BindOnce(&VideoEncoder::OnReadbackDone,
-                        MakeUnwrappingCrossThreadWeakHandle(this),
-                        MakeUnwrappingCrossThreadHandle(request), frame,
-                        std::move(encode_done_callback));
+    auto readback_done_callback = blink::BindOnce(
+        &VideoEncoder::OnReadbackDone, WrapWeakPersistent(this),
+        WrapPersistent(request), frame, std::move(encode_done_callback));
 
     if (StartReadback(std::move(frame), std::move(readback_done_callback))) {
       request->input->close();
@@ -1759,8 +1753,7 @@ ScriptPromise<VideoEncoderSupport> VideoEncoder::isConfigSupported(
           script_state);
   auto promise = resolver->Promise();
   auto find_any_callback = HeapBarrierCallback<VideoEncoderSupport>(
-      num_callbacks,
-      BindOnce(&FindAnySupported, MakeUnwrappingCrossThreadHandle(resolver)));
+      num_callbacks, BindOnce(&FindAnySupported, WrapPersistent(resolver)));
 
   if (parsed_config->hw_pref != HardwarePreference::kPreferSoftware ||
       media::MayHaveAndAllowSelectOSSoftwareEncoder(parsed_config->codec)) {

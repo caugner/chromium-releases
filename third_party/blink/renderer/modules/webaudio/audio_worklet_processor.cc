@@ -392,8 +392,8 @@ bool CopyParamValueMapToObject(
         param_array_value.As<v8::Float32Array>();
     size_t array_length = float32_array->Length();
 
-    // The `float32_array` is neither 1 nor 128 frames, or the array buffer is
-    // transferred/detached, do not proceed.
+    // The `float32_array` is neither 1 nor render quantum frames, or the array
+    // buffer is transferred/detached, do not proceed.
     if ((array_length != 1 && array_length != param_array->size()) ||
         float32_array->Buffer()->ByteLength() == 0) {
       return false;
@@ -413,7 +413,7 @@ AudioWorkletProcessor* AudioWorkletProcessor::Create(
     ExceptionState& exception_state) {
   AudioWorkletGlobalScope* global_scope = To<AudioWorkletGlobalScope>(context);
   DCHECK(global_scope);
-  CHECK(global_scope->IsContextThread());
+  DCHECK(global_scope->IsContextThread());
 
   // Get the stored initialization parameter from the global scope.
   std::unique_ptr<ProcessorCreationParams> params =
@@ -453,7 +453,7 @@ bool AudioWorkletProcessor::Process(
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("audio-worklet"),
                "AudioWorkletProcessor::Process");
 
-  CHECK(global_scope_->IsContextThread());
+  DCHECK(global_scope_->IsContextThread());
   DCHECK(!hasErrorOccurred());
 
   ScriptState* script_state =

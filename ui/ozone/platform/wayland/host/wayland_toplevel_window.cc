@@ -465,15 +465,7 @@ void WaylandToplevelWindow::HandleToplevelConfigure(
     int32_t width_dip,
     int32_t height_dip,
     const WindowStates& window_states) {
-  // HandleToplevelConfigureWithOrigin() calls into the delegate
-  // (OnActivationChanged et al.), which the views layer documents may
-  // synchronously close the widget and destroy this platform window. See
-  // DesktopWindowTreeHostPlatform::OnActivationChanged().
-  auto alive = weak_ptr_factory_.GetWeakPtr();
   HandleToplevelConfigureWithOrigin(0, 0, width_dip, height_dip, window_states);
-  if (!alive) {
-    return;
-  }
   UpdateSessionStateIfNeeded();
 }
 
@@ -517,11 +509,7 @@ void WaylandToplevelWindow::HandleToplevelConfigureWithOrigin(
   if (window_states.tiled_edges != applied_state().tiled_edges) {
     // This configure changes the decoration insets.  We should adjust the
     // bounds appropriately.
-    auto weak_this = AsWeakPtr();
     delegate()->OnWindowTiledStateChanged(window_states.tiled_edges);
-    if (!weak_this) {
-      return;
-    }
   }
 
   pending_configure_state_.tiled_edges = window_states.tiled_edges;
@@ -570,11 +558,7 @@ void WaylandToplevelWindow::HandleToplevelConfigureWithOrigin(
     SetRestoredBoundsInDIP(GetBoundsInDIP());
   }
 
-  auto alive = weak_ptr_factory_.GetWeakPtr();
   UpdateActivationState();
-  if (!alive) {
-    return;
-  }
   if (prev_suspended != is_suspended_) {
     frame_manager()->OnWindowSuspensionChanged();
   }
@@ -851,11 +835,7 @@ void WaylandToplevelWindow::TriggerStateChanges(
   // TODO(crbug.com/40276379): Remove this once this is async.
   auto previous_state = applied_state().window_state;
   ForceApplyWindowStateDoNotUse(window_state);
-  auto weak_this = AsWeakPtr();
   delegate()->OnWindowStateChanged(previous_state, window_state);
-  if (!weak_this) {
-    return;
-  }
   connection()->Flush();
 }
 
@@ -927,12 +907,31 @@ void WaylandToplevelWindow::SetSizeConstraints() {
 
   auto min_size_dip = delegate()->GetMinimumSizeForWindow();
   auto max_size_dip = delegate()->GetMaximumSizeForWindow();
+  const gfx::Insets insets_dip =
+      delegate()->CalculateInsetsInDIP(applied_state().window_state);
 
-  if (min_size_dip.has_value())
-    xdg_toplevel_->SetMinSize(min_size_dip->width(), min_size_dip->height());
+  if (min_size_dip.has_value()) {
+    gfx::Size adjusted_min_size = *min_size_dip;
+    adjusted_min_size.Enlarge(-insets_dip.width(), -insets_dip.height());
+    adjusted_min_size.SetToMax(gfx::Size(1, 1));
+    xdg_toplevel_->SetMinSize(adjusted_min_size.width(),
+                              adjusted_min_size.height());
+  }
 
-  if (max_size_dip.has_value())
-    xdg_toplevel_->SetMaxSize(max_size_dip->width(), max_size_dip->height());
+  if (max_size_dip.has_value()) {
+    gfx::Size adjusted_max_size = *max_size_dip;
+    // Zero means "no maximum" and should be preserved.
+    if (adjusted_max_size.width() > 0) {
+      adjusted_max_size.set_width(
+          std::max(1, adjusted_max_size.width() - insets_dip.width()));
+    }
+    if (adjusted_max_size.height() > 0) {
+      adjusted_max_size.set_height(
+          std::max(1, adjusted_max_size.height() - insets_dip.height()));
+    }
+    xdg_toplevel_->SetMaxSize(adjusted_max_size.width(),
+                              adjusted_max_size.height());
+  }
 
   connection()->Flush();
 }

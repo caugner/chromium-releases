@@ -23,8 +23,6 @@
 #include "content/public/browser/web_contents.h"
 #include "third_party/abseil-cpp/absl/functional/overload.h"
 #include "third_party/blink/public/common/features.h"
-#include "third_party/blink/public/mojom/content_extraction/ai_page_content.mojom-data-view.h"
-#include "third_party/blink/public/mojom/content_extraction/ai_page_content.mojom-forward.h"
 #include "third_party/blink/public/mojom/content_extraction/ai_page_content.mojom.h"
 #include "third_party/blink/public/mojom/content_extraction/ai_page_content_metadata.mojom.h"
 #include "third_party/blink/public/mojom/forms/form_control_type.mojom-shared.h"
@@ -44,6 +42,8 @@ BASE_FEATURE(kAnnotatedPageContentAutofillCreditCardRedactions,
 }  // namespace features
 
 namespace {
+
+constexpr char kHasMediaTranscripts[] = "has_media_transcripts";
 
 std::optional<AutofillFieldMetadata> GetAutofillFieldData(
     std::optional<content::GlobalRenderFrameHostToken> source_frame_token,
@@ -119,8 +119,6 @@ optimization_guide::proto::ClickabilityReason ConvertClickabilityReason(
       return optimization_guide::proto::CLICKABILITY_REASON_CLICKABLE_CONTROL;
     case blink::mojom::AIPageContentClickabilityReason::kClickEvents:
       return optimization_guide::proto::CLICKABILITY_REASON_CLICK_HANDLER;
-    case blink::mojom::AIPageContentClickabilityReason::kMouseEvents:
-      return optimization_guide::proto::CLICKABILITY_REASON_MOUSE_EVENTS;
     case blink::mojom::AIPageContentClickabilityReason::kKeyEvents:
       return optimization_guide::proto::CLICKABILITY_REASON_KEY_EVENTS;
     case blink::mojom::AIPageContentClickabilityReason::kEditable:
@@ -149,6 +147,23 @@ optimization_guide::proto::ClickabilityReason ConvertClickabilityReason(
   NOTREACHED();
 }
 
+optimization_guide::proto::InteractionDisabledReason
+ConvertInteractionDisabledReason(
+    blink::mojom::AIPageContentInteractionDisabledReason reason) {
+  switch (reason) {
+    case blink::mojom::AIPageContentInteractionDisabledReason::kDisabled:
+      return optimization_guide::proto::INTERACTION_DISABLED_REASON_DISABLED;
+    case blink::mojom::AIPageContentInteractionDisabledReason::kAriaDisabled:
+      return optimization_guide::proto::
+          INTERACTION_DISABLED_REASON_ARIA_DISABLED;
+    case blink::mojom::AIPageContentInteractionDisabledReason::
+        kCursorNotAllowed:
+      return optimization_guide::proto::
+          INTERACTION_DISABLED_REASON_CURSOR_NOT_ALLOWED;
+  }
+  NOTREACHED();
+}
+
 optimization_guide::proto::ContentAttributeType ConvertAttributeType(
     blink::mojom::AIPageContentAttributeType type) {
   switch (type) {
@@ -164,8 +179,8 @@ optimization_guide::proto::ContentAttributeType ConvertAttributeType(
       return optimization_guide::proto::CONTENT_ATTRIBUTE_ANCHOR;
     case blink::mojom::AIPageContentAttributeType::kImage:
       return optimization_guide::proto::CONTENT_ATTRIBUTE_IMAGE;
-    case blink::mojom::AIPageContentAttributeType::kSVG:
-      return optimization_guide::proto::CONTENT_ATTRIBUTE_SVG;
+    case blink::mojom::AIPageContentAttributeType::kSvgRoot:
+      return optimization_guide::proto::CONTENT_ATTRIBUTE_SVG_ROOT;
     case blink::mojom::AIPageContentAttributeType::kCanvas:
       return optimization_guide::proto::CONTENT_ATTRIBUTE_CANVAS;
     case blink::mojom::AIPageContentAttributeType::kVideo:
@@ -276,8 +291,6 @@ void ConvertNodeInteractionInfo(
     ConvertScrollerInfo(*mojom_node_interaction_info.scroller_info,
                         proto_interaction_info->mutable_scroller_info());
   }
-  proto_interaction_info->set_is_clickable(
-      mojom_node_interaction_info.is_clickable);
   proto_interaction_info->set_is_focusable(
       mojom_node_interaction_info.is_focusable);
 
@@ -287,12 +300,14 @@ void ConvertNodeInteractionInfo(
   }
 
   for (const auto& reason : mojom_node_interaction_info.clickability_reasons) {
-    // TODO(khushalsagar): Remove this once consumers move to the new field.
-    proto_interaction_info->add_debug_clickability_reasons(
-        ConvertClickabilityReason(reason));
-
     proto_interaction_info->add_clickability_reasons(
         ConvertClickabilityReason(reason));
+  }
+
+  for (const auto& reason :
+       mojom_node_interaction_info.interaction_disabled_reasons) {
+    proto_interaction_info->add_interaction_disabled_reasons(
+        ConvertInteractionDisabledReason(reason));
   }
 
   proto_interaction_info->set_is_disabled(
@@ -386,10 +401,11 @@ void ConvertImageInfo(
   }
 }
 
-void ConvertSVGData(const blink::mojom::AIPageContentSVGData& mojom_svg_data,
-                    optimization_guide::proto::SVGData* proto_svg_data) {
-  if (mojom_svg_data.inner_text) {
-    proto_svg_data->set_inner_text(*mojom_svg_data.inner_text);
+void ConvertSvgRootData(
+    const blink::mojom::AIPageContentSvgRootData& mojom_svg_root_data,
+    optimization_guide::proto::SVGRootData* proto_svg_root_data) {
+  if (mojom_svg_root_data.inner_text) {
+    proto_svg_root_data->set_inner_text(*mojom_svg_root_data.inner_text);
   }
 }
 
@@ -669,13 +685,13 @@ base::expected<void, std::string> ConvertAttributes(
     }
     ConvertImageInfo(*mojom_attributes.image_info,
                      proto_attributes->mutable_image_data());
-  } else if (mojom_attributes.svg_data) {
+  } else if (mojom_attributes.svg_root_data) {
     if (mojom_attributes.attribute_type !=
-        blink::mojom::AIPageContentAttributeType::kSVG) {
-      return base::unexpected("svg_data present, but node isn't kSvg");
+        blink::mojom::AIPageContentAttributeType::kSvgRoot) {
+      return base::unexpected("svg_root_data present, but node isn't kSvgRoot");
     }
-    ConvertSVGData(*mojom_attributes.svg_data,
-                   proto_attributes->mutable_svg_data());
+    ConvertSvgRootData(*mojom_attributes.svg_root_data,
+                       proto_attributes->mutable_svg_root_data());
   } else if (mojom_attributes.canvas_data) {
     if (mojom_attributes.attribute_type !=
         blink::mojom::AIPageContentAttributeType::kCanvas) {
@@ -821,8 +837,13 @@ void ConvertFrameData(
 
   if (render_frame_info.media_data) {
     *proto_frame_data->mutable_media_data() = *render_frame_info.media_data;
+    if (!render_frame_info.media_data->transcripts().empty()) {
+      auto meta_tag = blink::mojom::MetaTag::New();
+      meta_tag->name = kHasMediaTranscripts;
+      meta_tag->content = "true";
+      metadata.frame_metadata.back()->meta_tags.push_back(std::move(meta_tag));
+    }
   }
-
   for (const auto& tool : mojom_frame_data.script_tools) {
     ConvertScriptTool(*tool, proto_frame_data->add_script_tools());
   }
@@ -1052,17 +1073,6 @@ class Converter {
       return base::ok();
     }
 
-    if (page_content_proto().has_popup_window()) {
-      return base::ok();
-    }
-
-    if (!opener_frame_info.has_active_popup) {
-      // This could be a race condition where the popup was closed between the
-      // start of extraction and the renderer's response. We skip the popup
-      // but continue with the rest of the page content.
-      return base::ok();
-    }
-
     optimization_guide::proto::PopupWindow* popup_window =
         page_content_proto().mutable_popup_window();
 
@@ -1072,7 +1082,8 @@ class Converter {
 
     // Set the document ID to the frame which opened the popup (might be wrong,
     // because we treat a main page and its same-site iframes as the same
-    // document id). We verify that the the popup is owned by the iframe.
+    // document id). Also we don't need browser-side security check as the data
+    // all come from the same renderer.
     popup_window->mutable_opener_document_id()->set_serialized_token(
         opener_frame_info.serialized_server_token);
 
@@ -1217,13 +1228,6 @@ base::expected<void, std::string> ConvertAIPageContentToProto(
                       page_content_result);
   converter.AddPasswordRedactionData(*main_frame_page_content);
 
-  // Claim the singleton popup before walking child frames so the main frame
-  // wins if multiple verified frames report popup data.
-  if (main_frame_page_content->frame_data->popup) {
-    RETURN_IF_ERROR(converter.ConvertPopup(
-        *main_frame_page_content->frame_data->popup, *render_frame_info));
-  }
-
   RETURN_IF_ERROR(converter.ConvertNode(
       main_frame_token, *main_frame_page_content->root_node,
       page_content_result.proto.mutable_root_node()));
@@ -1245,6 +1249,12 @@ base::expected<void, std::string> ConvertAIPageContentToProto(
   }
   page_content_result.proto.set_version(version);
   page_content_result.proto.set_mode(mode);
+
+  // If the page had a popup open, provide that popup to APC as well.
+  if (main_frame_page_content->frame_data->popup) {
+    RETURN_IF_ERROR(converter.ConvertPopup(
+        *main_frame_page_content->frame_data->popup, *render_frame_info));
+  }
 
   return base::ok();
 }

@@ -152,15 +152,12 @@ void ThrottlingP2PNetworkInterceptor::OnSendNetworkTimer() {
       continue;
     }
     P2PSocketUdp* socket = packet_iterator->second.socket;
-    // Move `pending_packet` out of the iterator to avoid using an iterator that
-    // could be invalidated by SendFromInterceptor() below.
-    P2PPendingPacket pending_packet = std::move(packet_iterator->second.packet);
-    send_packets_.erase(packet_iterator);
 
     // Check for dropped packets
     if (packet.receive_time_us != webrtc::PacketDeliveryInfo::kNotReceived) {
-      socket->SendFromInterceptor(pending_packet);
+      socket->SendFromInterceptor(packet_iterator->second.packet);
     }
+    send_packets_.erase(packet_iterator);
   }
 
   // Schedule the next delivery timer
@@ -218,19 +215,15 @@ void ThrottlingP2PNetworkInterceptor::OnReceiveNetworkTimer() {
     }
 
     P2PSocketUdp* socket = packet_iterator->second.socket;
-    mojom::P2PReceivedPacketPtr pending_packet =
-        std::move(packet_iterator->second.packet);
-    scoped_refptr<net::IOBuffer> pending_buffer =
-        std::move(packet_iterator->second.buffer);
-    receive_packets_.erase(packet_iterator);
 
     // Check for dropped packets
     if (packet.receive_time_us != webrtc::PacketDeliveryInfo::kNotReceived) {
-      pending_packet->timestamp =
+      packet_iterator->second.packet->timestamp =
           base::TimeTicks() + base::Microseconds(packet.receive_time_us);
-      socket->ReceiveFromInterceptor(std::move(pending_packet),
-                                     std::move(pending_buffer));
+      socket->ReceiveFromInterceptor(std::move(packet_iterator->second.packet),
+                                     std::move(packet_iterator->second.buffer));
     }
+    receive_packets_.erase(packet_iterator);
   }
 
   // Schedule the next delivery timer

@@ -543,6 +543,9 @@ class LensOverlayController : public lens::mojom::LensPageHandler,
       std::map<std::string, std::string> additional_query_params,
       std::optional<lens::LensOverlayInvocationSource> invocation_source);
 
+  // Shows the mobile promo if the user is eligible.
+  void MaybeShowMobilePromo();
+
   // Issues a contextual text request to the query controller.
   void IssueContextualTextRequest(
       base::Time query_start_time,
@@ -955,6 +958,12 @@ class LensOverlayController : public lens::mojom::LensPageHandler,
   // Part 3 of reshowing the overlay. Called after the RGB bitmap has been
   // created.
   void ReshowOverlayPart3(const SkBitmap& rgb_bitmap);
+
+  // Starts the query flow.
+  void StartQueryFlow();
+
+  // Fetches the partial PDF text if the page is a PDF.
+  void FetchPdfTextIfEligible();
 
   // Sets the opacity of the overlay web view. No-op if the web view does not
   // exist.

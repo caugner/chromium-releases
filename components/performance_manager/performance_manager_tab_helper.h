@@ -186,10 +186,7 @@ class PerformanceManagerTabHelper
       permission_controller_subscription_id_;
 
   raw_ptr<DestructionObserver> destruction_observer_ = nullptr;
-  base::ObserverList<Observer,
-                     true,
-                     base::ObserverListReentrancyPolicy::kDisallowReentrancy>
-      observers_;
+  base::ObserverList<Observer, true, false> observers_;
 
   WEB_CONTENTS_USER_DATA_KEY_DECL();
 };

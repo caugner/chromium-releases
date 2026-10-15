@@ -11,12 +11,13 @@
 #import "base/memory/raw_ptr.h"
 #import "base/scoped_observation.h"
 #import "components/infobars/core/confirm_infobar_delegate.h"
+#import "components/signin/public/identity_manager/identity_manager.h"
 #import "components/sync/service/sync_service.h"
 #import "components/sync/service/sync_service_observer.h"
 
 class ProfileIOS;
 enum class SyncErrorInfoBarTrigger;
-@protocol SyncPresenter;
+@protocol SyncPresenterCommands;
 
 namespace infobars {
 class InfoBarManager;
@@ -28,10 +29,11 @@ inline constexpr base::TimeDelta kSyncErrorInfobarTimeout = base::Hours(24);
 
 // Shows a sync error in an infobar.
 class SyncErrorInfoBarDelegate : public ConfirmInfoBarDelegate,
+                                 public signin::IdentityManager::Observer,
                                  public syncer::SyncServiceObserver {
  public:
   SyncErrorInfoBarDelegate(ProfileIOS* profile,
-                           id<SyncPresenter> presenter,
+                           id<SyncPresenterCommands> sync_presenter_handler,
                            SyncErrorInfoBarTrigger trigger);
 
   SyncErrorInfoBarDelegate(const SyncErrorInfoBarDelegate&) = delete;
@@ -42,7 +44,7 @@ class SyncErrorInfoBarDelegate : public ConfirmInfoBarDelegate,
   // Creates a sync error infobar and adds it to `infobar_manager`.
   static bool Create(infobars::InfoBarManager* infobar_manager,
                      ProfileIOS* profile,
-                     id<SyncPresenter> presenter,
+                     id<SyncPresenterCommands> sync_presenter_handler,
                      SyncErrorInfoBarTrigger trigger);
 
   // InfoBarDelegate implementation.
@@ -60,6 +62,12 @@ class SyncErrorInfoBarDelegate : public ConfirmInfoBarDelegate,
   void OnStateChanged(syncer::SyncService* sync) override;
   void OnSyncShutdown(syncer::SyncService* sync) override;
 
+  // signin::IdentityManager::Observer:
+  void OnPrimaryAccountChanged(
+      const signin::PrimaryAccountChangeEvent& event_details) override;
+  void OnIdentityManagerShutdown(
+      signin::IdentityManager* identity_manager) override;
+
   // Called when the infobar is dismissed through timing out.
   void InfoBarDismissedByTimeout() const;
 
@@ -71,7 +79,10 @@ class SyncErrorInfoBarDelegate : public ConfirmInfoBarDelegate,
   const raw_ptr<ProfileIOS> profile_;
   base::ScopedObservation<syncer::SyncService, SyncErrorInfoBarDelegate>
       sync_observation_{this};
-  const id<SyncPresenter> presenter_;
+  base::ScopedObservation<signin::IdentityManager,
+                          signin::IdentityManager::Observer>
+      identity_manager_observation_{this};
+  const id<SyncPresenterCommands> sync_presenter_handler_;
   const SyncErrorInfoBarTrigger trigger_;
   syncer::SyncService::UserActionableError error_state_;
   std::u16string title_;

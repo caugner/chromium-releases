@@ -761,15 +761,10 @@ TEST_F(ChromePasswordManagerClientTest,
       &Observer::OnFieldTypesDetermined, form.global_id(),
       Observer::FieldTypeSource::kAutofillServer);
 
-  ContentPasswordManagerDriver* password_driver =
-      ContentPasswordManagerDriver::GetForRenderFrameHost(main_rfh());
-  int driver_id = password_driver->GetId();
-
   EXPECT_THAT(static_cast<const password_manager::PasswordManager*>(
                   GetClient()->GetPasswordManager())
                   ->GetServerPredictionsForTesting(),
-              UnorderedElementsAre(
-                  Key(testing::Pair(CalculateFormSignature(form), driver_id))));
+              UnorderedElementsAre(Key(CalculateFormSignature(form))));
 }
 
 TEST_F(ChromePasswordManagerClientTest,
@@ -878,21 +873,11 @@ TEST_F(ChromePasswordManagerClientTest,
   // Even though `OnFieldTypesDetermined` was only called for a single form (the
   // browser form that is the result of merging both forms), password manager
   // receives predictions for both the main and the child form.
-  ContentPasswordManagerDriver* main_password_driver =
-      ContentPasswordManagerDriver::GetForRenderFrameHost(main_rfh());
-  ContentPasswordManagerDriver* child_password_driver =
-      ContentPasswordManagerDriver::GetForRenderFrameHost(child_rfh);
-  int main_driver_id = main_password_driver->GetId();
-  int child_driver_id = child_password_driver->GetId();
-
-  EXPECT_THAT(
-      static_cast<const password_manager::PasswordManager*>(
-          GetClient()->GetPasswordManager())
-          ->GetServerPredictionsForTesting(),
-      UnorderedElementsAre(
-          Key(testing::Pair(CalculateFormSignature(main_form), main_driver_id)),
-          Key(testing::Pair(CalculateFormSignature(child_form),
-                            child_driver_id))));
+  EXPECT_THAT(static_cast<const password_manager::PasswordManager*>(
+                  GetClient()->GetPasswordManager())
+                  ->GetServerPredictionsForTesting(),
+              UnorderedElementsAre(Key(CalculateFormSignature(main_form)),
+                                   Key(CalculateFormSignature(child_form))));
 }
 
 TEST_F(ChromePasswordManagerClientTest,

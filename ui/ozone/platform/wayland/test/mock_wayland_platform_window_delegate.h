@@ -38,9 +38,8 @@ class MockWaylandPlatformWindowDelegate : public MockPlatformWindowDelegate,
   int64_t viz_seq() const { return viz_seq_; }
 
   // Callback called during OnStateUpdate. This can be used to simulate
-  // re-entrant client initiated requests. Returning false will cause
-  // OnStateUpdate to return -1.
-  void set_on_state_update_callback(base::RepeatingCallback<bool()> cb) {
+  // re-entrant client initiated requests.
+  void set_on_state_update_callback(base::RepeatingClosure cb) {
     on_state_update_callback_ = cb;
   }
 
@@ -56,7 +55,7 @@ class MockWaylandPlatformWindowDelegate : public MockPlatformWindowDelegate,
   // what sequence point is required to advance to the latest state.
   int64_t viz_seq_ = 0;
 
-  base::RepeatingCallback<bool()> on_state_update_callback_;
+  base::RepeatingClosure on_state_update_callback_;
 };
 
 }  // namespace ui

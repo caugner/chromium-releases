@@ -18,6 +18,7 @@
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_receiver_set.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_wrapper_mode.h"
+#include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/hash_traits.h"
 
@@ -32,9 +33,10 @@ class LocalFrame;
 class MODULES_EXPORT AIPageContentAgent final
     : public GarbageCollected<AIPageContentAgent>,
       public mojom::blink::AIPageContentAgent,
+      public Supplement<Document>,
       public LocalFrameView::LifecycleNotificationObserver {
  public:
-  static const unsigned kSupplementIndex;
+  static const char kSupplementName[];
   static AIPageContentAgent* From(Document&);
   static void BindReceiver(
       LocalFrame* frame,
@@ -184,7 +186,6 @@ class MODULES_EXPORT AIPageContentAgent final
   void Bind(mojo::PendingReceiver<mojom::blink::AIPageContentAgent> receiver);
   void EnsureLifecycleObserverRegistered();
 
-  Member<Document> document_;
   HeapMojoReceiverSet<mojom::blink::AIPageContentAgent, AIPageContentAgent>
       receiver_set_;
   // Already registered for lifetime notifications.

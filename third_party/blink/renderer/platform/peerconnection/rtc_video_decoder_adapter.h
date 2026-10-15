@@ -91,8 +91,6 @@ class PLATFORM_EXPORT RTCVideoDecoderAdapter : public webrtc::VideoDecoder {
   static int GetCurrentDecoderCountForTesting();
   static void IncrementCurrentDecoderCountForTesting();
   static void DecrementCurrentDecoderCountForTesting();
-  static void SetInitializeSyncTimeoutForTesting(
-      std::optional<base::TimeDelta> timeout);
 
   static std::atomic<int> g_num_decoders_;
 

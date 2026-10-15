@@ -57,7 +57,8 @@ class DigitalIdentitySafetyInterstitialControllerDesktop {
 
   void Abort();
 
-  void ShowInterstitialImpl(bool was_request_aborted);
+  void ShowInterstitialImpl(content::WebContents& web_contents,
+                            bool was_request_aborted);
 
   void OnDialogClosed(DigitalIdentityInterstitialClosedReason reason);
 

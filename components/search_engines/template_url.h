@@ -17,6 +17,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/time/time.h"
 #include "components/lens/proto/server/lens_overlay_response.pb.h"
+#include "components/omnibox/common/input_state.h"
 #include "components/search_engines/search_engine_type.h"
 #include "components/search_engines/search_terms_data.h"
 #include "components/search_engines/template_url_data.h"
@@ -25,8 +26,8 @@
 #include "third_party/metrics_proto/omnibox_event.pb.h"
 #include "third_party/metrics_proto/omnibox_focus_type.pb.h"
 #include "third_party/metrics_proto/omnibox_input_type.pb.h"
-#include "third_party/omnibox_proto/aim_tools_and_models.pb.h"
 #include "third_party/omnibox_proto/chrome_searchbox_stats.pb.h"
+#include "third_party/omnibox_proto/tool_mode.pb.h"
 #include "ui/gfx/geometry/size.h"
 #include "url/gurl.h"
 #include "url/third_party/mozilla/url_parse.h"
@@ -232,9 +233,9 @@ class TemplateURLRef {
     std::optional<lens::proto::LensOverlaySuggestInputs>
         lens_overlay_suggest_inputs;
 
-    // The tool mode to be sent in query parameters in the suggest requests.
-    omnibox::ChromeAimToolsAndModels aim_tool_mode =
-        omnibox::ChromeAimToolsAndModels::TOOL_MODE_UNSPECIFIED;
+    // Input state. This is specifically the contextual state, with regards to
+    // the tools and models that may be selected.
+    omnibox::InputState input_state;
 
     // Which omnibox the user used to type the prefix.
     metrics::OmniboxEventProto::PageClassification page_classification =

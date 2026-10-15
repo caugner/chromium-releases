@@ -14,6 +14,9 @@
 namespace contextual_tasks {
 
 BASE_DECLARE_FEATURE(kContextualTasks);
+// When enabled, it should instead request the kSearchResultsOAuth2Scope instead
+// of the kChromeSyncOAuth2Scope
+BASE_DECLARE_FEATURE(kContextualTasksScopeChange);
 BASE_DECLARE_FEATURE(kContextualTasksContext);
 BASE_DECLARE_FEATURE(kContextualTasksContextLibrary);
 BASE_DECLARE_FEATURE(kContextualTasksContextLogging);
@@ -28,8 +31,25 @@ BASE_DECLARE_FEATURE(kContextualTasksContextMenu);
 // Enables context menu settings for contextual tasks.
 BASE_DECLARE_FEATURE(kContextualTasksSuggestionsEnabled);
 
+// Enables auto-suggestions for contextual tasks. When disabled, no suggested
+// chips will be shown in the composebox automatically.
+BASE_DECLARE_FEATURE(kContextualTasksAutoSuggestionEnabled);
+
 // Force the application locale to US and the gl query parameter to us.
 BASE_DECLARE_FEATURE(kContextualTasksForceCountryCodeUS);
+
+// Remove tasks that have no tabs or threads associated with them on tab
+// disassociation.
+BASE_DECLARE_FEATURE(
+    kContextualTasksRemoveTasksWithoutThreadsOrTabAssociations);
+
+// Enables use of silk api to notify zero state rendered instead of the url
+// param.
+BASE_DECLARE_FEATURE(kEnableNotifyZeroStateRenderedCapability);
+
+// Replace the overflow menu in the side panel with an explicit button to move
+// the thread to a new tab.
+BASE_DECLARE_FEATURE(kContextualTasksExpandButton);
 
 // Enum denoting which entry point can show when enabled.
 enum class EntryPointOption {
@@ -39,12 +59,10 @@ enum class EntryPointOption {
   kToolbarPermanent
 };
 
-// The minimum score required for two embeddings to be considered similar.
-extern const base::FeatureParam<double> kMinEmbeddingSimilarityScore;
 // Whether to only consider titles for similarity.
 extern const base::FeatureParam<bool> kOnlyUseTitlesForSimilarity;
-// Minimum score, computed using multiple signals, to consider a tab relevant.
-extern const base::FeatureParam<double> kMinMultiSignalScore;
+// Minimum score to consider a tab relevant.
+extern const base::FeatureParam<double> kTabSelectionScoreThreshold;
 // Minimum score required for a tab to be considered visible.
 extern const base::FeatureParam<double> kContentVisibilityThreshold;
 
@@ -70,10 +88,12 @@ extern const base::FeatureParam<bool> kOpenSidePanelOnLinkClicked;
 extern bool GetIsContextualTasksNextboxContextMenuEnabled();
 
 // The file types that can be attached to a Nextbox as images.
-extern const base::FeatureParam<std::string> kContextualTasksNextboxImageFileTypes;
+extern const base::FeatureParam<std::string>
+    kContextualTasksNextboxImageFileTypes;
 
 // The file types that can be attached to a Nextbox as attachments.
-extern const base::FeatureParam<std::string> kContextualTasksNextboxAttachmentFileTypes;
+extern const base::FeatureParam<std::string>
+    kContextualTasksNextboxAttachmentFileTypes;
 
 // The maximum size of a file that can be attached to a Nextbox.
 extern const base::FeatureParam<int> kContextualTasksNextboxMaxFileSize;
@@ -91,6 +111,11 @@ extern const base::FeatureParam<std::string> kContextualTasksHelpUrl;
 extern const base::FeatureParam<std::string>
     kContextualTasksOnboardingTooltipHelpUrl;
 
+// Enables suggestions rendered on contextual tasks side, instead of from AIM
+// webpage.
+extern const base::FeatureParam<bool>
+    kContextualTasksEnableNativeZeroStateSuggestions;
+
 // The maximum number of times the onboarding tooltip can be shown to the user
 // in a single session before it no longer shows up.
 extern int GetContextualTasksShowOnboardingTooltipSessionImpressionCap();
@@ -101,6 +126,10 @@ extern int GetContextualTasksOnboardingTooltipDismissedCap();
 
 // The delay in milliseconds before the onboarding tooltip is considered shown.
 extern int GetContextualTasksOnboardingTooltipImpressionDelay();
+
+// The number of seconds inactive side panel WebContents should keep in cache.
+// Expired side panel WebContents will be destroyed.
+extern int ContextualTasksInactiveSidePanelKeepInCacheMinutes();
 
 // Returns if voice search is allowed in expanded composebox.
 extern bool GetIsExpandedComposeboxVoiceSearchEnabled();
@@ -113,6 +142,13 @@ extern bool GetAutoSubmitVoiceSearchQuery();
 
 // Returns if the protected page error is enabled.
 extern bool GetIsProtectedPageErrorEnabled();
+
+// Returns if the ghost loader is enabled.
+extern bool GetIsGhostLoaderEnabled();
+
+// Returns if basic mode should be forced when the thread history is opened
+// before the handshake is complete.
+extern bool ShouldForceBasicModeIfOpeningThreadHistory();
 
 // Returns the base URL for the AI page.
 extern std::string GetContextualTasksAiPageUrl();
@@ -151,6 +187,23 @@ extern std::string GetContextualTasksOnboardingTooltipHelpUrl();
 // Returns the help URL for the help center article from the toolbar.
 extern std::string GetContextualTasksHelpUrl();
 
+// Returns whether smart compose is enabled for Contextual Tasks.
+extern bool GetEnableContextualTasksSmartCompose();
+
+// Returns whether native (cobrowsing instead of AIM webpage)
+// zero state suggestions are enabled for Contextual Tasks.
+extern bool GetEnableNativeZeroStateSuggestions();
+
+// Returns whether the kSearchResultsOAuth2Scope should be used instead of the
+// kChromeSyncOAuth2Scope.
+extern bool ShouldUseSearchResultsScope();
+
+// Returns whether the z-order of the composebox should be changed in basic mode.
+extern bool ShouldEnableBasicModeZOrder();
+
+// Returns whether the cookie sync should be enabled.
+extern bool ShouldEnableCookieSync();
+
 namespace flag_descriptions {
 
 extern const char kContextualTasksName[];
@@ -159,6 +212,8 @@ extern const char kContextualTasksContextLibraryName[];
 extern const char kContextualTasksContextLibraryDescription[];
 extern const char kContextualTasksContextName[];
 extern const char kContextualTasksContextDescription[];
+extern const char kContextualTasksExpandButtonName[];
+extern const char kContextualTasksExpandButtonDescription[];
 extern const char kContextualTasksSuggestionsEnabledName[];
 extern const char kContextualTasksSuggestionsEnabledDescription[];
 

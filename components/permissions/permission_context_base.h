@@ -182,6 +182,11 @@ class PermissionContextBase : public content_settings::Observer {
     has_device_permission_for_test_ = has_permission;
   }
 
+  void set_can_request_device_permission_for_test(
+      std::optional<bool> can_request) {
+    can_request_device_permission_for_test_ = can_request;
+  }
+
  protected:
   // Retrieves the current permission status. |render_frame_host| may be
   // nullptr.
@@ -246,6 +251,11 @@ class PermissionContextBase : public content_settings::Observer {
   // Implementors can override this method to avoid using automatic embargo.
   virtual bool UsesAutomaticEmbargo() const;
 
+  // Implementors can override this method to use custom notification logic.
+  virtual void NotifyObservers(const ContentSettingsPattern& primary_pattern,
+                               const ContentSettingsPattern& secondary_pattern,
+                               ContentSettingsTypeSet content_type_set) const;
+
   // Derived classes can use this function to find some particular permission
   // request.
   const PermissionRequest* FindPermissionRequest(
@@ -254,6 +264,11 @@ class PermissionContextBase : public content_settings::Observer {
   // Implementors can override this method to use a different embedding origin.
   // TODO(crbug.com/40220500): This should return a url::Origin instead.
   virtual GURL GetEffectiveEmbedderOrigin(content::RenderFrameHost* rfh) const;
+
+  // Implementors can override this method to use a custom Permission Policy
+  // check.
+  virtual bool PermissionAllowedByPermissionsPolicy(
+      content::RenderFrameHost* rfh) const;
 
   base::ObserverList<permissions::Observer> permission_observers_;
 
@@ -268,9 +283,6 @@ class PermissionContextBase : public content_settings::Observer {
 
  private:
   friend class PermissionContextBaseTests;
-
-  bool PermissionAllowedByPermissionsPolicy(
-      content::RenderFrameHost* rfh) const;
 
   // Called when a request is no longer used so it can be cleaned up.
   void CleanUpRequest(content::WebContents* web_contents,
@@ -287,10 +299,6 @@ class PermissionContextBase : public content_settings::Observer {
                          bool is_final_decision,
                          const PermissionRequestData& request_data);
 
-  void NotifyObservers(const ContentSettingsPattern& primary_pattern,
-                       const ContentSettingsPattern& secondary_pattern,
-                       ContentSettingsTypeSet content_type_set) const;
-
   raw_ptr<content::BrowserContext> browser_context_;
   const ContentSettingsType content_settings_type_;
   const network::mojom::PermissionsPolicyFeature permissions_policy_feature_;
@@ -302,6 +310,7 @@ class PermissionContextBase : public content_settings::Observer {
   mutable std::optional<bool> last_has_device_permission_result_ = std::nullopt;
 
   std::optional<bool> has_device_permission_for_test_;
+  std::optional<bool> can_request_device_permission_for_test_;
 
   // Must be the last member, to ensure that it will be
   // destroyed first, which will invalidate weak pointers

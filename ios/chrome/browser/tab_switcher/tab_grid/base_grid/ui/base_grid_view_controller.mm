@@ -309,17 +309,15 @@ typedef NS_ENUM(NSInteger, DragEntrySide) {
   [coordinator
       animateAlongsideTransition:^(
           id<UIViewControllerTransitionCoordinatorContext> context) {
-        if (IsTabGridEmptyThumbnailUIEnabled()) {
-          for (UICollectionViewCell* cell in self.collectionView.visibleCells) {
-            if ([cell isKindOfClass:[GridCell class]]) {
-              GridCell* gridCell = ObjCCastStrict<GridCell>(cell);
-              gridCell.layoutType = [self layoutTypeForContainerSize:size
-                                                          isGridCell:YES];
-            } else if ([cell isKindOfClass:[GroupGridCell class]]) {
-              GroupGridCell* gridCell = ObjCCastStrict<GroupGridCell>(cell);
-              gridCell.layoutType = [self layoutTypeForContainerSize:size
-                                                          isGridCell:NO];
-            }
+        for (UICollectionViewCell* cell in self.collectionView.visibleCells) {
+          if ([cell isKindOfClass:[GridCell class]]) {
+            GridCell* gridCell = ObjCCastStrict<GridCell>(cell);
+            gridCell.layoutType = [self layoutTypeForContainerSize:size
+                                                        isGridCell:YES];
+          } else if ([cell isKindOfClass:[GroupGridCell class]]) {
+            GroupGridCell* gridCell = ObjCCastStrict<GroupGridCell>(cell);
+            gridCell.layoutType = [self layoutTypeForContainerSize:size
+                                                        isGridCell:NO];
           }
         }
         [self.collectionView.collectionViewLayout invalidateLayout];
@@ -938,9 +936,15 @@ typedef NS_ENUM(NSInteger, DragEntrySide) {
         static_cast<TabGroupInfo*>(dragItem.localObject);
     isSharedGroup = [self.dragDropHandler isGroupShared:tabGroupInfo];
   }
+  // This is how the explicit forbidden icon or (+) copy icon is shown. Move
+  // has no explicit icon.
+  UIDropOperation dropOperation = [self.dragDropHandler
+      dropOperationForDropSession:session
+                          toIndex:destinationIndexPath.item];
   if (IsTabGridDragAndDropEnabled() && !isSharedGroup &&
       destinationItemIndexPath &&
-      draggedItemIndexPath != destinationItemIndexPath) {
+      draggedItemIndexPath != destinationItemIndexPath &&
+      dropOperation != UIDropOperationForbidden) {
     // If the drag goes into a different cell's frame, either highlight or allow
     // for reorder depending on location.
     DragEntrySide entryDirection = DragEntrySideNone;
@@ -973,11 +977,6 @@ typedef NS_ENUM(NSInteger, DragEntrySide) {
       [self clearCurrentlyHighlightedCell];
     }
 
-    // This is how the explicit forbidden icon or (+) copy icon is shown. Move
-    // has no explicit icon.
-    UIDropOperation dropOperation = [self.dragDropHandler
-        dropOperationForDropSession:session
-                            toIndex:destinationIndexPath.item];
     return [[UICollectionViewDropProposal alloc]
         initWithDropOperation:dropOperation
                        intent:
@@ -1553,14 +1552,17 @@ typedef NS_ENUM(NSInteger, DragEntrySide) {
     [snapshot moveItemWithIdentifier:item
             beforeItemWithIdentifier:nextItemIdentifier];
   } else {
-    NSInteger section = [self.diffableDataSource
-        indexForSectionIdentifier:kGridOpenTabsSectionIdentifier];
-    NSIndexPath* lastIndexPath =
-        [NSIndexPath indexPathForItem:[self numberOfTabs] - 1
-                            inSection:section];
-    GridItemIdentifier* lastItem =
-        [self.diffableDataSource itemIdentifierForIndexPath:lastIndexPath];
-    if (lastItem == item) {
+    NSArray<GridItemIdentifier*>* items = [snapshot
+        itemIdentifiersInSectionWithIdentifier:kGridOpenTabsSectionIdentifier];
+    GridItemIdentifier* lastItem = items.lastObject;
+    if ([lastItem isEqual:item]) {
+      return;
+    }
+
+    // If there is no last item (empty section), append the item.
+    if (!lastItem) {
+      [snapshot appendItemsWithIdentifiers:@[ item ]
+                 intoSectionWithIdentifier:kGridOpenTabsSectionIdentifier];
       return;
     }
 
@@ -1807,12 +1809,9 @@ typedef NS_ENUM(NSInteger, DragEntrySide) {
   cell.tabsCount = item.numberOfTabsInGroup;
   cell.title = item.title;
   cell.accessibilityIdentifier = GroupGridCellAccessibilityIdentifier(index);
-  if (IsTabGridEmptyThumbnailUIEnabled()) {
-    cell.layoutType =
-        [self layoutTypeForContainerSize:self.collectionView.bounds.size
-                              isGridCell:NO];
-  }
-
+  cell.layoutType =
+      [self layoutTypeForContainerSize:self.collectionView.bounds.size
+                            isGridCell:NO];
   cell.facePileProvider =
       [self.gridProvider facePileProviderForItem:groupItemIdentifier];
 
@@ -1879,13 +1878,10 @@ typedef NS_ENUM(NSInteger, DragEntrySide) {
   cell.theme = self.theme;
   cell.itemIdentifier = itemIdentifier;
   cell.title = item.title;
-  cell.titleHidden = item.hidesTitle;
   [cell setAccessibilityIdentifiersWithIndex:index];
-  if (IsTabGridEmptyThumbnailUIEnabled()) {
-    cell.layoutType =
-        [self layoutTypeForContainerSize:self.collectionView.bounds.size
-                              isGridCell:YES];
-  }
+  cell.layoutType =
+      [self layoutTypeForContainerSize:self.collectionView.bounds.size
+                            isGridCell:YES];
   if (self.mode == TabGridMode::kSelection) {
     if ([self.gridProvider isItemSelected:itemIdentifier]) {
       cell.state = GridCellStateEditingSelected;
@@ -2239,7 +2235,7 @@ typedef NS_ENUM(NSInteger, DragEntrySide) {
       }
       break;
     case DragEntrySideNone:
-      NOTREACHED();
+      return NO;
   }
   return YES;
 }

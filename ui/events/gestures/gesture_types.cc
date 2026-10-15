@@ -19,6 +19,10 @@ const std::string& GestureConsumer::GetName() const {
   return name;
 }
 
+base::WeakPtr<GestureConsumer> GestureConsumer::GetWeakPtr() {
+  return weak_ptr_factory_.GetWeakPtr();
+}
+
 std::unique_ptr<GestureProviderAura> GestureConsumer::TakeProvider() {
   return std::move(provider_);
 }

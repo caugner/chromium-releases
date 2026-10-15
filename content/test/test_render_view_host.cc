@@ -175,16 +175,8 @@ void TestRenderWidgetHostView::Destroy() {
   delete this;
 }
 
-void TestRenderWidgetHostView::SetSize(const gfx::Size& size) {
-  bounds_.set_size(size);
-}
-
-void TestRenderWidgetHostView::SetBounds(const gfx::Rect& rect) {
-  bounds_ = rect;
-}
-
 gfx::Rect TestRenderWidgetHostView::GetViewBounds() {
-  return bounds_;
+  return gfx::Rect();
 }
 
 #if BUILDFLAG(IS_MAC)
