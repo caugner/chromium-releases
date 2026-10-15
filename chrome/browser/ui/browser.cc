@@ -1214,12 +1214,9 @@ bool Browser::IsActive() {
   // If this is a standalone PWA window, check BrowserList instead.
   if (GetAppBrowserController()) {
     return BrowserList::GetInstance()->GetLastActive() == this;
-  } else {
-    return window_->IsActive();
   }
-#else
-  return window_->IsActive();
 #endif
+  return is_active_;
 }
 
 base::CallbackListSubscription Browser::RegisterDidBecomeActive(
@@ -1234,6 +1231,10 @@ base::CallbackListSubscription Browser::RegisterDidBecomeInactive(
 
 ExclusiveAccessManager* Browser::GetExclusiveAccessManager() {
   return exclusive_access_manager();
+}
+
+ImmersiveModeController* Browser::GetImmersiveModeController() {
+  return GetBrowserView().immersive_mode_controller();
 }
 
 BrowserActions* Browser::GetActions() {
@@ -1265,13 +1266,17 @@ Browser* Browser::GetBrowserForMigrationOnly() {
 }
 
 void Browser::DidBecomeActive() {
-  BrowserList::SetLastActive(this);
-  did_become_active_callback_list_.Notify(this);
+  if (!is_active_) {
+    is_active_ = true;
+    did_become_active_callback_list_.Notify(this);
+  }
 }
 
 void Browser::DidBecomeInactive() {
-  BrowserList::NotifyBrowserNoLongerActive(this);
-  did_become_inactive_callback_list_.Notify(this);
+  if (is_active_) {
+    is_active_ = false;
+    did_become_inactive_callback_list_.Notify(this);
+  }
 }
 
 #if BUILDFLAG(IS_CHROMEOS)
@@ -1645,7 +1650,9 @@ void Browser::TabPinnedStateChanged(TabStripModel* tab_strip_model,
 }
 
 void Browser::TabGroupedStateChanged(
-    std::optional<tab_groups::TabGroupId> group,
+    TabStripModel* tab_strip_model,
+    std::optional<tab_groups::TabGroupId> old_group,
+    std::optional<tab_groups::TabGroupId> new_group,
     tabs::TabInterface* tab,
     int index) {
   // See comment in Browser::OnTabGroupChanged
@@ -1659,7 +1666,7 @@ void Browser::TabGroupedStateChanged(
   sessions::SessionTabHelper* const session_tab_helper =
       sessions::SessionTabHelper::FromWebContents(tab->GetContents());
   session_service->SetTabGroup(session_id(), session_tab_helper->session_id(),
-                               std::move(group));
+                               std::move(new_group));
 }
 
 void Browser::TabStripEmpty() {
@@ -1728,6 +1735,11 @@ void Browser::SetFocusToLocationBar() {
   //     renderer initiated focus (this method is a WebContentsDelegate
   //     override).
   window_->SetFocusToLocationBar(false);
+}
+
+bool Browser::PreHandleMouseEvent(content::WebContents* source,
+                                  const blink::WebMouseEvent& event) {
+  return window()->PreHandleMouseEvent(event);
 }
 
 content::KeyboardEventProcessingResult Browser::PreHandleKeyboardEvent(
@@ -2055,7 +2067,7 @@ content::WebContents* Browser::AddNewContents(
     // cannot switch their independent spaces simultaneously (crbug.com/1315749)
     auto web_contents_creation_callback = base::BindOnce(
         &chrome::AddWebContents, this, source, std::move(new_contents),
-        target_url, disposition, window_features, window_action);
+        target_url, disposition, window_features, window_action, user_gesture);
     fullscreen_controller->RunOrDeferUntilTransitionIsComplete(base::BindOnce(
         base::IgnoreResult(std::move(web_contents_creation_callback))));
     return nullptr;
@@ -2063,7 +2075,7 @@ content::WebContents* Browser::AddNewContents(
 
   return chrome::AddWebContents(this, source, std::move(new_contents),
                                 target_url, disposition, window_features,
-                                window_action);
+                                window_action, user_gesture);
 }
 
 void Browser::ActivateContents(WebContents* contents) {
@@ -2362,8 +2374,8 @@ bool Browser::CanUseWindowingControls(
   return true;
 }
 
-void Browser::OnCanResizeFromWebAPIChanged() {
-  window_->OnCanResizeFromWebAPIChanged();
+void Browser::OnWebApiWindowResizableChanged() {
+  window_->OnWebApiWindowResizableChanged();
 }
 
 bool Browser::GetCanResize() {
@@ -2959,6 +2971,13 @@ void Browser::OnActiveTabChanged(WebContents* old_contents,
   if (HasFindBarController()) {
     find_bar_controller_->ChangeWebContents(new_contents);
     find_bar_controller_->find_bar()->MoveWindowIfNecessary();
+    find_in_page::FindTabHelper* find_tab_helper =
+        find_in_page::FindTabHelper::FromWebContents(new_contents);
+    if (find_tab_helper && find_tab_helper->find_ui_active()) {
+      if (!find_bar_controller_->find_bar()->HasFocus()) {
+        find_bar_controller_->find_bar()->RestoreSavedFocus();
+      }
+    }
   }
 
   // Update sessions (selected tab index and last active time). Don't force

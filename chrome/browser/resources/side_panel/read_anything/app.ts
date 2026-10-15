@@ -21,11 +21,11 @@ import {getCss} from './app.css.js';
 import {getHtml} from './app.html.js';
 import {AppStyleUpdater} from './app_style_updater.js';
 import type {SettingsPrefs} from './common.js';
-import {getCurrentSpeechRate, isWhitespace, minOverflowLengthToScroll, playFromSelectionTimeout} from './common.js';
+import {getCurrentSpeechRate, isHtmlElementVisible, isWhitespace, minOverflowLengthToScroll, playFromSelectionTimeout} from './common.js';
 import type {LanguageToastElement} from './language_toast.js';
 import {ReadAnythingLogger, TimeFrom, TimeTo} from './read_anything_logger.js';
 import type {ReadAnythingToolbarElement} from './read_anything_toolbar.js';
-import {areVoicesEqual, AVAILABLE_GOOGLE_TTS_LOCALES, convertLangOrLocaleForVoicePackManager, convertLangOrLocaleToExactVoicePackLocale, convertLangToAnAvailableLangIfPresent, createInitialListOfEnabledLanguages, doesLanguageHaveNaturalVoices, getFilteredVoiceList, getNaturalVoiceOrDefault, getVoicePackConvertedLangIfExists, isEspeak, isGoogle, isNatural, isVoicePackStatusError, isVoicePackStatusSuccess, mojoVoicePackStatusToVoicePackStatusEnum, VoiceClientSideStatusCode, VoicePackServerStatusErrorCode, VoicePackServerStatusSuccessCode} from './voice_language_util.js';
+import {areVoicesEqual, AVAILABLE_GOOGLE_TTS_LOCALES, convertLangOrLocaleForVoicePackManager, convertLangOrLocaleToExactVoicePackLocale, convertLangToAnAvailableLangIfPresent, createInitialListOfEnabledLanguages, doesLanguageHaveNaturalVoices, EXTENSION_RESPONSE_TIMEOUT_MS, getFilteredVoiceList, getNaturalVoiceOrDefault, getVoicePackConvertedLangIfExists, isEspeak, isGoogle, isNatural, isVoicePackStatusError, isVoicePackStatusSuccess, mojoVoicePackStatusToVoicePackStatusEnum, VoiceClientSideStatusCode, VoicePackServerStatusErrorCode, VoicePackServerStatusSuccessCode} from './voice_language_util.js';
 import type {VoicePackStatus} from './voice_language_util.js';
 import {VoiceNotificationManager} from './voice_notification_manager.js';
 
@@ -198,8 +198,15 @@ export class AppElement extends AppElementBase {
   // more natural. When that text is then selected we need to pass the correct
   // index down the pipeline, so we store that info here.
   private highlightedNodeToOffsetInParent: Map<Node, number> = new Map();
+  // IDs of the text nodes that are hidden when images are hidden. This is
+  // usually the figcaption elements which we want to keep distilled for quick
+  // turnaround when enabling/disabling images, but we don't want read aloud to
+  // read out text that's not showing, so keep track of which nodes are not
+  // showing.
+  private hiddenImageNodesIds_: Set<number> = new Set();
   private imageNodeIdsToFetch_: Set<number> = new Set();
 
+  private allowAutoScroll_ = true;
   private scrollingOnSelection_ = false;
   protected hasContent_ = false;
   protected emptyStateImagePath_?: string;
@@ -218,6 +225,13 @@ export class AppElement extends AppElementBase {
   // Read Aloud controls until the engine has loaded in order to provide
   // visual feedback that a voice is about to be spoken.
   private speechEngineLoaded_: boolean = true;
+
+  // The extension is responsible for installing the Natural voices. We need to
+  // keep track of whether the extension is being responsive. If not, the
+  // extension is probably not downloaded and we'll let the user know. This
+  // handle is a reference to the callback that will be invoked if the extension
+  // does not respond in a timely manner.
+  private speechExtensionResponseCallbackHandle_?: number;
 
   // Sometimes distillations are queued up while distillation is happening so
   // when the current distillation finishes, we re-distill immediately. In that
@@ -342,6 +356,14 @@ export class AppElement extends AppElementBase {
     ColorChangeUpdater.forDocument().start();
   }
 
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    // Even though disconnectedCallback isn't always called reliably in prod,
+    // it is called in tests, and the speech extension timeout can cause
+    // flakiness.
+    this.cancelSpeechExtensionResponseTimeout();
+  }
+
   override connectedCallback() {
     super.connectedCallback();
 
@@ -451,6 +473,14 @@ export class AppElement extends AppElementBase {
     this.$.containerParent.onscroll = () => {
       chrome.readingMode.onScroll(this.scrollingOnSelection_);
       this.scrollingOnSelection_ = false;
+
+      // If the reading mode panel was scrolled while read aloud is speaking,
+      // we should disable autoscroll if the highlights are no longer visible,
+      // and we should re-enable autoscroll if the highlights are now
+      // visible.
+      if (this.speechPlayingState.isSpeechActive) {
+        this.allowAutoScroll_ = this.areHighlightsOnScreen();
+      }
     };
 
     // Pass copy commands to main page. Copy commands will not work if they are
@@ -755,12 +785,13 @@ export class AppElement extends AppElementBase {
     const langOrLocaleForPackManager =
         convertLangOrLocaleForVoicePackManager(langOrLocale);
     if (langOrLocaleForPackManager) {
+      this.setSpeechExtensionResponseTimeout();
       chrome.readingMode.sendGetVoicePackInfoRequest(
           langOrLocaleForPackManager);
     }
   }
 
-  private async loadImages_() {
+  private loadImages_() {
     if (!chrome.readingMode.imagesFeatureEnabled) {
       return;
     }
@@ -778,7 +809,7 @@ export class AppElement extends AppElementBase {
   }
 
   updateSelection() {
-    const selection: Selection = this.getSelection()!;
+    const selection: Selection = this.getSelection();
     selection.removeAllRanges();
 
     const range = new Range();
@@ -892,14 +923,50 @@ export class AppElement extends AppElementBase {
     }
 
     this.imagesEnabled = chrome.readingMode.imagesEnabled;
+    if (this.imagesEnabled) {
+      this.hiddenImageNodesIds_.clear();
+    }
     // There is some strange issue where the HTML css application does not work
     // on canvases.
     for (const canvas of this.shadowRoot.querySelectorAll('canvas')) {
       canvas.style.display = this.imagesEnabled ? '' : 'none';
+      this.markTextNodesHiddenIfImagesHidden_(canvas);
     }
     for (const canvas of this.shadowRoot.querySelectorAll('figure')) {
       canvas.style.display = this.imagesEnabled ? '' : 'none';
+      this.markTextNodesHiddenIfImagesHidden_(canvas);
     }
+  }
+
+  private async markTextNodesHiddenIfImagesHidden_(node: Node) {
+    if (this.imagesEnabled) {
+      return;
+    }
+
+    // Do this asynchronously so we don't block the UI on large pages.
+    await new Promise(() => {
+      setTimeout(() => {
+        const id = this.domNodeToAxNodeIdMap_.get(node);
+        if (node.nodeType === Node.TEXT_NODE) {
+          if (id) {
+            this.hiddenImageNodesIds_.add(id);
+          }
+          return;
+        }
+
+        // Since read aloud looks at the text nodes, we want to store those ids
+        // so we don't read out text that is not visible.
+        const startTreeWalker =
+            document.createTreeWalker(node, NodeFilter.SHOW_ALL);
+        while (startTreeWalker.nextNode()) {
+          const id =
+              this.domNodeToAxNodeIdMap_.get(startTreeWalker.currentNode);
+          if (id) {
+            this.hiddenImageNodesIds_.add(id);
+          }
+        }
+      });
+    });
   }
 
   protected onDocsLoadMoreButtonClick_() {
@@ -907,6 +974,9 @@ export class AppElement extends AppElementBase {
   }
 
   updateVoicePackStatus(lang: string, status: string) {
+    // This is called when the extension responds, so let's cancel the timer.
+    this.cancelSpeechExtensionResponseTimeout();
+
     if (!lang) {
       return;
     }
@@ -936,6 +1006,23 @@ export class AppElement extends AppElementBase {
     }
   }
 
+
+  // Schedules a timer that will notify the user if the speech extension is
+  // unresponsive. Only schedules a new timer if there is none pending.
+  private setSpeechExtensionResponseTimeout() {
+    if (this.speechExtensionResponseCallbackHandle_ === undefined) {
+      this.speechExtensionResponseCallbackHandle_ = setTimeout(
+          () => this.notificationManager_.onNoEngineConnection(),
+          EXTENSION_RESPONSE_TIMEOUT_MS);
+    }
+  }
+
+  private cancelSpeechExtensionResponseTimeout() {
+    if (this.speechExtensionResponseCallbackHandle_ !== undefined) {
+      clearTimeout(this.speechExtensionResponseCallbackHandle_);
+      this.speechExtensionResponseCallbackHandle_ = undefined;
+    }
+  }
 
   // Store client side voice pack state and trigger side effects
   private updateApplicationState(
@@ -1094,7 +1181,7 @@ export class AppElement extends AppElementBase {
     // reselect a new voice.
     if (this.selectedVoice_ &&
         !this.availableVoices_.some(
-            voice => areVoicesEqual(voice, this.selectedVoice_!))) {
+            voice => areVoicesEqual(voice, this.selectedVoice_))) {
       this.selectedVoice_ = undefined;
     }
 
@@ -1519,7 +1606,7 @@ export class AppElement extends AppElementBase {
     }
   }
 
-  async preprocessTextForSpeech() {
+  preprocessTextForSpeech() {
     chrome.readingMode.preprocessTextForSpeech();
   }
 
@@ -1635,6 +1722,11 @@ export class AppElement extends AppElementBase {
     // speech should stop.
     if (axNodeIds.length === 0) {
       return false;
+    }
+
+    if (axNodeIds.every(id => this.hiddenImageNodesIds_.has(id))) {
+      chrome.readingMode.movePositionToNextGranularity();
+      return this.highlightAndPlayMessage(isInterrupted);
     }
 
     const utteranceText = this.extractTextOf(axNodeIds);
@@ -2134,6 +2226,16 @@ export class AppElement extends AppElementBase {
   }
 
   private scrollHighlightIntoView() {
+    if (!this.allowAutoScroll_) {
+      if (!this.areHighlightsOnScreen()) {
+        return;
+      }
+
+      // If we scrolled away from the current highlights but speech has
+      // caught up with the new scrolled position, resume autoscrolling.
+      this.allowAutoScroll_ = true;
+    }
+
     // Ensure all the current highlights are in view.
     // TODO: crbug.com/40927698 - Handle if the highlight is longer than the
     // full height of the window (e.g. when font size is very large). Possibly
@@ -2141,9 +2243,9 @@ export class AppElement extends AppElementBase {
     // window and need to scroll so the rest of the current highlight is
     // showing.
     assert(this.shadowRoot);
-    const currentHighlights = this.shadowRoot!.querySelectorAll<HTMLElement>(
+    const currentHighlights = this.shadowRoot.querySelectorAll<HTMLElement>(
         '.' + currentReadHighlightClass);
-    if (!currentHighlights) {
+    if (!currentHighlights || !currentHighlights.length) {
       return;
     }
     const firstHighlight = currentHighlights.item(0);
@@ -2160,6 +2262,20 @@ export class AppElement extends AppElementBase {
       // off.
       firstHighlight.scrollIntoView({block: 'center'});
     }
+  }
+
+  private areHighlightsOnScreen(): boolean {
+    assert(this.shadowRoot);
+    const currentHighlights = this.shadowRoot.querySelectorAll<HTMLElement>(
+        '.' + currentReadHighlightClass);
+    if (!currentHighlights || !currentHighlights.length) {
+      return false;
+    }
+
+    const firstHighlight = currentHighlights.item(0);
+    const lastHighlight = currentHighlights.item(currentHighlights.length - 1);
+    return isHtmlElementVisible(firstHighlight) ||
+        isHtmlElementVisible(lastHighlight);
   }
 
   private defaultUtteranceSettings(): UtteranceSettings {
@@ -2577,9 +2693,10 @@ export class AppElement extends AppElementBase {
     // Apply highlighting changes to the DOM.
     this.styleUpdater_.setHighlight();
 
-    // TODO(crbug.com/366002886): Re-highlight with the new granularity. In
-    // particular, when switching from word or phrase to sentence, the sentence
-    // highlight needs to be recalculated.
+    // Rehighlight the new granularity.
+    if (changedHighlight !== chrome.readingMode.noHighlighting) {
+      this.highlightCurrentGranularity(chrome.readingMode.getCurrentText());
+    }
 
     // Log these highlight granularity changes when the phrase menu is shown.
     // (Toggles are already logged in the toolbar.)

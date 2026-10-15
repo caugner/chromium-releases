@@ -34,7 +34,7 @@ BASE_FEATURE(kApiPermissionsHostAccessRequests,
 
 BASE_FEATURE(kApiUserScriptsExecute,
              "ApiUserScriptsExecute",
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kApiUserScriptsMultipleWorlds,
              "ApiUserScriptsMultipleWorlds",
@@ -42,10 +42,6 @@ BASE_FEATURE(kApiUserScriptsMultipleWorlds,
 
 BASE_FEATURE(kApiOdfsConfigPrivate,
              "ApiOdfsConfigPrivate",
-             base::FEATURE_ENABLED_BY_DEFAULT);
-
-BASE_FEATURE(kApiEnterpriseReportingPrivateReportDataMaskingEvent,
-             "ApiEnterpriseReportingPrivateReportDataMaskingEvent",
              base::FEATURE_ENABLED_BY_DEFAULT);
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -70,10 +66,6 @@ BASE_FEATURE(kExtensionDisableUnsupportedDeveloper,
              "ExtensionDisableUnsupportedDeveloper",
              base::FEATURE_ENABLED_BY_DEFAULT);
 
-BASE_FEATURE(kExtensionDynamicURLRedirection,
-             "ExtensionDynamicURLRedirection",
-             base::FEATURE_ENABLED_BY_DEFAULT);
-
 BASE_FEATURE(kExtensionIconVariants,
              "ExtensionIconVariants",
              base::FEATURE_DISABLED_BY_DEFAULT);
@@ -92,7 +84,7 @@ BASE_FEATURE(kExtensionManifestV2ExceptionList,
 
 BASE_FEATURE(kExtensionManifestV2Disabled,
              "ExtensionManifestV2Disabled",
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 const base::FeatureParam<std::string> kExtensionManifestV2ExceptionListParam(
     &kExtensionManifestV2ExceptionList,
@@ -105,6 +97,10 @@ BASE_FEATURE(kAllowLegacyMV2Extensions,
 
 BASE_FEATURE(kExtensionSourceUrlEnforcement,
              "ExtensionSourceUrlEnforcement",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
+BASE_FEATURE(kExtensionWARForRedirect,
+             "ExtensionWARForRedirect",
              base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kExtensionWebFileHandlers,
@@ -198,6 +194,10 @@ BASE_FEATURE(kRemoveCoreSiteInstance,
 
 BASE_FEATURE(kUserScriptUserExtensionToggle,
              "UserScriptUserExtensionToggle",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kDebuggerAPIRestrictedToDevMode,
+             "DebuggerAPIRestrictedToDevMode",
              base::FEATURE_DISABLED_BY_DEFAULT);
 
 }  // namespace extensions_features

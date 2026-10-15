@@ -115,6 +115,8 @@ build_webui("build") {
       "elements/ink_color_selector.ts",
       "elements/ink_size_selector.html.ts",
       "elements/ink_size_selector.ts",
+      "elements/selectable_icon_button.html.ts",
+      "elements/selectable_icon_button.ts",
       "elements/viewer_bottom_toolbar.html.ts",
       "elements/viewer_bottom_toolbar.ts",
       "elements/viewer_bottom_toolbar_dropdown.html.ts",
@@ -154,6 +156,7 @@ build_webui("build") {
       "elements/ink_brush_selector.css",
       "elements/ink_color_selector.css",
       "elements/ink_size_selector.css",
+      "elements/selectable_icon_button.css",
       "elements/viewer_bottom_toolbar.css",
       "elements/viewer_bottom_toolbar_dropdown.css",
       "elements/viewer_side_panel.css",
@@ -166,6 +169,9 @@ build_webui("build") {
   html_to_wrapper_template = "detect"
 
   # TypeScript Compiler parameters
+  if (enable_ink) {
+    ts_tsconfig_base = "tsconfig_base.json"
+  }
   ts_composite = true
   ts_definitions = [
     "//tools/typescript/definitions/chrome_event.d.ts",

@@ -671,6 +671,10 @@ void ClientSideDetectionHost::MaybeStartPreClassification(
   if (classification_request_.get()) {
     classification_request_->Cancel();
   }
+
+  // Cancel any ongoing on device sessions.
+  csd_service_->ResetOnDeviceSession();
+
   // If we navigate away and there currently is a pending phishing report
   // request we have to cancel it to make sure we don't display an interstitial
   // for the wrong page.  Note that this won't cancel the server ping back but
@@ -1156,7 +1160,21 @@ void ClientSideDetectionHost::MaybeInquireOnDeviceForScamDetection(
       verdict->llama_forced_trigger_info().intelligent_scan();
 
   if (IsEnhancedProtectionEnabled(*delegate_->GetPrefs()) &&
+      csd_service_->IsOnDeviceModelAvailable() &&
       (is_keyboard_lock_requested || is_intelligent_scan_requested)) {
+    if (is_keyboard_lock_requested &&
+        did_match_high_confidence_allowlist.has_value() &&
+        did_match_high_confidence_allowlist.value()) {
+      IntelligentScanInfo intelligent_scan_info;
+      intelligent_scan_info.set_no_info_reason(
+          IntelligentScanInfo::ALLOWLISTED);
+      *verdict->mutable_intelligent_scan_info() =
+          std::move(intelligent_scan_info);
+      MaybeGetAccessToken(std::move(verdict),
+                          did_match_high_confidence_allowlist);
+      return;
+    }
+
     delegate_->GetInnerText(
         base::BindOnce(&ClientSideDetectionHost::OnInnerTextComplete,
                        weak_factory_.GetWeakPtr(), std::move(verdict),

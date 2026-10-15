@@ -1264,8 +1264,8 @@ void PrerenderHost::SetFailureReason(
     case PrerenderFinalStatus::kAllPrerenderingCanceled:
     case PrerenderFinalStatus::kWindowClosed:
     case PrerenderFinalStatus::kSlowNetwork:
-    case PrerenderFinalStatus::kV8OptimizerDisabled:
     case PrerenderFinalStatus::kPrerenderFailedDuringPrefetch:
+    case PrerenderFinalStatus::kBrowsingDataRemoved:
       if (attempt_) {
         attempt_->SetFailureReason(
             ToPreloadingFailureReason(reason.final_status()));
@@ -1544,7 +1544,6 @@ bool PrerenderHost::ShouldAbortNavigationBecausePrefetchUnavailable() const {
       case PreloadingEligibility::kHttpsOnly:
       case PreloadingEligibility::kHttpOrHttpsOnly:
       case PreloadingEligibility::kSlowNetwork:
-      case PreloadingEligibility::kV8OptimizerDisabled:
       case PreloadingEligibility::kUserHasCookies:
       case PreloadingEligibility::kNonDefaultStoragePartition:
       case PreloadingEligibility::kRetryAfter:

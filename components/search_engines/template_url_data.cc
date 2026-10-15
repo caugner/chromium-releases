@@ -18,6 +18,7 @@
 #include "base/uuid.h"
 #include "base/values.h"
 #include "components/search_engines/regulatory_extension_type.h"
+#include "components/search_engines/search_engines_switches.h"
 #include "crypto/hash.h"
 #include "third_party/search_engines_data/resources/definitions/prepopulated_engines.h"
 
@@ -130,7 +131,6 @@ TemplateURLData::TemplateURLData(
       alternate_urls.push_back(*alternate_url);
     }
   }
-
   regulatory_extensions = base::MakeFlatMap<
       RegulatoryExtensionType,
       raw_ptr<const TemplateURLData::RegulatoryExtension, CtnExperimental>>(
@@ -221,4 +221,8 @@ bool TemplateURLData::CreatedByDefaultSearchProviderPolicy() const {
 
 bool TemplateURLData::CreatedByNonDefaultSearchProviderPolicy() const {
   return CreatedByPolicy() && !CreatedByDefaultSearchProviderPolicy();
+}
+
+bool TemplateURLData::CreatedByEnterpriseSearchAggregatorPolicy() const {
+  return policy_origin == PolicyOrigin::kSearchAggregator;
 }

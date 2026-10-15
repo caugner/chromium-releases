@@ -35,6 +35,7 @@
 #include "gpu/command_buffer/service/service_utils.h"
 #include "gpu/command_buffer/service/shared_image/shared_image_representation.h"
 #include "gpu/config/gpu_finch_features.h"
+#include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_utils.h"
 #include "ui/gl/gl_version_info.h"
 #include "ui/gl/gpu_switching_manager.h"
@@ -137,13 +138,7 @@ class ScopedColorMaskZeroReset {
   explicit ScopedColorMaskZeroReset(gl::GLApi* api,
                                     bool oes_draw_buffers_indexed)
       : api_(api), oes_draw_buffers_indexed_(oes_draw_buffers_indexed) {
-    if (oes_draw_buffers_indexed_) {
-      GLsizei length = 0;
-      api_->glGetBooleani_vRobustANGLEFn(
-          GL_COLOR_WRITEMASK, 0, sizeof(color_mask_), &length, color_mask_);
-    } else {
-      api_->glGetBooleanvFn(GL_COLOR_WRITEMASK, color_mask_);
-    }
+    api_->glGetBooleanvFn(GL_COLOR_WRITEMASK, color_mask_);
   }
   ~ScopedColorMaskZeroReset() {
     if (oes_draw_buffers_indexed_) {
@@ -799,6 +794,9 @@ gpu::ContextResult GLES2DecoderPassthroughImpl::Initialize(
     const DisallowedFeatures& disallowed_features,
     const ContextCreationAttribs& attrib_helper) {
   TRACE_EVENT0("gpu", "GLES2DecoderPassthroughImpl::Initialize");
+  CHECK(gl::GetGLImplementation() == gl::kGLImplementationEGLANGLE)
+      << "Running WebGL through passthrough command decoder without ANGLE's "
+      << "validation is a security risk";
   DCHECK(context->IsCurrent(surface.get()));
   api_ = gl::g_current_gl_context;
   // Take ownership of the context and surface. The surface can be replaced
@@ -1065,17 +1063,6 @@ gpu::ContextResult GLES2DecoderPassthroughImpl::Initialize(
   if (feature_info_->IsWebGLContext())
     api()->glDisableFn(GL_TEXTURE_RECTANGLE_ANGLE);
 #endif
-
-  // TEMPORARY: Set primitive restart to enabled by default for WebGL2. Clear
-  // errors afterwards so that when this state is initialized and validated in
-  // ANGLE, it will not generate errors during command buffer initialization.
-  if (feature_info_->context_type() == CONTEXT_TYPE_WEBGL2) {
-    // If WebGL 2, the PRIMITIVE_RESTART_FIXED_INDEX should be always enabled.
-    // See the section <Primitive Restart is Always Enabled> in WebGL 2 spec:
-    // https://www.khronos.org/registry/webgl/specs/latest/2.0/#4.1.4
-    api()->glEnableFn(GL_PRIMITIVE_RESTART_FIXED_INDEX);
-    CheckErrorCallbackState();
-  }
 
   // Register this object as a GPU switching observer.
   if (feature_info_->IsWebGLContext()) {
@@ -1419,7 +1406,7 @@ gpu::Capabilities GLES2DecoderPassthroughImpl::GetCapabilities() {
   caps.angle_rgbx_internal_format =
       feature_info_->feature_flags().angle_rgbx_internal_format;
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   PopulateDRMCapabilities(&caps, feature_info_.get());
 #endif
 
@@ -2171,11 +2158,6 @@ bool GLES2DecoderPassthroughImpl::IsIgnoredCap(GLenum cap) const {
   switch (cap) {
     case GL_DEBUG_OUTPUT:
       return true;
-
-    case GL_PRIMITIVE_RESTART_FIXED_INDEX:
-      // Disable setting primitive restart at the command decoder level until
-      // it's blocked in ANGLE for WebGL contexts.
-      return feature_info_->IsWebGLContext();
 
     default:
       return false;

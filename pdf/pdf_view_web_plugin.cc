@@ -276,16 +276,31 @@ class PdfViewWebPlugin::PdfInkModuleClientImpl : public PdfInkModuleClient {
   ~PdfInkModuleClientImpl() override = default;
 
   // PdfInkModuleClient:
+  void DiscardStroke(int page_index, InkStrokeId id) override {
+    plugin_->engine_->DiscardStroke(page_index, id);
+  }
+
   PageOrientation GetOrientation() const override {
     return plugin_->engine_->GetCurrentOrientation();
   }
 
-  gfx::Rect GetPageContentsRect(int index) override {
-    if (index < 0 || index >= plugin_->engine_->GetNumberOfPages()) {
+  gfx::Rect GetPageContentsRect(int page_index) override {
+    if (page_index < 0 || page_index >= plugin_->engine_->GetNumberOfPages()) {
       return gfx::Rect();
     }
+    return plugin_->engine_->GetPageContentsRect(page_index);
+  }
 
-    return plugin_->engine_->GetPageContentsRect(index);
+  gfx::SizeF GetPageSizeInPoints(int page_index) override {
+    if (page_index < 0 || page_index >= plugin_->engine_->GetNumberOfPages()) {
+      return gfx::SizeF();
+    }
+    return plugin_->engine_->GetPageSizeInPoints(page_index).value();
+  }
+
+  gfx::Size GetThumbnailSize(int page_index) override {
+    return plugin_->engine_->GetThumbnailSize(page_index,
+                                              plugin_->device_scale_);
   }
 
   gfx::Vector2dF GetViewportOriginOffset() override {
@@ -331,10 +346,20 @@ class PdfViewWebPlugin::PdfInkModuleClientImpl : public PdfInkModuleClient {
     plugin_->client_->PostMessage(std::move(message));
   }
 
+  void RequestThumbnail(int page_index,
+                        SendThumbnailCallback callback) override {
+    plugin_->engine_->RequestThumbnail(page_index, plugin_->device_scale_,
+                                       std::move(callback));
+  }
+
   void StrokeAdded(int page_index,
                    InkStrokeId id,
                    const ink::Stroke& stroke) override {
     plugin_->engine_->ApplyStroke(page_index, id, stroke);
+
+    // `snapshot_` is now stale, since its content doesn't contain this newly
+    // added stroke.
+    plugin_->snapshot_needs_update_for_ink_input_ = true;
   }
 
   void StrokeFinished() override {
@@ -344,10 +369,8 @@ class PdfViewWebPlugin::PdfInkModuleClientImpl : public PdfInkModuleClient {
     plugin_->SetPluginCanSave(true);
   }
 
-  void UpdateInkCursorImage(SkBitmap bitmap) override {
-    gfx::Point hotspot(bitmap.width() / 2, bitmap.height() / 2);
-    plugin_->cursor_ =
-        ui::Cursor::NewCustom(std::move(bitmap), std::move(hotspot));
+  void UpdateInkCursor(const ui::Cursor& cursor) override {
+    plugin_->cursor_ = cursor;
   }
 
   void UpdateShapeActive(int page_index,
@@ -360,16 +383,6 @@ class PdfViewWebPlugin::PdfInkModuleClientImpl : public PdfInkModuleClient {
                           InkStrokeId id,
                           bool active) override {
     plugin_->engine_->UpdateStrokeActive(page_index, id, active);
-  }
-
-  void DiscardStroke(int page_index, InkStrokeId id) override {
-    plugin_->engine_->DiscardStroke(page_index, id);
-  }
-
-  void UpdateThumbnail(int page_index) override {
-    plugin_->GenerateAndSendInkThumbnail(
-        page_index,
-        plugin_->engine_->GetThumbnailSize(page_index, plugin_->device_scale_));
   }
 
   int VisiblePageIndexFromPoint(const gfx::PointF& point) override {
@@ -596,7 +609,11 @@ void PdfViewWebPlugin::Paint(cc::PaintCanvas* canvas, const gfx::Rect& rect) {
   canvas->drawImage(snapshot_, 0, 0);
 
 #if BUILDFLAG(ENABLE_PDF_INK2)
-  if (ink_module_ && ink_module_->HasInputsToDraw()) {
+  if (!ink_module_) {
+    return;
+  }
+
+  if (ink_module_->HasInputsToDraw()) {
     SkBitmap sk_bitmap;
     sk_bitmap.allocPixels(
         SkImageInfo::MakeN32Premul(rect.width(), rect.height()));
@@ -606,13 +623,23 @@ void PdfViewWebPlugin::Paint(cc::PaintCanvas* canvas, const gfx::Rect& rect) {
 
     sk_sp<SkImage> snapshot = sk_bitmap.asImage();
     CHECK(snapshot);
-    cc::PaintImage cc_snapshot =
+    snapshot_ink_inputs_ =
         cc::PaintImageBuilder::WithDefault()
             .set_image(std::move(snapshot), cc::PaintImage::GetNextContentId())
             .set_id(cc::PaintImage::GetNextId())
             .set_no_cache(true)
             .TakePaintImage();
-    canvas->drawImage(cc_snapshot, 0, 0);
+    canvas->drawImage(snapshot_ink_inputs_.value(), 0, 0);
+  } else if (snapshot_ink_inputs_.has_value()) {
+    if (snapshot_needs_update_for_ink_input_) {
+      // Still waiting on `snapshot_` to get refreshed to reflect the change
+      // for an added stroke, so reapply the last Ink inputs snapshot to avoid
+      // a flash of a recently added stroke temporarily disappearing.
+      canvas->drawImage(snapshot_ink_inputs_.value(), 0, 0);
+    } else {
+      // Now safe to discard the previous Ink inputs snapshot.
+      snapshot_ink_inputs_.reset();
+    }
   }
 #endif  // BUILDFLAG(ENABLE_PDF_INK2)
 }
@@ -1454,34 +1481,42 @@ void PdfViewWebPlugin::OnSearchifyStateChange(bool busy) {
   if (!busy) {
     if (show_searchify_in_progress_) {
       show_searchify_in_progress_ = false;
-      SetShowSearchifyInProgress(false);
+      // The UI is asked to hide the progress indicator with 1s delay, so that
+      // when the OCR process finishes in less than 1s, the indicator would not
+      // flicker.
+      base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
+          FROM_HERE,
+          base::BindOnce(&PdfViewWebPlugin::SetShowSearchifyInProgress,
+                         weak_factory_.GetWeakPtr(), /*show=*/false),
+          kSearchifyStatePropagationDelay);
     }
     return;
   }
 
-  pdf_host_->OnSearchifyStarted();
+  if (!searchify_started_) {
+    searchify_started_ = true;
+    pdf_host_->OnSearchifyStarted();
+  }
 
   if (!show_searchify_in_progress_) {
-    // The UI is asked to show the progress indicator with 1s delay, so that if
-    // the task finishes in less than 1s, the indicator would not be shown.
     show_searchify_in_progress_ = true;
-    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
-        FROM_HERE,
-        base::BindOnce(&PdfViewWebPlugin::SetShowSearchifyInProgress,
-                       weak_factory_.GetWeakPtr(), /*show=*/true),
-        kSearchifyStatePropagationDelay);
+    // Executing the script directly may cause a crash in blink as it might be
+    // during layout change, hence posting it (crbug.com/401142034).
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, base::BindOnce(&PdfViewWebPlugin::SetShowSearchifyInProgress,
+                                  weak_factory_.GetWeakPtr(), /*show=*/true));
     return;
   }
 }
 
 void PdfViewWebPlugin::SetShowSearchifyInProgress(bool show) {
   // Searchify tasks are expected to be quite fast most of the times, and if so,
-  // showing progress indicator is not needed.
-  // `SetShowSearchifyInProgress` is posted with delay to allow discarding the
-  // the request to show the progress indicator in such cases.
-  // A true `show` and a false `show_searchify_in_progress_` means that the task
-  // finished before the indicator is shown and UI element is not needed.
-  if (show && !show_searchify_in_progress_) {
+  // progress indicator should be kept visible for at least 1s to avoiding
+  // flickering.
+  // A false `show` and a true `show_searchify_in_progress_` means that during
+  // the 1s after OCR stopped, it started again and hence the UI should keep the
+  // progress bar visible.
+  if (!show && show_searchify_in_progress_) {
     return;
   }
 
@@ -2251,6 +2286,13 @@ void PdfViewWebPlugin::UpdateSnapshot(sk_sp<SkImage> snapshot) {
           .set_no_cache(true)
           .TakePaintImage();
 
+#if BUILDFLAG(ENABLE_PDF_INK2)
+  // `paint_manager_` updates the snapshot after it has completed painting,
+  // which uses `engine_` in `DoPaint()`.  Any newly added Ink stroke will now
+  // be applied in the snapshot.
+  snapshot_needs_update_for_ink_input_ = false;
+#endif
+
   if (!plugin_rect_.IsEmpty())
     InvalidatePluginContainer();
 }
@@ -2331,17 +2373,11 @@ void PdfViewWebPlugin::OnViewportChanged(
   const gfx::Size new_image_size =
       PaintManager::GetNewContextSize(old_image_size, plugin_rect_.size());
   if (new_image_size != old_image_size) {
-    SkAlphaType alpha_type;
-    if (base::FeatureList::IsEnabled(
-            features::kPdfPaintManagerDrawsBackground)) {
-      alpha_type = kUnpremul_SkAlphaType;
-    } else {
-      alpha_type = kPremul_SkAlphaType;
-    }
     // Ignore the result. If the allocation fails, the image data buffer will be
     // empty and the code below will handle that.
-    (void)image_data_.tryAllocPixels(SkImageInfo::MakeN32(
-        new_image_size.width(), new_image_size.height(), alpha_type));
+    (void)image_data_.tryAllocPixels(
+        SkImageInfo::MakeN32(new_image_size.width(), new_image_size.height(),
+                             kUnpremul_SkAlphaType));
     first_paint_ = true;
   }
 
@@ -2474,7 +2510,10 @@ void PdfViewWebPlugin::RecordDocumentMetrics() {
   // `metrics_handler_` is only initialized when not in Print Preview, so the
   // V2 ink annotations load metric will not count Print Preview loads.
   if (ink_module_) {
-    RecordPdfLoadedWithV2InkAnnotations(engine_->ContainsV2InkPath());
+    // Use a timeout limit of 100ms, which will capture over 90 percent of PDFs
+    // without increasing the PDF load time a significant amount.
+    RecordPdfLoadedWithV2InkAnnotations(
+        engine_->ContainsV2InkPath(base::Milliseconds(100)));
   }
 #endif  // BUILDFLAG(ENABLE_PDF_INK2)
 }
@@ -2755,7 +2794,8 @@ void PdfViewWebPlugin::SendThumbnail(base::Value::Dict reply,
 
 #if BUILDFLAG(ENABLE_PDF_INK2)
   if (ink_module_) {
-    GenerateAndSendInkThumbnail(page_index, thumbnail.image_size());
+    ink_module_->GenerateAndSendInkThumbnail(page_index,
+                                             thumbnail.image_size());
   }
 #endif
 }
@@ -2777,33 +2817,6 @@ std::unique_ptr<PdfInkModule> PdfViewWebPlugin::MaybeCreatePdfInkModule(
     return nullptr;
   }
   return std::make_unique<PdfInkModule>(*client);
-}
-
-void PdfViewWebPlugin::GenerateAndSendInkThumbnail(int page_index,
-                                                   const gfx::Size& size) {
-  CHECK(!size.IsEmpty());
-  CHECK(ink_module_);
-
-  auto info = SkImageInfo::Make(size.width(), size.height(),
-                                kRGBA_8888_SkColorType, kUnpremul_SkAlphaType);
-  const size_t alloc_size = info.computeMinByteSize();
-  CHECK(!SkImageInfo::ByteSizeOverflowed(alloc_size));
-  std::vector<uint8_t> image_data(alloc_size);
-
-  SkBitmap sk_bitmap;
-  sk_bitmap.installPixels(info, image_data.data(), info.minRowBytes());
-  SkCanvas canvas(sk_bitmap);
-  if (!ink_module_->DrawThumbnail(canvas, page_index)) {
-    return;
-  }
-
-  base::Value::Dict message;
-  message.Set("type", "updateInk2Thumbnail");
-  message.Set("pageNumber", page_index + 1);
-  message.Set("imageData", std::move(image_data));
-  message.Set("width", size.width());
-  message.Set("height", size.height());
-  client_->PostMessage(std::move(message));
 }
 #endif  // BUILDFLAG(ENABLE_PDF_INK2)
 

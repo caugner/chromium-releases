@@ -551,6 +551,10 @@ ScrollTranslationAction ConversionContext<Result>::StartClip(
     ApplyTransform(local_transform);
     const bool antialias = true;
     if (combined_clip_rect.IsRounded()) {
+      // When we have a non-round corner shape we remove the rect rounding
+      // and use clip-path.
+      // See FragmentPaintPropertyTreeBuilder::UpdateInnerBorderRadiusClip()
+      DCHECK(combined_clip_rect.HasSimpleRoundedCurvature());
       push<cc::ClipRRectOp>(SkRRect(combined_clip_rect), SkClipOp::kIntersect,
                             antialias);
     } else {
@@ -884,7 +888,8 @@ void ConversionContext<cc::DisplayItemList>::EmitDrawScrollingContentsOp(
   DCHECK_EQ(previous_transform_, nullptr);
 
   // Switch to the parent of the scroll translation in the current context.
-  auto action = SwitchToTransform(*scroll_translation.UnaliasedParent());
+  const auto* scroll_container_transform = scroll_translation.UnaliasedParent();
+  auto action = SwitchToTransform(*scroll_container_transform);
   // This should not need to switch to any other scroll translation.
   CHECK(!action);
 
@@ -908,6 +913,12 @@ void ConversionContext<cc::DisplayItemList>::EmitDrawScrollingContentsOp(
   result_.PushDrawScrollingContentsOp(
       scroll_translation.ScrollNode()->GetCompositorElementId(),
       std::move(scrolling_contents_list), visual_rect);
+
+  // Accumulate effect bounds in case the scrolling contents op is a part of an
+  // effect group.
+  UpdateEffectBounds(
+      gfx::RectF(scroll_translation.ScrollNode()->ContainerRect()),
+      *scroll_container_transform);
 }
 
 template <>
@@ -1292,7 +1303,7 @@ void LayerPropertiesUpdater::UpdateScrollHitTestData(const PaintChunk& chunk) {
     }
   }
 
-  if (RuntimeEnabledFeatures::FastNonCompositedScrollHitTestEnabled() &&
+  if (RuntimeEnabledFeatures::RasterInducingScrollEnabled() &&
       hit_test_data.scroll_translation) {
     CHECK_EQ(chunk.id.type, DisplayItem::Type::kScrollHitTest);
     AddNonCompositedScroll(chunk);
@@ -1330,7 +1341,7 @@ LayerPropertiesUpdater::TopNonCompositedScroll(
 }
 
 void LayerPropertiesUpdater::AddNonCompositedScroll(const PaintChunk& chunk) {
-  DCHECK(RuntimeEnabledFeatures::FastNonCompositedScrollHitTestEnabled());
+  DCHECK(RuntimeEnabledFeatures::RasterInducingScrollEnabled());
   const auto& scroll_translation = *chunk.hit_test_data->scroll_translation;
   const auto& top_scroll = TopNonCompositedScroll(scroll_translation);
   if (&top_scroll == &scroll_translation) {
@@ -1364,7 +1375,7 @@ void LayerPropertiesUpdater::UpdatePreviousNonCompositedScrolls(
   if (top_non_composited_scrolls_.empty()) {
     return;
   }
-  DCHECK(RuntimeEnabledFeatures::FastNonCompositedScrollHitTestEnabled());
+  DCHECK(RuntimeEnabledFeatures::RasterInducingScrollEnabled());
 
   if (chunk.hit_test_data && chunk.hit_test_data->scroll_translation) {
     // ScrollHitTest has been handled in AddNonCompositedScroll().

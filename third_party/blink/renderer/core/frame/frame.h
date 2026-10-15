@@ -42,7 +42,6 @@
 #include "third_party/blink/public/common/frame/user_activation_state.h"
 #include "third_party/blink/public/common/frame/user_activation_update_source.h"
 #include "third_party/blink/public/common/permissions_policy/document_policy_features.h"
-#include "third_party/blink/public/common/permissions_policy/permissions_policy_features.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/mojom/frame/frame_owner_properties.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/frame/frame_policy.mojom-blink-forward.h"
@@ -273,14 +272,6 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
     return had_sticky_user_activation_before_nav_;
   }
 
-  void SetAllowFocusDuringFocusAdvance(bool value) {
-    allow_focus_during_focus_advance_ = value;
-  }
-
-  bool AllowFocusDuringFocusAdvance() const {
-    return allow_focus_during_focus_advance_;
-  }
-
   bool IsAttached() const {
     return lifecycle_.GetState() == FrameLifecycle::kAttached;
   }
@@ -463,6 +454,9 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   // Returns all the resources under the frame tree of this node.
   HeapVector<Member<Resource>> AllResourcesUnderFrame();
 
+  // Iterates through the frame owner's ancestor nodes and adjusts the offset.
+  void AdjustOffsetByAncestorFrames(gfx::Point* origin_point);
+
  protected:
   // |inheriting_agent_factory| should basically be set to the parent frame or
   // opener's WindowAgentFactory. Pass nullptr if the frame is isolated from
@@ -599,10 +593,6 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   // The sticky user activation state of the current frame before eTLD+1
   // navigation.  This is used in autoplay.
   bool had_sticky_user_activation_before_nav_ = false;
-
-  // This is used in focus delegation scenario when
-  // focus-without-user-activation permission policy is set.
-  bool allow_focus_during_focus_advance_ = false;
 
   // This identifier represents the stable identifier between a
   // LocalFrame  <--> RenderFrameHostImpl or a

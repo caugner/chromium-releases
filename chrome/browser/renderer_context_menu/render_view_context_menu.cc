@@ -38,7 +38,6 @@
 #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
 #include "chrome/browser/apps/app_service/browser_app_launcher.h"
 #include "chrome/browser/apps/platform_apps/app_load_service.h"
-#include "chrome/browser/ash/crosapi/browser_util.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/browser_features.h"
 #include "chrome/browser/browser_process.h"
@@ -216,6 +215,7 @@
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/loader/network_utils.h"
 #include "third_party/blink/public/mojom/context_menu/context_menu.mojom.h"
+#include "third_party/blink/public/mojom/devtools/console_message.mojom.h"
 #include "third_party/blink/public/mojom/forms/form_control_type.mojom-shared.h"
 #include "third_party/blink/public/mojom/frame/frame.mojom.h"
 #include "third_party/blink/public/mojom/frame/media_player_action.mojom.h"
@@ -816,6 +816,19 @@ bool IsLensOptionEnteredThroughKeyboard(int event_flags) {
 #else
   return false;
 #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
+}
+
+bool IsGlicWindow(RenderViewContextMenu* menu,
+                  content::BrowserContext* browser_context) {
+#if BUILDFLAG(ENABLE_GLIC)
+  if (glic::GlicEnabling::IsEnabledByFlags()) {
+    auto* glic_service = glic::GlicKeyedServiceFactory::GetGlicKeyedService(
+        browser_context, false);
+    return glic_service && glic_service->IsActiveWebContents(
+                               menu->GetWebContents()->GetOuterWebContents());
+  }
+#endif  // BUILDFLAG(ENABLE_GLIC)
+  return false;
 }
 
 }  // namespace
@@ -1959,6 +1972,12 @@ void RenderViewContextMenu::AppendOpenInWebAppLinkItems() {
   if (browser && browser->app_name() ==
                      web_app::GenerateApplicationNameFromAppId(*link_app_id)) {
     if (provider->registrar_unsafe().IsTabbedWindowModeEnabled(*link_app_id)) {
+      if (browser->app_controller()->IsUrlInHomeTabScope(params_.link_url)) {
+        // Clicking on a link captured in the home tab will always focus and/or
+        // navigate that tab, and not a new tab. Thus this right-click menu
+        // entry should not be included in that case.
+        return;
+      }
       open_in_app_string_id = IDS_CONTENT_CONTEXT_OPENLINKWEBAPP_NEWTAB;
     } else {
       open_in_app_string_id = IDS_CONTENT_CONTEXT_OPENLINKBOOKMARKAPP_SAMEAPP;
@@ -1985,8 +2004,11 @@ void RenderViewContextMenu::AppendImageItems() {
     menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_LOAD_IMAGE,
                                     IDS_CONTENT_CONTEXT_LOAD_IMAGE);
   }
-  menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_OPENIMAGENEWTAB,
-                                  IDS_CONTENT_CONTEXT_OPENIMAGENEWTAB);
+  if (!IsGlicWindow(this, browser_context_)) {
+    // Glic doesn't have tabs, to this option doesn't make sense there.
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_OPENIMAGENEWTAB,
+                                    IDS_CONTENT_CONTEXT_OPENIMAGENEWTAB);
+  }
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVEIMAGEAS,
                                   IDS_CONTENT_CONTEXT_SAVEIMAGEAS);
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_COPYIMAGE,
@@ -2312,24 +2334,18 @@ void RenderViewContextMenu::AppendReadingModeItem() {
 
 void RenderViewContextMenu::AppendGlicItems() {
 #if BUILDFLAG(ENABLE_GLIC)
-  if (GlicEnabling::IsEnabledByFlags()) {
-    auto* glic_service = glic::GlicKeyedServiceFactory::GetGlicKeyedService(
-        browser_context_, false);
-    if (glic_service && glic_service->IsActiveWebContents(
-                            GetWebContents()->GetOuterWebContents())) {
-      menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_RELOAD_GLIC,
-                                      IDS_CONTENT_CONTEXT_RELOAD);
-      menu_model_.SetElementIdentifierAt(
-          menu_model_.GetIndexOfCommandId(IDC_CONTENT_CONTEXT_RELOAD_GLIC)
-              .value(),
-          kGlicReloadMenuItem);
-      menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_CLOSE_GLIC,
-                                      IDS_CONTENT_CONTEXT_CLOSE_GLIC);
-      menu_model_.SetElementIdentifierAt(
-          menu_model_.GetIndexOfCommandId(IDC_CONTENT_CONTEXT_CLOSE_GLIC)
-              .value(),
-          kGlicCloseMenuItem);
-    }
+  if (IsGlicWindow(this, browser_context_)) {
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_RELOAD_GLIC,
+                                    IDS_CONTENT_CONTEXT_RELOAD);
+    menu_model_.SetElementIdentifierAt(
+        menu_model_.GetIndexOfCommandId(IDC_CONTENT_CONTEXT_RELOAD_GLIC)
+            .value(),
+        kGlicReloadMenuItem);
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_CLOSE_GLIC,
+                                    IDS_CONTENT_CONTEXT_CLOSE_GLIC);
+    menu_model_.SetElementIdentifierAt(
+        menu_model_.GetIndexOfCommandId(IDC_CONTENT_CONTEXT_CLOSE_GLIC).value(),
+        kGlicCloseMenuItem);
   }
 #endif  // BUILDFLAG(ENABLE_GLIC)
 }
@@ -2741,27 +2757,30 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
   // Disable context menu in locked fullscreen mode to prevent users from
   // exiting this mode (the menu is not really disabled as the user can still
   // open it, but all the individual context menu entries are disabled / greyed
-  // out). We enable page navigation commands as well as extension ones when
-  // locked for OnTask (only relevant for non-web browser scenarios).
+  // out). We also extend the same restrictions with or without locked
+  // fullscreen mode for OnTask to enforce consistency in UX, with the exception
+  // of page navigation commands as well as extension ones being enabled in this
+  // setup (only relevant for non-web browser scenarios).
   //
   // NOTE: If new commands are being added, please disable them by default and
   // notify the ChromeOS team by filing a bug under this component --
   // b/?q=componentid:1389107.
   Browser* const browser = GetBrowser();
+  bool should_disable_command_for_locked_fullscreen_or_on_task = false;
   if (browser && platform_util::IsBrowserLockedFullscreen(browser)) {
-    bool should_disable_command_for_locked_fullscreen = true;
+    should_disable_command_for_locked_fullscreen_or_on_task = true;
+  }
 #if BUILDFLAG(IS_CHROMEOS)
-    if (browser->IsLockedForOnTask()) {
-      bool is_page_nav_command =
-          (id == IDC_BACK) || (id == IDC_FORWARD) || (id == IDC_RELOAD);
-      should_disable_command_for_locked_fullscreen =
-          !is_page_nav_command &&
-          !ContextMenuMatcher::IsExtensionsCustomCommandId(id);
-    }
+  if (browser && browser->IsLockedForOnTask()) {
+    bool is_page_nav_command =
+        (id == IDC_BACK) || (id == IDC_FORWARD) || (id == IDC_RELOAD);
+    should_disable_command_for_locked_fullscreen_or_on_task =
+        !is_page_nav_command &&
+        !ContextMenuMatcher::IsExtensionsCustomCommandId(id);
+  }
 #endif
-    if (should_disable_command_for_locked_fullscreen) {
-      return false;
-    }
+  if (should_disable_command_for_locked_fullscreen_or_on_task) {
+    return false;
   }
 
   {
@@ -3106,6 +3125,31 @@ void RenderViewContextMenu::OpenURLWithExtraHeaders(
 }
 
 void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
+  if (IsCommandGatedByFencedFrameUntrustedNetworkStatus(id) &&
+      IsUntrustedNetworkDisabled()) {
+    // Fenced frame untrusted network status can change between the time the
+    // command is shown and the time it is executed.
+    //
+    // This can be done by a `contextmenu` listener that disables the fenced
+    // frame untrusted network, granting fenced frame access to unpartitioned
+    // cross-site data. When context menu is shown, commands that are gated on
+    // fenced frame untrusted network status will still be enabled. But by the
+    // time the command executes, the listener has been invoked. The URL that
+    // the context menu operates upon may have been tampered to include
+    // cross-site information.
+    //
+    // The execution must be blocked if the untrusted network is disabled.
+    for (auto& observer : observers_) {
+      observer.CommandBlocked(id);
+    }
+
+    GetRenderFrameHost()->AddMessageToConsole(
+        blink::mojom::ConsoleMessageLevel::kWarning,
+        "Context menu command is not executed because the fenced frame has "
+        "untrusted network disabled.");
+    return;
+  }
+
   RenderViewContextMenuBase::ExecuteCommand(id, event_flags);
   if (command_executed_) {
     return;
@@ -3267,7 +3311,7 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
 
     case IDC_CONTENT_CONTEXT_RELOAD_GLIC:
 #if BUILDFLAG(ENABLE_GLIC)
-      if (GlicEnabling::IsEnabledByFlags()) {
+      if (glic::GlicEnabling::IsEnabledByFlags()) {
         auto* glic_service = glic::GlicKeyedServiceFactory::GetGlicKeyedService(
             browser_context_, false);
         if (glic_service) {
@@ -3279,7 +3323,7 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
 
     case IDC_CONTENT_CONTEXT_CLOSE_GLIC:
 #if BUILDFLAG(ENABLE_GLIC)
-      if (GlicEnabling::IsEnabledByFlags()) {
+      if (glic::GlicEnabling::IsEnabledByFlags()) {
         auto* glic_service = glic::GlicKeyedServiceFactory::GetGlicKeyedService(
             browser_context_, false);
         if (glic_service) {
@@ -3575,6 +3619,16 @@ void RenderViewContextMenu::RegisterMenuShownCallbackForTesting(
 void RenderViewContextMenu::RegisterExecutePluginActionCallbackForTesting(
     ExecutePluginActionCallback cb) {
   execute_plugin_action_callback_ = std::move(cb);
+}
+
+void RenderViewContextMenu::AddObserverForTesting(
+    RenderViewContextMenuObserver* observer) {
+  observers_.AddObserver(observer);
+}
+
+void RenderViewContextMenu::RemoveObserverForTesting(
+    RenderViewContextMenuObserver* observer) {
+  observers_.RemoveObserver(observer);
 }
 
 custom_handlers::ProtocolHandlerRegistry::ProtocolHandlerList

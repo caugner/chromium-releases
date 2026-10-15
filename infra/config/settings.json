@@ -1,21 +1,37 @@
 {
-    "project": "chromium-m134",
-    "project_title": "Chromium M134",
-    "ref": "refs/branch-heads/6998",
-    "chrome_project": "chrome-m134",
-    "dawn_ref": "refs/heads/chromium/6998",
+    "project": "chromium-m135",
+    "project_title": "Chromium M135",
+    "ref": "refs/branch-heads/7049",
+    "chrome_project": "chrome-m135",
+    "dawn_ref": "refs/heads/chromium/7049",
     "is_main": false,
     "platforms": {
+        "android": {
+            "description": "beta/stable",
+            "gardener_rotation": "chrome_browser_release"
+        },
+        "cros": {
+            "description": "beta/stable",
+            "gardener_rotation": "chrome_browser_release"
+        },
         "fuchsia": {
-            "description": "keep active when mac & windows are",
+            "description": "beta/stable",
+            "gardener_rotation": "chrome_browser_release"
+        },
+        "ios": {
+            "description": "beta/stable",
+            "gardener_rotation": "chrome_browser_release"
+        },
+        "linux": {
+            "description": "beta/stable",
             "gardener_rotation": "chrome_browser_release"
         },
         "mac": {
-            "description": "extended stable",
+            "description": "beta/stable",
             "gardener_rotation": "chrome_browser_release"
         },
         "windows": {
-            "description": "extended stable",
+            "description": "beta/stable",
             "gardener_rotation": "chrome_browser_release"
         }
     }

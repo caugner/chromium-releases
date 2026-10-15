@@ -63,6 +63,7 @@
 #include "ui/ozone/platform/wayland/host/wayland_async_cursor.h"
 #include "ui/ozone/platform/wayland/host/wayland_buffer_handle.h"
 #include "ui/ozone/platform/wayland/host/wayland_buffer_manager_host.h"
+#include "ui/ozone/platform/wayland/host/wayland_cursor_position.h"
 #include "ui/ozone/platform/wayland/host/wayland_cursor_shape.h"
 #include "ui/ozone/platform/wayland/host/wayland_event_source.h"
 #include "ui/ozone/platform/wayland/host/wayland_output.h"
@@ -88,6 +89,7 @@
 #include "ui/platform_window/platform_window_delegate.h"
 #include "ui/platform_window/platform_window_init_properties.h"
 #include "ui/platform_window/wm/wm_move_resize_handler.h"
+
 using ::testing::_;
 using ::testing::DoAll;
 using ::testing::ElementsAre;
@@ -1937,20 +1939,67 @@ TEST_P(WaylandWindowTest, InitialConfigureFollowedByBoundsChangeCompletesAck) {
 TEST_P(WaylandWindowTest, OnActivationChanged) {
   uint32_t serial = 0;
 
-  // Deactivate the surface.
+  MockWaylandPlatformWindowDelegate new_window_delegate;
+  auto new_window = CreateWaylandWindowWithParams(
+      PlatformWindowType::kWindow, gfx::Rect(100, 100), &new_window_delegate);
+  ASSERT_TRUE(new_window);
+  auto new_window_surface_id = new_window->root_surface()->get_surface_id();
+
+  MockWaylandPlatformWindowDelegate menu_delegate;
+  auto menu = CreateWaylandWindowWithParams(PlatformWindowType::kMenu,
+                                            gfx::Rect(100, 100), &menu_delegate,
+                                            new_window->GetWidget());
+  ASSERT_TRUE(menu);
+
   wl::ScopedWlArray empty_state({});
   SendConfigureEvent(surface_id_, {0, 0}, empty_state, ++serial);
+  SendConfigureEvent(new_window_surface_id, {0, 0}, empty_state, ++serial);
 
-  {
-    wl::ScopedWlArray states = InitializeWlArrayWithActivatedState();
-    EXPECT_CALL(delegate_, OnActivationChanged(Eq(true)));
-    SendConfigureEvent(surface_id_, {0, 0}, states, ++serial);
-    VerifyAndClearExpectations();
-  }
+  // Request active decorations.
+  wl::ScopedWlArray active_state = InitializeWlArrayWithActivatedState();
+  EXPECT_CALL(delegate_, OnActivationChanged(Eq(true)));
+  SendConfigureEvent(surface_id_, {0, 0}, active_state, ++serial);
+  VerifyAndClearExpectations();
 
-  wl::ScopedWlArray states({});
+  // Plug keyboard.
   EXPECT_CALL(delegate_, OnActivationChanged(Eq(false)));
-  SendConfigureEvent(surface_id_, {0, 0}, states, ++serial);
+  PostToServerAndWait([](wl::TestWaylandServerThread* server) {
+    wl_seat_send_capabilities(server->seat()->resource(),
+                              WL_SEAT_CAPABILITY_KEYBOARD);
+  });
+  VerifyAndClearExpectations();
+
+  // Focus keyboard.
+  EXPECT_CALL(delegate_, OnActivationChanged(Eq(true)));
+  SetKeyboardFocusedWindow(window_.get());
+  VerifyAndClearExpectations();
+
+  // Switch keyboard focus to other window.
+  EXPECT_CALL(delegate_, OnActivationChanged(Eq(false)));
+  EXPECT_CALL(new_window_delegate, OnActivationChanged(Eq(true)));
+  SetKeyboardFocusedWindow(new_window.get());
+  VerifyAndClearExpectations();
+
+  // Switch keyboard focus to menu in other window.
+  EXPECT_CALL(new_window_delegate, OnActivationChanged(_)).Times(0);
+  SetKeyboardFocusedWindow(menu.get());
+  VerifyAndClearExpectations();
+
+  // Unfocus keyboard.
+  EXPECT_CALL(new_window_delegate, OnActivationChanged(Eq(false)));
+  SetKeyboardFocusedWindow(nullptr);
+  VerifyAndClearExpectations();
+
+  // Unplug keyboard - should fall back to xdg-shell activated state.
+  EXPECT_CALL(delegate_, OnActivationChanged(Eq(true)));
+  PostToServerAndWait([](wl::TestWaylandServerThread* server) {
+    wl_seat_send_capabilities(server->seat()->resource(), 0);
+  });
+  VerifyAndClearExpectations();
+
+  // Request inactive decorations.
+  EXPECT_CALL(delegate_, OnActivationChanged(false));
+  SendConfigureEvent(surface_id_, {0, 0}, empty_state, ++serial);
 }
 
 TEST_P(WaylandWindowTest, OnAcceleratedWidgetDestroy) {
@@ -4894,6 +4943,10 @@ TEST_P(PerSurfaceScaleWaylandWindowTest, UiScale_HandleFontScaleChange) {
   ASSERT_EQ(event->type(), ui::EventType::kMouseMoved);
   // Event dispatching API expects pixel coordinates.
   EXPECT_EQ(event->AsLocatedEvent()->location(), gfx::Point(100, 100));
+  // Internal cursor position tracker uses Wayland DIP coordinates.
+  ASSERT_TRUE(connection_->wayland_cursor_position());
+  EXPECT_EQ(connection_->wayland_cursor_position()->GetCursorSurfacePoint(),
+            gfx::Point(100, 100));
   // Screen API uses UI DIP coordinates.
   EXPECT_EQ(screen_->GetCursorScreenPoint(), gfx::Point(80, 80));
 
@@ -5084,6 +5137,13 @@ TEST_P(PerSurfaceScaleWaylandWindowTest, UiScale_HandlePopupGeometry) {
   base::test::ScopedFeatureList enable_ui_scaling(features::kWaylandUiScale);
   ASSERT_TRUE(connection_->IsUiScaleEnabled());
 
+  // Required for emulating mouse events.
+  PostToServerAndWait([](wl::TestWaylandServerThread* server) {
+    wl_seat_send_capabilities(server->seat()->resource(),
+                              WL_SEAT_CAPABILITY_POINTER);
+  });
+  ASSERT_TRUE(connection_->seat()->pointer());
+
   // Set font scale to 1.25.
   EXPECT_CALL(delegate_, OnBoundsChanged(Eq(kDefaultBoundsChange))).Times(1);
   connection_->window_manager()->SetFontScale(1.25f);
@@ -5140,9 +5200,21 @@ TEST_P(PerSurfaceScaleWaylandWindowTest, UiScale_HandlePopupGeometry) {
     EXPECT_CALL(*mock_surface->xdg_surface(),
                 AckConfigure(Eq(kLatestConfigureSerial)));
   });
-  SendConfigureEvent(menu_surface_id, gfx::Size(100, 200),
-                     wl::ScopedWlArray({}), kLatestConfigureSerial);
-  EXPECT_EQ(menu_window->applied_state().bounds_dip, gfx::Rect(80, 160));
+  // Configure popup window to origin 100,100 and size 100x200.
+  PostToServerAndWait([id = menu_surface_id](
+                          wl::TestWaylandServerThread* server) {
+    auto* surface = server->GetObject<wl::MockSurface>(id);
+    ASSERT_TRUE(surface);
+    auto* xdg_surface = surface->xdg_surface();
+    ASSERT_TRUE(xdg_surface);
+    ASSERT_TRUE(xdg_surface->xdg_popup()->resource());
+    xdg_popup_send_configure(xdg_surface->xdg_popup()->resource(), 100, 100,
+                             100, 200);
+    xdg_surface_send_configure(xdg_surface->resource(), kLatestConfigureSerial);
+  });
+
+  EXPECT_EQ(menu_window->applied_state().bounds_dip,
+            gfx::Rect(80, 80, 80, 160));
   CreateBufferAndPresentAsNewFrame(menu_window.get(), menu_delegate,
                                    /*buffer_size=*/gfx::Size(100, 200),
                                    /*buffer_scale=*/1.25f);
@@ -5152,6 +5224,34 @@ TEST_P(PerSurfaceScaleWaylandWindowTest, UiScale_HandlePopupGeometry) {
   EXPECT_EQ(menu_window->latched_state().ui_scale, 1.25f);
   EXPECT_EQ(menu_window->latched_state().window_scale, 1.0f);
   EXPECT_EQ(menu_window->root_surface()->state_.buffer_scale_float, 1.0f);
+
+  // Verifies both event dispatching and screen "cursor location" API works` as
+  // expected with ui_scale > 1. Regression test fo https://crbug.com/396457560.
+  std::unique_ptr<Event> event;
+  EXPECT_CALL(menu_delegate, DispatchEvent(_))
+      .WillRepeatedly(CloneEvent(&event));
+  PostToServerAndWait(
+      [id = menu_surface_id](wl::TestWaylandServerThread* server) {
+        auto* pointer_resource = server->seat()->pointer()->resource();
+        auto* menu_surface = server->GetObject<wl::MockSurface>(id);
+        wl_pointer_send_enter(pointer_resource, server->GetNextSerial(),
+                              menu_surface->resource(), 0, 0);
+        wl_pointer_send_motion(pointer_resource, server->GetNextSerial(),
+                               wl_fixed_from_double(10.0f),
+                               wl_fixed_from_double(10.0f));
+      });
+  ASSERT_TRUE(event);
+  ASSERT_TRUE(event->IsMouseEvent());
+  ASSERT_EQ(event->type(), ui::EventType::kMouseMoved);
+  // Event dispatching API expects pixel coordinates.
+  EXPECT_EQ(event->AsLocatedEvent()->location(), gfx::Point(10, 10));
+  EXPECT_EQ(event->AsLocatedEvent()->root_location(), gfx::Point(10, 10));
+  // Internal cursor position tracker uses Wayland DIP coordinates.
+  ASSERT_TRUE(connection_->wayland_cursor_position());
+  EXPECT_EQ(connection_->wayland_cursor_position()->GetCursorSurfacePoint(),
+            gfx::Point(110, 110));
+  // Screen API uses UI DIP coordinates.
+  EXPECT_EQ(screen_->GetCursorScreenPoint(), gfx::Point(88, 88));
 }
 
 TEST_P(PerSurfaceScaleWaylandWindowTest, UiScale_SanitizeFontScale) {

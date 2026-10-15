@@ -54,10 +54,6 @@ _IGNORE_WARNINGS = (
         # https://crbug.com/1441226
         r'PaymentRequest[BH]',
     ]) + ')',
-    # TODO(agrieve): Remove once we update to U SDK.
-    r'OnBackAnimationCallback',
-    # This class was added only in the U PrivacySandbox SDK: crbug.com/333713111
-    r'Missing class android.adservices.common.AdServicesOutcomeReceiver',
     # We enforce that this class is removed via -checkdiscard.
     r'FastServiceLoader\.class:.*Could not inline ServiceLoader\.load',
     # Happens on internal builds. It's a real failure, but happens in dead code.
@@ -80,9 +76,6 @@ _IGNORE_WARNINGS = (
     # androidx/test/espresso/web/internal/deps/guava/collect/Maps$1.class:"
     # Also happens in espresso core.
     r'Warning in .*:androidx/test/espresso/.*/guava/collect/.*',
-
-    # We are following up in b/290389974
-    r'AppSearchDocumentClassMap\.class:.*Could not inline ServiceLoader\.load',
 )
 
 _BLOCKLISTED_EXPECTATION_PATHS = [
@@ -337,8 +330,8 @@ def _OptimizeWithR8(options, config_paths, libraries, dynamic_config_data):
                                                      tmp_output)
     base_context = split_contexts_by_name['base']
 
-    # R8 OOMs with xmx=2G.
-    cmd = build_utils.JavaCmd(xmx='3G') + [
+    # R8 OOMs with xmx=3G.
+    cmd = build_utils.JavaCmd(xmx='4G') + [
         # Allows -whyareyounotinlining, which we don't have by default, but
         # which is useful for one-off queries.
         '-Dcom.android.tools.r8.experimental.enablewhyareyounotinlining=1',
@@ -355,7 +348,7 @@ def _OptimizeWithR8(options, config_paths, libraries, dynamic_config_data):
         '-Dcom.android.tools.r8.allowTestProguardOptions=true',
         # Needed because we don't add an unconditional -keep for Enum.values()
         # methods. http://b/204939965
-        '-Dcom.android.tools.r8.experimentalTraceEnumReflection=1',
+        '-Dcom.android.tools.r8.experimentalTraceAndroidEnumSerialization=1',
     ]
     if options.sdk_extension_jars:
       # Enable API modelling for OS extensions. https://b/326252366

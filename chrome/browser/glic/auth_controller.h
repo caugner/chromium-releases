@@ -17,14 +17,6 @@ class GlicCookieSynchronizer;
 // Decides when to refresh sign-in cookies for the webview.
 class AuthController : public signin::IdentityManager::Observer {
  public:
-  // What to do if cookie sync fails, but chrome's sign-in state looks good?
-  enum class FallbackBehavior {
-    // Do nothing, return an error.
-    kNone,
-    // Show the reauth page, return kShowingReauthSigninPage.
-    kShowReauthPage,
-  };
-
   // Result of `BeforeShow()`.
   enum BeforeShowResult {
     // The glic webview should have valid sign-in cookies.
@@ -32,7 +24,7 @@ class AuthController : public signin::IdentityManager::Observer {
     // Sign-in cookies cannot be automatically refreshed. A new tab has been
     // opened to allow the user to sign-in manually.
     kShowingReauthSigninPage = 1,
-    // Syncing cookies failed, and `show_reauth_on_failure` was false.
+    // Syncing cookies failed.
     kSyncFailed = 2,
   };
 
@@ -48,8 +40,7 @@ class AuthController : public signin::IdentityManager::Observer {
 
   // Called before the glic window is shown. Checks status of sign-in state and
   // webview cookies. See `BeforeShowResult` for result detail.
-  void CheckAuthBeforeShow(FallbackBehavior fallback_behavior,
-                           base::OnceCallback<void(BeforeShowResult)> callback);
+  void CheckAuthBeforeShow(base::OnceCallback<void(BeforeShowResult)> callback);
 
   // Sync cookies, even if it appears as though a sync is not required.
   void ForceSyncCookies(base::OnceCallback<void(bool)> callback);
@@ -73,9 +64,6 @@ class AuthController : public signin::IdentityManager::Observer {
       const CoreAccountInfo& account_info) override;
 
  private:
-  void DoFallback(FallbackBehavior fallback_behavior,
-                  base::OnceCallback<void(BeforeShowResult)> callback,
-                  bool sync_success);
   base::WeakPtr<AuthController> GetWeakPtr() {
     return weak_ptr_factory_.GetWeakPtr();
   }

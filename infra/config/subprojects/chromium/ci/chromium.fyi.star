@@ -22,6 +22,7 @@ ci.defaults.set(
     execution_timeout = 10 * time.hour,
     health_spec = health_spec.DEFAULT,
     priority = ci.DEFAULT_FYI_PRIORITY,
+    reclient_enabled = False,
     service_account = ci.DEFAULT_SERVICE_ACCOUNT,
     shadow_service_account = ci.DEFAULT_SHADOW_SERVICE_ACCOUNT,
     siso_enabled = True,
@@ -96,6 +97,7 @@ def fyi_reclient_comparison_builder(*, name, **kwargs):
         "RBE_ip_reset_min_delay": "-1s",
         "RBE_fast_log_collection": "true",
     })
+    kwargs["reclient_enabled"] = True
     return ci.builder(name = name, **kwargs)
 
 def fyi_ios_builder(*, name, **kwargs):
@@ -116,6 +118,7 @@ def fyi_mac_builder(*, name, **kwargs):
     return ci.builder(name = name, **mac_builder_defaults(**kwargs))
 
 def fyi_mac_reclient_comparison_builder(*, name, **kwargs):
+    kwargs["reclient_enabled"] = True
     return fyi_reclient_comparison_builder(name = name, **mac_builder_defaults(**kwargs))
 
 ci.builder(
@@ -472,6 +475,70 @@ ci.builder(
         category = "linux|blink",
         short_name = "BIr",
     ),
+)
+
+ci.builder(
+    name = "linux-blink-wpt-3pcd-fyi-rel",
+    description_html = "Runs {} and web tests against Chrome with third party cookie disabled for experimental.".format(
+        linkify("https://web-platform-tests.org", "web platform tests"),
+    ),
+    builder_spec = builder_config.builder_spec(
+        gclient_config = builder_config.gclient_config(
+            config = "chromium",
+        ),
+        chromium_config = builder_config.chromium_config(
+            config = "chromium",
+            apply_configs = ["mb"],
+            build_config = builder_config.build_config.RELEASE,
+            target_bits = 64,
+            target_platform = builder_config.target_platform.LINUX,
+        ),
+    ),
+    gn_args = gn_args.config(
+        configs = [
+            "release_builder_blink",
+            "remoteexec",
+            "dcheck_always_on",
+            "linux",
+            "x64",
+        ],
+    ),
+    targets = targets.bundle(
+        targets = [
+            "chromium_webkit_isolated_scripts",
+        ],
+        mixins = [
+            "linux-jammy",
+        ],
+        per_test_modifications = {
+            "blink_web_tests": targets.mixin(
+                args = [
+                    "--flag-specific=disable-third-party-cookie",
+                ],
+            ),
+            "blink_wpt_tests": targets.mixin(
+                args = [
+                    "--flag-specific=disable-third-party-cookie",
+                ],
+            ),
+            "chrome_wpt_tests": targets.mixin(
+                args = [
+                    "--flag-specific=disable-third-party-cookie",
+                ],
+            ),
+            "headless_shell_wpt_tests": targets.mixin(
+                args = [
+                    "--flag-specific=disable-third-party-cookie",
+                ],
+            ),
+        },
+    ),
+    os = os.LINUX_DEFAULT,
+    console_view_entry = consoles.console_view_entry(
+        category = "linux|blink",
+        short_name = "3pcd",
+    ),
+    contact_team_email = "potassium-engprod-team@twosync.google.com",
 )
 
 ci.builder(
@@ -862,6 +929,7 @@ ci.builder(
     executable = "recipe:chromium_rr/test_launcher",
     schedule = "triggered",
     triggered_by = [],
+    builderless = False,
     os = os.LINUX_DEFAULT,
     console_view_entry = consoles.console_view_entry(
         category = "linux",
@@ -1174,7 +1242,7 @@ ci.builder(
         per_test_modifications = {
             "browser_tests": targets.mixin(
                 swarming = targets.swarming(
-                    shards = 30,
+                    shards = 35,
                 ),
             ),
             # TODO(crbug.com/40794640): dyld was rebuilt for macOS 12, which
@@ -2485,7 +2553,7 @@ fyi_mac_builder(
         per_test_modifications = {
             "browser_tests": targets.mixin(
                 swarming = targets.swarming(
-                    shards = 20,  # crbug.com/1419045
+                    shards = 25,  # crbug.com/1419045
                 ),
             ),
             # TODO(crbug.com/40794640): dyld was rebuilt for macOS 12, which
@@ -2775,4 +2843,41 @@ ci.builder(
     execution_timeout = 16 * time.hour,
     notifies = ["annotator-rel"],
     siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CI,
+)
+
+ci.builder(
+    name = "linux-crossbench",
+    description_html = "Run Crossbench Smoke tests on Linux.",
+    builder_spec = builder_config.builder_spec(
+        gclient_config = builder_config.gclient_config(config = "chromium"),
+        chromium_config = builder_config.chromium_config(
+            config = "chromium",
+            apply_configs = ["mb"],
+            build_config = builder_config.build_config.RELEASE,
+            target_bits = 64,
+            target_platform = builder_config.target_platform.LINUX,
+        ),
+    ),
+    gn_args = gn_args.config(
+        configs = [
+            "release_builder",
+            "remoteexec",
+            "linux",
+            "x64",
+        ],
+    ),
+    targets = targets.bundle(
+        targets = [
+            "crossbench_smoketests",
+        ],
+        mixins = [
+            "linux-jammy",
+            "x86-64",
+        ],
+    ),
+    os = os.LINUX_DEFAULT,
+    console_view_entry = consoles.console_view_entry(
+        category = "linux",
+    ),
+    contact_team_email = "crossbench-infra-vteam@google.com",
 )

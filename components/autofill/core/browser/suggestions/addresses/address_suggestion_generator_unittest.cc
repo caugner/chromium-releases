@@ -18,8 +18,8 @@
 #include "components/autofill/core/browser/data_manager/addresses/address_data_manager.h"
 #include "components/autofill/core/browser/data_manager/addresses/test_address_data_manager.h"
 #include "components/autofill/core/browser/data_manager/test_personal_data_manager.h"
-#include "components/autofill/core/browser/data_model/autofill_profile.h"
-#include "components/autofill/core/browser/data_model/autofill_profile_test_api.h"
+#include "components/autofill/core/browser/data_model/addresses/autofill_profile.h"
+#include "components/autofill/core/browser/data_model/addresses/autofill_profile_test_api.h"
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/foundations/test_autofill_client.h"
 #include "components/autofill/core/browser/geo/phone_number_i18n.h"
@@ -98,7 +98,7 @@ MATCHER(ContainsAddressFooterSuggestions, "") {
   return true;
 }
 
-// TODO(crbug.com/378835293): Add tests for generating icons for suggestions.
+// TODO(crbug.com/40100455): Add tests for generating icons for suggestions.
 class AddressSuggestionGeneratorTest : public testing::Test {
  public:
   void SetUp() override {
