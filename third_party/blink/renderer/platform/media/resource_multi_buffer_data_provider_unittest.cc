@@ -464,4 +464,60 @@ TEST_F(ResourceMultiBufferDataProviderTest, AllowGzip) {
   StopWhenLoad();
 }
 
+TEST_F(ResourceMultiBufferDataProviderTest,
+       PruneEmptiesUrlDataDuringDidReceiveData) {
+  Initialize(kHttpUrl, 0);
+  url_data_->Use();
+  Start();
+  PartialResponse(0, 100, 1024);
+
+  // Drop the test's reference so `url_index_` holds the sole reference to
+  // `UrlData`. Since there is no active `MultiBufferReader`, `GlobalLRU` max
+  // size is 0 and blocks are unpinned. Receiving a full block will cause
+  // `OnDataProviderEvent` to prune all blocks and invoke `UrlData::OnEmpty()`,
+  // which must not destroy `UrlData` / `MultiBuffer` while still on the stack.
+  ResourceMultiBufferDataProvider* loader = loader_.ExtractAsDangling();
+  url_data_ = nullptr;
+
+  std::string data_str(1, 'a');
+  loader->DidReceiveData(data_str);
+}
+
+TEST_F(ResourceMultiBufferDataProviderTest, DestructedUrlIndexStartViaReader) {
+  url_index_ = std::make_unique<UrlIndex>(
+      &fetch_context_, task_environment_.GetMainThreadTaskRunner());
+  url_ = KURL(kHttpUrl);
+  url_data_ =
+      url_index_->GetByUrl(url_, UrlData::CORS_UNSPECIFIED, UrlData::kNormal);
+
+  std::unique_ptr<MultiBufferReader> reader;
+  url_data_->OnRedirect(blink::BindOnce(
+      [](std::unique_ptr<MultiBufferReader>* reader_ptr,
+         const scoped_refptr<UrlData>& destination) {
+        EXPECT_FALSE(destination);
+        reader_ptr->reset();
+      },
+      Unretained(&reader)));
+
+  url_index_.reset();
+
+  // Creating a reader and calling SetPreload() invokes
+  // MultiBufferReader::UpdateInternalState() -> MultiBuffer::AddReader() ->
+  // ResourceMultiBuffer::CreateWriter() ->
+  // ResourceMultiBufferDataProvider::Start(). When `url_index_` is already
+  // destroyed, `Start()` must not synchronously run `url_data_->Fail()` and
+  // destroy `reader` while `AddReader()` and `UpdateInternalState()` are still
+  // on the stack.
+  reader = std::make_unique<MultiBufferReader>(
+      url_data_->multibuffer(), 0, 1024 * 1024,
+      /*is_client_audio_element=*/false, base::DoNothing(),
+      task_environment_.GetMainThreadTaskRunner());
+  reader->SetPinRange(0, 1024 * 1024);
+  reader->SetPreload(kDataSize, kDataSize);
+  ASSERT_TRUE(reader);
+
+  task_environment_.FastForwardUntilNoTasksRemain();
+  EXPECT_FALSE(reader);
+}
+
 }  // namespace blink

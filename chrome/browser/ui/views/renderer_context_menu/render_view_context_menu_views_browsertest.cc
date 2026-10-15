@@ -6,7 +6,7 @@
 
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -55,7 +55,7 @@ class RenderViewContextMenuViewsBrowserTest : public InProcessBrowserTest {
  public:
   content::RenderFrameHost& GetPrimaryMainFrame() const {
     return *browser()
-                ->tab_strip_model()
+                ->GetTabStripModel()
                 ->GetActiveWebContents()
                 ->GetPrimaryMainFrame();
   }
@@ -79,10 +79,10 @@ IN_PROC_BROWSER_TEST_F(RenderViewContextMenuViewsBrowserTest,
   menu.Init();
 
   EXPECT_TRUE(menu.menu_model()
-                  .GetIndexOfCommandId(kWritingDirectionMenuId)
+                  .GetIndexOfCommandId(IDC_WRITING_DIRECTION_MENU)
                   .has_value());
-  EXPECT_TRUE(menu.IsCommandIdEnabled(kWritingDirectionDefaultId));
-  EXPECT_TRUE(menu.IsCommandIdChecked(kWritingDirectionDefaultId));
+  EXPECT_TRUE(menu.IsCommandIdEnabled(IDC_WRITING_DIRECTION_DEFAULT));
+  EXPECT_TRUE(menu.IsCommandIdChecked(IDC_WRITING_DIRECTION_DEFAULT));
   EXPECT_TRUE(menu.IsCommandIdEnabled(IDC_WRITING_DIRECTION_LTR));
   EXPECT_FALSE(menu.IsCommandIdChecked(IDC_WRITING_DIRECTION_LTR));
   EXPECT_TRUE(menu.IsCommandIdEnabled(IDC_WRITING_DIRECTION_RTL));
@@ -106,9 +106,9 @@ IN_PROC_BROWSER_TEST_F(RenderViewContextMenuViewsBrowserTest,
   menu.Init();
 
   EXPECT_FALSE(menu.menu_model()
-                   .GetIndexOfCommandId(kWritingDirectionMenuId)
+                   .GetIndexOfCommandId(IDC_WRITING_DIRECTION_MENU)
                    .has_value());
-  EXPECT_FALSE(menu.IsCommandIdEnabled(kWritingDirectionDefaultId));
+  EXPECT_FALSE(menu.IsCommandIdEnabled(IDC_WRITING_DIRECTION_DEFAULT));
   EXPECT_FALSE(menu.IsCommandIdEnabled(IDC_WRITING_DIRECTION_LTR));
   EXPECT_FALSE(menu.IsCommandIdEnabled(IDC_WRITING_DIRECTION_RTL));
 }

@@ -85,7 +85,7 @@ static bool g_thread_cache_key_created = false;
 
 namespace internal {
 
-uint8_t ThreadCache::global_limits_[ThreadCache::kBucketCount];
+std::array<uint8_t, ThreadCache::kBucketCount> ThreadCache::global_limits_;
 
 // Start with the normal size, not the maximum one.
 uint16_t ThreadCache::largest_active_bucket_index_ =
@@ -255,9 +255,8 @@ void ThreadCacheRegistry::SetThreadCacheMultiplier(float multiplier) {
       for (int index = 0; index < ThreadCache::kBucketCount; index++) {
         // This is racy, but we don't care if the limit is enforced later, and
         // we really want to avoid atomic instructions on the fast path.
-        tcache->buckets_[index].limit.store(
-            PA_UNSAFE_TODO(ThreadCache::global_limits_[index]),
-            std::memory_order_relaxed);
+        tcache->buckets_[index].limit.store(ThreadCache::global_limits_[index],
+                                            std::memory_order_relaxed);
       }
 
       tcache = tcache->next_;
@@ -446,7 +445,7 @@ void ThreadCache::SetGlobalLimits(PartitionRoot* root, float multiplier) {
     const auto& root_bucket = PA_UNSAFE_TODO(root->buckets_[index]);
     // Invalid bucket.
     if (!root_bucket.active_slot_spans_head) {
-      PA_UNSAFE_TODO(global_limits_[index]) = 0;
+      global_limits_[index] = 0;
       continue;
     }
 
@@ -469,10 +468,10 @@ void ThreadCache::SetGlobalLimits(PartitionRoot* root, float multiplier) {
     constexpr size_t kMinLimit = 1;
     // |PutInBucket()| is called on a full bucket, which should not overflow.
     constexpr size_t kMaxLimit = std::numeric_limits<uint8_t>::max() - 1;
-    PA_UNSAFE_TODO(global_limits_[index]) =
+    global_limits_[index] =
         static_cast<uint8_t>(std::clamp(value, kMinLimit, kMaxLimit));
-    PA_UNSAFE_TODO(PA_DCHECK(global_limits_[index] >= kMinLimit));
-    PA_UNSAFE_TODO(PA_DCHECK(global_limits_[index] <= kMaxLimit));
+    PA_DCHECK(global_limits_[index] >= kMinLimit);
+    PA_DCHECK(global_limits_[index] <= kMaxLimit);
   }
 }
 
@@ -557,7 +556,7 @@ ThreadCache::ThreadCache(PartitionRoot* root)
     Bucket* tcache_bucket = &buckets_[index];
     tcache_bucket->freelist_head = nullptr;
     tcache_bucket->count = 0;
-    tcache_bucket->limit.store(PA_UNSAFE_TODO(global_limits_[index]),
+    tcache_bucket->limit.store(global_limits_[index],
                                std::memory_order_relaxed);
 
     tcache_bucket->slot_size = root_bucket.slot_size;
@@ -688,7 +687,7 @@ void ThreadCache::FillBucket(size_t bucket_index) {
   // Use a slightly larger buffer to be safe.
   constexpr size_t kMaxBatchSize = 64;
   count = std::min(count, static_cast<int>(kMaxBatchSize));
-  std::array<internal::UntaggedSlotStart, kMaxBatchSize> slot_starts;
+  std::array<UntaggedSlotStart, kMaxBatchSize> slot_starts;
 
   {
     // Same as calling RawAlloc() |count| times, but acquires the lock only
@@ -705,7 +704,7 @@ void ThreadCache::FillBucket(size_t bucket_index) {
       // only used for direct-mapped allocations and single-slot ones anyway,
       // which are not handled here.
       size_t ret_slot_size;
-      internal::UntaggedSlotStart slot_start =
+      UntaggedSlotStart slot_start =
           root_->AllocFromBucket<AllocFlags::kFastPathOrReturnNull |
                                  AllocFlags::kReturnNull>(
               &PA_UNSAFE_TODO(root_->buckets_[bucket_index]),
@@ -796,8 +795,7 @@ void ThreadCache::FreeAfter(internal::FreelistEntry* head, size_t slot_size) {
   // acquisitions can be expensive.
   internal::ScopedGuard guard(internal::PartitionRootLock(root_));
   while (head) {
-    internal::UntaggedSlotStart slot_start =
-        internal::SlotStart::Unchecked(head).Untag();
+    UntaggedSlotStart slot_start = SlotStart::Unchecked(head).Untag();
 #if PA_BUILDFLAG(HAS_64_BIT_POINTERS)
     head = head->GetNextForThreadCache(slot_size, offset_lookup_);
 #else
@@ -899,7 +897,7 @@ PartitionRoot* ThreadCache::GetRoot() {
   return root_;
 }
 
-bool ThreadCache::IsInFreelist(internal::UntaggedSlotStart address,
+bool ThreadCache::IsInFreelist(UntaggedSlotStart address,
                                size_t bucket_index,
                                size_t& position) {
   PA_REENTRANCY_GUARD(is_in_thread_cache_);
@@ -920,7 +918,7 @@ bool ThreadCache::IsInFreelist(internal::UntaggedSlotStart address,
   size_t index = 0;
   size_t length = bucket.count;
   while (entry != nullptr && index < length) {
-    if (address == internal::SlotStart::Unchecked(entry).Untag()) {
+    if (address == SlotStart::Unchecked(entry).Untag()) {
       position = index;
       return true;
     }

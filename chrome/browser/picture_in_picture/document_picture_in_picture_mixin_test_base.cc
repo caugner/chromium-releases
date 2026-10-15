@@ -9,10 +9,11 @@
 #include "base/files/file_path.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/test/run_until.h"
 #include "base/time/time.h"
-#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/test/base/chrome_test_utils.h"
+#include "chrome/test/base/chrome_test_path_utils.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/mixin_based_in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -34,12 +35,12 @@ void DocumentPictureInPictureMixinTestBase::PostRunTestOnMainThread() {
 }
 
 void DocumentPictureInPictureMixinTestBase::
-    NavigateToURLAndEnterPictureInPicture(Browser* browser,
+    NavigateToURLAndEnterPictureInPicture(BrowserWindowInterface* browser,
                                           const gfx::Size& window_size) {
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser, GetPictureInPictureURL()));
 
   content::WebContents* active_web_contents =
-      browser->tab_strip_model()->GetActiveWebContents();
+      browser->GetTabStripModel()->GetActiveWebContents();
   ASSERT_NE(nullptr, active_web_contents);
 
   SetUpWindowController(active_web_contents);
@@ -60,7 +61,7 @@ void DocumentPictureInPictureMixinTestBase::
 }
 
 void DocumentPictureInPictureMixinTestBase::NavigateToUrl(
-    Browser* browser,
+    BrowserWindowInterface* browser,
     const GURL& test_page_url) const {
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser, test_page_url));
 }
@@ -78,17 +79,8 @@ GURL DocumentPictureInPictureMixinTestBase::GetPictureInPictureURL() const {
 }
 
 bool DocumentPictureInPictureMixinTestBase::AwaitPipWindowClosedSuccessfully() {
-  auto* render_widget_host_view = GetRenderWidgetHostView();
-  if (!render_widget_host_view) {
-    return true;
-  }
-  ui_test_utils::CheckWaiter(
-      base::BindRepeating(&content::RenderWidgetHostView::IsShowing,
-                          base::Unretained(render_widget_host_view)),
-      false, base::Seconds(30))
-      .Wait();
-
-  return (GetRenderWidgetHostView() == nullptr);
+  return base::test::RunUntil(
+      [this]() { return GetRenderWidgetHostView() == nullptr; });
 }
 
 content::RenderWidgetHostView*

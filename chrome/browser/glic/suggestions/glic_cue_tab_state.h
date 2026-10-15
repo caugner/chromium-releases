@@ -17,6 +17,8 @@
 #include "ui/base/unowned_user_data/scoped_unowned_user_data.h"
 #include "url/gurl.h"
 
+class OptimizationGuideKeyedService;
+
 namespace content {
 class NavigationHandle;
 }  // namespace content
@@ -88,7 +90,6 @@ class GlicCueTabState
 
   // Tracked parameters to match incoming annotations to the current navigation.
   GURL last_committed_url_;
-  base::Time last_committed_timestamp_;
 
   // The latest classification result for the current navigation.
   std::optional<page_content_annotations::PageContentAnnotationsResult>
@@ -103,6 +104,10 @@ class GlicCueTabState
 
   raw_ptr<page_content_annotations::PageContentAnnotationsService>
       annotation_service_ = nullptr;
+  // Used for logging to chrome://optimization-guide-internals with the
+  // CUEING_LOG macro.
+  raw_ptr<OptimizationGuideKeyedService> optimization_guide_keyed_service_ =
+      nullptr;
 
   base::OneShotTimer annotation_timeout_timer_;
 

@@ -3190,24 +3190,12 @@
     {
       "id": 437,
       "cr_bugs": [ 372358970 ],
-      "description": "AV1 RTC decoding may crash driver on some of the Intel devices",
+      "description": "AV1 RTC decoding may crash driver on some of the Intel devices with old drivers",
       "os": {
         "type": "win"
       },
       "vendor_id": "0x8086",
       "multi_gpu_category": "any",
-      "intel_gpu_series": [
-        "tigerlake",
-        "rocketlake",
-        "dg1",
-        "alderlake",
-        "alchemist",
-        "raptorlake",
-        "meteorlake",
-        "arrowlake",
-        "lunarlake",
-        "battlemage"
-      ],
       "features": [
         "use_first_valid_ref_for_av1_invalid_ref"
       ],
@@ -3778,14 +3766,14 @@
     },
     {
       "id": 483,
-      "cr_bugs": [528131939],
-      "description": "Reset texture base level before calling glCompressedTexSubImage2D for ASTC textures to work around PowerVR driver bug.",
+      "cr_bugs": [551708184],
+      "description": "Reset texture base level before calling glCompressedTexImage2D or glCompressedTexSubImage2D for ASTC textures to work around PowerVR driver bug.",
       "os": {
         "type": "android"
       },
       "gl_vendor": "Imagination.*",
       "features": [
-        "reset_base_level_for_astc_sub_image"
+        "reset_base_level_for_astc_image"
       ]
     },
     {
@@ -3845,6 +3833,39 @@
       ]
     },
     {
+      "id": 489,
+      "cr_bugs": [530045332],
+      "description": "Lose context when 3D texture depth increases on Qualcomm GPUs",
+      "gl_vendor": "Qualcomm.*",
+      "features": [
+        "lose_gl_context_when_increase_texture_3d_depth"
+      ]
+    },
+    {
+      "id": 490,
+      "cr_bugs": [551573368],
+      "description": "Reset texture base level before calling glTexStorage2D to work around PowerVR driver bug.",
+      "os": {
+        "type": "android"
+      },
+      "gl_vendor": "Imagination.*",
+      "features": [
+        "reset_tex_storage_base_level"
+      ]
+    },
+    {
+      "id": 491,
+      "cr_bugs": [548085797],
+      "description": "Limit max texture image units to 13 on PowerVR GPUs.",
+      "os": {
+        "type": "android"
+      },
+      "gl_vendor": "Imagination.*",
+      "features": [
+        "max_texture_image_units_13"
+      ]
+    },
+    {
       "id": 492,
       "cr_bugs": [548127218],
       "description": "Upload oversized nonzero mip levels via unpack buffer on PowerVR GPUs",
@@ -3854,6 +3875,57 @@
       "gl_vendor": "Imagination.*",
       "features": [
         "upload_oversized_mip_levels_via_unpack_buffer"
+      ]
+    },
+    {
+      "id": 493,
+      "cr_bugs": [546252753],
+      "description": "Issue a glFinish before calling glBlitFramebuffer if the draw framebuffer has multiple color attachments or any color attachment's texture has base_level > 0.",
+      "os": {
+        "type": "android"
+      },
+      "gl_vendor": "ARM.*",
+      "gl_renderer": "Mali-G.*",
+      "features": [
+        "finish_before_blit_framebuffer_multi_attachment"
+      ]
+    },
+    {
+      "id": 494,
+      "cr_bugs": [553172761],
+      "description": "Upload non-power-of-two textures via TexSubImage2D instead of TexImage2D when uploading client-side data.",
+      "gl_vendor": "Imagination.*",
+      "features": [
+        "use_tex_sub_image_for_client_data_npot_uploads"
+      ]
+    },
+    {
+      "id": 496,
+      "cr_bugs": [556870863],
+      "description": "Program binary cache entries can collide in Imagination's GLES driver",
+      "os": {
+        "type": "android"
+      },
+      "gl_vendor": "Imagination.*",
+      "gl_type": "angle_gles",
+      "features": [
+        "disable_program_cache"
+      ]
+    },
+    {
+      "id": 500,
+      "cr_bugs": [556576976],
+      "description": "Older intel iHD drivers allocate too few tiles for AV1 decode, leading to potential memory corruption.",
+      "os": {
+        "type": "linux"
+      },
+      "vendor_id": "0x8086",
+      "driver_version": {
+        "op": "<",
+        "value": "23.2.4"
+      },
+      "features": [
+        "disable_accelerated_av1_decode"
       ]
     }
   ]

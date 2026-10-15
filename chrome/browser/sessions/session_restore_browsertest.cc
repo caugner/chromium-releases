@@ -8,6 +8,7 @@
 
 #include <array>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <set>
 #include <string_view>
@@ -103,7 +104,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/common/webui_url_constants.h"
-#include "chrome/test/base/chrome_test_utils.h"
+#include "chrome/test/base/chrome_test_path_utils.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -178,6 +179,7 @@
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS)
+#include "ash/constants/ash_switches.h"
 #include "ash/constants/web_app_id_constants.h"
 #include "base/json/json_reader.h"
 #include "chrome/browser/web_applications/test/web_app_test_observers.h"
@@ -281,7 +283,7 @@ class SessionRestoreTest : public InProcessBrowserTest {
 #if BUILDFLAG(IS_CHROMEOS)
   void SetUpCommandLine(base::CommandLine* command_line) override {
     // TODO(nkostylev): Investigate if we can remove this switch.
-    command_line->AppendSwitch(switches::kCreateBrowserOnStartupForTests);
+    command_line->AppendSwitch(ash::switches::kCreateBrowserOnStartupForTests);
   }
 #endif
 
@@ -780,11 +782,13 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest,
     if (tab.navigations[0].virtual_url() == url2) {
       timestamp = tab.navigations[0].timestamp();
       http_status_code = tab.navigations[0].http_status_code();
-      std::vector<sessions::LiveTab*> content = service->RestoreEntryById(
-          nullptr, tab.id, WindowOpenDisposition::UNKNOWN);
-      ASSERT_EQ(1U, content.size());
+      std::optional<std::vector<sessions::LiveTab*>> content =
+          service->RestoreEntryById(nullptr, tab.id,
+                                    WindowOpenDisposition::UNKNOWN);
+      ASSERT_TRUE(content.has_value());
+      ASSERT_EQ(1U, content->size());
       sessions::ContentLiveTab* live_tab =
-          static_cast<sessions::ContentLiveTab*>(content[0]);
+          static_cast<sessions::ContentLiveTab*>((*content)[0]);
       ASSERT_TRUE(live_tab);
       EXPECT_EQ(url2, live_tab->GetWebContents().GetURL());
       break;

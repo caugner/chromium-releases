@@ -237,12 +237,7 @@ IN_PROC_BROWSER_TEST_F(ContaminationDelayBrowserTest,
 
   auto* prefetch_service = PrefetchService::GetFromFrameTreeNodeId(
       shell()->web_contents()->GetPrimaryMainFrame()->GetFrameTreeNodeId());
-  // TODO(crbug.com/40946257): Currently `OnPrefetchLikely` will never be called
-  // for browser-initiated triggers, so we set `num_on_prefetch_likely_calls` to
-  // 0 here, and instead use `TestPrefetchWatcher` to confirm whether prefetch
-  // is actually triggered.
-  auto owned_delegate = std::make_unique<MockPrefetchServiceDelegate>(
-      /*num_on_prefetch_likely_calls=*/0);
+  auto owned_delegate = std::make_unique<MockPrefetchServiceDelegate>();
   EXPECT_CALL(*owned_delegate, IsContaminationExempt(referring_origin))
       .WillRepeatedly(testing::Return(true));
   prefetch_service->SetPrefetchServiceDelegateForTesting(
@@ -259,7 +254,8 @@ IN_PROC_BROWSER_TEST_F(ContaminationDelayBrowserTest,
           /*planned_max_preloading_type=*/PreloadingType::kPrefetch),
       /*attempt=*/nullptr,
       /*holdback_status_override=*/PreloadingHoldbackStatus::kUnspecified,
-      /*ttl=*/std::nullopt);
+      /*ttl=*/std::nullopt,
+      /*should_ignore_saver_modes=*/false);
   test_prefetch_watcher->WaitUntilPrefetchResponseCompleted(std::nullopt,
                                                             prefetch_url);
 

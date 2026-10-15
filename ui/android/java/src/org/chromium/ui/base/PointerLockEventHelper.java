@@ -20,6 +20,10 @@ public final class PointerLockEventHelper {
     private float mLastPointerPositionX;
     private float mLastPointerPositionY;
 
+    // Holds the previous raw pointer event's position that was forwarded to native
+    private float mLastPointerRawPositionX;
+    private float mLastPointerRawPositionY;
+
     // Holds the previous trackpad event's position when the pointer is captured, the event's
     // position in this case contains the raw finger coordinates on the trackpad
     private float mLastTrackpadPositionX;
@@ -30,15 +34,17 @@ public final class PointerLockEventHelper {
     // Called whenever we have a new mouse event when the pointer is not locked. Needed for updating
     // the state of the pointer & trackpad variables that are used in calculating the correct
     // pointer position when the pointer is captured
-    public void onNonCapturedPointerEvent(float x, float y) {
-        updateLastPointerPosition(x, y);
+    public void onNonCapturedPointerEvent(float x, float y, float rawX, float rawY) {
+        updateLastPointerPosition(x, y, rawX, rawY);
         mIsLastTrackpadPositionValid = false;
     }
 
     // Updates the last pointer position that was forwarded to the native side
-    public void updateLastPointerPosition(float x, float y) {
+    public void updateLastPointerPosition(float x, float y, float rawX, float rawY) {
         mLastPointerPositionX = x;
         mLastPointerPositionY = y;
+        mLastPointerRawPositionX = rawX;
+        mLastPointerRawPositionY = rawY;
     }
 
     public float getLastPointerPositionX() {
@@ -47,6 +53,14 @@ public final class PointerLockEventHelper {
 
     public float getLastPointerPositionY() {
         return mLastPointerPositionY;
+    }
+
+    public float getLastPointerRawPositionXForTesting() {
+        return mLastPointerRawPositionX;
+    }
+
+    public float getLastPointerRawPositionYForTesting() {
+        return mLastPointerRawPositionY;
     }
 
     public MotionEvent transformCapturedPointerEvent(MotionEvent event, int deviceRotation) {
@@ -91,9 +105,10 @@ public final class PointerLockEventHelper {
                             && event.getActionMasked() != MotionEvent.ACTION_POINTER_UP
                             && event.getActionMasked() != MotionEvent.ACTION_POINTER_DOWN);
         } else if (event.isFromSource(InputDevice.SOURCE_MOUSE_RELATIVE)) {
-            // Input device is Mouse, getX & getY return the relative change of the pointer position
-            offsetX = event.getX();
-            offsetY = event.getY();
+            // Captured mouse events report relative (delta) coordinates.
+            float scale = getScaleFactor();
+            offsetX = getAccumulatedRelativeDelta(event, MotionEvent.AXIS_X) * scale;
+            offsetY = getAccumulatedRelativeDelta(event, MotionEvent.AXIS_Y) * scale;
         } else {
             // Unexpected source
             return event;
@@ -102,10 +117,58 @@ public final class PointerLockEventHelper {
         float currentPointerPositionX = mLastPointerPositionX + offsetX;
         float currentPointerPositionY = mLastPointerPositionY + offsetY;
 
-        MotionEvent ret = MotionEvent.obtain(event);
-        ret.setSource(InputDevice.SOURCE_MOUSE);
-        ret.setLocation(currentPointerPositionX, currentPointerPositionY);
+        float currentPointerRawPositionX = mLastPointerRawPositionX + offsetX;
+        float currentPointerRawPositionY = mLastPointerRawPositionY + offsetY;
 
+        return cloneEventWithLocation(
+                event,
+                currentPointerPositionX,
+                currentPointerPositionY,
+                currentPointerRawPositionX,
+                currentPointerRawPositionY,
+                InputDevice.SOURCE_MOUSE);
+    }
+
+    private static MotionEvent cloneEventWithLocation(
+            MotionEvent event, float x, float y, float rawX, float rawY, int source) {
+        MotionEvent.PointerCoords[] pointerCoordsList = getPointerCoordsForEvent(event);
+        if (pointerCoordsList.length > 0) {
+            float deltaRawX = rawX - pointerCoordsList[0].x;
+            float deltaRawY = rawY - pointerCoordsList[0].y;
+            for (int i = 0; i < pointerCoordsList.length; i++) {
+                pointerCoordsList[i].x += deltaRawX;
+                pointerCoordsList[i].y += deltaRawY;
+            }
+        }
+
+        int action = event.getAction();
+        int buttonState = event.getButtonState();
+
+        if (action == MotionEvent.ACTION_BUTTON_RELEASE) {
+            // The released button identifies the changed button, but must not remain in the
+            // bitmask of buttons that are still pressed.
+            buttonState &= ~event.getActionButton();
+        } else if (action == MotionEvent.ACTION_UP) {
+            buttonState = 0;
+        }
+
+        MotionEvent ret =
+                MotionEvent.obtain(
+                        event.getDownTime(),
+                        event.getEventTime(),
+                        action,
+                        event.getPointerCount(),
+                        getPointerPropertiesForEvent(event),
+                        pointerCoordsList,
+                        event.getMetaState(),
+                        buttonState,
+                        event.getXPrecision(),
+                        event.getYPrecision(),
+                        event.getDeviceId(),
+                        event.getEdgeFlags(),
+                        source,
+                        event.getFlags());
+        ret.setLocation(x, y);
         return ret;
     }
 
@@ -252,5 +315,39 @@ public final class PointerLockEventHelper {
             case Surface.ROTATION_270 -> offsetX;
             default -> offsetY; // unreachable
         };
+    }
+
+    // High-polling-rate mice can produce several samples before Android dispatches one
+    // MotionEvent. Earlier samples are stored in the event's history and each one is an
+    // independent delta, so include all of them before converting the event to an absolute mouse
+    // position.
+    private static float getAccumulatedRelativeDelta(MotionEvent event, int axis) {
+        if (!UiAndroidFeatureList.sPointerLockMouseScaling.isEnabled()) {
+            return event.getAxisValue(axis);
+        }
+
+        float delta = 0.0f;
+        for (int h = 0; h < event.getHistorySize(); h++) {
+            delta += event.getHistoricalAxisValue(axis, /* pointerIndex= */ 0, h);
+        }
+        return delta + event.getAxisValue(axis);
+    }
+
+    // Scaling multiplier for captured physical mouse movement (https://crbug.com/490206349). When
+    // pointer lock is active, Android delivers raw unaccelerated relative coordinates without
+    // applying system pointer speed, causing physical mouse movement to feel sluggish compared to
+    // unlocked mode.
+    @VisibleForTesting public static final float MOUSE_MOVEMENT_SCALE_FACTOR = 2.4f;
+
+    private static float getScaleFactor() {
+        if (!UiAndroidFeatureList.sPointerLockMouseScaling.isEnabled()) {
+            return 1.0f;
+        }
+        return (float)
+                UiAndroidFeatureMap.getInstance()
+                        .getFieldTrialParamByFeatureAsDouble(
+                                UiAndroidFeatures.POINTER_LOCK_MOUSE_SCALING,
+                                "factor",
+                                MOUSE_MOVEMENT_SCALE_FACTOR);
     }
 }

@@ -28,8 +28,10 @@
 #include "third_party/blink/public/platform/web_runtime_features.h"
 #include "third_party/blink/public/web/web_heap.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_tester.h"
+#include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_worklet_options.h"
+#include "third_party/blink/renderer/bindings/core/v8/worker_or_worklet_script_controller.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_audio_sink_options.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_union_audiocontextlatencycategory_double.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_union_audiocontextrendersizecategory_unsignedlong.h"
@@ -38,20 +40,29 @@
 #include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/messaging/message_channel.h"
+#include "third_party/blink/renderer/core/messaging/message_port.h"
+#include "third_party/blink/renderer/core/script/classic_script.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/core/workers/worker_thread.h"
 #include "third_party/blink/renderer/modules/mediastream/sub_capture_target.h"
 #include "third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_playback_stats.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_worklet.h"
+#include "third_party/blink/renderer/modules/webaudio/audio_worklet_global_scope.h"
+#include "third_party/blink/renderer/modules/webaudio/audio_worklet_handler.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_worklet_messaging_proxy.h"
+#include "third_party/blink/renderer/modules/webaudio/audio_worklet_node.h"
+#include "third_party/blink/renderer/modules/webaudio/cross_thread_audio_worklet_processor_info.h"
 #include "third_party/blink/renderer/modules/webaudio/delay_node.h"
 #include "third_party/blink/renderer/modules/webaudio/media_stream_audio_destination_node.h"
+#include "third_party/blink/renderer/modules/webaudio/offline_audio_context.h"
 #include "third_party/blink/renderer/modules/webaudio/realtime_audio_destination_handler.h"
 #include "third_party/blink/renderer/modules/webaudio/realtime_audio_destination_node.h"
 #include "third_party/blink/renderer/modules/webaudio/testing/fake_audio_thread.h"
 #include "third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/scheduler/public/event_loop.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
@@ -497,6 +508,60 @@ TEST_F(AudioContextTest, DisposeOrphansHandlerWhenInterrupted) {
   // If it was NOT orphaned, it would have been destroyed if we didn't hold it,
   // OR it has only our ref. (HasOneRef() == true) Thus this will fail.
   EXPECT_FALSE(handler->HasOneRef());
+}
+
+TEST_F(AudioContextTest, DisposeOrphansHandlerWhenRunningWithoutPulling) {
+  AudioContextOptions* options = AudioContextOptions::Create();
+  AudioContext* context = AudioContext::Create(
+      GetFrame().DomWindow(), options, ASSERT_NO_EXCEPTION);
+  ExpectContextBecomesRunningAsync(context);
+  ExpectContextRunning(context);
+
+  RealtimeAudioDestinationHandler* dest_handler =
+      &context->destinationNode()->GetAudioDestinationHandler();
+  FakeAudioThread audio_thread(ThreadType::kRealtimeAudioWorkletThread);
+  {
+    DelayNode* node = context->createDelay(ASSERT_NO_EXCEPTION);
+    node->connect(context->destinationNode(), 0, 0, ASSERT_NO_EXCEPTION);
+
+    // Run a render cycle so the summing junction updates its rendering state.
+    audio_thread.RunOnAudioThreadWithContext(
+        context,
+        CrossThreadBindOnce(
+            [](RealtimeAudioDestinationHandler* handler) {
+              const AudioIOPosition pos{0, 0, 0};
+              const AudioCallbackMetric metric;
+              scoped_refptr<AudioBus> bus =
+                  AudioBus::Create(2, 128, /*create_memory=*/true);
+              handler->Render(bus.get(), 128, pos, metric, base::TimeDelta(),
+                              {});
+            },
+            CrossThreadUnretained(dest_handler)));
+  }
+
+  // Stop pulling the graph while the context state remains kRunning.
+  dest_handler->StopRendering();
+  ASSERT_EQ(context->ContextState(), V8AudioContextState::Enum::kRunning);
+  ASSERT_FALSE(context->IsPullingAudioGraph());
+
+  WebHeap::CollectAllGarbageForTesting();
+
+  // Resume rendering and verify the destination renders cleanly while the
+  // graph lock is held on the main thread.
+  dest_handler->StartRendering();
+  {
+    DeferredTaskHandler::GraphAutoLocker locker(
+        context->GetDeferredTaskHandler());
+    audio_thread.RunOnAudioThread(CrossThreadBindOnce(
+        [](RealtimeAudioDestinationHandler* handler) {
+          const AudioIOPosition pos{0, 0, 0};
+          const AudioCallbackMetric metric;
+          scoped_refptr<AudioBus> bus =
+              AudioBus::Create(2, 128, /*create_memory=*/true);
+          handler->Render(bus.get(), 128, pos, metric, base::TimeDelta(), {});
+        },
+        CrossThreadUnretained(dest_handler)));
+  }
 }
 
 TEST_F(AudioContextTest, AudioContextOptions_WebAudioLatencyHint) {
@@ -1493,6 +1558,159 @@ TEST_F(AudioContextTest, AudioWorkletTerminatedOnClose) {
 
   // Wait for worker thread to shut down to avoid race on g_platform.
   proxy->GetBackingWorkerThread()->WaitForShutdownForTesting();
+}
+
+// Test that releasing the last reference to an AudioWorkletHandler during
+// CreateProcessor teardown safely executes on the main thread instead of
+// running ~AudioHandler on the AudioWorklet thread (which triggers
+// DCHECK(IsMainThread())).
+TEST_F(AudioContextTest, AudioWorkletCreateProcessorTeardownOnMainThread) {
+  AudioContextOptions* options = AudioContextOptions::Create();
+  AudioContext* audio_context = AudioContext::Create(
+      GetFrame().DomWindow(), options, ASSERT_NO_EXCEPTION);
+
+  ScriptState* script_state = ToScriptStateForMainWorld(&GetFrame());
+  ScriptState::Scope scope(script_state);
+
+  auto* audio_worklet = audio_context->audioWorklet();
+  audio_worklet->proxies_.push_back(audio_worklet->CreateGlobalScope());
+
+  auto* proxy = audio_worklet->GetMessagingProxy();
+  ASSERT_TRUE(proxy);
+
+  WorkerThread* worker_thread = proxy->GetBackingWorkerThread();
+  ASSERT_TRUE(worker_thread);
+
+  // Register dummy-processor in the AudioWorkletGlobalScope.
+  base::WaitableEvent registration_event;
+  PostCrossThreadTask(
+      *worker_thread->GetTaskRunner(TaskType::kMiscPlatformAPI), FROM_HERE,
+      CrossThreadBindOnce(
+          [](WorkerThread* thread, base::WaitableEvent* event) {
+            auto* global_scope =
+                To<AudioWorkletGlobalScope>(thread->GlobalScope());
+            ScriptState* script_state =
+                global_scope->ScriptController()->GetScriptState();
+            ScriptState::Scope scope(script_state);
+            String source_code =
+                "class DummyProcessor extends AudioWorkletProcessor {"
+                "  process() { return true; }"
+                "};"
+                "registerProcessor('dummy-processor', DummyProcessor);";
+            ClassicScript::CreateUnspecifiedScript(source_code)
+                ->RunScriptOnScriptState(script_state);
+            event->Signal();
+          },
+          CrossThreadUnretained(worker_thread),
+          CrossThreadUnretained(&registration_event)));
+  registration_event.Wait();
+
+  AudioWorkletNodeOptions* node_options = AudioWorkletNodeOptions::Create();
+  auto* node = MakeGarbageCollected<AudioWorkletNode>(
+      *audio_context, "dummy-processor", node_options,
+      Vector<CrossThreadAudioParamInfo>(), nullptr);
+  scoped_refptr<AudioWorkletHandler> handler =
+      WrapRefCounted(&static_cast<AudioWorkletHandler&>(node->Handler()));
+
+  auto* channel = MakeGarbageCollected<MessageChannel>(
+      audio_context->GetExecutionContext());
+  MessagePortChannel processor_port_channel = channel->port2()->Disentangle();
+
+  handler->MarkProcessorInactiveOnMainThread();
+
+  WeakPersistent<AudioWorkletNode> weak_node = node;
+
+  // Block the worker thread until the main thread has dropped all references.
+  base::WaitableEvent worker_block_event;
+  PostCrossThreadTask(
+      *worker_thread->GetTaskRunner(TaskType::kMiscPlatformAPI), FROM_HERE,
+      CrossThreadBindOnce([](base::WaitableEvent* event) { event->Wait(); },
+                          CrossThreadUnretained(&worker_block_event)));
+
+  // Dispatch CreateProcessor and drop all main thread references.
+  proxy->CreateProcessor(handler, std::move(processor_port_channel),
+                         SerializedScriptValue::NullValue());
+  EXPECT_EQ(proxy->pending_create_processor_handlers_.size(), 1u);
+  handler = nullptr;
+  node = nullptr;
+  WebHeap::CollectAllGarbageForTesting();
+  EXPECT_EQ(weak_node.Get(), nullptr);
+  audio_context->GetDeferredTaskHandler().ClearHandlersToBeDeleted();
+
+  // Unblock worker thread so CreateProcessor runs.
+  worker_block_event.Signal();
+
+  // Flush the worker thread task queue and run main thread tasks.
+  base::WaitableEvent wait_event;
+  PostCrossThreadTask(
+      *worker_thread->GetTaskRunner(TaskType::kMiscPlatformAPI), FROM_HERE,
+      CrossThreadBindOnce(&base::WaitableEvent::Signal,
+                          CrossThreadUnretained(&wait_event)));
+  wait_event.Wait();
+  test::RunPendingTasks();
+  EXPECT_TRUE(proxy->pending_create_processor_handlers_.empty());
+
+  DummyExceptionStateForTesting exception_state;
+  audio_context->closeContext(script_state, exception_state);
+  worker_thread->WaitForShutdownForTesting();
+}
+
+// Test that an active AudioWorklet shared MessagePort keeps neither its
+// associated AudioWorklet nor the BaseAudioContext alive, and that the port is
+// collected after its peer disconnects without an explicit close() call.
+TEST_F(AudioContextTest, AudioWorkletSharedPortGCWithoutExplicitClose) {
+  ScopedAudioWorkletSharedPortForTest scoped_feature(true);
+  WeakPersistent<OfflineAudioContext> weak_context;
+  WeakPersistent<AudioWorklet> weak_worklet;
+  WeakPersistent<MessagePort> weak_port;
+
+  {
+    auto* context = OfflineAudioContext::Create(
+        GetFrame().DomWindow(), /*number_of_channels=*/1,
+        /*number_of_frames=*/128, /*sample_rate=*/44100.0f,
+        ASSERT_NO_EXCEPTION);
+    ASSERT_TRUE(context);
+
+    auto* worklet = context->audioWorklet();
+    ASSERT_TRUE(worklet);
+
+    MessagePort* port = worklet->port();
+    ASSERT_TRUE(port);
+
+    EXPECT_FALSE(port->Started());
+    EXPECT_FALSE(port->HasPendingActivity());
+
+    port->start();
+    EXPECT_TRUE(port->Started());
+    EXPECT_TRUE(port->HasPendingActivity());
+
+    weak_context = context;
+    weak_worklet = worklet;
+    weak_port = port;
+
+    EXPECT_NE(weak_context.Get(), nullptr);
+    EXPECT_NE(weak_worklet.Get(), nullptr);
+    EXPECT_NE(weak_port.Get(), nullptr);
+  }
+
+  WebHeap::CollectAllGarbageForTesting();
+
+  EXPECT_EQ(weak_context.Get(), nullptr);
+  EXPECT_EQ(weak_worklet.Get(), nullptr);
+
+  // ActiveScriptWrappableManager keeps the port alive while its
+  // ExecutionContext is live and the port has pending activity.
+  Persistent<MessagePort> port = weak_port.Get();
+  ASSERT_TRUE(port);
+  EXPECT_TRUE(port->HasPendingActivity());
+
+  // Process the asynchronous connection error, which closes the port.
+  test::RunPendingTasks();
+  EXPECT_FALSE(port->HasPendingActivity());
+
+  port.Clear();
+  WebHeap::CollectAllGarbageForTesting();
+  EXPECT_EQ(weak_port.Get(), nullptr);
 }
 
 TEST_F(AudioContextTest, ChannelCountRunning) {

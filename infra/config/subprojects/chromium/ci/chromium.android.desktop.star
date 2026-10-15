@@ -310,6 +310,10 @@ ci.thin_tester(
                 ci_only = True,
             ),
             "android_chrome_wpt_tests": targets.mixin(
+                args = [
+                    # https://crbug.com/557344239: ChromeDriver hangs navigating from WebUI NTP on Android.
+                    "--additional-driver-flag=--disable-features=UseWebUiNtpAndroid",
+                ],
                 ci_only = True,
             ),
             "unit_tests": targets.mixin(
@@ -325,7 +329,9 @@ ci.thin_tester(
     targets_settings = targets.settings(
         os_type = targets.os_type.ANDROID,
     ),
+    builderless = True,
     cores = 8,
+    ssd = None,
     gardener_rotations = gardener_rotations.ANDROID,
     console_view_entry = consoles.console_view_entry(
         category = "tester|x64",

@@ -505,6 +505,23 @@ void MetricsWebContentsObserver::ResourceLoadComplete(
   }
 }
 
+void MetricsWebContentsObserver::DidLoadResourceFromMemoryCache(
+    content::RenderFrameHost* render_frame_host,
+    const GURL& url,
+    const std::string& mime_type,
+    network::mojom::RequestDestination request_destination) {
+  if (!url.is_valid() || !ShouldTrackScheme(url.scheme())) {
+    return;
+  }
+
+  if (PageLoadTracker* tracker = GetPageLoadTracker(render_frame_host)) {
+    MemoryResourceLoadInfo memory_resource_load_info{
+        url::SchemeHostPort(url), request_destination,
+        render_frame_host->GetFrameTreeNodeId()};
+    tracker->DidLoadResourceFromMemoryCache(memory_resource_load_info);
+  }
+}
+
 void MetricsWebContentsObserver::FrameReceivedUserActivation(
     content::RenderFrameHost* render_frame_host) {
   if (PageLoadTracker* tracker = GetPageLoadTracker(render_frame_host)) {
@@ -1335,15 +1352,6 @@ void MetricsWebContentsObserver::RemoveLifecycleObserver(
   lifecycle_observers_.RemoveObserver(observer);
 }
 
-void MetricsWebContentsObserver::OnPrefetchLikely() {
-  // Prefetching can be triggered by speculation rules (by SpeculationHostImpl::
-  // UpdateSpeculationCandidates()) or by NavigationPredictor, both of which
-  // work only on behalf of a primary page.
-  if (primary_page_) {
-    primary_page_->OnPrefetchLikely();
-  }
-}
-
 void MetricsWebContentsObserver::OnSharedStorageWorkletHostCreated(
     content::RenderFrameHost* rfh) {
   if (!rfh) {
@@ -1460,9 +1468,20 @@ PageLoadTracker* MetricsWebContentsObserver::GetPageLoadTrackerIfValid(
   // subframe's timing update.
   PageLoadTracker* tracker = GetPageLoadTrackerLegacy(render_frame_host);
   // We may receive notifications from frames that have been navigated away
-  // from. In that case the PageLoadTracker is already destroyed in
-  // DidFinishNavigation (unless it's stored in bfcache). We simply ignore them.
-  if (!tracker && !render_frame_host->GetMainFrame()->IsActive()) {
+  // from or have not yet committed. In that case the PageLoadTracker is
+  // already destroyed in DidFinishNavigation (unless it's stored in bfcache),
+  // or the frame itself is not active. We simply ignore them.
+  const bool is_prerendering_or_bfcached_or_unloading =
+      render_frame_host->IsInLifecycleState(
+          content::RenderFrameHost::LifecycleState::kPrerendering) ||
+      render_frame_host->IsInLifecycleState(
+          content::RenderFrameHost::LifecycleState::kInBackForwardCache) ||
+      render_frame_host->IsInLifecycleState(
+          content::RenderFrameHost::LifecycleState::kPendingDeletion);
+  const bool is_valid_frame =
+      render_frame_host->IsActive() ||
+      (tracker && is_prerendering_or_bfcached_or_unloading);
+  if (!is_valid_frame) {
     RecordInternalError(ERR_IPC_FROM_WRONG_FRAME);
     return nullptr;
   }

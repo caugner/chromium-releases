@@ -44,6 +44,8 @@
 #include "chrome/browser/ui/navigator/browser_navigator_params.h"
 #include "chrome/browser/ui/tab_dialogs.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/contents_web_view.h"
 #include "chrome/browser/ui/views/status_bubble_views.h"
@@ -53,7 +55,6 @@
 #include "chrome/browser/web_applications/web_app_tab_helper.h"
 #include "chrome/browser/web_applications/web_app_utils.h"
 #include "chrome/common/webui_url_constants.h"
-#include "components/blocked_content/list_item_position.h"
 #include "components/blocked_content/popup_blocker.h"
 #include "components/blocked_content/popup_tracker.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
@@ -70,6 +71,7 @@
 #include "components/printing/browser/print_composite_client.h"
 #include "components/split_tabs/split_tab_id.h"
 #include "components/tabs/public/split_tab_data.h"
+#include "components/tabs/public/tab_interface.h"
 #include "content/public/browser/keyboard_event_processing_result.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -394,9 +396,7 @@ void BrowserWebContentsDelegate::SetTopControlsGestureScrollInProgress(
 
 bool BrowserWebContentsDelegate::CanOverscrollContent() {
 #if defined(USE_AURA)
-  return browser_->GetFeatures()
-      .overscroll_pref_manager()
-      ->CanOverscrollContent();
+  return OverscrollPrefManager::From(&browser_.get())->CanOverscrollContent();
 #else
   return false;
 #endif
@@ -447,7 +447,7 @@ bool BrowserWebContentsDelegate::CanDragEnter(
   // external navigation.
   if ((operations_allowed & blink::kDragOperationLink) &&
       chrome::SettingsWindowManager::GetInstance()->IsSettingsBrowser(
-          browser_->GetBrowserForMigrationOnly())) {
+          &browser_.get())) {
     return false;
   }
 #endif
@@ -492,16 +492,12 @@ void BrowserWebContentsDelegate::OnDidBlockNavigation(
     blink::mojom::NavigationBlockedReason reason) {
   if (reason ==
       blink::mojom::NavigationBlockedReason::kRedirectWithNoUserGesture) {
+    tabs::TabInterface* tab =
+        tabs::TabInterface::MaybeGetFromContents(web_contents);
     if (auto* framebust_helper =
-            FramebustBlockTabHelper::FromWebContents(web_contents)) {
-      auto on_click = [](const GURL& url, size_t index, size_t total_elements) {
-        UMA_HISTOGRAM_ENUMERATION(
-            "WebCore.Framebust.ClickThroughPosition",
-            blocked_content::GetListItemPositionFromDistance(index,
-                                                             total_elements));
-      };
+            tab ? FramebustBlockTabHelper::From(tab) : nullptr) {
       framebust_helper->AddBlockedUrl(blocked_url, initiator_origin,
-                                      base::BindOnce(on_click));
+                                      base::NullCallback());
     }
   }
 }
@@ -770,8 +766,7 @@ void BrowserWebContentsDelegate::LoadingStateChanged(
 
 void BrowserWebContentsDelegate::CloseContents(content::WebContents* source) {
   if (unload_controller_->CanCloseContents(source)) {
-    chrome::CloseWebContents(browser_->GetBrowserForMigrationOnly(), source,
-                             true);
+    chrome::CloseWebContents(&browser_.get(), source, true);
   }
 }
 
@@ -1142,6 +1137,12 @@ void BrowserWebContentsDelegate::EnumerateDirectory(
 
 bool BrowserWebContentsDelegate::GetCanResize() {
   return window_->GetCanResize();
+}
+
+bool BrowserWebContentsDelegate::GetIsAlwaysOnTop() {
+  // TODO(https://crbug.com/546631275): Return true when this browser
+  // represents an always-on-top popup.
+  return false;
 }
 
 bool BrowserWebContentsDelegate::CanUseWindowingControls(

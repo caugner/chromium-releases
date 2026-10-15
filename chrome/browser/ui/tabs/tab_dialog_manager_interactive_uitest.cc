@@ -2,17 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/ui/tabs/public/tab_dialog_manager.h"
+
 #include <memory>
 #include <utility>
 
 #include "base/test/scoped_feature_list.h"
+#include "base/test/test_timeouts.h"
 #include "build/buildflag.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
-#include "chrome/browser/ui/tabs/public/tab_dialog_manager.h"
 #include "chrome/browser/ui/tabs/public/tab_features.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/ui_features.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/contents_web_view.h"
 #include "chrome/test/interaction/interactive_browser_test.h"
 #include "components/tabs/public/tab_interface.h"
@@ -52,6 +54,12 @@ class TabDialogManagerUiTest : public InteractiveBrowserTest {
 
  protected:
   std::unique_ptr<views::Widget> CreateAndShowTestDialog() {
+    return CreateAndShowTestDialog(
+        std::make_unique<tabs::TabDialogManager::Params>());
+  }
+
+  std::unique_ptr<views::Widget> CreateAndShowTestDialog(
+      std::unique_ptr<tabs::TabDialogManager::Params> params) {
     ui::DialogModel::Builder dialog_builder;
     dialog_builder.SetInternalName("TestDialog");
     dialog_builder.AddParagraph(ui::DialogModelLabel(u"Test"), u"",
@@ -65,9 +73,8 @@ class TabDialogManagerUiTest : public InteractiveBrowserTest {
     model_host->SetOwnershipOfNewWidget(
         views::Widget::InitParams::CLIENT_OWNS_WIDGET);
 
-    return manager->CreateAndShowDialog(
-        model_host.release(),
-        std::make_unique<tabs::TabDialogManager::Params>());
+    return manager->CreateAndShowDialog(model_host.release(),
+                                        std::move(params));
   }
 
   TabDialogManager* GetTabDialogManager() {
@@ -203,6 +210,32 @@ IN_PROC_BROWSER_TEST_F(TabDialogManagerDesktopWidgetUiTest,
   EXPECT_TRUE(browser()->GetWindow()->IsActive());
   EXPECT_FALSE(widget->IsActive());
 }
+
+// Tests that the widget does not become active when `should_show_inactive` is
+// true.
+IN_PROC_BROWSER_TEST_F(TabDialogManagerDesktopWidgetUiTest,
+                       Params_should_show_inactive_true) {
+  std::unique_ptr<views::Widget> widget;
+
+  RunTestSequence(Do([&, this]() {
+                    auto params =
+                        std::make_unique<tabs::TabDialogManager::Params>();
+                    params->should_show_inactive = true;
+                    widget = CreateAndShowTestDialog(std::move(params));
+                  }),
+                  WaitForShow(kDialogViewId),
+                  CheckResult([&]() { return widget && widget->IsVisible(); },
+                              true, "Verify widget is visible"));
+
+  // Give any asynchronous activation a chance to run.
+  base::RunLoop run_loop;
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
+      FROM_HERE, run_loop.QuitClosure(), TestTimeouts::tiny_timeout());
+  run_loop.Run();
+
+  RunTestSequence(CheckResult([&]() { return widget && widget->IsActive(); },
+                              false, "Verify widget is not active"));
+}
 #endif  // BUILDFLAG(!IS_CHROMEOS)
 
 // Regression tests for crbug.com/460178087.
@@ -213,7 +246,7 @@ IN_PROC_BROWSER_TEST_F(TabDialogManagerDesktopWidgetUiTest,
 // activation instead.
 IN_PROC_BROWSER_TEST_F(TabDialogManagerUiTest, DoesNotActivateInactiveWindow) {
   // 1. Create a second browser window and activate it.
-  Browser* browser2 = CreateBrowser(browser()->GetProfile());
+  BrowserWindowInterface* browser2 = CreateBrowser(browser()->GetProfile());
 
   std::unique_ptr<views::Widget> widget;
 

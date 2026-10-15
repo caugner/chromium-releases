@@ -466,13 +466,15 @@ void PaintLayerScrollableArea::UpdateScrollOffset(
     // Update regions, scrolling may change the clip of a particular region.
     frame_view->UpdateDocumentDraggableRegions();
 
-    // As a performance optimization, the scroll offset of the root layer is
-    // not included in EmbeddedContentView's stored frame rect, so there is no
-    // reason to mark the FrameView as needing a geometry update here.
-    if (is_root_layer)
+    if (is_root_layer &&
+        !RuntimeEnabledFeatures::AvoidEmbeddedContentViewLocationEnabled()) {
+      // As a performance optimization, the scroll offset of the root layer is
+      // not included in EmbeddedContentView's stored frame rect, so there is no
+      // reason to mark the FrameView as needing a geometry update here.
       frame_view->SetRootLayerDidScroll();
-    else
+    } else {
       frame_view->SetNeedsUpdateGeometries();
+    }
   }
 
   if (auto* scrolling_coordinator = GetScrollingCoordinator()) {
@@ -649,6 +651,10 @@ gfx::Vector2d PaintLayerScrollableArea::MaximumScrollOffsetInt() const {
 
 void PaintLayerScrollableArea::VisibleSizeChanged() {
   ShowNonMacOverlayScrollbars();
+  if (AXObjectCache* cache =
+          GetLayoutBox()->GetDocument().ExistingAXObjectCache()) {
+    cache->HandleScrollDimensionsChanged(GetLayoutBox());
+  }
 }
 
 PhysicalRect PaintLayerScrollableArea::LayoutContentRect(
@@ -729,6 +735,10 @@ void PaintLayerScrollableArea::ContentsResized() {
   Layer()->SetNeedsCompositingInputsUpdate();
   GetLayoutBox()->GetFrameView()->SetIntersectionObservationState(
       LocalFrameView::kDesired);
+  if (AXObjectCache* cache =
+          GetLayoutBox()->GetDocument().ExistingAXObjectCache()) {
+    cache->HandleScrollDimensionsChanged(GetLayoutBox());
+  }
 }
 
 gfx::Point PaintLayerScrollableArea::LastKnownMousePosition() const {
@@ -2779,9 +2789,7 @@ bool PaintLayerScrollableArea::PrefersNonCompositedScrolling() const {
       }
     }
   }
-  if (RuntimeEnabledFeatures::CanvasDrawElementEnabled(
-          GetLayoutBox()->GetDocument().GetExecutionContext()) &&
-      GetLayoutBox()->IsInCanvasSubtree()) {
+  if (GetLayoutBox()->IsInCanvasSubtree()) {
     return true;
   }
   return false;
@@ -3159,9 +3167,7 @@ bool PaintLayerScrollableArea::MayCompositeScrollbar(
   }
   // Disable composited scrollbars under canvas.
   const auto* box = GetLayoutBox();
-  if (RuntimeEnabledFeatures::CanvasDrawElementEnabled(
-          box->GetDocument().GetExecutionContext()) &&
-      box->IsInCanvasSubtree()) {
+  if (box->IsInCanvasSubtree()) {
     return false;
   }
   // Compositing of scrollbar is decided in PaintArtifactCompositor. We assume

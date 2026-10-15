@@ -15,6 +15,7 @@
 #include "base/memory/raw_ref.h"
 #include "chrome/browser/glic/glic_enums.h"
 #include "chrome/browser/glic/host/glic.mojom.h"
+#include "chrome/browser/glic/host/glic_webui.mojom.h"
 #include "chrome/browser/glic/public/glic_instance_metrics_backwards_compatibility.h"
 #include "chrome/browser/glic/public/glic_window_invocation_tracker.h"
 #include "chrome/browser/glic/service/glic_state_tracker.h"
@@ -28,10 +29,6 @@ class Profile;
 namespace metrics {
 
 class ProfileMetricsService;
-}
-
-namespace content {
-class WebContents;
 }
 
 namespace tabs {
@@ -73,7 +70,8 @@ class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
   GlicInstanceMetrics& operator=(const GlicInstanceMetrics&) = delete;
 
   // `GlicInstanceMetricsBackwardsCompatibility`:
-  void OnUserInputSubmitted(mojom::WebClientMode mode) override;
+  void OnUserInputSubmitted(mojom::WebClientMode mode,
+                            mojom::PromptType prompt_type) override;
   void DidRequestContextFromTab(tabs::TabInterface& tab) override;
   void OnResponseStarted() override;
   void OnResponseStopped(mojom::ResponseStopCause cause) override;

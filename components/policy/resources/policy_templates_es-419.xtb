@@ -198,6 +198,19 @@ Esta política requiere una licencia de “<ph name="CHROME_ENTERPRISE_PREMIUM_N
 <translation id="1110426799149444997">Inhabilitar la búsqueda parcial de <ph name="GOOGLE_LENS_PRODUCT_NAME" /></translation>
 <translation id="1111324374369583989">No mostrar la pantalla de configuración del tamaño de visualización durante el acceso</translation>
 <translation id="1111824532252882775">Habilitado: Los desplazadores son enfocables de forma predeterminada.</translation>
+<translation id="1113523086451291158">Esta política se puede usar para permitir <ph name="CHROME_DEVTOOLS_NAME" /> en URLs específicas.
+
+La disponibilidad de <ph name="CHROME_DEVTOOLS_NAME" /> se evalúa a nivel del destino. Los patrones de URLs se comparan con la URL de cada destino que se inspecciona (como el marco principal de una página, un submarco incorporado, una extensión o una aplicación web). El comportamiento resultante depende de si también se establece la política <ph name="DEVELOPER_TOOLS_AVAILABILITY_BLOCKLIST_POLICY_NAME" />.
+
+Si estableces esta política y no estableces <ph name="DEVELOPER_TOOLS_AVAILABILITY_BLOCKLIST_POLICY_NAME" />, la URL de un destino debe coincidir con un patrón de esta lista de entidades permitidas para que se permita <ph name="CHROME_DEVTOOLS_NAME" /> en ese destino. Si la URL de un destino no coincide con esta lista de entidades permitidas, se bloqueará <ph name="CHROME_DEVTOOLS_NAME" /> para ese destino (por ejemplo, no se puede inspeccionar un submarco cuya URL no esté en la lista de entidades permitidas, pero la página principal se puede inspeccionar si su URL está en la lista de entidades permitidas). Para obtener información sobre el formato de las URLs, consulta https://support.google.com/chrome/a?p=url_blocklist_filter_format.
+
+Si se establecen esta política y la política <ph name="DEVELOPER_TOOLS_AVAILABILITY_BLOCKLIST_POLICY_NAME" />, esta lista de entidades permitidas tendrá prioridad. Si la URL de un destino coincide con un patrón de esta lista de direcciones permitidas, se permitirá, incluso si también coincide con un patrón de la lista de direcciones bloqueadas. Si la URL de un destino coincide con un patrón de la lista de direcciones bloqueadas (pero no con uno de la lista de direcciones permitidas), se bloqueará. Si la URL de un destino no coincide con ninguna, se usará la política <ph name="DEVELOPER_TOOLS_AVAILABILITY_POLICY_NAME" /> como alternativa.
+
+Si no estableces esta política, la disponibilidad de <ph name="CHROME_DEVTOOLS_NAME" /> se determinará según las políticas <ph name="DEVELOPER_TOOLS_AVAILABILITY_BLOCKLIST_POLICY_NAME" /> y <ph name="DEVELOPER_TOOLS_AVAILABILITY_POLICY_NAME" />.
+
+Los comodines de host generales (p. ej., “*” o “[*]”) no están permitidos; usa la política <ph name="DEVELOPER_TOOLS_AVAILABILITY_POLICY_NAME" /> para habilitar la función de forma global.
+
+Esta política se limitará a 1,000 entradas.</translation>
 <translation id="1117535567637097036">Los controladores de protocolo establecidos mediante esta política no se usan cuando se controlan intents en Android.</translation>
 <translation id="1118093128235245168">Permite que los sitios soliciten al usuario que otorgue acceso a un dispositivo USB conectado</translation>
 <translation id="111910763555783249">Configuración de notificaciones</translation>
@@ -656,6 +669,15 @@ el cambio de contraseña, pero también puede aplicarse de manera forzosa con ci
 <translation id="1438739959477268107">Configuración predeterminada de generación de claves</translation>
 <translation id="1440408958042020947">Permitir el acceso de los usuarios que habilitaron Phone Hub a las fotos y los videos tomados recientemente del teléfono</translation>
 <translation id="1443532790824582949">Habilitar el teclado virtual táctil</translation>
+<translation id="1445955287827003066">Esta política controla si un dispositivo está seleccionado para migrar de ChromeOS al siguiente SO y cuándo.
+
+Si estableces esta política en 0, la elegibilidad del dispositivo para la migración se determinará según la configuración predeterminada de Google, que puede depender del modelo del dispositivo, el hardware y otros factores.
+
+Si se establece esta política en 2147483647, el dispositivo se marcará como disponible y seleccionado para migración sin una fecha límite específica.
+
+Si se establece en un valor mayor que 0 y menor que 2147483647, el dispositivo se marcará como disponible y seleccionado para migración. El valor representa la fecha límite de finalización recomendada como la cantidad de segundos desde el tiempo Unix (1970-01-01 00:00:00 UTC).
+
+Ten en cuenta que otros parámetros de configuración de actualización del dispositivo, como la fijación de versiones (<ph name="DEVICE_TARGET_VERSION_PREFIX_POLICY" />), la inhabilitación de actualizaciones (<ph name="DEVICE_AUTO_UPDATE_DISABLED_POLICY" />) o la configuración del canal de versiones (<ph name="DEVICE_RELEASE_CHANNEL_POLICY" />), pueden impedir que el dispositivo reciba las actualizaciones necesarias para iniciar la migración, incluso si se establece una fecha objetivo aquí. La política debe aplicarse siempre y el valor no establecido corresponde al valor predeterminado de Google, ya que su valor puede influir en el procesamiento de las políticas de actualización del dispositivo.</translation>
 <translation id="1447252610864877219">Permite que la app de Gemini realice acciones en las páginas web.</translation>
 <translation id="1449083855104537880">Si estableces el valor "True" para la política, se mostrarán las opciones de accesibilidad en el menú de la bandeja del sistema. Si estableces el valor "False", no se mostrarán las opciones en el menú.
 
@@ -1436,6 +1458,7 @@ Si la inhabilitas, <ph name="PRODUCT_NAME" /> cerrará la pestaña y, luego, cam
         |TIME_LIMITS| aplica un límite de uso diario y hace que la app deje de estar disponible una vez que se alcance ese límite en el día. En |daily_limit_mins|, se especifica el límite de uso, el cual se restablece cada día a la hora (UTC) que se indica en |reset_at|.
         Solo se usa esta política para usuarios menores de edad.
         Esta política complementa a "UsageTimeLimit". Independientemente de la política "PerAppTimeLimits", se aplicarán las restricciones especificadas en "UsageTimeLimit", como el tiempo de uso y la hora de dormir.</translation>
+<translation id="1911003883066847257">Controla el reinicio del navegador y la configuración de reinicio.</translation>
 <translation id="19133869326547269">Esta política quedó obsoleta y no tiene efecto porque se quitó la función Llamar con un clic de Chrome.
 
 Descripción original:
@@ -2224,6 +2247,7 @@ la política BruschettaVMConfiguration o, si esto falla, un nombre genérico.</t
 
 Si habilitas esta política o no la estableces, el usuario podrá elegir una imagen de Google Fotos como fondo de pantalla.</translation>
 <translation id="2393862222659066027">Abrir una lista de URLs y restablecer la última sesión</translation>
+<translation id="239395129206831238">Establecer la fecha objetivo para la migración de dispositivos al siguiente SO</translation>
 <translation id="239416486107542256">La configuración de F11 usa la combinación de teclas que contiene las teclas modificadoras ctrl y mayúsculas</translation>
 <translation id="2394429297128584919">No permitir que las páginas envíen solicitudes XHR síncronas cuando el usuario las abandona</translation>
 <translation id="2398817690049129302">Aplicar el modo de seguridad de <ph name="YOUTUBE_PRODUCT_NAME" /></translation>
@@ -2960,6 +2984,7 @@ la línea de comandos.</translation>
 
 Si no la estableces, se aplicará la política <ph name="BLOCK_POPUPS_POLICY_NAME" />, pero los usuarios podrán cambiar esta configuración.</translation>
 <translation id="2796714419743648316">Lista de límites de tiempo por app permitidos</translation>
+<translation id="2799223571221894425">Reiniciar</translation>
 <translation id="2801065672151277034">Configuración de la administración de certificados</translation>
 <translation id="2801155097555584385">Establecer el porcentaje del nivel de la batería en el que debe comenzar la carga</translation>
 <translation id="2801378553855965587">Inhabilitar la integración de <ph name="GOOGLE_CALENDAR_NAME" /></translation>
@@ -3391,6 +3416,19 @@ El usuario puede establecer la imagen de avatar de cualquiera de estas opciones 
 <translation id="3036271748813538143">Controla si se habilita el nuevo comportamiento del analizador HTML para el elemento &lt;select&gt;</translation>
 <translation id="3038323923255997294">Continuar ejecutando aplicaciones en segundo plano cuando <ph name="PRODUCT_NAME" /> esté cerrado</translation>
 <translation id="3039862327847526651">Controlar el uso de optimizadores de JavaScript</translation>
+<translation id="3040510138377915303">Controla si el agente de <ph name="GEMINI_SPARK_PRODUCT_NAME" /> puede conectarse a <ph name="PRODUCT_NAME" /> y usar la navegación automática. Es posible que <ph name="GEMINI_SPARK_PRODUCT_NAME" /> no esté disponible para tu organización.
+
+0 = <ph name="GEMINI_SPARK_PRODUCT_NAME" /> tiene permiso para conectarse a la navegación automática de <ph name="PRODUCT_NAME" /> y usarla
+
+1 = <ph name="GEMINI_SPARK_PRODUCT_NAME" /> no tiene permiso para conectarse a la navegación automática de <ph name="PRODUCT_NAME" /> ni usarla
+
+Advertencia: Si habilitas la conexión de <ph name="GEMINI_SPARK_PRODUCT_NAME" /> a <ph name="PRODUCT_NAME" /> y el uso de la navegación automática, el agente de <ph name="GEMINI_SPARK_PRODUCT_NAME" /> podrá realizar acciones autónomas de varios pasos en los clientes de <ph name="PRODUCT_NAME" /> con la sesión de navegador activa. Esto implica riesgos de seguridad significativos, incluidos los riesgos de credenciales, la entrada de red local y la pérdida de señales con reconocimiento de contexto. Es posible que no se respeten los controles de administración y seguridad existentes.
+
+Se recomienda a los administradores que evalúen cuidadosamente el modelo de amenazas de red, el cumplimiento y los lineamientos de privacidad de su organización antes de habilitar esta función.
+
+Esta política no tiene efecto cuando se inhabilitan la app de <ph name="GOOGLE_GEMINI_PRODUCT_NAME" /> o las políticas de navegación automática de <ph name="PRODUCT_NAME" />. Por ejemplo, la política <ph name="GEMINI_SETTINGS_POLICY_NAME" /> puede inhabilitar la app de <ph name="GOOGLE_GEMINI_PRODUCT_NAME" />. Para obtener más información sobre <ph name="GOOGLE_GEMINI_PRODUCT_NAME" /> en <ph name="PRODUCT_NAME" />, consulta https://support.google.com/chrome/a?p=gemini_in_chrome.
+
+La navegación automática de <ph name="PRODUCT_NAME" /> y <ph name="GEMINI_SPARK_PRODUCT_NAME" /> no están disponibles en todos los países ni en todos los idiomas. Si estableces esta política con el valor "0" (habilitada), no se garantiza que se habilitará la función, ya que sigue sujeta a la disponibilidad. Para obtener más información sobre el lanzamiento, consulta las notas de la versión de Enterprise: https://chromeenterprise.google/resources/release-notes/.</translation>
 <translation id="3041887182529293512">Si estableces la política como verdadera o no la estableces, se mostrarán las sugerencias de contenido autogenerado en la página Nueva pestaña, según el historial de navegación del usuario, sus intereses y su ubicación.
 
       Si la estableces como falsa, no se mostrarán estas sugerencias en la página Nueva pestaña.</translation>
@@ -3543,19 +3581,6 @@ Si la inhabilitas o no la estableces, nunca se mostrará el menú de accesibilid
 <translation id="3150351525324499342">No mostrar el ícono de <ph name="PRODUCT_NAME" /> en la barra de herramientas de forma predeterminada, pero permitir que los usuarios elijan</translation>
 <translation id="3152135410085709340">Permitir el acceso de archivo local a las URLs de file:// para estos sitios en el Lector de PDF</translation>
 <translation id="3152425128389603870">Habilitar el modo de escritorio unificado y activarlo de forma predeterminada</translation>
-<translation id="3157506194753687842">Controla si el agente de <ph name="GEMINI_SPARK_PRODUCT_NAME" /> puede conectarse a <ph name="PRODUCT_NAME" /> y usar la navegación automática.
-
-0 = <ph name="GEMINI_SPARK_PRODUCT_NAME" /> tiene permiso para conectarse a la navegación automática de <ph name="PRODUCT_NAME" /> y usarla
-
-1 = <ph name="GEMINI_SPARK_PRODUCT_NAME" /> no tiene permiso para conectarse a la navegación automática de <ph name="PRODUCT_NAME" /> ni usarla
-
-Advertencia: Si habilitas la conexión de <ph name="GEMINI_SPARK_PRODUCT_NAME" /> a <ph name="PRODUCT_NAME" /> y el uso de la navegación automática, el agente de <ph name="GEMINI_SPARK_PRODUCT_NAME" /> podrá realizar acciones autónomas de varios pasos en los clientes de <ph name="PRODUCT_NAME" /> con la sesión de navegador activa. Esto implica riesgos de seguridad significativos, incluidos los riesgos de credenciales, la entrada de red local y la pérdida de señales con reconocimiento de contexto. Es posible que no se respeten los controles de administración y seguridad existentes.
-
-Se recomienda a los administradores que evalúen cuidadosamente el modelo de amenazas de red, el cumplimiento y los lineamientos de privacidad de su organización antes de habilitar esta función.
-
-Esta política no tiene efecto cuando se inhabilitan la app de <ph name="GOOGLE_GEMINI_PRODUCT_NAME" /> o las políticas de navegación automática de <ph name="PRODUCT_NAME" />. Por ejemplo, la política <ph name="GEMINI_SETTINGS_POLICY_NAME" /> puede inhabilitar la app de <ph name="GOOGLE_GEMINI_PRODUCT_NAME" />. Para obtener más información sobre <ph name="GOOGLE_GEMINI_PRODUCT_NAME" /> en <ph name="PRODUCT_NAME" />, consulta https://support.google.com/chrome/a?p=gemini_in_chrome.
-
-La navegación automática de <ph name="PRODUCT_NAME" /> y <ph name="GEMINI_SPARK_PRODUCT_NAME" /> no están disponibles en todos los países ni en todos los idiomas. Si estableces esta política con el valor "0" (habilitada), no se garantiza que se habilitará la función, ya que sigue sujeta a la disponibilidad. Para obtener más información sobre el lanzamiento, consulta las notas de la versión de Enterprise: https://chromeenterprise.google/resources/release-notes/.</translation>
 <translation id="3159375329008977062">El usuario está habilitado para exportar o importar contenedores de Crostini mediante la IU</translation>
 <translation id="3163167792874598128">Si estableces la política o no la habilitas, es posible que la promoción para calificar en la App Store se muestre al usuario como máximo una vez al año.
 Si inhabilitas la política, no se mostrará al usuario la promoción para calificar en la App Store.</translation>
@@ -4962,17 +4987,6 @@ Para obtener información detallada sobre los patrones válidos de <ph name="URL
 <translation id="4090088362777472639">El hash SHA-256 del playbook de Ansible.</translation>
 <translation id="4091040199847925434">Inhabilitar los informes de información del sistema y el contenido de la página que se usan para ayudar a mejorar la Navegación segura</translation>
 <translation id="4093058072421210667">No permitir la función Inline Image.</translation>
-<translation id="4096503137212127216">Esta política se puede usar para bloquear <ph name="CHROME_DEVTOOLS_NAME" /> en URLs específicas. Para obtener información sobre el formato de las URLs, consulta https://support.google.com/chrome/a?p=url_blocklist_filter_format.
-
-Los patrones de URLs se comparan con la URL de cada marco de la página que se inspecciona. El comportamiento resultante depende de si también se establece la política <ph name="DEVELOPER_TOOLS_AVAILABILITY_ALLOWLIST_POLICY_NAME" />.
-
-Si estableces esta política y no estableces <ph name="DEVELOPER_TOOLS_AVAILABILITY_ALLOWLIST_POLICY_NAME" />, se bloqueará <ph name="CHROME_DEVTOOLS_NAME" /> para toda la página si la URL de algún marco coincide con un patrón de esta lista de direcciones bloqueadas. Si la URL de un marco no coincide con ningún patrón, la disponibilidad se determina según la política <ph name="DEVELOPER_TOOLS_AVAILABILITY_POLICY_NAME" />.
-
-Si se establecen esta política y la política <ph name="DEVELOPER_TOOLS_AVAILABILITY_ALLOWLIST_POLICY_NAME" />, esta lista de direcciones permitidas tendrá prioridad. Si la URL de un marco coincide con un patrón de la lista de direcciones permitidas, se permitirá, incluso si también coincide con un patrón de esta lista de direcciones bloqueadas. Si una URL coincide con un patrón de esta lista de direcciones bloqueadas (pero no con la lista de direcciones permitidas), se bloqueará. Si una URL no coincide con ninguna, se usará la política <ph name="DEVELOPER_TOOLS_AVAILABILITY_POLICY_NAME" /> como alternativa.
-
-Si no estableces esta política, la disponibilidad de <ph name="CHROME_DEVTOOLS_NAME" /> se determinará según las políticas <ph name="DEVELOPER_TOOLS_AVAILABILITY_ALLOWLIST_POLICY_NAME" /> y <ph name="DEVELOPER_TOOLS_AVAILABILITY_POLICY_NAME" />.
-
-Esta política se limitará a 1,000 entradas.</translation>
 <translation id="4098920079809952737">Permitir la impresión con y sin gráficos de fondo</translation>
 <translation id="410061592404122032">Preguntar siempre que un sitio quiera obtener el permiso de Administración de ventanas</translation>
 <translation id="410068710490553233">Permite acceder en más Cuentas de Google</translation>
@@ -5334,7 +5348,6 @@ Esta es una capa de control adicional que se encuentra debajo de la capa de perm
 Los usuarios no pueden anular la selección de administrador. Si no estableces la política, los usuarios disfrutarán de la experiencia del consumidor, es decir, podrán modificar libremente la configuración de ubicación del sistema, si el valor predeterminado es <ph name="GLS_ALLOWED" />.
 
 Nota: Esta política da de baja la política <ph name="ARC_GLS_POLICY_NAME" />. Además, si estableces esta política, <ph name="DEFAULT_GEO_SETTING_POLICY_NAME" /> ya no afectará la preferencia de ubicación de <ph name="ANDROID_NAME" /> en <ph name="PRODUCT_OS_NAME" />.</translation>
-<translation id="4340826578810728651">Permitir que <ph name="GEMINI_SPARK_PRODUCT_NAME" /> se conecte a la navegación automática de <ph name="PRODUCT_NAME" /> y la use</translation>
 <translation id="4341199399451274159">Si activas <ph name="DEFAULT_SEARCH_PROVIDER_ENABLED_POLICY_NAME" />, establecer <ph name="DEFAULT_SEARCH_PROVIDER_ENCODINGS_POLICY_NAME" /> especificará la codificación de caracteres que admite el proveedor de búsqueda. Las codificaciones son nombres de página de código como UTF-8, GB2312 y ISO-8859-1. Estos se prueban en el orden establecido.
 
       Si no estableces <ph name="DEFAULT_SEARCH_PROVIDER_ENCODINGS_POLICY_NAME" />, se utilizará UTF-8.</translation>
@@ -6957,7 +6970,7 @@ Nota: Esta función aún no está disponible de forma general, por lo que habili
 <translation id="5249006530384016395">Controlar si se habilita la sintaxis <ph name="CUSTOM_STATE_DEPRECATED_SYNTAX" /> obsoleta para el estado personalizado de CSS</translation>
 <translation id="5249271416806588789">Talk to type es una función basada en IA que permite a los usuarios ingresar y editar texto con la voz, con la tecnología de modelos de IA generativa para proporcionar transcripción y formato de alta calidad.
 
-0 = Permite que se use la función y que Google use datos pertinentes para mejorar sus modelos de IA. Los datos pertinentes pueden incluir instrucciones, entradas, resultados, materiales de referencia y comentarios escritos, según la función. Es posible que personas revisen los datos para mejorar los modelos de IA. 0 es el valor predeterminado, excepto en los siguientes casos.
+0 = Permite que se use la función y que Google use datos pertinentes para mejorar sus modelos de IA. Los datos pertinentes pueden incluir instrucciones, entradas, resultados, materiales de referencia y comentarios escritos, según la función. Es posible que los datos sean revisados por personas para mejorar los modelos de IA. 0 es el valor predeterminado, excepto en los siguientes casos.
 
 1 = Permite que se use la función, pero no permite que Google mejore los modelos con el contenido de los usuarios (lo que incluye las instrucciones, las entradas, los resultados, los materiales de referencia y los comentarios escritos). 1 es el valor predeterminado para los usuarios empresariales que administra <ph name="GOOGLE_ADMIN_CONSOLE_PRODUCT_NAME" /> y las cuentas de institución educativa que administra <ph name="GOOGLE_WORKSPACE_PRODUCT_NAME" />.
 
@@ -7097,6 +7110,7 @@ Las cuentas administradas no son aptas para unirse a un grupo familiar ni crear 
 <translation id="533287753294126753">Permitir la Comparación de pestañas y mejorar los modelos de IA.</translation>
 <translation id="5334404204520035180">Controlar el uso de la API de WebPrinting</translation>
 <translation id="5334501839642146593">No enviar nunca métricas a Google</translation>
+<translation id="5335403007354311099">Habilitar las funciones de accesibilidad del procesador</translation>
 <translation id="5335910979215357815">Habilitar la API de Save and Share para el control de terceros de <ph name="PRODUCT_OS_NAME" />.</translation>
 <translation id="5337869685871558036">Permitir la carga previa de SpeculationRules a URLs controladas por ServiceWorker</translation>
 <translation id="5339096331970464266">Habilitar el teclado virtual de accesibilidad</translation>
@@ -8214,6 +8228,17 @@ las configuren.</translation>
 Esta política dejará de estar disponible a partir de la versión M124.</translation>
 <translation id="6022948604095165524">Acción al iniciar</translation>
 <translation id="602318745029752898">Permitir las voces de texto a voz de la red mejorada en Seleccionar para pronunciar</translation>
+<translation id="6023434563562800942">Esta política se puede usar para bloquear <ph name="CHROME_DEVTOOLS_NAME" /> en URLs específicas. Para obtener información sobre el formato de las URLs, consulta https://support.google.com/chrome/a?p=url_blocklist_filter_format.
+
+La disponibilidad de <ph name="CHROME_DEVTOOLS_NAME" /> se evalúa a nivel del destino. Los patrones de URLs se comparan con la URL de cada destino que se inspecciona (como el marco principal de una página, un submarco incorporado, una extensión o una aplicación web). El comportamiento resultante depende de si también se establece la política <ph name="DEVELOPER_TOOLS_AVAILABILITY_ALLOWLIST_POLICY_NAME" />.
+
+Si estableces esta política y no estableces <ph name="DEVELOPER_TOOLS_AVAILABILITY_ALLOWLIST_POLICY_NAME" />, se bloqueará <ph name="CHROME_DEVTOOLS_NAME" /> para un destino si su URL coincide con un patrón de esta lista de URLs bloqueadas (por ejemplo, no se puede inspeccionar un submarco cuya URL coincida con esta lista de URLs bloqueadas, pero la página principal se puede inspeccionar si su URL no está bloqueada). Si la URL de un destino no coincide con ningún patrón, la disponibilidad se determina según la política <ph name="DEVELOPER_TOOLS_AVAILABILITY_POLICY_NAME" />.
+
+Si se establecen esta política y la política <ph name="DEVELOPER_TOOLS_AVAILABILITY_ALLOWLIST_POLICY_NAME" />, la lista de entidades permitidas tendrá prioridad. Si la URL de un destino coincide con un patrón de la lista de direcciones permitidas, se permitirá, incluso si también coincide con un patrón de esta lista de direcciones bloqueadas. Si la URL de un destino coincide con un patrón de esta lista de direcciones bloqueadas (pero no con la lista de direcciones permitidas), se bloqueará. Si la URL de un destino no coincide con ninguna, se usará la política <ph name="DEVELOPER_TOOLS_AVAILABILITY_POLICY_NAME" /> como alternativa.
+
+Si no estableces esta política, la disponibilidad de <ph name="CHROME_DEVTOOLS_NAME" /> se determinará según las políticas <ph name="DEVELOPER_TOOLS_AVAILABILITY_ALLOWLIST_POLICY_NAME" /> y <ph name="DEVELOPER_TOOLS_AVAILABILITY_POLICY_NAME" />.
+
+Esta política se limitará a 1,000 entradas.</translation>
 <translation id="6026722971789064331">Controla el uso de la API de File System para escritura</translation>
 <translation id="602728333950205286">URL instantánea del proveedor de búsqueda predeterminado</translation>
 <translation id="603410445099326293">Parámetros para URL de sugerencia que utiliza POST</translation>
@@ -8322,6 +8347,7 @@ En <ph name="MAC_OS_NAME" />, esta política solo está disponible en instancias
       Si no se configura esta política, <ph name="PRODUCT_NAME" /> usará la versión máxima predeterminada.
 
       De lo contrario, puede establecerse en uno de los siguientes valores: "tls1.2" o "tls1.3". Si se establece, <ph name="PRODUCT_NAME" /> no usará versiones de SSL/TLS posteriores a la especificada. Se ignorarán los valores no reconocidos.</translation>
+<translation id="6120465104321378808">Permite que <ph name="GEMINI_SPARK_PRODUCT_NAME" /> se conecte a <ph name="PRODUCT_NAME" /> y use la navegación automática a través de Gemini en Chrome</translation>
 <translation id="6120909112796019291">Permitir Generative AI Photo Editing y mejorar los modelos de IA.</translation>
 <translation id="6123052603197028610">No permite que las consultas que se envíen a los servidores de Google recuperen marcas de tiempo</translation>
 <translation id="6128539430475678271">Bloquear la API de Controlled Frame en estos sitios</translation>
@@ -9524,6 +9550,19 @@ las configuren.</translation>
 <translation id="6757613329154374267">Se habilitó la funcionalidad de copia de seguridad y restablecimiento</translation>
 <translation id="6758659208493449452">Esta política controla si los usuarios inscritos en el Programa de Protección Avanzada reciben protección adicional. Es posible que algunas de estas funciones compartan datos con Google (por ejemplo, los usuarios de la Protección avanzada podrán enviar sus descargas a Google para comprobar que no incluyan software malicioso). Si se establece como verdadera o no se establece, los usuarios inscritos recibirán protección adicional. Si se establece como falsa, los usuarios de la Protección avanzada solo recibirán las funciones estándar para el consumidor.</translation>
 <translation id="6763023079133439068">Permitir los certificados que carezcan de una extensión subjectAlternativeName cuando son emitidos por anclas de confianza locales</translation>
+<translation id="6765476642902721793">Si habilitas esta política, las solicitudes de <ph name="LOCAL_NETWORK_ACCESS" />
+solo mostrarán advertencias en <ph name="CHROME_DEVTOOLS_NAME" /> debido a errores en las verificaciones de <ph name="LOCAL_NETWORK_ACCESS" />.
+
+Si la inhabilitas o no la estableces, las solicitudes de <ph name="LOCAL_NETWORK_ACCESS" /> usarán el
+manejo predeterminado de estas solicitudes.
+
+Para conocer las restricciones de <ph name="LOCAL_NETWORK_ACCESS" />, consulta https://wicg.github.io/local-network-access/.
+
+Esta política empresarial es temporal y se quitará después de la versión M163.
+
+A largo plazo, la política <ph name="LOCAL_NETWORK_ACCESS_ALLOWED_FOR_URLS_POLICY_NAME" />
+se puede usar para crear una lista de entidades permitidas de patrones de URL a los que se les debe otorgar automáticamente
+el permiso <ph name="LOCAL_NETWORK_ACCESS" />.</translation>
 <translation id="6766216162565713893">Permitir que los sitios soliciten permiso al usuario para acceder a un dispositivo Bluetooth cercano</translation>
 <translation id="6770454900105963262">Informar datos sobre las sesiones de kiosco activas</translation>
 <translation id="6770703270685871935">Limpieza automática de datos locales</translation>
@@ -10045,6 +10084,7 @@ Ten en cuenta que esta política solo se aplica a los navegadores administrados,
 En <ph name="MS_WIN_NAME" />, esta política solo está disponible en instancias que están vinculadas a un dominio de <ph name="MS_AD_NAME" />, vinculadas a <ph name="MS_AAD_NAME" /> o inscritas en <ph name="CHROME_ENTERPRISE_CORE_NAME" />.
 
 En <ph name="MAC_OS_NAME" />, esta política solo está disponible en instancias administradas con MDM, vinculadas a un dominio a través de MCX o inscritas en <ph name="CHROME_ENTERPRISE_CORE_NAME" />.</translation>
+<translation id="7054840304131108563">Inhabilitar las funciones de accesibilidad del procesador</translation>
 <translation id="7055022222176591388">No permitir el complemento de <ph name="FLASH_PLUGIN_NAME" /> desactualizado</translation>
 <translation id="7056040036973126753">Enviar datos de confiabilidad de dominios a Google en función de la política de Métricas del usuario (UMA) de Chrome</translation>
 <translation id="7062803946218028349">Permitir que se habilite Phone Hub</translation>
@@ -10963,21 +11003,6 @@ Si dejas la política vacía, no se permitirán excepciones a <ph name="FLOATING
 <translation id="759957074386651883">Configuración de Navegación segura</translation>
 <translation id="7602621823177962064">Inhabilitar los informes de la memoria del dispositivo</translation>
 <translation id="7604169113182304895">Las apps de Android pueden respetar esta lista de forma voluntaria, pero no puedes forzarlas a que lo hagan.</translation>
-<translation id="7604302274842086162">Esta política se puede usar para permitir <ph name="CHROME_DEVTOOLS_NAME" /> en URLs específicas.
-
-Los patrones de URLs se comparan con la URL de cada marco de la página que se inspecciona. El comportamiento resultante depende de si también se establece la política <ph name="DEVELOPER_TOOLS_AVAILABILITY_BLOCKLIST_POLICY_NAME" />.
-
-Si estableces esta política y no estableces <ph name="DEVELOPER_TOOLS_AVAILABILITY_BLOCKLIST_POLICY_NAME" />, la URL de cada marco debe coincidir con un patrón de esta lista de direcciones permitidas para que se permita <ph name="CHROME_DEVTOOLS_NAME" />. Si la URL de algún marco no coincide, se bloquearán las Herramientas para desarrolladores para toda la página. Para obtener información sobre el formato de las URLs, consulta https://support.google.com/chrome/a?p=url_blocklist_filter_format.
-
-Si se establecen esta política y la política <ph name="DEVELOPER_TOOLS_AVAILABILITY_BLOCKLIST_POLICY_NAME" />, esta lista de direcciones permitidas tendrá prioridad. Si la URL de un marco coincide con un patrón de esta lista de direcciones permitidas, se permitirá, incluso si también coincide con un patrón de la lista de direcciones bloqueadas. Si una URL coincide con un patrón de la lista de direcciones bloqueadas (pero no con uno de la lista de direcciones permitidas), se bloqueará. Si una URL no coincide con ninguna, se usará la política <ph name="DEVELOPER_TOOLS_AVAILABILITY_POLICY_NAME" /> como alternativa.
-
-Si no estableces esta política, la disponibilidad de <ph name="CHROME_DEVTOOLS_NAME" /> se determinará según las políticas <ph name="DEVELOPER_TOOLS_AVAILABILITY_BLOCKLIST_POLICY_NAME" /> y <ph name="DEVELOPER_TOOLS_AVAILABILITY_POLICY_NAME" />.
-
-Esta política también se aplica a <ph name="CHROME_DEVTOOLS_NAME" /> que se abre para extensiones y aplicaciones web.
-
-Los comodines de host generales (p. ej., "*" o "[*]") no están permitidos; usa la política <ph name="DEVELOPER_TOOLS_AVAILABILITY_POLICY_NAME" /> para habilitar la función de forma global.
-
-Esta política se limitará a 1,000 entradas.</translation>
 <translation id="7607831126797434329">Bloquear descargas automáticas en estos sitios</translation>
 <translation id="7608186022704392724">La función de envío automático de PIN cambia la manera en la que se ingresan los PIN en <ph name="PRODUCT_OS_NAME" />.
           En lugar de mostrar el mismo campo de texto que se utiliza para ingresar contraseñas, esta
@@ -11754,6 +11779,7 @@ Hay varias políticas que enumeran los orígenes que afectan las solicitudes al 
   - LocalNetworkAccessAllowedForUrls</translation>
 <translation id="8059352177830050556">Habilitar los informes de la retroiluminación del dispositivo</translation>
 <translation id="8062485064082966327">Usa un servicio anónimo de Google para obtener descripciones automáticas de las imágenes sin etiquetar</translation>
+<translation id="8064875716442437829">Habilitar la accesibilidad del procesador</translation>
 <translation id="8066428282805800713">Enviar datos de hardware adicionales en ChromeOS Flex</translation>
 <translation id="8069233292746468045">Esta política configura <ph name="PRODUCT_NAME" /> para ordenar sus algoritmos de acuerdo de claves preferidos (grupos admitidos) en TLS 1.3 para reflejar una preferencia por los algoritmos que fueron aprobados por un régimen de cumplimiento específico.
 
@@ -12943,6 +12969,13 @@ Nota: Esta política no tiene efecto si se establece DevicePowerBatteryChargingO
       Si no estableces esta política, se utilizará la configuración predeterminada para la zona de pruebas de la red. Esta configuración predeterminada puede variar según la versión de <ph name="PRODUCT_NAME" />, las pruebas de campo actualmente en ejecución y la plataforma.
       Esta política permite que las empresas inhabiliten la zona de pruebas de la red si utilizan software de terceros que interfiere con la zona de pruebas del servicio de red.</translation>
 <translation id="8840243776706727185">Inhabilitar la función NewBaseUrlInheritanceBehavior</translation>
+<translation id="8841125674413543406">Controla la generación del árbol de accesibilidad en los procesos del procesador.
+
+Si habilitas esta política o no la estableces, <ph name="PRODUCT_NAME" /> permitirá la generación de árboles de accesibilidad para las páginas web.
+
+Si la inhabilitas, ya no se generará el árbol de accesibilidad del procesador, lo que impedirá que las funciones de accesibilidad interactúen con el procesador.
+
+Si estableces esta política, los usuarios no podrán cambiarla ni anularla.</translation>
 <translation id="8842208363354615697">Permitir que se habilite el modo solo HTTPS</translation>
 <translation id="8843331294082716286">No mostrar el mensaje de <ph name="PRIVACY_SANDBOX_NAME" /> a los usuarios</translation>
 <translation id="884855199714673326">Permite que el host de acceso remoto decida</translation>
@@ -13369,19 +13402,6 @@ Nota: Si reinicias el dispositivo, se borrará la memoria caché. Se almacenan e
 
       Si estableces la política como falsa o no la estableces, no se informarán los eventos.
       Si la estableces como verdadera, se informarán los eventos de acceso y salida desde el dispositivo.</translation>
-<translation id="9087577919890548366">Si habilitas esta política, las solicitudes de <ph name="LOCAL_NETWORK_ACCESS" />
-solo mostrarán advertencias en <ph name="CHROME_DEVTOOLS_NAME" /> debido a errores en las verificaciones de <ph name="LOCAL_NETWORK_ACCESS" />.
-
-Si la inhabilitas o no la estableces, las solicitudes de <ph name="LOCAL_NETWORK_ACCESS" /> usarán el
-manejo predeterminado de estas solicitudes.
-
-Para conocer las restricciones de <ph name="LOCAL_NETWORK_ACCESS" />, consulta https://wicg.github.io/local-network-access/.
-
-Esta política empresarial es temporal y se quitará después de la versión M156.
-
-A largo plazo, la política <ph name="LOCAL_NETWORK_ACCESS_ALLOWED_FOR_URLS_POLICY_NAME" />
-se puede usar para crear una lista de entidades permitidas de patrones de URL a los que se les debe otorgar automáticamente
-el permiso <ph name="LOCAL_NETWORK_ACCESS" />.</translation>
 <translation id="9087652369391570821">Política de configuración para Chrome Enterprise Connector OnFileTransfer</translation>
 <translation id="9088433379343318874">Habilitar el proveedor de contenido de un usuario supervisado</translation>
 <translation id="9088444059179765143">Configurar el método de detección automática de la zona horaria</translation>

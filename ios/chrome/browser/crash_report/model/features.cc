@@ -5,3 +5,12 @@
 #include "ios/chrome/browser/crash_report/model/features.h"
 
 BASE_FEATURE(kMetrickitNonCrashReport, base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kMetrickitDeferRegistration, base::FEATURE_DISABLED_BY_DEFAULT);
+
+bool IsMetrickitDeferRegistrationEnabled() {
+  return base::FeatureList::IsEnabled(kMetrickitDeferRegistration);
+}
+
+BASE_FEATURE(kMetrickitSwiftReportSubscriber,
+             base::FEATURE_DISABLED_BY_DEFAULT);

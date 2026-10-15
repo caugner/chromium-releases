@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 """Definitions of builders in the chromium.fuchsia builder group."""
 
+load("@chromium-luci//args.star", "args")
 load("@chromium-luci//branches.star", "branches")
 load("@chromium-luci//builder_config.star", "builder_config")
 load("@chromium-luci//builder_health_indicators.star", "health_spec")
@@ -69,6 +70,7 @@ ci.builder(
             "x64",
         ],
     ),
+    ssd = None,
     # Runs two builds, which can cause the builder to run out of disk space
     # with standard free space.
     free_space = free_space.high,
@@ -155,6 +157,9 @@ ci.builder(
             ),
         },
     ),
+    ssd = None,
+    # TODO(crbug.com/549757519): Restore to the CQ when test pool is recovered.
+    gardener_rotations = args.ignore_default(None),
     console_view_entry = [
         consoles.console_view_entry(
             category = "cast-receiver",
@@ -212,7 +217,6 @@ ci.builder(
             "cast_test_lists",
         ],
         mixins = [
-            "fuchsia-orchestrate",
             "isolate_profile_data",
             "linux-jammy",
             targets.mixin(
@@ -253,6 +257,7 @@ ci.builder(
             ),
         },
     ),
+    ssd = None,
     free_space = free_space.high,
     console_view_entry = [
         consoles.console_view_entry(
@@ -316,7 +321,6 @@ ci.builder(
         ],
         mixins = [
             "fuchsia-large-device-spec",
-            "fuchsia-orchestrate",
             "isolate_profile_data",
             "linux-jammy",
             targets.mixin(
@@ -355,6 +359,7 @@ ci.builder(
             ],
         },
     ),
+    ssd = None,
     console_view_entry = [
         consoles.console_view_entry(
             category = "cast-receiver",

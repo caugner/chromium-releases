@@ -11,9 +11,11 @@
 #include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/dictation/features.h"
 #include "chrome/browser/dictation/target.h"
 #include "chrome/browser/dictation/test_util.h"
+#include "chrome/browser/ui/accelerator_table.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "content/public/browser/editable_level.h"
 #include "content/public/browser/focused_node_details.h"
@@ -27,6 +29,8 @@
 #include "third_party/blink/public/common/input/web_input_event.h"
 #include "third_party/blink/public/common/input/web_keyboard_event.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom.h"
+#include "ui/base/accelerators/accelerator.h"
+#include "ui/events/blink/blink_event_util.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 
 using ::testing::_;
@@ -657,7 +661,7 @@ TEST_F(DictationSessionControllerTest, ActiveStreamFailureOnErrorCalled) {
 
   EXPECT_CALL(*stream_provider_ptr, GetState())
       .WillRepeatedly(Return(StreamProvider::StreamState::kFailed));
-  EXPECT_CALL(*ui_ptr, OnError(SessionUi::StreamType::kAttached));
+  EXPECT_CALL(*ui_ptr, OnError(SessionUi::StreamType::kAttached, _));
 
   controller_->DidUpdateStreamProviderState(
       *stream_provider_ptr, StreamProvider::StreamState::kTranscribing);
@@ -688,7 +692,7 @@ TEST_F(DictationSessionControllerTest, CompletedStreamFailureOnErrorNotCalled) {
   // Now transition to failed. OnError should not be called.
   EXPECT_CALL(*stream_provider_ptr, GetState())
       .WillRepeatedly(Return(StreamProvider::StreamState::kFailed));
-  EXPECT_CALL(*ui_ptr, OnError(_)).Times(0);
+  EXPECT_CALL(*ui_ptr, OnError(_, _)).Times(0);
 
   controller_->DidUpdateStreamProviderState(
       *stream_provider_ptr, StreamProvider::StreamState::kComplete);
@@ -838,6 +842,20 @@ TEST_F(DictationSessionControllerTest, DoNotEndStreamOnModifiersOrNonText) {
   tab_event.windows_key_code = ui::VKEY_TAB;
   tab_event.text[0] = 9;  // Tab control character.
   controller_->DidGetUserInteraction(tab_event);
+  EXPECT_EQ(controller_->GetState(), SessionState::kStreamInitializing);
+  EXPECT_NE(controller_->attached_stream_provider(), nullptr);
+
+  // Don't mistake the focus on inactive dialogs shortcut as typing.
+  ui::Accelerator focus_popup_accelerator;
+  ASSERT_TRUE(GetAcceleratorForCommandId(
+      IDC_FOCUS_INACTIVE_POPUP_FOR_ACCESSIBILITY, &focus_popup_accelerator));
+  blink::WebKeyboardEvent focus_popup_event(
+      blink::WebInputEvent::Type::kRawKeyDown,
+      ui::EventFlagsToWebEventModifiers(focus_popup_accelerator.modifiers()),
+      base::TimeTicks::Now());
+  focus_popup_event.windows_key_code = focus_popup_accelerator.key_code();
+  focus_popup_event.text[0] = 'A';
+  controller_->DidGetUserInteraction(focus_popup_event);
   EXPECT_EQ(controller_->GetState(), SessionState::kStreamInitializing);
   EXPECT_NE(controller_->attached_stream_provider(), nullptr);
 }

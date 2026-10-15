@@ -13,7 +13,8 @@ cd "$SRC_DIR"
 roll-dep src/third_party/fontconfig/src --roll-to "$REVISION" "$@"
 
 cd "$SCRIPT_DIR/src"
-meson build -Ddoc=disabled --prefix=/usr
+rm -rf build
+meson setup build -Ddoc=disabled --prefix=/usr
 ninja -C build
 find build -name '*.h' -printf '%P\n' |
   rsync -R --files-from=- build/ ../include/
@@ -24,19 +25,23 @@ sed -i 's/_GNU_SOURCE$/_GNU_SOURCE 1/' ../include/meson-config.h
 # as locally we build without FreeType.
 sed -i '/#define ENABLE_FREETYPE 1/{N;d}' ../include/meson-config.h
 sed -i '/#define FREETYPE_PCF_LONG_FAMILY_NAMES/{N;d}' ../include/meson-config.h
+# Remove HAVE_SYMLINK so that fontconfig does not create .cache-N symlinks for
+# older cache versions.  Chrome's Fontations-based caches are not suitable for
+# consumption by the host's (FreeType-based) fontconfig.  See
+# https://crbug.com/565132857.
+sed -i '/#define HAVE_SYMLINK 1/{N;d}' ../include/meson-config.h
 # Use libxml2 instead of libexpat.  Currently, there's no way
 # to configure this with meson options.
 echo '#define ENABLE_LIBXML2 1' >>../include/config.h
 
-# Update the README.chromium version.
-sed -i "s/^Version: .*/Version: $REVISION/" ../README.chromium
-
-# Update the README.chromium CPE prefix.
+# Update the README.chromium version, revision, and CPE prefix.
 cd "$SCRIPT_DIR"
 VERSION="$(sed -n "s/^ *version: *'\([0-9.]\+\)'.*/\1/p" src/meson.build)"
 CPE="cpe:\/a:fontconfig_project:fontconfig:$VERSION"
+sed -i "s/^Version: .*/Version: $VERSION/" README.chromium
+sed -i "s/^Revision: .*/Revision: $REVISION/" README.chromium
 sed -i "s/^CPEPrefix: .*/CPEPrefix: $CPE/" README.chromium
 
 # Add the changes to the commit created by roll-dep.
-git add include README.chromium
+git add include README.chromium update.sh
 git commit --amend --no-edit

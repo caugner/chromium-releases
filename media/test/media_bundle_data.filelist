@@ -469,6 +469,7 @@ data/red-a500hz.webm
 data/red-green.h264
 data/red_green_gradient_lossy.webp
 data/reference-frame-scaling-test.ivf
+data/repro-minimal.mp3
 data/sfx-flac.mp4
 data/sfx-flac_frag.mp4
 data/sfx-opus-441.webm
@@ -494,6 +495,7 @@ data/spherical_frag.mp4
 data/stereo_48000.wav
 data/sync2-trimmed.mp4
 data/sync2.ogv
+data/synth-bad.mp3
 data/ten_byte_file
 data/test-25fps.av1.ivf
 data/test-25fps.av1.ivf.json

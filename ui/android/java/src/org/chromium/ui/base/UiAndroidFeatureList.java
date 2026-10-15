@@ -40,6 +40,9 @@ public class UiAndroidFeatureList {
     public static final MutableFlagWithSafeDefault sBottomSheetRemeasureFix =
             newMutableFlagWithSafeDefault(UiAndroidFeatures.BOTTOM_SHEET_REMEASURE_FIX, true);
 
+    public static final MutableFlagWithSafeDefault sPointerLockMouseScaling =
+            newMutableFlagWithSafeDefault(UiAndroidFeatures.POINTER_LOCK_MOUSE_SCALING, true);
+
     public static final CachedFlag sAndroidUseDisplayTopology =
             newCachedFlag(
                     UiAndroidFeatures.ANDROID_USE_DISPLAY_TOPOLOGY,
@@ -49,8 +52,8 @@ public class UiAndroidFeatureList {
     public static final CachedFlag sAndroidWindowOcclusion =
             newCachedFlag(
                     UiAndroidFeatures.ANDROID_WINDOW_OCCLUSION,
-                    /* defaultValue= */ true,
-                    /* defaultValueInTests= */ true);
+                    /* defaultValue= */ false,
+                    /* defaultValueInTests= */ false);
 
     // Whether to apply optimizations to the window when it is occluded. When false, occlusion
     // metrics will still be collected, but the actual behavior of the window remains unchanged.
@@ -123,6 +126,11 @@ public class UiAndroidFeatureList {
     public static final MutableFlagWithSafeDefault sSupportKeyboard =
             newMutableFlagWithSafeDefault(
                     UiAndroidFeatures.SUPPORT_KEYBOARD, /* defaultValue= */ true);
+
+    public static final MutableFlagWithSafeDefault sAndroidResourceMemoryOptimization =
+            newMutableFlagWithSafeDefault(
+                    UiAndroidFeatures.ANDROID_RESOURCE_MEMORY_OPTIMIZATION,
+                    /* defaultValue= */ false);
 
     public static final List<CachedFlag> sFlagsCachedUiAndroid =
             List.of(

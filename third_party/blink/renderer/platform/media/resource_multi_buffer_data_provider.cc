@@ -140,7 +140,8 @@ void ResourceMultiBufferDataProvider::Start() {
     active_loader_ = url_index->fetch_context()->CreateUrlLoader(options);
     active_loader_->LoadAsynchronously(request, this);
   } else {
-    url_data_->Fail();
+    task_runner_->PostTask(FROM_HERE,
+                           blink::BindOnce(&UrlData::Fail, url_data_));
   }
 }
 
@@ -374,7 +375,11 @@ void ResourceMultiBufferDataProvider::DidReceiveResponse(
     // Call callback to let upstream users know about the transfer.
     // This will merge the data from the two multibuffers and
     // cause clients to start using the new UrlData.
+    auto weak_this = weak_factory_.GetWeakPtr();
     old_url_data->RedirectTo(destination_url_data);
+    if (!weak_this) {
+      return;  // "this" may be deleted now.
+    }
   }
 
   if (do_fail) {

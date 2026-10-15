@@ -2482,10 +2482,12 @@ class DELnHandler(TypeHandler):
   def WriteGetDataSizeCode(self, func, arg, f):
     """Overrriden from TypeHandler."""
     code = """  uint32_t %(data_size)s;
-  if (!base::CheckMul(n, sizeof(GLuint)).AssignIfValid(&%(data_size)s)) {
+  if (!base::CheckMul(n, sizeof(%(element_type)s))
+           .AssignIfValid(&%(data_size)s)) {
     return error::kOutOfBounds;
   }
-""" % {'data_size': arg.GetReservedSizeId()}
+""" % {'data_size': arg.GetReservedSizeId(),
+       'element_type': arg.GetPointedType()}
     f.write(code)
 
   def WriteGLES2ImplementationUnitTest(self, func, f):
@@ -2629,11 +2631,13 @@ TEST_P(%(test_name)s, %(name)sInvalidArgs) {
 """
       f.write(code % args)
 
-  def WriteImmediateCmdComputeSize(self, _func, f):
+  def WriteImmediateCmdComputeSize(self, func, f):
     """Overrriden from TypeHandler."""
+    element_type = func.GetLastOriginalArg().GetPointedType()
     f.write("  static uint32_t ComputeDataSize(GLsizei _n) {\n")
     f.write(
-        "    return static_cast<uint32_t>(sizeof(GLuint) * _n);  // NOLINT\n")
+        "    return static_cast<uint32_t>(sizeof(%s) * _n);  // NOLINT\n" %
+        element_type)
     f.write("  }\n")
     f.write("\n")
     f.write("  static uint32_t ComputeSize(GLsizei _n) {\n")
@@ -2700,8 +2704,9 @@ TEST_P(%(test_name)s, %(name)sInvalidArgs) {
 
   def WriteImmediateFormatTest(self, func, f):
     """Overrriden from TypeHandler."""
+    element_type = func.GetLastOriginalArg().GetPointedType()
     f.write("TEST_F(%sFormatTest, %s) {\n" % (_prefix, func.name))
-    f.write("  static GLuint ids[] = { 12, 23, 34, };\n")
+    f.write("  static %s ids[] = { 12, 23, 34, };\n" % element_type)
     f.write("  cmds::%s& cmd = *GetBufferAs<cmds::%s>();\n" %
                (func.name, func.name))
     f.write("  void* next_cmd = cmd.Set(\n")
@@ -2710,12 +2715,15 @@ TEST_P(%(test_name)s, %(name)sInvalidArgs) {
                func.name)
     f.write("            cmd.header.command);\n")
     f.write("  EXPECT_EQ(sizeof(cmd) +\n")
-    f.write("            RoundSizeToMultipleOfEntries(cmd.n * 4u),\n")
+    f.write("            RoundSizeToMultipleOfEntries(cmd.n * sizeof(%s)),\n" %
+               element_type)
     f.write("            cmd.header.size * 4u);\n")
     f.write("  EXPECT_EQ(static_cast<GLsizei>(std::size(ids)), cmd.n);\n");
     f.write("  CheckBytesWrittenMatchesExpectedSize(\n")
     f.write("      next_cmd, sizeof(cmd) +\n")
-    f.write("      RoundSizeToMultipleOfEntries(std::size(ids) * 4u));\n")
+    f.write("      RoundSizeToMultipleOfEntries("
+            "std::size(ids) * sizeof(%s)));\n" %
+               element_type)
     f.write("  EXPECT_EQ(0, UNSAFE_TODO(memcmp(ids, ImmediateDataAddress(&cmd),\n")
     f.write("                      sizeof(ids))));\n")
     f.write("}\n")
@@ -4520,9 +4528,10 @@ TEST_P(%(test_name)s, %(name)sValidArgs) {
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   CommonDecoder::Bucket* bucket = decoder_->GetBucket(kBucketId);
   ASSERT_TRUE(bucket != nullptr);
-  EXPECT_EQ(strlen(kInfo) + 1, bucket->size());
-  EXPECT_EQ(0, UNSAFE_TODO(memcmp(bucket->GetData(0, bucket->size()), kInfo,
-                        bucket->size())));
+  const std::string_view info(kInfo);
+  ASSERT_EQ(info.size() + 1u, bucket->size());
+  EXPECT_EQ(base::as_string_view(bucket->GetDataAsByteSpan(0, info.size())),
+            info);
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
 """
@@ -5242,8 +5251,10 @@ class BucketPointerArgument(PointerArgument):
   def WriteGetCode(self, f):
     """Overridden from Argument."""
     f.write(
-      "  %s %s = bucket->GetData(0, %s);\n" %
-      (self.type, self.name, self.GetReservedSizeId()))
+      "  base::span<uint8_t> %s_span = bucket->GetDataAsByteSpan(0, %s);\n" %
+      (self.name, self.GetReservedSizeId()))
+    f.write(
+      "  %s %s = %s_span.data();\n" % (self.type, self.name, self.name))
 
   def WriteValidationCode(self, f, func):
     """Overridden from Argument."""

@@ -24,6 +24,19 @@ using CreateSearchUrlRequestInfo = contextual_search::
 using SearchUrlType =
     contextual_search::ContextualSearchContextController::SearchUrlType;
 
+// Returns true if the given invocation source originates from the Omnibox.
+bool IsOmniboxInvocationSource(
+    std::optional<lens::LensOverlayInvocationSource> invocation_source);
+
+// Returns true if the active tab should be forced to contextualize for the
+// given invocation source when no overlay token is present.
+// `session_handle` is the contextual search session the query will be issued
+// on, and may be null.
+bool ShouldFetchActiveTabForInvocationSource(
+    std::optional<lens::LensOverlayInvocationSource> invocation_source,
+    const contextual_search::ContextualSearchSessionHandle* session_handle =
+        nullptr);
+
 // A router for queries that Lens should perform.
 class LensQueryFlowRouter
     : public contextual_search::ContextualSearchContextController::

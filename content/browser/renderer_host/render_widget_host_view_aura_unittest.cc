@@ -109,7 +109,8 @@
 #include "ui/base/ui_base_features.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/compositor/compositor.h"
-#include "ui/compositor/layer.h"
+#include "ui/compositor/layer_solid_color.h"
+#include "ui/compositor/layer_surface.h"
 #include "ui/compositor/layer_tree_owner.h"
 #include "ui/compositor/test/draw_waiter_for_test.h"
 #include "ui/display/display.h"
@@ -3164,7 +3165,7 @@ TEST_F(RenderWidgetHostViewAuraTest, BackgroundColorMatchesCompositorFrame) {
   auto* parent_layer = view_->GetNativeView()->layer()->AsSurface();
 
   EXPECT_EQ(gfx::Rect(0, 0, 100, 100), parent_layer->bounds());
-  EXPECT_EQ(SkColors::kRed, parent_layer->GetBackgroundColor());
+  EXPECT_EQ(SkColors::kRed, parent_layer->GetFallbackBackgroundColor());
 }
 
 // Tests background setting priority.
@@ -7044,6 +7045,20 @@ class DestroyingMockInputMethod : public ui::MockInputMethod {
     }
   }
 
+  void SetVirtualKeyboardVisibilityIfEnabled(bool should_show) override {
+    ui::MockInputMethod::SetVirtualKeyboardVisibilityIfEnabled(should_show);
+    if (on_set_virtual_keyboard_visibility_if_enabled_) {
+      std::move(on_set_virtual_keyboard_visibility_if_enabled_).Run();
+    }
+  }
+
+  void CancelComposition(const ui::TextInputClient* client) override {
+    ui::MockInputMethod::CancelComposition(client);
+    if (on_cancel_composition_) {
+      std::move(on_cancel_composition_).Run();
+    }
+  }
+
   void set_on_caret_bounds_changed(base::OnceClosure closure) {
     on_caret_bounds_changed_ = std::move(closure);
   }
@@ -7052,9 +7067,20 @@ class DestroyingMockInputMethod : public ui::MockInputMethod {
     on_text_input_type_changed_ = std::move(closure);
   }
 
+  void set_on_set_virtual_keyboard_visibility_if_enabled(
+      base::OnceClosure closure) {
+    on_set_virtual_keyboard_visibility_if_enabled_ = std::move(closure);
+  }
+
+  void set_on_cancel_composition(base::OnceClosure closure) {
+    on_cancel_composition_ = std::move(closure);
+  }
+
  private:
   base::OnceClosure on_caret_bounds_changed_;
   base::OnceClosure on_text_input_type_changed_;
+  base::OnceClosure on_set_virtual_keyboard_visibility_if_enabled_;
+  base::OnceClosure on_cancel_composition_;
 };
 
 class RenderWidgetHostViewAuraReentrantDestructionIME
@@ -7140,6 +7166,91 @@ TEST_F(RenderWidgetHostViewAuraReentrantDestructionIME,
   // Dispatching this state notifies `view_` (a TextInputManager observer) via
   // OnUpdateTextInputStateCalled(), which calls into the input method above.
   GetTextInputManager(view_)->UpdateTextInputState(view_, state);
+}
+
+// RWHVA::OnUpdateTextInputStateCalled() calls
+// GetInputMethod()->SetVirtualKeyboardVisibilityIfEnabled(true) when the state
+// indicates that the virtual keyboard should be shown. If an observer or
+// virtual keyboard controller pumps messages and the view is destroyed
+// re-entrantly (e.g. on ChromeOS where KeyboardUIController runs the keyboard
+// show/hide cascade), on unwind the function must not dereference freed view
+// pointers or stale text input state.
+TEST_F(RenderWidgetHostViewAuraReentrantDestructionIME,
+       DestroyDuringSetVirtualKeyboardVisibilityIfEnabled) {
+  InitViewForFrame(nullptr);
+  ParentHostView(view_, parent_view_);
+  // `view_` shares the root window (and thus the InputMethod) with
+  // `parent_view_`.
+  ASSERT_EQ(static_cast<ui::InputMethod*>(input_method_.get()),
+            GetInputMethod());
+
+  // The virtual-keyboard branch requires the view to be the InputMethod's
+  // focused text input client.
+  input_method_->SetFocusedTextInputClient(view_.get());
+
+  // Arrange for the view to be synchronously destroyed inside
+  // SetVirtualKeyboardVisibilityIfEnabled.
+  input_method_->set_on_set_virtual_keyboard_visibility_if_enabled(
+      base::BindLambdaForTesting([&]() {
+        widget_host_ = nullptr;
+        view_.ExtractAsDangling()->Destroy();
+      }));
+
+  ui::mojom::TextInputState state;
+  state.type = ui::TEXT_INPUT_TYPE_TEXT;
+  state.mode = ui::TEXT_INPUT_MODE_TEXT;
+  state.show_ime_if_needed = true;
+  GetTextInputManager(view_.get())->UpdateTextInputState(view_.get(), state);
+}
+
+// When a mouse press occurs during active composition,
+// RenderWidgetHostViewEventHandler::OnMouseEvent calls
+// FinishImeCompositionSession(), which triggers
+// GetInputMethod()->CancelComposition(this). If the IME callout re-entrantly
+// destroys the view (e.g. by pumping a message loop on Windows TSF),
+// OnMouseEvent must not touch freed memory or cleared pointers.
+TEST_F(RenderWidgetHostViewAuraReentrantDestructionIME,
+       DestroyDuringFinishImeCompositionSessionOnMousePressed) {
+  InitViewForFrame(nullptr);
+  ParentHostView(view_, parent_view_);
+  ASSERT_EQ(static_cast<ui::InputMethod*>(input_method_.get()),
+            GetInputMethod());
+
+  input_method_->set_on_cancel_composition(base::BindLambdaForTesting([&]() {
+    widget_host_ = nullptr;
+    view_.ExtractAsDangling()->Destroy();
+  }));
+
+  FakeRenderWidgetHostViewAura* target_view = view_.get();
+  ui::MouseEvent mouse_press(ui::EventType::kMousePressed, gfx::Point(10, 10),
+                             gfx::Point(10, 10), ui::EventTimeForNow(),
+                             ui::EF_LEFT_MOUSE_BUTTON,
+                             ui::EF_LEFT_MOUSE_BUTTON);
+  target_view->OnMouseEvent(&mouse_press);
+}
+
+// When a gesture tap occurs during active composition,
+// RenderWidgetHostViewEventHandler::OnGestureEvent calls
+// FinishImeCompositionSession(), which triggers
+// GetInputMethod()->CancelComposition(this). If the IME callout re-entrantly
+// destroys the view, OnGestureEvent must not touch freed memory or cleared
+// pointers.
+TEST_F(RenderWidgetHostViewAuraReentrantDestructionIME,
+       DestroyDuringFinishImeCompositionSessionOnGestureTap) {
+  InitViewForFrame(nullptr);
+  ParentHostView(view_, parent_view_);
+  ASSERT_EQ(static_cast<ui::InputMethod*>(input_method_.get()),
+            GetInputMethod());
+
+  input_method_->set_on_cancel_composition(base::BindLambdaForTesting([&]() {
+    widget_host_ = nullptr;
+    view_.ExtractAsDangling()->Destroy();
+  }));
+
+  FakeRenderWidgetHostViewAura* target_view = view_.get();
+  ui::GestureEventDetails tap_details(ui::EventType::kGestureTap);
+  ui::GestureEvent gesture_tap(10, 10, 0, ui::EventTimeForNow(), tap_details);
+  target_view->OnGestureEvent(&gesture_tap);
 }
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS)

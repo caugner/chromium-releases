@@ -349,7 +349,6 @@ CSSTransitionData::TransitionBehavior CSSToStyleMap::MapAnimationBehavior(
 
 StyleTimeline CSSToStyleMap::MapAnimationTimeline(StyleResolverState& state,
                                                   const CSSValue& value) {
-  DCHECK(value.IsScopedValue());
   if (auto* ident = DynamicTo<CSSIdentifierValue>(value)) {
     DCHECK(ident->GetValueID() == CSSValueID::kAuto ||
            ident->GetValueID() == CSSValueID::kNone);
@@ -583,7 +582,7 @@ void CSSToStyleMap::MapNinePieceImage(StyleResolverState& state,
       if (length > 2) {
         image.SetOutset(MapNinePieceImageQuad(state, slash_list->Item(2)));
       }
-    } else if (current.IsPrimitiveValue() || current.IsValuePair()) {
+    } else if (current.IsPrimitiveValue() || current.IsBaseValuePair()) {
       // Set the appropriate rules for stretch/round/repeat of the slices.
       MapNinePieceImageRepeat(state, current, image);
     }

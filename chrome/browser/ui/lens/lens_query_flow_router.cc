@@ -71,6 +71,10 @@ omnibox::ChromeAimEntryPoint AimEntryPointFromInvocationSource(
   // TODO(crbug.com/483805922): Create individual AIM entry points for each
   // Lens invocation source.
   if (invocation_source ==
+      lens::LensOverlayInvocationSource::kOmniboxPopupButton) {
+    return omnibox::DESKTOP_CHROME_COBROWSE_OMNIBOX_POPUP_BUTTON;
+  }
+  if (invocation_source ==
       lens::LensOverlayInvocationSource::kOmniboxContextualSuggestion) {
     if (base::FeatureList::IsEnabled(omnibox::kWebUIOmniboxAskGAboutThisPage)) {
       return omnibox::DESKTOP_CHROME_COBROWSE_OMNIBOX_CONTEXTUAL_SUGGESTION;
@@ -83,6 +87,45 @@ omnibox::ChromeAimEntryPoint AimEntryPointFromInvocationSource(
 }  // namespace
 
 namespace lens {
+
+bool IsOmniboxInvocationSource(
+    std::optional<lens::LensOverlayInvocationSource> invocation_source) {
+  if (!invocation_source.has_value()) {
+    return false;
+  }
+  switch (invocation_source.value()) {
+    case lens::LensOverlayInvocationSource::kOmnibox:
+    case lens::LensOverlayInvocationSource::kOmniboxPageAction:
+    case lens::LensOverlayInvocationSource::kOmniboxContextualSuggestion:
+    case lens::LensOverlayInvocationSource::kOmniboxContextualQuery:
+    case lens::LensOverlayInvocationSource::kOmniboxPopupButton:
+      return true;
+    // Note: kOmniboxEverywhereComposebox is intentionally excluded for now
+    // to restrict non-blocking navigation strictly to standard Omnibox entry
+    // points.
+    default:
+      return false;
+  }
+}
+
+bool ShouldFetchActiveTabForInvocationSource(
+    std::optional<lens::LensOverlayInvocationSource> invocation_source,
+    const contextual_search::ContextualSearchSessionHandle* session_handle) {
+  // Omnibox contextual compose queries upload tab context before submission,
+  // so forcing a second fetch would be redundant. That only holds while the
+  // query is issued on the session that context was uploaded to. When the
+  // query is fulfilled on a session of its own, as happens when it is routed
+  // to the Lens side panel, the pre-uploaded context is unreachable and the
+  // active tab must still be contextualized.
+  if (invocation_source ==
+          lens::LensOverlayInvocationSource::kOmniboxContextualQuery &&
+      session_handle &&
+      (!session_handle->GetUploadedContextTokens().empty() ||
+       !session_handle->GetSubmittedContextTokens().empty())) {
+    return false;
+  }
+  return true;
+}
 
 LensQueryFlowRouter::LensQueryFlowRouter(
     LensSearchController* lens_search_controller)
@@ -717,10 +760,15 @@ void LensQueryFlowRouter::SendInteractionToContextualTasks(
   pending_search_url_request_ = std::move(request_info);
   if (query_contextualizer_) {
     // Force contextualization of the active tab only if the overlay token was
-    // never fetched. This happens for flows that do not call StartQueryFlow /
-    // open the overlay like omnibox contextual suggestions.
+    // never fetched and the invocation source requires tab contextualization.
+    // Certain entry points (such as the Omnibox compose flow) handle tab
+    // context prior to submission, but only when the query is issued on the
+    // session that context was uploaded to.
     std::vector<contextual_tasks::QueryContextualizer::TabId> force_tabs;
-    if (!overlay_tab_context_file_token_.has_value()) {
+    if (!overlay_tab_context_file_token_.has_value() &&
+        ShouldFetchActiveTabForInvocationSource(
+            pending_search_url_request_->invocation_source,
+            GetContextualSearchSessionHandle())) {
       force_tabs.push_back(tab_interface()->GetHandle().raw_value());
     }
     contextual_tasks::QueryContextualizer::ContextualizeParams params;
@@ -731,9 +779,20 @@ void LensQueryFlowRouter::SendInteractionToContextualTasks(
         base::BindRepeating(&LensQueryFlowRouter::ShowContextualTasksErrorPage,
                             weak_factory_.GetWeakPtr());
     params.on_processed_callback = base::DoNothing();
-    params.complete_callback =
-        base::BindOnce(&LensQueryFlowRouter::OnContextualizedComplete,
-                       weak_factory_.GetWeakPtr());
+    const bool is_omnibox = IsOmniboxInvocationSource(
+        pending_search_url_request_->invocation_source);
+    if (contextual_tasks::
+            GetIsContextualTasksNonBlockingUrlNavigationEnabled() &&
+        is_omnibox) {
+      params.on_uploads_started_callback =
+          base::BindOnce(&LensQueryFlowRouter::OnContextualizedComplete,
+                         weak_factory_.GetWeakPtr());
+      params.complete_callback = base::DoNothing();
+    } else {
+      params.complete_callback =
+          base::BindOnce(&LensQueryFlowRouter::OnContextualizedComplete,
+                         weak_factory_.GetWeakPtr());
+    }
     params.enable_smart_tab_selection = false;
     query_contextualizer_->Contextualize(std::move(params));
     return;
@@ -871,9 +930,20 @@ void LensQueryFlowRouter::UploadContextualInputData(
           &LensQueryFlowRouter::ShowContextualTasksErrorPage,
           weak_factory_.GetWeakPtr());
       params.on_processed_callback = base::DoNothing();
-      params.complete_callback =
-          base::BindOnce(&LensQueryFlowRouter::OnContextualizedComplete,
-                         weak_factory_.GetWeakPtr());
+      const bool is_omnibox = IsOmniboxInvocationSource(
+          pending_search_url_request_->invocation_source);
+      if (contextual_tasks::
+              GetIsContextualTasksNonBlockingUrlNavigationEnabled() &&
+          is_omnibox) {
+        params.on_uploads_started_callback =
+            base::BindOnce(&LensQueryFlowRouter::OnContextualizedComplete,
+                           weak_factory_.GetWeakPtr());
+        params.complete_callback = base::DoNothing();
+      } else {
+        params.complete_callback =
+            base::BindOnce(&LensQueryFlowRouter::OnContextualizedComplete,
+                           weak_factory_.GetWeakPtr());
+      }
       params.enable_smart_tab_selection = true;
       query_contextualizer_->Contextualize(std::move(params));
       return;

@@ -34,6 +34,7 @@
 #include "ui/views/controls/separator.h"
 #include "ui/views/controls/styled_label.h"
 #include "ui/views/layout/box_layout_view.h"
+#include "ui/views/layout/layout_provider.h"
 #include "ui/views/style/typography_provider.h"
 #include "ui/views/view_class_properties.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -213,6 +214,10 @@ void OnboardingDialogController::Show(base::OnceClosure complete_callback,
 
   widget_->MakeCloseSynchronous(base::BindOnce(
       &OnboardingDialogController::Close, base::Unretained(this)));
+
+  views::View* initially_focused_view = model_host->GetInitiallyFocusedView();
+  CHECK(initially_focused_view);
+  initially_focused_view->RequestFocus();
 }
 
 bool OnboardingDialogController::IsShowing() const {
@@ -248,6 +253,8 @@ std::unique_ptr<ui::DialogModel> OnboardingDialogController::CreateDialogModel(
                                IDS_DICTATION_ONBOARDING_BUTTON_CANCEL))
                            .SetId(kDictationOnboardingCancelButtonElementId)
                            .SetStyle(ui::ButtonStyle::kTonal))
+      .SetInitiallyFocusedField(kDictationOnboardingOkButtonElementId)
+      .SetIsAlertDialog()
       .Build();
 }
 

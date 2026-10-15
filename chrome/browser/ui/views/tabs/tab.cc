@@ -174,6 +174,7 @@ class TabStyleViewDelegateImpl : public TabStyleViewDelegate {
   bool IsSelected() const override { return tab_->IsSelected(); }
   bool IsHovering() const override { return tab_->IsHovering(); }
   bool IsClosing() const override { return tab_->closing(); }
+  bool IsDragging() const override { return tab_->dragging(); }
   std::optional<tab_groups::TabGroupId> GetGroup() const override {
     return tab_->group();
   }
@@ -1334,7 +1335,7 @@ void Tab::UpdateIconVisibility() {
 
   const bool declutter_eligible =
       features::IsTabStripDeclutterEnabled() &&
-      !(mouse_hovered_ || HasFocus() ||
+      !(IsHovering() || HasFocus() ||
         (close_button_ && close_button_->HasFocus()));
 
 #if BUILDFLAG(IS_CHROMEOS)

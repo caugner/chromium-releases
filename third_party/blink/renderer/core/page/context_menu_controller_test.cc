@@ -247,8 +247,8 @@ class ContextMenuControllerTest : public testing::Test {
   }
 
  protected:
-  test::TaskEnvironment task_environment_;
   base::test::ScopedFeatureList feature_list_;
+  test::TaskEnvironment task_environment_;
   TestWebFrameClientImpl web_frame_client_;
   frame_test_helpers::WebViewHelper web_view_helper_;
 };
@@ -2262,8 +2262,8 @@ class ContextMenuControllerRemoteParentFrameTest : public testing::Test {
   }
 
  protected:
-  test::TaskEnvironment task_environment_;
   base::test::ScopedFeatureList feature_list_;
+  test::TaskEnvironment task_environment_;
   TestWebFrameClientImpl child_web_frame_client_;
   frame_test_helpers::WebViewHelper web_view_helper_;
   Persistent<WebLocalFrameImpl> child_frame_;
@@ -2453,6 +2453,35 @@ TEST_F(ContextMenuControllerTest, RevealedPasswordField) {
   ContextMenuData context_menu_data = GetWebFrameClient().GetContextMenuData();
   EXPECT_EQ(context_menu_data.form_control_type,
             mojom::blink::FormControlType::kInputPassword);
+}
+
+TEST_F(ContextMenuControllerTest, ImageReplacement) {
+  RegisterMockedImageURLLoad("https://example.com/image.png");
+
+  frame_test_helpers::LoadHTMLString(
+      LocalMainFrame(), "<img id='target' src='https://example.com/image.png'>",
+      url_test_helpers::ToKURL("https://example.com/"));
+
+  GetDocument()->UpdateStyleAndLayout(DocumentUpdateReason::kTest);
+
+  Element* img_element = GetDocument()->getElementById(AtomicString("target"));
+  ASSERT_TRUE(IsA<HTMLImageElement>(img_element));
+  auto* image_element = To<HTMLImageElement>(img_element);
+
+  ASSERT_TRUE(ShowContextMenuForElement(
+      img_element, ui::mojom::blink::MenuSourceType::kMouse));
+  ContextMenuData context_menu_data = GetWebFrameClient().GetContextMenuData();
+  EXPECT_FALSE(context_menu_data.image_replacement_frame_token.has_value());
+
+  image_element->StartImageReplacement();
+  GetDocument()->UpdateStyleAndLayout(DocumentUpdateReason::kTest);
+
+  ASSERT_TRUE(ShowContextMenuForElement(
+      img_element, ui::mojom::blink::MenuSourceType::kMouse));
+  context_menu_data = GetWebFrameClient().GetContextMenuData();
+  EXPECT_TRUE(context_menu_data.image_replacement_frame_token.has_value());
+  EXPECT_EQ(context_menu_data.image_replacement_frame_token,
+            image_element->ReplacementFrameToken());
 }
 
 }  // namespace blink

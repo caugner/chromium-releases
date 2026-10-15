@@ -14,7 +14,7 @@
 #include "chrome/browser/ui/immersive/immersive_mode_controller.h"
 #include "chrome/browser/ui/tabs/vertical_tab_strip_state_controller.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_button.h"
-#include "components/prefs/pref_member.h"
+#include "components/prefs/pref_change_registrar.h"
 #include "ui/base/interaction/element_identifier.h"
 #include "ui/base/metadata/metadata_header_macros.h"
 
@@ -22,8 +22,9 @@ class BrowserWindowInterface;
 
 namespace ui {
 class ImageModel;
+class Layer;
 class LayerOwner;
-}
+}  // namespace ui
 
 class ContextualTasksButton
     : public ToolbarButton,
@@ -36,8 +37,11 @@ class ContextualTasksButton
       BrowserWindowInterface* browser_window_interface);
   ~ContextualTasksButton() override;
 
+  static constexpr int kShadowOutset = 12;
+
   float GetCornerRadiusFor(ToolbarButton::Edge edge) const override;
   bool ShouldApplyCircularBackgroundShadow() const;
+  ui::Layer* GetDropShadowLayerForTesting() const;
   // contextual_tasks::ContextualTasksPanelController::Observer:
   void OnSurfaceStateChanged(
       contextual_tasks::ContextualTasksPanelHost::SurfaceState state,
@@ -53,6 +57,9 @@ class ContextualTasksButton
   // views::ViewObserver:
   void OnViewLayerBoundsSet(views::View* observed_view) override;
 
+  // views::View:
+  void RemoveLayerFromRegions(ui::Layer* old_layer) override;
+
  protected:
   void UpdateColorsAndInsets() override;
 
@@ -62,13 +69,15 @@ class ContextualTasksButton
   void OnShouldUpdateVisibility(bool should_show);
   void OnEligibilityChange(bool is_eligible);
   void MaybeUpdateVisibility();
+  void MaybeShowFeaturePromo();
   void UpdateDropShadow(bool force_paint = false, float initial_opacity = 1.0f);
   void UpdateDropShadowLayerBounds();
   void AnimateShow();
   void ClearDropShadow();
   ui::ImageModel GetButtonImage();
+  bool IsSidePanelRightAligned() const;
 
-  BooleanPrefMember side_panel_alignment_;
+  PrefChangeRegistrar pref_change_registrar_;
   base::CallbackListSubscription should_update_visibility_subscription_;
   base::CallbackListSubscription eligibility_change_subscription_;
   base::CallbackListSubscription vertical_tabs_subscription_;

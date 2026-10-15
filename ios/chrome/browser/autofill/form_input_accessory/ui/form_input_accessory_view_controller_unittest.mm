@@ -13,6 +13,7 @@
 #import "base/time/time.h"
 #import "components/autofill/core/common/autofill_features.h"
 #import "components/autofill/ios/browser/form_suggestion.h"
+#import "ios/chrome/browser/autofill/form_input_accessory/public/autofill_suggestion_context_menu_handler.h"
 #import "ios/chrome/browser/autofill/form_input_accessory/ui/form_input_accessory_view_controller+testing.h"
 #import "ios/chrome/browser/autofill/form_input_accessory/ui/form_input_accessory_view_controller_delegate.h"
 #import "ios/chrome/browser/autofill/form_input_accessory/ui/form_suggestion_label.h"
@@ -268,6 +269,55 @@ TEST_F(FormInputAccessoryViewControllerTest,
   EXPECT_OCMOCK_VERIFY(mock_view_controller);
 }
 
+// Tests that when the only suggestion is kAutocompleteAtMemoryButton, manual
+// fill buttons are shown instead of the expand button.
+TEST_F(FormInputAccessoryViewControllerTest,
+       ShowAccessorySuggestions_OnlyAtMemorySuggestionShowsManualFillButtons) {
+  FormInputAccessoryView* accessory_view =
+      base::apple::ObjCCastStrict<FormInputAccessoryView>(
+          view_controller_.view);
+
+  FormSuggestion* atMemorySuggestion = SimpleFormSuggestion(
+      u"AtMemory", autofill::SuggestionType::kAutocompleteAtMemoryButton);
+
+  [view_controller_ showAccessorySuggestions:@[ atMemorySuggestion ]];
+
+  EXPECT_EQ(accessory_view.currentGroup,
+            FormInputAccessoryViewSubitemGroup::kManualFillButtons);
+}
+
+// Tests that special suggestions (AtMemory and Ambient) are preserved when
+// suggestions exceed the limit.
+TEST_F(FormInputAccessoryViewControllerTest,
+       ShowAccessorySuggestions_SpecialSuggestionsPreservedWhenTruncated) {
+  id mock_view_controller = OCMPartialMock(view_controller_);
+
+  NSMutableArray<FormSuggestion*>* suggestions =
+      [SimpleFormSuggestions(kKeyboardAccessorySuggestionsLimit + 5)
+          mutableCopy];
+
+  FormSuggestion* ambientSuggestion = SimpleFormSuggestion(
+      u"Ambient", autofill::SuggestionType::kFetchingAmbientData);
+  FormSuggestion* atMemorySuggestion = SimpleFormSuggestion(
+      u"AtMemory", autofill::SuggestionType::kAutocompleteAtMemoryButton);
+
+  [suggestions addObject:ambientSuggestion];
+  [suggestions addObject:atMemorySuggestion];
+
+  OCMExpect([mock_view_controller
+      updateFormSuggestionView:[OCMArg checkWithBlock:^BOOL(
+                                           NSArray* resultSuggestions) {
+        return resultSuggestions.count ==
+                   kKeyboardAccessorySuggestionsLimit + 2 &&
+               [resultSuggestions containsObject:ambientSuggestion] &&
+               [resultSuggestions containsObject:atMemorySuggestion];
+      }]]);
+
+  [mock_view_controller showAccessorySuggestions:suggestions];
+
+  EXPECT_OCMOCK_VERIFY(mock_view_controller);
+}
+
 // Tests that updateFormSuggestionView takes less than a threshold with the
 // amount of suggestions we intend to support. Updating suggestions should be
 // done within this threshold to maintain smooth UI animations.
@@ -431,4 +481,78 @@ TEST_F(FormInputAccessoryViewControllerTest,
   // their default description "Passkey".
   EXPECT_NSEQ(desc1, kPasskeyLabel);
   EXPECT_NSEQ(desc2, kPasskeyLabel);
+}
+
+// Tests that FormInputAccessoryViewController forwards
+// hasSourcesForSuggestion: to the context menu handler.
+TEST_F(FormInputAccessoryViewControllerTest, HasSourcesForSuggestion) {
+  id context_menu_handler =
+      OCMProtocolMock(@protocol(AutofillSuggestionContextMenuHandler));
+  view_controller_.contextMenuHandler = context_menu_handler;
+
+  FormSuggestion* suggestion = SimpleFormSuggestion(
+      u"Test Suggestion", autofill::SuggestionType::kFillAutofillAi);
+
+  OCMStub([context_menu_handler hasSourcesForSuggestion:suggestion])
+      .andReturn(YES);
+
+  EXPECT_TRUE([(id<FormSuggestionViewDelegate>)view_controller_
+      hasSourcesForSuggestion:suggestion]);
+}
+
+// Tests that FormInputAccessoryViewController forwards
+// openSourcesForSuggestion: to the context menu handler.
+TEST_F(FormInputAccessoryViewControllerTest, OpenSourcesForSuggestion) {
+  id context_menu_handler =
+      OCMProtocolMock(@protocol(AutofillSuggestionContextMenuHandler));
+  view_controller_.contextMenuHandler = context_menu_handler;
+
+  FormSuggestion* suggestion = SimpleFormSuggestion(
+      u"Test Suggestion", autofill::SuggestionType::kFillAutofillAi);
+
+  OCMExpect([context_menu_handler openSourcesForSuggestion:suggestion]);
+
+  [(id<FormSuggestionViewDelegate>)view_controller_
+      openSourcesForSuggestion:suggestion];
+
+  EXPECT_OCMOCK_VERIFY(context_menu_handler);
+}
+
+// Tests that FormInputAccessoryViewController forwards
+// canSuppressPersonalContextSuggestion: to the context menu handler.
+TEST_F(FormInputAccessoryViewControllerTest,
+       CanSuppressPersonalContextSuggestion) {
+  id context_menu_handler =
+      OCMProtocolMock(@protocol(AutofillSuggestionContextMenuHandler));
+  view_controller_.contextMenuHandler = context_menu_handler;
+
+  FormSuggestion* suggestion = SimpleFormSuggestion(
+      u"Test Suggestion", autofill::SuggestionType::kFillAutofillAi);
+
+  OCMStub(
+      [context_menu_handler canSuppressPersonalContextSuggestion:suggestion])
+      .andReturn(YES);
+
+  EXPECT_TRUE([(id<FormSuggestionViewDelegate>)view_controller_
+      canSuppressPersonalContextSuggestion:suggestion]);
+}
+
+// Tests that FormInputAccessoryViewController forwards
+// suppressPersonalContextSuggestion: to the context menu handler.
+TEST_F(FormInputAccessoryViewControllerTest,
+       SuppressPersonalContextSuggestion) {
+  id context_menu_handler =
+      OCMProtocolMock(@protocol(AutofillSuggestionContextMenuHandler));
+  view_controller_.contextMenuHandler = context_menu_handler;
+
+  FormSuggestion* suggestion = SimpleFormSuggestion(
+      u"Test Suggestion", autofill::SuggestionType::kFillAutofillAi);
+
+  OCMExpect(
+      [context_menu_handler suppressPersonalContextSuggestion:suggestion]);
+
+  [(id<FormSuggestionViewDelegate>)view_controller_
+      suppressPersonalContextSuggestion:suggestion];
+
+  EXPECT_OCMOCK_VERIFY(context_menu_handler);
 }

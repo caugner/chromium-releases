@@ -140,13 +140,25 @@ NSString* const kMIACircleAnimationDarkMode = @"mia_glowing_circle_animation";
 // Returns the background color for the NTP Header view. This is the color
 // that shows when the fakebox is scrolled up.
 UIColor* HeaderBackgroundColor(id<UITraitEnvironment> environment) {
+  NewTabPageColorPalette* colorPalette =
+      [environment.traitCollection objectForNewTabPageTrait];
+  if (colorPalette) {
+    return colorPalette.primaryColor;
+  }
+  if ([environment.traitCollection boolForNewTabPageImageBackgroundTrait]) {
+    return [UIColor colorNamed:kBackgroundColor];
+  }
   if (IsNewTabPageUICleanupEnabled()) {
-    NewTabPageColorPalette* colorPalette =
-        [environment.traitCollection objectForNewTabPageTrait];
-    if (!colorPalette &&
-        ![environment.traitCollection boolForNewTabPageImageBackgroundTrait]) {
-      return [UIColor colorNamed:kNewTabPageBackgroundColor];
+    return [UIColor colorNamed:kNewTabPageBackgroundColor];
+  } else if (ShouldApplyFakeboxBackgroundAndShadow()) {
+    // In light mode, matches the default light blue NTP background
+    // color so the white pinned omnibox does not blend into a white header.
+    // In dark mode, matches standard `kBackgroundColor`.
+    if (environment.traitCollection.userInterfaceStyle ==
+        UIUserInterfaceStyleDark) {
+      return [UIColor colorNamed:kBackgroundColor];
     }
+    return [UIColor colorNamed:@"ntp_background_color"];
   }
   if (IsSplitToolbarMode(environment)) {
     return [UIColor colorNamed:kBackgroundColor];
@@ -312,9 +324,9 @@ CGFloat Interpolate(CGFloat from, CGFloat to, CGFloat percent) {
                      (BOOL)useNewBadgeForCustomizationMenu {
   self = [super initWithFrame:CGRectZero];
   if (self) {
+    self.translatesAutoresizingMaskIntoConstraints = NO;
     _fakeLocationBar = [[FakeLocationBarView alloc] init];
-    if (!(IsNewTabPageUICleanupEnabled() ||
-          IsNewTabPageUICleanupFakeboxOnlyEnabled())) {
+    if (!ShouldApplyFakeboxBackgroundAndShadow()) {
       self.clipsToBounds = YES;
     }
     _useNewBadgeForLensButton = useNewBadgeForLensButton;
@@ -816,7 +828,8 @@ CGFloat Interpolate(CGFloat from, CGFloat to, CGFloat percent) {
   // Update the opacity of the header background color as the user scrolls so
   // that content does not appear beneath it. Since the NTP background might be
   // a gradient, the opacity must be 0 by default.
-  if (!IsChromeNextIaEnabled()) {
+  if (!IsChromeNextIaEnabled() ||
+      (!CanShowTabStrip(self) && ShouldApplyFakeboxBackgroundAndShadow())) {
     self.backgroundColor =
         [HeaderBackgroundColor(self) colorWithAlphaComponent:progress];
   }
@@ -1088,7 +1101,10 @@ CGFloat Interpolate(CGFloat from, CGFloat to, CGFloat percent) {
   configuration.background.cornerRadius = ntp_home::kNTPMenuButtonCornerRadius;
   customizationMenuButton.configuration = configuration;
 
-  UIColor* unthemedTintColor = [UIColor colorNamed:kBlue600Color];
+  UIColor* unthemedTintColor =
+      IsNewTabPageUICleanupEnabled()
+          ? [UIColor colorNamed:kNTPRedesignCustomizationMenuButtonIconColor]
+          : [UIColor colorNamed:kBlue600Color];
   customizationMenuButton.configurationUpdateHandler =
       CreateThemedButtonConfigurationUpdateHandler(
           unthemedTintColor, ^UIColor*(NewTabPageColorPalette* palette) {
@@ -1098,11 +1114,15 @@ CGFloat Interpolate(CGFloat from, CGFloat to, CGFloat percent) {
 
             return [UIColor colorWithDynamicProvider:^UIColor*(
                                 UITraitCollection* traits) {
-              return traits.userInterfaceStyle == UIUserInterfaceStyleDark
-                         ? [UIColor colorNamed:kTabGroupFaviconBackgroundColor]
-                         : [[UIColor colorNamed:kSolidWhiteColor]
-                               colorWithAlphaComponent:
-                                   ntp_home::kNTPMenuButtonLightUnthemedAlpha];
+              if (traits.userInterfaceStyle == UIUserInterfaceStyleDark) {
+                return IsNewTabPageUICleanupEnabled()
+                           ? [UIColor colorNamed:kSurfaceContainerLowColor]
+                           : [UIColor
+                                 colorNamed:kTabGroupFaviconBackgroundColor];
+              }
+              return [[UIColor colorNamed:kSolidWhiteColor]
+                  colorWithAlphaComponent:ntp_home::
+                                              kNTPMenuButtonLightUnthemedAlpha];
             }];
           });
 
@@ -1273,6 +1293,7 @@ CGFloat Interpolate(CGFloat from, CGFloat to, CGFloat percent) {
     [self addConstraintsForLogoView:_searchEngineLogoView
                         fakeOmnibox:self.fakeOmniboxContainer
                       andHeaderView:self];
+    [self updateFakeboxDisplay];
   }
 }
 
@@ -1412,6 +1433,11 @@ CGFloat Interpolate(CGFloat from, CGFloat to, CGFloat percent) {
 // palette, or defaults if neither are set.
 - (void)applyBackgroundTheme {
   // Fakebox coloring looks at image/color/default to determine correct colors.
+  if (!IsChromeNextIaEnabled() ||
+      (!CanShowTabStrip(self) && ShouldApplyFakeboxBackgroundAndShadow())) {
+    self.backgroundColor = [HeaderBackgroundColor(self)
+        colorWithAlphaComponent:_lastAnimationPercent];
+  }
   [self setFakeboxColorsWithProgress:_lastAnimationPercent];
 }
 
@@ -2145,10 +2171,10 @@ CGFloat Interpolate(CGFloat from, CGFloat to, CGFloat percent) {
   self.fakeOmniboxContainer.hidden =
       CanShowTabStrip(self) &&
       (self.searchEngineLogoState == SearchEngineLogoState::kNone);
-  [self layoutIfNeeded];
   self.headerViewHeightConstraint.constant =
       content_suggestions::HeightForLogoHeader(self.searchEngineLogoState,
                                                self.traitCollection);
+  [self layoutIfNeeded];
 }
 
 - (void)addConstraintsForLogoView:(UIView*)logoView

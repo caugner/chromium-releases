@@ -41,8 +41,8 @@
 #include "services/metrics/public/cpp/ukm_builders.h"
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #endif
 
 #if BUILDFLAG(IS_WIN)
@@ -669,14 +669,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTabPrerenderingTest, DISABLED_Prerendering) {
   ASSERT_TRUE(RunExtensionTest("tabs/prerendering")) << message_;
 }
 
-// TODO(crbug.com/497838105): Flaky.
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS)
-#define MAYBE_PrerenderingIntoANewTab DISABLED_PrerenderingIntoANewTab
-#else
-#define MAYBE_PrerenderingIntoANewTab PrerenderingIntoANewTab
-#endif
 IN_PROC_BROWSER_TEST_F(ExtensionApiTabPrerenderingTest,
-                       MAYBE_PrerenderingIntoANewTab) {
+                       PrerenderingIntoANewTab) {
   ASSERT_TRUE(RunExtensionTest("tabs/prerendering_into_new_tab")) << message_;
 }
 
@@ -1180,5 +1174,9 @@ class ExtensionApiTabSplitViewTest : public ExtensionApiTabTest {
 IN_PROC_BROWSER_TEST_F(ExtensionApiTabSplitViewTest, CreateSplitWithTabId) {
   ASSERT_TRUE(RunExtensionTest("tabs/split_view_create_split_with_id"))
       << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionApiTabSplitViewTest, CreateSplit) {
+  ASSERT_TRUE(RunExtensionTest("tabs/split_view_create_split")) << message_;
 }
 #endif  // !BUILDFLAG(IS_ANDROID)

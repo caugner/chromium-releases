@@ -16,15 +16,16 @@
 #include "chrome/browser/contextual_tasks/contextual_tasks_utils.h"
 #include "chrome/browser/contextual_tasks/entry_point_eligibility_manager.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_actions.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/immersive/immersive_mode_controller.h"
 #include "chrome/browser/ui/layout_constants.h"
+#include "chrome/browser/ui/side_panel/side_panel_entry_id.h"
 #include "chrome/browser/ui/tabs/vertical_tab_strip_state_controller.h"
 #include "chrome/browser/ui/ui_features.h"
+#include "chrome/browser/ui/user_education/browser_user_education_interface.h"
 #include "chrome/browser/ui/views/contextual_tasks/contextual_tasks_ephemeral_button_controller.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_button.h"
@@ -33,7 +34,7 @@
 #include "chrome/grit/branded_strings.h"
 #include "chrome/grit/theme_resources.h"
 #include "components/contextual_tasks/public/features.h"
-#include "components/prefs/pref_member.h"
+#include "components/feature_engagement/public/feature_constants.h"
 #include "components/prefs/pref_service.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/vector_icons/vector_icons.h"
@@ -46,6 +47,7 @@
 #include "ui/base/models/image_model.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/compositor/layer.h"
+#include "ui/compositor/layer_animator.h"
 #include "ui/compositor/layer_owner.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/geometry/skia_conversions.h"
@@ -197,6 +199,9 @@ ContextualTasksButton::ContextualTasksButton(
       browser_window_interface_(browser_window_interface) {
   SetPaintToLayer();
   layer()->SetFillsBoundsOpaquely(false);
+  // The contextual tasks button is ephemeral and starts hidden until an active
+  // task requires it.
+  SetVisible(false);
   SetProperty(views::kElementIdentifierKey,
               kContextualTasksEphemeralToolbarButtonElementId);
   const std::u16string button_tooltip =
@@ -212,9 +217,15 @@ ContextualTasksButton::ContextualTasksButton(
   GetViewAccessibility().SetName(button_tooltip);
   SetTooltipText(button_tooltip);
 
-  side_panel_alignment_.Init(
+  PrefService* const pref_service =
+      browser_window_interface->GetProfile()->GetPrefs();
+  pref_change_registrar_.Init(pref_service);
+  pref_change_registrar_.Add(
       prefs::kSidePanelHorizontalAlignment,
-      browser_window_interface->GetProfile()->GetPrefs(),
+      base::BindRepeating(&ContextualTasksButton::OnSidePanelAlignmentChanged,
+                          base::Unretained(this)));
+  pref_change_registrar_.Add(
+      prefs::kSidePanelAlignmentOverrides,
       base::BindRepeating(&ContextualTasksButton::OnSidePanelAlignmentChanged,
                           base::Unretained(this)));
 
@@ -272,9 +283,7 @@ ContextualTasksButton::ContextualTasksButton(
 }
 
 ContextualTasksButton::~ContextualTasksButton() {
-  if (drop_shadow_painted_layer_) {
-    views::View::RemoveLayerFromRegions(drop_shadow_painted_layer_->layer());
-  }
+  ClearDropShadow();
 }
 
 float ContextualTasksButton::GetCornerRadiusFor(
@@ -308,13 +317,28 @@ void ContextualTasksButton::OnImmersiveModeControllerDestroyed() {
 }
 
 void ContextualTasksButton::OnButtonPress() {
+  if (auto* const user_ed =
+          BrowserUserEducationInterface::From(browser_window_interface_);
+      user_ed && user_ed->IsFeaturePromoActive(
+                     feature_engagement::
+                         kIPHContextualTasksEphemeralToolbarButtonFeature)) {
+    user_ed->NotifyFeaturePromoFeatureUsed(
+        feature_engagement::kIPHContextualTasksEphemeralToolbarButtonFeature,
+        FeaturePromoFeatureUsedAction::kClosePromoIfPresent);
+  }
+
   auto* controller = contextual_tasks::ContextualTasksPanelController::From(
       browser_window_interface_);
   CHECK(controller);
-  // TODO(crbug.com/480218994): Clean up the ToggleContextualTasksSidePanel
-  // browser action, since the logic is now handled in this method.
-  bool is_pinned = contextual_tasks::GetEffectivePinState(
-      browser_window_interface_->GetProfile());
+
+  // When kEphemeralPinningVisibleWhenPermanentlyPinned is enabled, the
+  // ephemeral button remains visible alongside the pinned button, and presses
+  // on this button should always be logged as EphemeralToolbarButton actions.
+  bool is_pinned =
+      !base::FeatureList::IsEnabled(
+          contextual_tasks::kEphemeralPinningVisibleWhenPermanentlyPinned) &&
+      contextual_tasks::GetEffectivePinState(
+          browser_window_interface_->GetProfile());
 
   if (controller->IsPanelOpenForContextualTask()) {
     base::RecordAction(base::UserMetricsAction(
@@ -358,20 +382,16 @@ void ContextualTasksButton::OnButtonPress() {
   }
 }
 
-
 void ContextualTasksButton::OnSidePanelAlignmentChanged() {
   if (contextual_tasks::kShowEntryPoint.Get() ==
       contextual_tasks::EntryPointOption::kToolbarEphemeralBranded) {
     SetHorizontalAlignment(gfx::ALIGN_CENTER);
     UpdateColorsAndInsets();
+    MaybeUpdateVisibility();
   } else {
-    PrefService* const pref_service =
-        browser_window_interface_->GetProfile()->GetPrefs();
-
     const gfx::VectorIcon& contextual_tasks_icon =
-        pref_service->GetBoolean(prefs::kSidePanelHorizontalAlignment)
-            ? kDockToRightSparkCustomIcon
-            : kDockToLeftSparkCustomIcon;
+        IsSidePanelRightAligned() ? kDockToRightSparkCustomIcon
+                                  : kDockToLeftSparkCustomIcon;
     SetVectorIcon(contextual_tasks_icon);
   }
 }
@@ -420,6 +440,16 @@ void ContextualTasksButton::OnViewLayerBoundsSet(views::View* observed_view) {
   }
 }
 
+void ContextualTasksButton::RemoveLayerFromRegions(ui::Layer* old_layer) {
+  const std::vector<ui::Layer*> region_layers =
+      GetLayersInOrder(views::ViewLayer::kExclude);
+  if (std::ranges::contains(region_layers, old_layer)) {
+    views::View::RemoveLayerFromRegions(old_layer);
+  } else {
+    ToolbarButton::RemoveLayerFromRegions(old_layer);
+  }
+}
+
 void ContextualTasksButton::OnShouldUpdateVisibility(bool should_show) {
   MaybeUpdateVisibility();
 }
@@ -450,6 +480,30 @@ bool ContextualTasksButton::ShouldApplyCircularBackgroundShadow() const {
   return controller && controller->ShouldDisplayVerticalTabs();
 }
 
+ui::Layer* ContextualTasksButton::GetDropShadowLayerForTesting() const {
+  return drop_shadow_painted_layer_ ? drop_shadow_painted_layer_->layer()
+                                    : nullptr;
+}
+
+bool ContextualTasksButton::IsSidePanelRightAligned() const {
+  if (!browser_window_interface_ || !browser_window_interface_->GetProfile()) {
+    return false;
+  }
+  PrefService* const pref_service =
+      browser_window_interface_->GetProfile()->GetPrefs();
+  if (!pref_service) {
+    return false;
+  }
+  const base::DictValue& overrides =
+      pref_service->GetDict(prefs::kSidePanelAlignmentOverrides);
+  std::optional<bool> override_value = overrides.FindBool(
+      SidePanelEntryIdToString(SidePanelEntryId::kContextualTasks));
+  if (override_value.has_value()) {
+    return *override_value;
+  }
+  return pref_service->GetBoolean(prefs::kSidePanelHorizontalAlignment);
+}
+
 void ContextualTasksButton::MaybeUpdateVisibility() {
   if (contextual_tasks::kShowEntryPoint.Get() !=
       contextual_tasks::EntryPointOption::kToolbarEphemeralBranded) {
@@ -457,32 +511,46 @@ void ContextualTasksButton::MaybeUpdateVisibility() {
   }
 
   const bool is_button_eligible =
-      contextual_tasks::EntryPointEligibilityManager::From(
-          browser_window_interface_)
-          ->AreEntryPointsEligible();
+      contextual_tasks::IsContextualTasksUIEnabled();
 
   ContextualTasksEphemeralButtonController* const controller =
       ContextualTasksEphemeralButtonController::From(browser_window_interface_);
 
   const bool was_visible = GetVisible();
-  const bool will_be_visible = is_button_eligible && controller &&
+  const bool will_be_visible = !IsSidePanelRightAligned() &&
+                               is_button_eligible && controller &&
                                controller->ShouldShowEphemeralButton();
 
   if (!was_visible && will_be_visible) {
     if (layer()) {
       layer()->SetOpacity(0.0f);  // Silence the flash before it becomes visible
     }
+    ClearDropShadow();
     SetVisible(true);
     AnimateShow();
     base::RecordAction(base::UserMetricsAction(
         "ContextualTasks.EphemeralToolbarButton.Shown"));
     base::UmaHistogramBoolean("ContextualTasks.EphemeralToolbarButton.Shown",
                               true);
+    MaybeShowFeaturePromo();
   } else {
-    SetVisible(will_be_visible);
-    if (was_visible && !will_be_visible) {
+    if (!will_be_visible) {
+      if (layer() && layer()->GetAnimator()) {
+        layer()->GetAnimator()->AbortAllAnimations();
+      }
       ClearDropShadow();
+    } else if (!drop_shadow_painted_layer_) {
+      UpdateDropShadow();
     }
+    SetVisible(will_be_visible);
+  }
+}
+
+void ContextualTasksButton::MaybeShowFeaturePromo() {
+  if (auto* const user_ed =
+          BrowserUserEducationInterface::From(browser_window_interface_)) {
+    user_ed->MaybeShowFeaturePromo(
+        feature_engagement::kIPHContextualTasksEphemeralToolbarButtonFeature);
   }
 }
 
@@ -497,9 +565,17 @@ void ContextualTasksButton::UpdateDropShadow(bool force_paint,
     return;
   }
 
-  float target_opacity = drop_shadow_painted_layer_
-                             ? drop_shadow_painted_layer_->layer()->opacity()
-                             : initial_opacity;
+  if (drop_shadow_painted_layer_ &&
+      drop_shadow_painted_layer_->layer()->GetAnimator() &&
+      drop_shadow_painted_layer_->layer()->GetAnimator()->is_animating()) {
+    UpdateDropShadowLayerBounds();
+    return;
+  }
+
+  float target_opacity =
+      drop_shadow_painted_layer_
+          ? drop_shadow_painted_layer_->layer()->GetTargetOpacity()
+          : initial_opacity;
 
   ClearDropShadow();
 
@@ -536,11 +612,10 @@ void ContextualTasksButton::AnimateShow() {
     return;
   }
   views::AnimationBuilder builder;
-  auto& sequence =
-      builder.Once()
-          .SetDuration(
-              base::Milliseconds(features::kSidePanelFlyoverDurationMs.Get()))
-          .SetOpacity(layer(), 1.0f);
+  auto& sequence = builder.Once()
+                       .SetDuration(base::Milliseconds(
+                           features::kSidePanelFlyoverDurationMs.Get()))
+                       .SetOpacity(layer(), 1.0f);
 
   if (drop_shadow_painted_layer_) {
     drop_shadow_painted_layer_->layer()->SetOpacity(0.0f);
@@ -550,7 +625,12 @@ void ContextualTasksButton::AnimateShow() {
 
 void ContextualTasksButton::ClearDropShadow() {
   if (drop_shadow_painted_layer_) {
-    views::View::RemoveLayerFromRegions(drop_shadow_painted_layer_->layer());
+    if (auto* drop_shadow_layer = drop_shadow_painted_layer_->layer()) {
+      if (drop_shadow_layer->GetAnimator()) {
+        drop_shadow_layer->GetAnimator()->AbortAllAnimations();
+      }
+      views::View::RemoveLayerFromRegions(drop_shadow_layer);
+    }
     drop_shadow_painted_layer_.reset();
   }
 }

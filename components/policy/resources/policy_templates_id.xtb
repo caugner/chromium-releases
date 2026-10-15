@@ -196,6 +196,19 @@ Kebijakan ini memerlukan lisensi `<ph name="CHROME_ENTERPRISE_PREMIUM_NAME" />` 
 <translation id="1110426799149444997">Nonaktifkan penelusuran region <ph name="GOOGLE_LENS_PRODUCT_NAME" />.</translation>
 <translation id="1111324374369583989">Jangan tampilkan layar setelan ukuran tampilan selama login</translation>
 <translation id="1111824532252882775">Diaktifkan: Scroller dapat difokuskan secara default.</translation>
+<translation id="1113523086451291158">Kebijakan ini dapat digunakan untuk mengizinkan <ph name="CHROME_DEVTOOLS_NAME" /> di URL tertentu.
+
+Ketersediaan <ph name="CHROME_DEVTOOLS_NAME" /> dievaluasi di tingkat target. Pola URL dicocokkan dengan URL setiap target yang diperiksa (seperti frame utama halaman, subframe yang disematkan, ekstensi, atau aplikasi web). Perilaku yang dihasilkan bergantung pada apakah kebijakan <ph name="DEVELOPER_TOOLS_AVAILABILITY_BLOCKLIST_POLICY_NAME" /> juga disetel.
+
+Jika kebijakan ini disetel dan <ph name="DEVELOPER_TOOLS_AVAILABILITY_BLOCKLIST_POLICY_NAME" /> tidak disetel, URL target harus cocok dengan pola di daftar yang diizinkan ini agar <ph name="CHROME_DEVTOOLS_NAME" /> diizinkan untuk target tersebut. Jika URL target tidak cocok dengan daftar yang diizinkan ini, <ph name="CHROME_DEVTOOLS_NAME" /> akan diblokir untuk target tersebut (misalnya, subframe yang URL-nya tidak ada dalam daftar yang diizinkan tidak dapat diperiksa, tetapi halaman utama tetap dapat diperiksa jika URL-nya ada dalam daftar yang diizinkan). Untuk mengetahui informasi tentang format URL, lihat https://support.google.com/chrome/a?p=url_blocklist_filter_format.
+
+Jika kebijakan ini dan kebijakan <ph name="DEVELOPER_TOOLS_AVAILABILITY_BLOCKLIST_POLICY_NAME" /> disetel, daftar yang diizinkan ini akan diprioritaskan. Jika URL target cocok dengan pola di daftar yang diizinkan ini, URL akan tetap diizinkan, meskipun juga cocok dengan pola di daftar yang tidak diizinkan. Jika URL target cocok dengan pola di daftar yang tidak diizinkan (tetapi tidak cocok dengan pola di daftar yang diizinkan), URL target akan diblokir. Jika URL target tidak cocok dengan keduanya, kebijakan <ph name="DEVELOPER_TOOLS_AVAILABILITY_POLICY_NAME" /> akan digunakan sebagai gantinya.
+
+Jika kebijakan ini tidak disetel, ketersediaan <ph name="CHROME_DEVTOOLS_NAME" /> akan ditentukan oleh kebijakan <ph name="DEVELOPER_TOOLS_AVAILABILITY_BLOCKLIST_POLICY_NAME" /> dan <ph name="DEVELOPER_TOOLS_AVAILABILITY_POLICY_NAME" />.
+
+Karakter pengganti host menyeluruh (yaitu, "*" atau "[*]") tidak diperbolehkan; gunakan kebijakan <ph name="DEVELOPER_TOOLS_AVAILABILITY_POLICY_NAME" /> untuk mengaktifkan fitur ini secara global.
+
+Kebijakan ini terbatas untuk 1.000 entri.</translation>
 <translation id="1117535567637097036">Penanganan protokol yang disetel melalui kebijakan ini tidak digunakan ketika menangani maksud Android.</translation>
 <translation id="1118093128235245168">Izinkan situs meminta pengguna memberikan akses ke perangkat USB yang terhubung</translation>
 <translation id="111910763555783249">Setelan notifikasi</translation>
@@ -654,6 +667,15 @@ perubahan sandi, tetapi juga dapat diterapkan oleh kebijakan tertentu seperti
 <translation id="1438739959477268107">Setelan pembuatan kunci default</translation>
 <translation id="1440408958042020947">Mengizinkan pengguna yang telah mengizinkan Phone Hub mengakses foto dan video yang terakhir diambil di ponselnya</translation>
 <translation id="1443532790824582949">Mengaktifkan keyboard virtual sentuh</translation>
+<translation id="1445955287827003066">Kebijakan ini mengontrol apakah dan kapan perangkat ditargetkan untuk migrasi dari ChromeOS ke Next OS.
+
+Jika kebijakan ini disetel ke 0, kelayakan perangkat untuk migrasi ditentukan oleh setelan default Google, yang mungkin bergantung pada model perangkat, hardware, dan faktor lainnya.
+
+Jika kebijakan ini disetel ke 2147483647, perangkat akan ditandai sebagai tersedia dan ditargetkan untuk migrasi tanpa batas waktu tertentu.
+
+Jika kebijakan ini disetel ke nilai yang lebih besar dari 0 dan lebih kecil dari 2147483647, perangkat akan ditandai sebagai tersedia dan ditargetkan untuk migrasi. Nilai ini menunjukkan batas waktu penyelesaian yang direkomendasikan dalam jumlah detik sejak Epoch Unix (01-01-1970 00:00:00 UTC).
+
+Perhatikan bahwa setelan update perangkat lainnya, seperti penyematan versi (<ph name="DEVICE_TARGET_VERSION_PREFIX_POLICY" />), penonaktifan update (<ph name="DEVICE_AUTO_UPDATE_DISABLED_POLICY" />), atau setelan saluran rilis (<ph name="DEVICE_RELEASE_CHANNEL_POLICY" />), dapat menyebabkan perangkat tidak menerima update yang diperlukan untuk memulai migrasi, meskipun tanggal target sudah ditetapkan di sini. Kebijakan ini dimaksudkan agar selalu aktif; jika tidak disetel, sistem akan mengikuti default Google karena nilainya dapat memengaruhi cara kebijakan update perangkat diproses.</translation>
 <translation id="1447252610864877219">Izinkan aplikasi Gemini melakukan tindakan di halaman web.</translation>
 <translation id="1449083855104537880">Jika kebijakan ditetapkan ke Benar (True), opsi aksesibilitas akan ditampilkan di menu area notifikasi. Jika kebijakan ditetapkan ke Salah (False), opsi tidak akan muncul di menu.
 
@@ -1436,6 +1458,7 @@ Jika kebijakan disetel ke Nonaktif, <ph name="PRODUCT_NAME" /> akan menutup tab 
         |TIME_LIMITS| menerapkan batas penggunaan harian dan membuat aplikasi menjadi tidak tersedia setelah batas tersebut tercapai pada hari yang sudah ditentukan. Batas penggunaan ditentukan dalam |daily_limit_mins|. Batas penggunaan direset setiap hari pada waktu UTC yang dilewati dalam |reset_at|.
         Kebijakan ini hanya digunakan untuk anak-anak sebagai pengguna.
         Kebijakan ini bersifat komplementer terhadap 'UsageTimeLimit'. Pembatasan yang ditentukan dalam 'UsageTimeLimit' seperti waktu pemakaian perangkat dan waktu tidur akan diterapkan tanpa memandang 'PerAppTimeLimits'.</translation>
+<translation id="1911003883066847257">Mengontrol setelan peluncuran kembali dan mulai ulang browser.</translation>
 <translation id="19133869326547269">Kebijakan ini tidak lagi digunakan dan tidak berpengaruh karena fitur Klik untuk Menelepon telah dihapus dari Chrome.
 
 Deskripsi asli:
@@ -2226,6 +2249,7 @@ kebijakan BruschettaVMConfiguration, atau jika tidak, nama umum.</translation>
 
 Jika kebijakan ini disetel ke aktif atau tidak disetel, pengguna dapat memilih foto Google Foto sebagai wallpaper.</translation>
 <translation id="2393862222659066027">Buka daftar URL dan pulihkan sesi sebelumnya</translation>
+<translation id="239395129206831238">Tetapkan tanggal target untuk migrasi perangkat ke Next OS</translation>
 <translation id="239416486107542256">Setelan F11 menggunakan pintasan yang berisi tombol pengubah ctrl dan shift</translation>
 <translation id="2394429297128584919">Jangan izinkan halaman mengirim permintaan XHR sinkron selama penutupan halaman</translation>
 <translation id="2398817690049129302">Paksa Mode Aman <ph name="YOUTUBE_PRODUCT_NAME" /></translation>
@@ -2966,6 +2990,7 @@ command line.</translation>
 
 Jika kebijakan tidak disetel, <ph name="BLOCK_POPUPS_POLICY_NAME" /> akan berlaku, tetapi pengguna dapat mengubah setelan ini.</translation>
 <translation id="2796714419743648316">Daftar yang Diizinkan terkait Batas Waktu per Aplikasi</translation>
+<translation id="2799223571221894425">Luncurkan Ulang</translation>
 <translation id="2801065672151277034">Setelan pengelolaan sertifikat</translation>
 <translation id="2801155097555584385">Menetapkan nilai awal pengisian daya baterai kustom dalam persen</translation>
 <translation id="2801378553855965587">Nonaktifkan Integrasi <ph name="GOOGLE_CALENDAR_NAME" />.</translation>
@@ -3397,6 +3422,19 @@ Pengguna dapat menyetel gambar avatar dari salah satu opsi ini jika kebijakan in
 <translation id="3036271748813538143">Mengontrol apakah perilaku baru parser HTML untuk elemen &lt;select&gt; akan diaktifkan</translation>
 <translation id="3038323923255997294">Terus jalankan aplikasi latar belakang saat <ph name="PRODUCT_NAME" /> ditutup</translation>
 <translation id="3039862327847526651">Mengontrol penggunaan pengoptimal JavaScript</translation>
+<translation id="3040510138377915303">Mengontrol apakah agen <ph name="GEMINI_SPARK_PRODUCT_NAME" /> diizinkan untuk terhubung ke <ph name="PRODUCT_NAME" /> dan menggunakan fitur penjelajahan otomatis. <ph name="GEMINI_SPARK_PRODUCT_NAME" /> mungkin tidak tersedia untuk organisasi Anda.
+
+Nilai 0 = <ph name="GEMINI_SPARK_PRODUCT_NAME" /> diizinkan untuk terhubung ke dan menggunakan fitur penjelajahan otomatis <ph name="PRODUCT_NAME" />
+
+Nilai 1 = <ph name="GEMINI_SPARK_PRODUCT_NAME" /> tidak diizinkan untuk terhubung ke atau menggunakan fitur penjelajahan otomatis <ph name="PRODUCT_NAME" />
+
+Peringatan: Mengizinkan <ph name="GEMINI_SPARK_PRODUCT_NAME" /> terhubung ke <ph name="PRODUCT_NAME" /> dan menggunakan fitur penjelajahan otomatis akan mengizinkan agen <ph name="GEMINI_SPARK_PRODUCT_NAME" /> melakukan tindakan multilangkah otonom di klien <ph name="PRODUCT_NAME" /> menggunakan sesi penjelajahan aktif. Hal ini menimbulkan risiko keamanan yang signifikan, termasuk risiko kredensial, Ingress Jaringan Lokal, dan hilangnya sinyal kontekstual. Kontrol pengelolaan dan keamanan yang ada mungkin tidak dipatuhi.
+
+Administrator disarankan untuk mengevaluasi dengan cermat model ancaman jaringan, kepatuhan, dan panduan privasi organisasi sebelum mengaktifkan fitur ini.
+
+Kebijakan ini tidak akan berpengaruh jika kebijakan aplikasi <ph name="GOOGLE_GEMINI_PRODUCT_NAME" /> atau penjelajahan otomatis <ph name="PRODUCT_NAME" /> dinonaktifkan. Misalnya, aplikasi <ph name="GOOGLE_GEMINI_PRODUCT_NAME" /> dapat dinonaktifkan oleh kebijakan <ph name="GEMINI_SETTINGS_POLICY_NAME" />. Untuk mengetahui informasi selengkapnya tentang <ph name="GOOGLE_GEMINI_PRODUCT_NAME" /> di <ph name="PRODUCT_NAME" />, lihat https://support.google.com/chrome/a?p=gemini_in_chrome.
+
+Penjelajahan otomatis <ph name="PRODUCT_NAME" /> dan <ph name="GEMINI_SPARK_PRODUCT_NAME" /> hanya tersedia di negara atau bahasa tertentu. Jika kebijakan ini disetel ke nilai 0 - Aktif, tidak ada jaminan bahwa fitur akan diaktifkan; fitur tetap bergantung pada ketersediaan. Untuk mengetahui info selengkapnya tentang peluncuran, baca Catatan Rilis Enterprise: https://chromeenterprise.google/resources/release-notes/.</translation>
 <translation id="3041887182529293512">Jika kebijakan ditetapkan ke Benar (True) atau tidak ditetapkan, saran konten yang dihasilkan otomatis akan ditampilkan di halaman Tab Baru, berdasarkan histori penjelajahan, minat, atau lokasi pengguna.
 
       Jika kebijakan ditetapkan ke Salah (False), saran konten yang dihasilkan otomatis tidak akan muncul di halaman Tab Baru.</translation>
@@ -3550,19 +3588,6 @@ Jika kebijakan ini disetel ke nonaktif atau tidak disetel, menu aksesibilitas me
 <translation id="3150351525324499342">Jangan tampilkan ikon <ph name="PRODUCT_NAME" /> di toolbar secara default, tetapi izinkan pengguna memilih</translation>
 <translation id="3152135410085709340">Mengizinkan akses file lokal ke URL file:// di situs ini di Penampil PDF</translation>
 <translation id="3152425128389603870">Membuat Desktop Terpadu tersedia dan aktif secara default</translation>
-<translation id="3157506194753687842">Mengontrol apakah agen <ph name="GEMINI_SPARK_PRODUCT_NAME" /> diizinkan untuk terhubung ke <ph name="PRODUCT_NAME" /> dan menggunakan fitur penjelajahan otomatis.
-
-Nilai 0 = <ph name="GEMINI_SPARK_PRODUCT_NAME" /> diizinkan untuk terhubung ke dan menggunakan fitur penjelajahan otomatis <ph name="PRODUCT_NAME" />
-
-Nilai 1 = <ph name="GEMINI_SPARK_PRODUCT_NAME" /> tidak diizinkan untuk terhubung ke atau menggunakan fitur penjelajahan otomatis <ph name="PRODUCT_NAME" />
-
-Peringatan: Mengizinkan <ph name="GEMINI_SPARK_PRODUCT_NAME" /> terhubung ke <ph name="PRODUCT_NAME" /> dan menggunakan fitur penjelajahan otomatis akan mengizinkan agen <ph name="GEMINI_SPARK_PRODUCT_NAME" /> melakukan tindakan multilangkah otonom di klien <ph name="PRODUCT_NAME" /> menggunakan sesi penjelajahan aktif. Hal ini menimbulkan risiko keamanan yang signifikan, termasuk risiko kredensial, Ingress Jaringan Lokal, dan hilangnya sinyal kontekstual. Kontrol pengelolaan dan keamanan yang ada mungkin tidak dipatuhi.
-
-Administrator disarankan untuk mengevaluasi dengan cermat model ancaman jaringan, kepatuhan, dan panduan privasi organisasi sebelum mengaktifkan fitur ini.
-
-Kebijakan ini tidak akan berpengaruh jika kebijakan aplikasi <ph name="GOOGLE_GEMINI_PRODUCT_NAME" /> atau penjelajahan otomatis <ph name="PRODUCT_NAME" /> dinonaktifkan. Misalnya, aplikasi <ph name="GOOGLE_GEMINI_PRODUCT_NAME" /> dapat dinonaktifkan oleh kebijakan <ph name="GEMINI_SETTINGS_POLICY_NAME" />. Untuk mengetahui informasi selengkapnya tentang <ph name="GOOGLE_GEMINI_PRODUCT_NAME" /> di <ph name="PRODUCT_NAME" />, lihat https://support.google.com/chrome/a?p=gemini_in_chrome.
-
-Penjelajahan otomatis <ph name="PRODUCT_NAME" /> dan <ph name="GEMINI_SPARK_PRODUCT_NAME" /> hanya tersedia di negara atau bahasa tertentu. Jika kebijakan ini disetel ke nilai 0 - Aktif, tidak ada jaminan bahwa fitur akan diaktifkan; fitur tetap bergantung pada ketersediaan. Untuk mengetahui info selengkapnya tentang peluncuran, baca Catatan Rilis Enterprise: https://chromeenterprise.google/resources/release-notes/.</translation>
 <translation id="3159375329008977062">Pengguna diaktifkan untuk mengekspor/mengimpor container Crostini melalui UI</translation>
 <translation id="3163167792874598128">Jika kebijakan disetel ke Aktif atau tidak disetel, pop-up Rating App Store dapat ditampilkan kepada pengguna, paling banyak setahun sekali.
 Jika kebijakan disetel ke Nonaktif, pop-up Rating App Store tidak akan ditampilkan kepada pengguna.</translation>
@@ -4972,17 +4997,6 @@ Untuk informasi selengkapnya tentang pola <ph name="URL_LABEL" /> yang valid, li
 <translation id="4090088362777472639">Hash SHA-256 gambar playbook Ansible.</translation>
 <translation id="4091040199847925434">Nonaktifkan pelaporan informasi sistem dan konten halaman yang digunakan untuk membantu meningkatkan Safe Browsing</translation>
 <translation id="4093058072421210667">Jangan izinkan Gambar Inline.</translation>
-<translation id="4096503137212127216">Kebijakan ini dapat digunakan untuk memblokir <ph name="CHROME_DEVTOOLS_NAME" /> di URL tertentu. Untuk mengetahui informasi tentang format URL, lihat https://support.google.com/chrome/a?p=url_blocklist_filter_format.
-
-Pola URL dicocokkan dengan URL setiap frame di halaman yang diperiksa. Perilaku yang dihasilkan bergantung pada apakah kebijakan <ph name="DEVELOPER_TOOLS_AVAILABILITY_ALLOWLIST_POLICY_NAME" /> juga disetel.
-
-Jika kebijakan ini disetel dan <ph name="DEVELOPER_TOOLS_AVAILABILITY_ALLOWLIST_POLICY_NAME" /> tidak disetel, URL frame apa pun yang cocok dengan pola di daftar yang tidak diizinkan ini akan memblokir <ph name="CHROME_DEVTOOLS_NAME" /> untuk seluruh halaman. Jika URL frame tidak cocok dengan pola apa pun, ketersediaan akan ditentukan oleh kebijakan <ph name="DEVELOPER_TOOLS_AVAILABILITY_POLICY_NAME" />.
-
-Jika kebijakan ini dan kebijakan <ph name="DEVELOPER_TOOLS_AVAILABILITY_ALLOWLIST_POLICY_NAME" /> disetel, daftar yang diizinkan ini akan diprioritaskan. Jika URL frame cocok dengan pola di daftar yang diizinkan, URL akan diizinkan, meskipun juga cocok dengan pola di daftar yang tidak diizinkan ini. Jika cocok dengan pola di daftar yang tidak diizinkan ini (tetapi tidak cocok dengan pola di daftar yang diizinkan), URL akan diblokir. Jika URL tidak cocok dengan keduanya, kebijakan <ph name="DEVELOPER_TOOLS_AVAILABILITY_POLICY_NAME" /> akan digunakan sebagai gantinya.
-
-Jika kebijakan ini tidak disetel, ketersediaan <ph name="CHROME_DEVTOOLS_NAME" /> akan ditentukan oleh kebijakan <ph name="DEVELOPER_TOOLS_AVAILABILITY_ALLOWLIST_POLICY_NAME" /> dan <ph name="DEVELOPER_TOOLS_AVAILABILITY_POLICY_NAME" />.
-
-Kebijakan ini terbatas untuk 1.000 entri.</translation>
 <translation id="4098920079809952737">Izinkan pencetakan dengan dan tanpa grafis latar belakang</translation>
 <translation id="410061592404122032">Tanyakan setiap kali situs ingin mendapatkan izin Pengelolaan Jendela</translation>
 <translation id="410068710490553233">Mengizinkan Login ke Akun Google Tambahan</translation>
@@ -5343,7 +5357,6 @@ Lapisan ini adalah lapisan kontrol tambahan, yang berada di bawah lapisan izin u
 Pengguna tidak dapat mengganti pilihan admin. Jika kebijakan ini tidak disetel, pengguna akan mendapatkan pengalaman konsumen, yaitu mereka dapat dengan bebas mengubah setelan lokasi sistem, dengan setelan default-nya adalah <ph name="GLS_ALLOWED" />.
 
 Catatan: Kebijakan ini menghentikan penggunaan kebijakan <ph name="ARC_GLS_POLICY_NAME" />. Selain itu, jika kebijakan ini disetel, <ph name="DEFAULT_GEO_SETTING_POLICY_NAME" /> tidak akan lagi memengaruhi preferensi lokasi <ph name="ANDROID_NAME" /> di <ph name="PRODUCT_OS_NAME" />.</translation>
-<translation id="4340826578810728651">Mengizinkan <ph name="GEMINI_SPARK_PRODUCT_NAME" /> terhubung ke dan menggunakan penjelajahan otomatis <ph name="PRODUCT_NAME" /></translation>
 <translation id="4341199399451274159">Jika <ph name="DEFAULT_SEARCH_PROVIDER_ENABLED_POLICY_NAME" /> aktif, menyetel <ph name="DEFAULT_SEARCH_PROVIDER_ENCODINGS_POLICY_NAME" /> akan menentukan encoding karakter yang didukung oleh penyedia penelusuran. Encoding adalah nama halaman kode seperti UTF-8, GB2312, dan ISO-8859-1. Encoding dicoba sesuai urutan yang diberikan.
 
       Jika <ph name="DEFAULT_SEARCH_PROVIDER_ENCODINGS_POLICY_NAME" /> tidak disetel, UTF-8 akan digunakan.</translation>
@@ -7110,6 +7123,7 @@ Akun terkelola tidak memenuhi syarat untuk bergabung atau membuat grup keluarga,
 <translation id="533287753294126753">Izinkan Tab Perbandingan Produk dan tingkatkan kualitas model AI.</translation>
 <translation id="5334404204520035180">Mengontrol penggunaan WebPrinting API</translation>
 <translation id="5334501839642146593">Jangan pernah kirim metrik ke Google</translation>
+<translation id="5335403007354311099">Aktifkan fitur aksesibilitas perender</translation>
 <translation id="5335910979215357815">Aktifkan Save and Share API untuk kontrol <ph name="PRODUCT_OS_NAME" /> pihak ketiga.</translation>
 <translation id="5337869685871558036">Mengizinkan pengambilan data SpeculationRules ke URL yang dikontrol ServiceWorker</translation>
 <translation id="5339096331970464266">Mengaktifkan keyboard virtual aksesibilitas</translation>
@@ -8225,6 +8239,17 @@ mengonfigurasi pintasan.</translation>
 Kebijakan ini tidak digunakan lagi mulai M124.</translation>
 <translation id="6022948604095165524">Tindakan saat permulaan</translation>
 <translation id="602318745029752898">Mengizinkan suara text-to-speech enhanced network di fitur Klik untuk Diucapkan</translation>
+<translation id="6023434563562800942">Kebijakan ini dapat digunakan untuk memblokir <ph name="CHROME_DEVTOOLS_NAME" /> di URL tertentu. Untuk mengetahui informasi tentang format URL, lihat https://support.google.com/chrome/a?p=url_blocklist_filter_format.
+
+Ketersediaan <ph name="CHROME_DEVTOOLS_NAME" /> dievaluasi di tingkat target. Pola URL dicocokkan dengan URL setiap target yang diperiksa (seperti frame utama halaman, subframe yang disematkan, ekstensi, atau aplikasi web). Perilaku yang dihasilkan bergantung pada apakah kebijakan <ph name="DEVELOPER_TOOLS_AVAILABILITY_ALLOWLIST_POLICY_NAME" /> juga disetel.
+
+Jika kebijakan ini disetel dan <ph name="DEVELOPER_TOOLS_AVAILABILITY_ALLOWLIST_POLICY_NAME" /> tidak disetel, URL target yang cocok dengan pola di daftar yang tidak diizinkan ini akan memblokir <ph name="CHROME_DEVTOOLS_NAME" /> untuk target tersebut (misalnya, subframe yang URL-nya cocok dengan daftar yang tidak diizinkan ini tidak dapat diperiksa, tetapi halaman utama tetap dapat diperiksa jika URL-nya tidak ada dalam daftar yang tidak diizinkan). Jika URL target tidak cocok dengan pola apa pun, ketersediaan akan ditentukan oleh kebijakan <ph name="DEVELOPER_TOOLS_AVAILABILITY_POLICY_NAME" />.
+
+Jika kebijakan ini dan kebijakan <ph name="DEVELOPER_TOOLS_AVAILABILITY_ALLOWLIST_POLICY_NAME" /> disetel, daftar yang diizinkan akan diprioritaskan. Jika URL target cocok dengan pola di daftar yang diizinkan, URL akan diizinkan, meskipun juga cocok dengan pola di daftar yang tidak diizinkan ini. Jika URL target cocok dengan pola di daftar yang tidak diizinkan ini (tetapi tidak cocok dengan pola di daftar yang diizinkan), URL akan diblokir. Jika URL target tidak cocok dengan keduanya, kebijakan <ph name="DEVELOPER_TOOLS_AVAILABILITY_POLICY_NAME" /> akan digunakan sebagai gantinya.
+
+Jika kebijakan ini tidak disetel, ketersediaan <ph name="CHROME_DEVTOOLS_NAME" /> akan ditentukan oleh kebijakan <ph name="DEVELOPER_TOOLS_AVAILABILITY_ALLOWLIST_POLICY_NAME" /> dan <ph name="DEVELOPER_TOOLS_AVAILABILITY_POLICY_NAME" />.
+
+Kebijakan ini terbatas untuk 1.000 entri.</translation>
 <translation id="6026722971789064331">Mengontrol penggunaan File System API untuk menulis</translation>
 <translation id="602728333950205286">URL sekejap penyedia penelusuran default</translation>
 <translation id="603410445099326293">Parameter untuk URL yang disarankan yang menggunakan POST</translation>
@@ -8333,6 +8358,7 @@ Di <ph name="MAC_OS_NAME" />, kebijakan ini hanya tersedia di instance yang dike
       Jika kebijakan ini tidak dikonfigurasi, <ph name="PRODUCT_NAME" /> akan menggunakan versi maksimum default.
 
       Jika kebijakan dikonfigurasi, kebijakan dapat disetel ke salah satu nilai berikut: "tls1.2" atau "tls1.3". Jika disetel, <ph name="PRODUCT_NAME" /> tidak akan menggunakan versi SSL/TLS yang lebih besar dari versi yang ditentukan. Nilai yang tidak dikenali akan diabaikan.</translation>
+<translation id="6120465104321378808">Mengizinkan <ph name="GEMINI_SPARK_PRODUCT_NAME" /> terhubung ke <ph name="PRODUCT_NAME" /> dan menggunakan fitur penjelajahan otomatis melalui Gemini di Chrome</translation>
 <translation id="6120909112796019291">Izinkan Pengeditan Foto AI Generatif dan tingkatkan kualitas model AI.</translation>
 <translation id="6123052603197028610">Jangan izinkan kueri ke server Google untuk mengambil stempel waktu</translation>
 <translation id="6128539430475678271">Memblokir Controlled Frame API di situs ini</translation>
@@ -9535,6 +9561,19 @@ mengonfigurasi pintasan.</translation>
 <translation id="6757613329154374267">Pencadangan dan pemulihan diaktifkan</translation>
 <translation id="6758659208493449452">Kebijakan ini mengontrol apakah pengguna yang terdaftar dalam Program Perlindungan Lanjutan menerima perlindungan tambahan. Beberapa fitur ini dapat mencakup pembagian data kepada Google (misalnya, pengguna Perlindungan Lanjutan akan dapat mengirimkan hasil downloadnya ke Google untuk pemindaian malware). Jika ditetapkan ke Benar atau tidak ditetapkan, pengguna terdaftar akan menerima perlindungan tambahan. Jika ditetapkan ke Salah, pengguna Perlindungan Lanjutan hanya akan menerima fitur konsumen standar.</translation>
 <translation id="6763023079133439068">Izinkan sertifikat yang tidak dilengkapi ekstensi subjectAlternativeName saat dikeluarkan oleh trust anchor lokal</translation>
+<translation id="6765476642902721793">Jika kebijakan ini disetel ke Aktif, permintaan <ph name="LOCAL_NETWORK_ACCESS" />
+hanya akan menampilkan peringatan di <ph name="CHROME_DEVTOOLS_NAME" /> karena pemeriksaan <ph name="LOCAL_NETWORK_ACCESS" /> gagal.
+
+Jika kebijakan ini disetel ke Nonaktif atau tidak disetel, permintaan <ph name="LOCAL_NETWORK_ACCESS" /> akan menggunakan
+penanganan default untuk permintaan ini.
+
+Lihat https://wicg.github.io/local-network-access/ untuk mengetahui batasan <ph name="LOCAL_NETWORK_ACCESS" />.
+
+Kebijakan perusahaan ini bersifat sementara, dan akan dihapus setelah M163.
+
+Dalam jangka panjang, kebijakan <ph name="LOCAL_NETWORK_ACCESS_ALLOWED_FOR_URLS_POLICY_NAME" />
+dapat digunakan untuk memasukkan pola URL ke daftar yang diizinkan yang harus otomatis diberi
+izin <ph name="LOCAL_NETWORK_ACCESS" />.</translation>
 <translation id="6766216162565713893">Izinkan situs meminta pengguna memberikan akses ke perangkat Bluetooth di sekitar</translation>
 <translation id="6770454900105963262">Melaporkan informasi tentang sesi kios aktif</translation>
 <translation id="6770703270685871935">Penghapusan total data lokal secara otomatis</translation>
@@ -10055,6 +10094,7 @@ Perhatikan bahwa kebijakan ini hanya diterapkan untuk browser terkelola, sehingg
 Di <ph name="MS_WIN_NAME" />, kebijakan ini hanya tersedia pada instance yang dihubungkan ke domain <ph name="MS_AD_NAME" />, dihubungkan ke <ph name="MS_AAD_NAME" />, atau didaftarkan di <ph name="CHROME_ENTERPRISE_CORE_NAME" />.
 
 Di <ph name="MAC_OS_NAME" />, kebijakan ini hanya tersedia pada instance yang dikelola melalui MDM, dihubungkan ke domain melalui MCX, atau didaftarkan di <ph name="CHROME_ENTERPRISE_CORE_NAME" />.</translation>
+<translation id="7054840304131108563">Nonaktifkan fitur aksesibilitas perender</translation>
 <translation id="7055022222176591388">Larang <ph name="FLASH_PLUGIN_NAME" /> yang sudah tidak berlaku</translation>
 <translation id="7056040036973126753">Data Keandalan Domain dapat dikirim ke Google bergantung pada kebijakan Metrik Pengguna Chrome (UMA)</translation>
 <translation id="7062803946218028349">Izinkan pengaktifan Phone Hub</translation>
@@ -10973,21 +11013,6 @@ Jika kebijakan ini dikosongkan, tidak akan ada pengecualian untuk <ph name="FLOA
 <translation id="759957074386651883">Setelan Safe Browsing</translation>
 <translation id="7602621823177962064">Nonaktifkan pelaporan info memori perangkat</translation>
 <translation id="7604169113182304895">Aplikasi Android dapat memilih untuk menerima daftar ini secara sukarela. Anda tidak dapat memaksa aplikasi untuk menerimanya.</translation>
-<translation id="7604302274842086162">Kebijakan ini dapat digunakan untuk mengizinkan <ph name="CHROME_DEVTOOLS_NAME" /> di URL tertentu.
-
-Pola URL dicocokkan dengan URL setiap frame di halaman yang diperiksa. Perilaku yang dihasilkan bergantung pada apakah kebijakan <ph name="DEVELOPER_TOOLS_AVAILABILITY_BLOCKLIST_POLICY_NAME" /> juga disetel.
-
-Jika kebijakan ini disetel dan <ph name="DEVELOPER_TOOLS_AVAILABILITY_BLOCKLIST_POLICY_NAME" /> tidak disetel, URL setiap frame harus cocok dengan pola di daftar yang diizinkan ini agar <ph name="CHROME_DEVTOOLS_NAME" /> diizinkan. Jika URL frame tidak cocok, DevTools akan diblokir untuk seluruh halaman. Untuk mengetahui informasi tentang format URL, lihat https://support.google.com/chrome/a?p=url_blocklist_filter_format.
-
-Jika kebijakan ini dan kebijakan <ph name="DEVELOPER_TOOLS_AVAILABILITY_BLOCKLIST_POLICY_NAME" /> disetel, daftar yang diizinkan ini akan diprioritaskan. Jika URL frame cocok dengan pola di daftar yang diizinkan ini, URL akan tetap diizinkan, meskipun juga cocok dengan pola di daftar yang tidak diizinkan. Jika cocok dengan pola di daftar yang tidak diizinkan (tetapi tidak cocok dengan pola di daftar yang diizinkan), URL akan diblokir. Jika URL tidak cocok dengan keduanya, kebijakan <ph name="DEVELOPER_TOOLS_AVAILABILITY_POLICY_NAME" /> akan digunakan sebagai gantinya.
-
-Jika kebijakan ini tidak disetel, ketersediaan <ph name="CHROME_DEVTOOLS_NAME" /> akan ditentukan oleh kebijakan <ph name="DEVELOPER_TOOLS_AVAILABILITY_BLOCKLIST_POLICY_NAME" /> dan <ph name="DEVELOPER_TOOLS_AVAILABILITY_POLICY_NAME" />.
-
-Kebijakan ini juga berlaku untuk <ph name="CHROME_DEVTOOLS_NAME" /> yang dibuka untuk ekstensi dan aplikasi web.
-
-Karakter pengganti host menyeluruh (yaitu, "*" atau "[*]") tidak diperbolehkan; gunakan kebijakan <ph name="DEVELOPER_TOOLS_AVAILABILITY_POLICY_NAME" /> untuk mengaktifkan fitur ini secara global.
-
-Kebijakan ini terbatas untuk 1.000 entri.</translation>
 <translation id="7607831126797434329">Blokir download otomatis di situs ini</translation>
 <translation id="7608186022704392724">Fitur kirim otomatis PIN akan mengubah cara memasukkan PIN di <ph name="PRODUCT_OS_NAME" />.
           Fitur ini akan menampilkan UI khusus yang dengan jelas memperlihatkan kepada pengguna berapa
@@ -11760,6 +11785,7 @@ Ada beberapa kebijakan yang mencantumkan origin yang memengaruhi permintaan ke p
   - LocalNetworkAccessAllowedForUrls</translation>
 <translation id="8059352177830050556">Aktifkan pelaporan info lampu latar perangkat</translation>
 <translation id="8062485064082966327">Gunakan layanan Google anonim untuk memberikan deskripsi otomatis untuk gambar tanpa label</translation>
+<translation id="8064875716442437829">Aktifkan aksesibilitas perender</translation>
 <translation id="8066428282805800713">Kirim data hardware tambahan di ChromeOS Flex</translation>
 <translation id="8069233292746468045">Kebijakan ini mengonfigurasi <ph name="PRODUCT_NAME" /> untuk mengurutkan algoritma perjanjian kunci pilihannya (grup yang didukung) di TLS 1.3 agar sesuai dengan algoritma yang telah disetujui berdasarkan skema kepatuhan tertentu.
 
@@ -12927,6 +12953,13 @@ Catatan: Kebijakan ini tidak akan berpengaruh jika DevicePowerBatteryChargingOpt
       Jika kebijakan ini tidak disetel, konfigurasi default untuk sandbox jaringan akan digunakan. Konfigurasi default ini dapat bervariasi bergantung pada rilis <ph name="PRODUCT_NAME" />, uji coba kolom yang sedang berjalan, dan platform.
       Kebijakan ini dimaksudkan untuk memberikan fleksibilitas kepada perusahaan guna menonaktifkan sandbox jaringan jika perusahaan menggunakan software pihak ketiga yang mengganggu sandbox layanan jaringan.</translation>
 <translation id="8840243776706727185">Fitur NewBaseUrlInheritanceBehavior dinonaktifkan</translation>
+<translation id="8841125674413543406">Mengontrol pembuatan hierarki aksesibilitas dalam proses perender.
+
+Jika kebijakan ini disetel ke Aktif atau tidak disetel, <ph name="PRODUCT_NAME" /> akan mengizinkan pembuatan hierarki aksesibilitas untuk halaman web.
+
+Jika kebijakan ini disetel ke Nonaktif, hierarki aksesibilitas perender tidak akan dibuat lagi, sehingga mencegah fitur aksesibilitas berinteraksi dengan perender.
+
+Jika kebijakan ini disetel, pengguna tidak dapat mengubah atau menggantinya.</translation>
 <translation id="8842208363354615697">Mengizinkan pengaktifan Mode Khusus HTTPS</translation>
 <translation id="8843331294082716286">Jangan tampilkan permintaan <ph name="PRIVACY_SANDBOX_NAME" /> kepada pengguna.</translation>
 <translation id="884855199714673326">Izinkan host akses jarak jauh untuk memutuskan</translation>
@@ -13353,19 +13386,6 @@ Catatan: Memulai ulang perangkat akan menghapus cache. Bahkan, data realm penggu
 
       Jika kebijakan disetel ke salah (false) atau tidak disetel, informasi tidak akan dilaporkan.
       Jika disetel ke benar (true), peristiwa login/logout di perangkat akan dilaporkan.</translation>
-<translation id="9087577919890548366">Jika kebijakan ini disetel ke Aktif, permintaan <ph name="LOCAL_NETWORK_ACCESS" />
-hanya akan menampilkan peringatan di <ph name="CHROME_DEVTOOLS_NAME" /> karena pemeriksaan <ph name="LOCAL_NETWORK_ACCESS" /> gagal.
-
-Jika kebijakan ini disetel ke Nonaktif atau tidak disetel, permintaan <ph name="LOCAL_NETWORK_ACCESS" /> akan menggunakan
-penanganan default untuk permintaan ini.
-
-Lihat https://wicg.github.io/local-network-access/ untuk melihat batasan <ph name="LOCAL_NETWORK_ACCESS" />.
-
-Kebijakan perusahaan ini bersifat sementara, dan akan dihapus setelah M156.
-
-Dalam jangka panjang, kebijakan <ph name="LOCAL_NETWORK_ACCESS_ALLOWED_FOR_URLS_POLICY_NAME" />
-dapat digunakan untuk memasukkan pola URL ke daftar yang diizinkan yang harus otomatis diberikan
-izin <ph name="LOCAL_NETWORK_ACCESS" />.</translation>
 <translation id="9087652369391570821">Kebijakan konfigurasi untuk Chrome Enterprise Connector OnFileTransfer</translation>
 <translation id="9088433379343318874">Izinkan penyedia konten pengguna yang dilindungi</translation>
 <translation id="9088444059179765143">Mengonfigurasi metode deteksi zona waktu otomatis</translation>

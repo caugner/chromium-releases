@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 
+#include "base/containers/flat_set.h"
 #include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/safe_ref.h"
@@ -20,7 +21,6 @@
 #include "chrome/browser/ui/read_anything/read_anything_controller.h"
 #include "chrome/browser/ui/read_anything/read_anything_enums.h"
 #include "chrome/browser/ui/read_anything/read_anything_lifecycle_observer.h"
-#include "chrome/browser/ui/read_anything/read_anything_side_panel_controller.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model.h"
 #include "chrome/common/read_anything/distillation_evaluator.mojom.h"
@@ -87,6 +87,18 @@ enum class ReadAnythingDistillationScheme {
 };
 
 // LINT.ThenChange(/tools/metrics/histograms/metadata/accessibility/enums.xml:ReadAnythingDistillationScheme)
+
+// LINT.IfChange(ReadAnythingRendererRequestResult)
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class ReadAnythingRendererRequestResult {
+  kAllowed = 0,
+  kNotObservedTree = 1,
+  kDisallowedActionOnPageType = 2,
+  kMaxValue = kDisallowedActionOnPageType,
+};
+
+// LINT.ThenChange(/tools/metrics/histograms/metadata/accessibility/enums.xml:ReadAnythingRendererRequestResult)
 
 enum class ListenToThisPagePlaybackMetricState {
   kInactive = 0,
@@ -235,9 +247,6 @@ class ReadAnythingUntrustedPageHandler :
   void OnLineFocusChanged(
       read_anything::mojom::LineFocus current_line_focus,
       read_anything::mojom::LineFocus last_non_disabled_line_focus) override;
-  void OnLineFocusFeatureUsed() override;
-  void ShouldShowLineFocusNewBadge(
-      ShouldShowLineFocusNewBadgeCallback callback) override;
   void GetVoicePackInfo(const std::string& language) override;
   void InstallVoicePack(const std::string& language) override;
   void UninstallVoice(const std::string& language) override;
@@ -330,9 +339,20 @@ class ReadAnythingUntrustedPageHandler :
                       content::WebContents* old_contents,
                       content::WebContents* new_contents);
 
-  // Used to verify that an incoming action request is for the currently
-  // observed tree. If it's not, it may be a malicious request.
+  // Returns whether `tree_id` belongs to a frame whose accessibility data may
+  // be sent to, and whose nodes may be acted on by, the Reading Mode page.
+  // Allowed frames are:
+  //  - the primary main frame of the observed tab;
+  //  - subframes of the primary page that are same-origin with the main frame
+  //    (not when the main frame's origin is opaque or file://);
+  //  - the direct https://www.google.com child of chrome://whats-new;
+  //  - for full-page PDFs, the PDF extension host and PDF content frame.
   bool IsObservingTree(const ui::AXTreeID& tree_id) const;
+
+  // Used to verify if an incoming action request (e.g. clicking a link or
+  // downloading an image) is allowed on the current tree. Actions are allowed
+  // if the page is HTTP/HTTPS or a PDF.
+  bool AreActionsAllowedInTree(const ui::AXTreeID& tree_id) const;
 
   // ui::AXActionHandlerObserver:
   void TreeRemoved(ui::AXTreeID ax_tree_id) override;
@@ -433,14 +453,8 @@ class ReadAnythingUntrustedPageHandler :
 
   void RecordListenToThisPagePlaybackMetric(bool successful_playback);
 
-  // The Reading Mode controller for both immersive and side-panel reading mode,
-  // used when the immersive reading mode flag is enabled.
+  // The Reading Mode controller for both immersive and side-panel reading mode.
   raw_ptr<ReadAnythingController> read_anything_controller_;
-  // Legacy side-panel reading mode controller, only to be used when the
-  // immersive reading mode flag is disabled.
-  // TODO: (crbug.com/449162079) Remove this when immersive reading mode flag is
-  // fully rolled out.
-  raw_ptr<ReadAnythingSidePanelController> side_panel_controller_;
   const raw_ptr<Profile> profile_;
   const raw_ptr<content::WebUI> web_ui_;
   raw_ptr<tabs::TabInterface> tab_;
@@ -496,6 +510,12 @@ class ReadAnythingUntrustedPageHandler :
   // itself has not necessarily loaded in yet, so wait for that frame before
   // notifying of the new tree using the info from the pdf frame itself.
   bool is_waiting_for_pdf_frame_ = false;
+
+  // IDs of trees whose data has been sent to `page_`, either through
+  // AccessibilityEventReceived or OnActiveAXTreeIDChanged. Used to forward
+  // only removals of those trees, because AXActionHandlerRegistry reports tree
+  // removals for every tree in the browser.
+  base::flat_set<ui::AXTreeID> forwarded_tree_ids_;
 
   // Subscription for tab discard events.
   base::CallbackListSubscription tab_discard_subscription_;

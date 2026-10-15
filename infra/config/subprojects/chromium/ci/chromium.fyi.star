@@ -142,6 +142,7 @@ ci.builder(
         ],
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "viz",
     ),
@@ -196,6 +197,7 @@ ci.builder(
         ],
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "site_isolation",
     ),
@@ -204,6 +206,7 @@ ci.builder(
 
 ci.builder(
     name = "linux-annotator-rel",
+    description_html = "Runs tests for the Network Traffic Annotation Auditor on Linux.",
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(config = "chromium"),
         chromium_config = builder_config.chromium_config(
@@ -228,16 +231,19 @@ ci.builder(
         ],
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "network|traffic|annotations",
         short_name = "lnx",
     ),
+    contact_team_email = "cbe-compliance@google.com",
     notifies = ["annotator-rel"],
     siso_remote_jobs = siso.remote_jobs.HIGH_JOBS_FOR_CI,
 )
 
 ci.builder(
     name = "linux-chromeos-annotator-rel",
+    description_html = "Runs tests for the Network Traffic Annotation Auditor on ChromeOS.",
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(
             config = "chromium",
@@ -271,10 +277,12 @@ ci.builder(
     ),
     builderless = True,
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "release",
         short_name = "rel",
     ),
+    contact_team_email = "cbe-compliance@google.com",
     execution_timeout = 3 * time.hour,
     notifies = ["annotator-rel"],
     siso_remote_jobs = siso.remote_jobs.HIGH_JOBS_FOR_CI,
@@ -334,6 +342,7 @@ ci.builder(
         },
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux|blink",
         short_name = "BIr",
@@ -378,6 +387,7 @@ ci.builder(
         ],
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux",
         short_name = "se",
@@ -417,6 +427,7 @@ ci.builder(
         ],
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux|blink",
         short_name = "VF",
@@ -455,6 +466,7 @@ ci.builder(
         ],
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux",
     ),
@@ -487,6 +499,7 @@ ci.thin_tester(
             "mac_default_arm64",
         ],
     ),
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "mac",
     ),
@@ -531,6 +544,7 @@ ci.builder(
     ),
     builderless = True,
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "mulitscreen",
     ),
@@ -639,7 +653,7 @@ fyi_ios_builder(
             "mac_default_arm64",
             "mac_toolchain",
             "out_dir_arg",
-            "xcode_26_main",
+            "xcode_27_main",
             "xctest",
         ],
     ),
@@ -699,6 +713,7 @@ ci.builder(
     ),
     builderless = True,
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "android",
     ),
@@ -737,6 +752,7 @@ ci.builder(
         ],
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux",
     ),
@@ -945,6 +961,7 @@ ci.builder(
         },
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux",
     ),
@@ -1000,6 +1017,7 @@ ci.builder(
         },
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux|blink",
         short_name = "trace",
@@ -1052,7 +1070,7 @@ fyi_ios_builder(
             "ioswpt-chromium-swarming-pool",
             "mac_15_x64",
             "mac_toolchain",
-            "xcode_26_main",
+            "xcode_27_main",
         ],
     ),
     builderless = True,
@@ -1094,6 +1112,7 @@ ci.builder(
         ],
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux",
         short_name = "hdls",
@@ -1348,6 +1367,7 @@ ci.builder(
         os_type = targets.os_type.LINUX,
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux|arm64",
         short_name = "rel",
@@ -1432,6 +1452,7 @@ ci.builder(
         os_type = targets.os_type.LINUX,
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux|arm64",
         short_name = "wl",
@@ -1472,6 +1493,7 @@ ci.builder(
         use_swarming = False,
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "perfetto",
         short_name = "lnx",
@@ -1567,7 +1589,7 @@ fyi_ios_builder(
             "mac_default_arm64",
             "mac_toolchain",
             "out_dir_arg",
-            "xcode_26_main",
+            "xcode_27_main",
             "xctest",
         ],
     ),
@@ -1631,7 +1653,7 @@ fyi_ios_builder(
             "mac_default_arm64",
             "mac_toolchain",
             "out_dir_arg",
-            "xcode_26_main",
+            "xcode_27_main",
             "xctest",
         ],
     ),
@@ -1685,7 +1707,7 @@ fyi_ios_builder(
             "mac_vm",
             "mac_toolchain",
             "out_dir_arg",
-            "xcode_26_main",
+            "xcode_27_main",
             "xctest",
         ],
     ),
@@ -2278,6 +2300,7 @@ ci.builder(
 
 ci.builder(
     name = "win-annotator-rel",
+    description_html = "Runs tests for the Network Traffic Annotation Auditor on Windows.",
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(config = "chromium"),
         chromium_config = builder_config.chromium_config(
@@ -2308,6 +2331,7 @@ ci.builder(
         category = "network|traffic|annotations",
         short_name = "win",
     ),
+    contact_team_email = "cbe-compliance@google.com",
     execution_timeout = 16 * time.hour,
     notifies = ["annotator-rel"],
     siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CI,
@@ -2584,6 +2608,7 @@ ci.builder(
         },
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = [
         consoles.console_view_entry(
             category = "treesinviz",
@@ -2737,6 +2762,7 @@ ci.builder(
         },
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = [
         consoles.console_view_entry(
             category = "treesinviz",
@@ -2847,6 +2873,13 @@ ci.builder(
         mixins = [
             "linux-jammy",
         ],
+        per_test_modifications = {
+            "webdriver_bidi_e2e_tests": targets.mixin(
+                swarming = targets.swarming(
+                    shards = 8,
+                ),
+            ),
+        },
     ),
     console_view_entry = consoles.console_view_entry(
         category = "webdriver",
@@ -2930,6 +2963,9 @@ ci.builder(
         additional_compile_targets = [
             "chrome",
         ],
+        mixins = [
+            "linux-jammy",
+        ],
         per_test_modifications = {
             "browser_tests": targets.mixin(
                 swarming = targets.swarming(
@@ -2944,6 +2980,7 @@ ci.builder(
         },
     ),
     os = os.LINUX_DEFAULT,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         category = "linux|separate-renderer",
         short_name = "tst",
@@ -2970,6 +3007,9 @@ fyi_mac_builder(
         ],
         additional_compile_targets = [
             "chrome",
+        ],
+        mixins = [
+            "mac_default_arm64",
         ],
         per_test_modifications = {
             "browser_tests": targets.mixin(

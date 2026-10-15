@@ -542,7 +542,8 @@ public class EventForwarder {
                 isTrackpadToMouseEventConversionEnabled()
                         && isTrackpadToMouseConversionEvent(event);
 
-        mPointerLockEventHelper.onNonCapturedPointerEvent(event.getX(), event.getY());
+        mPointerLockEventHelper.onNonCapturedPointerEvent(
+                event.getX(), event.getY(), event.getRawX(), event.getRawY());
 
         EventForwarderJni.get()
                 .onMouseEvent(
@@ -848,6 +849,16 @@ public class EventForwarder {
         boolean shouldConvertToMouseEvent =
                 isTrackpadToMouseEventConversionEnabled()
                         && event.isFromSource(InputDevice.SOURCE_TOUCHPAD);
+        // The MotionEvent.obtain() overload used by transformCapturedPointerEvent() does not
+        // preserve actionButton. Save it before transforming physical mouse events. A captured
+        // trackpad may also use SOURCE_MOUSE_RELATIVE, but is identified by TOOL_TYPE_FINGER and
+        // must continue passing 0 so WebMouseEventBuilder::Build() in
+        // web_input_event_builders_android.cc derives the changed button from buttonState.
+        int actionButton =
+                event.isFromSource(InputDevice.SOURCE_MOUSE_RELATIVE)
+                                && event.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE
+                        ? getMouseEventActionButton(event)
+                        : 0;
         event = mPointerLockEventHelper.transformCapturedPointerEvent(event, deviceRotation);
 
         if (!event.isFromSource(InputDevice.SOURCE_MOUSE)) {
@@ -879,7 +890,8 @@ public class EventForwarder {
         }
 
         // Update the last event position
-        mPointerLockEventHelper.updateLastPointerPosition(event.getX(), event.getY());
+        mPointerLockEventHelper.updateLastPointerPosition(
+                event.getX(), event.getY(), event.getRawX(), event.getRawY());
 
         if (event.getAction() == MotionEvent.ACTION_SCROLL) {
             return EventForwarderJni.get()
@@ -895,7 +907,7 @@ public class EventForwarder {
                             event,
                             MotionEventUtils.getEventTimeNanos(event),
                             event.getActionMasked(),
-                            getMouseEventActionButton(event),
+                            actionButton,
                             shouldConvertToMouseEvent
                                     ? MotionEvent.TOOL_TYPE_MOUSE
                                     : event.getToolType(0));

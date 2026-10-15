@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/memory/raw_ptr.h"
+#include "build/build_config.h"
 #include "chrome/browser/ui/autofill/autofill_popup_view.h"
 #include "chrome/browser/ui/autofill/mock_autofill_popup_controller.h"
 #include "chrome/browser/ui/views/autofill/popup/popup_bnpl_footnote_view.h"
@@ -18,6 +19,7 @@
 #include "chrome/browser/ui/views/autofill/popup/popup_row_view.h"
 #include "chrome/browser/ui/views/autofill/popup/popup_view_utils.h"
 #include "chrome/browser/ui/views/autofill/popup/popup_view_views_test_api.h"
+#include "components/autofill/core/browser/data_model/autofill_ai/entity_instance.h"
 #include "components/autofill/core/browser/data_model/payments/bnpl_issuer.h"
 #include "components/autofill/core/browser/filling/filling_product.h"
 #include "components/autofill/core/browser/suggestions/suggestion.h"
@@ -29,8 +31,10 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/range/range.h"
 #include "ui/gfx/render_text.h"
 #include "ui/views/controls/tabbed_pane/tabbed_pane.h"
+#include "url/gurl.h"
 
 namespace autofill {
 namespace {
@@ -584,22 +588,54 @@ IN_PROC_BROWSER_TEST_P(PopupViewViewsBrowsertest,
 }
 
 IN_PROC_BROWSER_TEST_P(PopupViewViewsBrowsertest, InvokeUi_AutofillAi_SubMenu) {
+  Suggestion source_attribution(u"Suggested by Gemini · Photos\u00A0[1]",
+                                SuggestionType::kAutofillAiSourceAttribution);
+  source_attribution.icon = Suggestion::Icon::kSpark;
+  source_attribution.payload = Suggestion::AutofillAiPayload(
+      autofill::EntityInstance::EntityId("test-guid"),
+      {Suggestion::PersonalContextSourceCitation(
+          GURL("https://photos.google.com/test"), gfx::Range(29, 32))});
+
   Suggestion remove_suggestion(
       l10n_util::GetStringUTF16(IDS_AUTOFILL_AI_REMOVE_INFO),
       SuggestionType::kRemoveAutofillAi);
   remove_suggestion.icon = Suggestion::Icon::kClose;
-  PrepareSuggestions({std::move(remove_suggestion)});
+
+  Suggestion manage_suggestion(
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_MANAGE_ENHANCED_AUTOFILL),
+      SuggestionType::kManageEnhancedAutofill);
+  manage_suggestion.icon = Suggestion::Icon::kSettings;
+
+  PrepareSuggestions(
+      {std::move(source_attribution), Suggestion(SuggestionType::kSeparator),
+       std::move(remove_suggestion), std::move(manage_suggestion)});
   ShowAndVerifyUi(/*popup_has_parent=*/true);
 }
 
 IN_PROC_BROWSER_TEST_P(PopupViewViewsBrowsertest,
                        InvokeUi_AutofillAi_SubMenu_Selected) {
+  Suggestion source_attribution(u"Suggested by Gemini · Photos\u00A0[1]",
+                                SuggestionType::kAutofillAiSourceAttribution);
+  source_attribution.icon = Suggestion::Icon::kSpark;
+  source_attribution.payload = Suggestion::AutofillAiPayload(
+      autofill::EntityInstance::EntityId("test-guid"),
+      {Suggestion::PersonalContextSourceCitation(
+          GURL("https://photos.google.com/test"), gfx::Range(29, 32))});
+
   Suggestion remove_suggestion(
       l10n_util::GetStringUTF16(IDS_AUTOFILL_AI_REMOVE_INFO),
       SuggestionType::kRemoveAutofillAi);
   remove_suggestion.icon = Suggestion::Icon::kClose;
-  PrepareSuggestions({std::move(remove_suggestion)});
-  PrepareSelectedCell(CellIndex{0, CellType::kContent});
+
+  Suggestion manage_suggestion(
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_MANAGE_ENHANCED_AUTOFILL),
+      SuggestionType::kManageEnhancedAutofill);
+  manage_suggestion.icon = Suggestion::Icon::kSettings;
+
+  PrepareSuggestions(
+      {std::move(source_attribution), Suggestion(SuggestionType::kSeparator),
+       std::move(remove_suggestion), std::move(manage_suggestion)});
+  PrepareSelectedCell(CellIndex{3, CellType::kContent});
   ShowAndVerifyUi(/*popup_has_parent=*/true);
 }
 

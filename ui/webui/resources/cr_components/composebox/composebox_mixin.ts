@@ -21,7 +21,7 @@ import type {BigBuffer} from '//resources/mojo/mojo/public/mojom/base/big_buffer
 import type {UnguessableToken} from '//resources/mojo/mojo/public/mojom/base/unguessable_token.mojom-webui.js';
 import type {Url} from '//resources/mojo/url/mojom/url.mojom-webui.js';
 
-import {ComposeboxFile, ComposeboxFileValidationError, ContextType, ContextualSearchInputStateDeletionType, FILE_VALIDATION_ERRORS_MAP, getLoadTimeBoolean, hasOnlyAutoAddedTabs, isContextUploadStatusTerminal, isValidTabId, mapOriginToMojoSource, ProcessFilesError, recordBoolean, recordContextAdditionMethod, recordContextualElementClickedMetric, recordEnumerationValue, recordInputTypeShown, recordModelModeSelection, recordModelModeShown, recordToolModeSelection, recordToolModeShown, recordUserAction, TabSuggestionsState, TabUploadOrigin} from './common.js';
+import {ComposeboxFile, ComposeboxFileValidationError, ComposeboxInputModel, ContextType, ContextualSearchInputStateDeletionType, FILE_VALIDATION_ERRORS_MAP, getLoadTimeBoolean, isContextUploadStatusTerminal, isValidTabId, mapOriginToMojoSource, ProcessFilesError, recordBoolean, recordContextAdditionMethod, recordContextualElementClickedMetric, recordEnumerationValue, recordInputTypeShown, recordModelModeSelection, recordModelModeShown, recordToolModeSelection, recordToolModeShown, recordUserAction, TabSuggestionsState, TabUploadOrigin} from './common.js';
 import type {ComposeboxFuseboxActionRequest, ComposeboxState, DriveUpload, TabUpload} from './common.js';
 import type {PageHandlerRemote} from './composebox.mojom-webui.js';
 import type {ComposeboxDropdownElement} from './composebox_dropdown.js';
@@ -107,7 +107,7 @@ export const ComposeboxEmbedderMixin =
             },
             contextMenuEnabled: {type: Boolean},
             errorMessage: {type: String},
-            files: {type: Object},
+            attachedContext: {type: Object},
             fileUploadsComplete: {
               type: Boolean,
               reflect: true,
@@ -247,6 +247,9 @@ export const ComposeboxEmbedderMixin =
         accessor energyEffectAnimationEnabled: boolean = false;
 
         browserTabContextAdded: boolean = false;
+        pendingAutomaticActiveTabUrl: string = '';
+        pendingAutomaticActiveTabTitle: string = '';
+        automaticActiveTab: ComposeboxFile|null = null;
         pendingUploads: Set<UnguessableToken> = new Set();
         earlyCompletedUploads: Set<UnguessableToken> = new Set();
         dragAndDropEnabled: boolean =
@@ -276,8 +279,17 @@ export const ComposeboxEmbedderMixin =
         accessor contextMenuEnabled: boolean =
             loadTimeData.getBoolean('composeboxShowContextMenu');
         accessor errorMessage: string = '';
-        // Files/tabs added by the user for the current turn (query).
-        accessor files: Map<UnguessableToken, ComposeboxFile> = new Map();
+        // Context (files/tabs) added by the user for the current turn (query).
+        accessor attachedContext: Map<UnguessableToken, ComposeboxFile> =
+            new Map();
+
+        get files(): Map<UnguessableToken, ComposeboxFile> {
+          return this.attachedContext;
+        }
+
+        set files(value: Map<UnguessableToken, ComposeboxFile>) {
+          this.attachedContext = value;
+        }
         accessor fileUploadsComplete: boolean = true;
         accessor hasAllowedInputs: boolean = false;
         accessor input: string = '';
@@ -353,6 +365,18 @@ export const ComposeboxEmbedderMixin =
         private updateStateComplete_: Promise<void> = Promise.resolve();
         private userInputGeneration_: number = 0;
 
+        get inputModel(): ComposeboxInputModel {
+          return new ComposeboxInputModel({
+            attachedContext: this.attachedContext,
+            smartTabSharingActive: this.smartTabSharingActive,
+            tabFaviconChipsToCoinsEnabled: this.tabFaviconChipsToCoinsEnabled,
+            input: this.input,
+            selectedMatchIndex: this.selectedMatchIndex,
+            hasResult: !!this.result,
+            activeTool: this.inputState?.activeTool,
+          });
+        }
+
         // =====================================================================
         // Lifecycle Hooks
         // =====================================================================
@@ -392,7 +416,12 @@ export const ComposeboxEmbedderMixin =
                   (active: boolean) => {
                     this.smartTabSharingActive = active;
                     if (this.smartTabSharingVisible && !active) {
-                      this.addedTabsIds = new Map();
+                      this.addedTabsIds = this.automaticActiveTab?.tabId ?
+                          new Map([[
+                            this.automaticActiveTab.tabId,
+                            this.automaticActiveTab.uuid,
+                          ]]) :
+                          new Map();
                       this.resetRestoredTabs();
                     }
                   });
@@ -487,15 +516,21 @@ export const ComposeboxEmbedderMixin =
               this.smartTabSharingActive = false;
             }
           }
+          if (this.hasUpdated &&
+              changedPrivateProperties.has('smartTabSharingActive') &&
+              changedPrivateProperties.get('smartTabSharingActive') !==
+                  this.smartTabSharingActive) {
+            this.clearContextForSmartTabSharingActive();
+          }
           // </if>
           // When the result initially gets set check if dropdown should show.
           if (changedPrivateProperties.has('input') ||
               changedPrivateProperties.has('result') ||
-              changedPrivateProperties.has('files') ||
+              changedPrivateProperties.has('attachedContext') ||
               changedPrivateProperties.has('errorMessage')) {
             this.showFileCarousel = this.tabFaviconChipsToCoinsEnabled ?
                 this.getFilteredCarouselFiles().length > 0 :
-                this.files.size > 0;
+                this.attachedContext.size > 0;
             this.showDropdown = this.computeShowDropdown();
           }
 
@@ -503,7 +538,7 @@ export const ComposeboxEmbedderMixin =
               changedPrivateProperties.has('selectedMatchIndex') ||
               changedPrivateProperties.has('inputState') ||
               changedPrivateProperties.has('isFollowupQuery') ||
-              changedPrivateProperties.has('files') ||
+              changedPrivateProperties.has('attachedContext') ||
               changedPrivateProperties.has('submitEnabled') ||
               changedPrivateProperties.has('fileUploadsComplete')) {
             this.submitEnabled = this.computeSubmitEnabled();
@@ -534,7 +569,7 @@ export const ComposeboxEmbedderMixin =
             }));
           }
 
-          if (changedPrivateProperties.has('files') ||
+          if (changedPrivateProperties.has('attachedContext') ||
               changedPrivateProperties.has('inputState') ||
               changedPrivateProperties.has('inputState.activeTool')) {
             // Non-default Suggest Inventory should not be shown when context
@@ -592,7 +627,7 @@ export const ComposeboxEmbedderMixin =
               this.input = this.lastQueriedInput;
             }
           }
-          if (changedPrivateProperties.has('files')) {
+          if (changedPrivateProperties.has('attachedContext')) {
             this.dispatchEvent(new CustomEvent('on-context-files-changed'));
           }
           if (changedPrivateProperties.has('smartComposeInlineHint')) {
@@ -713,9 +748,9 @@ export const ComposeboxEmbedderMixin =
         // where the frontend starts a file upload flow
         // (`addFileContext`).
         onFileContextAdded(file: ComposeboxFile) {
-          const newFiles = new Map(this.files);
-          newFiles.set(file.uuid, file);
-          this.files = newFiles;
+          const newAttachedContext = new Map(this.attachedContext);
+          newAttachedContext.set(file.uuid, file);
+          this.attachedContext = newAttachedContext;
           if (file.status !== ContextUploadStatus.kUploadSuccessful) {
             this.addToPendingUploads(file.uuid);
           }
@@ -775,7 +810,7 @@ export const ComposeboxEmbedderMixin =
           this.inputState = inputState;
 
           const allowedTypes = this.inputState.allowedInputTypes;
-          this.files.forEach((file, uuid) => {
+          this.attachedContext.forEach((file, uuid) => {
             if (!allowedTypes.includes(file.inputType)) {
               this.deleteFile(uuid);
             }
@@ -854,10 +889,11 @@ export const ComposeboxEmbedderMixin =
         onContextualInputStatusChanged(
             token: UnguessableToken, status: ContextUploadStatus,
             errorType: ContextUploadErrorType|null) {
-          if (!this.files.has(token) && isContextUploadStatusTerminal(status)) {
+          if (!this.attachedContext.has(token) &&
+              isContextUploadStatusTerminal(status)) {
             // Buffer early terminal statuses in case C++ finishes uploading
             // before the async `addTabContext` response resolves and maps
-            // the token into `this.files`.
+            // the token into `this.attachedContext`.
             this.earlyCompletedUploads.add(token);
           }
           // If error message is updated, then the returned file is stale and
@@ -871,6 +907,14 @@ export const ComposeboxEmbedderMixin =
             this.errorMessage = errorMessage;
             this.pendingUploads.delete(token);
             this.fileUploadsComplete = this.pendingUploads.size === 0;
+            // Clear autocomplete matches and refresh zero state suggestions if
+            // there are no attached files and no user input after a file upload
+            // error.
+            this.getSearchboxHandler().deleteContext(
+                token, /*fromAutoSuggestedChip=*/ false);
+            if (this.attachedContext.size === 0 && !this.input.trim()) {
+              this.queryAutocomplete(/* clearMatches= */ true);
+            }
           } else if (file) {
             // Treat `kUploadReplaced` like an error upload state
             // (like `kUploadFailed`. `kValidationFailed`,
@@ -1189,12 +1233,11 @@ export const ComposeboxEmbedderMixin =
           }
           this.handleToolModeUpdate(newToolMode);
         }
-        handleToolModeUpdate(
-            newTool: ToolMode, isSetByServer: boolean = false) {
+        handleToolModeUpdate(newTool: ToolMode, isSetByAim: boolean = false) {
           // If it is canvas added/removed, browser process will notify
           // AIM webpage (client side) so it can respond to these changes.
           // Server is not notified of these changes; side effects are local.
-          this.getSearchboxHandler().setActiveToolMode(newTool, isSetByServer);
+          this.getSearchboxHandler().setActiveToolMode(newTool, isSetByAim);
 
           this.queryAutocomplete(/* clearMatches= */ true);
           this.updateInputPlaceholder();
@@ -1249,7 +1292,30 @@ export const ComposeboxEmbedderMixin =
             this.addedTabsIds = new Map();
             this.resetRestoredTabs();
           }
+          this.clearContextForSmartTabSharingActive();
           // </if>
+        }
+
+        clearContextForSmartTabSharingActive() {
+          this.clearManualTabs();
+          if (this.automaticActiveTab) {
+            const uuid = this.automaticActiveTab.uuid;
+            this.automaticActiveTab = null;
+            this.pendingAutomaticActiveTabUrl = '';
+            this.pendingAutomaticActiveTabTitle = '';
+            this.deleteFile(uuid, /*fromUserAction=*/ false);
+          }
+        }
+
+        clearManualTabs() {
+          const fileMap = new Map(this.files);
+          for (const [uuid, file] of fileMap.entries()) {
+            if ((file.type === 'tab' || !!file.tabId) &&
+                (!this.automaticActiveTab ||
+                 file.uuid !== this.automaticActiveTab.uuid)) {
+              this.deleteFile(uuid, /*fromUserAction=*/ false);
+            }
+          }
         }
 
         onContextMenuContainerMousedown(e: FocusEvent) {
@@ -1365,8 +1431,8 @@ export const ComposeboxEmbedderMixin =
               onBeforeUpdateFiles(attachment);
             }
 
-            this.files = new Map([
-              ...this.files.entries(),
+            this.attachedContext = new Map([
+              ...this.attachedContext.entries(),
               [attachment.uuid, attachment],
             ]);
             this.addedTabsIds = new Map([
@@ -1733,8 +1799,9 @@ export const ComposeboxEmbedderMixin =
         deleteFileContext(
             uuidToDelete: UnguessableToken,
             fromAutoSuggestedChip: boolean = false) {
-          this.files = new Map([...this.files.entries()].filter(
-              ([uuid, _]) => uuid !== uuidToDelete));
+          this.attachedContext =
+              new Map([...this.attachedContext.entries()].filter(
+                  ([uuid, _]) => uuid !== uuidToDelete));
           this.pendingUploads.delete(uuidToDelete);
           this.fileUploadsComplete = this.pendingUploads.size === 0;
           this.getSearchboxHandler().deleteContext(
@@ -1744,7 +1811,8 @@ export const ComposeboxEmbedderMixin =
         deleteFile(
             uuidToDelete: UnguessableToken, fromUserAction?: boolean,
             fromAutoSuggestedChip: boolean = false): ComposeboxFile|null {
-          const file = uuidToDelete ? this.files.get(uuidToDelete) : null;
+          const file =
+              uuidToDelete ? this.attachedContext.get(uuidToDelete) : null;
 
           if (!file) {
             return null;
@@ -1784,10 +1852,7 @@ export const ComposeboxEmbedderMixin =
         }
 
         hasContent(ignoreAutoAddedTabs: boolean = false): boolean {
-          const hasFiles = this.files.size > 0 &&
-              !(ignoreAutoAddedTabs && hasOnlyAutoAddedTabs(this.files));
-          return this.inputState?.activeTool !== ToolMode.kUnspecified ||
-              this.input.trim().length > 0 || hasFiles;
+          return this.inputModel.hasContent(ignoreAutoAddedTabs);
         }
 
         clearInput() {
@@ -1795,6 +1860,23 @@ export const ComposeboxEmbedderMixin =
           this.activeQueryId = -1;
           this.lastQueriedInput = '';
           this.getDropdownElement().unselect();
+        }
+
+        clearInputsForNewThread() {
+          this.clearInput();
+          this.getInputElement().resetHeight();
+          this.resetModes();
+          this.resetSmartComposeStats();
+
+          // Delete all manually added files/tabs, keeping the auto-suggested
+          // tab.
+          const fileMap = new Map(this.files);
+          for (const [uuid, file] of fileMap.entries()) {
+            if (!this.automaticActiveTab ||
+                file.uuid !== this.automaticActiveTab.uuid) {
+              this.deleteFile(uuid, /*fromUserAction=*/ false);
+            }
+          }
         }
 
         clearAllInputs(
@@ -1817,12 +1899,12 @@ export const ComposeboxEmbedderMixin =
           // `undeletableFiles` is for files; `SubmitCleanup()` still deletes
           // TABS only after this, regardless of `undeletableFiles`. Adding tabs
           // to `undeletableFiles` does nothing to prevent deletion from
-          // `this.files`. Adding files to `undeletableFiles` does prevent
-          // deletion.
-          const undeletableFiles =
-              Array.from(this.files.values()).filter(file => !file.isDeletable);
-          if (undeletableFiles.length !== this.files.size) {
-            this.files =
+          // `this.attachedContext`. Adding files to `undeletableFiles` does
+          // prevent deletion.
+          const undeletableFiles = Array.from(this.attachedContext.values())
+                                       .filter(file => !file.isDeletable);
+          if (undeletableFiles.length !== this.attachedContext.size) {
+            this.attachedContext =
                 new Map(undeletableFiles.map(file => [file.uuid, file]));
             this.addedTabsIds =
                 new Map(undeletableFiles.filter(file => file.tabId)
@@ -1831,22 +1913,23 @@ export const ComposeboxEmbedderMixin =
           // Reset files in set to match remaining files in carousel that are
           // still uploading.
           this.pendingUploads = new Set(
-              Array.from(this.files.values())
+              Array.from(this.attachedContext.values())
                   .filter(file => !isContextUploadStatusTerminal(file.status))
                   .map(file => file.uuid));
           this.smartComposeInlineHint = '';
           this.resetSmartComposeStats();
           // Ask the searchbox handler to clear its own state when the clear all
-          // button is clicked. Otherwise, it will clear its own state when mojo submit
-          // query is sent.
+          // button is clicked. Otherwise, it will clear its own state when mojo
+          // submit query is sent.
           // TODO(crbug.com/532712756): Browser process should fully own
           // clearing logic, and frontend should listen and follow which files
           // browser process says to keep. This is better than having to
           // maintain and align two different hard coded logic for clearing
           // files across composebox (here) and browser process code (session
-          // handle). `restoredTabs` is the server telling the frontend which tabs
-          // are persistent, but the logic for clearing context on submit/clear all
-          // should still be handled by browser process, not frontend and browser process.
+          // handle). `restoredTabs` is the server telling the frontend which
+          // tabs are persistent, but the logic for clearing context on
+          // submit/clear all should still be handled by browser process, not
+          // frontend and browser process.
           if (!querySubmitted) {
             this.getSearchboxHandler().clearFiles(shouldBlockAutoSuggestedTabs);
           }
@@ -1979,7 +2062,7 @@ export const ComposeboxEmbedderMixin =
         resetToolsAndModels() {
           if (this.inputState) {
             this.getSearchboxHandler().setActiveToolMode(
-                ToolMode.kUnspecified, /*isSetByServer=*/ false);
+                ToolMode.kUnspecified, /*isSetByAim=*/ false);
             this.getSearchboxHandler().setActiveModelMode(
                 ModelMode.kUnspecified, /*isSetByServer=*/ false);
           }
@@ -2141,12 +2224,12 @@ export const ComposeboxEmbedderMixin =
             for (const tabId of activeTabsArray) {
               const token = this.addedTabsIds.get(tabId);
               if (token) {
-                this.files.delete(token);
+                this.attachedContext.delete(token);
                 this.addedTabsIds.delete(tabId);
               }
             }
 
-            this.files = new Map(this.files);
+            this.attachedContext = new Map(this.attachedContext);
             this.addedTabsIds = new Map(this.addedTabsIds);
           }
           // Standard behavior: clear inputs if flag is enabled
@@ -2160,7 +2243,7 @@ export const ComposeboxEmbedderMixin =
         }
 
         hasImageFiles(): boolean {
-          return Array.from(this.files.values())
+          return Array.from(this.attachedContext.values())
               .some(file => file.type.includes('image'));
         }
 
@@ -2175,7 +2258,7 @@ export const ComposeboxEmbedderMixin =
         }
 
         hasFiles(): boolean {
-          return this.files.size > 0;
+          return this.inputModel.hasFiles();
         }
 
         resetSmartComposeStats() {
@@ -2206,7 +2289,7 @@ export const ComposeboxEmbedderMixin =
               this.input.length :
               this.getInputElement().getSelectionEnd();
           this.getSearchboxHandler().queryAutocomplete(
-              this.activeQueryId, this.input,
+              this.activeQueryId, /*tabId=*/ null, this.input,
               /*preventInlineAutocomplete=*/ false, cursorPosition,
               this.suggestInventory ?? SuggestInventory.kDefault,
               /*isOnFocus=*/ !this.input, /*keyword=*/ '', inputMethod);
@@ -2220,7 +2303,6 @@ export const ComposeboxEmbedderMixin =
           // Autocomplete sends updates once it is stopped. Invalidate those
           // results by setting `activeQueryId` to -1.
           this.activeQueryId = -1;
-          this.lastQueriedInput = '';
         }
 
         /**
@@ -2243,28 +2325,11 @@ export const ComposeboxEmbedderMixin =
           // injected inputs), this needs to check if any files are present to
           // show the submit button. The button will still appear disabled
           // because that is controlled by `canSubmitFilesAndInput`.
-          return this.hasValidQuery() || this.files.size > 0;
+          return this.inputModel.canSubmit();
         }
 
         hasValidQuery(): boolean {
-          // If there is at least one file that supports unimodal search, the
-          // query is valid.
-          if (Array.from(this.files.values())
-                  .some((file: ComposeboxFile) => file.supportsUnimodal)) {
-            return true;
-          }
-
-          // If an autocomplete match is selected, it's a valid query.
-          if (this.selectedMatchIndex >= 0 && !!this.result) {
-            return true;
-          }
-
-          // If there is non-empty text input.
-          if (this.input.trim().length > 0) {
-            return true;
-          }
-
-          return false;
+          return this.inputModel.hasValidQuery();
         }
 
         recordFileValidationMetric(enumValue: ComposeboxFileValidationError) {
@@ -2317,8 +2382,10 @@ export const ComposeboxEmbedderMixin =
             const announcer = getAnnouncerInstance();
             announcer.announce(this.i18n('composeboxFileUploadStartedText'));
           }
-          this.files =
-              new Map([...this.files.entries(), ...composeboxFiles.entries()]);
+          this.attachedContext = new Map([
+            ...this.attachedContext.entries(),
+            ...composeboxFiles.entries(),
+          ]);
           this.recordFileValidationMetric(ComposeboxFileValidationError.NONE);
           this.focusInput();
         }
@@ -2388,8 +2455,8 @@ export const ComposeboxEmbedderMixin =
           }
 
           if (composeboxFiles.size > 0) {
-            this.files = new Map([
-              ...this.files.entries(),
+            this.attachedContext = new Map([
+              ...this.attachedContext.entries(),
               ...composeboxFiles.entries(),
             ]);
             this.recordFileValidationMetric(ComposeboxFileValidationError.NONE);
@@ -2470,12 +2537,12 @@ export const ComposeboxEmbedderMixin =
           counts.set(InputType.kLensFile, 0);
           counts.set(InputType.kBrowserTab, 0);
 
-          for (const file of this.files.values()) {
+          for (const file of this.attachedContext.values()) {
             const type = this.getInputType(file.type);
             counts.set(type, (counts.get(type) || 0) + 1);
           }
 
-          let totalCount = this.files.size;
+          let totalCount = this.attachedContext.size;
 
           let maxTotal = this.maxFileCount;
           if (this.inputState && this.inputState.maxTotalInputs > 0) {
@@ -2515,11 +2582,11 @@ export const ComposeboxEmbedderMixin =
             errorType: ContextUploadErrorType|
             null): {file: ComposeboxFile|null, errorMessage: string|null} {
           let errorMessage = null;
-          let file = this.files.get(token) ?? null;
+          let file = this.attachedContext.get(token) ?? null;
           if (file) {
             if (isContextUploadStatusTerminal(status) &&
                 status !== ContextUploadStatus.kUploadSuccessful) {
-              this.files.delete(token);
+              this.attachedContext.delete(token);
 
               if (file.tabId) {
                 this.addedTabsIds =
@@ -2558,9 +2625,9 @@ export const ComposeboxEmbedderMixin =
               this.closeMenu();
             } else {
               file = {...file, status: status};
-              this.files.set(token, file);
+              this.attachedContext.set(token, file);
             }
-            this.files = new Map([...this.files]);
+            this.attachedContext = new Map([...this.attachedContext]);
           } else {
             // File is unknown but its status is known. Show this if
             // ghost/unknown files in frontend are allowed to be in
@@ -2613,11 +2680,11 @@ export const ComposeboxEmbedderMixin =
             const openTabsMap = new Map(tabs.map(t => [t.tabId, t]));
 
             // Gather UUIDs in a temporary array to prevent modifying
-            // `this.files` mid-iteration, since `deleteFile()` replaces the Map
-            // reference.
+            // `this.attachedContext` mid-iteration, since `deleteFile()`
+            // replaces the Map reference.
             const uuidsToDelete: UnguessableToken[] = [];
 
-            this.files.forEach((file, uuid) => {
+            this.attachedContext.forEach((file, uuid) => {
               if (file.tabId) {
                 const freshTab = openTabsMap.get(file.tabId);
                 if (!freshTab || (file.url && file.url !== freshTab.url)) {
@@ -2784,7 +2851,7 @@ export const ComposeboxEmbedderMixin =
           // When the context management flag is enabled, tabs (files with a
           // URL) are filtered out because they would be displayed as favicons
           // instead of chips.
-          const filesArray = Array.from(this.files.values());
+          const filesArray = Array.from(this.attachedContext.values());
           if (this.tabFaviconChipsToCoinsEnabled) {
             return filesArray.filter(f => !f.url);
           }
@@ -2792,33 +2859,25 @@ export const ComposeboxEmbedderMixin =
         }
 
         getNonTabFileNum(): number {
-          return Array.from(this.files.values())
-              .filter(file => file.inputType !== InputType.kBrowserTab)
-              .length;
+          return this.inputModel.getNonTabFileNum();
         }
 
         // Returns all attached tabs in composebox.
         getSharedTabs(): TabInfo[] {
-          return Array.from(this.files.values())
-              .filter(file => !!file.url)
-              .map(file => ({
-                     tabId: file.tabId!,
-                     title: file.name,
-                     url: file.url!,
-                   } as TabInfo));
+          return this.inputModel.getSharedTabs();
         }
 
         hasTabs(): boolean {
-          return (this.tabFaviconChipsToCoinsEnabled &&
-                  Array.from(this.files.values()).some(f => !!f.url)) ||
-              this.smartTabSharingActive;
+          return this.inputModel.hasTabs();
+        }
+
+        hasNonTabFiles(): boolean {
+          return this.inputModel.hasNonTabFiles();
         }
 
         shouldShowDivider(): boolean {
           if (this.tabFaviconChipsToCoinsEnabled && this.hasTabs()) {
-            const hasNonTabFiles =
-                Array.from(this.files.values()).some(f => !f.url);
-            if (!hasNonTabFiles) {
+            if (!this.hasNonTabFiles()) {
               return false;
             }
           }
@@ -2836,14 +2895,14 @@ export const ComposeboxEmbedderMixin =
         }
 
         computeCancelButtonTitle(): string {
-          return this.input.trim().length > 0 || this.files.size > 0 ?
+          return this.input.trim().length > 0 || this.hasFiles() ?
               this.i18n('composeboxCancelButtonTitleInput') :
               this.i18n('composeboxCancelButtonTitle');
         }
 
         computeShowDropdown() {
           // Don't show dropdown if there's multiple files.
-          if (this.files.size > 1) {
+          if (this.attachedContext.size > 1) {
             return false;
           }
 
@@ -2872,7 +2931,8 @@ export const ComposeboxEmbedderMixin =
           if (this.showTypedSuggest && this.lastQueriedInput.trim()) {
             // If context is present, but not enabled, continue to avoid showing
             // the dropdown.
-            if (!this.showTypedSuggestWithContext && this.files.size > 0) {
+            if (!this.showTypedSuggestWithContext &&
+                this.attachedContext.size > 0) {
               return false;
             }
             // Do not show the dropdown for multiline input or if only the
@@ -2937,6 +2997,7 @@ export interface ComposeboxEmbedderMixinInterface extends I18nMixinLitInterface,
   keepMenuOpenOnTabSelect: boolean;
   eventTracker: EventTracker;
   errorMessage: string;
+  attachedContext: Map<UnguessableToken, ComposeboxFile>;
   files: Map<UnguessableToken, ComposeboxFile>;
   input: string;
   inputPlaceholder: string;
@@ -2988,6 +3049,11 @@ export interface ComposeboxEmbedderMixinInterface extends I18nMixinLitInterface,
   energyEffectEnabled: boolean;
   energyEffectAnimationEnabled: boolean;
   updateComplete: Promise<boolean>;
+  pendingAutomaticActiveTabUrl: string;
+  pendingAutomaticActiveTabTitle: string;
+  automaticActiveTab: ComposeboxFile|null;
+  clearContextForSmartTabSharingActive(): void;
+  clearManualTabs(): void;
 
   // Embedder-provided methods for DOM and Mojo access
   updateInputPlaceholder(): void;
@@ -3074,7 +3140,7 @@ export interface ComposeboxEmbedderMixinInterface extends I18nMixinLitInterface,
   isTogglingOff(tool: ToolMode): boolean;
   onToolClick(e: CustomEvent<{toolMode: ToolMode}>): void;
   handleToolClick(tool: ToolMode): void;
-  handleToolModeUpdate(newTool: ToolMode, isSetByServer?: boolean): void;
+  handleToolModeUpdate(newTool: ToolMode, isSetByAim?: boolean): void;
   onModelClick(e: CustomEvent<{model: ModelMode}>): void;
   onOpenImageUpload(): void;
   onOpenFileUpload(): void;
@@ -3093,6 +3159,7 @@ export interface ComposeboxEmbedderMixinInterface extends I18nMixinLitInterface,
   focusInput(): void;
   hasContent(ignoreAutoTab?: boolean): boolean;
   clearInput(): void;
+  clearInputsForNewThread(): void;
   clearAllInputs(
       querySubmitted: boolean, shouldBlockAutoSuggestedTabs: boolean): void;
   handleProcessFilesError(error: ProcessFilesError): void;
@@ -3110,8 +3177,10 @@ export interface ComposeboxEmbedderMixinInterface extends I18nMixinLitInterface,
   hasImageFiles(): boolean;
   hasMatches(): boolean;
   selectFirstMatch(): void;
+  readonly inputModel: ComposeboxInputModel;
   hasFiles(): boolean;
   hasTabs(): boolean;
+  hasNonTabFiles(): boolean;
   resetSmartComposeStats(): void;
   resetSession(): void;
   queryAutocomplete(clearMatches: boolean, inputMethod?: InputMethod): void;

@@ -36,6 +36,7 @@ import org.chromium.chrome.browser.tab.TabStateBrowserControlsVisibilityDelegate
 import org.chromium.chrome.browser.tab.TabWebContentsDelegateAndroid;
 import org.chromium.chrome.browser.tabmodel.TabCreatorManager;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+import org.chromium.chrome.browser.tabmodel.TabModelType;
 import org.chromium.chrome.browser.tasks.HomeSurfaceTracker;
 import org.chromium.chrome.browser.toolbar.top.Toolbar;
 import org.chromium.chrome.browser.ui.ExclusiveAccessManager;
@@ -240,6 +241,11 @@ public class TabbedModeTabDelegateFactory implements TabDelegateFactory {
     }
 
     @Override
+    public @TabModelType int getTabModelType() {
+        return TabModelType.STANDARD;
+    }
+
+    @Override
     public boolean isCustomTab() {
         return false;
     }
@@ -252,5 +258,10 @@ public class TabbedModeTabDelegateFactory implements TabDelegateFactory {
     @Override
     public boolean isTabInBrowser() {
         return true;
+    }
+
+    @Override
+    public boolean isTabInPopup() {
+        return false;
     }
 }

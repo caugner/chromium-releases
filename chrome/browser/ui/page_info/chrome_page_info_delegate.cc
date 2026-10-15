@@ -12,6 +12,8 @@
 #include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/content_settings/page_specific_content_settings_delegate.h"
+#include "chrome/browser/hid/hid_chooser_context.h"
+#include "chrome/browser/hid/hid_chooser_context_factory.h"
 #include "chrome/browser/infobars/browser_infobar_manager.h"
 #include "chrome/browser/infobars/infobar_features.h"
 #include "chrome/browser/permissions/permission_actions_history_factory.h"
@@ -31,6 +33,8 @@
 #include "chrome/browser/subresource_filter/subresource_filter_profile_context_factory.h"
 #if BUILDFLAG(IS_ANDROID)
 #include "chrome/browser/safe_browsing/android/suspicious_site_controller_android.h"
+#else
+#include "chrome/browser/safe_browsing/suspicious_site_warnings/suspicious_site_controller_desktop.h"
 #endif
 #include "chrome/browser/ui/url_identity.h"
 #include "chrome/browser/usb/usb_chooser_context.h"
@@ -73,8 +77,6 @@
 #include "ui/base/l10n/l10n_util.h"
 #else
 #include "chrome/browser/certificate_viewer.h"
-#include "chrome/browser/hid/hid_chooser_context.h"
-#include "chrome/browser/hid/hid_chooser_context_factory.h"
 #include "chrome/browser/infobars/infobar_spec.h"
 #include "chrome/browser/lookalikes/safety_tip_ui_helper.h"
 #include "chrome/browser/ui/browser.h"
@@ -168,11 +170,7 @@ ChromePageInfoDelegate::GetChooserContext(ContentSettingsType type) {
     case ContentSettingsType::SERIAL_CHOOSER_DATA:
       return SerialChooserContextFactory::GetForProfile(GetProfile());
     case ContentSettingsType::HID_CHOOSER_DATA:
-#if !BUILDFLAG(IS_ANDROID)
       return HidChooserContextFactory::GetForProfile(GetProfile());
-#else
-      NOTREACHED();
-#endif
     case ContentSettingsType::SMART_CARD_DATA:
 #if BUILDFLAG(IS_CHROMEOS)
       if (base::FeatureList::IsEnabled(blink::features::kSmartCard)) {
@@ -472,6 +470,13 @@ void ChromePageInfoDelegate::OnSuspiciousSiteBackToSafety() {
             kBackToSafetyButton);
     return;
   }
+#else
+  if (auto* ssc =
+          safe_browsing::SuspiciousSiteControllerDesktop::FromWebContents(
+              web_contents_)) {
+    ssc->OnBackToSafetyClicked();
+    return;
+  }
 #endif
   if (!web_contents_) {
     return;
@@ -506,6 +511,13 @@ void ChromePageInfoDelegate::OnSuspiciousSiteMarkAsSafe() {
     ssc->OnContinueButtonClicked();
     return;
   }
+#else
+  if (auto* ssc =
+          safe_browsing::SuspiciousSiteControllerDesktop::FromWebContents(
+              web_contents_)) {
+    ssc->OnMarkAsSafeClicked();
+    return;
+  }
 #endif
   if (!web_contents_) {
     return;
@@ -523,6 +535,7 @@ void ChromePageInfoDelegate::OnSuspiciousSiteMarkAsSafe() {
           std::string(current_url.host()));
     }
   }
+  web_contents_->DidChangeVisibleSecurityState();
 }
 
 std::u16string ChromePageInfoDelegate::GetSubjectName(const GURL& url) {

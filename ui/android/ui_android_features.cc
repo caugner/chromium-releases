@@ -9,6 +9,9 @@ namespace ui {
 
 BASE_FEATURE(kAndroidHDR, base::FEATURE_ENABLED_BY_DEFAULT);
 
+BASE_FEATURE(kAndroidResourceMemoryOptimization,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 BASE_FEATURE(kAndroidUseCorrectDisplayWorkArea,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
@@ -16,7 +19,7 @@ BASE_FEATURE(kAndroidUseCorrectWindowBounds, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kAndroidUseDisplayTopology, base::FEATURE_DISABLED_BY_DEFAULT);
 
-BASE_FEATURE(kAndroidWindowOcclusion, base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kAndroidWindowOcclusion, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kBlockMouseEventsOnView, base::FEATURE_ENABLED_BY_DEFAULT);
 
@@ -32,6 +35,8 @@ BASE_FEATURE(kClipboardConfusedDeputyDefenseImages,
              base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kClipboardConfusedDeputyDefenseFiles,
              base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kClipboardOversizedPayloadProvider,
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kDeprecatedExternalPickerFunction,
              base::FEATURE_DISABLED_BY_DEFAULT);
@@ -41,6 +46,8 @@ BASE_FEATURE(kDisablePhotoPickerForVideoCapture,
 
 BASE_FEATURE(kMaximumWindowForGestureNavDetection,
              base::FEATURE_ENABLED_BY_DEFAULT);
+
+BASE_FEATURE(kPointerLockMouseScaling, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kRefactorMinWidthContextOverride,
              base::FEATURE_ENABLED_BY_DEFAULT);

@@ -79,6 +79,7 @@ builders.builder(
     triggered_by = [],
     pool = "luci.chromium.ci",
     builderless = True,
+    ssd = None,
     console_view_entry = consoles.console_view_entry(
         console_view = "infra",
         category = "autosharder",
@@ -105,6 +106,7 @@ builders.builder(
             "android-x86-rel",
         ],
         "exclude_suites": [
+            "ash_pixeltests",
             "chrome_all_tast_tests",
         ],
         "target_runtime": 15.0,
