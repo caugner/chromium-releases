@@ -8,8 +8,10 @@
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
 #include "build/branding_buildflags.h"
+#include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/lens/lens_overlay_theme_utils.h"
 #include "chrome/grit/branded_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
@@ -102,6 +104,12 @@ LensPermissionBubbleController::CreateLensPermissionDialogModel() {
           &LensPermissionBubbleController::OnHelpCenterLinkClicked,
           weak_ptr_factory_.GetWeakPtr()));
 
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  bool dark_mode =
+      lens::LensOverlayShouldUseDarkMode(ThemeServiceFactory::GetForProfile(
+          browser_window_interface_->GetProfile()));
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
+
   auto description_text =
       lens::features::IsLensOverlayContextualSearchboxEnabled()
           ? ui::DialogModelLabel::CreateWithReplacement(
@@ -114,8 +122,10 @@ LensPermissionBubbleController::CreateLensPermissionDialogModel() {
       .SetTitle(
           l10n_util::GetStringUTF16(IDS_LENS_PERMISSION_BUBBLE_DIALOG_TITLE))
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
-      .SetIcon(ui::ImageModel::FromVectorIcon(vector_icons::kGoogleColorIcon,
-                                              ui::kColorIcon, 20))
+      .SetIcon(ui::ImageModel::FromVectorIcon(
+          dark_mode ? vector_icons::kGoogleGLogoMonochromeIcon
+                    : vector_icons::kGoogleColorIcon,
+          dark_mode ? ui::kColorRefPrimary100 : ui::kColorIcon, 20))
       .SetBannerImage(ui::ImageModel::FromImageSkia(
           *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
               IDR_LENS_PERMISSION_MODAL_IMAGE)))
@@ -162,11 +172,21 @@ void LensPermissionBubbleController::OnHelpCenterLinkClicked(
 void LensPermissionBubbleController::OnPermissionDialogAccept() {
   RecordPermissionUserAction(LensPermissionUserAction::kAcceptButtonPressed,
                              invocation_source_);
+  base::WeakPtr<LensPermissionBubbleController>
+      lens_permission_bubble_controller = weak_ptr_factory_.GetWeakPtr();
   pref_service_->SetBoolean(prefs::kLensSharingPageScreenshotEnabled, true);
-  if (lens::features::IsLensOverlayContextualSearchboxEnabled()) {
+  // TODO(crbug.com/401029609): Rethink permission bubble lifetime.
+  // Must check WeakPtr in case CloseUISync() is called in
+  // LensOverlayController. This happens if the LensOverlayController cannot
+  // successfully take a screenshot of the page. If CloseUISync() is called,
+  // LensPermissionBubbleController gets reset before the following.
+  if (lens_permission_bubble_controller.get() &&
+      lens::features::IsLensOverlayContextualSearchboxEnabled()) {
     pref_service_->SetBoolean(prefs::kLensSharingPageContentEnabled, true);
   }
-  dialog_widget_ = nullptr;
+  if (lens_permission_bubble_controller.get()) {
+    dialog_widget_ = nullptr;
+  }
 }
 
 void LensPermissionBubbleController::OnPermissionDialogCancel() {

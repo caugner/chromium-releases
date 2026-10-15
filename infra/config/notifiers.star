@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-load("//lib/branches.star", "branches")
+load("@chromium-luci//branches.star", "branches")
 
 luci.notifier(
     name = "chromesec-lkgr-failures",
@@ -331,9 +331,18 @@ luci.notifier(
 luci.notifier(
     name = "chrome-fake-vaapi-test",
     on_occurrence = ["SUCCESS", "FAILURE", "INFRA_FAILURE"],
-    failed_step_regexp = "video_decode_accelerator_tests_fake_vaapi.*",
+    failed_step_regexp = "video_decode_accelerator_tests_fake_vaapi*",
     notify_emails = [
         "bchoobineh@google.com",
+    ],
+)
+
+luci.notifier(
+    name = "chrome-v4l2-visl-test",
+    on_occurrence = ["SUCCESS", "FAILURE", "INFRA_FAILURE"],
+    failed_step_regexp = "video_decode_accelerator_tests_v4l2*",
+    notify_emails = [
+        "stevecho@google.com",
     ],
 )
 

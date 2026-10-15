@@ -478,6 +478,9 @@ bool OffscreenCanvas::EnableAcceleration() {
   // will be an accelerated canvas once it has been created.
   CanvasResourceProvider* provider =
       GetOrCreateCanvasResourceProvider(RasterModeHint::kPreferGPU);
+  if (!provider) {
+    return false;
+  }
   return provider->IsAccelerated();
 }
 
@@ -647,6 +650,7 @@ bool OffscreenCanvas::PushFrame(scoped_refptr<CanvasResource>&& canvas_resource,
     return false;
   const base::TimeTicks commit_start_time = base::TimeTicks::Now();
   const bool needs_vertical_flip = !canvas_resource->IsOriginTopLeft();
+  canvas_resource->SetOriginClean(OriginClean());
   GetOrCreateResourceDispatcher()->DispatchFrame(
       std::move(canvas_resource), commit_start_time, current_frame_damage_rect_,
       needs_vertical_flip, IsOpaque());

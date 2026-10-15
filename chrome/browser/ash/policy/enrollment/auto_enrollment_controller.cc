@@ -406,8 +406,7 @@ void AutoEnrollmentController::OnOwnershipStatusCheckDone(
           // The ownership check is only triggered if
           // `auto_enrollment_check_type_` indicates that an auto-enrollment
           // check should be done.
-          NOTREACHED_IN_MIGRATION();
-          break;
+          NOTREACHED();
       }
       return;
     case ash::DeviceSettingsService::OwnershipStatus::kOwnershipTaken:
@@ -707,6 +706,12 @@ void AutoEnrollmentController::SetEnrollmentStateFetcherFactoryForTesting(
     enrollment_state_fetcher_factory_ =
         base::BindRepeating(EnrollmentStateFetcher::Create);
   }
+}
+
+bool AutoEnrollmentController::IsGuestSigninAllowed() const {
+  return auto_enrollment_check_type_ !=
+         AutoEnrollmentTypeChecker::CheckType::
+             kForcedReEnrollmentExplicitlyRequired;
 }
 
 }  // namespace policy

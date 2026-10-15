@@ -10,6 +10,7 @@
 #import "base/metrics/user_metrics_action.h"
 #import "base/strings/sys_string_conversions.h"
 #import "components/open_from_clipboard/clipboard_recent_content.h"
+#import "components/optimization_guide/optimization_guide_buildflags.h"
 #import "components/search_engines/template_url_service.h"
 #import "ios/chrome/browser/ntp/model/new_tab_page_util.h"
 #import "ios/chrome/browser/overlays/model/public/overlay_presenter.h"
@@ -451,7 +452,14 @@
   } else {
     cameraSearch = [self.actionFactory actionToShowQRScanner];
   }
+
+#if BUILDFLAG(BUILD_WITH_INTERNAL_OPTIMIZATION_GUIDE)
+  UIAction* openAIMenu = [self.actionFactory actionToOpenAIMenu];
+  staticActions =
+      @[ newSearch, newIncognitoSearch, voiceSearch, cameraSearch, openAIMenu ];
+#else
   staticActions = @[ newSearch, newIncognitoSearch, voiceSearch, cameraSearch ];
+#endif
 
   UIMenuElement* clipboardAction = [self menuElementForPasteboard];
 
@@ -528,7 +536,7 @@
 
 // Returns the tab group of the active web state, if any.
 - (const TabGroup*)activeWebStateTabGroup {
-  if (IsTabGroupIndicatorEnabled()) {
+  if (IsTabGroupInGridEnabled()) {
     const int active_index = _webStateList->active_index();
     if (active_index != WebStateList::kInvalidIndex) {
       return _webStateList->GetGroupOfWebStateAt(active_index);
@@ -540,15 +548,22 @@
 // Returns the tab count to display in the Tab Grid button.
 - (int)tabCountToDisplay {
   const TabGroup* activeTabGroup = [self activeWebStateTabGroup];
-  return activeTabGroup ? activeTabGroup->range().count()
-                        : _webStateList->count();
+  if (activeTabGroup == nullptr) {
+    return _webStateList->count();
+  }
+
+  return IsTabGroupIndicatorEnabled() ? activeTabGroup->range().count()
+                                      : _webStateList->count();
 }
 
 // Returns the tab group state to display in the Tab Grid button.
 - (ToolbarTabGroupState)tabGroupStateToDisplay {
-  return [self activeWebStateTabGroup] != nullptr
-             ? ToolbarTabGroupState::kTabGroup
-             : ToolbarTabGroupState::kNormal;
+  const TabGroup* activeTabGroup = [self activeWebStateTabGroup];
+  if (activeTabGroup == nullptr) {
+    return ToolbarTabGroupState::kNormal;
+  }
+  return IsTabGroupIndicatorEnabled() ? ToolbarTabGroupState::kTabGroup
+                                      : ToolbarTabGroupState::kNormal;
 }
 
 @end

@@ -83,7 +83,7 @@ void TCPReadableStreamWrapper::OnHandleReady(MojoResult result,
       break;
 
     default:
-      NOTREACHED_IN_MIGRATION();
+      NOTREACHED();
   }
 }
 
@@ -133,8 +133,7 @@ void TCPReadableStreamWrapper::Pull() {
       return;
 
     default:
-      NOTREACHED_IN_MIGRATION() << "Unexpected result: " << result;
-      return;
+      NOTREACHED() << "Unexpected result: " << result;
   }
 }
 
@@ -147,7 +146,7 @@ void TCPReadableStreamWrapper::CloseStream() {
   SetState(State::kClosed);
 
   ResetPipe();
-  std::move(on_close_).Run(ScriptValue());
+  std::move(on_close_).Run(v8::Local<v8::Value>());
   return;
 }
 
@@ -177,26 +176,25 @@ void TCPReadableStreamWrapper::ErrorStream(int32_t error_code) {
       DCHECK(ReadableStream::IsReadable(Readable()));
       NonThrowableExceptionState exception_state;
       Controller()->close(script_state, exception_state);
-      std::move(on_close_).Run(ScriptValue());
+      std::move(on_close_).Run(v8::Local<v8::Value>());
     }
     return;
   }
 
   SetState(State::kAborted);
 
-  auto exception = ScriptValue(
-      script_state->GetIsolate(),
-      V8ThrowDOMException::CreateOrDie(script_state->GetIsolate(),
-                                       DOMExceptionCode::kNetworkError,
-                                       String{"Stream aborted by the remote: " +
-                                              net::ErrorToString(error_code)}));
+  auto exception = V8ThrowDOMException::CreateOrDie(
+      script_state->GetIsolate(), DOMExceptionCode::kNetworkError,
+      String{"Stream aborted by the remote: " +
+             net::ErrorToString(error_code)});
 
   if (data_pipe_) {
-    pending_exception_ = exception;
+    pending_exception_.Reset(script_state->GetIsolate(), exception);
     return;
   }
 
-  Controller()->error(script_state, exception);
+  Controller()->error(script_state,
+                      ScriptValue(script_state->GetIsolate(), exception));
   std::move(on_close_).Run(exception);
 }
 
@@ -235,19 +233,22 @@ void TCPReadableStreamWrapper::OnHandleReset(MojoResult result,
 
   ScriptState::Scope scope(script_state);
   if (!pending_exception_.IsEmpty()) {
-    Controller()->error(script_state, pending_exception_);
+    auto* isolate = script_state->GetIsolate();
+    auto exception = pending_exception_.Get(isolate);
+    Controller()->error(script_state,
+                        ScriptValue(script_state->GetIsolate(), exception));
 
     SetState(State::kAborted);
-    std::move(on_close_).Run(pending_exception_);
+    std::move(on_close_).Run(exception);
 
-    pending_exception_.Clear();
+    pending_exception_.Reset();
   } else if (graceful_peer_shutdown_) {
     DCHECK(ReadableStream::IsReadable(Readable()));
     NonThrowableExceptionState exception_state;
     Controller()->close(script_state, exception_state);
 
     SetState(State::kClosed);
-    std::move(on_close_).Run(ScriptValue());
+    std::move(on_close_).Run(v8::Local<v8::Value>());
   }
 }
 

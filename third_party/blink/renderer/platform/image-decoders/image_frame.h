@@ -130,7 +130,9 @@ class PLATFORM_EXPORT ImageFrame final {
   // written, and should only be called once. The specified color space may be
   // null if and only if color correct rendering is enabled. Returns true if the
   // allocation succeeded.
-  bool AllocatePixelData(int new_width, int new_height, sk_sp<SkColorSpace>);
+  [[nodiscard]] bool AllocatePixelData(int new_width,
+                                       int new_height,
+                                       sk_sp<SkColorSpace>);
 
   bool HasAlpha() const { return has_alpha_; }
   PixelFormat GetPixelFormat() const { return pixel_format_; }
@@ -194,7 +196,7 @@ class PLATFORM_EXPORT ImageFrame final {
     DCHECK(pixel_format_ == kRGBA_F16);
     SkPixmap pixmap;
     if (!bitmap_.peekPixels(&pixmap)) {
-      NOTREACHED_IN_MIGRATION();
+      NOTREACHED();
     }
     return pixmap.writable_addr64(x, y);
   }

@@ -13,7 +13,6 @@
 #include "ash/accessibility/sticky_keys/sticky_keys_overlay.h"
 #include "ash/constants/ash_features.h"
 #include "ash/constants/ash_pref_names.h"
-#include "ash/constants/ash_switches.h"
 #include "ash/public/cpp/input_device_settings_controller.h"
 #include "ash/public/cpp/test/mock_input_device_settings_controller.h"
 #include "ash/public/mojom/input_device_settings.mojom.h"
@@ -994,8 +993,6 @@ class EventRewriterTestBase : public ChromeAshTestBase {
   TestEventSink sink_;
   ui::test::TestEventSource source_{&sink_};
   message_center::FakeMessageCenter message_center_;
-  base::AutoReset<bool> ignore_modifier_split_secret_key_ =
-      switches::SetIgnoreModifierSplitSecretKeyForTest();
   raw_ptr<DeprecationNotificationController>
       deprecation_controller_;  // Not owned.
   raw_ptr<InputDeviceSettingsNotificationController>
@@ -5615,6 +5612,24 @@ TEST_P(EventRewriterSettingsSplitTest, TopRowAreFKeys) {
   EXPECT_EQ(KeyF1::Typed(), RunRewriter(KeyF1::Typed()));
 }
 
+TEST_P(EventRewriterSettingsSplitTest,
+       TopRowAreFKeys_unknownDeviceRespectsPreference) {
+  // Create the preference.
+  Preferences::RegisterProfilePrefs(prefs()->registry());
+  BooleanPrefMember top_row_as_fn_key_pref;
+  top_row_as_fn_key_pref.Init(prefs::kSendFunctionKeys, prefs());
+
+  // Pretend the settings controller doesn't know the keyboard.
+  EXPECT_CALL(*input_device_settings_controller_mock_, GetKeyboardSettings)
+      .WillRepeatedly(testing::Return(nullptr));
+
+  top_row_as_fn_key_pref.SetValue(true);
+  EXPECT_EQ(RunRewriter(KeyF1::Typed()), KeyF1::Typed());
+
+  top_row_as_fn_key_pref.SetValue(false);
+  EXPECT_EQ(RunRewriter(KeyF1::Typed()), KeyBrowserBack::Typed());
+}
+
 TEST_P(EventRewriterSettingsSplitTest, RewriteMetaTopRowKeyComboEvents) {
   mojom::KeyboardSettings settings;
   settings.top_row_are_fkeys = true;
@@ -5884,7 +5899,6 @@ class FKeysRewritingPeripheralCustomizationTest
 
  protected:
   mojom::MouseSettings mouse_settings_;
-  mojom::KeyboardSettings keyboard_settings_;
 };
 
 INSTANTIATE_TEST_SUITE_P(All,

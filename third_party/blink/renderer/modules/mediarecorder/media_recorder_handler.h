@@ -10,6 +10,7 @@
 #include <string_view>
 
 #include "base/feature_list.h"
+#include "base/memory/weak_ptr.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
@@ -22,13 +23,15 @@
 #include "third_party/blink/renderer/modules/mediarecorder/video_track_recorder.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/heap/weak_cell.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
-#if BUILDFLAG(USE_PROPRIETARY_CODECS)
-#include "media/formats/mp4/h264_annex_b_to_avc_bitstream_converter.h"
+#if BUILDFLAG(USE_PROPRIETARY_CODECS) || \
+    BUILDFLAG(ENABLE_HEVC_PARSER_AND_HW_DECODER)
+#include "media/formats/mp4/h26x_annex_b_to_bitstream_converter.h"
 #endif
 
 namespace media {
@@ -48,6 +51,14 @@ struct WebMediaConfiguration;
 
 MODULES_EXPORT BASE_DECLARE_FEATURE(kMediaRecorderEnableMp4Muxer);
 
+// Helper function to convert media recorder codec id to media video codec.
+MODULES_EXPORT media::VideoCodec MediaVideoCodecFromCodecId(
+    VideoTrackRecorder::CodecId id);
+
+// Helper function to parse a codec string to codec/profile/level.
+MODULES_EXPORT VideoTrackRecorder::CodecProfile VideoStringToCodecProfile(
+    const String& codecs);
+
 // MediaRecorderHandler orchestrates the creation, lifetime management and
 // mapping between:
 // - MediaStreamTrack(s) providing data,
@@ -59,8 +70,7 @@ MODULES_EXPORT BASE_DECLARE_FEATURE(kMediaRecorderEnableMp4Muxer);
 class MODULES_EXPORT MediaRecorderHandler final
     : public GarbageCollected<MediaRecorderHandler>,
       public VideoTrackRecorder::CallbackInterface,
-      public AudioTrackRecorder::CallbackInterface,
-      public WebMediaStreamObserver {
+      public AudioTrackRecorder::CallbackInterface {
  public:
   MediaRecorderHandler(
       scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner,
@@ -105,10 +115,34 @@ class MODULES_EXPORT MediaRecorderHandler final
  private:
   friend class MediaRecorderHandlerFixture;
   friend class MediaRecorderHandlerPassthroughTest;
+  friend class MediaStreamObserver;
 
-  // WebMediaStreamObserver overrides.
-  void TrackAdded(const WebString& track_id) override;
-  void TrackRemoved(const WebString& track_id) override;
+  class MediaStreamObserver : public WebMediaStreamObserver {
+   public:
+    explicit MediaStreamObserver(MediaRecorderHandler* handler)
+        : media_recorder_handler_(handler) {}
+
+    // WebMediaStreamObserver overrides.
+    void TrackAdded(const WebString& track_id) override {
+      CHECK(media_recorder_handler_);
+      media_recorder_handler_->TrackAdded(track_id);
+    }
+    void TrackRemoved(const WebString& track_id) override {
+      CHECK(media_recorder_handler_);
+      media_recorder_handler_->TrackRemoved(track_id);
+    }
+
+    base::WeakPtr<WebMediaStreamObserver> AsWeakPtr() {
+      return weak_factory_.GetWeakPtr();
+    }
+
+   private:
+    WeakPersistent<MediaRecorderHandler> media_recorder_handler_;
+    base::WeakPtrFactory<WebMediaStreamObserver> weak_factory_{this};
+  };
+
+  void TrackAdded(const WebString& track_id);
+  void TrackRemoved(const WebString& track_id);
 
   // VideoTrackRecorder::CallbackInterface overrides.
   void OnEncodedVideo(
@@ -206,9 +240,13 @@ class MODULES_EXPORT MediaRecorderHandler final
   // Worker class doing the actual muxing work.
   std::unique_ptr<media::MuxerTimestampAdapter> muxer_adapter_;
 
-#if BUILDFLAG(USE_PROPRIETARY_CODECS)
-  std::unique_ptr<media::H264AnnexBToAvcBitstreamConverter> h264_converter_;
+#if BUILDFLAG(USE_PROPRIETARY_CODECS) || \
+    BUILDFLAG(ENABLE_HEVC_PARSER_AND_HW_DECODER)
+  // Converter to get the codec description from Annex-B bitstream keyframes.
+  std::unique_ptr<media::H26xAnnexBToBitstreamConverter> h26x_converter_;
 #endif
+
+  std::unique_ptr<MediaStreamObserver> media_stream_observer_;
 
   // For invalidation of in-flight callbacks back to ourselves. Need to track
   // each callback interface specifically as there seem to be no automatic

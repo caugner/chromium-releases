@@ -334,7 +334,7 @@
 <translation id="36451918667380448">મોબાઇલ નેટવર્ક પ્રદાતા લૉક કરેલા છે. સપોર્ટ માટે તમારા પ્રદાતાનો સંપર્ક કરો.</translation>
 <translation id="3645233063072417428"><ph name="NUMBER_OF_ITEMS" /> આઇટમ ખસેડી.</translation>
 <translation id="3658269352872031728"><ph name="SELECTED_FILE_COUNT" /> ફાઇલ પસંદ કરી</translation>
-<translation id="3685122418104378273">મોબાઇલ ડેટાનો ઉપયોગ કરી રહ્યાં હોય ત્યારે, Google ડ્રાઇવ સિંક ડિફોલ્ટ રૂપે બંધ છે.</translation>
+<translation id="3685122418104378273">મોબાઇલ ડેટાનો ઉપયોગ કરી રહ્યાં હોય ત્યારે, Google Drive સિંક ડિફૉલ્ટ તરીકે બંધ છે.</translation>
 <translation id="3689865792480713551"><ph name="ACTIVITY_DESCRIPTION" />ને રદ કરો.</translation>
 <translation id="3690128548376345212"><ph name="NETWORK_COUNT" />માંથી <ph name="NETWORK_INDEX" /> નેટવર્ક, <ph name="NETWORK_NAME" />, સક્રિય કર્યા વિનાનું, <ph name="CONNECTION_STATUS" />, સિગ્નલની પ્રબળતા <ph name="SIGNAL_STRENGTH" />%, વિગતો</translation>
 <translation id="3691184985318546178">સિંહાલા</translation>
@@ -422,6 +422,7 @@
 <translation id="4387004326333427325">પ્રમાણીકરણ પ્રમાણપત્ર રિમોટલી નકારવામાં આવ્યું છે</translation>
 <translation id="4394214039309501350">બાહ્ય લિંક</translation>
 <translation id="4394980935660306080">આ અઠવાડિયાની શરૂઆતમાં</translation>
+<translation id="4397435965699247285">ઑફલાઇન હોવા પર OneDrive ઉપલબ્ધ હોતી નથી</translation>
 <translation id="4398096759193130964">આઇટમ રિસ્ટોર કરો અથવા તેમને ટ્રેશની બહાર કોઈ નવા ફોલ્ડર પર ખેંચો</translation>
 <translation id="4401287888955153199">બધું એક્સટ્રેક્ટ કરો</translation>
 <translation id="4410695710508688828">એક્સટ્રેક્ટ કરવામાં નિષ્ફ્ળ રહ્યાં. <ph name="ERROR_MESSAGE" /></translation>

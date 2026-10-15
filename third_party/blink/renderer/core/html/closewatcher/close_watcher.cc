@@ -134,7 +134,9 @@ void CloseWatcher::WatcherStack::EscapeKeyHandler(KeyboardEvent* event) {
 void CloseWatcher::WatcherStack::Signal() {
   if (!watcher_groups_.empty()) {
     auto& group = watcher_groups_.back();
-    for (auto& watcher : base::Reversed(group)) {
+
+    HeapVector<Member<CloseWatcher>> group_copy(group);
+    for (auto& watcher : base::Reversed(group_copy)) {
       if (!watcher->requestClose()) {
         break;
       }
@@ -207,6 +209,10 @@ bool CloseWatcher::requestClose() {
   if (IsClosed() || dispatching_cancel_ || !DomWindow()) {
     return true;
   }
+  if (!enabled_) {
+    CHECK(RuntimeEnabledFeatures::HTMLDialogLightDismissEnabled());
+    return true;
+  }
 
   WatcherStack& stack = *DomWindow()->closewatcher_stack();
   Event& cancel_event =
@@ -231,10 +237,11 @@ bool CloseWatcher::requestClose() {
 }
 
 void CloseWatcher::close() {
-  if (IsClosed()) {
+  if (IsClosed() || !DomWindow() || !DomWindow()->document()->IsActive()) {
     return;
   }
-  if (!DomWindow() || !DomWindow()->document()->IsActive()) {
+  if (!enabled_) {
+    CHECK(RuntimeEnabledFeatures::HTMLDialogLightDismissEnabled());
     return;
   }
 

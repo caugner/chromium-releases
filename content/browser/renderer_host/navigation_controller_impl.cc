@@ -165,8 +165,7 @@ bool ShouldOverrideUserAgent(
     case NavigationController::UA_OVERRIDE_FALSE:
       return false;
   }
-  NOTREACHED_IN_MIGRATION();
-  return false;
+  NOTREACHED();
 }
 
 // Returns true if this navigation should be treated as a reload. For e.g.
@@ -478,7 +477,7 @@ void ValidateRequestMatchesEntry(NavigationRequest* request,
                 frame_entry->redirect_chain()[i]);
     }
   } else {
-    NOTREACHED_IN_MIGRATION();
+    NOTREACHED();
   }
 }
 #endif  // DCHECK_IS_ON()
@@ -1365,8 +1364,7 @@ base::WeakPtr<NavigationHandle> NavigationControllerImpl::LoadURLWithParams(
       break;
     case LOAD_TYPE_DATA:
       if (!params.url.SchemeIs(url::kDataScheme)) {
-        NOTREACHED_IN_MIGRATION() << "Data load must use data scheme.";
-        return nullptr;
+        NOTREACHED() << "Data load must use data scheme.";
       }
       break;
   }
@@ -1635,8 +1633,7 @@ bool NavigationControllerImpl::RendererDidNavigate(
       }
       break;
     case NAVIGATION_TYPE_UNKNOWN:
-      NOTREACHED_IN_MIGRATION();
-      break;
+      NOTREACHED();
   }
 
   // At this point, we know that the navigation has just completed, so
@@ -4111,7 +4108,8 @@ NavigationControllerImpl::CreateNavigationRequestFromLoadParams(
           /*lcpp_hint=*/nullptr, blink::CreateDefaultRendererContentSettings(),
           /*cookie_deprecation_label=*/std::nullopt,
           /*visited_link_salt=*/std::nullopt,
-          /*local_surface_id=*/std::nullopt);
+          /*local_surface_id=*/std::nullopt,
+          node->current_frame_host()->GetCachedPermissionStatuses());
 #if BUILDFLAG(IS_ANDROID)
   if (ValidateDataURLAsString(params.data_url_as_string)) {
     commit_params->data_url_as_string = params.data_url_as_string->as_string();
@@ -4252,6 +4250,8 @@ NavigationControllerImpl::CreateNavigationRequestFromEntry(
   commit_params->navigation_timing->system_entropy_at_navigation_start =
       SystemEntropyUtils::ComputeSystemEntropyForFrameTreeNode(
           frame_tree_node, blink::mojom::SystemEntropy::kNormal);
+  commit_params->initial_permission_statuses =
+      frame_tree_node->current_frame_host()->GetCachedPermissionStatuses();
 
   if (common_params->url.IsAboutSrcdoc()) {
     // TODO(wjmaclean): initialize this in NavigationRequest's constructor
@@ -4620,13 +4620,13 @@ void NavigationControllerImpl::BroadcastHistoryOffsetAndLength() {
       "history_offset", GetLastCommittedEntryIndex(), "history_length",
       GetEntryCount());
 
-  auto callback = base::BindRepeating(
-      [](int history_offset, int history_length, RenderViewHostImpl* rvh) {
-        if (auto& broadcast = rvh->GetAssociatedPageBroadcast()) {
-          broadcast->SetHistoryOffsetAndLength(history_offset, history_length);
-        }
-      },
-      GetLastCommittedEntryIndex(), GetEntryCount());
+  int history_offset = GetLastCommittedEntryIndex();
+  int history_length = GetEntryCount();
+  auto callback = [history_offset, history_length](RenderViewHostImpl* rvh) {
+    if (auto& broadcast = rvh->GetAssociatedPageBroadcast()) {
+      broadcast->SetHistoryOffsetAndLength(history_offset, history_length);
+    }
+  };
   frame_tree_->root()->render_manager()->ExecutePageBroadcastMethod(callback);
 }
 

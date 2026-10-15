@@ -124,6 +124,9 @@ int FakeSocket::Write(
   DCHECK(buf);
   DCHECK(!write_pending_);
 
+  if (error_on_next_write_ != 0) {
+    return error_on_next_write_;
+  }
   if (async_write_) {
     base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE,
@@ -168,7 +171,7 @@ int FakeSocket::Connect(net::CompletionOnceCallback callback) {
 }
 
 void FakeSocket::Disconnect() {
-  NOTREACHED_IN_MIGRATION();
+  NOTREACHED();
 }
 
 bool FakeSocket::IsConnected() const {
@@ -190,8 +193,7 @@ int FakeSocket::GetLocalAddress(net::IPEndPoint* address) const {
 }
 
 const net::NetLogWithSource& FakeSocket::NetLog() const {
-  NOTREACHED_IN_MIGRATION();
-  return net_log_;
+  NOTREACHED();
 }
 
 bool FakeSocket::WasEverUsed() const {

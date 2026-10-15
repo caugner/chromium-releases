@@ -84,7 +84,7 @@
 <translation id="1665611772925418501">El fitxer no s'ha pogut modificar.</translation>
 <translation id="1673103856845176271">No s'ha pogut accedir al fitxer per qüestions de seguretat.</translation>
 <translation id="169515659049020177">Maj</translation>
-<translation id="1715848075824334077">Persona en bicicleta</translation>
+<translation id="1715848075824334077">Persona amb bicicleta</translation>
 <translation id="1722487484194605434">S'estan comprimint <ph name="NUMBER_OF_ITEMS" /> elements...</translation>
 <translation id="1722687688096767818">S'està afegint el perfil...</translation>
 <translation id="1726100011689679555">Servidors de noms</translation>
@@ -422,6 +422,7 @@
 <translation id="4387004326333427325">S'ha rebutjat el certificat d'autenticació de manera remota</translation>
 <translation id="4394214039309501350">Enllaç extern</translation>
 <translation id="4394980935660306080">Aquesta setmana</translation>
+<translation id="4397435965699247285">OneDrive no està disponible sense connexió</translation>
 <translation id="4398096759193130964">Restaura els elements o arrossega'ls a una carpeta nova fora de la paperera</translation>
 <translation id="4401287888955153199">Extreu-ho tot</translation>
 <translation id="4410695710508688828">L'operació d'extracció ha fallat. <ph name="ERROR_MESSAGE" /></translation>

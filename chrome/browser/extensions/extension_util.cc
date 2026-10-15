@@ -124,6 +124,18 @@ bool IsLoginScreenExtension(
 #endif
 }
 
+#if BUILDFLAG(IS_CHROMEOS)
+bool IsPolicyInstalled(const ExtensionId& extension_id,
+                       content::BrowserContext* context) {
+  const Extension* extension =
+      ExtensionRegistry::Get(context)->GetInstalledExtension(extension_id);
+  if (!extension) {
+    return false;
+  }
+
+  return Manifest::IsPolicyLocation(extension->location());
+}
+#endif
 }  // namespace
 
 bool HasIsolatedStorage(const ExtensionId& extension_id,
@@ -182,6 +194,14 @@ void SetIsIncognitoEnabled(const std::string& extension_id,
   }
 
   ExtensionPrefs* extension_prefs = ExtensionPrefs::Get(context);
+#if BUILDFLAG(IS_CHROMEOS)
+  // Admin installed extensions should not be restartable, so we will apply the
+  // change when Chrome restarts.
+  if (IsPolicyInstalled(extension_id, context)) {
+    extension_prefs->SetIsIncognitoEnabledDelayed(extension_id, enabled);
+    return;
+  }
+#endif
   // Broadcast unloaded and loaded events to update browser state. Only bother
   // if the value changed and the extension is actually enabled, since there is
   // no UI otherwise.
@@ -204,6 +224,15 @@ void SetIsIncognitoEnabled(const std::string& extension_id,
 void SetAllowFileAccess(const std::string& extension_id,
                         content::BrowserContext* context,
                         bool allow) {
+#if BUILDFLAG(IS_CHROMEOS)
+  // Admin installed extensions should not be restartable, so we will apply the
+  // change when Chrome restarts.
+  if (IsPolicyInstalled(extension_id, context)) {
+    ExtensionPrefs::Get(context)->SetAllowFileAccessDelayed(extension_id,
+                                                            allow);
+    return;
+  }
+#endif
   // Reload to update browser state if the value changed. We need to reload even
   // if the extension is disabled, in order to make sure file access is
   // reinitialized correctly.
@@ -214,23 +243,6 @@ void SetAllowFileAccess(const std::string& extension_id,
   ExtensionPrefs::Get(context)->SetAllowFileAccess(extension_id, allow);
 
   ReloadExtension(extension_id, context);
-}
-
-bool ShouldSync(const Extension* extension,
-                content::BrowserContext* context) {
-  ExtensionManagement* extension_management =
-      ExtensionManagementFactory::GetForBrowserContext(context);
-  // Update URL is overridden only for non webstore extensions and offstore
-  // extensions should not be synced.
-  if (extension_management->IsUpdateUrlOverridden(extension->id())) {
-    const GURL update_url =
-        extension_management->GetEffectiveUpdateURL(*extension);
-    DCHECK(!extension_urls::IsWebstoreUpdateUrl(update_url))
-        << "Update URL cannot be overridden to be the webstore URL!";
-    return false;
-  }
-  return sync_helper::IsSyncable(extension) &&
-         !ExtensionPrefs::Get(context)->DoNotSync(extension->id());
 }
 
 bool IsExtensionIdle(const std::string& extension_id,
@@ -350,13 +362,17 @@ void SetDeveloperModeForProfile(Profile* profile, bool in_developer_mode) {
 }
 
 std::u16string GetFixupExtensionNameForUIDisplay(
-    const std::string& extension_name) {
+    const std::u16string& extension_name) {
   const size_t extension_name_char_limit =
       75;  // Extension name char limit on CWS
   gfx::BreakType break_type = gfx::BreakType::CHARACTER_BREAK;
   std::u16string fixup_extension_name = gfx::TruncateString(
-      base::UTF8ToUTF16(extension_name), extension_name_char_limit, break_type);
+      extension_name, extension_name_char_limit, break_type);
   return fixup_extension_name;
+}
+std::u16string GetFixupExtensionNameForUIDisplay(
+    const std::string& extension_name) {
+  return GetFixupExtensionNameForUIDisplay(base::UTF8ToUTF16(extension_name));
 }
 
 }  // namespace util

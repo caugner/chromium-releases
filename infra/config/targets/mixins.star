@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-load("//lib/targets.star", "targets")
+load("@chromium-luci//targets.star", "targets")
 
 targets.mixin(
     name = "10-x86-emulator",
@@ -71,6 +71,7 @@ targets.mixin(
 
 targets.mixin(
     name = "12-x64-emulator",
+    generate_pyl_entry = False,
     description = "Run with android_31_google_apis_x64",
     args = [
         "--avd-config=../../tools/android/avd/proto/android_31_google_apis_x64.textpb",
@@ -201,30 +202,6 @@ targets.mixin(
     ),
 )
 
-# TODO(crbug.com/370084605): Remove this mixin after the migration is done.
-targets.mixin(
-    name = "13-swangle-x64-emulator",
-    generate_pyl_entry = False,
-    description = "Run with android_33_google_apis_x64_swangle",
-    args = [
-        "--avd-config=../../tools/android/avd/proto/android_33_google_apis_x64_swangle.textpb",
-    ],
-    swarming = targets.swarming(
-        # soft affinity so that bots with caches will be picked first
-        optional_dimensions = {
-            60: {
-                "caches": "android_33_google_apis_x64_swangle",
-            },
-        },
-        named_caches = [
-            swarming.cache(
-                name = "android_33_google_apis_x64_swangle",
-                path = ".android_emulator/android_33_google_apis_x64_swangle",
-            ),
-        ],
-    ),
-)
-
 targets.mixin(
     name = "13-x64-emulator",
     generate_pyl_entry = False,
@@ -243,30 +220,6 @@ targets.mixin(
             swarming.cache(
                 name = "android_33_google_apis_x64",
                 path = ".android_emulator/android_33_google_apis_x64",
-            ),
-        ],
-    ),
-)
-
-# TODO(crbug.com/370084605): Remove this mixin after the migration is done.
-targets.mixin(
-    name = "14-swangle-x64-emulator",
-    generate_pyl_entry = False,
-    description = "Run with android_34_google_apis_x64_swangle",
-    args = [
-        "--avd-config=../../tools/android/avd/proto/android_34_google_apis_x64_swangle.textpb",
-    ],
-    swarming = targets.swarming(
-        # soft affinity so that bots with caches will be picked first
-        optional_dimensions = {
-            60: {
-                "caches": "android_34_google_apis_x64_swangle",
-            },
-        },
-        named_caches = [
-            swarming.cache(
-                name = "android_34_google_apis_x64_swangle",
-                path = ".android_emulator/android_34_google_apis_x64_swangle",
             ),
         ],
     ),
@@ -341,30 +294,6 @@ targets.mixin(
     ),
 )
 
-# TODO(crbug.com/370084605): Remove this mixin after the migration is done.
-targets.mixin(
-    name = "15-swangle-x64-emulator",
-    generate_pyl_entry = False,
-    description = "Run with android_35_google_apis_x64_swangle",
-    args = [
-        "--avd-config=../../tools/android/avd/proto/android_35_google_apis_x64_swangle.textpb",
-    ],
-    swarming = targets.swarming(
-        # soft affinity so that bots with caches will be picked first
-        optional_dimensions = {
-            60: {
-                "caches": "android_35_google_apis_x64_swangle",
-            },
-        },
-        named_caches = [
-            swarming.cache(
-                name = "android_35_google_apis_x64_swangle",
-                path = ".android_emulator/android_35_google_apis_x64_swangle",
-            ),
-        ],
-    ),
-)
-
 targets.mixin(
     name = "amd_radeon_rx_5500_xt",
     swarming = targets.swarming(
@@ -386,6 +315,8 @@ targets.mixin(
 
 targets.mixin(
     name = "arm64",
+    # All references have been moved to starlark
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "cpu": "arm64",
@@ -402,6 +333,7 @@ targets.mixin(
 
 targets.mixin(
     name = "bullhead",
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "device_type": "bullhead",
@@ -467,22 +399,29 @@ targets.mixin(
 )
 
 targets.mixin(
-    name = "shards-20",
-    shards = 20,
+    name = "skylab-shards-20",
+    skylab = targets.skylab(
+        shards = 20,
+    ),
 )
 
 targets.mixin(
-    name = "shards-30",
-    shards = 30,
+    name = "skylab-shards-30",
+    skylab = targets.skylab(
+        shards = 30,
+    ),
 )
 
 targets.mixin(
-    name = "shards-50",
-    shards = 50,
+    name = "skylab-shards-50",
+    skylab = targets.skylab(
+        shards = 50,
+    ),
 )
 
 targets.mixin(
     name = "chromeos-generic-vm",
+    generate_pyl_entry = False,
     args = [
         "--magic-vm-cache=magic_cros_vm_cache",
     ],
@@ -544,25 +483,26 @@ targets.mixin(
 
 targets.mixin(
     name = "chromeos-tast-public-builder",
-    skylab = targets.skylab(
-        args = [
-            # FieldTrial is disabled on ChromeOS builders but not in this builder.
-            # Notify Tast to handle the different UI by that.
-            "tast.setup.FieldTrialConfig=enable",
+    args = [
+        # FieldTrial is disabled on ChromeOS builders but not in this builder.
+        # Notify Tast to handle the different UI by that.
+        "tast.setup.FieldTrialConfig=enable",
 
-            # Tests using the default gaia pool cannot be run by public builders.
-            # These variables are fed by private bundles, thus not for public builders.
-            "maybemissingvars=ui\\.(gaiaPoolDefault|signinProfileTestExtensionManifestKey)|uidetection\\.(key|key_type|server)",
+        # Tests using the default gaia pool cannot be run by public builders.
+        # These variables are fed by private bundles, thus not for public builders.
+        "maybemissingvars=ui\\.(gaiaPoolDefault|signinProfileTestExtensionManifestKey)|uidetection\\.(key|key_type|server)",
 
-            # Use "hash" method to shrding of test tests. This should balance the
-            # execution time among shards in a better way.
-            "shard_method=hash",
-        ],
-    ),
+        # Use "hash" method to shrding of test tests. This should balance the
+        # execution time among shards in a better way.
+        "shard_method=hash",
+    ],
 )
 
 targets.mixin(
     name = "chromium_nexus_5x_oreo",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
+    generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
             "device_os": "OPR4.170623.020",
@@ -576,6 +516,9 @@ targets.mixin(
 
 targets.mixin(
     name = "chromium_pixel_2_pie",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
+    generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
             "device_os": "PQ3A.190801.002",
@@ -589,6 +532,7 @@ targets.mixin(
 
 targets.mixin(
     name = "chromium-tester-dev-service-account",
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         service_account = "chromium-tester-dev@chops-service-accounts.iam.gserviceaccount.com",
     ),
@@ -617,6 +561,7 @@ targets.mixin(
 
 targets.mixin(
     name = "chromium-tests-oslogin",
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "pool": "chromium.tests.oslogin",
@@ -638,6 +583,7 @@ targets.mixin(
 
 targets.mixin(
     name = "disable_field_trial_config_for_earl_grey",
+    generate_pyl_entry = False,
     args = [
         "--extra-app-args=--disable-field-trial-config",
     ],
@@ -668,6 +614,7 @@ targets.mixin(
 
 targets.mixin(
     name = "emulator-8-cores",
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "device_os": None,
@@ -703,6 +650,7 @@ targets.mixin(
 
 targets.mixin(
     name = "finch-chromium-swarming-pool",
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "pool": "chromium.tests.finch",
@@ -790,6 +738,9 @@ targets.mixin(
 
 targets.mixin(
     name = "gpu_nvidia_shield_tv_stable",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
+    generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
             "os": "Android",
@@ -803,6 +754,8 @@ targets.mixin(
 
 targets.mixin(
     name = "gpu_pixel_4_stable",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
     generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
@@ -817,6 +770,8 @@ targets.mixin(
 
 targets.mixin(
     name = "gpu_pixel_6_experimental",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
     generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
@@ -831,6 +786,8 @@ targets.mixin(
 
 targets.mixin(
     name = "gpu_pixel_6_stable",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
     generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
@@ -845,6 +802,9 @@ targets.mixin(
 
 targets.mixin(
     name = "gpu_samsung_a13_stable",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
+    generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
             "os": "Android",
@@ -858,6 +818,9 @@ targets.mixin(
 
 targets.mixin(
     name = "gpu_samsung_a23_stable",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
+    generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
             "os": "Android",
@@ -871,7 +834,9 @@ targets.mixin(
 
 targets.mixin(
     name = "gpu_samsung_s23_stable",
-    generate_pyl_entry = False,
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
+    generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
             # Unfortunately, "s23" is not exposed as a dimension. "dm1q" appears
@@ -888,6 +853,9 @@ targets.mixin(
 
 targets.mixin(
     name = "gpu_samsung_s24_stable",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
+    generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
             # Unfortunately, "s24" is not exposed as a dimension. "e2s" appears
@@ -926,6 +894,7 @@ targets.mixin(
 
 targets.mixin(
     name = "integrity_high",
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "integrity": "high",
@@ -944,6 +913,7 @@ targets.mixin(
 
 targets.mixin(
     name = "ios_custom_webkit",
+    generate_pyl_entry = False,
     args = [
         "--args-json",
         "{\"test_args\": [\"--run-with-custom-webkit\"]}",
@@ -960,6 +930,7 @@ targets.mixin(
 
 targets.mixin(
     name = "ios_parallel_simulators",
+    generate_pyl_entry = False,
     args = [
         "--clones",
         "2",
@@ -989,6 +960,7 @@ targets.mixin(
 
 targets.mixin(
     name = "ios_runtime_cache_17_5",
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         named_caches = [
             swarming.cache(
@@ -1013,6 +985,7 @@ targets.mixin(
 
 targets.mixin(
     name = "ios_runtime_cache_18_1",
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         named_caches = [
             swarming.cache(
@@ -1024,7 +997,21 @@ targets.mixin(
 )
 
 targets.mixin(
+    name = "ios_runtime_cache_18_2",
+    generate_pyl_entry = False,
+    swarming = targets.swarming(
+        named_caches = [
+            swarming.cache(
+                name = "runtime_ios_18_2",
+                path = "Runtime-ios-18.2",
+            ),
+        ],
+    ),
+)
+
+targets.mixin(
     name = "ioswpt-chromium-swarming-pool",
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "pool": "chromium.tests.ioswpt",
@@ -1034,6 +1021,7 @@ targets.mixin(
 
 targets.mixin(
     name = "isolate_profile_data",
+    generate_pyl_entry = False,
     isolate_profile_data = True,
 )
 
@@ -1093,6 +1081,7 @@ targets.mixin(
 # migrated to focal.
 targets.mixin(
     name = "linux-xenial",
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "os": "Ubuntu-16.04",
@@ -1102,6 +1091,7 @@ targets.mixin(
 
 targets.mixin(
     name = "linux-noble",
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "os": "Ubuntu-24.04",
@@ -1111,6 +1101,8 @@ targets.mixin(
 
 targets.mixin(
     name = "linux_amd_rx_5500_xt",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
     generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
@@ -1124,6 +1116,8 @@ targets.mixin(
 
 targets.mixin(
     name = "linux_intel_uhd_630_experimental",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
     generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
@@ -1137,6 +1131,8 @@ targets.mixin(
 
 targets.mixin(
     name = "linux_intel_uhd_630_stable",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
     generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
@@ -1149,6 +1145,9 @@ targets.mixin(
 
 targets.mixin(
     name = "linux_intel_uhd_770_stable",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
+    generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
             "gpu": "8086:4680-23.2.1",
@@ -1161,6 +1160,8 @@ targets.mixin(
 
 targets.mixin(
     name = "linux_nvidia_gtx_1660_experimental",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
     generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
@@ -1173,6 +1174,8 @@ targets.mixin(
 
 targets.mixin(
     name = "linux_nvidia_gtx_1660_stable",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
     generate_pyl_entry = targets.IGNORE_UNUSED,
     # TODO(crbug.com/40888390): The swarming dimensions for
     # webgpu_blink_web_tests and webgpu_cts_tests on linux-code-coverage
@@ -1218,14 +1221,18 @@ targets.mixin(
 
 targets.mixin(
     name = "long_skylab_timeout",
-    timeout_sec = 10800,
+    skylab = targets.skylab(
+        timeout_sec = 10800,
+    ),
 )
 
 targets.mixin(
     name = "mac_vm",
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
-            "cpu": "arm64-64-Apple_M1_(Virtual)",
+            "cpu": "arm64",
+            "mac_model": "VirtualMac2,1",
             "os": "Mac-14",
             "pool": "chromium.tests.macvm",
         },
@@ -1234,6 +1241,7 @@ targets.mixin(
 
 targets.mixin(
     name = "mac_10.15",
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "cpu": "x86-64",
@@ -1244,6 +1252,8 @@ targets.mixin(
 
 targets.mixin(
     name = "mac_11_arm64",
+    # All references have been moved to starlark
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "cpu": "arm64",
@@ -1254,6 +1264,8 @@ targets.mixin(
 
 targets.mixin(
     name = "mac_11_x64",
+    # All references have been moved to starlark
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "cpu": "x86-64",
@@ -1264,6 +1276,8 @@ targets.mixin(
 
 targets.mixin(
     name = "mac_12_arm64",
+    # All references have been moved to starlark
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "cpu": "arm64",
@@ -1274,6 +1288,8 @@ targets.mixin(
 
 targets.mixin(
     name = "mac_12_x64",
+    # All references have been moved to starlark
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "cpu": "x86-64",
@@ -1284,6 +1300,8 @@ targets.mixin(
 
 targets.mixin(
     name = "mac_13_arm64",
+    # All references have been moved to starlark
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "cpu": "arm64",
@@ -1294,6 +1312,8 @@ targets.mixin(
 
 targets.mixin(
     name = "mac_13_x64",
+    # All references have been moved to starlark
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "cpu": "x86-64",
@@ -1304,6 +1324,8 @@ targets.mixin(
 
 targets.mixin(
     name = "mac_14_arm64",
+    # All references have been moved to starlark
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "cpu": "arm64",
@@ -1324,6 +1346,7 @@ targets.mixin(
 
 targets.mixin(
     name = "mac_14_beta_arm64",
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "cpu": "arm64",
@@ -1334,6 +1357,8 @@ targets.mixin(
 
 targets.mixin(
     name = "mac_15_arm64",
+    # All references have been moved to starlark
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "cpu": "arm64",
@@ -1344,6 +1369,8 @@ targets.mixin(
 
 targets.mixin(
     name = "mac_15_x64",
+    # All references have been moved to starlark
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "cpu": "x86-64",
@@ -1354,6 +1381,9 @@ targets.mixin(
 
 targets.mixin(
     name = "mac_arm64_apple_m1_gpu_experimental",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
+    generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
             "cpu": "arm64",
@@ -1368,6 +1398,9 @@ targets.mixin(
 
 targets.mixin(
     name = "mac_arm64_apple_m1_gpu_stable",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
+    generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
             "cpu": "arm64",
@@ -1382,6 +1415,9 @@ targets.mixin(
 
 targets.mixin(
     name = "mac_arm64_apple_m2_retina_gpu_experimental",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
+    generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
             "cpu": "arm64",
@@ -1397,6 +1433,9 @@ targets.mixin(
 
 targets.mixin(
     name = "mac_arm64_apple_m2_retina_gpu_stable",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
+    generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
             "cpu": "arm64",
@@ -1412,6 +1451,7 @@ targets.mixin(
 
 targets.mixin(
     name = "mac_beta_arm64",
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "cpu": "arm64",
@@ -1422,6 +1462,7 @@ targets.mixin(
 
 targets.mixin(
     name = "mac_beta_x64",
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "cpu": "x86-64",
@@ -1455,6 +1496,8 @@ targets.mixin(
 
 targets.mixin(
     name = "mac_mini_intel_gpu_experimental",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
     generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
@@ -1468,6 +1511,8 @@ targets.mixin(
 
 targets.mixin(
     name = "mac_mini_intel_gpu_stable",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
     generate_pyl_entry = targets.IGNORE_UNUSED,
     # TODO(crbug.com/40888390): The swarming dimensions for
     # webgpu_blink_web_tests and webgpu_cts_tests on mac-code-coverage
@@ -1485,6 +1530,9 @@ targets.mixin(
 
 targets.mixin(
     name = "mac_pro_amd_gpu",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
+    generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
             "cpu": "x86-64",
@@ -1498,6 +1546,8 @@ targets.mixin(
 
 targets.mixin(
     name = "mac_retina_amd_gpu_experimental",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
     generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
@@ -1513,6 +1563,8 @@ targets.mixin(
 
 targets.mixin(
     name = "mac_retina_amd_gpu_stable",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
     generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
@@ -1528,6 +1580,8 @@ targets.mixin(
 
 targets.mixin(
     name = "mac_retina_nvidia_gpu_experimental",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
     generate_pyl_entry = targets.IGNORE_UNUSED,
     # Currently the same as the stable version.
     swarming = targets.swarming(
@@ -1544,6 +1598,8 @@ targets.mixin(
 
 targets.mixin(
     name = "mac_retina_nvidia_gpu_stable",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
     generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
@@ -1629,6 +1685,7 @@ targets.mixin(
 
 targets.mixin(
     name = "nougat",
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "device_os": "N2G48C",
@@ -1767,6 +1824,7 @@ targets.mixin(
 
 targets.mixin(
     name = "record_failed_tests",
+    generate_pyl_entry = False,
     args = [
         "--record-video",
         "failed_only",
@@ -1795,20 +1853,6 @@ targets.mixin(
     generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         containment_type = "AUTO",
-    ),
-)
-
-targets.mixin(
-    name = "skylab-cft",
-    skylab = targets.skylab(
-        run_cft = True,
-    ),
-)
-
-targets.mixin(
-    name = "cros-cbx-dut",
-    skylab = targets.skylab(
-        cros_cbx = True,
     ),
 )
 
@@ -1844,6 +1888,7 @@ targets.mixin(
 
 targets.mixin(
     name = "updater-default-pool",
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "pool": "chromium.tests",
@@ -1853,6 +1898,7 @@ targets.mixin(
 
 targets.mixin(
     name = "updater-mac-pool",
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             # Bots in this pool support passwordless sudo.
@@ -1863,6 +1909,7 @@ targets.mixin(
 
 targets.mixin(
     name = "updater-win-uac-pool",
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "pool": "chromium.win.uac",
@@ -1880,6 +1927,7 @@ targets.mixin(
 
 targets.mixin(
     name = "vaapi_unittest_libfake_args",
+    generate_pyl_entry = False,
     args = [
         # Tell libva to do dummy encoding/decoding. For more info, see:
         # https://github.com/intel/libva/blob/v2.14-branch/va/va_fool.c#L52
@@ -1895,6 +1943,7 @@ targets.mixin(
 # Pixel 2
 targets.mixin(
     name = "walleye",
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "device_type": "walleye",
@@ -1905,6 +1954,7 @@ targets.mixin(
 
 targets.mixin(
     name = "web-test-leak",
+    generate_pyl_entry = False,
     args = [
         "--additional-expectations",
         "../../third_party/blink/web_tests/LeakExpectations",
@@ -1914,6 +1964,7 @@ targets.mixin(
 
 targets.mixin(
     name = "webgpu_cts",
+    generate_pyl_entry = False,
     args = [
         # crbug.com/953991 Ensure WebGPU is ready before running tests
         "--initialize-webgpu-adapter-at-startup-timeout-ms=60000",
@@ -1924,9 +1975,6 @@ targets.mixin(
     ],
     mac_args = [
         "--platform=mac-mac11",
-    ],
-    win64_args = [
-        "--target=Release_x64",
     ],
     merge = targets.merge(
         script = "//third_party/blink/tools/merge_web_test_results.py",
@@ -1949,6 +1997,7 @@ targets.mixin(
 
 targets.mixin(
     name = "webview_cts_archive",
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         cipd_packages = [
             targets.cipd_package(
@@ -1980,6 +2029,9 @@ targets.mixin(
 
 targets.mixin(
     name = "win10_amd_rx_5500_xt_stable",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
+    generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
             "display_attached": "1",
@@ -2005,6 +2057,9 @@ targets.mixin(
 
 targets.mixin(
     name = "win10_intel_uhd_630_experimental",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
+    generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
             "display_attached": "1",
@@ -2017,6 +2072,8 @@ targets.mixin(
 
 targets.mixin(
     name = "win10_intel_uhd_630_stable",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
     generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
@@ -2030,6 +2087,8 @@ targets.mixin(
 
 targets.mixin(
     name = "win10_intel_uhd_770_stable",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
     generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
@@ -2043,6 +2102,9 @@ targets.mixin(
 
 targets.mixin(
     name = "win10_nvidia_gtx_1660_experimental",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
+    generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
             "display_attached": "1",
@@ -2055,6 +2117,8 @@ targets.mixin(
 
 targets.mixin(
     name = "win10_nvidia_gtx_1660_stable",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
     generate_pyl_entry = targets.IGNORE_UNUSED,
     # TODO(crbug.com/40888390): The swarming dimensions for
     # webgpu_blink_web_tests and webgpu_cts_tests on win10-code-coverage
@@ -2072,6 +2136,9 @@ targets.mixin(
 
 targets.mixin(
     name = "win10_nvidia_rtx_4070_super_stable",
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
+    generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
             "display_attached": "1",
@@ -2084,7 +2151,9 @@ targets.mixin(
 
 targets.mixin(
     name = "win11_qualcomm_adreno_690_stable",
-    generate_pyl_entry = False,
+    # We always need this entry to be generated since it is used by
+    # //content/test/gpu/find_bad_machines.py.
+    generate_pyl_entry = targets.IGNORE_UNUSED,
     swarming = targets.swarming(
         dimensions = {
             "display_attached": "1",
@@ -2101,15 +2170,18 @@ targets.mixin(
 
 targets.mixin(
     name = "win11",
+    # All references have been moved to starlark
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
-            "os": "Windows-11-22000",
+            "os": "Windows-11-22000|Windows-11-22631",
         },
     ),
 )
 
 targets.mixin(
     name = "win11-23h2",
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "os": "Windows-11-22631",
@@ -2120,6 +2192,7 @@ targets.mixin(
 
 targets.mixin(
     name = "win11-any",
+    generate_pyl_entry = False,
     swarming = targets.swarming(
         dimensions = {
             "os": "Windows-11",
@@ -2152,6 +2225,7 @@ targets.mixin(
 
 targets.mixin(
     name = "xcode_15_beta",
+    generate_pyl_entry = False,
     args = [
         "--xcode-build-version",
         "15f31d",
@@ -2170,12 +2244,12 @@ targets.mixin(
     name = "xcode_16_main",
     args = [
         "--xcode-build-version",
-        "16a242d",
+        "16b40",
     ],
     swarming = targets.swarming(
         named_caches = [
             swarming.cache(
-                name = "xcode_ios_16a242d",
+                name = "xcode_ios_16b40",
                 path = "Xcode.app",
             ),
         ],
@@ -2184,14 +2258,15 @@ targets.mixin(
 
 targets.mixin(
     name = "xcode_16_beta",
+    generate_pyl_entry = False,
     args = [
         "--xcode-build-version",
-        "16a242d",
+        "16b40",
     ],
     swarming = targets.swarming(
         named_caches = [
             swarming.cache(
-                name = "xcode_ios_16a242d",
+                name = "xcode_ios_16b40",
                 path = "Xcode.app",
             ),
         ],
@@ -2199,15 +2274,16 @@ targets.mixin(
 )
 
 targets.mixin(
-    name = "xcode_16_1_beta",
+    name = "xcode_16_2_beta",
+    generate_pyl_entry = False,
     args = [
         "--xcode-build-version",
-        "16b5029d",
+        "16b5100e",
     ],
     swarming = targets.swarming(
         named_caches = [
             swarming.cache(
-                name = "xcode_ios_16b5029d",
+                name = "xcode_ios_16b5100e",
                 path = "Xcode.app",
             ),
         ],
@@ -2216,6 +2292,7 @@ targets.mixin(
 
 targets.mixin(
     name = "xcodebuild_sim_runner",
+    generate_pyl_entry = False,
     args = [
         "--xcodebuild-sim-runner",
     ],

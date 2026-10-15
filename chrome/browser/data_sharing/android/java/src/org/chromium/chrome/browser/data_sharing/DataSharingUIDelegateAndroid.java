@@ -21,6 +21,10 @@ import org.chromium.base.ServiceLoaderUtil;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.components.data_sharing.DataSharingUIDelegate;
 import org.chromium.components.data_sharing.configs.AvatarConfig;
+import org.chromium.components.data_sharing.configs.DataSharingAvatarBitmapConfig;
+import org.chromium.components.data_sharing.configs.DataSharingCreateUiConfig;
+import org.chromium.components.data_sharing.configs.DataSharingJoinUiConfig;
+import org.chromium.components.data_sharing.configs.DataSharingManageUiConfig;
 import org.chromium.components.data_sharing.configs.MemberPickerConfig;
 import org.chromium.url.GURL;
 
@@ -30,11 +34,11 @@ import java.util.List;
  * Implementation of {@link DataSharingUIDelegate} that implements some methods while delegating
  * some to the internal delegate.
  */
-class DataSharingUIDelegateAndroid implements DataSharingUIDelegate {
+class DataSharingUiDelegateAndroid implements DataSharingUIDelegate {
 
     private final @Nullable DataSharingUIDelegate mInternalDelegate;
 
-    DataSharingUIDelegateAndroid(Profile profile) {
+    DataSharingUiDelegateAndroid(Profile profile) {
         DataSharingImplFactory factory =
                 ServiceLoaderUtil.maybeCreate(DataSharingImplFactory.class);
         if (factory != null) {
@@ -45,8 +49,8 @@ class DataSharingUIDelegateAndroid implements DataSharingUIDelegate {
     }
 
     @CalledByNative
-    private static DataSharingUIDelegateAndroid create(Profile profile) {
-        return new DataSharingUIDelegateAndroid(profile);
+    private static DataSharingUiDelegateAndroid create(Profile profile) {
+        return new DataSharingUiDelegateAndroid(profile);
     }
 
     @Override
@@ -80,6 +84,51 @@ class DataSharingUIDelegateAndroid implements DataSharingUIDelegate {
             AvatarConfig config) {
         if (mInternalDelegate != null) {
             mInternalDelegate.showAvatars(context, views, emails, success, config);
+        }
+    }
+
+    @Override
+    public String showCreateFlow(DataSharingCreateUiConfig createUiConfig) {
+        if (mInternalDelegate != null) {
+            return mInternalDelegate.showCreateFlow(createUiConfig);
+        }
+        return null;
+    }
+
+    @Override
+    public String showJoinFlow(DataSharingJoinUiConfig joinUiConfig) {
+        if (mInternalDelegate != null) {
+            return mInternalDelegate.showJoinFlow(joinUiConfig);
+        }
+        return null;
+    }
+
+    @Override
+    public String showManageFlow(DataSharingManageUiConfig manageUiConfig) {
+        if (mInternalDelegate != null) {
+            return mInternalDelegate.showManageFlow(manageUiConfig);
+        }
+        return null;
+    }
+
+    @Override
+    public void showAvatarsInTile(AvatarConfig avatarConfig) {
+        if (mInternalDelegate != null) {
+            mInternalDelegate.showAvatarsInTile(avatarConfig);
+        }
+    }
+
+    @Override
+    public void destroyFlow(String sessionId) {
+        if (mInternalDelegate != null) {
+            mInternalDelegate.destroyFlow(sessionId);
+        }
+    }
+
+    @Override
+    public void getAvatarBitmap(DataSharingAvatarBitmapConfig avatarBitmapConfig) {
+        if (mInternalDelegate != null) {
+            mInternalDelegate.getAvatarBitmap(avatarBitmapConfig);
         }
     }
 
