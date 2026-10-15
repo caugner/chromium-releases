@@ -5,9 +5,9 @@
 #include "chrome/browser/save_to_drive/save_to_drive_utils.h"
 
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/pdf/pdf_viewer_stream_manager.h"
 #include "chrome/common/extensions/api/tabs.h"
 #include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest.h"
+#include "extensions/browser/mime_handler/mime_handler_stream_manager.h"
 #include "extensions/browser/mime_handler/stream_container.h"
 #include "pdf/pdf_features.h"
 
@@ -25,7 +25,8 @@ base::WeakPtr<extensions::StreamContainer> GetStreamWeakPtr(
   }
   content::RenderFrameHost* embedder_host = render_frame_host->GetParent();
   auto* manager =
-      pdf::PdfViewerStreamManager::FromRenderFrameHost(embedder_host);
+      extensions::mime_handler::MimeHandlerStreamManager::FromRenderFrameHost(
+          embedder_host);
   return manager ? manager->GetStreamContainer(embedder_host) : nullptr;
 }
 

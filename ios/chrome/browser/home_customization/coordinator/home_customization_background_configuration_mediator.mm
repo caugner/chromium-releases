@@ -311,11 +311,11 @@ const net::NetworkTrafficAnnotationTag kTrafficAnnotation =
   CHECK(!thumbnailURL.is_empty());
   CHECK(thumbnailURL.is_valid());
 
-  _imageFetcher->FetchImage(
+  _imageFetcher->FetchImageData(
       thumbnailURL,
-      base::BindOnce(^(const gfx::Image& image,
+      base::BindOnce(^(const std::string& image_data,
                        const image_fetcher::RequestMetadata& metadata) {
-        if (image.IsEmpty()) {
+        if (image_data.empty()) {
           // Image fetch failed or returned empty.
           NSDictionary<NSErrorUserInfoKey, id>* userInfo = @{
             NSURLErrorFailingURLErrorKey : net::NSURLWithGURL(thumbnailURL)
@@ -332,10 +332,13 @@ const net::NetworkTrafficAnnotationTag kTrafficAnnotation =
           completion(nil, fetchError);
           return;
         }
-        UIImage* uiImage = image.ToUIImage();
-        base::UmaHistogramBoolean(
-            "IOS.HomeCustomization.Background.Gallery.ImageDownloadSuccessful",
-            true);
+
+        UIImage* uiImage =
+            [UIImage imageWithData:[NSData dataWithBytes:image_data.data()
+                                                  length:image_data.length()]];
+        base::UmaHistogramBoolean("IOS.HomeCustomization.Background.Gallery."
+                                  "ImageDownloadSuccessful",
+                                  true);
         if (completion) {
           completion(uiImage, nil);
         }
@@ -345,6 +348,7 @@ const net::NetworkTrafficAnnotationTag kTrafficAnnotation =
 }
 
 - (void)fetchBackgroundCustomizationUserUploadedImage:(NSString*)imagePath
+                                           targetSize:(CGSize)targetSize
                                            completion:
                                                (UserUploadImageCompletion)
                                                    completion {
@@ -353,7 +357,7 @@ const net::NetworkTrafficAnnotationTag kTrafficAnnotation =
 
   base::FilePath path = base::FilePath(base::SysNSStringToUTF8(imagePath));
 
-  _userUploadedImageManager->LoadUserUploadedImage(path,
+  _userUploadedImageManager->LoadUserUploadedImage(path, targetSize,
                                                    base::BindOnce(completion));
 }
 

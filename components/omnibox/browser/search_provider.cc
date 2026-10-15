@@ -72,6 +72,10 @@
 #include "url/url_constants.h"
 #include "url/url_util.h"
 
+#if !BUILDFLAG(IS_IOS)
+#include "components/omnibox/browser/geolocation_header_service.h"
+#endif
+
 using metrics::OmniboxEventProto;
 
 // Helpers --------------------------------------------------------------------
@@ -247,6 +251,12 @@ void SearchProvider::Start(const AutocompleteInput& input,
   matches_.clear();
   smart_compose_inline_hint_.clear();
 
+#if !BUILDFLAG(IS_IOS)
+  if (auto* geo_service = client()->GetGeolocationHeaderService()) {
+    geo_service->PrimeLocation();
+  }
+#endif
+
   // At this point, we could exit early if the input is on-focus or empty,
   // because offering suggestions in those scenarios is handled by
   // ZeroSuggestProvider. But we continue here anyway in order to send a request
@@ -263,6 +273,16 @@ void SearchProvider::Start(const AutocompleteInput& input,
   if (base::FeatureList::IsEnabled(omnibox::kAblateSearchProviderWarmup) &&
       (input.IsZeroSuggest() ||
        input.type() == metrics::OmniboxInputType::EMPTY)) {
+    Stop(AutocompleteStopReason::kClobbered);
+    return;
+  }
+
+  // Ablate composebox warmup requests if the flag is enabled. Composebox does
+  // not show any personalized requests and therefore warmup requests don't
+  // add benefit.
+  if (omnibox::IsComposebox(input.current_page_classification()) &&
+      input.IsZeroSuggest() &&
+      base::FeatureList::IsEnabled(omnibox::kDisableComposeboxWarmupRequests)) {
     Stop(AutocompleteStopReason::kClobbered);
     return;
   }
@@ -930,6 +950,7 @@ std::unique_ptr<network::SimpleURLLoader> SearchProvider::CreateSuggestLoader(
   search_term_args.lens_overlay_suggest_inputs =
       input.lens_overlay_suggest_inputs();
   search_term_args.input_state = input.input_state();
+  search_term_args.previous_query = input.previous_query();
 
   const SearchTermsData& search_terms_data =
       client()->GetTemplateURLService()->search_terms_data();
@@ -1217,7 +1238,8 @@ void SearchProvider::AddTransformedHistoryResultsToMap(
     AddMatchToMap(result, GetInput(result.from_keyword()),
                   GetTemplateURL(result.from_keyword()),
                   client()->GetTemplateURLService()->search_terms_data(),
-                  did_not_accept_suggestion, true,
+                  did_not_accept_suggestion,
+                  client()->AllowDeletingBrowserHistory(),
                   providers_.GetKeywordProviderURL() != nullptr, map);
   }
 }

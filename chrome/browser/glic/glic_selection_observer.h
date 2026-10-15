@@ -18,9 +18,12 @@
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/glic/host/host.h"
-#include "content/public/browser/global_routing_id.h"
+#include "components/shared_highlighting/core/common/shared_highlighting_metrics.h"
 #include "content/public/browser/render_widget_host.h"
+#include "content/public/browser/weak_document_ptr.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "third_party/blink/public/mojom/link_to_text/link_to_text.mojom.h"
 
 namespace content {
 class Page;
@@ -53,7 +56,8 @@ class GlicSelectionObserver
  protected:
   // Updates the Glic UI (nudge or panel) with the selected text.
   // Virtual for testing.
-  virtual void UpdateSelectionState(const std::u16string& text);
+  virtual void UpdateSelectionState(const std::u16string& text,
+                                    bool is_pending_selection);
 
   // Dismisses the selection UI (widget and/or nudge).
   // Virtual for testing.
@@ -61,6 +65,22 @@ class GlicSelectionObserver
 
   // Returns true if the selection prompt is enabled for the current profile.
   virtual bool IsSelectionPromptEnabled() const;
+
+  // Returns true if Glic panel is showing for the current browser.
+  // Virtual for testing.
+  virtual bool IsPanelShowing(tabs::TabInterface* tab_interface,
+                              BrowserWindowInterface* bwi);
+
+  // Sends the selection context to the Glic panel.
+  // Virtual for testing.
+  virtual void SendAdditionalContextToPanel(
+      tabs::TabInterface* tab_interface,
+      const std::u16string& selected_text);
+
+  // Shows the selection affordance UI (widget or nudge).
+  // Virtual for testing.
+  virtual void ShowSelectionAffordance(const std::u16string& selected_text,
+                                       BrowserWindowInterface* bwi);
 
   // content::WebContentsObserver:
   void RenderFrameCreated(content::RenderFrameHost* render_frame_host) override;
@@ -92,15 +112,27 @@ class GlicSelectionObserver
       base::WeakPtr<content::WebContents> web_contents,
       GlicNudgeActivity activity);
 
-  void ShowSelectionAffordance(const std::u16string& selected_text,
-                               BrowserWindowInterface* bwi);
+
+  bool ShouldShowSelectionWidget();
+  void OnWidgetDismissed();
+  void OnWidgetPinToggled(bool is_pinned);
+
+  void CopyLinkToHighlight(content::WeakDocumentPtr weak_document_ptr);
+
+  void WriteLinkToClipboard(content::WeakDocumentPtr weak_document_ptr,
+                            const GURL& url);
+
+  void OnLinkGenerated(
+      const GURL& fallback_url,
+      const std::string& selector,
+      shared_highlighting::LinkGenerationError error,
+      shared_highlighting::LinkGenerationReadyStatus ready_status);
+
+  void RequestLinkGeneration(content::RenderFrameHost* rfh);
 
   raw_ptr<GlicKeyedService> glic_keyed_service_;
   base::CallbackListSubscription panel_state_subscription_;
   std::u16string last_selected_text_;
-
-  // Timer to process the selection after a timeout.
-  base::OneShotTimer selection_debounce_timer_;
 
   // The text of the last selection that was ignored due to rate limiting.
   std::optional<std::u16string> pending_selection_text_;
@@ -114,8 +146,13 @@ class GlicSelectionObserver
   int bounds_retry_count_ = 0;
 
   bool has_sent_selection_context_ = false;
+  bool is_widget_pinned_ = false;
+  bool is_selecting_ = false;
 
   base::WeakPtr<views::Widget> selection_widget_;
+
+  mojo::Remote<blink::mojom::TextFragmentReceiver> text_fragment_remote_;
+  std::optional<GURL> generated_link_;
 
   base::ScopedObservation<Host, Host::Observer> host_observation_{this};
 

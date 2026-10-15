@@ -72,6 +72,7 @@ extern const char kHatsSurveyTriggerSettings[];
 extern const char kHatsSurveyTriggerSEHijacking[];
 extern const char kHatsSurveyTriggerSettingsPrivacy[];
 extern const char kHatsSurveyTriggerSettingsSecurity[];
+extern const char kHatsSurveyTriggerSettingsSecurityV2[];
 extern const char kHatsSurveyTriggerTrustSafetyPrivacySettings[];
 extern const char kHatsSurveyTriggerTrustSafetyTrustedSurface[];
 extern const char kHatsSurveyTriggerTrustSafetyTransactions[];
@@ -104,17 +105,6 @@ extern const char kHatsSurveyTriggerSigninBookmarkPromo[];
 #endif  // #if !BUILDFLAG(IS_ANDROID)
 
 extern const char kHatsSurveyTriggerPermissionsPrompt[];
-extern const char kHatsSurveyTriggerPlusAddressAcceptedFirstTimeCreate[];
-extern const char kHatsSurveyTriggerPlusAddressCreatedMultiplePlusAddresses[];
-extern const char
-    kHatsSurveyTriggerPlusAddressCreatedPlusAddressViaManualFallback[];
-extern const char kHatsSurveyTriggerPlusAddressDeclinedFirstTimeCreate[];
-extern const char
-    kHatsSurveyTriggerPlusAddressDidChooseEmailOverPlusAddressSurvey[];
-extern const char
-    kHatsSurveyTriggerPlusAddressDidChoosePlusAddressOverEmailSurvey[];
-extern const char
-    kHatsSurveyTriggerPlusAddressFilledPlusAddressViaManualFallback[];
 extern const char kHatsSurveyTriggerPrivacySandboxActSurvey[];
 extern const char kHatsSurveyTriggerOnFocusZpsSuggestionsHappiness[];
 extern const char kHatsSurveyTriggerOnFocusZpsSuggestionsUtility[];
@@ -133,15 +123,15 @@ class Profile;
 
 namespace hats {
 struct SurveyConfig {
-  // LINT.IfChange(RequestedBrowserType)
+  // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser.ui.hats
   enum RequestedBrowserType {
     // A standard survey, shown only in regular mode.
     kRegular = 0,
     // An Incognito survey, shown only in incognito.
     kIncognito = 1,
   };
-  // LINT.ThenChange(//chrome/browser/ui/android/hats/java/src/org/chromium/chrome/browser/ui/hats/SurveyConfig.java:RequestedBrowserType)
 
+  // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser.ui.hats
   // Enum to control the minimum profile age check before showing a survey.
   // The profile age is determined by the creation time of the profile
   // directory, and is NOT related to the age of the user.
@@ -240,11 +230,6 @@ struct SurveyConfig {
   // optional greater than 0. Otherwise, returns std::nullopt.
   static std::optional<uint64_t> ValidateHatsSurveyUkmId(
       const std::optional<uint64_t> hats_survey_ukm_id);
-
-  // Initializes the cooldown period override for this survey config if
-  // `cooldown_period_override` is not zero.
-  void SetCooldownPeriodOverride(
-      const base::TimeDelta& cooldown_period_override);
 
   // Returns the cooldown override for this survey only if the survey feature
   // is enabled for the current profile and the feature is in the dogfood stage,

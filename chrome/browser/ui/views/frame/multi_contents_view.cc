@@ -359,6 +359,13 @@ void MultiContentsView::SetTargetContentBounds(
   InvalidateLayout(/*avoid_propagate_during_layout=*/true);
 }
 
+void MultiContentsView::SetIsAnimatingContent(bool is_animating) {
+  for (auto* contents_container_view : contents_container_views_) {
+    contents_container_view->contents_view()->SetIsAnimatingBounds(
+        is_animating);
+  }
+}
+
 std::vector<views::View*> MultiContentsView::GetAccessiblePanes() {
   std::vector<views::View*> accessible_panes;
   for (auto* contents_container_view : contents_container_views_) {
@@ -637,9 +644,7 @@ gfx::Rect MultiContentsView::CalculateSeparatorLayouts(
       gfx::Rect(available_space.origin(), {width, separator_height}));
 
   const bool should_show_leading =
-      contents_separators_.should_show_leading ||
-      (drop_target_view_->side() ==
-       MultiContentsDropTargetView::DropSide::START);
+      drop_target_view_->side() == MultiContentsDropTargetView::DropSide::START;
   const int leading_separator_width =
       should_show_leading
           ? contents_separators_.leading_separator->GetPreferredSize().width()
@@ -649,8 +654,7 @@ gfx::Rect MultiContentsView::CalculateSeparatorLayouts(
       gfx::Rect(available_space.origin(), {leading_separator_width, height}));
 
   const bool should_show_trailing =
-      contents_separators_.should_show_trailing ||
-      (drop_target_view_->side() == MultiContentsDropTargetView::DropSide::END);
+      drop_target_view_->side() == MultiContentsDropTargetView::DropSide::END;
 
   const int trailing_separator_width =
       should_show_trailing
@@ -774,10 +778,10 @@ bool MultiContentsView::IsDragAndDropEnabled() const {
 
   const auto* web_contents = active_contents_view->web_contents();
   return !web_contents ||
-         web_contents->GetLastCommittedURL().spec() ==
-             chrome::kChromeUINewTabURL ||
-         web_contents->GetLastCommittedURL().spec() ==
-             chrome::kChromeUINewTabPageURL ||
+         web_contents->GetLastCommittedURL() ==
+             chrome::ChromeUINewTabURLAsGURL() ||
+         web_contents->GetLastCommittedURL() ==
+             chrome::ChromeUINewTabPageURLAsGURL() ||
          !web_contents->GetLastCommittedURL().SchemeIs(
              content::kChromeUIScheme);
 }
@@ -794,37 +798,20 @@ void MultiContentsView::SetShouldShowTopSeparator(bool should_show) {
     return;
   }
   contents_separators_.should_show_top = should_show;
-  start_contents_view_inset_.set_top(
-      should_show ? 0 : MultiContentsView::kSplitViewContentInset);
-  end_contents_view_inset_.set_top(
-      should_show ? 0 : MultiContentsView::kSplitViewContentInset);
-
   // This can be called during BrowserView layout, so protect against creating a
   // layout loop.
   InvalidateLayout(/*avoid_propagate_during_layout=*/true);
 }
 
-void MultiContentsView::SetShouldShowLeadingSeparator(bool should_show) {
-  if (contents_separators_.should_show_leading == should_show) {
+void MultiContentsView::SetSplitViewInsets(
+    gfx::Insets start_contents_view_inset,
+    gfx::Insets end_contents_view_inset) {
+  if (start_contents_view_inset == start_contents_view_inset_ &&
+      end_contents_view_inset == end_contents_view_inset_) {
     return;
   }
-  contents_separators_.should_show_leading = should_show;
-  start_contents_view_inset_.set_left(
-      should_show ? 0 : MultiContentsView::kSplitViewContentInset);
-
-  // This can be called during BrowserView layout, so protect against creating a
-  // layout loop.
-  InvalidateLayout(/*avoid_propagate_during_layout=*/true);
-}
-
-void MultiContentsView::SetShouldShowTrailingSeparator(bool should_show) {
-  if (contents_separators_.should_show_trailing == should_show) {
-    return;
-  }
-  contents_separators_.should_show_trailing = should_show;
-  end_contents_view_inset_.set_right(
-      should_show ? 0 : MultiContentsView::kSplitViewContentInset);
-
+  start_contents_view_inset_ = std::move(start_contents_view_inset);
+  end_contents_view_inset_ = std::move(end_contents_view_inset);
   // This can be called during BrowserView layout, so protect against creating a
   // layout loop.
   InvalidateLayout(/*avoid_propagate_during_layout=*/true);

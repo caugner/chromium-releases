@@ -86,6 +86,7 @@
 #include "extensions/common/manifest_handlers/shared_module_info.h"
 #include "extensions/common/mojom/view_type.mojom.h"
 #include "extensions/common/permissions/permissions_data.h"
+#include "extensions/common/verifier_formats.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
 #include "third_party/blink/public/common/switches.h"
@@ -95,7 +96,7 @@
 #include "chrome/browser/extensions/scoped_test_mv2_enabler.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/web_applications/os_integration/os_integration_manager.h"
-#include "chrome/browser/web_applications/proto/web_app_install_state.pb.h"
+#include "chrome/browser/web_applications/proto/web_app_install_state.pb.h"  // nogncheck
 #include "chrome/browser/web_applications/test/web_app_test_observers.h"
 #include "chrome/browser/web_applications/test/web_app_test_utils.h"
 #include "chrome/browser/web_applications/web_app_install_info.h"
@@ -1596,7 +1597,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionPolicyTest,
 
 // Verifies that corrupted non-webstore policy-based extension is automatically
 // repaired (reinstalled) even if hashes file is damaged too.
-// crbug.com/1131634: flaky on win
+// crbug.com/40150293: flaky on win
 #if BUILDFLAG(IS_WIN)
 #define MAYBE_CorruptedNonWebstoreExtensionWithDamagedHashesRepaired \
   DISABLED_CorruptedNonWebstoreExtensionWithDamagedHashesRepaired
@@ -1678,7 +1679,7 @@ IN_PROC_BROWSER_TEST_F(
 // Verifies that corrupted non-webstore policy-based extension is not repaired
 // if there are no computed_hashes.json for it. Note that this behavior will
 // change in the future.
-// See https://crbug.com/40625642#c22 for details.
+// See https://crbug.com/40625642#comment23 for details.
 // TODO(crbug.com/40669814): Change this test so extension without hashes
 // will be also reinstalled.
 IN_PROC_BROWSER_TEST_F(ExtensionPolicyTest,
@@ -1865,7 +1866,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionPolicyTest,
 
 // Verifies that the browser doesn't crash on shutdown. If the extensions are
 // being installed, and the browser is shutdown, it should not lead to a crash
-// as in (crbug/1114191).
+// as in (crbug.com/40710676).
 IN_PROC_BROWSER_TEST_F(ExtensionPolicyTest,
                        ExtensionInstallForcelistShutdownBeforeInstall) {
   ExtensionRequestInterceptor interceptor;
@@ -2514,9 +2515,16 @@ class WebAppInstallForceListPolicyPlaceholderWithAppFallbackNameTest
       delete;
 };
 
+#if BUILDFLAG(IS_MAC)
+#define MAYBE_StartUpInstallationPlaceholderFallbackName \
+  DISABLED_StartUpInstallationPlaceholderFallbackName
+#else
+#define MAYBE_StartUpInstallationPlaceholderFallbackName \
+  StartUpInstallationPlaceholderFallbackName
+#endif
 IN_PROC_BROWSER_TEST_F(
     WebAppInstallForceListPolicyPlaceholderWithAppFallbackNameTest,
-    StartUpInstallationPlaceholderFallbackName) {
+    MAYBE_StartUpInstallationPlaceholderFallbackName) {
   const web_app::WebAppRegistrar& registrar =
       web_app::WebAppProvider::GetForTest(browser()->profile())
           ->registrar_unsafe();

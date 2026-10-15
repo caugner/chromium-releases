@@ -25,7 +25,6 @@ import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.robolectric.Robolectric;
 import org.robolectric.android.controller.ActivityController;
-import org.robolectric.annotation.Config;
 
 import org.chromium.base.Callback;
 import org.chromium.base.UnownedUserDataHost;
@@ -55,6 +54,7 @@ import org.chromium.chrome.browser.data_sharing.DataSharingTabManager;
 import org.chromium.chrome.browser.ephemeraltab.EphemeralTabCoordinator;
 import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
 import org.chromium.chrome.browser.findinpage.FindToolbarManager;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.fullscreen.FullscreenManager;
 import org.chromium.chrome.browser.keyboard_accessory.ManualFillingComponent;
 import org.chromium.chrome.browser.keyboard_accessory.ManualFillingComponentSupplier;
@@ -96,6 +96,8 @@ import org.chromium.chrome.browser.toolbar.top.ToolbarActionModeCallback;
 import org.chromium.chrome.browser.toolbar.top.ToolbarControlContainer;
 import org.chromium.chrome.browser.toolbar.top.TopToolbarSceneLayer;
 import org.chromium.chrome.browser.toolbar.top.TopToolbarSceneLayerJni;
+import org.chromium.chrome.browser.ui.actions.ActionId;
+import org.chromium.chrome.browser.ui.actions.ActionRegistry;
 import org.chromium.chrome.browser.ui.appmenu.AppMenuCoordinator;
 import org.chromium.chrome.browser.ui.appmenu.AppMenuDelegate;
 import org.chromium.chrome.browser.ui.bottombar.BottomBarHostManager;
@@ -126,6 +128,7 @@ import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.display.DisplayAndroid;
 import org.chromium.ui.insets.InsetObserver;
 import org.chromium.ui.modaldialog.ModalDialogManager;
+import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.util.TokenHolder;
 import org.chromium.url.GURL;
 
@@ -136,11 +139,11 @@ import java.util.function.Supplier;
 /** Unit tests for {@link ToolbarManager}. */
 @RunWith(BaseRobolectricTestRunner.class)
 @EnableFeatures({
+    ChromeFeatureList.HTTPS_FIRST_DIALOG_UI,
     SigninFeatures.ENABLE_ACTIVITYLESS_SIGNIN_ALL_ENTRY_POINT,
     SigninFeatures.ENABLE_SEAMLESS_SIGNIN
 })
 @DisableFeatures({SigninFeatures.MAKE_IDENTITY_MANAGER_SOURCE_OF_ACCOUNTS})
-@Config(manifest = Config.NONE)
 public class ToolbarManagerUnitTest {
 
     @Rule public MockitoRule mMockitoRule = MockitoJUnit.rule();
@@ -205,16 +208,16 @@ public class ToolbarManagerUnitTest {
     @Mock private IdentityManager mIdentityManager;
     @Mock private SigninManager mSigninManager;
     @Mock private SyncService mSyncService;
+    @Mock private ActionRegistry mActionRegistry;
+    @Mock private PropertyModel mActionPropertyModel;
 
-    private KeyboardVisibilityDelegate mOriginalKeyboardVisibilityDelegate;
     private ActivityController<TestActivity> mActivityController;
     private ToolbarManager mToolbarManager;
     private TopToolbarSceneLayer mTopToolbarSceneLayerInstance;
 
     @Before
+    @SuppressWarnings("unchecked") // Raw CompositorModelChangeProcessor mock.
     public void setUp() {
-        mOriginalKeyboardVisibilityDelegate = KeyboardVisibilityDelegate.getInstance();
-        KeyboardVisibilityDelegate.setInstance(mKeyboardVisibilityDelegate);
         ComposeboxQueryControllerBridge.setInstanceForTesting(null);
         ChromeAutocompleteSchemeClassifierJni.setInstanceForTesting(
                 mChromeAutocompleteSchemeClassifierJni);
@@ -292,6 +295,8 @@ public class ToolbarManagerUnitTest {
         when(mTabModel.getProfile()).thenReturn(mProfile);
         when(mTabModelSelector.getCurrentModelTabCountSupplier())
                 .thenReturn(ObservableSuppliers.createNonNull(0));
+        when(mTabModelSelector.getCurrentTabSupplier())
+                .thenReturn(ObservableSuppliers.createNullable(mTab));
         SettableMonotonicObservableSupplier<TabModel> currentTabModelSupplier =
                 ObservableSuppliers.createMonotonic();
         currentTabModelSupplier.set(mTabModel);
@@ -306,9 +311,13 @@ public class ToolbarManagerUnitTest {
                 ObservableSuppliers.createMonotonic();
         ManualFillingComponentSupplier.attach(unownedUserDataHost, manualFillingComponentSupplier);
         when(mWindowAndroid.getKeyboardDelegate()).thenReturn(mKeyboardVisibilityDelegate);
+        KeyboardVisibilityDelegate.setInstanceForTesting(mKeyboardVisibilityDelegate);
         when(mWindowAndroid.getInsetObserver()).thenReturn(mInsetObserver);
         when(mInsetObserver.getSupplierForKeyboardInset())
                 .thenReturn(ObservableSuppliers.createNonNull(0));
+
+        when(mActionRegistry.get(ActionId.NEW_TAB))
+                .thenReturn(ObservableSuppliers.createNullable(mActionPropertyModel));
 
         SettableMonotonicObservableSupplier<EdgeToEdgeController> edgeToEdgeControllerSupplier =
                 ObservableSuppliers.createMonotonic();
@@ -403,7 +412,8 @@ public class ToolbarManagerUnitTest {
                         mPageZoomManager,
                         mSnackbarManager,
                         mOmniboxChipManager,
-                        mBottomBarHostManager);
+                        mBottomBarHostManager,
+                        mActionRegistry);
 
         NonNullObservableSupplier<TabModelDotInfo> dotSupplier =
                 ObservableSuppliers.createNonNull(mTabModelDotInfo);
@@ -424,7 +434,6 @@ public class ToolbarManagerUnitTest {
 
     @After
     public void tearDown() {
-        KeyboardVisibilityDelegate.setInstance(mOriginalKeyboardVisibilityDelegate);
         mActivityController.close();
     }
 

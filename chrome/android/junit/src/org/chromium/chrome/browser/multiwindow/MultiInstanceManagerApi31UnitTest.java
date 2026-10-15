@@ -52,6 +52,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.Captor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
@@ -117,6 +118,7 @@ import org.chromium.components.messages.MessageIdentifier;
 import org.chromium.components.tab_group_sync.TabGroupSyncService;
 import org.chromium.ui.modaldialog.ModalDialogManager;
 import org.chromium.ui.modelutil.PropertyModel;
+import org.chromium.ui.test.util.MockitoHelper;
 import org.chromium.url.GURL;
 import org.chromium.url.JUnitTestGURLs;
 
@@ -132,6 +134,7 @@ import java.util.stream.Collectors;
 /** Unit tests for {@link MultiInstanceManagerApi31}. */
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
+@EnableFeatures(ChromeFeatureList.INCOGNITO_AS_WINDOW_FULL_SCREEN)
 @DisableFeatures(ChromeFeatureList.ROBUST_WINDOW_MANAGEMENT_EXPERIMENTAL)
 public class MultiInstanceManagerApi31UnitTest {
     private static final int INSTANCE_ID_1 = 1;
@@ -194,6 +197,9 @@ public class MultiInstanceManagerApi31UnitTest {
     @Mock private ChromeTabbedActivity mTabbedActivityTask66;
     @Mock private RecentlyClosedEntriesManagerTracker mRecentlyClosedTracker;
     @Mock private MessageDispatcher mMessageDispatcher;
+
+    @Captor private ArgumentCaptor<List<Integer>> mIntegerListCaptor;
+    @Captor private ArgumentCaptor<List<InstanceInfo>> mInstanceInfoListCaptor;
 
     private final SettableMonotonicObservableSupplier<TabModelOrchestrator>
             mTabModelOrchestratorSupplier = ObservableSuppliers.createMonotonic();
@@ -349,7 +355,7 @@ public class MultiInstanceManagerApi31UnitTest {
         when(mTabbedActivityTask63.getSystemService(Context.ACTIVITY_SERVICE))
                 .thenReturn(mActivityManager);
 
-        when(mActivityManager.getAppTasks()).thenReturn(new ArrayList());
+        when(mActivityManager.getAppTasks()).thenReturn(new ArrayList<>());
 
         mProfileProviderSupplier.set(mProfileProvider);
         when(mIncognitoProfile.isOffTheRecord()).thenReturn(true);
@@ -384,7 +390,9 @@ public class MultiInstanceManagerApi31UnitTest {
         when(mTabGroupSyncService.getAllGroupIds()).thenReturn(new String[] {});
         when(mNormalTabModel.getProfile()).thenReturn(mProfile);
         when(mTabModelSelector.isTabStateInitialized()).thenReturn(true);
-        doNothing().when(mMultiInstanceManager).showTargetSelectorDialog(any(), anyInt(), anyInt());
+        doNothing()
+                .when(mMultiInstanceManager)
+                .showTargetSelectorDialog(MockitoHelper.anyCallback(), anyInt(), anyInt());
 
         setupActivityForCreateNewWindowIntent(mCurrentActivity);
         RecentlyClosedEntriesManagerTrackerFactory.setInstanceForTesting(mRecentlyClosedTracker);
@@ -408,6 +416,7 @@ public class MultiInstanceManagerApi31UnitTest {
 
     @Test
     @SuppressWarnings("DirectInvocationOnMock")
+    @DisableFeatures(ChromeFeatureList.ALLOC_INSTANCE_ID_INCREASED_DEFAULT_RANGE)
     public void testAllocInstanceId_reachesMaximum() {
         assertTrue(mMultiInstanceManager.mMaxInstances < mActivityPool.length);
         int index = 0;
@@ -598,7 +607,79 @@ public class MultiInstanceManagerApi31UnitTest {
         mFakeTimeTestRule.advanceMillis(MultiInstanceManagerApi31.SIX_MONTHS_MS + 5000000);
         // Closing the two other instances that are not managing the current activity.
         assertEquals(1, mMultiInstanceManager.getInstanceInfo(PersistedInstanceType.ANY).size());
-        verify(mMultiInstanceManager, times(2))
+        verify(mMultiInstanceManager, times(1))
+                .closeWindows(
+                        mIntegerListCaptor.capture(),
+                        eq(CloseWindowAppSource.RETENTION_PERIOD_EXPIRATION));
+        List<List<Integer>> capturedLists = mIntegerListCaptor.getAllValues();
+        assertEquals(1, capturedLists.size());
+        assertEquals(2, capturedLists.get(0).size());
+    }
+
+    @Test
+    public void testRemoveInvalidInstanceData_doesNotCloseCurrentInstanceEvenIfExpired() {
+        // Setup current activity and instance.
+        assertEquals(0, allocInstanceIndex(PASSED_ID_INVALID, mCurrentActivity));
+        mMultiInstanceManager.initialize(0, TASK_ID_56, SupportedProfileType.MIXED);
+
+        // Advance time by over six months.
+        mFakeTimeTestRule.advanceMillis(MultiInstanceManagerApi31.SIX_MONTHS_MS + 1000);
+
+        // Instance 0 is the current instance, it should NOT be closed.
+        assertEquals(1, mMultiInstanceManager.getInstanceInfo(PersistedInstanceType.ANY).size());
+        verify(mMultiInstanceManager, never())
+                .closeWindows(any(), eq(CloseWindowAppSource.RETENTION_PERIOD_EXPIRATION));
+    }
+
+    @Test
+    public void testRemoveInvalidInstanceData_closesExpiredInactiveInstance() {
+        // Setup current activity and instance.
+        assertEquals(0, allocInstanceIndex(PASSED_ID_INVALID, mCurrentActivity));
+        mMultiInstanceManager.initialize(0, TASK_ID_56, SupportedProfileType.MIXED);
+
+        // Setup another instance and make it inactive.
+        assertEquals(1, allocInstanceIndex(PASSED_ID_INVALID, mActivityTask57));
+        removeTaskOnRecentsScreen(mActivityTask57);
+
+        // Advance time by over six months.
+        mFakeTimeTestRule.advanceMillis(MultiInstanceManagerApi31.SIX_MONTHS_MS + 1000);
+
+        // Instance 1 is expired and inactive, it should be closed.
+        // Instance 0 is expired but current, it should not be closed.
+        assertEquals(1, mMultiInstanceManager.getInstanceInfo(PersistedInstanceType.ANY).size());
+        assertEquals(
+                0,
+                mMultiInstanceManager.getInstanceInfo(PersistedInstanceType.ANY).get(0).instanceId);
+        verify(mMultiInstanceManager, times(1))
+                .closeWindows(any(), eq(CloseWindowAppSource.RETENTION_PERIOD_EXPIRATION));
+    }
+
+    @Test
+    public void testAllocInstanceId_cleansUpExpiredInstanceBeforeAllocation() {
+        // Setup an existing instance.
+        assertEquals(0, allocInstanceIndex(PASSED_ID_INVALID, mActivityTask56));
+        mMultiInstanceManager.initialize(0, TASK_ID_56, SupportedProfileType.MIXED);
+
+        // Simulate activity destruction and task removal (inactive instance).
+        removeTaskOnRecentsScreen(mActivityTask56);
+
+        // Advance time by over six months.
+        mFakeTimeTestRule.advanceMillis(MultiInstanceManagerApi31.SIX_MONTHS_MS + 1000);
+
+        // Now allocate a new instance for a new activity.
+        // The old instance 0 should be cleaned up because it is expired and not the current
+        // activity.
+        // Then ID 0 should be re-allocated as a NEW instance.
+        AllocatedIdInfo info =
+                mMultiInstanceManager.allocInstanceId(
+                        PASSED_ID_INVALID,
+                        TASK_ID_57,
+                        /* preferNew= */ false,
+                        /* isIncognitoIntent= */ false);
+
+        assertEquals(0, info.instanceId);
+        assertEquals(InstanceAllocationType.NEW_INSTANCE_NEW_TASK, info.allocationType);
+        verify(mMultiInstanceManager, times(1))
                 .closeWindows(any(), eq(CloseWindowAppSource.RETENTION_PERIOD_EXPIRATION));
     }
 
@@ -781,11 +862,11 @@ public class MultiInstanceManagerApi31UnitTest {
                         > initialTime);
 
         // Verify #onInstancesClosed is invoked.
-        ArgumentCaptor<List<InstanceInfo>> captor = ArgumentCaptor.forClass(List.class);
-        verify(mRecentlyClosedTracker).onInstancesClosed(captor.capture(), eq(false));
+        verify(mRecentlyClosedTracker)
+                .onInstancesClosed(mInstanceInfoListCaptor.capture(), eq(false));
 
         // Verify the captured InstanceInfo.
-        List<InstanceInfo> closedInstanceInfo = captor.getValue();
+        List<InstanceInfo> closedInstanceInfo = mInstanceInfoListCaptor.getValue();
         assertEquals("There should be exactly 1 InstanceInfo.", 1, closedInstanceInfo.size());
         assertEquals("Instance ID should be 1.", 1, closedInstanceInfo.get(0).instanceId);
 
@@ -882,6 +963,40 @@ public class MultiInstanceManagerApi31UnitTest {
 
         // Verify that subsequent id allocation uses a new id, not a persisted one marked for
         // deletion.
+        var multiInstanceManager = createTestMultiInstanceManager(mActivityTask59);
+        var allocatedIdInfo =
+                multiInstanceManager.allocInstanceId(
+                        /* windowId= */ -1,
+                        TASK_ID_59,
+                        /* preferNew= */ false,
+                        /* isIncognitoIntent= */ false);
+        assertEquals(3, allocatedIdInfo.instanceId);
+    }
+
+    @Test
+    @EnableFeatures(ChromeFeatureList.ALLOC_INSTANCE_ID_INCREASED_DEFAULT_RANGE)
+    public void testAllocInstanceId_maxInstanceLimitWindowCountMarkedForDeletion() {
+        MultiWindowUtils.setMaxInstancesForTesting(3);
+
+        // Setup 3 instances.
+        assertEquals(0, allocInstanceIndex(PASSED_ID_INVALID, mCurrentActivity));
+        mMultiInstanceManager.initialize(
+                /* instanceId= */ 0, /* taskId= */ TASK_ID_56, SupportedProfileType.MIXED);
+        assertEquals(1, allocInstanceIndex(PASSED_ID_INVALID, mActivityTask57));
+        assertEquals(2, allocInstanceIndex(PASSED_ID_INVALID, mActivityTask58));
+
+        // Simulate closure of all windows from the window manager.
+        mMultiInstanceManager.closeWindows(List.of(0, 1, 2), CloseWindowAppSource.WINDOW_MANAGER);
+        destroyActivity(mCurrentActivity);
+        destroyActivity(mActivityTask57);
+        destroyActivity(mActivityTask58);
+
+        // Verify that they are marked for deletion.
+        assertTrue(ChromeMultiInstancePersistentStore.readMarkedForDeletion(/* instanceId= */ 0));
+        assertTrue(ChromeMultiInstancePersistentStore.readMarkedForDeletion(/* instanceId= */ 1));
+        assertTrue(ChromeMultiInstancePersistentStore.readMarkedForDeletion(/* instanceId= */ 2));
+
+        // Allocating a new instance should now loop past the limit and allocate a new ID (3).
         var multiInstanceManager = createTestMultiInstanceManager(mActivityTask59);
         var allocatedIdInfo =
                 multiInstanceManager.allocInstanceId(
@@ -997,12 +1112,12 @@ public class MultiInstanceManagerApi31UnitTest {
         mMultiInstanceManager.getInstanceInfo(PersistedInstanceType.ANY);
 
         // Verify closeWindows was called with the inactive instances exceeding the limit.
-        ArgumentCaptor<List<Integer>> captor = ArgumentCaptor.forClass(List.class);
         verify(mMultiInstanceManager)
                 .closeWindows(
-                        captor.capture(), eq(CloseWindowAppSource.RECENTLY_CLOSED_LIMIT_EXCEEDED));
+                        mIntegerListCaptor.capture(),
+                        eq(CloseWindowAppSource.RECENTLY_CLOSED_LIMIT_EXCEEDED));
 
-        List<Integer> closedInstances = captor.getValue();
+        List<Integer> closedInstances = mIntegerListCaptor.getValue();
         // Since we have 30 inactive instances and the limit is 25, 5 should be closed.
         assertEquals("Should have closed 5 instances", 5, closedInstances.size());
 
@@ -1425,7 +1540,8 @@ public class MultiInstanceManagerApi31UnitTest {
                                 null,
                                 null,
                                 mMismatchedIndicesHandler,
-                                index);
+                                index,
+                                SupportedProfileType.MIXED);
         if (pair == null) return INVALID_WINDOW_ID;
 
         int instanceId = pair.first;
@@ -1523,6 +1639,107 @@ public class MultiInstanceManagerApi31UnitTest {
         int flags = intent.getFlags();
         assertFalse(
                 "FLAG_ACTIVITY_LAUNCH_ADJACENT should not be set.",
+                (flags & Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT) != 0);
+    }
+
+    @Test
+    public void testOpenWindow_opensFullScreen_DifferentModel_RegularToIncognito() {
+        IncognitoUtils.setShouldOpenIncognitoAsWindowForTesting(true);
+        setupTwoInstances();
+        ChromeMultiInstancePersistentStore.writeProfileType(0, SupportedProfileType.REGULAR);
+        ChromeMultiInstancePersistentStore.writeLastAccessedTime(INSTANCE_ID_2);
+        ChromeMultiInstancePersistentStore.writeProfileType(
+                INSTANCE_ID_2, SupportedProfileType.OFF_THE_RECORD);
+
+        ArgumentCaptor<Intent> intentCaptor = ArgumentCaptor.forClass(Intent.class);
+
+        mMultiInstanceManager.openWindow(INSTANCE_ID_2, NewWindowAppSource.WINDOW_MANAGER);
+
+        verify(mCurrentActivity).startActivity(intentCaptor.capture());
+        Intent intent = intentCaptor.getValue();
+        assertNotEquals("Intent should not be null.", null, intent);
+        int flags = intent.getFlags();
+        assertFalse(
+                "FLAG_ACTIVITY_LAUNCH_ADJACENT should not be set for different models.",
+                (flags & Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT) != 0);
+    }
+
+    @Test
+    public void testOpenWindow_opensFullScreen_DifferentModel_IncognitoToRegular() {
+        IncognitoUtils.setShouldOpenIncognitoAsWindowForTesting(true);
+        setupActivityForCreateNewWindowIntent(mTabbedActivityTask62);
+        when(mTabbedActivityTask62.isIncognitoWindow()).thenReturn(true);
+        var manager = spy(createTestMultiInstanceManager(mTabbedActivityTask62));
+        manager.mTestBuildInstancesList = true;
+
+        assertEquals(0, allocInstanceIndex(PASSED_ID_INVALID, mTabbedActivityTask62, true));
+        manager.initialize(0, TASK_ID_62, SupportedProfileType.OFF_THE_RECORD);
+
+        ChromeMultiInstancePersistentStore.writeLastAccessedTime(INSTANCE_ID_2);
+        ChromeMultiInstancePersistentStore.writeProfileType(
+                INSTANCE_ID_2, SupportedProfileType.REGULAR);
+
+        ArgumentCaptor<Intent> intentCaptor = ArgumentCaptor.forClass(Intent.class);
+
+        manager.openWindow(INSTANCE_ID_2, NewWindowAppSource.WINDOW_MANAGER);
+
+        verify(mTabbedActivityTask62).startActivity(intentCaptor.capture());
+        Intent intent = intentCaptor.getValue();
+        assertNotEquals("Intent should not be null.", null, intent);
+        int flags = intent.getFlags();
+        assertFalse(
+                "FLAG_ACTIVITY_LAUNCH_ADJACENT should not be set for different models.",
+                (flags & Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT) != 0);
+    }
+
+    @Test
+    public void testOpenWindow_opensAdjacently_SameModel_IncognitoToIncognito() {
+        IncognitoUtils.setShouldOpenIncognitoAsWindowForTesting(true);
+        setupActivityForCreateNewWindowIntent(mTabbedActivityTask62);
+        when(mTabbedActivityTask62.isIncognitoWindow()).thenReturn(true);
+        var manager = spy(createTestMultiInstanceManager(mTabbedActivityTask62));
+        manager.mTestBuildInstancesList = true;
+
+        assertEquals(0, allocInstanceIndex(PASSED_ID_INVALID, mTabbedActivityTask62, true));
+        manager.initialize(0, TASK_ID_62, SupportedProfileType.OFF_THE_RECORD);
+
+        ChromeMultiInstancePersistentStore.writeLastAccessedTime(INSTANCE_ID_2);
+        ChromeMultiInstancePersistentStore.writeProfileType(
+                INSTANCE_ID_2, SupportedProfileType.OFF_THE_RECORD);
+
+        ArgumentCaptor<Intent> intentCaptor = ArgumentCaptor.forClass(Intent.class);
+
+        manager.openWindow(INSTANCE_ID_2, NewWindowAppSource.WINDOW_MANAGER);
+
+        verify(mTabbedActivityTask62).startActivity(intentCaptor.capture());
+        Intent intent = intentCaptor.getValue();
+        assertNotEquals("Intent should not be null.", null, intent);
+        int flags = intent.getFlags();
+        assertTrue(
+                "FLAG_ACTIVITY_LAUNCH_ADJACENT should be set for same models.",
+                (flags & Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT) != 0);
+    }
+
+    @Test
+    @DisableFeatures(ChromeFeatureList.INCOGNITO_AS_WINDOW_FULL_SCREEN)
+    public void testOpenWindow_opensAdjacently_DifferentModel_WhenFeatureDisabled() {
+        IncognitoUtils.setShouldOpenIncognitoAsWindowForTesting(true);
+        setupTwoInstances();
+        ChromeMultiInstancePersistentStore.writeProfileType(0, SupportedProfileType.REGULAR);
+        ChromeMultiInstancePersistentStore.writeLastAccessedTime(INSTANCE_ID_2);
+        ChromeMultiInstancePersistentStore.writeProfileType(
+                INSTANCE_ID_2, SupportedProfileType.OFF_THE_RECORD);
+
+        ArgumentCaptor<Intent> intentCaptor = ArgumentCaptor.forClass(Intent.class);
+
+        mMultiInstanceManager.openWindow(INSTANCE_ID_2, NewWindowAppSource.WINDOW_MANAGER);
+
+        verify(mCurrentActivity).startActivity(intentCaptor.capture());
+        Intent intent = intentCaptor.getValue();
+        assertNotEquals("Intent should not be null.", null, intent);
+        int flags = intent.getFlags();
+        assertTrue(
+                "FLAG_ACTIVITY_LAUNCH_ADJACENT should be set when feature is disabled.",
                 (flags & Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT) != 0);
     }
 
@@ -1845,7 +2062,7 @@ public class MultiInstanceManagerApi31UnitTest {
 
         mMultiInstanceManager.openNewWindow(false);
 
-        verify(mCurrentActivity).startActivity(intentCaptor.capture());
+        verify(mCurrentActivity).startActivity(intentCaptor.capture(), eq(null));
         Intent intent = intentCaptor.getValue();
         assertNotNull(intent.getComponent());
         assertEquals(

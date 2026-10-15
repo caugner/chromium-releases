@@ -13,6 +13,7 @@
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service_factory.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_utils.h"
+#include "chrome/browser/contextual_tasks/mock_contextual_tasks_ui_service_delegate.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
@@ -20,6 +21,8 @@
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/side_panel/side_panel_ui.h"
+#include "chrome/browser/ui/tabs/features.h"
+#include "chrome/browser/ui/tabs/vertical_tab_strip_state_controller.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/contextual_tasks/contextual_tasks_button.h"
 #include "chrome/browser/ui/views/contextual_tasks/contextual_tasks_close_tab_button.h"
@@ -57,24 +60,24 @@ class TestingAimEligibilityService : public ChromeAimEligibilityService {
                                     template_url_service,
                                     /*url_loader_factory=*/nullptr,
                                     /*identity_manager=*/nullptr,
-                                    /*configuration=*/{}) {}
+                                    /*configuration=*/{}),
+        pref_service_(pref_service) {}
 
   ~TestingAimEligibilityService() override = default;
 
   bool IsAimEligible() const override { return true; }
-  bool IsCobrowseEligible() const override { return is_cobrowse_eligible_; }
+  bool IsCobrowseEligible() const override {
+    return is_cobrowse_eligible_ &&
+           ChromeAimEligibilityService::IsAimAllowedByPolicy(
+               &pref_service_.get());
+  }
 
   void SetIsCobrowseEligible(bool eligible) {
     if (is_cobrowse_eligible_ == eligible) {
       return;
     }
     is_cobrowse_eligible_ = eligible;
-    callbacks_.Notify();
-  }
-
-  base::CallbackListSubscription RegisterEligibilityChangedCallback(
-      base::RepeatingClosure callback) override {
-    return callbacks_.Add(std::move(callback));
+    OnEligibilityResponseChanged();
   }
 
   variations::VariationsService* GetVariationsService() const override {
@@ -83,7 +86,50 @@ class TestingAimEligibilityService : public ChromeAimEligibilityService {
 
  private:
   bool is_cobrowse_eligible_ = true;
-  base::RepeatingClosureList callbacks_;
+  const base::raw_ref<PrefService> pref_service_;
+};
+
+class FakeContextualTasksEligibilityManager
+    : public contextual_tasks::ContextualTasksEligibilityManager {
+ public:
+  FakeContextualTasksEligibilityManager(
+      PrefService* pref_service,
+      signin::IdentityManager* identity_manager,
+      AimEligibilityService* aim_eligibility_service)
+      : ContextualTasksEligibilityManager(pref_service,
+                                          identity_manager,
+                                          aim_eligibility_service) {
+    MaybeNotifyEligibilityChanged();
+  }
+  ~FakeContextualTasksEligibilityManager() override = default;
+
+  void SetIsEligible(bool eligible) {
+    if (mock_identity_eligible_ == eligible) {
+      return;
+    }
+    mock_identity_eligible_ = eligible;
+    MaybeNotifyEligibilityChanged();
+  }
+
+  bool IsEligibleWithoutIdentity() const override {
+    if (aim_eligibility_service_ &&
+        !aim_eligibility_service_->IsCobrowseEligible()) {
+      return false;
+    }
+    return true;
+  }
+
+ protected:
+  bool CalculateEligibility() const override {
+    if (aim_eligibility_service_ &&
+        !aim_eligibility_service_->IsCobrowseEligible()) {
+      return false;
+    }
+    return mock_identity_eligible_;
+  }
+
+ private:
+  bool mock_identity_eligible_ = false;
 };
 
 class TestingContextualTasksUiService
@@ -94,24 +140,24 @@ class TestingContextualTasksUiService
       contextual_tasks::ContextualTasksService* contextual_tasks_service,
       signin::IdentityManager* identity_manager,
       AimEligibilityService* aim_eligibility_service)
-      : ContextualTasksUiService(profile,
-                                 /*delegate=*/nullptr,
-                                 contextual_tasks_service,
-                                 identity_manager,
-                                 aim_eligibility_service,
-                                 /*cookie_synchronizer=*/nullptr) {}
+      : ContextualTasksUiService(
+            profile,
+            std::make_unique<
+                contextual_tasks::MockContextualTasksUiServiceDelegate>(),
+            contextual_tasks_service,
+            identity_manager,
+            aim_eligibility_service,
+            std::make_unique<FakeContextualTasksEligibilityManager>(
+                profile->GetPrefs(),
+                identity_manager,
+                aim_eligibility_service),
+            /*cookie_synchronizer=*/nullptr) {}
   ~TestingContextualTasksUiService() override = default;
 
-  bool CookieJarContainsPrimaryAccount() override {
-    return cookie_jar_contains_primary_account_;
+  FakeContextualTasksEligibilityManager* GetFakeEligibilityManager() {
+    return static_cast<FakeContextualTasksEligibilityManager*>(
+        GetEligibilityManager());
   }
-
-  void SetCookieJarContainsPrimaryAccount(bool contains) {
-    cookie_jar_contains_primary_account_ = contains;
-  }
-
- private:
-  bool cookie_jar_contains_primary_account_ = true;
 };
 }  // namespace
 
@@ -182,26 +228,31 @@ class ContextualTasksButtonInteractiveTestBase : public InteractiveBrowserTest {
 
   PrefService* GetPrefService() { return browser()->profile()->GetPrefs(); }
 
+  TestingContextualTasksUiService* GetTestingService() {
+    return static_cast<TestingContextualTasksUiService*>(
+        contextual_tasks::ContextualTasksUiServiceFactory::GetForBrowserContext(
+            browser()->profile()));
+  }
+
   auto SignIntoEligibleAccount() {
     return Do([&]() {
       identity_test_env()->MakePrimaryAccountAvailable(
           "primary@example.com", signin::ConsentLevel::kSignin);
+      GetTestingService()->GetFakeEligibilityManager()->SetIsEligible(true);
     });
   }
 
   auto SetMockCookieJarContainsPrimaryAccount(bool contains) {
     return Do([&, contains]() {
-      auto* service = static_cast<TestingContextualTasksUiService*>(
-          contextual_tasks::ContextualTasksUiServiceFactory::
-              GetForBrowserContext(browser()->profile()));
-      service->SetCookieJarContainsPrimaryAccount(contains);
-      // Trigger update
-      identity_test_env()->SetRefreshTokenForPrimaryAccount();
+      GetTestingService()->GetFakeEligibilityManager()->SetIsEligible(contains);
     });
   }
 
   auto ClearPrimaryAccount() {
-    return Do([&]() { identity_test_env()->ClearPrimaryAccount(); });
+    return Do([&]() {
+      identity_test_env()->ClearPrimaryAccount();
+      GetTestingService()->GetFakeEligibilityManager()->SetIsEligible(false);
+    });
   }
 
   content::WebContents* GetSidePanelWebContents() {
@@ -220,6 +271,7 @@ class ContextualTasksButtonInteractiveTestBase : public InteractiveBrowserTest {
       auto* service = static_cast<TestingAimEligibilityService*>(
           AimEligibilityServiceFactory::GetForProfile(browser()->profile()));
       service->SetIsCobrowseEligible(eligible);
+      GetTestingService()->GetFakeEligibilityManager()->SetIsEligible(eligible);
     });
   }
 
@@ -321,15 +373,17 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksButtonInteractiveTest,
                        VisiblityUpdatesOnAimPolicyChange) {
   RunTestSequence(
       SignIntoEligibleAccount(),
-      EnsurePresent(ContextualTasksButton::kContextualTasksToolbarButton),
+      WaitForShow(ContextualTasksButton::kContextualTasksToolbarButton),
       Do([&]() {
         PrefService* const pref_service = browser()->profile()->GetPrefs();
         pref_service->SetInteger(omnibox::kAIModeSettings, 1);
+        GetTestingService()->GetFakeEligibilityManager()->SetIsEligible(false);
       }),
       WaitForHide(ContextualTasksButton::kContextualTasksToolbarButton),
       Do([&]() {
         PrefService* const pref_service = browser()->profile()->GetPrefs();
         pref_service->SetInteger(omnibox::kAIModeSettings, 0);
+        GetTestingService()->GetFakeEligibilityManager()->SetIsEligible(true);
       }),
       WaitForShow(ContextualTasksButton::kContextualTasksToolbarButton));
 }
@@ -356,7 +410,9 @@ class ContextualTasksEphemeralButtonInteractiveTest
     scoped_feature_list_.InitWithFeaturesAndParameters(
         {{contextual_tasks::kContextualTasks,
           {{"ContextualTasksEntryPoint", GetParam()},
-           {"ContextualTasksExpandButtonOptions", "toolbar-close-button"}}}},
+           {"ContextualTasksExpandButtonOptions", "toolbar-close-button"}}},
+         {contextual_tasks::kContextualTasksHideCloseButtonInVerticalTabs, {}},
+         {tabs::kVerticalTabs, {}}},
         {});
     InteractiveBrowserTest::SetUp();
   }
@@ -524,6 +580,52 @@ IN_PROC_BROWSER_TEST_P(ContextualTasksEphemeralButtonInteractiveTest,
       EnsurePresent(ContextualTasksButton::kContextualTasksToolbarButton),
       EnsureNotPresent(
           ContextualTasksCloseTabButton::kContextualTasksCloseTabButton));
+}
+
+IN_PROC_BROWSER_TEST_P(ContextualTasksEphemeralButtonInteractiveTest,
+                       CloseButtonHiddenInVerticalTabs) {
+  RunTestSequence(
+      SignIntoEligibleAccount(), InstrumentTab(kFirstTab),
+      AddInstrumentedTab(kSecondTab, GetTestURL()),
+      SelectTab(kTabStripElementId, 0), CreateTaskForTab(0),
+      SimulateOpeningContextualTaskSidePanel(), SimulateNavigateToAiPage(),
+      // Ensure close button is visible in horizontal mode.
+      EnsurePresent(
+          ContextualTasksCloseTabButton::kContextualTasksCloseTabButton),
+      // Switch to vertical tabs.
+      Do([&]() {
+        auto* controller =
+            tabs::VerticalTabStripStateController::From(browser());
+        CHECK(controller);
+        controller->SetVerticalTabsEnabled(true);
+      }),
+      // Verify close button is hidden.
+      EnsureNotPresent(
+          ContextualTasksCloseTabButton::kContextualTasksCloseTabButton));
+}
+
+IN_PROC_BROWSER_TEST_P(ContextualTasksEphemeralButtonInteractiveTest,
+                       CloseButtonHiddenInImmersiveMode) {
+#if !(BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_MAC))
+  GTEST_SKIP() << "Immersive mode not supported on this platform.";
+#else
+  RunTestSequence(
+      SignIntoEligibleAccount(), InstrumentTab(kFirstTab),
+      AddInstrumentedTab(kSecondTab, GetTestURL()),
+      SelectTab(kTabStripElementId, 0), CreateTaskForTab(0),
+      SimulateOpeningContextualTaskSidePanel(), SimulateNavigateToAiPage(),
+      // Ensure close button is visible in non-immersive mode.
+      EnsurePresent(
+          ContextualTasksCloseTabButton::kContextualTasksCloseTabButton),
+      // Switch to immersive mode.
+      Do([&]() {
+        auto* controller = ImmersiveModeController::From(browser());
+        controller->SetEnabled(true);
+      }),
+      // Verify close button is hidden.
+      EnsureNotPresent(
+          ContextualTasksCloseTabButton::kContextualTasksCloseTabButton));
+#endif
 }
 
 IN_PROC_BROWSER_TEST_P(ContextualTasksEphemeralButtonInteractiveTest,

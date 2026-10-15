@@ -1,0 +1,1403 @@
+// Copyright 2026 The Chromium Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+#include <optional>
+
+#include "base/base64.h"
+#include "base/check_deref.h"
+#include "base/command_line.h"
+#include "base/files/file_util.h"
+#include "base/path_service.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
+#include "base/test/bind.h"
+#include "base/threading/thread_restrictions.h"
+#include "chrome/browser/autocomplete/aim_eligibility_service_factory.h"
+#include "chrome/browser/contextual_search/contextual_search_service_factory.h"
+#include "chrome/browser/contextual_tasks/contextual_tasks_cookie_synchronizer.h"
+#include "chrome/browser/contextual_tasks/contextual_tasks_eligibility_manager.h"
+#include "chrome/browser/contextual_tasks/contextual_tasks_service_factory.h"
+#include "chrome/browser/contextual_tasks/contextual_tasks_ui_interface.h"
+#include "chrome/browser/contextual_tasks/contextual_tasks_ui_service.h"
+#include "chrome/browser/contextual_tasks/contextual_tasks_ui_service_factory.h"
+#include "chrome/browser/contextual_tasks/contextual_tasks_utils.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/identity_manager_factory.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_element_identifiers.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/contextual_search/tab_contextualization_controller.h"
+#include "chrome/browser/ui/tabs/public/tab_features.h"
+#include "chrome/common/chrome_paths.h"
+#include "chrome/common/webui_url_constants.h"
+#include "chrome/test/base/ui_test_utils.h"
+#include "chrome/test/interaction/interactive_browser_test.h"
+#include "components/contextual_search/contextual_search_types.h"
+#include "components/contextual_search/pref_names.h"
+#include "components/contextual_tasks/public/contextual_tasks_service.h"
+#include "components/contextual_tasks/public/features.h"
+#include "components/lens/contextual_input.h"
+#include "components/lens/lens_features.h"
+#include "components/omnibox/browser/mock_aim_eligibility_service.h"
+#include "components/prefs/pref_service.h"
+#include "components/sessions/content/session_tab_helper.h"
+#include "components/signin/public/identity_manager/identity_test_utils.h"
+#include "components/tabs/public/tab_interface.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test.h"
+#include "content/public/test/browser_test_utils.h"
+#include "content/public/test/content_mock_cert_verifier.h"
+#include "content/public/test/file_system_chooser_test_helpers.h"
+#include "content/public/test/test_navigation_observer.h"
+#include "content/public/test/url_loader_interceptor.h"
+#include "net/base/net_errors.h"
+#include "net/dns/mock_host_resolver.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
+#include "net/test/embedded_test_server/http_request.h"
+#include "net/test/embedded_test_server/http_response.h"
+#include "third_party/lens_server_proto/aim_communication.pb.h"
+#include "third_party/lens_server_proto/aim_query.pb.h"
+#include "third_party/lens_server_proto/lens_overlay_cluster_info.pb.h"
+#include "third_party/lens_server_proto/lens_overlay_server.pb.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "third_party/skia/include/core/SkColor.h"
+#include "ui/base/unowned_user_data/user_data_factory.h"
+
+using testing::_;
+
+namespace {
+constexpr char kMockAimPagePath[] = "chrome/test/data/mock_aim_page.html";
+constexpr char kMockAimPageHost[] = "www.google.com";
+
+DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kPrimaryTab);
+DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kGenericTab);
+DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kInnerWebContentsId);
+DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kNewTabId);
+DEFINE_LOCAL_CUSTOM_ELEMENT_EVENT_TYPE(kElementExistsEvent);
+DEFINE_LOCAL_CUSTOM_ELEMENT_EVENT_TYPE(kElementDoesNotExistEvent);
+
+class TestTabContextualizationController
+    : public lens::TabContextualizationController {
+ public:
+  explicit TestTabContextualizationController(tabs::TabInterface* tab)
+      : lens::TabContextualizationController(tab) {}
+  ~TestTabContextualizationController() override = default;
+
+  void CaptureScreenshot(
+      std::optional<lens::ImageEncodingOptions> image_options,
+      CaptureScreenshotCallback callback) override {
+    SkBitmap bitmap;
+    bitmap.allocN32Pixels(100, 100, /*isOpaque=*/true);
+    bitmap.eraseColor(SK_ColorRED);
+    std::move(callback).Run(bitmap);
+  }
+
+ protected:
+  bool IsPageContextEligible(
+      const GURL& url,
+      const std::vector<optimization_guide::FrameMetadata>& frame_metadata)
+      override {
+    return true;
+  }
+};
+
+class MockContextualTasksEligibilityManager
+    : public contextual_tasks::ContextualTasksEligibilityManager {
+ public:
+  MockContextualTasksEligibilityManager(
+      PrefService* pref_service,
+      signin::IdentityManager* identity_manager,
+      AimEligibilityService* aim_eligibility_service)
+      : contextual_tasks::ContextualTasksEligibilityManager(
+            pref_service, identity_manager, aim_eligibility_service) {
+    MaybeNotifyEligibilityChanged();
+  }
+  ~MockContextualTasksEligibilityManager() override = default;
+
+  bool IsEligibleWithoutIdentity() const override { return true; }
+  bool CalculateEligibility() const override { return true; }
+};
+
+class MockContextualTasksUiService
+    : public contextual_tasks::ContextualTasksUiService {
+ public:
+  MockContextualTasksUiService(
+      Profile* profile,
+      contextual_tasks::ContextualTasksService* contextual_tasks_service,
+      AimEligibilityService* aim_eligibility_service,
+      signin::IdentityManager* identity_manager)
+      : contextual_tasks::ContextualTasksUiService(
+            profile,
+            /*delegate=*/nullptr,
+            contextual_tasks_service,
+            identity_manager,
+            aim_eligibility_service,
+            std::make_unique<MockContextualTasksEligibilityManager>(
+                profile->GetPrefs(), identity_manager, aim_eligibility_service),
+            /*cookie_synchronizer=*/nullptr) {}
+  ~MockContextualTasksUiService() override = default;
+
+  bool IsSignedInToBrowserWithValidCredentials() override { return true; }
+  bool IsUrlForPrimaryAccount(const GURL& url) override { return true; }
+  void GetAccessToken(
+      GetAccessTokenCallback callback,
+      base::WeakPtr<content::WebContents> web_contents) override {
+    std::move(callback).Run("fake_access_token");
+  }
+};
+
+}  // namespace
+
+namespace contextual_tasks {
+
+class ContextualTasksInteractiveUiTest : public InteractiveBrowserTest {
+ public:
+  ContextualTasksInteractiveUiTest() {
+    scoped_feature_list_.InitWithFeatures(
+        /*enabled_features=*/{kContextualTasks},
+        /*disabled_features=*/{lens::features::kLensSendRawFileMediaTypes});
+  }
+  ~ContextualTasksInteractiveUiTest() override = default;
+
+  void SetUpBrowserContextKeyedServices(
+      content::BrowserContext* context) override {
+    InteractiveBrowserTest::SetUpBrowserContextKeyedServices(context);
+
+    AimEligibilityServiceFactory::GetInstance()->SetTestingFactory(
+        context,
+        base::BindRepeating(
+            &ContextualTasksInteractiveUiTest::BuildMockAimServiceInstance,
+            base::Unretained(this)));
+
+    contextual_tasks::ContextualTasksUiServiceFactory::GetInstance()
+        ->SetTestingFactory(
+            context,
+            base::BindRepeating(&ContextualTasksInteractiveUiTest::
+                                    BuildMockContextualTasksUiServiceInstance,
+                                base::Unretained(this)));
+
+  }
+
+  std::unique_ptr<KeyedService> BuildMockAimServiceInstance(
+      content::BrowserContext* context) {
+    Profile* profile = Profile::FromBrowserContext(context);
+    return std::make_unique<MockAimEligibilityService>(
+        CHECK_DEREF(profile->GetPrefs()), /*template_url_service=*/nullptr,
+        /*url_loader_factory=*/nullptr,
+        IdentityManagerFactory::GetForProfile(profile));
+  }
+
+  std::unique_ptr<KeyedService> BuildMockContextualTasksUiServiceInstance(
+      content::BrowserContext* context) {
+    Profile* profile = Profile::FromBrowserContext(context);
+    return std::make_unique<MockContextualTasksUiService>(
+        profile,
+        contextual_tasks::ContextualTasksServiceFactory::GetForProfile(profile),
+        AimEligibilityServiceFactory::GetForProfile(profile),
+        IdentityManagerFactory::GetForProfile(profile));
+  }
+
+  MockAimEligibilityService* GetMockAimEligibilityService(Profile* profile) {
+    auto* service = AimEligibilityServiceFactory::GetForProfile(profile);
+    return static_cast<MockAimEligibilityService*>(service);
+  }
+
+  void SetUpOnMainThread() override {
+    InteractiveBrowserTest::SetUpOnMainThread();
+
+    host_resolver()->AddRule("*", "127.0.0.1");
+    ASSERT_TRUE(embedded_test_server()->Start());
+
+    url_loader_interceptor_ = std::make_unique<
+        content::URLLoaderInterceptor>(base::BindLambdaForTesting(
+        [&](content::URLLoaderInterceptor::RequestParams* params) {
+          const GURL& url = params->url_request.url;
+          if (url.host() == "a.google.com") {
+            content::URLLoaderInterceptor::WriteResponse(
+                "HTTP/1.1 200 OK\nContent-Type: text/html\n\n",
+                "<html><body>Title 1</body></html>", params->client.get());
+            return true;
+          }
+          if (url.host() == kMockAimPageHost) {
+            content::URLLoaderInterceptor::WriteResponse(kMockAimPagePath,
+                                                         params->client.get());
+            return true;
+          }
+          GURL cluster_info_url{
+              lens::features::GetLensOverlayClusterInfoEndpointUrl()};
+          GURL upload_url{lens::features::GetLensOverlayEndpointURL()};
+          if (url.host() == cluster_info_url.host()) {
+            if (url.path() == cluster_info_url.path()) {
+              lens::LensOverlayServerClusterInfoResponse response;
+              response.set_search_session_id("test_search_session_id");
+              std::string response_string;
+              CHECK(response.SerializeToString(&response_string));
+              content::URLLoaderInterceptor::WriteResponse(
+                  "HTTP/1.1 200 OK\nContent-Type: application/x-protobuf\n\n",
+                  response_string, params->client.get());
+              return true;
+            }
+            if (url.path() == upload_url.path()) {
+              lens::LensOverlayServerResponse response;
+              std::string response_string;
+              CHECK(response.SerializeToString(&response_string));
+              content::URLLoaderInterceptor::WriteResponse(
+                  "HTTP/1.1 200 OK\nContent-Type: application/x-protobuf\n\n",
+                  response_string, params->client.get());
+              return true;
+            }
+          }
+          return false;
+        }));
+
+    auto* mock_aim = GetMockAimEligibilityService(browser()->profile());
+    auto* config = &mock_aim->config();
+    // Configure AimEligibility to recognize Browser Tabs as valid inputs to
+    // populate context selection.
+    config->add_input_type_configs()->set_input_type(
+        omnibox::INPUT_TYPE_BROWSER_TAB);
+    config->add_input_type_configs()->set_input_type(
+        omnibox::INPUT_TYPE_LENS_IMAGE);
+    config->add_input_type_configs()->set_input_type(
+        omnibox::INPUT_TYPE_LENS_FILE);
+
+    EXPECT_CALL(*mock_aim, GetSearchboxConfig())
+        .WillRepeatedly(testing::Return(config));
+
+    // Satisfy the native navigation interception checks.
+    EXPECT_CALL(*mock_aim, HasAimUrlParams(_))
+        .WillRepeatedly(testing::Return(true));
+    EXPECT_CALL(*mock_aim, IsCobrowseEligible())
+        .WillRepeatedly(testing::Return(true));
+    EXPECT_CALL(*mock_aim, IsAimEligible())
+        .WillRepeatedly(testing::Return(true));
+
+    // Explicitly enable user-level content sharing settings to satisfy native
+    // FeatureEligibility.
+    browser()->profile()->GetPrefs()->SetInteger(
+        contextual_search::kSearchContentSharingSettings,
+        static_cast<int>(
+            contextual_search::SearchContentSharingSettingsValue::kEnabled));
+
+    tab_context_override_ =
+        tabs::TabFeatures::GetUserDataFactoryForTesting()
+            .AddOverrideForTesting<
+                lens::TabContextualizationController>(base::BindRepeating(
+                [](tabs::TabInterface& tab)
+                    -> std::unique_ptr<lens::TabContextualizationController> {
+                  return std::make_unique<TestTabContextualizationController>(
+                      &tab);
+                }));
+  }
+
+  void TearDownOnMainThread() override {
+    url_loader_interceptor_.reset();
+    ui::SelectFileDialog::SetFactory(nullptr);
+    InteractiveBrowserTest::TearDownOnMainThread();
+  }
+
+  static auto WaitForElementExists(const ui::ElementIdentifier& contents_id,
+                                   const DeepQuery& element) {
+    StateChange change;
+    change.type = StateChange::Type::kExists;
+    change.where = element;
+    change.event = kElementExistsEvent;
+    return WaitForStateChange(contents_id, change);
+  }
+
+  static auto WaitForElementDoesNotExist(
+      const ui::ElementIdentifier& contents_id,
+      const DeepQuery& element) {
+    StateChange change;
+    change.type = StateChange::Type::kDoesNotExist;
+    change.where = element;
+    change.event = kElementDoesNotExistEvent;
+    return WaitForStateChange(contents_id, change);
+  }
+
+  static auto ClickButton(const ui::ElementIdentifier& contents_id,
+                          const DeepQuery& element) {
+    return ExecuteJsAt(contents_id, element, "el => el.click()");
+  }
+
+  auto ForceClickAddContextEntrypoint(
+      const ui::ElementIdentifier& contents_id) {
+    StateChange change;
+    change.type = StateChange::Type::kExistsAndConditionTrue;
+    change.where = {"contextual-tasks-app"};
+    change.test_function =
+        "function(app) {"
+        "  const composebox = "
+        "app?.shadowRoot?.querySelector('#composebox')?.shadowRoot?."
+        "querySelector('#composebox');"
+        "  if (!composebox) return false;"
+        "  if (composebox.contextMenuOpened) return true;"
+        "  const btn = "
+        "composebox.shadowRoot?.querySelector('#contextEntrypoint')?."
+        "shadowRoot?."
+        "querySelector('#entrypointButton')?.shadowRoot?.querySelector('#"
+        "entrypoint');"
+        "  if (btn) { btn.click(); }"
+        "  return false;"
+        "}";
+    change.event = kElementExistsEvent;
+    return WaitForStateChange(contents_id, change);
+  }
+
+  // Forces a click on a context menu item identified by its data-index.
+  // This is used when the menu item does not have a specific ID but can be
+  // identified by its position or index in the list.
+  auto ForceClickMenuButton(const ui::ElementIdentifier& contents_id,
+                            int target_index) {
+    StateChange change;
+    change.type = StateChange::Type::kExistsAndConditionTrue;
+    change.where = {"contextual-tasks-app"};
+    change.test_function = base::StringPrintf(
+        "function(app) {"
+        "  const composebox = "
+        "app?.shadowRoot?.querySelector('#composebox')?.shadowRoot?."
+        "querySelector('#composebox');"
+        "  if (!composebox) return false;"
+        "  const btn = "
+        "composebox.shadowRoot?.querySelector('#contextEntrypoint')?."
+        "shadowRoot?.querySelector('#menu')?.shadowRoot?.querySelector('button."
+        "dropdown-item[data-index=\"' + %d + '\"]');"
+        "  if (btn) {"
+        "    btn.click();"
+        "    return true;"
+        "  }"
+        "  return false;"
+        "}",
+        target_index);
+    change.event = kElementExistsEvent;
+    return WaitForStateChange(contents_id, change);
+  }
+
+  // Forces a click on a context menu item identified by its ID string.
+  auto ForceClickMenuButton(const ui::ElementIdentifier& contents_id,
+                            const std::string& button_id) {
+    StateChange change;
+    change.type = StateChange::Type::kExistsAndConditionTrue;
+    change.where = {"contextual-tasks-app"};
+    change.test_function = base::StringPrintf(
+        "function(app) {"
+        "  const composebox = "
+        "app?.shadowRoot?.querySelector('#composebox')?.shadowRoot?."
+        "querySelector('#composebox');"
+        "  if (!composebox) return false;"
+        "  const menu = "
+        "composebox.shadowRoot?.querySelector('#contextEntrypoint')?."
+        "shadowRoot?.querySelector('#menu');"
+        "  if (!menu) return false;"
+        "  const btn = menu.shadowRoot?.querySelector('#%s');"
+        "  if (btn) {"
+        "    btn.click();"
+        "    return true;"
+        "  }"
+        "  return false;"
+        "}",
+        button_id.c_str());
+    change.event = kElementExistsEvent;
+    return WaitForStateChange(contents_id, change);
+  }
+
+  auto WaitForComposeboxFilesCount(int expected_count) {
+    StateChange change;
+    change.type = StateChange::Type::kExistsAndConditionTrue;
+    change.where = {"contextual-tasks-app", "#composebox", "#composebox"};
+    change.test_function = base::StringPrintf(
+        "el => el.files && el.files.size === %d", expected_count);
+    change.event = kElementExistsEvent;
+    return WaitForStateChange(kPrimaryTab, change);
+  }
+
+  auto WaitForInterceptionAndLoad() {
+    return Steps(WaitForWebContentsNavigation(kPrimaryTab),
+                 CheckElement(kPrimaryTab,
+                              [](ui::TrackedElement* el) {
+                                return AsInstrumentedWebContents(el)
+                                           ->web_contents()
+                                           ->GetLastCommittedURL()
+                                           .host() ==
+                                       chrome::kChromeUIContextualTasksHost;
+                              }),
+                 WaitForElementExists(kPrimaryTab, {"contextual-tasks-app"}));
+  }
+
+  auto OpenContextualTasksInCurrentTab(const GURL& interception_url) {
+    return Steps(Do(base::BindLambdaForTesting([this, interception_url]() {
+                   browser()
+                       ->tab_strip_model()
+                       ->GetActiveWebContents()
+                       ->GetController()
+                       .LoadURL(interception_url, content::Referrer(),
+                                ui::PAGE_TRANSITION_TYPED, std::string());
+                 })),
+                 WaitForInterceptionAndLoad());
+  }
+
+  // Verifies the structure and content of the SubmitQuery protobuf message sent
+  // from the browser to the inner WebContents.
+  auto VerifySubmitQueryMessage(
+      lens::LensOverlayRequestId::MediaType expected_media_type,
+      std::optional<std::string> expected_added_input_name = std::nullopt) {
+    return Steps(
+        // Wait until the inner WebContents receives a message starting with the
+        // SubmitQuery protobuf tag byte (18 / 0x12).
+        WaitForJsResult(kInnerWebContentsId,
+                        "() => window.receivedMessages.some(buf => new "
+                        "Uint8Array(buf)[0] === 18)"),
+        WithElement(kInnerWebContentsId, [expected_media_type,
+                                          expected_added_input_name](
+                                             ui::TrackedElement* el) {
+          auto* web_contents = AsInstrumentedWebContents(el)->web_contents();
+          // Extract the binary protobuf message from JavaScript by converting
+          // the matching ArrayBuffer into a base64 encoded string.
+          std::string base64_msg =
+              content::EvalJs(web_contents,
+                              "btoa(Array.from(new "
+                              "Uint8Array(window.receivedMessages.find(buf => "
+                              "new Uint8Array(buf)[0] === 18))).map(b => "
+                              "String.fromCharCode(b)).join(''))")
+                  .ExtractString();
+          std::string decoded_msg;
+          ASSERT_TRUE(base::Base64Decode(base64_msg, &decoded_msg));
+          lens::ClientToAimMessage message;
+          ASSERT_TRUE(message.ParseFromString(decoded_msg));
+
+          // Verify core query payload requirements.
+          EXPECT_TRUE(message.has_submit_query());
+          EXPECT_EQ(
+              message.submit_query().payload().lens_image_query_data_size(), 1);
+          EXPECT_EQ(message.submit_query()
+                        .payload()
+                        .lens_image_query_data(0)
+                        .request_id()
+                        .media_type(),
+                    expected_media_type);
+
+          // Verify additional context inputs if expected by the test case.
+          if (expected_added_input_name.has_value()) {
+            EXPECT_TRUE(message.submit_query().payload().has_added_inputs());
+            EXPECT_EQ(message.submit_query()
+                          .payload()
+                          .added_inputs()
+                          .added_inputs_size(),
+                      1);
+            EXPECT_TRUE(message.submit_query()
+                            .payload()
+                            .added_inputs()
+                            .added_inputs(0)
+                            .has_lens_file());
+            if (expected_media_type ==
+                lens::LensOverlayRequestId::MEDIA_TYPE_PDF) {
+              EXPECT_THAT(message.submit_query()
+                              .payload()
+                              .added_inputs()
+                              .added_inputs(0)
+                              .lens_file()
+                              .file_name(),
+                          testing::HasSubstr(*expected_added_input_name));
+            } else {
+              EXPECT_THAT(message.submit_query()
+                              .payload()
+                              .added_inputs()
+                              .added_inputs(0)
+                              .lens_file()
+                              .page_url(),
+                          testing::HasSubstr(*expected_added_input_name));
+            }
+          } else {
+            EXPECT_FALSE(message.submit_query().payload().has_added_inputs());
+          }
+        }));
+  }
+
+ protected:
+  base::test::ScopedFeatureList scoped_feature_list_;
+  std::optional<ui::UserDataFactory::ScopedOverride> tab_context_override_;
+  std::unique_ptr<content::URLLoaderInterceptor> url_loader_interceptor_;
+};
+
+// TODO(crbug.com/500717050): Parameterize this test suite on the feature flag.
+IN_PROC_BROWSER_TEST_F(ContextualTasksInteractiveUiTest,
+                       AddAndRemovePdfChipFromComposebox) {
+  const GURL kInterceptionUrl("https://www.google.com/search?udm=50");
+
+  base::FilePath test_data_dir;
+  base::PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
+  base::FilePath file_path = test_data_dir.AppendASCII("download.pdf");
+
+  ui::SelectFileDialog::SetFactory(
+      std::make_unique<content::FakeSelectFileDialogFactory>(
+          std::vector<base::FilePath>{file_path}));
+
+  const DeepQuery kDocumentChip = {"contextual-tasks-app",
+                                   "#composebox",
+                                   "#composebox",
+                                   "#carousel",
+                                   "cr-composebox-file-thumbnail",
+                                   "#documentChip"};
+
+  const DeepQuery kRemoveDocumentButton = {"contextual-tasks-app",
+                                           "#composebox",
+                                           "#composebox",
+                                           "#carousel",
+                                           "cr-composebox-file-thumbnail",
+                                           "#removeDocumentButton"};
+
+  const DeepQuery kDocumentChipTitle = {"contextual-tasks-app",
+                                        "#composebox",
+                                        "#composebox",
+                                        "#carousel",
+                                        "cr-composebox-file-thumbnail",
+                                        "#documentTitle"};
+
+  RunTestSequence(InstrumentTab(kPrimaryTab, 0),
+                  SelectTab(kTabStripElementId, 0),
+                  OpenContextualTasksInCurrentTab(kInterceptionUrl),
+
+                  ForceClickAddContextEntrypoint(kPrimaryTab),
+                  ForceClickMenuButton(kPrimaryTab, "fileUpload"),
+
+                  WaitForElementExists(kPrimaryTab, kDocumentChip),
+                  CheckJsResultAt(kPrimaryTab, kDocumentChipTitle,
+                                  "el => el.textContent.trim()",
+                                  testing::HasSubstr("download.pdf")),
+                  WaitForComposeboxFilesCount(1),
+
+                  ClickButton(kPrimaryTab, kRemoveDocumentButton),
+                  WaitForElementDoesNotExist(kPrimaryTab, kDocumentChip),
+                  WaitForComposeboxFilesCount(0));
+}
+
+IN_PROC_BROWSER_TEST_F(ContextualTasksInteractiveUiTest,
+                       AddAndRemoveImageChipFromComposebox) {
+  const GURL kInterceptionUrl("https://www.google.com/search?udm=50");
+
+  base::FilePath test_data_dir;
+  base::PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
+  base::FilePath file_path = test_data_dir.AppendASCII("handbag.png");
+
+  ui::SelectFileDialog::SetFactory(
+      std::make_unique<content::FakeSelectFileDialogFactory>(
+          std::vector<base::FilePath>{file_path}));
+
+  const DeepQuery kImgChip = {
+      "contextual-tasks-app",         "#composebox", "#composebox", "#carousel",
+      "cr-composebox-file-thumbnail", "#imgChip"};
+
+  const DeepQuery kRemoveImgButton = {"contextual-tasks-app",
+                                      "#composebox",
+                                      "#composebox",
+                                      "#carousel",
+                                      "cr-composebox-file-thumbnail",
+                                      "#removeImgButton"};
+
+  RunTestSequence(InstrumentTab(kPrimaryTab, 0),
+                  SelectTab(kTabStripElementId, 0),
+                  OpenContextualTasksInCurrentTab(kInterceptionUrl),
+
+                  ForceClickAddContextEntrypoint(kPrimaryTab),
+                  ForceClickMenuButton(kPrimaryTab, "imageUpload"),
+
+                  WaitForElementExists(kPrimaryTab, kImgChip),
+                  WaitForComposeboxFilesCount(1),
+
+                  ClickButton(kPrimaryTab, kRemoveImgButton),
+                  WaitForElementDoesNotExist(kPrimaryTab, kImgChip),
+                  WaitForComposeboxFilesCount(0));
+}
+
+IN_PROC_BROWSER_TEST_F(ContextualTasksInteractiveUiTest,
+                       AddAndRemoveTabFromComposebox) {
+  const GURL kInterceptionUrl("https://www.google.com/search?udm=50");
+  const GURL kGenericPageUrl = embedded_test_server()->GetURL("/title1.html");
+
+  const DeepQuery kFaviconGroup = {
+      "contextual-tasks-app", "#composebox",       "#composebox",
+      "#contextEntrypoint",   "#entrypointButton", "composebox-favicon-group"};
+
+  RunTestSequence(InstrumentTab(kPrimaryTab, 0),
+                  AddInstrumentedTab(kGenericTab, kGenericPageUrl),
+                  SelectTab(kTabStripElementId, 0),
+                  OpenContextualTasksInCurrentTab(kInterceptionUrl),
+
+                  ForceClickAddContextEntrypoint(kPrimaryTab),
+                  ForceClickMenuButton(kPrimaryTab, 0),
+
+                  WaitForElementExists(kPrimaryTab, kFaviconGroup),
+                  CheckJsResultAt(kPrimaryTab, kFaviconGroup,
+                                  "el => el.tabs && el.tabs.length === 1 && "
+                                  "el.tabs[0].title.includes('title1.html')",
+                                  true),
+                  WaitForComposeboxFilesCount(1),
+
+                  ForceClickAddContextEntrypoint(kPrimaryTab),
+                  ForceClickMenuButton(kPrimaryTab, 0),
+
+                  WaitForElementDoesNotExist(kPrimaryTab, kFaviconGroup),
+                  WaitForComposeboxFilesCount(0));
+}
+
+IN_PROC_BROWSER_TEST_F(ContextualTasksInteractiveUiTest,
+                       AddAndSubmitTabFromComposebox) {
+  const GURL kInterceptionUrl("https://www.google.com/search?udm=50");
+  const GURL kGenericPageUrl = embedded_test_server()->GetURL("/title1.html");
+
+  const DeepQuery kFaviconGroup = {
+      "contextual-tasks-app", "#composebox",       "#composebox",
+      "#contextEntrypoint",   "#entrypointButton", "composebox-favicon-group"};
+
+  const DeepQuery kSubmitButton = {"contextual-tasks-app", "#composebox",
+                                   "#composebox", "cr-composebox-submit",
+                                   "#submitContainer"};
+
+  RunTestSequence(
+      InstrumentTab(kPrimaryTab, 0),
+      AddInstrumentedTab(kGenericTab, kGenericPageUrl),
+      SelectTab(kTabStripElementId, 0),
+      OpenContextualTasksInCurrentTab(kInterceptionUrl),
+      InstrumentInnerWebContents(kInnerWebContentsId, kPrimaryTab, 0),
+      ForceClickAddContextEntrypoint(kPrimaryTab),
+      ForceClickMenuButton(kPrimaryTab, 0),
+      WaitForElementExists(kPrimaryTab, kFaviconGroup),
+      CheckJsResultAt(kPrimaryTab, kFaviconGroup,
+                      "el => el.tabs && el.tabs.length === 1 && "
+                      "el.tabs[0].title.includes('title1.html')",
+                      true),
+      WaitForComposeboxFilesCount(1), ClickButton(kPrimaryTab, kSubmitButton),
+      VerifySubmitQueryMessage(
+          lens::LensOverlayRequestId::MEDIA_TYPE_WEBPAGE_AND_IMAGE,
+          "title1.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(ContextualTasksInteractiveUiTest,
+                       AddAndSubmitPdfChipFromComposebox) {
+  const GURL kInterceptionUrl("https://www.google.com/search?udm=50");
+
+  base::FilePath test_data_dir;
+  base::PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
+  base::FilePath file_path = test_data_dir.AppendASCII("download.pdf");
+
+  ui::SelectFileDialog::SetFactory(
+      std::make_unique<content::FakeSelectFileDialogFactory>(
+          std::vector<base::FilePath>{file_path}));
+
+  const DeepQuery kDocumentChip = {"contextual-tasks-app",
+                                   "#composebox",
+                                   "#composebox",
+                                   "#carousel",
+                                   "cr-composebox-file-thumbnail",
+                                   "#documentChip"};
+
+  const DeepQuery kSubmitButton = {"contextual-tasks-app", "#composebox",
+                                   "#composebox", "cr-composebox-submit",
+                                   "#submitContainer"};
+
+  const DeepQuery kDocumentChipTitle = {"contextual-tasks-app",
+                                        "#composebox",
+                                        "#composebox",
+                                        "#carousel",
+                                        "cr-composebox-file-thumbnail",
+                                        "#documentTitle"};
+
+  RunTestSequence(
+      InstrumentTab(kPrimaryTab, 0), SelectTab(kTabStripElementId, 0),
+      OpenContextualTasksInCurrentTab(kInterceptionUrl),
+      InstrumentInnerWebContents(kInnerWebContentsId, kPrimaryTab, 0),
+      ForceClickAddContextEntrypoint(kPrimaryTab),
+      ForceClickMenuButton(kPrimaryTab, "fileUpload"),
+      WaitForElementExists(kPrimaryTab, kDocumentChip),
+      CheckJsResultAt(kPrimaryTab, kDocumentChipTitle,
+                      "el => el.textContent.trim()",
+                      testing::HasSubstr("download.pdf")),
+      WaitForComposeboxFilesCount(1), ClickButton(kPrimaryTab, kSubmitButton),
+      VerifySubmitQueryMessage(lens::LensOverlayRequestId::MEDIA_TYPE_PDF,
+                               "download.pdf"));
+}
+
+IN_PROC_BROWSER_TEST_F(ContextualTasksInteractiveUiTest,
+                       AddAndSubmitImageChipFromComposebox) {
+  const GURL kInterceptionUrl("https://www.google.com/search?udm=50");
+
+  base::FilePath test_data_dir;
+  base::PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
+  base::FilePath file_path = test_data_dir.AppendASCII("handbag.png");
+
+  ui::SelectFileDialog::SetFactory(
+      std::make_unique<content::FakeSelectFileDialogFactory>(
+          std::vector<base::FilePath>{file_path}));
+
+  const DeepQuery kImgChip = {
+      "contextual-tasks-app",         "#composebox", "#composebox", "#carousel",
+      "cr-composebox-file-thumbnail", "#imgChip"};
+
+  const DeepQuery kSubmitButton = {"contextual-tasks-app", "#composebox",
+                                   "#composebox", "cr-composebox-submit",
+                                   "#submitContainer"};
+
+  RunTestSequence(
+      InstrumentTab(kPrimaryTab, 0), SelectTab(kTabStripElementId, 0),
+      OpenContextualTasksInCurrentTab(kInterceptionUrl),
+      InstrumentInnerWebContents(kInnerWebContentsId, kPrimaryTab, 0),
+      ForceClickAddContextEntrypoint(kPrimaryTab),
+      ForceClickMenuButton(kPrimaryTab, "imageUpload"),
+      WaitForElementExists(kPrimaryTab, kImgChip),
+      WaitForComposeboxFilesCount(1), ClickButton(kPrimaryTab, kSubmitButton),
+      VerifySubmitQueryMessage(
+          lens::LensOverlayRequestId::MEDIA_TYPE_DEFAULT_IMAGE));
+}
+
+class ContextualTasksInteractiveUiTestParameterized
+    : public ContextualTasksInteractiveUiTest,
+      public testing::WithParamInterface<bool> {
+ public:
+  ContextualTasksInteractiveUiTestParameterized() {
+    if (GetParam()) {
+      scoped_feature_list_.InitAndEnableFeature(kAimTriggeredThreadLinks);
+    } else {
+      scoped_feature_list_.InitAndDisableFeature(kAimTriggeredThreadLinks);
+    }
+  }
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    mock_cert_verifier_.SetUpCommandLine(command_line);
+
+    // Add command line to allow opaque origin post messages to be accepted in
+    // GetGuestForMessage. For some reason, during testing, the
+    // accounts.google.com postMessage is always opaque, so this is needed for
+    // the test to pass.
+    command_line->AppendSwitch(
+        "allow-opaque-origin-for-contextual-tasks-testing");
+  }
+
+  void SetUpInProcessBrowserTestFixture() override {
+    mock_cert_verifier_.SetUpInProcessBrowserTestFixture();
+  }
+
+  void SetUpOnMainThread() override {
+    ContextualTasksInteractiveUiTest::SetUpOnMainThread();
+    mock_cert_verifier_.mock_cert_verifier()->set_default_result(net::OK);
+
+    base::FilePath test_data_dir;
+    base::PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
+    base::FilePath file_path = test_data_dir.AppendASCII("mock_aim_page.html");
+    std::string mock_aim_page_content;
+    {
+      base::ScopedAllowBlockingForTesting allow_blocking;
+      ASSERT_TRUE(base::ReadFileToString(file_path, &mock_aim_page_content));
+    }
+
+    https_server_.SetSSLConfig(net::EmbeddedTestServer::CERT_TEST_NAMES);
+    https_server_.RegisterRequestHandler(base::BindRepeating(
+        [](std::string mock_aim_page_content,
+           const net::test_server::HttpRequest& request)
+            -> std::unique_ptr<net::test_server::HttpResponse> {
+          auto response =
+              std::make_unique<net::test_server::BasicHttpResponse>();
+          response->set_code(net::HTTP_OK);
+          response->set_content_type("text/html; charset=utf-8");
+          response->AddCustomHeader("Cross-Origin-Opener-Policy",
+                                    "unsafe-none");
+
+          auto it = request.headers.find("Host");
+          if (it != request.headers.end()) {
+            if (it->second == "myaccount.google.com" &&
+                request.relative_url == "/title1.html") {
+              response->set_content(
+                  "<html><body>Title 1 HTML Page</body></html>");
+              return response;
+            }
+            if (it->second == kMockAimPageHost) {
+              response->set_content(mock_aim_page_content);
+              return response;
+            }
+          }
+          return nullptr;
+        },
+        mock_aim_page_content));
+
+    ASSERT_TRUE(https_server_.Start());
+  }
+
+  void TearDownInProcessBrowserTestFixture() override {
+    mock_cert_verifier_.TearDownInProcessBrowserTestFixture();
+  }
+
+ protected:
+  base::test::ScopedFeatureList scoped_feature_list_;
+  content::ContentMockCertVerifier mock_cert_verifier_;
+  net::EmbeddedTestServer https_server_{net::EmbeddedTestServer::TYPE_HTTPS};
+};
+
+// CUJ covered by this test:
+// 1) Opens Contextual Tasks in a tab.
+// 2) In the Contextual Tasks <webview>, calls window.open() to a URL (not
+// about:blank) with target _blank.
+// 3) Verifies that the call returns a window
+// object.
+// 4) Verifies that the window.open call was successful by verifying the
+// new tab opened.
+// 5) Back in Contextual Tasks, calls window.open with a URL and
+// target _self.
+// 6) Verifies the Contextual Tasks tab navigates to the opened
+// URL.
+IN_PROC_BROWSER_TEST_P(ContextualTasksInteractiveUiTestParameterized,
+                       WindowOpenCUJ) {
+  const GURL kInterceptionUrl("https://www.google.com/search?udm=50");
+  const GURL kTargetUrl("https://a.google.com/title1.html");
+
+  auto sequence = Steps(
+      InstrumentTab(kPrimaryTab, 0), SelectTab(kTabStripElementId, 0),
+      // 1) Opens Contextual Tasks in a tab.
+      OpenContextualTasksInCurrentTab(kInterceptionUrl),
+      InstrumentInnerWebContents(kInnerWebContentsId, kPrimaryTab, 0),
+
+      WithElement(kInnerWebContentsId, [kTargetUrl](ui::TrackedElement* el) {
+        auto* web_contents = AsInstrumentedWebContents(el)->web_contents();
+        content::TestNavigationObserver nav_observer(kTargetUrl);
+        nav_observer.StartWatchingNewWebContents();
+
+        // 2) In the Contextual Tasks <webview>, calls window.open() to a
+        // URL (not about:blank) with target _blank. 3) Verifies that the
+        // call returns a window object.
+        bool returns_window =
+            content::EvalJs(
+                web_contents,
+                base::StringPrintf("window.open('%s', '_blank') !== null",
+                                   kTargetUrl.spec().c_str()))
+                .ExtractBool();
+        EXPECT_TRUE(returns_window);
+
+        // 4) Verifies that the window.open call was successful by verifying
+        // the new tab opened.
+        nav_observer.Wait();
+      }));
+
+  if (GetParam()) {
+    // When flag is enabled, the source tab stays open.
+    // Instrument the new tab at index 1.
+    sequence = Steps(
+        std::move(sequence), InstrumentTab(kNewTabId, 1),
+        SelectTab(kTabStripElementId, 0), WaitForShow(kInnerWebContentsId),
+        // 5) Back in Contextual Tasks, calls window.open with a URL and target
+        // _self.
+        Do(base::BindLambdaForTesting([this, kTargetUrl]() {
+          auto* web_contents =
+              browser()->tab_strip_model()->GetActiveWebContents();
+          auto inner_contents = web_contents->GetInnerWebContents();
+          ASSERT_FALSE(inner_contents.empty());
+          auto* guest_contents = inner_contents[0];
+
+          content::ExecuteScriptAsync(
+              guest_contents, base::StringPrintf("window.open('%s', '_self')",
+                                                 kTargetUrl.spec().c_str()));
+        })),
+        // 6) Verifies the Contextual Tasks tab navigates to the opened URL.
+        WaitForWebContentsNavigation(kPrimaryTab, kTargetUrl));
+  } else {
+    // When flag is disabled, the source tab closes and the new tab becomes
+    // index 0.
+    sequence = Steps(
+        std::move(sequence), InstrumentTab(kNewTabId, 0),
+
+        // Verifies the new tab opened and is at the target URL.
+        CheckElement(kNewTabId,
+                     base::BindOnce(
+                         [](const GURL& expected_url, ui::TrackedElement* el) {
+                           return AsInstrumentedWebContents(el)
+                                      ->web_contents()
+                                      ->GetLastCommittedURL() == expected_url;
+                         },
+                         kTargetUrl)));
+  }
+
+  RunTestSequence(std::move(sequence));
+}
+
+// CUJ covered by this test:
+// 1) Opens Contextual Tasks in a tab.
+// 2) In the Contextual Tasks <webview>, calls window.open() to a URL (not
+// about:blank) with target _blank.
+// 3) Verifies that the call returns a window
+// object.
+// 4) Verifies that the window.open call was successful by verifying the
+// new tab opened.
+IN_PROC_BROWSER_TEST_P(ContextualTasksInteractiveUiTestParameterized,
+                       WindowOpenBlank) {
+  const GURL kInterceptionUrl("https://www.google.com/search?udm=50");
+  const GURL kTargetUrl("https://a.google.com/title1.html");
+
+  RunTestSequence(
+      InstrumentTab(kPrimaryTab, 0), SelectTab(kTabStripElementId, 0),
+      // 1) Opens Contextual Tasks in a tab.
+      OpenContextualTasksInCurrentTab(kInterceptionUrl),
+      InstrumentInnerWebContents(kInnerWebContentsId, kPrimaryTab, 0),
+
+      WithElement(kInnerWebContentsId, [kTargetUrl](ui::TrackedElement* el) {
+        auto* web_contents = AsInstrumentedWebContents(el)->web_contents();
+        content::TestNavigationObserver nav_observer(kTargetUrl);
+        nav_observer.StartWatchingNewWebContents();
+
+        // 2) In the Contextual Tasks <webview>, calls window.open() to a URL
+        // (not about:blank) with target _blank. 3) Verifies that the call
+        // returns a window object.
+        bool returns_window =
+            content::EvalJs(
+                web_contents,
+                base::StringPrintf("window.open('%s', '_blank') !== null",
+                                   kTargetUrl.spec().c_str()))
+                .ExtractBool();
+        EXPECT_TRUE(returns_window);
+
+        // 4) Verifies that the window.open call was successful by verifying the
+        // new tab opened.
+        nav_observer.Wait();
+      }));
+}
+
+// CUJ covered by this test:
+// 1) Opens Contextual Tasks in a tab.
+// 2) Back in Contextual Tasks, calls window.open with a URL and target _self.
+// 3) Verifies the Contextual Tasks tab navigates to the opened URL.
+IN_PROC_BROWSER_TEST_P(ContextualTasksInteractiveUiTestParameterized,
+                       WindowOpenSelf) {
+  const GURL kInterceptionUrl("https://www.google.com/search?udm=50");
+  const GURL kTargetUrl("https://a.google.com/title1.html");
+
+  RunTestSequence(
+      InstrumentTab(kPrimaryTab, 0), SelectTab(kTabStripElementId, 0),
+      // 1) Opens Contextual Tasks in a tab.
+      OpenContextualTasksInCurrentTab(kInterceptionUrl),
+      InstrumentInnerWebContents(kInnerWebContentsId, kPrimaryTab, 0),
+
+      // 2) Back in Contextual Tasks, calls window.open with a URL and target
+      // _self.
+      Do(base::BindLambdaForTesting([this, kTargetUrl]() {
+        auto* web_contents =
+            browser()->tab_strip_model()->GetActiveWebContents();
+        auto inner_contents = web_contents->GetInnerWebContents();
+        ASSERT_FALSE(inner_contents.empty());
+        auto* guest_contents = inner_contents[0];
+
+        content::ExecuteScriptAsync(
+            guest_contents, base::StringPrintf("window.open('%s', '_self')",
+                                               kTargetUrl.spec().c_str()));
+      })),
+
+      // 3) Verifies the Contextual Tasks tab navigates to the opened URL.
+      WaitForWebContentsNavigation(kPrimaryTab, kTargetUrl));
+}
+
+// CUJ covered by this test:
+// 1) Opens Contextual Tasks in a tab.
+// 2) Call window.open from the Contextual Tasks <webview>.
+// 3) In the opened window, call window.opener.postMessage.
+// 4) Verify the postMessage is received in the <webview>.
+IN_PROC_BROWSER_TEST_P(ContextualTasksInteractiveUiTestParameterized,
+                       PostMessageToDummyOpenerRoutedToWebview) {
+  const GURL kActiveTabUrl =
+      https_server_.GetURL("myaccount.google.com", "/title1.html");
+  const GURL clicked_url =
+      https_server_.GetURL("myaccount.google.com", "/title1.html#citation");
+  const GURL kInterceptionUrl =
+      https_server_.GetURL(kMockAimPageHost, "/search?udm=50");
+
+  DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kOpenedTab);
+  DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kPrimaryTab2);
+  DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kInnerWebContentsId2);
+
+  // Step 1: Open Contextual Tasks in a Tab
+  auto sequence =
+      Steps(InstrumentTab(kPrimaryTab, 0), SelectTab(kTabStripElementId, 0),
+            OpenContextualTasksInCurrentTab(kInterceptionUrl),
+            InstrumentInnerWebContents(kInnerWebContentsId, kPrimaryTab, 0));
+
+  sequence = Steps(
+      std::move(sequence),
+      // 1. Inject listener in the <webview> to collect
+      // received messages.
+      WithElement(kInnerWebContentsId,
+                  base::BindOnce([](ui::TrackedElement* el) {
+                    std::string setup_listener = R"(
+            window.receivedMessages = [];
+            window.messagePromiseResolver = null;
+            window.addEventListener('message', (event) => {
+              window.receivedMessages.push(event.data);
+              if (window.messagePromiseResolver &&
+                  event.data === 'hello_from_opened_page') {
+                window.messagePromiseResolver(true);
+              }
+            });
+          )";
+                    auto* wc = AsInstrumentedWebContents(el)->web_contents();
+                    EXPECT_TRUE(content::ExecJs(wc, setup_listener));
+                  })),
+
+      // 2. Set up instrumenting the next tab BEFORE we trigger window.open to
+      // avoid race conditions.
+      InstrumentNextTab(kOpenedTab),
+
+      // 3. Within the <webview>, inject and open a window.
+      WithElement(kInnerWebContentsId,
+                  base::BindOnce(
+                      [](GURL url, ui::TrackedElement* el) {
+                        auto* wc =
+                            AsInstrumentedWebContents(el)->web_contents();
+                        std::string click_script = content::JsReplace(
+                            R"(
+                  (() => {
+                    window.open($1, '_blank');
+                  })();
+                )",
+                            url.spec());
+                        EXPECT_TRUE(content::ExecJs(wc, click_script));
+                      },
+                      clicked_url)),
+
+      // 4. Wait for the opened tab to finish loading
+      WaitForWebContentsNavigation(kOpenedTab, clicked_url),
+
+      // 5. Verify window.opener is non-null and call postMessage from the
+      // opened tab.
+      WithElement(kOpenedTab, base::BindOnce([](ui::TrackedElement* el) {
+                    auto* wc = AsInstrumentedWebContents(el)->web_contents();
+                    std::string post_message_script = R"(
+            (async () => {
+              if (!window.opener) {
+                return "no opener";
+              }
+              try {
+                window.opener.postMessage("hello_from_opened_page", "*");
+                return "ok";
+              } catch (e) {
+                return "error: " + e.message;
+              }
+            })();
+          )";
+                    EXPECT_EQ("ok", content::EvalJs(wc, post_message_script));
+                  })),
+
+      // Switch back to the original tab.
+      SelectTab(kTabStripElementId, 0));
+
+  const std::string check_message_script = R"(
+          new Promise((resolve) => {
+            if (window.receivedMessages &&
+                window.receivedMessages.includes("hello_from_opened_page")) {
+              resolve(true);
+            } else {
+              window.messagePromiseResolver = resolve;
+            }
+          });
+        )";
+
+  // If AimTriggeredThreadLinks is enabled, the window.open call opens in a new
+  // tab, so the original contextual tasks tab still exists.
+  if (GetParam()) {
+    sequence = Steps(
+        std::move(sequence), WaitForShow(kInnerWebContentsId),
+        WithElement(kInnerWebContentsId,
+                    base::BindOnce(
+                        [](std::string script, ui::TrackedElement* el) {
+                          auto* wc =
+                              AsInstrumentedWebContents(el)->web_contents();
+                          EXPECT_EQ(true, content::EvalJs(wc, script));
+                        },
+                        check_message_script)));
+  } else {
+    // If AimTriggeredThreadLinks is disabled, the window.open call moves
+    // Contextual Tasks into the side panel. Therefore, instrument the side
+    // panel <webview> and ensure the postMessage was received.
+    sequence = Steps(
+        std::move(sequence),
+        WaitForShow(kContextualTasksSidePanelWebViewElementId),
+        InstrumentNonTabWebView(kPrimaryTab2,
+                                kContextualTasksSidePanelWebViewElementId),
+        InstrumentInnerWebContents(kInnerWebContentsId2, kPrimaryTab2, 0),
+        WaitForShow(kInnerWebContentsId2),
+        WithElement(kInnerWebContentsId2,
+                    base::BindOnce(
+                        [](std::string script, ui::TrackedElement* el) {
+                          auto* wc =
+                              AsInstrumentedWebContents(el)->web_contents();
+                          EXPECT_EQ(true, content::EvalJs(wc, script));
+                        },
+                        check_message_script)));
+  }
+
+  RunTestSequence(std::move(sequence));
+}
+
+// CUJ covered by this test:
+// 1) Opens Contextual Tasks in a tab.
+// 2) Call window.open from the Contextual Tasks <webview>.
+// 3) In the opened window, call window.opener.postMessage.
+// 4) Verify the postMessage is received in the <webview>.
+IN_PROC_BROWSER_TEST_P(ContextualTasksInteractiveUiTestParameterized,
+                       PopupPostMessageToOpenerRoutedToWebview) {
+  const GURL kActiveTabUrl =
+      https_server_.GetURL("myaccount.google.com", "/title1.html");
+  const GURL clicked_url =
+      https_server_.GetURL("myaccount.google.com", "/title1.html#citation");
+  const GURL kInterceptionUrl =
+      https_server_.GetURL(kMockAimPageHost, "/search?udm=50");
+
+  DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kOpenedPopup);
+  DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kPrimaryTab2);
+  DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kInnerWebContentsId2);
+
+  // Step 1: Open Contextual Tasks in a Tab
+  auto sequence =
+      Steps(InstrumentTab(kPrimaryTab, 0), SelectTab(kTabStripElementId, 0),
+            OpenContextualTasksInCurrentTab(kInterceptionUrl),
+            InstrumentInnerWebContents(kInnerWebContentsId, kPrimaryTab, 0));
+
+  sequence = Steps(
+      std::move(sequence),
+      // 1. Inject listener in the <webview> to collect
+      // received messages.
+      WithElement(kInnerWebContentsId,
+                  base::BindOnce([](ui::TrackedElement* el) {
+                    std::string setup_listener = R"(
+            window.receivedMessages = [];
+            window.messagePromiseResolver = null;
+            window.addEventListener('message', (event) => {
+              window.receivedMessages.push(event.data);
+              if (window.messagePromiseResolver &&
+                  event.data === 'hello_from_opened_page') {
+                window.messagePromiseResolver(true);
+              }
+            });
+          )";
+                    auto* wc = AsInstrumentedWebContents(el)->web_contents();
+                    EXPECT_TRUE(content::ExecJs(wc, setup_listener));
+                  })),
+
+      // 2. Set up instrumenting the next tab BEFORE we trigger window.open to
+      // avoid race conditions. We use AnyBrowser() to catch it if it opens in
+      // a new window.
+      InstrumentNextTab(kOpenedPopup, AnyBrowser()),
+
+      // 3. Within the guest view, call window.open with popup=yes
+      WithElement(kInnerWebContentsId,
+                  base::BindOnce(
+                      [](GURL url, ui::TrackedElement* el) {
+                        auto* wc =
+                            AsInstrumentedWebContents(el)->web_contents();
+                        std::string open_script = content::JsReplace(
+                            R"(
+                  (() => {
+                    window.open($1, '_blank', 'popup=yes,width=400,height=400');
+                  })();
+                )",
+                            url.spec());
+                        EXPECT_TRUE(content::ExecJs(wc, open_script));
+                      },
+                      clicked_url)),
+
+      // 4. Wait for the opened popup to finish loading
+      WaitForWebContentsNavigation(kOpenedPopup, clicked_url),
+
+      // Check that the popup window is focused when it is opened.
+      CheckElement(
+          kOpenedPopup, base::BindOnce([](ui::TrackedElement* el) {
+            auto* wc = AsInstrumentedWebContents(el)->web_contents();
+            tabs::TabInterface* tab = tabs::TabInterface::GetFromContents(wc);
+            Browser* popup_browser =
+                tab->GetBrowserWindowInterface()->GetBrowserForMigrationOnly();
+            EXPECT_TRUE(popup_browser);
+            EXPECT_TRUE(ui_test_utils::IsBrowserActive(popup_browser));
+            return true;
+          })),
+
+      // 5. Verify window.opener is non-null and call postMessage from the
+      // opened popup
+      WithElement(kOpenedPopup, base::BindOnce([](ui::TrackedElement* el) {
+                    auto* wc = AsInstrumentedWebContents(el)->web_contents();
+                    std::string post_message_script = R"(
+            (async () => {
+              if (!window.opener) {
+                return "no opener";
+              }
+              try {
+                window.opener.postMessage("hello_from_opened_page", "*");
+                return "ok";
+              } catch (e) {
+                return "error: " + e.message;
+              }
+            })();
+          )";
+                    EXPECT_EQ("ok", content::EvalJs(wc, post_message_script));
+                  })));
+
+  const std::string check_message_script = R"(
+          new Promise((resolve) => {
+            if (window.receivedMessages &&
+                window.receivedMessages.includes("hello_from_opened_page")) {
+              resolve(true);
+            } else {
+              window.messagePromiseResolver = resolve;
+            }
+          });
+        )";
+
+  // If AimTriggeredThreadLinks is enabled, the window.open call opens in a new
+  // tab, so the original contextual tasks tab still exists.
+  if (GetParam()) {
+    sequence = Steps(
+        std::move(sequence), WaitForShow(kInnerWebContentsId),
+        WithElement(kInnerWebContentsId,
+                    base::BindOnce(
+                        [](std::string script, ui::TrackedElement* el) {
+                          auto* wc =
+                              AsInstrumentedWebContents(el)->web_contents();
+                          EXPECT_EQ(true, content::EvalJs(wc, script));
+                        },
+                        check_message_script)));
+  } else {
+    // If AimTriggeredThreadLinks is disabled, the window.open call moves
+    // Contextual Tasks into the side panel. Therefore, instrument the side
+    // panel <webview> and ensure the postMessage was received.
+    sequence = Steps(
+        std::move(sequence),
+        WaitForShow(kContextualTasksSidePanelWebViewElementId),
+        InstrumentNonTabWebView(kPrimaryTab2,
+                                kContextualTasksSidePanelWebViewElementId),
+        InstrumentInnerWebContents(kInnerWebContentsId2, kPrimaryTab2, 0),
+        WaitForShow(kInnerWebContentsId2),
+        WithElement(kInnerWebContentsId2,
+                    base::BindOnce(
+                        [](std::string script, ui::TrackedElement* el) {
+                          auto* wc =
+                              AsInstrumentedWebContents(el)->web_contents();
+                          EXPECT_EQ(true, content::EvalJs(wc, script));
+                        },
+                        check_message_script)));
+  }
+
+  RunTestSequence(InAnyContext(std::move(sequence)));
+}
+
+INSTANTIATE_TEST_SUITE_P(All,
+                         ContextualTasksInteractiveUiTestParameterized,
+                         testing::Bool());
+
+// CUJ covered by this test:
+// 1) User navigates to google search contextual tasks trigger URL (udm=50)
+// 2) The tab should navigate to chrome://contextual-tasks
+// 3) The composebox becomes visible and the input field is focused
+IN_PROC_BROWSER_TEST_F(ContextualTasksInteractiveUiTest,
+                       FocusComposeboxOnInitialLoad) {
+  const GURL kInterceptionUrl("https://www.google.com/search?udm=50");
+
+  StateChange composebox_focused;
+  composebox_focused.type = StateChange::Type::kExistsAndConditionTrue;
+  composebox_focused.where = {"contextual-tasks-app"};
+  composebox_focused.test_function =
+      "function(app) {"
+      "  const cb = app?.shadowRoot?.querySelector('#composebox');"
+      "  const crCb = cb?.shadowRoot?.querySelector('#composebox');"
+      "  const inputSuite = "
+      "crCb?.shadowRoot?.querySelector('#composeboxInput');"
+      "  const input = inputSuite?.shadowRoot?.querySelector('#input');"
+      "  return !app.isComposeboxHidden_() && input && "
+      "         input.getRootNode().activeElement === input;"
+      "}";
+  composebox_focused.event = kElementExistsEvent;
+
+  RunTestSequence(InstrumentTab(kPrimaryTab, 0),
+                  SelectTab(kTabStripElementId, 0),
+                  OpenContextualTasksInCurrentTab(kInterceptionUrl),
+                  WaitForStateChange(kPrimaryTab, composebox_focused));
+}
+
+// CUJ covered by this test:
+// 1) Opens Contextual Tasks in a tab.
+// 2) Call window.open from the Contextual Tasks <webview>.
+// 3) The window opens in a new tab.
+// 4) In the <webview>, call location.href on the opened window.
+// 5) Verify the opened tab navigates to the new URL.
+// 6) Verify the original contextual tasks tab is still there.
+IN_PROC_BROWSER_TEST_P(ContextualTasksInteractiveUiTestParameterized,
+                       LocationHrefRedirectedToOpenedTab) {
+  if (!GetParam()) {
+    GTEST_SKIP()
+        << "Requires AimTriggeredThreadLinks (window tracking) enabled";
+  }
+
+  const GURL kActiveTabUrl =
+      https_server_.GetURL("myaccount.google.com", "/title1.html");
+  const GURL initial_url =
+      https_server_.GetURL("myaccount.google.com", "/title1.html#citation");
+  const GURL new_url =
+      https_server_.GetURL("myaccount.google.com", "/title2.html");
+  const GURL kInterceptionUrl =
+      https_server_.GetURL(kMockAimPageHost, "/search?udm=50");
+
+  DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kOpenedTab);
+
+  // Step 1: Open Contextual Tasks in a Tab
+  auto sequence =
+      Steps(InstrumentTab(kPrimaryTab, 0), SelectTab(kTabStripElementId, 0),
+            OpenContextualTasksInCurrentTab(kInterceptionUrl),
+            InstrumentInnerWebContents(kInnerWebContentsId, kPrimaryTab, 0));
+
+  sequence = Steps(
+      std::move(sequence),
+      // 1. Set up instrumenting the next tab BEFORE we trigger window.open to
+      // avoid race conditions.
+      InstrumentNextTab(kOpenedTab),
+
+      // 2. Within the <webview>, open a window and store its reference.
+      WithElement(kInnerWebContentsId,
+                  base::BindOnce(
+                      [](GURL url, ui::TrackedElement* el) {
+                        auto* wc =
+                            AsInstrumentedWebContents(el)->web_contents();
+                        std::string open_script = content::JsReplace(
+                            R"(
+                  (() => {
+                    window.openedWindow = window.open($1, '_blank');
+                  })();
+                )",
+                            url.spec());
+                        EXPECT_TRUE(content::ExecJs(wc, open_script));
+                      },
+                      initial_url)),
+
+      // 3. Wait for the opened tab to finish loading the initial URL.
+      WaitForWebContentsNavigation(kOpenedTab, initial_url),
+
+      // 4. Within the <webview>, set location.href on the opened window.
+      WithElement(kInnerWebContentsId,
+                  base::BindOnce(
+                      [](GURL url, ui::TrackedElement* el) {
+                        auto* wc =
+                            AsInstrumentedWebContents(el)->web_contents();
+                        std::string navigate_script = content::JsReplace(
+                            R"(
+                  (() => {
+                    if (!window.openedWindow) {
+                      return "no opened window";
+                    }
+                    window.openedWindow.location.href = $1;
+                    return "ok";
+                  })();
+                )",
+                            url.spec());
+                        EXPECT_EQ("ok", content::EvalJs(wc, navigate_script));
+                      },
+                      new_url)),
+
+      // 5. Verify the opened tab navigates to the new URL.
+      WaitForWebContentsNavigation(kOpenedTab, new_url),
+
+      // 6. Switch back to the original tab and verify it's still there.
+      SelectTab(kTabStripElementId, 0), WaitForShow(kInnerWebContentsId));
+
+  RunTestSequence(std::move(sequence));
+}
+
+}  // namespace contextual_tasks

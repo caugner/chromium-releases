@@ -26,8 +26,6 @@ import org.chromium.android_webview.common.origin_trial.DisableOriginTrialsSafeM
 import org.chromium.android_webview.test.util.DisableOriginTrialsSafeModeTestUtilsJni;
 import org.chromium.base.test.util.Feature;
 
-import java.util.Set;
-
 /** Tests for WebView DisableOriginTrialsSafeMode. */
 @JNINamespace("android_webview")
 @RunWith(Parameterized.class)
@@ -50,15 +48,21 @@ public class DisableOriginTrialsSafeModeTest extends AwParameterizedTest {
     @Test
     @SmallTest
     @Feature("AndroidWebview")
-    public void testOriginTrialsSafeModeSavesState() {
+    public void testOriginTrialsSafeModeSavesState() throws Throwable {
+        SafeModeController controller = SafeModeController.getInstance();
+        controller.registerActions(new SafeModeAction[] {new DisableOriginTrialsSafeModeAction()});
         // Given
-        assertFalse(DisableOriginTrialsSafeModeAction.isDisableOriginTrialsEnabled());
+        assertFalse(
+                SafeModeController.getInstance()
+                        .isActionEnabled(SafeModeActionIds.DISABLE_ORIGIN_TRIALS));
 
         // When
-        new DisableOriginTrialsSafeModeAction().execute();
+        controller.enableAllRegisteredActionsForTesting();
 
         // Then
-        assertTrue(DisableOriginTrialsSafeModeAction.isDisableOriginTrialsEnabled());
+        assertTrue(
+                SafeModeController.getInstance()
+                        .isActionEnabled(SafeModeActionIds.DISABLE_ORIGIN_TRIALS));
     }
 
     @Test
@@ -69,7 +73,7 @@ public class DisableOriginTrialsSafeModeTest extends AwParameterizedTest {
         SafeModeController safeModeController = SafeModeController.getInstance();
         safeModeController.registerActions(
                 new SafeModeAction[] {new DisableOriginTrialsSafeModeAction()});
-        safeModeController.executeActions(Set.of(SafeModeActionIds.DISABLE_ORIGIN_TRIALS));
+        safeModeController.enableAllRegisteredActionsForTesting();
 
         // Then
         assertTrue(
@@ -90,6 +94,9 @@ public class DisableOriginTrialsSafeModeTest extends AwParameterizedTest {
     @SmallTest
     @Feature("AndroidWebview")
     public void testSafeModeOffOriginTrialPolicy() throws Throwable {
+        SafeModeController safeModeController = SafeModeController.getInstance();
+        safeModeController.registerActions(
+                new SafeModeAction[] {new DisableOriginTrialsSafeModeAction()});
         // Then
         assertTrue(
                 "Expect a valid origin trial policy",

@@ -45,7 +45,18 @@ ToolbarGlicButton::ToolbarGlicButton(
                                 mouse_down_callback,
                                 expansion_animation_done_callback,
                                 tooltip,
-                                pressed_callback) {}
+                                kToolbarGlicIconSize,
+                                pressed_callback) {
+  UpdateIcon();
+  auto* image_view = static_cast<views::ImageView*>(image_container_view());
+  image_view->SetImageSize({kToolbarGlicIconSize, kToolbarGlicIconSize});
+  image_view->SetProperty(views::kMarginsKey,
+                          gfx::Insets().set_left(kIconLeftMargin));
+
+  SetLabelMargins();
+
+  UpdateColors();
+}
 
 ToolbarGlicButton::~ToolbarGlicButton() = default;
 
@@ -55,6 +66,11 @@ gfx::Size ToolbarGlicButton::CalculatePreferredSize(
       GlicButton<ToolbarButton>::CalculatePreferredSize(available_size);
   size.set_height(GetLayoutConstant(LayoutConstant::kToolbarButtonHeight));
   return size;
+}
+
+gfx::Size ToolbarGlicButton::GetMinimumSize() const {
+  const int size = GetLayoutConstant(LayoutConstant::kToolbarButtonHeight);
+  return gfx::Size(size, size);
 }
 
 void ToolbarGlicButton::AddedToWidget() {
@@ -98,17 +114,24 @@ void ToolbarGlicButton::SetLeftRightCornerRadii(int left, int right) {
 }
 
 float ToolbarGlicButton::GetCornerRadiusFor(ToolbarButton::Edge edge) const {
-  return edge == ToolbarButton::Edge::kLeft
-             ? left_corner_radius_.value_or(GetRoundedCornerRadius())
-             : right_corner_radius_.value_or(GetRoundedCornerRadius());
+  switch (edge) {
+    case ToolbarButton::Edge::kLeft:
+    case ToolbarButton::Edge::kTopLeft:
+    case ToolbarButton::Edge::kBottomLeft:
+      return left_corner_radius_.value_or(GetRoundedCornerRadius());
+    case ToolbarButton::Edge::kRight:
+    case ToolbarButton::Edge::kTopRight:
+    case ToolbarButton::Edge::kBottomRight:
+      return right_corner_radius_.value_or(GetRoundedCornerRadius());
+  }
+}
+
+int ToolbarGlicButton::GetRoundedCornerRadius() const {
+  return GetLayoutConstant(LayoutConstant::kToolbarButtonHeight) / 2;
 }
 
 int ToolbarGlicButton::GetSplitRoundedEdgeRadius() {
   return split_rounded_edge_radius_;
-}
-
-int ToolbarGlicButton::GetGlicIconSize() {
-  return kToolbarGlicIconSize;
 }
 
 int ToolbarGlicButton::GetIconSize() const {
@@ -198,8 +221,49 @@ void ToolbarGlicButton::Expand() {
   GlicButton<ToolbarButton>::Expand();
 }
 
+void ToolbarGlicButton::OnBoundsChanged(const gfx::Rect& previous_bounds) {
+  GlicButton<ToolbarButton>::OnBoundsChanged(previous_bounds);
+
+  // Button layout is kPreferredSnapToMinimum, so if the width is smaller than
+  // the normal width or if the button is collapsed, the label will be hidden.
+  bool should_hide_label =
+      width() < normal_width() || width_state() == WidthState::kCollapsed;
+
+  auto* image_view = static_cast<views::ImageView*>(image_container_view());
+  auto* box_layout = static_cast<views::BoxLayout*>(GetLayoutManager());
+
+  if (should_hide_label) {
+    if (label()->GetVisible()) {
+      label()->SetVisible(false);
+      image_view->SetProperty(views::kMarginsKey, gfx::Insets());
+      box_layout->set_main_axis_alignment(
+          views::BoxLayout::MainAxisAlignment::kCenter);
+    }
+  } else {
+    if (!label()->GetVisible()) {
+      label()->SetVisible(true);
+      image_view->SetProperty(views::kMarginsKey,
+                              gfx::Insets().set_left(kIconLeftMargin));
+      box_layout->set_main_axis_alignment(
+          views::BoxLayout::MainAxisAlignment::kCenter);
+    }
+  }
+}
+
+bool ToolbarGlicButton::GetIsShowingNudge() const {
+  return width_state_ == WidthState::kNudge;
+}
+
 void ToolbarGlicButton::ResetSplitButtonCornerStyling() {
   SetLeftRightCornerRadii(GetRoundedCornerRadius(), GetRoundedCornerRadius());
+}
+
+float ToolbarGlicButton::GetWidthFactor() const {
+  return width_factor_;
+}
+void ToolbarGlicButton::SetWidthFactor(float factor) {
+  width_factor_ = factor;
+  this->PreferredSizeChanged();
 }
 
 BEGIN_METADATA(ToolbarGlicButton)

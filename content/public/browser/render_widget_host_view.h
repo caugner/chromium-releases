@@ -336,6 +336,18 @@ class CONTENT_EXPORT RenderWidgetHostView {
 
   // Returns true if this widget is a HTML popup, e.g. a <select> menu.
   virtual bool IsHTMLFormPopup() const = 0;
+
+  // Returns true if this view has a saved compositor frame.
+  virtual bool HasSavedCompositorFrame() const = 0;
+
+  // Forces a specified deadline for the next surface embedding. If the optional
+  // has a value, overrides the embedding deadline to the specified duration
+  // (unit: frames). If set to std::nullopt, clears any active override and
+  // restores default resize deadline policies.
+  virtual void SetForceSpecifiedDeadline(
+      std::optional<uint32_t> deadline_in_frames) {}
+
+  virtual std::optional<uint32_t> GetForceSpecifiedDeadlineForTesting();
 };
 
 }  // namespace content

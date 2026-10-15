@@ -11,6 +11,8 @@
 #include "chrome/browser/glic/test_support/glic_browser_test.h"
 #include "chrome/browser/renderer_context_menu/render_view_context_menu_test_util.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/test/browser_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -75,7 +77,7 @@ IN_PROC_BROWSER_TEST_F(GlicContextMenuBrowserTest, GlicInvokeStandard) {
   menu->ExecuteCommand(IDC_CONTENT_CONTEXT_GLIC, 0);
 
   // Now Glic should be open.
-  ASSERT_TRUE(WaitForGlicOpen());
+  ASSERT_OK(WaitForGlicOpen());
   EXPECT_NE(nullptr, GetOnlyGlicInstance());
 }
 
@@ -121,7 +123,7 @@ IN_PROC_BROWSER_TEST_F(GlicContextMenuArm2BrowserTest, GlicInvokeArm2) {
   menu->ExecuteCommand(IDC_CONTENT_CONTEXT_GLIC, 0);
 
   // Now Glic should be open.
-  ASSERT_TRUE(WaitForGlicOpen());
+  ASSERT_OK(WaitForGlicOpen());
   EXPECT_NE(nullptr, GetOnlyGlicInstance());
 }
 
@@ -149,8 +151,34 @@ IN_PROC_BROWSER_TEST_F(GlicContextMenuArm3BrowserTest, GlicInvokeArm3) {
   menu->ExecuteCommand(IDC_CONTENT_CONTEXT_GLIC, 0);
 
   // Now Glic should be open.
-  ASSERT_TRUE(WaitForGlicOpen());
+  ASSERT_OK(WaitForGlicOpen());
   EXPECT_NE(nullptr, GetOnlyGlicInstance());
+}
+
+IN_PROC_BROWSER_TEST_F(GlicContextMenuBrowserTest, GlicItemAbsentInAppWindow) {
+  // Create an app browser window.
+  Browser* app_browser = Browser::Create(Browser::CreateParams::CreateForApp(
+      "test_app", /*trusted_source=*/false, gfx::Rect(), browser()->profile(),
+      /*user_gesture=*/true));
+
+  // Add a tab and navigate to a test page.
+  content::WebContents* blank_tab = chrome::AddSelectedTabWithURL(
+      app_browser, GetSimpleTestUrl(), ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
+  ASSERT_TRUE(content::WaitForLoadStop(blank_tab));
+  app_browser->window()->Show();
+
+  // Create context menu for the app window.
+  content::ContextMenuParams params;
+  params.page_url = blank_tab->GetVisibleURL();
+  auto menu = std::make_unique<TestRenderViewContextMenu>(
+      *blank_tab->GetPrimaryMainFrame(), params);
+  menu->Init();
+
+  // Verify Glic item is NOT present.
+  EXPECT_FALSE(menu->IsItemPresent(IDC_CONTENT_CONTEXT_GLIC));
+
+  // Clean up.
+  CloseBrowserSynchronously(app_browser);
 }
 
 }  // namespace glic

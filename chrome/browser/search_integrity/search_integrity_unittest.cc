@@ -44,6 +44,10 @@ class SearchIntegrityTest : public testing::Test {
     return search_integrity_->CheckSearchEnginesReport();
   }
 
+  SiteSearchIntegrityReport CheckSiteSearchReport() {
+    return search_integrity_->CheckSiteSearchReport();
+  }
+
   void TriggerAllowlistInitialized() {
     search_integrity_->OnAllowlistInitialized("");
   }
@@ -64,6 +68,16 @@ class SearchIntegrityTest : public testing::Test {
     data.prepopulate_id = prepopulate_id;
     data.starter_pack_id = starter_pack_id;
     return test_util_->model()->Add(std::make_unique<TemplateURL>(data));
+  }
+
+  void ClearAllButDefault() {
+    const TemplateURL* def_turl =
+        test_util_->model()->GetDefaultSearchProvider();
+    for (const auto& turl : test_util_->model()->GetTemplateURLs()) {
+      if (turl != def_turl) {
+        test_util_->model()->Remove(turl);
+      }
+    }
   }
 
   void SetDefaultSearchProvider(TemplateURL* template_url) {
@@ -91,6 +105,7 @@ TEST_F(SearchIntegrityTest, CheckCustomSearchEngines_ExtractsNoReferralParam) {
       AddSearchEngine(u"No Referral Engine", "http://custom.com");
   SetDefaultSearchProvider(turl);
   TriggerAllowlistInitialized();
+  ClearAllButDefault();
   SearchIntegrityReport report = CheckSearchEnginesReport();
 
   EXPECT_TRUE(report.has_custom_option);
@@ -283,15 +298,64 @@ TEST_F(SearchIntegrityTest, CheckDefaultSearchEngine_DefaultIsStarterPack) {
   EXPECT_FALSE(report.is_default_custom);
 }
 
-TEST_F(SearchIntegrityTest, CheckDefaultSearchEngine_DefaultIsPrepopulated) {
-  TemplateURL* turl =
-      AddSearchEngine(u"Prepopulated", "http://prepopulated.com",
-                      /*created_by_policy=*/false, /*prepopulate_id=*/1);
-  SetDefaultSearchProvider(turl);
+TEST_F(SearchIntegrityTest, CheckForSpoofing_NoAlertForNonUrlKeywords) {
+  // These 3 should not trigger any spoofing metrics since the keywords are not
+  // URLs.
+  AddSearchEngine(u"goog", "https://bing.com/search?q={searchTerms}");
+  AddSearchEngine(u"@gemini", "https://google.com/search?q={searchTerms}");
+  AddSearchEngine(u"altavista", "https://bing.com/search?q={searchTerms}");
 
-  SearchIntegrityReport report = CheckSearchEnginesReport();
+  SiteSearchIntegrityReport report = CheckSiteSearchReport();
 
-  EXPECT_FALSE(report.is_default_custom);
+  EXPECT_FALSE(report.has_cross_domain_search);
+  EXPECT_FALSE(report.has_cross_tld_search);
+}
+
+TEST_F(SearchIntegrityTest, CheckForSpoofing_AlertForUrlKeywords) {
+  // Shortcut "maps.google.com" pointing to Wikipedia should trigger alert.
+  AddSearchEngine(u"maps.google.com",
+                  "https://wikipedia.org/wiki/{searchTerms}");
+
+  SiteSearchIntegrityReport report = CheckSiteSearchReport();
+
+  EXPECT_TRUE(report.has_cross_domain_search);
+  EXPECT_FALSE(report.has_cross_tld_search);
+}
+
+TEST_F(SearchIntegrityTest, CheckForSpoofing_AlertForCrossTld) {
+  // Shortcut "google.com" pointing to google.ca should trigger CROSS_TLD alert.
+  AddSearchEngine(u"google.com", "https://google.ca/search?q={searchTerms}");
+
+  SiteSearchIntegrityReport report = CheckSiteSearchReport();
+
+  EXPECT_TRUE(report.has_cross_tld_search);
+}
+
+TEST_F(SearchIntegrityTest, CheckForSpoofing_ExtensionUrlSearch) {
+  // Shortcut "google.com" pointing to an extension URL should trigger
+  // extension-url-search and NOT cross-domain alert.
+  AddSearchEngine(u"google.com",
+                  "chrome-extension://extensionid/search?q={searchTerms}");
+
+  SiteSearchIntegrityReport report = CheckSiteSearchReport();
+
+  EXPECT_TRUE(report.has_extension_url_search);
+  EXPECT_FALSE(report.has_cross_domain_search);
+}
+
+TEST_F(SearchIntegrityTest, CheckForSpoofing_ObfuscatedUrl) {
+  // Search URL with hex-encoded "www.google.com" should trigger obfuscated
+  // alert. The domain itself should still be correctly identified as
+  // google.com.
+  AddSearchEngine(u"google.com",
+                  "https://%77%77%77%2e%67%6f%6f%67%6c%65%2e%63%6f%6d/"
+                  "search?q={searchTerms}");
+
+  SiteSearchIntegrityReport report = CheckSiteSearchReport();
+
+  EXPECT_TRUE(report.has_obfuscated_search_url);
+  EXPECT_FALSE(report.has_cross_tld_search);
+  EXPECT_FALSE(report.has_cross_domain_search);
 }
 
 }  // namespace search_integrity

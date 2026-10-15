@@ -11,7 +11,8 @@ export function getHtml(this: ContextualEntrypointButtonElement) {
   // clang-format off
   return html`<!--_html_template_start_-->
   <div id="${this.getWrapperId_()}" class="${this.getWrapperCssClass_()}">
-    ${this.showContextMenuDescription && !this.windowWidthBelowThreshold_ ? html`
+    ${(this.showContextMenuDescription || this.showSuggestionLabel)
+        && !this.windowWidthBelowThreshold_ ? html`
       <cr-button id="entrypoint" class="ai-mode-button" part="entrypoint-button"
           @click="${this.onEntrypointClick_}"
           title="${this.i18n('addContextTitle')}"
@@ -20,8 +21,21 @@ export function getHtml(this: ContextualEntrypointButtonElement) {
         <cr-icon id="entrypointIcon" icon="cr:add" slot="prefix-icon"></cr-icon>
         <span id="description"
             @animationend="${this.onDescriptionAnimationend_}">
-          ${this.i18n('addContext')}
+          ${this.showSuggestionLabel ?
+             this.i18n('searchBoxHintMultimodal') : this.i18n('addContext')}
         </span>
+        ${this.tabFaviconChipsToCoinsEnabled_ && this.sharedTabs && this.sharedTabs.length > 0 ? html`
+          <composebox-favicon-group .tabs="${this.sharedTabs}"></composebox-favicon-group>
+        ` : ''}
+      </cr-button>
+    ` : (this.tabFaviconChipsToCoinsEnabled_ && this.sharedTabs && this.sharedTabs.length > 0) ? html`
+      <cr-button id="entrypoint" class="ai-mode-button pill-button" part="entrypoint-button"
+          @click="${this.onEntrypointClick_}"
+          title="${this.i18n('addContextTitle')}"
+          ?disabled="${this.uploadButtonDisabled}" noink
+          aria-label="${this.i18n('addContextTitle')}">
+        <cr-icon id="entrypointIcon" icon="cr:add" slot="prefix-icon"></cr-icon>
+        <composebox-favicon-group .tabs="${this.sharedTabs}"></composebox-favicon-group>
       </cr-button>
     ` : html`
       <cr-icon-button id="entrypoint" class="ai-mode-button"
@@ -39,7 +53,7 @@ export function getHtml(this: ContextualEntrypointButtonElement) {
       <div class="aim-background aim-c"
           @animationend="${this.onAimBackgroundAnimationend_}">
       </div>
-    ` : ''}
+   ` : ''}
   </div>
 <!--_html_template_end_-->`;
   // clang-format off

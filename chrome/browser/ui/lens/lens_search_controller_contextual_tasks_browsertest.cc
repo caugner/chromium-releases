@@ -77,6 +77,7 @@ class TestingContextualTasksUiService
             contextual_tasks_service,
             identity_manager,
             aim_eligibility_service,
+            /*eligibility_manager=*/nullptr,
             std::unique_ptr<
                 contextual_tasks::ContextualTasksCookieSynchronizer>()),
         profile_(profile),
@@ -631,7 +632,7 @@ class ContextualTasksLensInteractionBrowserTest
           {{"cluster-info-endpoint-url",
             embedded_test_server()->GetURL("/v1/clusterinfo").spec()}}},
          {contextual_tasks::kContextualTasksForceEntryPointEligibility, {}}},
-        {lens::features::kLensSearchZeroStateCsb});
+        {});
     InProcessBrowserTest::SetUp();
   }
 

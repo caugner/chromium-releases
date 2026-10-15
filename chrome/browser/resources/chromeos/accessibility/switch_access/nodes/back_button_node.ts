@@ -144,7 +144,7 @@ export class BackButtonNode extends SAChildNode {
     if (BackButtonNode.automationNode_ && BackButtonNode.automationNode_.role) {
       return;
     }
-    SwitchAccess.findNodeInDesktopTree(
+    SwitchAccess.findNodeMatching(
         {
           role: RoleType.BUTTON,
           attributes: {className: 'SwitchAccessBackButtonView'},

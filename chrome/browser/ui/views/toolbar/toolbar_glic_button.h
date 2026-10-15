@@ -9,6 +9,7 @@
 #include "chrome/browser/ui/views/toolbar/toolbar_button.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_glic_constants.h"
 #include "ui/base/metadata/metadata_header_macros.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/views/layout/layout_types.h"
 
 class BrowserFrameView;
@@ -32,6 +33,7 @@ class ToolbarGlicButton : public GlicButton<ToolbarButton> {
 
   gfx::Size CalculatePreferredSize(
       const views::SizeBounds& available_size) const override;
+  gfx::Size GetMinimumSize() const override;
 
   void SetCloseButtonFocusBehavior(
       views::View::FocusBehavior focus_behavior) override;
@@ -49,22 +51,30 @@ class ToolbarGlicButton : public GlicButton<ToolbarButton> {
   void ResetSplitButtonCornerStyling() override;
   void SetLeftRightCornerRadii(int left, int right) override;
   float GetCornerRadiusFor(ToolbarButton::Edge edge) const override;
+  int GetRoundedCornerRadius() const override;
   int GetSplitRoundedEdgeRadius() override;
   int GetIconSize() const override;
-  int GetGlicIconSize() override;
   ui::ColorId GetBackgroundColor();
 
   void Collapse() override;
   void Expand() override;
+  void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
+
+  bool GetIsShowingNudge() const override;
 
  private:
   void UpdateBackground();
   void UpdateInkDrop();
 
+  float GetWidthFactor() const override;
+  void SetWidthFactor(float factor) override;
+
   std::optional<int> left_corner_radius_;
   std::optional<int> right_corner_radius_;
 
   int split_rounded_edge_radius_ = kDefaultSplitButtonRoundedCornerRadius;
+
+  float width_factor_ = 0;
 };
 }  // namespace glic
 

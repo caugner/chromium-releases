@@ -13,7 +13,7 @@ import type {TabInfo} from '//resources/mojo/components/omnibox/browser/searchbo
 import type {InputState} from '//resources/mojo/components/omnibox/composebox/composebox_query.mojom-webui.js';
 import type {UnguessableToken} from '//resources/mojo/mojo/public/mojom/base/unguessable_token.mojom-webui.js';
 
-import {getLoadTimeBoolean, GlifAnimationState} from './common.js';
+import {GlifAnimationState} from './common.js';
 import type {ContextualActionMenuElement} from './contextual_action_menu.js';
 import {getCss} from './contextual_entrypoint_and_menu.css.js';
 import {getHtml} from './contextual_entrypoint_and_menu.html.js';
@@ -53,6 +53,7 @@ export class ContextualEntrypointAndMenuElement extends
       // =========================================================================
       fileNum: {type: Number},
       showContextMenuDescription: {type: Boolean},
+      smartTabSharingActive: {type: Boolean},
       hasImageFiles: {
         reflect: true,
         type: Boolean,
@@ -63,6 +64,8 @@ export class ContextualEntrypointAndMenuElement extends
       glifAnimationState: {type: String, reflect: true},
       searchboxLayoutMode: {type: String},
       uploadButtonDisabled: {type: Boolean},
+      disableAutoReposition: {type: Boolean},
+      usePecApi: {type: Boolean},
 
       // =========================================================================
       // Protected properties
@@ -71,28 +74,28 @@ export class ContextualEntrypointAndMenuElement extends
         reflect: true,
         type: Boolean,
       },
-      usePecApi_: {
-        type: Boolean,
-      },
+      sharedTabs: {type: Array},
     };
   }
 
   accessor fileNum: number = 0;
   accessor showContextMenuDescription: boolean = false;
+  accessor smartTabSharingActive: boolean = false;
   accessor disabledTabIds: Map<number, UnguessableToken> = new Map();
   accessor tabSuggestions: TabInfo[] = [];
   accessor inputState: InputState|null = null;
   accessor glifAnimationState: GlifAnimationState =
       GlifAnimationState.INELIGIBLE;
   accessor uploadButtonDisabled: boolean = false;
+  accessor sharedTabs: TabInfo[] = [];
 
   accessor hasImageFiles: boolean = false;
   accessor searchboxLayoutMode: string = '';
+  accessor disableAutoReposition: boolean = false;
+  accessor usePecApi: boolean = false;
 
   protected accessor enableMultiTabSelection_: boolean =
       loadTimeData.getBoolean('composeboxContextMenuEnableMultiTabSelection');
-  protected accessor usePecApi_: boolean =
-      getLoadTimeBoolean('contextualMenuUsePecApi', /*defaultValue=*/ false);
 
   // TODO(crbug.com/499310611): Explore avoiding/removing this local property.
   private shouldOpenMenuForMultiSelection_: boolean = false;
@@ -121,7 +124,7 @@ export class ContextualEntrypointAndMenuElement extends
       // Clear the flag if the entrypoint is fully or partially rendered, or if
       // inputState is truthy (valid) but the entrypoint is not rendered
       // (ex: because `hasAllowedInputs()` returned false based on
-      // `usePecApi_` or disabled inputs) to prevent a delayed pop open.
+      // `usePecApi` or disabled inputs) to prevent a delayed pop open.
       if (entrypoint || entrypointButton || this.inputState) {
         this.shouldOpenMenuForMultiSelection_ = false;
       }

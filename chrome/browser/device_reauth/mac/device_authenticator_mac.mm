@@ -82,9 +82,6 @@ void DeviceAuthenticatorMac::AuthenticateWithMessage(
     return;
   }
   callback_ = std::move(callback);
-  // Always use CanAuthenticateWithBiometrics() before invoking the biometrics
-  // API, and if it fails use password_manager_util_mac::AuthenticateUser()
-  // instead, until crbug.com/1358442 is fixed.
   if (!CanAuthenticateWithBiometrics()) {
     // AuthenticateUserWithNonBiometrics runs a dialog with a nested run loop.
     // Post a task to run it asynchronously, so that it doesn't block the

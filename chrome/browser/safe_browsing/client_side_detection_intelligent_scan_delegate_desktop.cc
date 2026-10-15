@@ -10,6 +10,7 @@
 #include "chrome/browser/safe_browsing/client_side_detection_intelligent_scan_delegate_util.h"
 #include "components/optimization_guide/core/optimization_guide_features.h"
 #include "components/optimization_guide/public/mojom/model_broker.mojom-shared.h"
+#include "components/policy/core/common/management/management_service.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/core/browser/intelligent_scan_delegate.h"
 #include "components/safe_browsing/core/common/features.h"
@@ -185,8 +186,11 @@ void ClientSideDetectionIntelligentScanDelegateDesktop::Inquiry::
 ClientSideDetectionIntelligentScanDelegateDesktop::
     ClientSideDetectionIntelligentScanDelegateDesktop(
         PrefService& pref,
-        OptimizationGuideKeyedService* opt_guide)
-    : pref_(pref), opt_guide_(opt_guide) {
+        OptimizationGuideKeyedService* opt_guide,
+        policy::ManagementService* management_service)
+    : pref_(pref),
+      opt_guide_(opt_guide),
+      management_service_(management_service) {
   pref_change_registrar_.Init(&pref);
   pref_change_registrar_.Add(
       prefs::kSafeBrowsingEnhanced,
@@ -211,8 +215,6 @@ bool ClientSideDetectionIntelligentScanDelegateDesktop::
       ClientSideDetectionType::KEYBOARD_LOCK_REQUESTED;
 
   bool is_intelligent_scan_requested =
-      base::FeatureList::IsEnabled(
-          kClientSideDetectionLlamaForcedTriggerInfoForScamDetection) &&
       verdict->has_llama_forced_trigger_info() &&
       verdict->llama_forced_trigger_info().intelligent_scan();
 
@@ -239,9 +241,7 @@ bool ClientSideDetectionIntelligentScanDelegateDesktop::ShouldShowScamWarning(
   }
 
   return *verdict == IntelligentScanVerdict::SCAM_EXPERIMENT_VERDICT_1 ||
-         (base::FeatureList::IsEnabled(
-              kClientSideDetectionShowLlamaScamVerdictWarning) &&
-          *verdict == IntelligentScanVerdict::SCAM_EXPERIMENT_VERDICT_2) ||
+         *verdict == IntelligentScanVerdict::SCAM_EXPERIMENT_VERDICT_2 ||
          *verdict == IntelligentScanVerdict::SCAM_EXPERIMENT_VERDICT_3 ||
          *verdict == IntelligentScanVerdict::SCAM_EXPERIMENT_VERDICT_4 ||
          *verdict ==
@@ -253,7 +253,9 @@ void ClientSideDetectionIntelligentScanDelegateDesktop::OnPrefsUpdated() {
     return;
   }
 
-  if (IsEnhancedProtectionEnabled(*pref_)) {
+  bool is_managed = management_service_ && management_service_->IsManaged();
+
+  if (IsEnhancedProtectionEnabled(*pref_) && !is_managed) {
     StartListeningToOnDeviceModelUpdate();
   } else {
     StopListeningToOnDeviceModelUpdate();

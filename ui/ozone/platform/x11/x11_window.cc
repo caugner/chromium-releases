@@ -264,10 +264,6 @@ X11Window::~X11Window() {
   Close();
 }
 
-base::WeakPtr<X11Window> X11Window::GetWeakPtr() {
-  return weak_ptr_factory_.GetWeakPtr();
-}
-
 void X11Window::Initialize(PlatformWindowInitProperties properties) {
   CreateXWindow(properties);
 
@@ -824,11 +820,15 @@ void X11Window::Restore() {
   }
 }
 
-void X11Window::ShowWindowControlsMenu(const gfx::Point& point) {
+void X11Window::ShowWindowControlsMenu(const gfx::Point& point_in_dip) {
+  const gfx::Point point_in_pixels =
+      platform_window_delegate_->ConvertPointToPixels(point_in_dip);
+  const uint32_t x = static_cast<uint32_t>(point_in_pixels.x());
+  const uint32_t y = static_cast<uint32_t>(point_in_pixels.y());
+
   SendClientMessage(xwindow_, x_root_window_,
                     x11::GetAtom("_GTK_SHOW_WINDOW_MENU"),
-                    {/*device_id=*/0, base::bit_cast<uint32_t>(point.x()),
-                     base::bit_cast<uint32_t>(point.y()), 0, 0});
+                    {/*device_id=*/0, x, y, 0, 0});
 }
 
 PlatformWindowState X11Window::GetPlatformWindowState() const {
@@ -1412,7 +1412,11 @@ uint32_t X11Window::DispatchEvent(const PlatformEvent& event) {
   auto& current_xevent = *connection_->dispatching_event();
 
   if (event->IsMouseEvent()) {
+    auto weak_this = weak_ptr_factory_.GetWeakPtr();
     X11WindowManager::GetInstance()->MouseOnWindow(this);
+    if (!weak_this) {
+      return POST_DISPATCH_STOP_PROPAGATION;
+    }
   }
 #if BUILDFLAG(USE_ATK)
   if (HandleAsAtkEvent(current_xevent)) {
@@ -1454,8 +1458,6 @@ void X11Window::DispatchUiEvent(ui::Event* event, const x11::Event& xev) {
   auto* located_events_grabber = window_manager->located_events_grabber();
   if (event->IsLocatedEvent() && located_events_grabber &&
       located_events_grabber != this) {
-    base::WeakPtr<X11Window> weak_grabber =
-        located_events_grabber->GetWeakPtr();
     if (event->IsMouseEvent() ||
         (event->IsTouchEvent() &&
          event->type() == ui::EventType::kTouchPressed)) {
@@ -1463,23 +1465,17 @@ void X11Window::DispatchUiEvent(ui::Event* event, const x11::Event& xev) {
       // event's location and dispatch to the other.
       const gfx::Point target_origin =
           located_events_grabber->GetBoundsInPixels().origin();
-      if (!weak_this || !weak_grabber ||
-          window_manager->located_events_grabber() != weak_grabber.get()) {
+      if (!weak_this) {
         return;
       }
       const gfx::Point current_origin = GetBoundsInPixels().origin();
-      if (!weak_this || !weak_grabber ||
-          window_manager->located_events_grabber() != weak_grabber.get()) {
+      if (!weak_this) {
         return;
       }
       ConvertEventLocationToTargetWindowLocation(target_origin, current_origin,
                                                  event->AsLocatedEvent());
     }
-    if (weak_grabber &&
-        window_manager->located_events_grabber() == weak_grabber.get()) {
-      weak_grabber->DispatchUiEvent(event, xev);
-    }
-    return;
+    return located_events_grabber->DispatchUiEvent(event, xev);
   }
 
   // If after CoalescePendingMotionEvents the type of xev is resolved to
@@ -2449,7 +2445,12 @@ void X11Window::OnWindowMapped() {
   // Some WMs only respect maximize hints after the window has been mapped.
   // Check whether we need to re-do a maximization.
   if (should_maximize_after_map_) {
+    // Maximize() may synchronously delete `this` via OnBoundsChanged().
+    auto weak_this = weak_ptr_factory_.GetWeakPtr();
     Maximize();
+    if (!weak_this) {
+      return;
+    }
     should_maximize_after_map_ = false;
   }
   if (should_grab_pointer_after_map_) {

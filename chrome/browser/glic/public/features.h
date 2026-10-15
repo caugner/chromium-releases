@@ -14,23 +14,34 @@
 namespace features {
 
 BASE_DECLARE_FEATURE(kGlicTabRestoration);
+BASE_DECLARE_FEATURE(kGlicAndroidSidePanel);
 
 BASE_DECLARE_FEATURE(kGlicDaisyChainViaCoordinator);
 BASE_DECLARE_FEATURE(kGlicClearTurnIdOnPanelWillOpen);
 BASE_DECLARE_FEATURE(kGlicChromeStatusIcon);
 extern const base::FeatureParam<int> kGlicChromeStatusIconSizePx;
 extern const base::FeatureParam<bool> kGlicChromeStatusIconUseAltIcon;
+extern const base::FeatureParam<bool> kGlicChromeStatusIconLogOnly;
+extern const base::FeatureParam<std::string> kGlicChromeStatusIconOtherAppID;
+
+BASE_DECLARE_FEATURE(kGlicOSIconVariant);
+extern const base::FeatureParam<int> kGlicOSIconVariantParam;
 
 BASE_DECLARE_FEATURE(kGlicOrphanedReattachment);
 
 BASE_DECLARE_FEATURE(kAutoOpenGlicForPdf);
 extern const base::FeatureParam<bool> kAutoOpenGlicForPdfWithOnboarding;
+extern const base::FeatureParam<base::TimeDelta> kAutoOpenGlicCooldown;
 
 BASE_DECLARE_FEATURE(kGlicInvoke);
 
 BASE_DECLARE_FEATURE(kGlicSelectionPrompt);
 extern const base::FeatureParam<bool> kGlicSelectionPromptUpdatesOnly;
 extern const base::FeatureParam<bool> kGlicSelectionPromptUseWidget;
+extern const base::FeatureParam<bool> kGlicSelectionPromptEnablePinning;
+extern const base::FeatureParam<std::string> kGlicSelectionTopCueOnlyList;
+extern const base::FeatureParam<int>
+    kGlicSelectionPromptWidgetMaxTotalDismisses;
 
 BASE_DECLARE_FEATURE(kGlicCreateTabAdjacent);
 
@@ -76,11 +87,19 @@ BASE_DECLARE_FEATURE(kGlicButtonAutoSummarize);
 
 BASE_DECLARE_FEATURE(kGlicGetTabFaviconById);
 
+BASE_DECLARE_FEATURE(kGlicSkipCookieSyncOnOpen);
+BASE_DECLARE_FEATURE(kGlicCookieSyncOnTokenChange);
+BASE_DECLARE_FEATURE(kGlicShareImageViaInvoke);
+
 BASE_DECLARE_FEATURE(kGlicWebClientLoadTimes);
 extern const base::FeatureParam<int> kGlicPreLoadingTimeMs;
 extern const base::FeatureParam<int> kGlicMinLoadingTimeMs;
 extern const base::FeatureParam<int> kGlicMaxLoadingTimeMs;
 extern const base::FeatureParam<int> kGlicReloadMaxLoadingTimeMs;
+
+BASE_DECLARE_FEATURE(kGlicContextualCueingV2AutoSubmit);
+
+BASE_DECLARE_FEATURE(kGlicWebDragAndDropFileUpload);
 
 BASE_DECLARE_FEATURE(kGlicOptInImpressionMetrics);
 }  // namespace features

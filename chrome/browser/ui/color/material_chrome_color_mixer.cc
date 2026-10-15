@@ -147,6 +147,8 @@ void AddMaterialChromeColorMixer(ui::ColorProvider* provider,
   mixer[kColorBnplIssuerLinkedIneligibleBackground] = {ui::kColorSysSurface2};
   mixer[kColorBnplIssuerLinkedPillBackground] = {ui::kColorBadgeBackground};
   mixer[kColorBnplIssuerLinkedPillForeground] = {ui::kColorBadgeForeground};
+  mixer[kColorAutofillPopupDeactivatedBnplForeground] = ui::SetAlpha(
+      ui::kColorLabelForegroundSecondary, gfx::kDisabledControlAlpha);
 
   // Tab Search colors.
   mixer[kColorTabSearchButtonBackground] = {ui::kColorSysSurface2};
@@ -305,10 +307,7 @@ void AddMaterialChromeColorMixer(ui::ColorProvider* provider,
   // Aligns with kColorToolbarButtonIconInactive.
   mixer[kColorBookmarkBarForegroundDisabled] = {ui::GetResultingPaintColor(
       {ui::kColorSysStateDisabled}, {kColorToolbar})};
-  mixer[kColorBookmarkBarSeparatorChromeRefresh] = {
-      base::FeatureList::IsEnabled(features::kGlassToolbar)
-          ? ui::kColorSysStateDisabledContainer
-          : ui::kColorSysDivider};
+  mixer[kColorBookmarkBarSeparatorChromeRefresh] = {ui::kColorSysDivider};
   mixer[kColorBookmarkButtonIcon] = {kColorBookmarkBarForeground};
   mixer[kColorBookmarkDialogProductImageBorder] = {ui::kColorSysNeutralOutline};
   mixer[kColorBookmarkDialogTrackPriceIcon] = {ui::kColorSysOnSurfaceSubtle};
@@ -417,10 +416,7 @@ void AddMaterialChromeColorMixer(ui::ColorProvider* provider,
   mixer[kColorToolbarIconContainerBorder] = {ui::kColorSysNeutralOutline};
   mixer[kColorToolbarInkDropHover] = {ui::kColorSysStateHoverOnSubtle};
   mixer[kColorToolbarInkDropRipple] = {ui::kColorSysStateRippleNeutralOnSubtle};
-  mixer[kColorToolbarExtensionSeparatorEnabled] = {
-      base::FeatureList::IsEnabled(features::kGlassToolbar)
-          ? ui::kColorSysStateDisabledContainer
-          : ui::kColorSysDivider};
+  mixer[kColorToolbarExtensionSeparatorEnabled] = {ui::kColorSysDivider};
   mixer[kColorToolbarExtensionSeparatorDisabled] = {
       kColorToolbarButtonIconInactive};
   mixer[kColorToolbarSeparator] = {kColorToolbarSeparatorDefault};
@@ -442,4 +438,6 @@ void AddMaterialChromeColorMixer(ui::ColorProvider* provider,
   mixer[kColorGlicInactiveTabUnderlineGradient3] = {
       ui::kColorGlicTabUnderline3};
   mixer[kColorGlicSelectionOverlayToast] = {ui::kColorSysInverseSurfacePrimary};
+  mixer[kColorGlicSelectionOverlayToastCancelButton] = {
+      ui::kColorSysInversePrimary};
 }

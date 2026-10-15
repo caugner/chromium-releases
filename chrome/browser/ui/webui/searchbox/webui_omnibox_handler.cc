@@ -7,6 +7,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/notreached.h"
 #include "base/types/expected.h"
@@ -145,6 +146,15 @@ WebuiOmniboxHandler::WebuiOmniboxHandler(
 
   OnAimPopupEligibilityChanged();
   OnContentSharingPolicyChanged();
+
+  // Ensure the page receives the current autocomplete state on startup.
+  // This handles the case where results are generated before the remote is
+  // bound and the handler is created and starts observing the
+  // AutocompleteController.
+  if (base::FeatureList::IsEnabled(
+          omnibox::kOmniboxWebUIPopupStabilizeStartupShow)) {
+    OnResultChanged(controller_->autocomplete_controller(), false);
+  }
 }
 
 WebuiOmniboxHandler::~WebuiOmniboxHandler() = default;
@@ -222,10 +232,6 @@ void WebuiOmniboxHandler::AddTabContext(int32_t tab_id,
 void WebuiOmniboxHandler::StepSelection(
     OmniboxPopupSelection::Direction direction,
     OmniboxPopupSelection::Step step) {
-  if (!IsRemoteBound()) {
-    return;
-  }
-
   searchbox::mojom::SelectionStep mojom_step;
   switch (step) {
     case OmniboxPopupSelection::Step::kWholeLine: {
@@ -252,18 +258,10 @@ void WebuiOmniboxHandler::StepSelection(
 
 void WebuiOmniboxHandler::OpenCurrentSelection(
     WindowOpenDisposition disposition) {
-  if (!IsRemoteBound()) {
-    return;
-  }
-
   page_->OpenCurrentSelection(disposition);
 }
 
 void WebuiOmniboxHandler::SetAimButtonVisible(bool visible) {
-  if (!IsRemoteBound()) {
-    return;
-  }
-
   page_->SetAimButtonVisible(visible);
 }
 
@@ -278,6 +276,14 @@ WebuiOmniboxHandler::CreateAutocompleteMatch(
   auto mojom_match = SearchboxHandler::CreateAutocompleteMatch(
       match, line, edit_model, bookmark_model, suggestion_groups_map,
       turl_service);
+
+  // Override contextual search spark loupe icon for GROUP_CONTEXTUAL_SEARCH.
+  // Results on the omnibox webui will use an arrow icon instead.
+  if (mojom_match &&
+      match.suggestion_group_id == omnibox::GroupId::GROUP_CONTEXTUAL_SEARCH) {
+    mojom_match.value()->icon_path =
+        searchbox_internal::kReplyRotated180IconResourceName;
+  }
 
   mojom_match.value()->has_instant_keyword =
       match.HasInstantKeyword(turl_service);
@@ -294,41 +300,12 @@ WebuiOmniboxHandler::CreateAutocompleteMatch(
   return mojom_match;
 }
 
-std::string WebuiOmniboxHandler::AutocompleteIconToResourceName(
-    const gfx::VectorIcon& icon) const {
-  // The default icon for contextual suggestions is the subdirectory arrow right
-  // icon. If there is a header enabled (which is when the lens chip is
-  // showing), use the search spark loupe instead.
-  const auto& input = autocomplete_controller()->input();
-  bool has_toolbelt_lens_action =
-      autocomplete_controller()->contextual_search_provider() &&
-      autocomplete_controller()
-          ->contextual_search_provider()
-          ->HasToolbeltLensAction();
-  const auto* client =
-      autocomplete_controller()->autocomplete_provider_client();
-  bool has_lens_search_chip =
-      client->IsOmniboxNextLensSearchChipEnabled() &&
-      ContextualSearchProvider::LensEntrypointEligible(input, client);
-  if ((has_toolbelt_lens_action || has_lens_search_chip) &&
-      icon.name == omnibox::kSubdirectoryArrowRightIcon.name) {
-    return searchbox_internal::kSearchSparkIconResourceName;
-  }
-
-  return SearchboxHandler::AutocompleteIconToResourceName(icon);
-}
-
 // TODO(crbug.com/469098088): Use something other than
 //   `AutocompleteController::Observer::OnStart()` to reduce the IPC overhead
 //   due to the fact that `AutocompleteController::Start()` gets invoked on
 //   *every* keystroke in the Omnibox.
 void WebuiOmniboxHandler::OnStart(AutocompleteController* controller,
                                   const AutocompleteInput& input) {
-  // Ignore the call until the page remote is bound and ready to receive calls.
-  if (!IsRemoteBound()) {
-    return;
-  }
-
   const AutocompleteProviderClient* client =
       autocomplete_controller()->autocomplete_provider_client();
   // Check if there are zero suggest (either on NTP or on web) or the
@@ -341,16 +318,12 @@ void WebuiOmniboxHandler::OnStart(AutocompleteController* controller,
 
 void WebuiOmniboxHandler::OnResultChanged(AutocompleteController* controller,
                                           bool default_match_changed) {
-  const bool ready = IsRemoteBound();
+  // TODO: (crbug.com/506266490) - Clean up these metrics since it is no longer
+  // relevant to track after moving to factory pattern for searchbox::mojom.
   if (metrics_reporter_ && !metrics_reporter_->HasLocalMark("FirstAccess")) {
     metrics_reporter_->Mark("FirstAccess");
     base::UmaHistogramBoolean(
-        "Omnibox.Popup.WebUI.PageRemoteIsBoundOnFirstCall", ready);
-  }
-
-  // Ignore the call until the page remote is bound and ready to receive calls.
-  if (!ready) {
-    return;
+        "Omnibox.Popup.WebUI.PageRemoteIsBoundOnFirstCall", true);
   }
 
   if (metrics_reporter_ && !metrics_reporter_->HasLocalMark("ResultChanged")) {
@@ -362,18 +335,6 @@ void WebuiOmniboxHandler::OnResultChanged(AutocompleteController* controller,
 void WebuiOmniboxHandler::OnSelectionChanged(
     OmniboxPopupSelection old_selection,
     OmniboxPopupSelection selection) {
-  const bool ready = IsRemoteBound();
-  if (metrics_reporter_ && !metrics_reporter_->HasLocalMark("FirstAccess")) {
-    metrics_reporter_->Mark("FirstAccess");
-    base::UmaHistogramBoolean("Omnibox.Popup.WebUI.PageIsReadyOnFirstCall",
-                              ready);
-  }
-
-  // Ignore the call until the page remote is bound and ready to receive calls.
-  if (!ready) {
-    return;
-  }
-
   page_->UpdateSelection(
       searchbox::mojom::OmniboxPopupSelection::New(
           old_selection.line, ConvertLineState(old_selection.state),
@@ -384,11 +345,6 @@ void WebuiOmniboxHandler::OnSelectionChanged(
 }
 
 void WebuiOmniboxHandler::OnKeywordStateChanged(bool is_keyword_selected) {
-  // Ignore the call until the page remote is bound and ready to receive calls.
-  if (!IsRemoteBound()) {
-    return;
-  }
-
   page_->SetKeywordSelected(is_keyword_selected);
 }
 
@@ -470,11 +426,6 @@ int WebuiOmniboxHandler::GetContextMenuMaxTabSuggestions() {
 }
 
 void WebuiOmniboxHandler::OnContentSharingPolicyChanged() {
-  // Ignore the call until the page remote is bound and ready to receive calls.
-  if (!IsRemoteBound()) {
-    return;
-  }
-
   page_->UpdateContentSharingPolicy(
       contextual_search::ContextualSearchService::IsContextSharingEnabled(
           profile_->GetPrefs()));
@@ -483,18 +434,14 @@ void WebuiOmniboxHandler::OnContentSharingPolicyChanged() {
 void WebuiOmniboxHandler::OnAimPopupEligibilityChanged() {
   InitializeInputStateModel();
 
-  if (IsRemoteBound()) {
-    page_->UpdateAimPopupEligibility(
-        omnibox::IsAimPopupEnabled(profile_) &&
-        profile_->GetPrefs()->GetBoolean(omnibox::kShowAiModeOmniboxButton));
-  }
+  page_->UpdateAimPopupEligibility(
+      omnibox::IsAimPopupEnabled(profile_) &&
+      profile_->GetPrefs()->GetBoolean(omnibox::kShowAiModeOmniboxButton));
 }
 
 void WebuiOmniboxHandler::OnNavigationFinished(
     content::NavigationHandle* navigation_handle) {
   if (navigation_handle->HasCommitted() && navigation_handle->IsInMainFrame()) {
-    if (IsRemoteBound()) {
-      page_->OnTabStripChanged();
-    }
+    page_->OnTabStripChanged();
   }
 }

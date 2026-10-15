@@ -81,8 +81,8 @@
       </if>
       <if expr="not is_android">
         <structure type="chrome_scaled_image" name="IDR_BOOKMARK_BAR_APPS_SHORTCUT" file="common/apps_bookmark_bar_icon.png" />
-        <structure type="chrome_scaled_image" name="IDR_BOOKMARKS_FAVICON" file="common/favicon_bookmarks.png" />
       </if>
+      <structure type="chrome_scaled_image" name="IDR_BOOKMARKS_FAVICON" file="common/favicon_bookmarks.png" />
       <if expr="not is_android">
         <structure type="chrome_scaled_image" name="IDR_CLOSE_BUTTON_MASK" file="common/close_button_mask.png" />
       </if>
@@ -108,6 +108,7 @@
       <if expr="not is_android">
         <if expr="_google_chrome">
             <structure type="chrome_scaled_image" name="IDR_GOOGLE_G_GRADIENT_16" file="google_chrome/google_g_gradient_16.png" />
+            <structure type="chrome_scaled_image" name="IDR_GOOGLE_G_GRADIENT_16_ALT" file="google_chrome/google_g_gradient_16_alt.png" />
             <structure type="chrome_scaled_image" name="IDR_GOOGLE_G_GRADIENT_20" file="google_chrome/google_g_gradient_20.png" />
             <structure type="chrome_scaled_image" name="IDR_GOOGLE_G" file="google_chrome/google_icon.png" />
         </if>

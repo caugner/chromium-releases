@@ -1308,14 +1308,16 @@ class COMPONENT_EXPORT(AX_PLATFORM)
   static void SanitizeStringAttributeForIA2(const std::string& input,
                                             std::string* output);
 
+  enum class WinApiType { kMsaa, kUia };
+
   // Turn on AXMode::kWebContent if in web content, otherwise just kNativeAPIs.
-  void OnPropertiesUsed() const;
+  void OnPropertiesUsed(WinApiType api) const;
 
   // Turn on AXMode::kExtendedProperties if in web content.
-  void OnExtendedPropertiesUsed() const;
+  void OnExtendedPropertiesUsed(WinApiType api) const;
 
   // Turn on AXMode::kInlineTextBoxes if in web content.
-  void OnInlineTextBoxesUsed() const;
+  void OnInlineTextBoxesUsed(WinApiType api) const;
 
   FRIEND_TEST_ALL_PREFIXES(AXPlatformNodeWinTest,
                            SanitizeStringAttributeForIA2);
@@ -1514,6 +1516,11 @@ class COMPONENT_EXPORT(AX_PLATFORM)
   // Convert mojom TextAlign to UIA HorizontalTextAlignment enumeration
   static std::optional<HorizontalTextAlignment>
   AXTextAlignToUIAHorizontalTextAlignment(ax::mojom::TextAlign text_align);
+  // Converts a heading role + IntAttribute::kHierarchicalLevel to UIA
+  // HeadingLevel enumeration. Returns HeadingLevel_None for non-heading roles
+  // or heading levels outside the valid 1-9 range.
+  static LONG AXHierarchicalLevelToUIAHeadingLevel(ax::mojom::Role role,
+                                                   int32_t hierarchical_level);
   // Converts IntAttribute::kHierarchicalLevel to UIA StyleId enumeration
   static LONG AXHierarchicalLevelToUIAStyleId(int32_t hierarchical_level);
   // Converts a ListStyle to UIA StyleId enumeration

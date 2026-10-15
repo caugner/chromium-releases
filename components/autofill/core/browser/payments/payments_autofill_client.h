@@ -19,6 +19,7 @@
 #include "components/autofill/core/browser/payments/risk_data_loader.h"
 #include "components/autofill/core/browser/suggestions/suggestion.h"
 #include "components/signin/public/identity_manager/account_info.h"
+#include "url/origin.h"
 
 #if !BUILDFLAG(IS_IOS)
 namespace webauthn {
@@ -63,6 +64,12 @@ class TouchToFillDelegate;
 struct VirtualCardEnrollmentFields;
 class VirtualCardEnrollmentManager;
 enum class WebauthnDialogCallbackType;
+
+namespace autofill_metrics {
+enum class SaveCardPromptOffer;
+}
+
+using SaveCardPromptOffer = autofill_metrics::SaveCardPromptOffer;
 
 namespace payments {
 
@@ -211,6 +218,12 @@ class PaymentsAutofillClient : public RiskDataLoader {
       return *this;
     }
 
+    SaveCreditCardOptions& with_save_card_prompt_offer_decision(
+        SaveCardPromptOffer decision) {
+      save_card_prompt_offer_decision = decision;
+      return *this;
+    }
+
     bool should_request_name_from_user = false;
     bool should_request_expiration_date_from_user = false;
     bool show_prompt = false;
@@ -220,6 +233,7 @@ class PaymentsAutofillClient : public RiskDataLoader {
     std::optional<int> num_strikes;
     CardSaveType card_save_type = CardSaveType::kCardSaveOnly;
     SourceFeature source_feature = SourceFeature::kOfferSaveAfterFormSubmit;
+    std::optional<SaveCardPromptOffer> save_card_prompt_offer_decision;
   };
 
   enum class SaveCardOfferUserDecision {
@@ -449,8 +463,11 @@ class PaymentsAutofillClient : public RiskDataLoader {
 
   // Called when the card has been fetched successfully. Uses the necessary
   // information in `options` to show the FilledCardInformationBubble.
+  // `origin` is the origin of the frame on which fetching was originally
+  // triggered.
   virtual void OnCardDataAvailable(
-      const FilledCardInformationBubbleOptions& options) = 0;
+      const FilledCardInformationBubbleOptions& options,
+      const url::Origin& origin) = 0;
 
   // Runs `callback` once the user makes a decision with respect to the
   // offer-to-save prompt. On desktop, shows the offer-to-save bubble if

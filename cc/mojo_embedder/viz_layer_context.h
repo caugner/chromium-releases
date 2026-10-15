@@ -51,6 +51,7 @@ class CC_MOJO_EMBEDDER_EXPORT VizLayerContext
       gpu::SharedImageInterface* shared_image_interface,
       const gfx::Rect& viewport_damage_rect,
       bool frame_has_damage,
+      bool is_flush,
       std::vector<ui::LatencyInfo> latency_info) override;
   void UpdateDisplayTile(PictureLayerImpl& layer,
                          const Tile& tile,
@@ -63,6 +64,8 @@ class CC_MOJO_EMBEDDER_EXPORT VizLayerContext
   void OnTilingsReadyForCleanup(
       int32_t layer_id,
       const std::vector<float>& tiling_scales_to_clean_up) override;
+
+  void FlushReceiverForTesting();
 
  private:
   // Serializes any changes to animation state on `tree` since the last push to

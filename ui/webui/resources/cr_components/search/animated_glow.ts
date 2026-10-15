@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 import './audio_wave.js';
+import './recording_wave.js';
 
 import {loadTimeData} from '//resources/js/load_time_data.js';
 import {CrLitElement} from '//resources/lit/v3_0/lit.rollup.js';
@@ -57,6 +58,7 @@ export class SearchAnimatedGlowElement extends CrLitElement {
 
   static override get properties() {
     return {
+      coloredTicTacVoiceAnimationEnabled: {type: Boolean},
       animationState: {
         type: String,
         reflect: true,
@@ -73,6 +75,10 @@ export class SearchAnimatedGlowElement extends CrLitElement {
       },
       transcript: {type: String},
       receivedSpeech: {type: Boolean},
+      isListening: {
+        type: Boolean,
+        reflect: true,
+      },
       energyEffectAnimationEnabled: {
         type: Boolean,
         reflect: true,
@@ -92,6 +98,10 @@ export class SearchAnimatedGlowElement extends CrLitElement {
   accessor isCollapsible: boolean = false;
   accessor transcript: string = '';
   accessor receivedSpeech: boolean = false;
+  // Source of truth for voice search (as not every parent has
+  // `animationState`).
+  accessor coloredTicTacVoiceAnimationEnabled: boolean = false;
+  accessor isListening: boolean = false;
   accessor energyEffectAnimationEnabled: boolean = false;
   accessor isZeroState: boolean = false;
 

@@ -54,8 +54,11 @@ enum class NudgeDecision {
   // The page was eligible for the nudge, but the contextual tasks side panel is
   // open for the tab.
   kNudgeNotShownContextualTasksSidePanelForTabShowing = 16,
+  // The page was eligible for the nudge, but the contextual cueing v2 is
+  // enabled.
+  kNudgeNotShownContextualCueingV2 = 17,
   // New values above this line.
-  kMaxValue = kNudgeNotShownContextualTasksSidePanelForTabShowing,
+  kMaxValue = kNudgeNotShownContextualCueingV2,
 };
 // LINT.ThenChange(/tools/metrics/histograms/metadata/contextual_cueing/enums.xml:NudgeDecision)
 
@@ -69,7 +72,8 @@ enum class GlicAutoOpenResult {
   kPreventedFromWindowTooNarrow = 5,
   kPreventedFromButtonNotVisible = 6,
   kPreventedFromPdfPageCountBelowThreshold = 7,
-  kMaxValue = kPreventedFromPdfPageCountBelowThreshold,
+  kPreventedFromCooldown = 8,
+  kMaxValue = kPreventedFromCooldown,
 };
 // LINT.ThenChange(/tools/metrics/histograms/metadata/contextual_cueing/enums.xml:GlicAutoOpenResult)
 

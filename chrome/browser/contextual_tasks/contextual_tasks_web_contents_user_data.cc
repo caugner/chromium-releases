@@ -40,11 +40,21 @@ ContextualTasksWebContentsUserData::GetOrCreateInputStateModel(
   auto* service = AimEligibilityServiceFactory::GetForProfile(profile);
   const omnibox::SearchboxConfig* config =
       service ? service->GetSearchboxConfig() : nullptr;
+
+  auto* ui_service = profile
+                         ? contextual_tasks::ContextualTasksUiServiceFactory::
+                               GetForBrowserContext(profile)
+                         : nullptr;
   GURL url = web_contents->GetLastCommittedURL();
+  bool browser_identity_matches_aim_identity =
+      ui_service && ui_service->IsSignedInToBrowserWithValidCredentials() &&
+      ui_service->IsUrlForPrimaryAccount(url);
+
+  bool is_off_the_record = profile->IsOffTheRecord();
 
   input_state_model_ = std::make_unique<contextual_search::InputStateModel>(
       session_handle, config ? *config : omnibox::SearchboxConfig(), url,
-      profile->IsOffTheRecord());
+      is_off_the_record, browser_identity_matches_aim_identity);
 
   return input_state_model_->AsWeakPtr();
 }

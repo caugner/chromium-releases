@@ -28,14 +28,18 @@
 #import "google_apis/gaia/gaia_urls.h"
 #import "ios/chrome/app/change_profile_commands.h"
 #import "ios/chrome/app/change_profile_continuation.h"
+#import "ios/chrome/browser/authentication/age_mismatch_signout/coordinator/age_mismatch_signout_coordinator.h"
+#import "ios/chrome/browser/authentication/age_mismatch_signout/ui/age_mismatch_prompt_mode.h"
+#import "ios/chrome/browser/authentication/enterprise/managed_profile_creation/coordinator/managed_profile_creation_coordinator.h"
+#import "ios/chrome/browser/authentication/enterprise/public/managed_profile_creation_constants.h"
 #import "ios/chrome/browser/authentication/history_sync/model/history_sync_utils.h"
+#import "ios/chrome/browser/authentication/signin/reauth/coordinator/signin_reauth_coordinator.h"
 #import "ios/chrome/browser/authentication/ui_bundled/authentication_constants.h"
+#import "ios/chrome/browser/authentication/ui_bundled/authentication_flow/age_mismatch_capabilities_fetcher.h"
 #import "ios/chrome/browser/authentication/ui_bundled/authentication_flow/authentication_flow_delegate.h"
 #import "ios/chrome/browser/authentication/ui_bundled/authentication_flow/authentication_flow_performer_base+protected.h"
 #import "ios/chrome/browser/authentication/ui_bundled/authentication_flow/authentication_flow_performer_delegate.h"
 #import "ios/chrome/browser/authentication/ui_bundled/authentication_ui_util.h"
-#import "ios/chrome/browser/authentication/ui_bundled/enterprise/managed_profile_creation/managed_profile_creation_constants.h"
-#import "ios/chrome/browser/authentication/ui_bundled/enterprise/managed_profile_creation/managed_profile_creation_coordinator.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_utils.h"
 #import "ios/chrome/browser/policy/model/browser_policy_connector_ios.h"
 #import "ios/chrome/browser/policy/model/cloud/user_policy_signin_service.h"
@@ -121,7 +125,9 @@ policy::ProfileSeparationPolicies GetFakePolicyResponseForTesting() {
 }  // namespace
 
 @interface AuthenticationFlowPerformer () <
-    ManagedProfileCreationCoordinatorDelegate>
+    AgeMismatchSignoutCoordinatorDelegate,
+    ManagedProfileCreationCoordinatorDelegate,
+    SigninReauthCoordinatorDelegate>
 @end
 
 @implementation AuthenticationFlowPerformer {
@@ -138,6 +144,9 @@ policy::ProfileSeparationPolicies GetFakePolicyResponseForTesting() {
   std::unique_ptr<policy::UserCloudSigninRestrictionPolicyFetcher>
       _accountLevelSigninRestrictionPolicyFetcher;
   ActionSheetCoordinator* _leavingPrimaryAccountConfirmationDialogCoordinator;
+  AgeMismatchSignoutCoordinator* _ageMismatchSignoutCoordinator;
+  SigninReauthCoordinator* _reauthCoordinator;
+  AgeMismatchCapabilitiesFetcher* _canSignInToChromeCapabilitiesFetcher;
 }
 
 - (instancetype)
@@ -152,11 +161,40 @@ policy::ProfileSeparationPolicies GetFakePolicyResponseForTesting() {
 }
 
 - (void)interrupt {
+  [self stopAgeMismatchSignoutCoordinator];
   [self stopManagedConfirmation];
   [_managedConfirmationAlertCoordinator stop];
   _managedConfirmationAlertCoordinator = nil;
   _delegate = nil;
   [self stopWatchdogTimer];
+  [self stopReauthCoordinator];
+  [_canSignInToChromeCapabilitiesFetcher shutdown];
+  _canSignInToChromeCapabilitiesFetcher = nil;
+}
+
+- (void)reauthIdentity:(id<SystemIdentity>)identity
+               browser:(Browser*)browser
+        viewController:(UIViewController*)viewController
+           accessPoint:(signin_metrics::AccessPoint)accessPoint {
+  CHECK(!_reauthCoordinator);
+
+  signin::IdentityManager* identityManager =
+      IdentityManagerFactory::GetForProfile(
+          browser->GetProfile()->GetOriginalProfile());
+  CoreAccountInfo accountInfo =
+      identityManager->FindExtendedAccountInfoByGaiaId(identity.gaiaId);
+  if (accountInfo.IsEmpty()) {
+    accountInfo.gaia = identity.gaiaId;
+    accountInfo.email = base::SysNSStringToUTF8(identity.userEmail);
+  }
+
+  _reauthCoordinator =
+      [[SigninReauthCoordinator alloc] initWithBaseViewController:viewController
+                                                          browser:browser
+                                                          account:accountInfo
+                                                signinAccessPoint:accessPoint];
+  _reauthCoordinator.delegate = self;
+  [_reauthCoordinator start];
 }
 
 - (void)fetchUnsyncedDataWithSyncService:(syncer::SyncService*)syncService {
@@ -210,6 +248,26 @@ policy::ProfileSeparationPolicies GetFakePolicyResponseForTesting() {
       identity, base::BindOnce(^(NSString* hostedDomain, NSError* error) {
         [weakSelf handleGetHostedDomain:hostedDomain error:error];
       }));
+}
+
+- (void)fetchCanSignInToChromeCapability:(id<SystemIdentity>)identity
+                                 profile:(ProfileIOS*)profile {
+  CHECK(!_canSignInToChromeCapabilitiesFetcher);
+  _canSignInToChromeCapabilitiesFetcher =
+      [[AgeMismatchCapabilitiesFetcher alloc]
+          initWithIdentityManager:IdentityManagerFactory::GetForProfile(
+                                      profile)];
+
+  __weak __typeof(self) weakSelf = self;
+  CoreAccountId accountId = CoreAccountId::FromGaiaId([identity gaiaId]);
+  [_canSignInToChromeCapabilitiesFetcher
+      startFetchingCanSignInToChromeCapabilityWithCallback:
+          base::BindOnce(
+              [](__typeof(self) strong_self, signin::Tribool result) {
+                [strong_self didFetchCanSignInToChromeCapability:result];
+              },
+              weakSelf)
+                                                forAccount:accountId];
 }
 
 - (void)fetchProfileSeparationPolicies:(ProfileIOS*)profile
@@ -322,15 +380,52 @@ policy::ProfileSeparationPolicies GetFakePolicyResponseForTesting() {
           hostedDomain, browser, viewController, acceptBlock, cancelBlock);
 }
 
+- (void)showAgeMismatchDialogForIdentity:(id<SystemIdentity>)identity
+                          viewController:(UIViewController*)viewController
+                                 browser:(Browser*)browser {
+  [self checkNoDialog];
+  _ageMismatchSignoutCoordinator = [[AgeMismatchSignoutCoordinator alloc]
+      initWithBaseViewController:viewController
+                         browser:browser
+                        identity:identity
+                            mode:AgeMismatchPromptMode::kSigninFlow];
+  _ageMismatchSignoutCoordinator.delegate = self;
+  [_ageMismatchSignoutCoordinator start];
+}
+
+#pragma mark - SigninReauthCoordinatorDelegate
+
+- (void)reauthFinishedWithResult:(ReauthResult)result
+                          gaiaID:(const GaiaId*)gaiaID {
+  [self stopReauthCoordinator];
+
+  BOOL success = (result == ReauthResult::kSuccess);
+  [_delegate didCompleteReauthWithSuccess:success];
+}
+
 #pragma mark - AuthenticationFlowPerformerBase
 
 - (void)checkNoDialog {
   [super checkNoDialog];
   CHECK(!_managedConfirmationScreenCoordinator);
   CHECK(!_managedConfirmationAlertCoordinator);
+  CHECK(!_ageMismatchSignoutCoordinator);
 }
 
 #pragma mark - Private
+
+- (void)didFetchCanSignInToChromeCapability:(signin::Tribool)capability {
+  [_delegate authenticationFlowPerformer:self
+      didFetchCanSignInToChromeCapability:capability];
+  [_canSignInToChromeCapabilitiesFetcher shutdown];
+  _canSignInToChromeCapabilitiesFetcher = nil;
+}
+
+- (void)stopReauthCoordinator {
+  [_reauthCoordinator stop];
+  _reauthCoordinator.delegate = nil;
+  _reauthCoordinator = nil;
+}
 
 - (void)stopManagedConfirmation {
   [_managedConfirmationScreenCoordinator stop];
@@ -476,6 +571,33 @@ policy::ProfileSeparationPolicies GetFakePolicyResponseForTesting() {
   CHECK_EQ(_managedConfirmationScreenCoordinator, coordinator);
   [_delegate managedConfirmationCouldNotProceed];
   [self stopManagedConfirmation];
+}
+
+#pragma mark - AgeMismatchSignoutCoordinatorDelegate
+
+// TODO(crbug.com/486124651): The user wants to stay signed out.
+// Update the naming.
+- (void)ageMismatchSignoutCoordinatorWantsToBeStopped:
+    (AgeMismatchSignoutCoordinator*)coordinator {
+  CHECK_EQ(coordinator, _ageMismatchSignoutCoordinator);
+  [self stopAgeMismatchSignoutCoordinator];
+  [_delegate
+      didDismissAgeMismatchDialogWithCancelationReason:
+          signin_ui::CancelationReason::kAgeMismatchCanceledStaySignedOut];
+}
+
+- (void)ageMismatchSignoutCoordinatorWantsToSignIn:
+    (AgeMismatchSignoutCoordinator*)coordinator {
+  CHECK_EQ(coordinator, _ageMismatchSignoutCoordinator);
+  [self stopAgeMismatchSignoutCoordinator];
+  [_delegate didDismissAgeMismatchDialogWithCancelationReason:
+                 signin_ui::CancelationReason::kAgeMismatchCanceled];
+}
+
+- (void)stopAgeMismatchSignoutCoordinator {
+  _ageMismatchSignoutCoordinator.delegate = nil;
+  [_ageMismatchSignoutCoordinator stop];
+  _ageMismatchSignoutCoordinator = nil;
 }
 
 @end

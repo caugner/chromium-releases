@@ -21,12 +21,14 @@
 #import "build/branding_buildflags.h"
 #import "components/crash/core/common/crash_keys.h"
 #import "components/metrics/metrics_pref_names.h"
+#import "components/metrics/metrics_reporting_choice_service.h"
 #import "components/metrics/metrics_service.h"
 #import "components/metrics/metrics_switches.h"
 #import "components/prefs/pref_service.h"
 #import "components/previous_session_info/previous_session_info.h"
 #import "components/signin/public/identity_manager/tribool.h"
 #import "components/ukm/ios/ukm_reporting_ios_util.h"
+#import "crypto/apple/keychain_util.h"
 #import "ios/chrome/app/application_delegate/app_state.h"
 #import "ios/chrome/app/application_delegate/metric_kit_subscriber.h"
 #import "ios/chrome/app/application_delegate/startup_information.h"
@@ -51,6 +53,7 @@
 #import "ios/chrome/browser/signin/model/signin_util.h"
 #import "ios/chrome/browser/tabs/model/inactive_tabs/metrics.h"
 #import "ios/chrome/browser/widget_kit/model/features.h"
+#import "ios/chrome/common/app_group/app_group_constants.h"
 #import "ios/chrome/common/app_group/app_group_metrics.h"
 #import "ios/chrome/common/app_group/app_group_metrics_mainapp.h"
 #import "ios/chrome/common/credential_provider/constants.h"
@@ -429,12 +432,11 @@ BOOL _credentialExtensionWasUsed = NO;
       continue;
     }
 
-    const WebStateList* webStateList =
-        scene.browserProviderInterface.mainBrowserProvider.browser
-            ->GetWebStateList();
+    Browser* const mainbrowser =
+        scene.browserProviderInterface.mainBrowserProvider.browser;
+    const WebStateList* webStateList = mainbrowser->GetWebStateList();
     const WebStateList* inactiveWebStateList =
-        scene.browserProviderInterface.mainBrowserProvider.inactiveBrowser
-            ->GetWebStateList();
+        mainbrowser->GetInactiveBrowser()->GetWebStateList();
     const int webStateListCount = webStateList->count();
     const int inactiveWebStateListCount = inactiveWebStateList->count();
 
@@ -512,6 +514,8 @@ BOOL _credentialExtensionWasUsed = NO;
     [self recordStartupDuplicatedTabCount:duplicatedTabCount];
     [self recordTabsAgeAtStartup:timesSinceCreation];
     [self recordAndResetWarmStartCount];
+    crypto::apple::RecordKeychainMigrationStatus(
+        base::SysNSStringToUTF8(app_group::ApplicationGroup()));
     ui_util::RecordSystemFontSizeMetrics();
   } else {
     [[PreviousSessionInfo sharedInstance] incrementWarmStartCount];
@@ -636,8 +640,9 @@ BOOL _credentialExtensionWasUsed = NO;
 // If this if-def changes, it needs to be changed in
 // IOSChromeMainParts::IsMetricsReportingEnabled and settings_egtest.mm.
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
-  BOOL optIn = GetApplicationContext()->GetLocalState()->GetBoolean(
-      metrics::prefs::kMetricsReportingEnabled);
+  BOOL optIn =
+      metrics::MetricsReportingChoiceService::IsBasicMetricsReportingEnabled(
+          GetApplicationContext()->GetLocalState());
 #else
   // If a startup crash has been requested, then pretend that metrics have been
   // enabled, so that the app will go into recovery mode.

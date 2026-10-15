@@ -12,6 +12,7 @@ import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.magic_stack.ModuleDelegate.ModuleType;
+import org.chromium.chrome.browser.ntp_customization.NtpCustomizationUtils;
 import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
 import org.chromium.chrome.browser.preferences.ChromeSharedPreferences;
 import org.chromium.chrome.browser.profiles.Profile;
@@ -26,7 +27,6 @@ import org.chromium.components.feature_engagement.FeatureConstants;
 import org.chromium.components.feature_engagement.Tracker;
 import org.chromium.components.segmentation_platform.InputContext;
 import org.chromium.components.segmentation_platform.ProcessedValue;
-import org.chromium.components.signin.identitymanager.ConsentLevel;
 import org.chromium.components.tab_group_sync.TabGroupSyncService;
 
 /** Provides information about the signals of cards in the educational tip module. */
@@ -67,6 +67,16 @@ public class EducationalTipCardProviderSignalHandler {
                         ProcessedValue.fromFloat(syncedTabGroupExists(profile)));
                 return inputContext;
             case ModuleType.QUICK_DELETE_PROMO:
+                return inputContext;
+            case ModuleType.NTP_THEME_PROMO:
+                inputContext.addEntry(
+                        "has_customized_ntp_background",
+                        ProcessedValue.fromBoolean(
+                                NtpCustomizationUtils.getNtpBackgroundType()
+                                        != NtpCustomizationUtils.NtpBackgroundType.DEFAULT));
+                inputContext.addEntry(
+                        "support_customized_ntp_theme",
+                        ProcessedValue.fromBoolean(actionDelegate.supportCustomizedNtpTheme()));
                 return inputContext;
             case ModuleType.HISTORY_SYNC_PROMO:
                 inputContext.addEntry(
@@ -172,7 +182,7 @@ public class EducationalTipCardProviderSignalHandler {
      */
     private static float isEligibleToHistoryOptIn(Profile profile) {
         if (assumeNonNull(IdentityServicesProvider.get().getIdentityManager(profile))
-                .hasPrimaryAccount(ConsentLevel.SIGNIN)) {
+                .hasPrimaryAccount()) {
             HistorySyncHelper helper = HistorySyncHelper.getForProfile(profile);
             return !helper.shouldDisplayHistorySync() || helper.isDeclinedOften() ? 0.0f : 1.0f;
         }
@@ -183,7 +193,7 @@ public class EducationalTipCardProviderSignalHandler {
     /** Returns a value of 1.0f if the user has signed in. Otherwise, it returns 0.0f. */
     private static float isUserSignedIn(Profile profile) {
         if (assumeNonNull(IdentityServicesProvider.get().getIdentityManager(profile))
-                .hasPrimaryAccount(ConsentLevel.SIGNIN)) {
+                .hasPrimaryAccount()) {
             return 1.0f;
         }
 

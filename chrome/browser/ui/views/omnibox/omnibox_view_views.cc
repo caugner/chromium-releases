@@ -578,12 +578,13 @@ void OmniboxViewViews::SetFocus(bool is_user_initiated) {
   // For renderer initiated focuses (like NTP or about:blank page load finish):
   //  - If the omnibox was not already focused, select-all. This handles the
   //    about:blank homepage case, where the location bar has initial focus.
-  //    It annoys users if the URL is not pre-selected. https://crbug.com/45260.
+  //    It annoys users if the URL is not pre-selected.
+  //    https://crbug.com/40402896.
   //  - If the omnibox is already focused, DO NOT select-all. This can happen
   //    if the user starts typing before the NTP finishes loading. If the NTP
   //    finishes loading and then does a renderer-initiated focus, performing
   //    a select-all here would surprisingly overwrite the user's first few
-  //    typed characters. https://crbug.com/924935.
+  //    typed characters. https://crbug.com/40610912.
   if (is_user_initiated || !omnibox_already_focused) {
     SelectAll(true);
   }
@@ -621,6 +622,13 @@ IconLabelBubbleView* OmniboxViewViews::GetAiModePageActionIconView() const {
 }
 
 void OmniboxViewViews::ApplyFocusRingToAimButton(bool force_focus) {
+  // Early exit to prevent redundant invalidations (e.g., SchedulePaint).
+  // BrowserView::OnWidgetMove() unconditionally attempts to close the omnibox
+  // popup during window drags, which calls this method repeatedly.
+  if (aim_page_action_icon_has_fake_focus_ == force_focus) {
+    return;
+  }
+
   IconLabelBubbleView* icon_view = GetAiModePageActionIconView();
   if (!icon_view) {
     return;
@@ -1481,7 +1489,7 @@ bool OmniboxViewViews::OnMousePressed(const ui::MouseEvent& event) {
       // the elided URL is selected prior to the double click. Unelision happens
       // between the first and second click, causing the wrong word to be
       // selected because it's based on the click position in the newly unelided
-      // URL. See https://crbug.com/1084406.
+      // URL. See https://crbug.com/40693090.
       if (IsSelectAll()) {
         SelectWordAt(event.location());
         const std::u16string shown_url = GetText();
@@ -2073,6 +2081,18 @@ bool OmniboxViewViews::HandleKeyEvent(views::Textfield* textfield,
   const bool command = event.IsCommandDown();
   switch (event.key_code()) {
     case ui::VKEY_RETURN: {
+      if (omnibox::kShowRhsAimHint.Get()) {
+#if BUILDFLAG(IS_MAC)
+        const bool ai_mode_modifier = command;
+#else
+        const bool ai_mode_modifier = control;
+#endif
+        if (ai_mode_modifier && !shift) {
+          controller()->edit_model()->OpenAiMode(/*via_keyboard=*/true,
+                                                 /*via_context_menu=*/false);
+          return true;
+        }
+      }
       WindowOpenDisposition disposition = WindowOpenDisposition::CURRENT_TAB;
       OpenMatchWithKeyboardModifiers metric_value;
       if (alt && !shift) {
@@ -2228,11 +2248,15 @@ bool OmniboxViewViews::HandleKeyEvent(views::Textfield* textfield,
       break;
 
     case ui::VKEY_SPACE: {
-      if (!controller()->IsPopupOpen()) {
-        // If the popup is not open and the page action icon has "fake" focus
-        // (see comments in `HandleEarlyTabActions`), have `OmniboxEditModel`
-        // open a `kNoMatch`/`FOCUSED_BUTTON_AIM` selection.
-        if (aim_page_action_icon_has_fake_focus_) {
+      if (aim_page_action_icon_has_fake_focus_) {
+        if (base::FeatureList::IsEnabled(
+                omnibox::kAiModeSpaceDoesNotActivate)) {
+          // Pressing space should add a space to user input, cause AIM button
+          // to lose focus, and move focus back to first suggestion.
+          ApplyFocusRingToAimButton(false);
+          controller()->edit_model()->SetCaretVisibility(true);
+          return false;  // Fallthrough to insert space
+        } else {
           controller()->edit_model()->OpenSelection(
               OmniboxPopupSelection(
                   OmniboxPopupSelection::kNoMatch,
@@ -2241,7 +2265,9 @@ bool OmniboxViewViews::HandleKeyEvent(views::Textfield* textfield,
               /*via_keyboard=*/true);
           return true;
         }
-      } else if (!control && !alt && !shift) {
+      }
+
+      if (controller()->IsPopupOpen() && !control && !alt && !shift) {
         if (controller()->edit_model()->OnSpacePressed()) {
           return true;
         }
@@ -2261,7 +2287,7 @@ bool OmniboxViewViews::HandleKeyEvent(views::Textfield* textfield,
   }
 
   if (is_mouse_pressed_ && select_all_on_mouse_release_) {
-    // https://crbug.com/1063161 If the user presses the mouse button down and
+    // https://crbug.com/40123188 If the user presses the mouse button down and
     // begins to type without releasing the mouse button, the subsequent release
     // will delete any newly typed characters due to the SelectAll happening on
     // mouse-up. If we detect this state, do the select-all immediately.
@@ -2403,14 +2429,14 @@ void OmniboxViewViews::UpdateContextMenu(ui::SimpleMenuModel* menu_contents) {
   // example. There is an effort to move simple_web_view_dialog away from
   // location_bar_view and from this nullptr situation.
   if (lens::features::IsOmniboxEntryPointEnabled() &&
-      location_bar_view_->browser() &&
-      location_bar_view_->browser()
-          ->GetFeatures()
-          .lens_overlay_entry_point_controller()
-          ->IsEnabled()) {
-    menu_contents->AddCheckItemWithStringId(
-        IDC_SHOW_GOOGLE_LENS_SHORTCUT,
-        IDS_CONTEXT_MENU_SHOW_GOOGLE_LENS_SHORTCUT);
+      location_bar_view_->browser()) {
+    if (auto* controller = lens::LensOverlayEntryPointController::From(
+            location_bar_view_->browser());
+        controller && controller->IsEnabled()) {
+      menu_contents->AddCheckItemWithStringId(
+          IDC_SHOW_GOOGLE_LENS_SHORTCUT,
+          IDS_CONTEXT_MENU_SHOW_GOOGLE_LENS_SHORTCUT);
+    }
   }
 
   if (omnibox::ShouldShowAimContextMenuOption(

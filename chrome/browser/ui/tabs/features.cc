@@ -84,7 +84,7 @@ BASE_FEATURE_PARAM(base::TimeDelta,
 
 BASE_FEATURE(kTabSelectionByPointer, base::FEATURE_ENABLED_BY_DEFAULT);
 
-BASE_FEATURE(kHorizontalTabStripComboButton, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kHorizontalTabStripComboButton, base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE_PARAM(bool,
                    kHorizontalTabStripComboButtonShowStartOnly,
                    &kHorizontalTabStripComboButton,

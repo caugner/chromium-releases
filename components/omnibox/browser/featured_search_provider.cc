@@ -303,7 +303,7 @@ void FeaturedSearchProvider::AddFeaturedKeywordMatches(
       // Skip @gemini if feature disabled.
       if (turl->starter_pack_id() ==
               template_url_starter_pack_data::StarterPackId::kGemini &&
-          !OmniboxFieldTrial::IsStarterPackExpansionEnabled()) {
+          !client_->IsGeminiStarterPackEnabled()) {
         continue;
       }
       // Skip @page if feature disabled.
@@ -374,6 +374,7 @@ void FeaturedSearchProvider::AddStarterPackMatch(
   match.allowed_to_be_default_match = false;
   match.keyword = template_url.keyword();
   match.associated_keyword = template_url.keyword();
+  match.starter_pack_id = static_cast<int>(template_url.starter_pack_id());
   matches_.push_back(match);
 }
 
@@ -434,6 +435,7 @@ void FeaturedSearchProvider::AddFeaturedEnterpriseSearchMatch(
   match.allowed_to_be_default_match = false;
   match.keyword = template_url.keyword();
   match.associated_keyword = template_url.keyword();
+  match.starter_pack_id = static_cast<int>(template_url.starter_pack_id());
   if (template_url.CreatedByEnterpriseSearchAggregatorPolicy()) {
     match.icon_url = template_url.favicon_url();
   }
@@ -465,7 +467,8 @@ bool FeaturedSearchProvider::ShouldShowIPH(IphType iph_type) const {
 }
 
 bool FeaturedSearchProvider::ShouldShowGeminiIPHMatch() const {
-  if (!OmniboxFieldTrial::IsStarterPackIPHEnabled() ||
+  if (!client_->IsGeminiStarterPackEnabled() ||
+      !OmniboxFieldTrial::IsStarterPackIPHEnabled() ||
       !ShouldShowIPH(IphType::kGemini)) {
     return false;
   }

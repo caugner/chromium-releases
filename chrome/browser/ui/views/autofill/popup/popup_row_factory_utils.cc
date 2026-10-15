@@ -25,6 +25,7 @@
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/ui/autofill/autofill_popup_controller.h"
 #include "chrome/browser/ui/autofill/autofill_suggestion_controller_utils.h"
+#include "chrome/browser/ui/color/chrome_color_id.h"
 #include "chrome/browser/ui/views/autofill/payments/bnpl_issuer_linked_pill.h"
 #include "chrome/browser/ui/views/autofill/popup/lazy_loading_image_view.h"
 #include "chrome/browser/ui/views/autofill/popup/popup_base_view.h"
@@ -55,6 +56,7 @@
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/color/color_id.h"
+#include "ui/compositor/layer.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/text_constants.h"
 #include "ui/views/accessibility/view_accessibility.h"
@@ -89,9 +91,8 @@ constexpr auto kPopupItemTypesUsingLeadingIcons = DenseSet<SuggestionType>(
      SuggestionType::kManageCreditCard, SuggestionType::kManageAutofillAi,
      SuggestionType::kManageAutofillAiIdentityDocs,
      SuggestionType::kManageAutofillAiTravel, SuggestionType::kManageIban,
-     SuggestionType::kManageLoyaltyCard, SuggestionType::kManagePlusAddress,
-     SuggestionType::kUndoOrClear, SuggestionType::kViewPasswordDetails,
-     SuggestionType::kPendingStateSignin,
+     SuggestionType::kManageLoyaltyCard, SuggestionType::kUndoOrClear,
+     SuggestionType::kViewPasswordDetails, SuggestionType::kPendingStateSignin,
      SuggestionType::kWebauthnSignInWithAnotherDevice});
 
 // Max width for the username and masked password.
@@ -108,8 +109,8 @@ constexpr auto kMainTextStyleLight = views::style::TextStyle::STYLE_BODY_3;
 constexpr auto kMainTextStyleHighlighted =
     views::style::TextStyle::STYLE_BODY_3_BOLD;
 constexpr auto kMinorTextStyle = views::style::TextStyle::STYLE_BODY_4;
-constexpr auto kBadgeTextStyle = views::style::TextStyle::STYLE_BODY_5;
 constexpr auto kDisabledTextStyle = views::style::TextStyle::STYLE_DISABLED;
+constexpr float kDisabledBnplOpacity = 0.38f;
 
 // Returns a wrapper around `closure` that posts it to the default message
 // queue instead of executing it directly. This is to avoid that the callback's
@@ -129,7 +130,6 @@ bool IsDeactivatedPasswordOrPasskey(const Suggestion& suggestion) {
     case FillingProduct::kPasskey:
       return suggestion.HasDeactivatedStyle();
     case FillingProduct::kAddress:
-    case FillingProduct::kPlusAddresses:
     case FillingProduct::kCreditCard:
     case FillingProduct::kIban:
     case FillingProduct::kAutocomplete:
@@ -146,18 +146,32 @@ bool IsDeactivatedPasswordOrPasskey(const Suggestion& suggestion) {
   }
 }
 
-std::unique_ptr<views::BoxLayoutView> GetBadgeView(std::u16string_view label) {
+// Used to check if a suggestion should be displayed with styling specific to
+// deactivated BNPL suggestions.
+// TODO(crbug.com/503847790): Consolidate all deactivated suggestion styles,
+// pending alignment from UX.
+bool IsDeactivatedBnplSuggestion(const Suggestion& suggestion) {
+  return suggestion.type == SuggestionType::kBnplEntry &&
+         suggestion.HasDeactivatedStyle();
+}
+
+std::unique_ptr<views::BoxLayoutView> GetAlternativePaymentMethodBadge(
+    std::u16string_view label) {
+  // 100 is guaranteed to be larger than half the height of this view. Using 100
+  // as `corner_radius`, the view will be created with maximum possible radius
+  // which is half the height.
+  // TODO(crbug.com/507868678) calculate the precise `corner_radius` value
+  // instead of using a hard coded large number.
   return views::Builder<views::BoxLayoutView>()
-      .AddChildren(views::Builder<views::Label>()
-                       .SetText(std::u16string(label))
-                       .SetTextStyle(kBadgeTextStyle)
-                       .SetBorder(views::CreateRoundedRectBorder(
-                           /*thickness=*/0, /*corner_radius=*/100,
-                           gfx::Insets::TLBR(/*top=*/2, /*left=*/8,
-                                             /*bottom=*/2, /*right=*/8),
-                           ui::kColorSysNeutralContainer))
-                       .SetBackground(views::CreateRoundedRectBackground(
-                           ui::kColorSysNeutralContainer, 100)))
+      .AddChildren(
+          views::Builder<views::Label>()
+              .SetText(std::u16string(label))
+              .SetTextStyle(kPopupBadgeTextStyle)
+              .SetBorder(views::CreateRoundedRectBorder(
+                  /*thickness=*/0, /*corner_radius=*/100,
+                  kPopupBadgeBorderInsets, ui::kColorSysNeutralContainer))
+              .SetBackground(views::CreateRoundedRectBackground(
+                  ui::kColorSysNeutralContainer, 100)))
       .Build();
 }
 
@@ -169,7 +183,6 @@ void FormatLabel(views::Label& label,
     case FillingProduct::kAddress:
     case FillingProduct::kAutocomplete:
     case FillingProduct::kAutofillAi:
-    case FillingProduct::kPlusAddresses:
     case FillingProduct::kLoyaltyCard:
     case FillingProduct::kIdentityCredential:
       label.SetMaximumWidthSingleLine(maximum_width_single_line);
@@ -216,6 +229,10 @@ std::unique_ptr<views::Label> CreateMainTextLabel(
   if (!suggestion.main_text.is_primary) {
     label->SetEnabledColor(ui::kColorLabelForegroundSecondary);
   }
+  if (IsDeactivatedBnplSuggestion(suggestion)) {
+    label->SetEnabledColor(kColorAutofillPopupDeactivatedBnplForeground);
+  }
+
   return label;
 }
 
@@ -272,6 +289,9 @@ std::vector<std::unique_ptr<views::View>> CreateSubtextViews(
                                                          : kMinorTextStyle));
       if (!IsDeactivatedPasswordOrPasskey(suggestion)) {
         label->SetEnabledColor(ui::kColorLabelForegroundSecondary);
+      }
+      if (IsDeactivatedBnplSuggestion(suggestion)) {
+        label->SetEnabledColor(kColorAutofillPopupDeactivatedBnplForeground);
       }
       // To make sure the popup width will not exceed its maximum value,
       // divide the maximum label width by the number of labels.
@@ -543,10 +563,20 @@ std::unique_ptr<PopupRowContentView> CreateBnplPopupRowContentView(
   std::vector<std::unique_ptr<views::View>> subtexts =
       CreateSubtextViews(*view, suggestion, main_filling_product);
 
+  std::unique_ptr<views::ImageView> icon =
+      popup_cell_utils::GetIconImageView(suggestion);
+  if (suggestion.HasDeactivatedStyle()) {
+    if (icon) {
+      icon->SetPaintToLayer();
+      icon->layer()->SetFillsBoundsOpaquely(false);
+      icon->layer()->SetOpacity(kDisabledBnplOpacity);
+    }
+  }
+
   popup_cell_utils::AddSuggestionContentToView(
       suggestion, std::move(main_text_label), std::move(minor_texts),
-      /*description_label=*/nullptr, std::move(subtexts),
-      popup_cell_utils::GetIconImageView(suggestion), *view);
+      /*description_label=*/nullptr, std::move(subtexts), std::move(icon),
+      *view);
 
   return view;
 }
@@ -575,7 +605,7 @@ CreateAlternativePaymentMethodPopupRowContentView(
       CreateMinorTextLabels(suggestion);
 
   std::unique_ptr<views::BoxLayoutView> badge_view =
-      GetBadgeView(l10n_util::GetStringUTF16(
+      GetAlternativePaymentMethodBadge(l10n_util::GetStringUTF16(
           suggestion.type == SuggestionType::kVirtualCreditCardEntry
               ? IDS_AUTOFILL_VIRTUAL_CARD_SUGGESTION_OPTION_VALUE
               : IDS_AUTOFILL_IBAN_SUGGESTION_OPTION_VALUE));

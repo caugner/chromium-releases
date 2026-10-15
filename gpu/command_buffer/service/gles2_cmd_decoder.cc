@@ -934,6 +934,7 @@ class GLES2DecoderImpl : public GLES2Decoder,
   // If the color image is a renderbuffer, returns 0 for type.
   GLenum GetBoundReadFramebufferTextureType();
   GLenum GetBoundReadFramebufferInternalFormat();
+  bool IsBoundReadFramebufferMultisampledRenderbuffer();
 
   // Get the i-th draw buffer's internal format/type from the bound framebuffer.
   // If no framebuffer is bound, or no image is attached, or the DrawBuffers
@@ -2147,6 +2148,7 @@ class GLES2DecoderImpl : public GLES2Decoder,
       case GL_UNSIGNED_INT_SAMPLER_CUBE:
         return GL_TEXTURE_CUBE_MAP;
       case GL_SAMPLER_EXTERNAL_OES:
+      case GL_SAMPLER_EXTERNAL_2D_Y2Y_EXT:
         return GL_TEXTURE_EXTERNAL_OES;
       case GL_SAMPLER_2D_RECT_ANGLE:
         return GL_TEXTURE_RECTANGLE_ANGLE;
@@ -4386,6 +4388,18 @@ GLenum GLES2DecoderImpl::GetBoundReadFramebufferInternalFormat() {
     }
     return back_buffer_color_format_;
   }
+}
+
+bool GLES2DecoderImpl::IsBoundReadFramebufferMultisampledRenderbuffer() {
+  Framebuffer* read_framebuffer = GetBoundReadFramebuffer();
+  // We check if the read framebuffer is a multisampled renderbuffer.
+  // We explicitly do NOT block multisampled texture attachments (with target
+  // GL_TEXTURE_2D, etc.) because they are implicit resolve textures (allocated
+  // via FramebufferTexture2DMultisampleEXT) and are safe to copy from (they are
+  // resolved on the fly). True multisampled textures
+  // (GL_TEXTURE_2D_MULTISAMPLE) are not supported by the validating decoder.
+  return read_framebuffer &&
+         read_framebuffer->GetReadBufferIsMultisampledRenderbuffer();
 }
 
 GLenum GLES2DecoderImpl::GetBoundColorDrawBufferType(GLint drawbuffer_i) {
@@ -8318,9 +8332,12 @@ void GLES2DecoderImpl::DoRenderbufferStorageMultisampleCHROMIUM(
                                                width, height, kDoNotForce);
   GLenum error =
       LOCAL_PEEK_GL_ERROR("glRenderbufferStorageMultisampleCHROMIUM");
+
   if (error == GL_NO_ERROR) {
     renderbuffer_manager()->SetInfoAndInvalidate(renderbuffer, samples,
                                                  internalformat, width, height);
+  } else {
+    renderbuffer_manager()->SetAllocationFailed(renderbuffer);
   }
 }
 
@@ -12410,11 +12427,16 @@ bool GLES2DecoderImpl::ClearLevelUsingGL(Texture* texture,
     result = true;
   }
   RestoreClearState();
-  api()->glDeleteFramebuffersEXTFn(1, &fb);
+  // Restore the previous framebuffer binding *before* deleting the temporary
+  // FBO. Some Imagination/PowerVR drivers retain an internal reference to the
+  // previously-bound FBO across bind transitions; deleting it while bound and
+  // then rebinding can dereference freed driver state. See the
+  // ensure_previous_framebuffer_not_deleted workaround.
   Framebuffer* framebuffer = GetFramebufferInfoForTarget(fb_target);
   GLuint fb_service_id =
       framebuffer ? framebuffer->service_id() : GetBackbufferServiceId();
   BindFramebuffer(fb_target, fb_service_id);
+  api()->glDeleteFramebuffersEXTFn(1, &fb);
   return result;
 }
 
@@ -13639,6 +13661,12 @@ void GLES2DecoderImpl::DoCopyTexImage2D(
     return;
   }
 
+  if (IsBoundReadFramebufferMultisampledRenderbuffer()) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, func_name,
+                       "cannot copy from a multisampled framebuffer");
+    return;
+  }
+
   GLenum read_format = GetBoundReadFramebufferInternalFormat();
   GLenum read_type = GetBoundReadFramebufferTextureType();
   if (!ValidateCopyTexFormat(func_name, internal_format,
@@ -13891,6 +13919,12 @@ void GLES2DecoderImpl::DoCopyTexSubImage2D(
     return;
   }
 
+  if (IsBoundReadFramebufferMultisampledRenderbuffer()) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, func_name,
+                       "cannot copy from a multisampled framebuffer");
+    return;
+  }
+
   GLenum read_format = GetBoundReadFramebufferInternalFormat();
   GLenum read_type = GetBoundReadFramebufferTextureType();
   if (!ValidateCopyTexFormat(func_name, internal_format,
@@ -14019,6 +14053,12 @@ void GLES2DecoderImpl::DoCopyTexSubImage3D(
 
   if (!CheckBoundReadFramebufferValid(func_name,
                                       GL_INVALID_FRAMEBUFFER_OPERATION)) {
+    return;
+  }
+
+  if (IsBoundReadFramebufferMultisampledRenderbuffer()) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, func_name,
+                       "cannot copy from a multisampled framebuffer");
     return;
   }
 
@@ -14854,55 +14894,6 @@ error::Error GLES2DecoderImpl::HandleShaderBinary(
   // TODO(gman): call glShaderBinary
   return error::kNoError;
 #endif
-}
-
-error::Error GLES2DecoderImpl::HandleEnableFeatureCHROMIUM(
-    uint32_t immediate_data_size,
-    const volatile void* cmd_data) {
-  const volatile gles2::cmds::EnableFeatureCHROMIUM& c =
-      *static_cast<const volatile gles2::cmds::EnableFeatureCHROMIUM*>(
-          cmd_data);
-  Bucket* bucket = GetBucket(c.bucket_id);
-  if (!bucket || bucket->size() == 0) {
-    return error::kInvalidArguments;
-  }
-  typedef cmds::EnableFeatureCHROMIUM::Result Result;
-  Result* result = GetSharedMemoryAs<Result*>(
-      c.result_shm_id, c.result_shm_offset, sizeof(*result));
-  if (!result) {
-    return error::kOutOfBounds;
-  }
-  // Check that the client initialized the result.
-  if (*result != 0) {
-    return error::kInvalidArguments;
-  }
-  std::string feature_str;
-  if (!bucket->GetAsString(&feature_str)) {
-    return error::kInvalidArguments;
-  }
-
-  // TODO(gman): make this some kind of table to function pointer thingy.
-  if (feature_str.compare("pepper3d_allow_buffers_on_multiple_targets") == 0) {
-    buffer_manager()->set_allow_buffers_on_multiple_targets(true);
-  } else if (feature_str.compare("pepper3d_support_fixed_attribs") == 0) {
-    buffer_manager()->set_allow_fixed_attribs(true);
-    // TODO(gman): decide how to remove the need for this const_cast.
-    // I could make validators_ non const but that seems bad as this is the only
-    // place it is needed. I could make some special friend class of validators
-    // just to allow this to set them. That seems silly. I could refactor this
-    // code to use the extension mechanism or the initialization attributes to
-    // turn this feature on. Given that the only real point of this is to make
-    // the conformance tests pass and given that there is lots of real work that
-    // needs to be done it seems like refactoring for one to one of those
-    // methods is a very low priority.
-    const_cast<Validators*>(validators_.get())
-        ->vertex_attrib_type.AddValue(GL_FIXED);
-  } else {
-    return error::kNoError;
-  }
-
-  *result = 1;  // true.
-  return error::kNoError;
 }
 
 error::Error GLES2DecoderImpl::HandleGetRequestableExtensionsCHROMIUM(
@@ -16325,6 +16316,27 @@ void GLES2DecoderImpl::TexStorageImpl(GLenum target,
     compatibility_internal_format = format_info->decompressed_internal_format;
   }
 
+  // TODO(zmo): We might need to emulate TexStorage using TexImage or
+  // CompressedTexImage on Mac OSX where we expose ES3 APIs when the underlying
+  // driver is lower than 4.2 and ARB_texture_storage extension doesn't exist.
+  LOCAL_COPY_REAL_GL_ERRORS_TO_WRAPPER(function_name);
+  if (dimension == ContextState::k2D) {
+    api()->glTexStorage2DEXTFn(target, levels, compatibility_internal_format,
+                               width, height);
+  } else {
+    api()->glTexStorage3DFn(target, levels, compatibility_internal_format,
+                            width, height, depth);
+  }
+  GLenum error = LOCAL_PEEK_GL_ERROR(function_name);
+  if (error != GL_NO_ERROR) {
+    // The driver rejected the allocation. Do NOT update the decoder-side
+    // LevelInfo / immutable flag, otherwise subsequent TexSubImage bounds
+    // checks (Texture::ValidForTexture) would validate against dimensions
+    // that the driver never allocated, allowing oversized writes to be
+    // forwarded to the native driver.
+    return;
+  }
+
   {
     GLsizei level_width = width;
     GLsizei level_height = height;
@@ -16352,17 +16364,6 @@ void GLES2DecoderImpl::TexStorageImpl(GLenum target,
     }
     texture->ApplyFormatWorkarounds(feature_info_.get());
     texture->SetImmutable(true, true);
-  }
-
-  // TODO(zmo): We might need to emulate TexStorage using TexImage or
-  // CompressedTexImage on Mac OSX where we expose ES3 APIs when the underlying
-  // driver is lower than 4.2 and ARB_texture_storage extension doesn't exist.
-  if (dimension == ContextState::k2D) {
-    api()->glTexStorage2DEXTFn(target, levels, compatibility_internal_format,
-                               width, height);
-  } else {
-    api()->glTexStorage3DFn(target, levels, compatibility_internal_format,
-                            width, height, depth);
   }
 }
 
@@ -17235,7 +17236,8 @@ void GLES2DecoderImpl::ClearFramebufferForWorkaround(GLbitfield mask) {
   ScopedGLErrorSuppressor suppressor("GLES2DecoderImpl::ClearWorkaround",
                                      error_state_.get());
   clear_framebuffer_blit_->ClearFramebuffer(
-      this, gfx::Size(viewport_max_width_, viewport_max_height_), mask,
+      this, state_.bound_transform_feedback.get(),
+      gfx::Size(viewport_max_width_, viewport_max_height_), mask,
       state_.color_clear_red, state_.color_clear_green, state_.color_clear_blue,
       state_.color_clear_alpha, state_.depth_clear, state_.stencil_clear);
 }
@@ -17367,8 +17369,6 @@ error::Error GLES2DecoderImpl::HandleSetActiveURLCHROMIUM(
 // we can easily edit the non-auto generated parts right here in this file
 // instead of having to edit some template or the code generator.
 #include "gpu/command_buffer/service/gles2_cmd_decoder_autogen.h"
-#include "base/check_op.h"
-#include "base/check.h"
 
 }  // namespace gles2
 }  // namespace gpu

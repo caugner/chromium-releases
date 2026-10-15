@@ -52,6 +52,7 @@ class CC_EXPORT LayerContext {
       gpu::SharedImageInterface* shared_image_interface,
       const gfx::Rect& viewport_damage_rect,
       bool frame_has_damage,
+      bool is_flush,
       std::vector<ui::LatencyInfo> latency_info) = 0;
 
   // Pushes an update to a single tile in the context's display tree.

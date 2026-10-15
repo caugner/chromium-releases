@@ -19,8 +19,9 @@
 #include "base/types/id_type.h"
 #include "base/types/optional_ref.h"
 #include "base/types/pass_key.h"
+#include "chrome/browser/actor/actor_container_config.h"
 #include "chrome/browser/actor/aggregated_journal.h"
-#include "chrome/browser/actor/origin_checker.h"
+#include "chrome/browser/actor/enterprise_policy_checker.h"
 #include "chrome/browser/actor/site_policy.h"
 #include "chrome/browser/actor/tools/tool_controller.h"
 #include "chrome/browser/actor/tools/tool_delegate.h"
@@ -28,6 +29,8 @@
 #include "chrome/common/actor.mojom-forward.h"
 #include "chrome/common/actor/task_id.h"
 #include "chrome/common/buildflags.h"
+#include "components/actor/core/origin_checker.h"
+#include "components/actor/public/mojom/actor_types.mojom.h"
 #include "components/autofill/core/browser/integrators/actor/actor_form_filling_types.h"
 #include "components/password_manager/core/browser/actor_login/actor_login_types.h"
 #include "components/tabs/public/tab_interface.h"
@@ -109,7 +112,12 @@ class ExecutionEngine : public ToolDelegate,
     // The navigation is not on any allowlist or blocklist and requires an
     // asynchronous check to determine the final outcome.
     kNeedsAsyncCheck = 3,
-    kMaxValue = kNeedsAsyncCheck,
+    // AgentContainerConfig was provided and did not block this site. In this
+    // case navigation is allowed.
+    kAllowByContainerConfig = 4,
+    // AgentContainerConfig was provided and blocked this site.
+    kBlockByContainerConfig = 5,
+    kMaxValue = kBlockByContainerConfig,
   };
   // LINT.ThenChange(//tools/metrics/histograms/metadata/actor/enums.xml:GatingDecision)
 
@@ -162,6 +170,9 @@ class ExecutionEngine : public ToolDelegate,
   // Cancels any ongoing actions.
   void CancelOngoingActions(mojom::ActionResultCode reason);
 
+  // Notifies ongoing actions that they have been paused.
+  void PauseOngoingActions();
+
   // If there is an ongoing tool request, treat it as having failed with the
   // given reason.
   void FailCurrentTool(mojom::ActionResultCode reason) override;
@@ -181,6 +192,7 @@ class ExecutionEngine : public ToolDelegate,
   Profile& GetProfile() override;
   AggregatedJournal& GetJournal() override;
   favicon::FaviconService* GetFaviconService() override;
+  const EnterprisePolicyChecker& GetEnterprisePolicyChecker() const override;
   void IsAcceptableNavigationDestination(
       const GURL& url,
       DecisionCallbackWithReason callback) override;
@@ -202,6 +214,12 @@ class ExecutionEngine : public ToolDelegate,
   void InterruptFromTool() override;
   void UninterruptFromTool() override;
   void EnqueueFollowupAction(std::unique_ptr<ToolRequest> action) override;
+  void AddTab(
+      tabs::TabHandle tab_handle,
+      bool stop_task_on_detach,
+      base::OnceCallback<void(mojom::ActionResultPtr)> callback) override;
+  bool HasTab(tabs::TabHandle tab_handle) override;
+  void RemoveTab(tabs::TabHandle tab_handle) override;
   base::WeakPtr<actor_login::ActionSequenceDelegate> GetActionSequenceDelegate()
       override;
 
@@ -276,6 +294,10 @@ class ExecutionEngine : public ToolDelegate,
   // https://crbug.com/420669167 ). In some cases we need to drop this
   // restriction for certain tools to function.
   bool TabsCanOpenNewWebContents() const;
+
+  ActorContainerConfig& actor_container_config() {
+    return actor_container_config_;
+  }
 
  protected:
   // Allow derived classes to use the natural constructors.
@@ -372,10 +394,12 @@ class ExecutionEngine : public ToolDelegate,
       base::ScopedUmaHistogramTimer timer,
       ExecutionEngine::NavigationDecisionCallback callback);
 
-  void SendNavigationConfirmationRequest(const url::Origin& destination,
-                                         ukm::SourceId ukm_source_id,
-                                         base::ScopedUmaHistogramTimer timer,
-                                         NavigationDecisionCallback callback);
+  using NavigationConfirmationCallback =
+      base::OnceCallback<void(webui::mojom::NavigationConfirmationResponsePtr)>;
+  void SendNavigationConfirmationRequest(
+      const url::Origin& destination,
+      NavigationConfirmationCallback callback);
+
   void OnNavigationConfirmationDecision(
       const url::Origin& destination,
       ukm::SourceId ukm_source_id,
@@ -437,6 +461,12 @@ class ExecutionEngine : public ToolDelegate,
   // Manages the sets of origins that have been allowed for navigations and that
   // the user has been prompted about.
   OriginChecker origin_checker_;
+  // This will allow us to store already-recorded origins to avoid duplication
+  // of dark launch metrics.
+  OriginChecker dark_launch_origin_checker_;
+
+  // Manages the container config settings that have been sent by the server.
+  ActorContainerConfig actor_container_config_;
 
   // For overwriting the actor login permission, currently only works for the
   // feature `kPasswordCheckupPrototype` for automated password changes.

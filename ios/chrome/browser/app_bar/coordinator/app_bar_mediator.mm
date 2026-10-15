@@ -11,27 +11,35 @@
 #import "base/metrics/user_metrics.h"
 #import "base/metrics/user_metrics_action.h"
 #import "components/signin/public/base/signin_metrics.h"
-#import "components/signin/public/identity_manager/identity_manager.h"
-#import "components/signin/public/identity_manager/objc/identity_manager_observer_bridge.h"
 #import "ios/chrome/browser/app_bar/ui/app_bar_consumer.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_constants.h"
 #import "ios/chrome/browser/cobrowse/model/cobrowse_context.h"
-#import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_metrics.h"
+#import "ios/chrome/browser/fullscreen/model/fullscreen_browser_agent.h"
+#import "ios/chrome/browser/fullscreen/model/fullscreen_browser_agent_observer_bridge.h"
+#import "ios/chrome/browser/fullscreen/public/fullscreen_metrics.h"
 #import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_ui_element.h"
 #import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_ui_updater.h"
-#import "ios/chrome/browser/intelligence/bwg/model/bwg_service.h"
+#import "ios/chrome/browser/intelligence/bwg/metrics/gemini_metrics.h"
+#import "ios/chrome/browser/intelligence/bwg/model/gemini_service.h"
 #import "ios/chrome/browser/intelligence/bwg/utils/gemini_constants.h"
+#import "ios/chrome/browser/intelligence/bwg/utils/gemini_entry_flow_result.h"
 #import "ios/chrome/browser/intelligence/features/features.h"
 #import "ios/chrome/browser/intents/model/intents_donation_helper.h"
+#import "ios/chrome/browser/lens/ui_bundled/lens_entrypoint.h"
 #import "ios/chrome/browser/policy/model/policy_util.h"
+#import "ios/chrome/browser/search_engines/model/search_engine_observer_bridge.h"
 #import "ios/chrome/browser/shared/coordinator/scene/state/incognito_state.h"
 #import "ios/chrome/browser/shared/coordinator/scene/state/tab_grid_state.h"
 #import "ios/chrome/browser/shared/model/application_context/application_context.h"
 #import "ios/chrome/browser/shared/model/url/chrome_url_constants.h"
 #import "ios/chrome/browser/shared/model/web_state_list/tab_group.h"
+#import "ios/chrome/browser/shared/model/web_state_list/tab_group_utils.h"
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list_observer_bridge.h"
 #import "ios/chrome/browser/shared/public/commands/bwg_commands.h"
+#import "ios/chrome/browser/shared/public/commands/fullscreen_commands.h"
+#import "ios/chrome/browser/shared/public/commands/lens_commands.h"
+#import "ios/chrome/browser/shared/public/commands/open_lens_input_selection_command.h"
 #import "ios/chrome/browser/shared/public/commands/open_new_tab_command.h"
 #import "ios/chrome/browser/shared/public/commands/scene_commands.h"
 #import "ios/chrome/browser/shared/public/commands/settings_commands.h"
@@ -40,10 +48,6 @@
 #import "ios/chrome/browser/shared/public/commands/tab_groups_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/signin/model/authentication_service.h"
-#import "ios/chrome/browser/signin/model/authentication_service_observer_bridge.h"
-#import "ios/chrome/browser/signin/model/avatar/avatar_provider.h"
-#import "ios/chrome/browser/signin/model/chrome_account_manager_service.h"
-#import "ios/chrome/browser/signin/model/system_identity.h"
 #import "ios/chrome/browser/toolbar/ui/buttons/toolbar_button_menu_factory.h"
 #import "ios/chrome/browser/toolbar/ui/buttons/toolbar_button_menu_factory_delegate.h"
 #import "ios/chrome/browser/url_loading/model/url_loading_browser_agent.h"
@@ -51,9 +55,8 @@
 #import "ios/web/public/web_state.h"
 #import "url/gurl.h"
 
-@interface AppBarMediator () <AuthenticationServiceObserving,
-                              IdentityManagerObserverBridgeDelegate,
-                              IncognitoStateObserver,
+@interface AppBarMediator () <IncognitoStateObserver,
+                              SearchEngineObserving,
                               TabGridStateObserver,
                               ToolbarButtonMenuFactoryDelegate,
                               WebStateListObserving>
@@ -68,21 +71,25 @@
 
 @implementation AppBarMediator {
   std::unique_ptr<WebStateListObserverBridge> _observerBridge;
-  std::unique_ptr<AuthenticationServiceObserverBridge> _authServiceBridge;
-  std::unique_ptr<signin::IdentityManagerObserverBridge> _identityManagerBridge;
   raw_ptr<WebStateList> _regularWebStateList;
   raw_ptr<WebStateList> _incognitoWebStateList;
   raw_ptr<FullscreenController> _regularFullscreenController;
   std::unique_ptr<FullscreenUIUpdater> _regularFullscreenUIUpdater;
   raw_ptr<FullscreenController> _incognitoFullscreenController;
   std::unique_ptr<FullscreenUIUpdater> _incognitoFullscreenUIUpdater;
+  raw_ptr<FullscreenBrowserAgent> _regularFullscreenBrowserAgent;
+  std::unique_ptr<FullscreenBrowserAgentObserverBridge>
+      _regularFullscreenObserver;
+  raw_ptr<FullscreenBrowserAgent> _incognitoFullscreenBrowserAgent;
+  std::unique_ptr<FullscreenBrowserAgentObserverBridge>
+      _incognitoFullscreenObserver;
   raw_ptr<PrefService> _prefService;
   raw_ptr<AuthenticationService> _authenticationService;
-  raw_ptr<BwgService> _geminiService;
-  raw_ptr<ChromeAccountManagerService> _accountManagerService;
-  raw_ptr<signin::IdentityManager> _identityManager;
+  raw_ptr<GeminiService> _geminiService;
   raw_ptr<UrlLoadingBrowserAgent> _URLLoader;
   raw_ptr<TemplateURLService> _templateURLService;
+  // Observer for the TemplateURLService.
+  std::unique_ptr<SearchEngineObserverBridge> _searchEngineObserver;
   TabGridPage _currentPage;
   TabGridState* _tabGridState;
   IncognitoState* _incognitoState;
@@ -91,24 +98,27 @@
 }
 
 - (instancetype)
-      initWithRegularWebStateList:(WebStateList*)regularWebStateList
-            incognitoWebStateList:(WebStateList*)incognitoWebStateList
-      regularFullscreenController:
-          (FullscreenController*)regularFullscreenController
-    incognitoFullscreenController:
-        (FullscreenController*)incognitoFullscreenController
-             regularActionFactory:(BrowserActionFactory*)regularActionFactory
-           incognitoActionFactory:(BrowserActionFactory*)incognitoActionFactory
-                      prefService:(PrefService*)prefService
-               templateURLService:(TemplateURLService*)templateURLService
-            authenticationService:(AuthenticationService*)authenticationService
-                    geminiService:(BwgService*)geminiService
-            accountManagerService:
-                (ChromeAccountManagerService*)accountManagerService
-                  identityManager:(signin::IdentityManager*)identityManager
-                        URLLoader:(UrlLoadingBrowserAgent*)URLLoader
-                     tabGridState:(TabGridState*)tabGridState
-                   incognitoState:(IncognitoState*)incognitoState {
+        initWithRegularWebStateList:(WebStateList*)regularWebStateList
+              incognitoWebStateList:(WebStateList*)incognitoWebStateList
+        regularFullscreenController:
+            (FullscreenController*)regularFullscreenController
+      incognitoFullscreenController:
+          (FullscreenController*)incognitoFullscreenController
+      regularFullscreenBrowserAgent:
+          (FullscreenBrowserAgent*)regularFullscreenBrowserAgent
+    incognitoFullscreenBrowserAgent:
+        (FullscreenBrowserAgent*)incognitoFullscreenBrowserAgent
+               regularActionFactory:(BrowserActionFactory*)regularActionFactory
+             incognitoActionFactory:
+                 (BrowserActionFactory*)incognitoActionFactory
+                        prefService:(PrefService*)prefService
+                 templateURLService:(TemplateURLService*)templateURLService
+              authenticationService:
+                  (AuthenticationService*)authenticationService
+                      geminiService:(GeminiService*)geminiService
+                          URLLoader:(UrlLoadingBrowserAgent*)URLLoader
+                       tabGridState:(TabGridState*)tabGridState
+                     incognitoState:(IncognitoState*)incognitoState {
   self = [super init];
   if (self) {
     _regularWebStateList = regularWebStateList;
@@ -118,21 +128,18 @@
     _regularFullscreenController = regularFullscreenController;
     _incognitoFullscreenController = incognitoFullscreenController;
 
+    _regularFullscreenBrowserAgent = regularFullscreenBrowserAgent;
+    _incognitoFullscreenBrowserAgent = incognitoFullscreenBrowserAgent;
+
     _URLLoader = URLLoader;
     _prefService = prefService;
     _templateURLService = templateURLService;
+    _searchEngineObserver =
+        std::make_unique<SearchEngineObserverBridge>(self, _templateURLService);
 
     _authenticationService = authenticationService;
-    _authServiceBridge = std::make_unique<AuthenticationServiceObserverBridge>(
-        _authenticationService, self);
 
     _geminiService = geminiService;
-    _accountManagerService = accountManagerService;
-
-    _identityManager = identityManager;
-    _identityManagerBridge =
-        std::make_unique<signin::IdentityManagerObserverBridge>(
-            _identityManager, self);
 
     _tabGridState = tabGridState;
     [_tabGridState addObserver:self];
@@ -165,20 +172,37 @@
   return self;
 }
 
-- (void)setConsumer:(id<AppBarConsumer, FullscreenUIElement>)consumer {
+- (void)setConsumer:
+    (id<AppBarConsumer, FullscreenUIElement, FullscreenBrowserAgentObserving>)
+        consumer {
   if (consumer == _consumer) {
     return;
   }
   _regularFullscreenUIUpdater.reset();
   _incognitoFullscreenUIUpdater.reset();
+  _regularFullscreenObserver.reset();
+  _incognitoFullscreenObserver.reset();
   _consumer = consumer;
   if (!_consumer) {
     return;
   }
-  _regularFullscreenUIUpdater = std::make_unique<FullscreenUIUpdater>(
-      _regularFullscreenController, _consumer);
-  _incognitoFullscreenUIUpdater = std::make_unique<FullscreenUIUpdater>(
-      _incognitoFullscreenController, _consumer);
+  if (IsFullscreenRefactoringEnabled()) {
+    _regularFullscreenObserver =
+        std::make_unique<FullscreenBrowserAgentObserverBridge>(
+            _consumer, _regularFullscreenBrowserAgent);
+    if (_incognitoFullscreenBrowserAgent) {
+      _incognitoFullscreenObserver =
+          std::make_unique<FullscreenBrowserAgentObserverBridge>(
+              _consumer, _incognitoFullscreenBrowserAgent);
+    }
+  } else {
+    _regularFullscreenUIUpdater = std::make_unique<FullscreenUIUpdater>(
+        _regularFullscreenController, _consumer);
+    if (_incognitoFullscreenController) {
+      _incognitoFullscreenUIUpdater = std::make_unique<FullscreenUIUpdater>(
+          _incognitoFullscreenController, _consumer);
+    }
+  }
   [self updateConsumer];
 }
 
@@ -200,6 +224,17 @@
   if (_incognitoFullscreenController && _consumer) {
     _incognitoFullscreenUIUpdater = std::make_unique<FullscreenUIUpdater>(
         _incognitoFullscreenController, _consumer);
+  }
+}
+
+- (void)setIncognitoFullscreenBrowserAgent:
+    (FullscreenBrowserAgent*)fullscreenBrowserAgent {
+  _incognitoFullscreenObserver.reset();
+  _incognitoFullscreenBrowserAgent = fullscreenBrowserAgent;
+  if (_incognitoFullscreenBrowserAgent && _consumer) {
+    _incognitoFullscreenObserver =
+        std::make_unique<FullscreenBrowserAgentObserverBridge>(
+            _consumer, _incognitoFullscreenBrowserAgent);
   }
 }
 
@@ -230,21 +265,24 @@
   }
   _regularFullscreenUIUpdater.reset();
   _incognitoFullscreenUIUpdater.reset();
+  _regularFullscreenObserver.reset();
+  _incognitoFullscreenObserver.reset();
   _regularFullscreenController = nullptr;
   _incognitoFullscreenController = nullptr;
+  _regularFullscreenBrowserAgent = nullptr;
+  _incognitoFullscreenBrowserAgent = nullptr;
+  _regularFullscreenHandler = nil;
+  _incognitoFullscreenHandler = nil;
   [_tabGridState removeObserver:self];
   [_incognitoState removeObserver:self];
-  _identityManager = nullptr;
-  _authServiceBridge.reset();
-  _identityManagerBridge.reset();
   _observerBridge.reset();
   _regularWebStateList = nullptr;
   _incognitoWebStateList = nullptr;
   _prefService = nullptr;
+  _searchEngineObserver.reset();
   _templateURLService = nullptr;
   _authenticationService = nullptr;
   _geminiService = nullptr;
-  _accountManagerService = nullptr;
   _URLLoader = nullptr;
   _incognitoState = nil;
   _tabGridState = nil;
@@ -255,6 +293,10 @@
 - (void)didChangeWebStateList:(WebStateList*)webStateList
                        change:(const WebStateListChange&)change
                        status:(const WebStateListStatus&)status {
+  if (status.active_web_state_change() && !_tabGridState.tabGridVisible) {
+    self.currentTabGroup = GetGroupForActiveWebState(webStateList);
+  }
+
   switch (change.type()) {
     case WebStateListChange::Type::kStatusOnly:
     case WebStateListChange::Type::kMove:
@@ -323,18 +365,29 @@
   _currentPage = _tabGridState.currentPage;
   self.currentTabGroup = _tabGridState.visibleTabGroup;
 
-  FullscreenController* fullscreenController =
-      _incognitoState.incognitoContentVisible ? _incognitoFullscreenController
-                                              : _regularFullscreenController;
+  if (IsFullscreenRefactoringEnabled()) {
+    id<FullscreenCommands> fullscreenHandler =
+        _incognitoState.incognitoContentVisible
+            ? self.incognitoFullscreenHandler
+            : self.regularFullscreenHandler;
+    [fullscreenHandler
+        exitFullscreenWithTrigger:FullscreenModeTransitionTrigger::kForcedByCode
+                         animated:YES];
+  } else {
+    FullscreenController* fullscreenController =
+        _incognitoState.incognitoContentVisible ? _incognitoFullscreenController
+                                                : _regularFullscreenController;
 
-  if (fullscreenController && fullscreenController->GetProgress() < 1.0) {
-    fullscreenController->ExitFullscreen(
-        FullscreenModeTransitionTrigger::kForcedByCode);
+    if (fullscreenController && fullscreenController->GetProgress() < 1.0) {
+      fullscreenController->ExitFullscreen(
+          FullscreenModeTransitionTrigger::kForcedByCode);
+    }
   }
   [self updateConsumer];
 }
 
 - (void)willExitTabGrid {
+  self.currentTabGroup = GetGroupForActiveWebState(self.currentWebStateList);
   [self updateForIncognitoVisible:_incognitoState.incognitoContentVisible];
 }
 
@@ -354,10 +407,10 @@
 }
 
 - (void)willHideTabGroup {
-  self.currentTabGroup = nullptr;
   if (!_tabGridState.tabGridVisible) {
     return;
   }
+  self.currentTabGroup = nullptr;
   [self updateForTabGridPage:_tabGridState.currentPage];
 }
 
@@ -371,30 +424,17 @@
   }
 }
 
-#pragma mark - AuthenticationServiceObserving
+#pragma mark - SearchEngineObserving
 
-- (void)onServiceStatusChanged {
-  [self updateAssistantButton];
-}
+- (void)searchEngineChanged {
+  BOOL incognito = self.currentWebStateList == _incognitoWebStateList;
+  ToolbarButtonMenuFactory* buttonMenuFactory =
+      incognito ? _incognitoButtonMenuFactory : _regularButtonMenuFactory;
 
-#pragma mark - IdentityManagerObserverBridgeDelegate
-
-- (void)onPrimaryAccountChanged:
-    (const signin::PrimaryAccountChangeEvent&)event {
-  [self updateAssistantButton];
-}
-
-- (void)onAccountsOnDeviceChanged {
-  [self updateAssistantButton];
-}
-
-- (void)onExtendedAccountInfoUpdated:(const AccountInfo&)info {
-  [self updateAssistantButton];
-}
-
-- (void)onIdentityManagerShutdown:(signin::IdentityManager*)identityManager {
-  _identityManager = nullptr;
-  _identityManagerBridge.reset();
+  // Update the long press menu actions to replace lens with QR scanner or vice
+  // versa, based on the new default search engine.
+  [self.consumer setMenu:[buttonMenuFactory menuForNewTabButton]
+           forButtonType:AppBarButtonType::AppBarButtonTypeNewTab];
 }
 
 #pragma mark - AppBarMutator
@@ -430,34 +470,30 @@
 
 - (void)assistantButtonTappedWithState:(AppBarAssistantButtonState)state {
   switch (state) {
-    case AppBarAssistantButtonState::kSignedOut: {
-      ShowSigninCommand* command = [[ShowSigninCommand alloc]
-          initWithOperation:AuthenticationOperation::kSigninOnly
-                accessPoint:signin_metrics::AccessPoint::kIosAppBar];
-      [self.sceneHandler showSignin:command
-                 baseViewController:self.baseViewController];
-      break;
-    }
-    case AppBarAssistantButtonState::kAccount: {
-      [self.settingsHandler
-          showAccountsSettingsFromViewController:self.baseViewController
-                            skipIfUINotAvailable:NO];
+    case AppBarAssistantButtonState::kLens: {
+      OpenLensInputSelectionCommand* command =
+          [[OpenLensInputSelectionCommand alloc]
+                  initWithEntryPoint:LensEntrypoint::AppBar
+                   presentationStyle:LensInputSelectionPresentationStyle::
+                                         SlideFromRight
+              presentationCompletion:nil];
+      [self.lensHandler openLensInputSelection:command];
       break;
     }
     case AppBarAssistantButtonState::kAsk: {
-      if (!_authenticationService->HasPrimaryIdentity(
-              signin::ConsentLevel::kSignin)) {
-        // TODO(crbug.com/484000888): Prompt user to sign in.
-        return;
-      }
-      if (!_geminiService || !_geminiService->IsProfileEligibleForGemini()) {
-        // TODO(crbug.com/484000888): If user is not eligible, then show prompt
-        // notifying ineligibility.
-        return;
-      }
-      GeminiStartupState* startupState = [[GeminiStartupState alloc]
-          initWithEntryPoint:gemini::EntryPoint::AppBar];
-      [self.geminiHandler startGeminiFlowWithStartupState:startupState];
+      __weak __typeof(self) weakSelf = self;
+      [self.geminiHandler
+          startGeminiEntryFlowWithStartupState:
+              [[GeminiStartupState alloc]
+                  initWithEntryPoint:gemini::EntryPoint::AppBar]
+                            baseViewController:self.baseViewController
+                                   accessPoint:signin_metrics::AccessPoint::
+                                                   kIosAppBar
+                      showSnackbarOnCompletion:YES
+                                    completion:^(GeminiEntryFlowResult result) {
+                                      [weakSelf
+                                          handleGeminiEntryFlowResult:result];
+                                    }];
       break;
     }
     case AppBarAssistantButtonState::kAIM: {
@@ -474,48 +510,11 @@
     return;
   }
 
-  GURL URL(kChromeUINewTabURL);
-  UrlLoadParams params = UrlLoadParams::InNewTab(URL);
-  params.in_incognito = _incognitoState.incognitoContentVisible;
-  params.load_in_group = true;
-  params.tab_group = self.currentTabGroup->GetWeakPtr();
-  _URLLoader->Load(params);
-  [self updateConsumer];
-}
-
-- (void)moveCurrentTabToGroup:(const TabGroup*)destinationGroup {
-  CHECK(base::FeatureList::IsEnabled(kTabGroupInTabIconContextMenu));
-  CHECK([self activeWebStateInGroup]);
-  int tabIndex = self.currentWebStateList->active_index();
-  self.currentWebStateList->MoveToGroup({tabIndex}, destinationGroup);
-  [self updateConsumer];
-}
-
-- (void)removeCurrentTabFromGroup {
-  CHECK(base::FeatureList::IsEnabled(kTabGroupInTabIconContextMenu));
-  CHECK([self activeWebStateInGroup]);
-  int tabIndex = self.currentWebStateList->active_index();
-  self.currentWebStateList->RemoveFromGroups({tabIndex});
-  [self updateConsumer];
-}
-
-- (void)addCurrentTabToGroup:(const TabGroup*)destinationGroup {
-  CHECK(base::FeatureList::IsEnabled(kTabGroupInTabIconContextMenu));
-  CHECK(![self activeWebStateInGroup]);
-  int tabIndex = self.currentWebStateList->active_index();
-  if (destinationGroup) {
-    self.currentWebStateList->MoveToGroup({tabIndex}, destinationGroup);
-  } else {
-    web::WebState* currentWebState =
-        self.currentWebStateList->GetActiveWebState();
-    if (!currentWebState) {
-      return;
-    }
-    std::set<web::WebStateID> identifiers = {
-        currentWebState->GetUniqueIdentifier()};
-    [self createNewTabGroupWithTabs:identifiers];
+  [self.tabGridHandler prepareToExitTabGrid];
+  if ([self addNewTabInGroup:self.currentTabGroup
+                   incognito:_incognitoState.incognitoContentVisible]) {
+    [self.tabGridHandler exitTabGrid];
   }
-  [self updateConsumer];
 }
 
 - (void)navigateToPageForItem:(web::NavigationItem*)item {
@@ -529,7 +528,13 @@
   if (_currentWebStateList) {
     _currentWebStateList->RemoveObserver(_observerBridge.get());
   }
-  _currentWebStateList = currentWebStateList;
+
+  if (currentWebStateList != _currentWebStateList) {
+    self.currentTabGroup = _tabGridState.visibleTabGroup
+                               ? GetGroupForActiveWebState(currentWebStateList)
+                               : nullptr;
+    _currentWebStateList = currentWebStateList;
+  }
 
   if (_currentWebStateList) {
     _currentWebStateList->AddObserver(_observerBridge.get());
@@ -553,17 +558,13 @@
     return;
   }
   NSUInteger tabCount;
+
+  // Determine the tab count to display in the tab grid button.
   if (self.currentTabGroup) {
     tabCount = static_cast<NSUInteger>(self.currentTabGroup->range().count());
   } else {
-    tabCount = self.currentWebStateList->count();
+    tabCount = static_cast<NSUInteger>(self.currentWebStateList->count());
   }
-  [self.consumer updateTabCount:tabCount];
-  [self.consumer setTabGridVisible:_tabGridState.tabGridVisible];
-  [self.consumer setTabGroupsPageVisible:_tabGridState.currentPage ==
-                                         TabGridPageTabGroups];
-  [self.consumer setTabGroupVisible:_tabGridState.visibleTabGroup];
-  [self.consumer setInTabGroup:[self activeWebStateInGroup]];
 
   BOOL incognito = self.currentWebStateList == _incognitoWebStateList;
   ToolbarButtonMenuFactory* buttonMenuFactory =
@@ -575,6 +576,15 @@
            forButtonType:AppBarButtonTypeNewTab];
   [self.consumer setMenu:[buttonMenuFactory menuForTabGridButton]
            forButtonType:AppBarButtonTypeTabGrid];
+
+  [self.consumer updateTabCount:tabCount];
+  [self.consumer setTabGridVisible:_tabGridState.tabGridVisible];
+  [self.consumer setTabGroupsPageVisible:_tabGridState.currentPage ==
+                                         TabGridPageTabGroups];
+  [self.consumer setTabGroupVisible:self.currentTabGroup != nullptr];
+  [self.consumer
+      setInTabGroup:GetGroupForActiveWebState(self.currentWebStateList)];
+
   [self updateAssistantButton];
   [self updateButtonsForCurrentTabGridPage];
 }
@@ -611,10 +621,6 @@
       (_tabGridState.tabGridVisible && isIncognitoPage);
   if (isIncognitoContentVisible) {
     enableButtons = enableButtons && !_incognitoState.authenticationRequired;
-    if (IsIOSSoftLockEnabled()) {
-      // TODO(crbug.com/484000564): Hide background if authentication is
-      // required.
-    }
   }
   [self.consumer setButtonsEnabled:enableButtons];
   [self.consumer setIncognito:isIncognitoContentVisible];
@@ -622,28 +628,15 @@
 
 // Updates the consumer with the latest state of the assistant button.
 - (void)updateAssistantButton {
-  AppBarAssistantButtonState state = AppBarAssistantButtonState::kSignedOut;
-  UIImage* avatar = nil;
+  AppBarAssistantButtonState state = AppBarAssistantButtonState::kLens;
 
   if (IsPageActionMenuEnabled()) {
     state = AppBarAssistantButtonState::kAsk;
   } else if (IsAimCobrowseEnabled() && IsAssistantContainerEnabled()) {
     state = AppBarAssistantButtonState::kAIM;
-  } else if (_authenticationService->HasPrimaryIdentity(
-                 signin::ConsentLevel::kSignin)) {
-    state = AppBarAssistantButtonState::kAccount;
-    id<SystemIdentity> identity = _authenticationService->GetPrimaryIdentity(
-        signin::ConsentLevel::kSignin);
-    ApplicationContext* context = GetApplicationContext();
-    signin::AvatarProvider* avatarProvider =
-        context ? context->GetIdentityAvatarProvider() : nullptr;
-    if (avatarProvider) {
-      avatar = avatarProvider->GetIdentityAvatar(
-          identity, IdentityAvatarSize::TableViewIcon);
-    }
   }
 
-  [self.consumer setAssistantButtonState:state avatar:avatar];
+  [self.consumer setAssistantButtonState:state];
 }
 
 // Updates for `incognito` being visible.
@@ -668,6 +661,13 @@
   // example).
   if (!IsAddNewTabAllowedByPolicy(_prefService, incognito)) {
     return;
+  }
+
+  if (_tabGridState.visibleTabGroup) {
+    id<TabGroupsCommands> tabGroupsHandler =
+        incognito ? self.incognitoTabGroupsCommands
+                  : self.regularTabGroupsCommands;
+    [tabGroupsHandler hideTabGroup];
   }
 
   [self.tabGridHandler prepareToExitTabGrid];
@@ -720,19 +720,6 @@
   return webStateListCount != webStateList->count();
 }
 
-// Returns whether the active web state in the current web state list is in a
-// tab group.
-- (BOOL)activeWebStateInGroup {
-  if (!self.currentWebStateList) {
-    return NO;
-  }
-  int activeIndex = self.currentWebStateList->active_index();
-  if (activeIndex == WebStateList::kInvalidIndex) {
-    return NO;
-  }
-  return self.currentWebStateList->GetGroupOfWebStateAt(activeIndex) != nullptr;
-}
-
 // Triggers the creation of a New Tab Group with 'identifiers'.
 - (void)createNewTabGroupWithTabs:(std::set<web::WebStateID>)identifiers {
   // While in the tab grid, the App Bar can only create new Tab Groups from the
@@ -765,4 +752,39 @@
   }
 }
 
+// Adds a new tab in `group` and returns its success.
+- (BOOL)addNewTabInGroup:(const TabGroup*)group incognito:(BOOL)incognito {
+  CHECK(group);
+  WebStateList* webStateList =
+      incognito ? _incognitoWebStateList : _regularWebStateList;
+  int webStateListCount = webStateList->count();
+
+  GURL URL(kChromeUINewTabURL);
+  UrlLoadParams params = UrlLoadParams::InNewTab(URL);
+  params.in_incognito = incognito;
+  params.load_in_group = true;
+  params.tab_group = group->GetWeakPtr();
+  _URLLoader->Load(params);
+
+  [self updateConsumer];
+  return webStateListCount != webStateList->count();
+}
+
+// Handles the result of the Gemini entry flow from the app bar.
+- (void)handleGeminiEntryFlowResult:(GeminiEntryFlowResult)result {
+  switch (result) {
+    case kGeminiEntryFlowResultAccountCapabilityRestricted:
+    case kGeminiEntryFlowResultAccountIneligibleByEnterprise:
+    case kGeminiEntryFlowResultAccountIneligibleByGemini:
+      // TODO(crbug.com/484000888): Update app bar button state to reflect
+      // ineligibility.
+      break;
+    case kGeminiEntryFlowResultSuccess:
+    case kGeminiEntryFlowResultTimeout:
+    case kGeminiEntryFlowResultCancelled:
+    case kGeminiEntryFlowResultPageIneligible:
+    case kGeminiEntryFlowResultUnknown:
+      break;
+  }
+}
 @end

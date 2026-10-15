@@ -49,7 +49,9 @@
 #include "chrome/browser/devtools/views/devtools_floaty.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/download/download_stats.h"
+#include "chrome/browser/enterprise/data_protection/data_protection_clipboard_utils.h"
 #include "chrome/browser/glic/browser_ui/glic_vector_icon_manager.h"
+#include "chrome/browser/glic/host/guest_util.h"
 #include "chrome/browser/glic/public/features.h"
 #include "chrome/browser/glic/public/glic_enabling.h"
 #include "chrome/browser/glic/public/glic_invoke_options.h"
@@ -95,27 +97,30 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/browser_navigator.h"
-#include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
+#include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
+#include "chrome/browser/ui/browser_window/public/profile_browser_collection.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
 #include "chrome/browser/ui/exclusive_access/keyboard_lock_controller.h"
 #include "chrome/browser/ui/lens/lens_overlay_entry_point_controller.h"
 #include "chrome/browser/ui/lens/lens_search_controller.h"
 #include "chrome/browser/ui/lens/lens_string_utils.h"
+#include "chrome/browser/ui/navigator/browser_navigator.h"
+#include "chrome/browser/ui/navigator/browser_navigator_params.h"
 #include "chrome/browser/ui/passwords/ui_utils.h"
 #include "chrome/browser/ui/profiles/profile_colors_util.h"
 #include "chrome/browser/ui/profiles/profile_view_utils.h"
 #include "chrome/browser/ui/qrcode_generator/qrcode_generator_bubble_controller.h"
 #include "chrome/browser/ui/read_anything/read_anything_controller.h"
 #include "chrome/browser/ui/read_anything/read_anything_entry_point_controller.h"
+#include "chrome/browser/ui/read_anything/read_anything_side_panel_controller.h"
 #include "chrome/browser/ui/read_anything/read_anything_side_panel_controller_utils.h"
 #include "chrome/browser/ui/send_tab_to_self/send_tab_to_self_bubble.h"
+#include "chrome/browser/ui/send_tab_to_self/send_tab_to_self_context_menu_delegate.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/tabs/public/tab_features.h"
 #include "chrome/browser/ui/tabs/split_tab_metrics.h"
@@ -151,6 +156,7 @@
 #include "components/autofill/core/common/unique_ids.h"
 #include "components/compose/buildflags.h"
 #include "components/compose/core/browser/compose_features.h"
+#include "components/contextual_tasks/public/features.h"
 #include "components/custom_handlers/protocol_handler.h"
 #include "components/download/public/common/download_url_parameters.h"
 #include "components/google/core/common/google_util.h"
@@ -179,6 +185,7 @@
 #include "components/search_engines/search_engines_pref_names.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
+#include "components/send_tab_to_self/features.h"
 #include "components/send_tab_to_self/metrics_util.h"
 #include "components/services/app_service/public/cpp/app_launch_params.h"
 #include "components/services/app_service/public/cpp/app_launch_util.h"
@@ -253,6 +260,7 @@
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/point_conversions.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/text_elider.h"
 #include "ui/strings/grit/ui_strings.h"
@@ -405,6 +413,23 @@ std::string GetGlicWebContentsContextToken(
   return "TextSelection";
 }
 
+ui::ImageModel GetLensContextMenuIcon() {
+#if BUILDFLAG(IS_MAC)
+  if (!base::FeatureList::IsEnabled(
+          lens::features::kShowContextualTasksMenuIcon)) {
+    return ui::ImageModel();
+  }
+#endif
+
+  return ui::ImageModel::FromVectorIcon(
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+      vector_icons::kGoogleLensMonochromeLogoIcon
+#else
+      vector_icons::kSearchChromeRefreshIcon
+#endif
+  );
+}
+
 enum class UmaEnumIdLookupType {
   GeneralEnumId,
   ContextSpecificEnumId,
@@ -554,7 +579,6 @@ const std::map<int, int>& GetIdcToUmaMap(UmaEnumIdLookupType type) {
        {IDC_CONTENT_CONTEXT_SAVEVIDEOFRAMEAS, 141},
        {IDC_CONTENT_CONTEXT_SEARCHLENSFORVIDEOFRAME, 142},
        {IDC_CONTENT_CONTEXT_SEARCHWEBFORVIDEOFRAME, 143},
-       {IDC_CONTENT_CONTEXT_OPENLINKPREVIEW, 144},
        {IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PLUS_ADDRESS, 145},
        // Removed: {IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PASSWORDS, 146},
        {IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PASSWORDS_SELECT_PASSWORD, 147},
@@ -576,13 +600,15 @@ const std::map<int, int>& GetIdcToUmaMap(UmaEnumIdLookupType type) {
        {IDC_CONTENT_CONTEXT_INSPECTELEMENT_WITH_DEVTOOLS, 160},
        {IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_AT_MEMORY, 161},
        {IDC_CONTENT_CONTEXT_GLIC, 162},
+       {IDC_CONTENT_CONTEXT_VIDEO_FRAME, 163},
+       {IDC_CONTENT_CONTEXT_LISTEN_TO_THIS_PAGE, 164},
        // To add new items:
        //   - Add one more line above this comment block, using the UMA value
        //     from the line below this comment block.
        //   - Increment the UMA value in that latter line.
        //   - Add the new item to the RenderViewContextMenuItem enum in
        //     tools/metrics/histograms/metadata/ui/enums.xml.
-       {0, 163}});
+       {0, 165}});
   // LINT.ThenChange(//tools/metrics/histograms/metadata/ui/enums.xml:RenderViewContextMenuItem)
 
   // LINT.IfChange(ContextMenuOptionDesktop)
@@ -619,7 +645,6 @@ const std::map<int, int>& GetIdcToUmaMap(UmaEnumIdLookupType type) {
        // Removed: {IDC_CONTENT_CONTEXT_TRANSLATEIMAGEWITHWEB, 27},
        // Removed: {IDC_CONTENT_CONTEXT_TRANSLATEIMAGEWITHLENS, 28},
        {IDC_CONTENT_CONTEXT_SEARCHWEBFORNEWTAB, 29},
-       {IDC_CONTENT_CONTEXT_OPENLINKPREVIEW, 30},
        {IDC_CONTENT_CONTEXT_OPENLINKSPLITVIEW, 31},
        {IDC_CONTENT_CONTEXT_GLICSHAREIMAGE, 32},
        // To add new items:
@@ -868,11 +893,9 @@ bool IsLensOptionEnteredThroughKeyboard(int event_flags) {
 
 bool IsGlicWindow(const RenderViewContextMenu* menu,
                   content::BrowserContext* browser_context) {
-  if (glic::GlicEnabling::IsEnabledByFlags()) {
-    auto* glic_service =
-        glic::GlicKeyedServiceFactory::GetGlicKeyedService(browser_context);
-    return glic_service && glic_service->IsActiveWebContents(
-                               menu->GetWebContents()->GetOuterWebContents());
+  if (glic::GlicEnabling::IsEnabledByGlobalCriteria()) {
+    return glic::GetGlicGuestWebContents(
+               menu->GetWebContents()->GetOuterWebContents()) != nullptr;
   }
   return false;
 }
@@ -945,6 +968,7 @@ RenderViewContextMenu::RenderViewContextMenu(
       protocol_handler_registry_(
           ProtocolHandlerRegistryFactory::GetForBrowserContext(GetProfile())),
       inspect_submenu_model_(this),
+      video_frame_submenu_model_(this),
       accessibility_labels_submenu_model_(this),
       embedder_web_contents_(GetWebContentsToUse(&render_frame_host)),
       autofill_context_menu_manager_(this, &menu_model_),
@@ -1023,12 +1047,6 @@ void RenderViewContextMenu::AppendCurrentExtensionItems() {
                                         /*is_action_menu=*/false, title);
 }
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
-
-// static
-bool RenderViewContextMenu::IsCommandGatedByFencedFrameUntrustedNetworkStatus(
-    int id) {
-  return kFencedFrameUntrustedNetworkStatusGatedCommands.contains(id);
-}
 
 std::u16string RenderViewContextMenu::FormatURLForClipboard(const GURL& url) {
   DCHECK(url.is_valid());
@@ -1141,8 +1159,7 @@ void RenderViewContextMenu::InitMenu() {
     // Add "Copy Link Address" menu option for Glic Multi instance. Link
     // options are not supported by default (since Glic uses WebView's context
     // menu).
-    if (glic::GlicEnabling::IsMultiInstanceEnabled() &&
-        IsGlicWindow(this, browser_context_) && !params_.link_url.is_empty()) {
+    if (IsGlicWindow(this, browser_context_) && !params_.link_url.is_empty()) {
       AppendCopyLinkLocationItem();
       menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
     }
@@ -1237,8 +1254,7 @@ void RenderViewContextMenu::InitMenu() {
     AppendPrintItem();
   } else {
     if (IsGlicWindow(this, browser_context_) &&
-        base::FeatureList::IsEnabled(features::kGlicPrintMenuItem) &&
-        glic::GlicEnabling::IsMultiInstanceEnabled()) {
+        base::FeatureList::IsEnabled(features::kGlicPrintMenuItem)) {
       AppendPrintItem();
     }
   }
@@ -1484,7 +1500,7 @@ void RenderViewContextMenu::RecordUsedItem(int id) {
       base::RecordAction(
           base::UserMetricsAction("MostVisited_ClickedFromContextMenu"));
     } else if (doc_url.DeprecatedGetOriginAsURL() ==
-                   GURL(chrome::kChromeUINewTabPageURL) ||
+                   chrome::ChromeUINewTabPageURLAsGURL() ||
                doc_url.DeprecatedGetOriginAsURL() ==
                    GURL(chrome::kChromeUIUntrustedNewTabPageUrl)) {
       base::RecordAction(base::UserMetricsAction(
@@ -1567,7 +1583,8 @@ void RenderViewContextMenu::RecordShownItem(int id, bool is_submenu) {
 
 bool RenderViewContextMenu::IsHTML5Fullscreen() const {
   BrowserWindowInterface* browser =
-      chrome::FindBrowserWithTab(embedder_web_contents_);
+      GlobalBrowserCollection::GetInstance()->FindBrowserWithTab(
+          embedder_web_contents_);
   if (!browser) {
     return false;
   }
@@ -1580,7 +1597,8 @@ bool RenderViewContextMenu::IsHTML5Fullscreen() const {
 
 bool RenderViewContextMenu::IsPressAndHoldEscRequiredToExitFullscreen() const {
   BrowserWindowInterface* browser =
-      chrome::FindBrowserWithTab(source_web_contents_);
+      GlobalBrowserCollection::GetInstance()->FindBrowserWithTab(
+          source_web_contents_);
   if (!browser) {
     return false;
   }
@@ -1828,36 +1846,6 @@ void RenderViewContextMenu::AppendLinkItems() {
                  : IDS_CONTENT_CONTEXT_OPENLINKOFFTHERECORD);
     }
 
-#if !BUILDFLAG(IS_ANDROID)
-    if (base::FeatureList::IsEnabled(blink::features::kLinkPreview) &&
-        params_.link_url.SchemeIsHTTPOrHTTPS() && !is_link_to_iwa &&
-        !extensions::WebViewGuest::FromRenderFrameHost(GetRenderFrameHost())) {
-      menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_OPENLINKPREVIEW,
-                                      IDS_CONTENT_CONTEXT_OPENLINKPREVIEW);
-      // We don't show in-production-help for ChromeOS for now because we should
-      // use a different trigger.
-      //
-      // TODO(b:325390312): Update trigger for ChromeOS and show
-      // in-production-help.
-#if !BUILDFLAG(IS_CHROMEOS)
-      int string_id;
-      switch (blink::features::kLinkPreviewTriggerType.Get()) {
-        case blink::features::LinkPreviewTriggerType::kAltClick:
-          string_id = IDS_CONTENT_CONTEXT_OPENLINKPREVIEW_TRIGGER_ALTCLICK;
-          break;
-        case blink::features::LinkPreviewTriggerType::kAltHover:
-          string_id = IDS_CONTENT_CONTEXT_OPENLINKPREVIEW_TRIGGER_ALTHOVER;
-          break;
-        case blink::features::LinkPreviewTriggerType::kLongPress:
-          string_id = IDS_CONTENT_CONTEXT_OPENLINKPREVIEW_TRIGGER_LONGPRESS;
-          break;
-      }
-      menu_model_.SetMinorText(menu_model_.GetItemCount() - 1,
-                               l10n_util::GetStringUTF16(string_id));
-#endif  // !BUILDFLAG(IS_CHROMEOS)
-    }
-#endif  // !BUILDFLAG(IS_ANDROID)
-
     AppendOpenInWebAppLinkItems();
     AppendOpenWithLinkItems();
 
@@ -1881,7 +1869,9 @@ void RenderViewContextMenu::AppendLinkItems() {
         if (profile_for_path != GetProfile() && !entry->IsOmitted() &&
             !entry->IsSigninRequired()) {
           target_profiles_entries.push_back(entry);
-          if (chrome::FindLastActiveWithProfile(profile_for_path)) {
+          ProfileBrowserCollection* collection =
+              ProfileBrowserCollection::GetForProfile(profile_for_path);
+          if (collection && collection->GetLastActiveBrowser()) {
             multiple_profiles_open_ = true;
           }
           if (ProfileMetrics::IsProfileActive(entry)) {
@@ -2105,31 +2095,26 @@ void RenderViewContextMenu::AppendSearchWebForImageItems() {
 
   const int search_for_image_idc = GetSearchForImageIdc();
   auto* entry_point_controller =
-      GetBrowser()
-          ? GetBrowser()->GetFeatures().lens_overlay_entry_point_controller()
-          : nullptr;
+      GetBrowser() ? lens::LensOverlayEntryPointController::From(GetBrowser())
+                   : nullptr;
+  ui::ImageModel icon = GetLensContextMenuIcon();
   if (entry_point_controller && entry_point_controller->IsEnabled() &&
       lens::features::UseLensOverlayForImageSearch()) {
     // If the entrypoint is ephermally hidden, don't add the item.
     if (!entry_point_controller->AreVisible()) {
       return;
     }
-    const gfx::VectorIcon& icon =
-#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
-        vector_icons::kGoogleLensMonochromeLogoIcon;
-#else
-        vector_icons::kSearchChromeRefreshIcon;
-#endif
     menu_model_.AddItemWithStringIdAndIcon(
         search_for_image_idc,
         lens::GetLensOverlayImageEntrypointLabelAltIds(
             IDS_CONTENT_CONTEXT_LENS_OVERLAY),
-        ui::ImageModel::FromVectorIcon(icon));
+        icon);
   } else {
-    menu_model_.AddItem(
+    menu_model_.AddItemWithIcon(
         search_for_image_idc,
         l10n_util::GetStringFUTF16(IDS_CONTENT_CONTEXT_SEARCHLENSFORIMAGE,
-                                   provider->short_name()));
+                                   provider->short_name()),
+        icon);
   }
   const int command_index =
       menu_model_.GetIndexOfCommandId(search_for_image_idc).value();
@@ -2182,70 +2167,106 @@ void RenderViewContextMenu::AppendCanvasItems() {
 }
 
 void RenderViewContextMenu::AppendVideoItems() {
+  const bool use_submenu =
+      base::FeatureList::IsEnabled(media::kContextMenu2026);
+
+  if (use_submenu) {
+    menu_model_.AddCheckItemWithStringId(IDC_CONTENT_CONTEXT_PICTUREINPICTURE,
+                                         IDS_CONTENT_CONTEXT_PICTUREINPICTURE);
+
+    if (media_router::MediaRouterEnabled(browser_context_)) {
+      menu_model_.AddItemWithStringId(IDC_ROUTE_MEDIA,
+                                      IDS_MEDIA_ROUTER_MENU_ITEM_TITLE);
+    }
+
+    menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
+  }
+
   AppendMediaItems();
   menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_OPENAVNEWTAB,
                                   IDS_CONTENT_CONTEXT_OPENVIDEONEWTAB);
-  if (base::FeatureList::IsEnabled(media::kContextMenuSaveVideoFrameAs)) {
-    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVEVIDEOFRAMEAS,
-                                    IDS_CONTENT_CONTEXT_SAVEVIDEOFRAMEAS);
+
+  ui::SimpleMenuModel* target_model = &menu_model_;
+  if (use_submenu) {
+    target_model = &video_frame_submenu_model_;
   }
-  menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVEAVAS,
-                                  IDS_CONTENT_CONTEXT_SAVEVIDEOAS);
+
+  if (base::FeatureList::IsEnabled(media::kContextMenuSaveVideoFrameAs)) {
+    target_model->AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVEVIDEOFRAMEAS,
+                                      IDS_CONTENT_CONTEXT_SAVEVIDEOFRAMEAS);
+  }
+
+  if (!use_submenu) {
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVEAVAS,
+                                    IDS_CONTENT_CONTEXT_SAVEVIDEOAS);
+  }
+
   if (base::FeatureList::IsEnabled(media::kContextMenuCopyVideoFrame)) {
-    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_COPYVIDEOFRAME,
-                                    IDS_CONTENT_CONTEXT_COPYVIDEOFRAME);
+    target_model->AddItemWithStringId(IDC_CONTENT_CONTEXT_COPYVIDEOFRAME,
+                                      IDS_CONTENT_CONTEXT_COPYVIDEOFRAME);
+  }
+
+  if (use_submenu) {
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVEAVAS,
+                                    IDS_CONTENT_CONTEXT_SAVEVIDEOAS);
   }
 
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_COPYAVLOCATION,
                                   IDS_CONTENT_CONTEXT_COPYVIDEOLOCATION);
-  menu_model_.AddCheckItemWithStringId(IDC_CONTENT_CONTEXT_PICTUREINPICTURE,
-                                       IDS_CONTENT_CONTEXT_PICTUREINPICTURE);
-  AppendMediaRouterItem();
+
+  if (!use_submenu) {
+    menu_model_.AddCheckItemWithStringId(IDC_CONTENT_CONTEXT_PICTUREINPICTURE,
+                                         IDS_CONTENT_CONTEXT_PICTUREINPICTURE);
+    AppendMediaRouterItem();
+  }
 
   // Search for video frame menu item.
   if (base::FeatureList::IsEnabled(media::kContextMenuSearchForVideoFrame)) {
     const int search_for_video_frame_idc = GetSearchForVideoFrameIdc();
     auto* entry_point_controller =
-        GetBrowser()
-            ? GetBrowser()->GetFeatures().lens_overlay_entry_point_controller()
-            : nullptr;
+        GetBrowser() ? lens::LensOverlayEntryPointController::From(GetBrowser())
+                     : nullptr;
+    bool item_added = false;
+    ui::ImageModel icon = GetLensContextMenuIcon();
+
     if (entry_point_controller && entry_point_controller->IsEnabled() &&
         lens::features::UseLensOverlayForVideoFrameSearch()) {
-      // If the entrypoint is ephermally hidden, exit early so the item is not
-      // added.
-      if (!entry_point_controller->AreVisible()) {
-        return;
+      // Add the item only if the entrypoint is visible.
+      if (entry_point_controller->AreVisible()) {
+        target_model->AddItemWithStringIdAndIcon(
+            search_for_video_frame_idc,
+            lens::GetLensOverlayVideoEntrypointLabelAltIds(
+                IDS_CONTENT_CONTEXT_LENS_OVERLAY),
+            icon);
+        item_added = true;
       }
-      const gfx::VectorIcon& icon =
-#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
-          vector_icons::kGoogleLensMonochromeLogoIcon;
-#else
-          vector_icons::kSearchChromeRefreshIcon;
-#endif
-      menu_model_.AddItemWithStringIdAndIcon(
-          search_for_video_frame_idc,
-          lens::GetLensOverlayVideoEntrypointLabelAltIds(
-              IDS_CONTENT_CONTEXT_LENS_OVERLAY),
-          ui::ImageModel::FromVectorIcon(icon));
     } else {
       const auto* provider = GetImageSearchProvider();
-      if (!provider) {
-        return;
+      if (provider) {
+        target_model->AddItemWithIcon(
+            search_for_video_frame_idc,
+            l10n_util::GetStringFUTF16(IDS_CONTENT_CONTEXT_SEARCHFORVIDEOFRAME,
+                                       GetImageSearchProviderName(provider)),
+            icon);
+        item_added = true;
       }
-
-      menu_model_.AddItem(
-          search_for_video_frame_idc,
-          l10n_util::GetStringFUTF16(IDS_CONTENT_CONTEXT_SEARCHFORVIDEOFRAME,
-                                     GetImageSearchProviderName(provider)));
     }
 
-    // Used for interactive tests. See LensOverlayControllerCUJTest.
-    const int command_index =
-        menu_model_.GetIndexOfCommandId(search_for_video_frame_idc).value();
-    menu_model_.SetElementIdentifierAt(command_index, kSearchForVideoFrameItem);
+    if (item_added) {
+      // Used for interactive tests. See LensOverlayControllerCUJTest.
+      target_model->SetElementIdentifierAt(target_model->GetItemCount() - 1,
+                                           kSearchForVideoFrameItem);
 
-    MaybePrepareForLensQuery();
+      MaybePrepareForLensQuery();
+    }
+  }
+
+  if (use_submenu && video_frame_submenu_model_.GetItemCount() > 0) {
+    menu_model_.AddSubMenu(
+        IDC_CONTENT_CONTEXT_VIDEO_FRAME,
+        l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_VIDEO_FRAME),
+        &video_frame_submenu_model_);
   }
 }
 
@@ -2457,6 +2478,10 @@ void RenderViewContextMenu::AppendReadAnythingItem() {
       !IsReadAnythingEntryShowing(GetBrowser())) {
     menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_OPEN_IN_READING_MODE,
                                     IDS_CONTENT_CONTEXT_READING_MODE);
+    if (features::IsImprovedReadAloudEnabled()) {
+      menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_LISTEN_TO_THIS_PAGE,
+                                      IDS_CONTENT_CONTEXT_LISTEN_TO_THIS_PAGE);
+    }
   }
 }
 
@@ -2468,16 +2493,7 @@ void RenderViewContextMenu::AppendGlicItems() {
         menu_model_.GetIndexOfCommandId(IDC_CONTENT_CONTEXT_RELOAD_GLIC)
             .value(),
         kGlicReloadMenuItem);
-    if (!glic::GlicEnabling::IsMultiInstanceEnabled()) {
-      menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_CLOSE_GLIC,
-                                      IDS_CONTENT_CONTEXT_CLOSE_GLIC);
-      menu_model_.SetElementIdentifierAt(
-          menu_model_.GetIndexOfCommandId(IDC_CONTENT_CONTEXT_CLOSE_GLIC)
-              .value(),
-          kGlicCloseMenuItem);
-    }
-    if (glic::GlicEnabling::IsMultiInstanceEnabled() &&
-        base::FeatureList::IsEnabled(features::kGlicArchiveConversation)) {
+    if (base::FeatureList::IsEnabled(features::kGlicArchiveConversation)) {
       // Archive  Glic conversation.
       menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_ARCHIVE_GLIC,
                                       IDS_CONTENT_CONTEXT_ARCHIVE_GLIC);
@@ -2501,6 +2517,11 @@ void RenderViewContextMenu::AppendRotationItems() {
 
 void RenderViewContextMenu::AppendSearchProvider() {
   DCHECK(browser_context_);
+
+  if (!enterprise_data_protection::IsSearchWithAllowed(
+          GetWebContentsForDataControls())) {
+    return;
+  }
 
   base::TrimWhitespace(params_.selection_text, base::TRIM_ALL,
                        &params_.selection_text);
@@ -2797,26 +2818,21 @@ void RenderViewContextMenu::AppendClickToCallItem() {
 
 void RenderViewContextMenu::AppendRegionSearchItem() {
   auto* entry_point_controller =
-      GetBrowser()
-          ? GetBrowser()->GetFeatures().lens_overlay_entry_point_controller()
-          : nullptr;
+      GetBrowser() ? lens::LensOverlayEntryPointController::From(GetBrowser())
+                   : nullptr;
+  ui::ImageModel icon = GetLensContextMenuIcon();
+
   if (entry_point_controller && entry_point_controller->IsEnabled()) {
     // If the entrypoint is ephermally hidden, exit early so the item is not
     // added.
     if (!entry_point_controller->AreVisible()) {
       return;
     }
-    const gfx::VectorIcon& icon =
-#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
-        vector_icons::kGoogleLensMonochromeLogoIcon;
-#else
-        vector_icons::kSearchChromeRefreshIcon;
-#endif
     menu_model_.AddItemWithStringIdAndIcon(
         IDC_CONTENT_CONTEXT_LENS_REGION_SEARCH,
         lens::GetLensOverlayEntrypointLabelAltIds(
             IDS_CONTENT_CONTEXT_LENS_OVERLAY),
-        ui::ImageModel::FromVectorIcon(icon));
+        icon);
     const int command_index =
         menu_model_.GetIndexOfCommandId(IDC_CONTENT_CONTEXT_LENS_REGION_SEARCH)
             .value();
@@ -2831,9 +2847,18 @@ void RenderViewContextMenu::AppendRegionSearchItem() {
   if (provider) {
     const int region_search_idc = GetRegionSearchIdc();
     const int resource_id = IDS_CONTENT_CONTEXT_LENS_REGION_SEARCH;
-    menu_model_.AddItem(region_search_idc,
-                        l10n_util::GetStringFUTF16(
-                            resource_id, GetImageSearchProviderName(provider)));
+
+    ui::ImageModel fallback_icon = icon;
+    if (!search::DefaultSearchProviderIsGoogle(GetProfile())) {
+      fallback_icon = ui::ImageModel();
+    }
+
+    menu_model_.AddItemWithIcon(
+        region_search_idc,
+        l10n_util::GetStringFUTF16(resource_id,
+                                   GetImageSearchProviderName(provider)),
+        fallback_icon);
+
     menu_model_.SetElementIdentifierAt(
         menu_model_.GetIndexOfCommandId(region_search_idc).value(),
         kRegionSearchItem);
@@ -2889,18 +2914,9 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
     return false;
   }
 
-  // If the command makes network requests and the frame does not have untrusted
-  // network access, the command is disabled.
-  if (IsCommandGatedByFencedFrameUntrustedNetworkStatus(id) &&
-      IsUntrustedNetworkDisabled()) {
-    return false;
-  }
-
-  {
-    bool enabled = false;
-    if (RenderViewContextMenuBase::IsCommandIdKnown(id, &enabled)) {
-      return enabled;
-    }
+  bool enabled = false;
+  if (RenderViewContextMenuBase::IsCommandIdKnown(id, &enabled)) {
+    return enabled;
   }
 
   CoreTabHelper* core_tab_helper =
@@ -2986,7 +3002,6 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
     case IDC_CONTENT_CONTEXT_OPENLINKINPROFILE:
     case IDC_CONTENT_CONTEXT_OPENLINKNEWTAB:
     case IDC_CONTENT_CONTEXT_OPENLINKNEWWINDOW:
-    case IDC_CONTENT_CONTEXT_OPENLINKPREVIEW:
       return navigation_allowed && params_.link_url.is_valid() &&
              IsOpenLinkAllowedByDlp(params_.link_url);
 
@@ -3137,6 +3152,7 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       return true;
 #endif
 
+    case IDC_CONTENT_CONTEXT_VIDEO_FRAME:
     case IDC_SPELLCHECK_MENU:
     case IDC_CONTENT_CONTEXT_OPENLINKWITH:
     case IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_SETTINGS:
@@ -3149,6 +3165,7 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       return IsRouteMediaEnabled();
 
     case IDC_CONTENT_CONTEXT_OPEN_IN_READING_MODE:
+    case IDC_CONTENT_CONTEXT_LISTEN_TO_THIS_PAGE:
       return navigation_allowed;
 
     case IDC_CONTENT_CONTEXT_RELOAD_GLIC:
@@ -3240,31 +3257,6 @@ void RenderViewContextMenu::OpenURLWithExtraHeaders(
 }
 
 void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
-  if (IsCommandGatedByFencedFrameUntrustedNetworkStatus(id) &&
-      IsUntrustedNetworkDisabled()) {
-    // Fenced frame untrusted network status can change between the time the
-    // command is shown and the time it is executed.
-    //
-    // This can be done by a `contextmenu` listener that disables the fenced
-    // frame untrusted network, granting fenced frame access to unpartitioned
-    // cross-site data. When context menu is shown, commands that are gated on
-    // fenced frame untrusted network status will still be enabled. But by the
-    // time the command executes, the listener has been invoked. The URL that
-    // the context menu operates upon may have been tampered to include
-    // cross-site information.
-    //
-    // The execution must be blocked if the untrusted network is disabled.
-    for (auto& observer : observers_) {
-      observer.CommandBlocked(id);
-    }
-
-    GetRenderFrameHost()->AddMessageToConsole(
-        blink::mojom::ConsoleMessageLevel::kWarning,
-        "Context menu command is not executed because the fenced frame has "
-        "untrusted network disabled.");
-    return;
-  }
-
   RenderViewContextMenuBase::ExecuteCommand(id, event_flags);
   if (command_executed_) {
     return;
@@ -3345,10 +3337,6 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       ExecOpenWebApp();
       break;
 
-    case IDC_CONTENT_CONTEXT_OPENLINKPREVIEW:
-      ExecOpenLinkPreview();
-      break;
-
     case IDC_CONTENT_CONTEXT_OPENLINKSPLITVIEW:
 #if !BUILDFLAG(IS_ANDROID)
       OpenLinkInSplitView();
@@ -3417,8 +3405,12 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       ExecOpenInReadAnything();
       break;
 
+    case IDC_CONTENT_CONTEXT_LISTEN_TO_THIS_PAGE:
+      ExecListenToThisPage();
+      break;
+
     case IDC_CONTENT_CONTEXT_RELOAD_GLIC:
-      if (glic::GlicEnabling::IsEnabledByFlags()) {
+      if (glic::GlicEnabling::IsEnabledByGlobalCriteria()) {
         auto* glic_service = glic::GlicKeyedService::Get(browser_context_);
         if (glic_service) {
           glic_service->Reload(GetRenderFrameHost());
@@ -3427,23 +3419,12 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       break;
 
     case IDC_CONTENT_CONTEXT_CLOSE_GLIC:
-      if (glic::GlicEnabling::IsEnabledByFlags() &&
-          !glic::GlicEnabling::IsMultiInstanceEnabled()) {
-        auto* glic_service = glic::GlicKeyedService::Get(browser_context_);
-        if (glic_service) {
-          // TODO(crbug.com/454112198): Clean up after multi-instance launches.
-          if (glic::GlicEnabling::IsMultiInstanceEnabled()) {
-            if (auto* rfh = GetRenderFrameHost()) {
-              glic_service->Close(rfh->GetOutermostMainFrame());
-            }
-          }
-        }
-      }
+      // This command is only available when multi-instance is disabled.
+      // Since multi-instance is always enabled, this is dead code.
       break;
 
     case IDC_CONTENT_CONTEXT_ARCHIVE_GLIC:  // Added for archive conversation
-      if (glic::GlicEnabling::IsMultiInstanceEnabled() &&
-          base::FeatureList::IsEnabled(features::kGlicArchiveConversation)) {
+      if (base::FeatureList::IsEnabled(features::kGlicArchiveConversation)) {
         auto* glic_service = glic::GlicKeyedService::Get(browser_context_);
         if (glic_service) {
           // Call the Archive method on the Glic service.
@@ -3655,7 +3636,29 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
 #endif  // BUILDFLAG(ENABLE_LENS_DESKTOP_GOOGLE_BRANDED_FEATURES)
       [[fallthrough]];
     }
-    case IDC_CONTENT_CONTEXT_SEARCHWEBFORNEWTAB:
+    case IDC_CONTENT_CONTEXT_SEARCHWEBFORNEWTAB: {
+      auto disposition = ui::DispositionFromEventFlags(
+          event_flags, WindowOpenDisposition::NEW_FOREGROUND_TAB);
+
+      content::OpenURLParams open_url_params = GetOpenURLParamsWithExtraHeaders(
+          selection_navigation_url_, /*referring_url=*/GURL(),
+          /*initiator=*/{}, disposition, ui::PAGE_TRANSITION_LINK,
+          /*extra_headers=*/std::string(), /*started_from_context_menu=*/true);
+
+      enterprise_data_protection::ShouldAllowSearchWith(
+          GetWebContentsForDataControls(), params_.selection_text.size(),
+          base::BindOnce(
+              [](base::WeakPtr<content::WebContents> web_contents,
+                 content::OpenURLParams params) {
+                if (!web_contents) {
+                  return;
+                }
+                web_contents->OpenURL(params,
+                                      /*navigation_handle_callback=*/{});
+              },
+              source_web_contents_->GetWeakPtr(), std::move(open_url_params)));
+      break;
+    }
     case IDC_CONTENT_CONTEXT_GOTOURL: {
       auto disposition = ui::DispositionFromEventFlags(
           event_flags, WindowOpenDisposition::NEW_FOREGROUND_TAB);
@@ -3695,7 +3698,7 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
 
     case IDC_CONTENT_CONTEXT_EMOJI: {
       // The emoji dialog is UI that can interfere with the fullscreen bubble,
-      // so drop fullscreen when it is shown. https://crbug.com/1170584
+      // so drop fullscreen when it is shown. https://crbug.com/40054574
       // TODO(avi): Do we need to attach the fullscreen block to the emoji
       // panel?
       if (!source_web_contents_->ForSecurityDropFullscreen(
@@ -3834,19 +3837,12 @@ bool RenderViewContextMenu::IsSaveAsItemAllowedByPolicy(
   return true;
 }
 
-bool RenderViewContextMenu::IsUntrustedNetworkDisabled() const {
-  return GetRenderFrameHost() &&
-         GetRenderFrameHost()->IsUntrustedNetworkDisabled();
-}
-
 bool RenderViewContextMenu::ShouldOpenTextQueryInLens() const {
   BrowserWindowInterface* browser = GetBrowser();
   return lens::features::
              IsLensOverlayTextSelectionContextMenuEntrypointEnabled() &&
          browser &&
-         browser->GetFeatures()
-             .lens_overlay_entry_point_controller()
-             ->IsEnabled();
+         lens::LensOverlayEntryPointController::From(browser)->IsEnabled();
 }
 
 // Controller functions --------------------------------------------------------
@@ -4034,8 +4030,7 @@ bool RenderViewContextMenu::IsPasteAndMatchStyleEnabled() const {
 
 bool RenderViewContextMenu::IsPrintPreviewEnabled() const {
   if (IsGlicWindow(this, browser_context_) &&
-      base::FeatureList::IsEnabled(features::kGlicPrintMenuItem) &&
-      glic::GlicEnabling::IsMultiInstanceEnabled()) {
+      base::FeatureList::IsEnabled(features::kGlicPrintMenuItem)) {
     return GetPrefs(browser_context_)->GetBoolean(prefs::kPrintingEnabled) &&
            (source_web_contents_ && !source_web_contents_->IsCrashed());
   }
@@ -4079,10 +4074,7 @@ bool RenderViewContextMenu::IsRegionSearchEnabled() const {
     return false;
   }
 
-  if (GetBrowser()
-          ->GetFeatures()
-          .lens_overlay_entry_point_controller()
-          ->IsEnabled()) {
+  if (lens::LensOverlayEntryPointController::From(GetBrowser())->IsEnabled()) {
     return true;
   }
 
@@ -4143,6 +4135,30 @@ void RenderViewContextMenu::AppendSendTabToSelfItem(bool add_separator) {
   if (add_separator) {
     menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
   }
+
+  if (base::FeatureList::IsEnabled(
+          send_tab_to_self::kSendTabToSelfShowTargetsInContextMenus)) {
+    send_tab_to_self_submenu_delegate_ =
+        std::make_unique<send_tab_to_self::SendTabToSelfContextMenuDelegate>(
+            embedder_web_contents_);
+    send_tab_to_self_submenu_ = std::make_unique<ui::SimpleMenuModel>(
+        send_tab_to_self_submenu_delegate_.get());
+    send_tab_to_self_submenu_delegate_->PopulateSubmenu(
+        send_tab_to_self_submenu_.get());
+
+#if BUILDFLAG(IS_MAC)
+    menu_model_.AddSubMenu(IDC_SEND_TAB_TO_SELF,
+                           l10n_util::GetStringUTF16(IDS_MENU_SEND_TAB_TO_SELF),
+                           send_tab_to_self_submenu_.get());
+#else
+    menu_model_.AddSubMenuWithStringIdAndIcon(
+        IDC_SEND_TAB_TO_SELF, IDS_MENU_SEND_TAB_TO_SELF,
+        send_tab_to_self_submenu_.get(),
+        ui::ImageModel::FromVectorIcon(kDevicesIcon));
+#endif
+    return;
+  }
+
 #if BUILDFLAG(IS_MAC)
   menu_model_.AddItem(IDC_SEND_TAB_TO_SELF,
                       l10n_util::GetStringUTF16(IDS_MENU_SEND_TAB_TO_SELF));
@@ -4209,14 +4225,6 @@ void RenderViewContextMenu::ExecOpenWebApp() {
   launch_params.override_url = params_.link_url;
   apps::AppServiceProxyFactory::GetForProfile(GetProfile())
       ->LaunchAppWithParams(std::move(launch_params));
-}
-
-void RenderViewContextMenu::ExecOpenLinkPreview() {
-  CHECK(embedder_web_contents_);
-  CHECK(embedder_web_contents_->GetDelegate());
-
-  embedder_web_contents_->GetDelegate()->InitiatePreview(
-      *embedder_web_contents_, params_.link_url);
 }
 
 void RenderViewContextMenu::ExecProtocolHandler(int event_flags,
@@ -4286,6 +4294,13 @@ void RenderViewContextMenu::ExecOpenCompose() {
 #endif
 
 void RenderViewContextMenu::ExecOpenInReadAnything() {
+  read_anything::ReadAnythingEntryPointController::ShowUI(
+      GetBrowser(), ReadAnythingOpenTrigger::kReadAnythingContextMenu);
+}
+
+void RenderViewContextMenu::ExecListenToThisPage() {
+  // TODO(https://b/494307454): This is a placeholder. Full implementation will
+  // be done in a future request.
   read_anything::ReadAnythingEntryPointController::ShowUI(
       GetBrowser(), ReadAnythingOpenTrigger::kReadAnythingContextMenu);
 }
@@ -4445,33 +4460,9 @@ void RenderViewContextMenu::ExecSaveAs() {
 
 void RenderViewContextMenu::ExecGlic() {
   if (glic::GlicEnabling::IsContextualMenuItemEnabled(GetProfile())) {
-    glic::GlicKeyedService* glic_service =
-        glic::GlicKeyedServiceFactory::GetGlicKeyedService(browser_context_);
-    if (glic_service) {
-      tabs::TabInterface* tab =
-          tabs::TabInterface::MaybeGetFromContents(source_web_contents_);
-      if (tab) {
-        glic_item_executed_ = true;
-        glic::GlicInvokeOptions options(
-            glic::mojom::InvocationSource::kWebContentsContextMenu);
-        std::string arm = features::kGlicContextMenuArm.Get();
-        if (arm == "arm3") {
-          options.fre_override = glic::mojom::FreOverride::kTrustFirstClick;
-        } else {
-          options.fre_override = glic::mojom::FreOverride::kTrustFirstInline;
-        }
-
-        if (arm == "arm2") {
-          options.prompts.push_back(
-              l10n_util::GetStringUTF8(IDS_GLIC_SUMMARIZE_PAGE_PROMPT));
-          glic_service->InvokeWithAutoSubmit(
-              glic::InvokeWithAutoSubmitPasskeyProvider::GetPassKey(), tab,
-              std::move(options));
-        } else {
-          glic_service->Invoke(tab, std::move(options));
-        }
-      }
-    }
+    glic_item_executed_ = true;
+    glic::GlicContextMenuInvocationHelper::HandleContextualMenuClick(
+        tabs::TabInterface::MaybeGetFromContents(source_web_contents_));
   }
 }
 
@@ -4539,10 +4530,7 @@ void RenderViewContextMenu::ExecSearchLensForImage(int event_flags) {
       IsLensOptionEnteredThroughKeyboard(event_flags) &&
       !lens::features::IsLensOverlayKeyboardSelectionEnabled();
   bool lens_overlay_for_image_search_enabled =
-      GetBrowser()
-          ->GetFeatures()
-          .lens_overlay_entry_point_controller()
-          ->IsEnabled() &&
+      lens::LensOverlayEntryPointController::From(GetBrowser())->IsEnabled() &&
       lens::features::UseLensOverlayForImageSearch();
   if (lens_overlay_for_image_search_enabled &&
       !use_keyboard_accessibility_fallback) {
@@ -4611,10 +4599,7 @@ void RenderViewContextMenu::ExecRegionSearch(
   CHECK(browser);
 
   bool lens_overlay_for_region_search_enabled =
-      GetBrowser()
-          ->GetFeatures()
-          .lens_overlay_entry_point_controller()
-          ->IsEnabled();
+      lens::LensOverlayEntryPointController::From(GetBrowser())->IsEnabled();
   // If Lens overlay is enabled but keyboard selection is disabled and the user
   // triggered the context menu option via keyboard, use the Lens region search
   // flow (with results forced into a new tab) instead of the Lens Overlay flow.
@@ -4867,6 +4852,10 @@ void RenderViewContextMenu::ExecProtocolHandlerSettings(int event_flags) {
 
 void RenderViewContextMenu::MaybeAppendOpenGlicItem() {
   // Append an item for opening Glic
+  if (!IsNormalBrowser()) {
+    return;
+  }
+
   if (glic::GlicEnabling::IsContextualMenuItemEnabled(GetProfile())) {
     std::string arm = features::kGlicContextMenuArm.Get();
     bool show_summarize_page = (arm == "arm2");
@@ -4924,10 +4913,7 @@ void RenderViewContextMenu::SearchForVideoFrame(
   }
 
   bool lens_overlay_for_video_search_enabled =
-      GetBrowser()
-          ->GetFeatures()
-          .lens_overlay_entry_point_controller()
-          ->IsEnabled() &&
+      lens::LensOverlayEntryPointController::From(GetBrowser())->IsEnabled() &&
       lens::features::UseLensOverlayForVideoFrameSearch() && is_lens_query;
   // TODO(crbug/353984457): Clean this branching when the new server
   // results flow is ready.
@@ -5032,8 +5018,36 @@ void RenderViewContextMenu::OpenTextQueryInLens() {
           IsLensOverlayTextSelectionContextMenuEntrypointContextualized());
 }
 
+content::WebContents* RenderViewContextMenu::GetWebContentsForDataControls()
+    const {
+  if (auto* glue =
+          ReadAnythingControllerGlue::FromWebContents(source_web_contents_)) {
+    if (glue->controller() && glue->controller()->tab()) {
+      if (auto* contents = glue->controller()->tab()->GetContents()) {
+        return contents;
+      }
+    }
+  }
+  if (auto* glue = ReadAnythingSidePanelControllerGlue::FromWebContents(
+          source_web_contents_)) {
+    if (glue->controller() && glue->controller()->tab()) {
+      if (auto* contents = glue->controller()->tab()->GetContents()) {
+        return contents;
+      }
+    }
+  }
+  return source_web_contents_;
+}
+
 Browser* RenderViewContextMenu::GetBrowser() const {
-  return chrome::FindBrowserWithTab(embedder_web_contents_);
+  auto* browser = GlobalBrowserCollection::GetInstance()->FindBrowserWithTab(
+      embedder_web_contents_);
+  return browser ? browser->GetBrowserForMigrationOnly() : nullptr;
+}
+
+bool RenderViewContextMenu::IsNormalBrowser() const {
+  const BrowserWindowInterface* browser = GetBrowser();
+  return browser && browser->GetType() == BrowserWindowInterface::TYPE_NORMAL;
 }
 
 ToastController* RenderViewContextMenu::GetToastController() const {

@@ -37,6 +37,12 @@ source_set("impl") {
       "glic_status_icon.h",
     ]
   }
+  if (is_mac) {
+    sources += [
+      "os_icon_provider_mac.h",
+      "os_icon_provider_mac.mm",
+    ]
+  }
   if (is_win) {
     sources += [
       "glic_status_icon_win.cc",
@@ -61,6 +67,7 @@ source_set("impl") {
     "//chrome/browser/background",
     "//chrome/browser/glic",
     "//chrome/browser/glic/resources:browser_resources",
+    "//chrome/browser/lifetime",
     "//chrome/browser/profiles:profile",
     "//chrome/browser/profiles:profile_manager",
     "//chrome/browser/resources/glic:resources_grit",
@@ -75,7 +82,6 @@ source_set("impl") {
   if (!is_android) {
     deps += [
       "//chrome/browser/glic/browser_ui",
-      "//chrome/browser/ui:browser_list",
       "//components/keep_alive_registry",
     ]
   }
@@ -96,6 +102,9 @@ source_set("unit_tests") {
       "glic_launcher_configuration_unittest.cc",
       "glic_status_icon_unittest.cc",
     ]
+  }
+  if (is_mac) {
+    sources += [ "os_icon_provider_mac_unittest.mm" ]
   }
   deps = []
   if (!is_android) {

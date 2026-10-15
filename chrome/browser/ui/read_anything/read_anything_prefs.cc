@@ -68,12 +68,10 @@ void RegisterReadAnythingProfilePrefs(
         prefs::kAccessibilityReadAnythingOmniboxChipIgnoredCount, 0,
         user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   }
-  if (features::IsImmersiveReadAnythingEnabled()) {
-    registry->RegisterIntegerPref(
-        prefs::kAccessibilityReadAnythingLastOpenedPresentationState,
-        static_cast<int>(read_anything::mojom::ReadAnythingPresentationState::
-                             kInImmersiveOverlay));
-  }
+  registry->RegisterIntegerPref(
+      prefs::kAccessibilityReadAnythingLastOpenedPresentationState,
+      static_cast<int>(read_anything::mojom::ReadAnythingPresentationState::
+                           kInImmersiveOverlay));
   if (features::IsReadAnythingLineFocusEnabled()) {
     registry->RegisterIntegerPref(
         prefs::kAccessibilityReadAnythingLineFocus,

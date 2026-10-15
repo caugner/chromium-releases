@@ -49,6 +49,7 @@
 #include "extensions/common/features/feature_channel.h"
 #include "extensions/common/manifest_handlers/permissions_parser.h"
 #include "extensions/test/extension_test_message_listener.h"
+#include "extensions/test/permissions_manager_waiter.h"
 #include "extensions/test/result_catcher.h"
 #include "extensions/test/test_content_script_load_waiter.h"
 #include "extensions/test/test_extension_dir.h"
@@ -134,6 +135,62 @@ class ScriptInjectionTrackerBrowserTest : public ExtensionBrowserTest {
     content::WebContents* new_web_contents = GetActiveWebContents();
     return original_web_contents->GetPrimaryMainFrame()->GetProcess() !=
            new_web_contents->GetPrimaryMainFrame()->GetProcess();
+  }
+
+  // Opens a new tab to `parent_url` and adds a subframe, which will point to
+  // `child_url` -- but ensures the child frame fails to load and instead is an
+  // error page. `response` is a controllable response for the `parent_url`
+  // (sadly, this must be passed in, because these need to be instantiated
+  // before the test server starts).
+  // Returns the child frame.
+  content::RenderFrameHost* OpenPageWithErrorSubFrame(
+      net::test_server::ControllableHttpResponse& response,
+      const GURL& parent_url,
+      const GURL& child_url) {
+    // Navigate to the parent URL.
+    content::TestNavigationObserver nav_observer(parent_url);
+    nav_observer.StartWatchingNewWebContents();
+    ui_test_utils::NavigateToURLWithDisposition(
+        browser(), parent_url, WindowOpenDisposition::NEW_FOREGROUND_TAB,
+        ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB);
+    response.WaitForRequest();
+
+    // Respond with a CSP that will block an iframe loading the child URL.
+    static constexpr char kHtmlTemplate[] =
+        R"(<html>
+             <body>
+               <iframe src="%s"></iframe>
+             </body>
+           </html>)";
+    std::string response_body =
+        base::StringPrintf(kHtmlTemplate, child_url.spec().c_str());
+    std::vector<std::string> headers = {
+        "Content-Security-Policy: frame-src 'none'"};
+    response.Send(net::HTTP_OK, "text/html", response_body, {}, headers);
+    response.Done();
+    nav_observer.WaitForNavigationFinished();
+
+    content::WebContents* tab = GetActiveWebContents();
+    content::WaitForLoadStop(tab);
+    content::RenderFrameHost* main_frame = tab->GetPrimaryMainFrame();
+
+    // Find the child frame.
+    content::RenderFrameHost* child_frame =
+        content::ChildFrameAt(main_frame, 0);
+    if (!child_frame) {
+      ADD_FAILURE() << "Failed to navigate to child: " << child_url;
+      return nullptr;
+    }
+
+    // The child frame should have failed to navigate to victim.com and
+    // committed an error page instead.
+    EXPECT_TRUE(child_frame->IsErrorDocument());
+    EXPECT_EQ(child_url, child_frame->GetLastCommittedURL());
+
+    // The child frame is hosted in the same process as the main frame.
+    EXPECT_EQ(main_frame->GetProcess(), child_frame->GetProcess());
+
+    return child_frame;
   }
 };
 
@@ -939,8 +996,8 @@ IN_PROC_BROWSER_TEST_F(
       *child_frame->GetProcess(), extension->id()));
 }
 
-// This is a regression test for https://crbug.com/1312125 - it simulates a race
-// where an extension is loaded during or before a navigation, resulting in
+// This is a regression test for https://crbug.com/40059263 - it simulates a
+// race where an extension is loaded during or before a navigation, resulting in
 // ScriptInjectionTracker::DidUpdateContentScriptsInRenderer getting called
 // between ReadyToCommit and DidCommit of a navigation from a page where content
 // scripts are not injected, to a page where content scripts are injected.
@@ -1053,10 +1110,10 @@ IN_PROC_BROWSER_TEST_F(
   // *) Non-racey step UI.4: UI thread: IPC from the content script is
   //    processed.  The test simulates this by explicitly calling and checking
   //    ScriptInjectionTracker::DidProcessRunContentScriptFromExtension which in
-  //    presence of https://crbug.com/1312125 could have incorrectly returned
+  //    presence of https://crbug.com/40059263 could have incorrectly returned
   //    false.
   //
-  // Triggering https://crbug.com/1312125 requires that UI.3a happens before
+  // Triggering https://crbug.com/40059263 requires that UI.3a happens before
   // UI.3b - when this happens then ScriptInjectionTracker's
   // DidUpdateContentScriptsInRenderer won't see the newly committed URL and
   // won't realize that content script may be injected into the newly committed
@@ -1097,7 +1154,7 @@ IN_PROC_BROWSER_TEST_F(
 IN_PROC_BROWSER_TEST_F(ScriptInjectionTrackerBrowserTest,
                        ContentScriptViaDeclarativeContentApi) {
 #if BUILDFLAG(IS_MAC)
-  GTEST_SKIP() << "Very flaky on Mac; https://crbug.com/1311017";
+  GTEST_SKIP() << "Very flaky on Mac; https://crbug.com/40830799";
 #else
   ASSERT_TRUE(embedded_test_server()->Start());
 
@@ -1388,7 +1445,7 @@ IN_PROC_BROWSER_TEST_F(DynamicScriptsTrackerBrowserTest,
       *first_tab->GetPrimaryMainFrame()->GetProcess(), extension->id()));
 }
 
-// Regression test for https://crbug.com/1439642.
+// Regression test for https://crbug.com/40064211.
 IN_PROC_BROWSER_TEST_F(DynamicScriptsTrackerBrowserTest,
                        ContentScriptViaScriptingApiWhileIdle) {
   // The test orchestrates the following sequence of events.
@@ -1406,7 +1463,7 @@ IN_PROC_BROWSER_TEST_F(DynamicScriptsTrackerBrowserTest,
   //         - registering content script injection for a.com
   //         - when the script gets loaded (step 2b)
   //           `ScriptInjectionTracker::DidUpdateContentScriptsInRenderer` will
-  //           be called (but as described in https://crbug.com/1439642 there
+  //           be called (but as described in https://crbug.com/40064211 there
   //           may be trouble with seeing the newly registered scripts)
   //
   // Step 3: DOMContentLoaded
@@ -1778,8 +1835,11 @@ IN_PROC_BROWSER_TEST_F(DynamicScriptsTrackerBrowserTest, ActiveTabGranted) {
       *web_contents->GetPrimaryMainFrame()->GetProcess(), extension->id()));
 
   // Step 3: Grant activeTab and verify tracker runs the content script.
+  PermissionsManagerWaiter waiter(PermissionsManager::Get(profile()));
   ActiveTabPermissionGranter::FromWebContents(web_contents)
       ->GrantIfRequested(extension);
+  waiter.WaitForActiveTabPermissionGranted(extension->id());
+
   EXPECT_TRUE(ScriptInjectionTracker::DidProcessRunContentScriptFromExtension(
       *web_contents->GetPrimaryMainFrame()->GetProcess(), extension->id()));
 
@@ -2274,6 +2334,70 @@ IN_PROC_BROWSER_TEST_F(ScriptInjectionTrackerAppBrowserTest,
   // Verify that ScriptInjectionTracker detected the content script injection.
   EXPECT_TRUE(ScriptInjectionTracker::DidProcessRunContentScriptFromExtension(
       *guest_process, app->id()));
+}
+
+// Tests that error pages, such as those shown when a frame is blocked via CSP,
+// do not get counted as having scripts injected into them during programmatic
+// script execution with allFrames: true.
+// Regression test for crbug.com/517153117.
+IN_PROC_BROWSER_TEST_F(
+    ScriptInjectionTrackerBrowserTest,
+    CSPBlockedFrameDoesNotGrantPrivilege_ProgrammaticScript) {
+  // Set up ControllableHttpResponse to control the attacker page response.
+  std::string attacker_path = "/page.html";
+  net::test_server::ControllableHttpResponse attacker_response(
+      embedded_test_server(), attacker_path);
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  // Install a test extension that has scripting permission and host
+  // permissions.
+  TestExtensionDir dir;
+  const char kManifestTemplate[] = R"(
+      {
+        "name": "ScriptInjectionTrackerBrowserTest - CSP Blocked Programmatic",
+        "version": "1.0",
+        "manifest_version": 3,
+        "permissions": [ "scripting" ],
+        "host_permissions": ["*://victim.com/*"],
+        "background": { "service_worker": "worker.js" }
+      } )";
+
+  dir.WriteManifest(kManifestTemplate);
+  dir.WriteFile(FILE_PATH_LITERAL("worker.js"), "");
+
+  const Extension* extension = LoadExtension(dir.UnpackedPath());
+  ASSERT_TRUE(extension);
+
+  // Navigate to attacker.com with an error subframe to victim.com.
+  GURL attacker_url =
+      embedded_test_server()->GetURL("attacker.com", "/page.html");
+  GURL victim_url = embedded_test_server()->GetURL("victim.com", "/page.html");
+  content::RenderFrameHost* child_frame =
+      OpenPageWithErrorSubFrame(attacker_response, attacker_url, victim_url);
+  ASSERT_TRUE(child_frame);
+
+  int tab_id = ExtensionTabUtil::GetTabId(GetActiveWebContents());
+
+  // Execute a programmatic script injection with allFrames: true.
+  const char kScript[] = R"(
+      chrome.scripting.executeScript({
+        target: {tabId: $1, allFrames: true},
+        func: () => {}
+      }, () => {
+        chrome.test.sendScriptResult('executed');
+      });
+  )";
+  std::string script = content::JsReplace(kScript, tab_id);
+
+  base::Value result = BackgroundScriptExecutor::ExecuteScript(
+      profile(), extension->id(), script,
+      BackgroundScriptExecutor::ResultCapture::kSendScriptResult);
+  EXPECT_EQ("executed", result.GetString());
+
+  // The tracker should still not think that the attacker process has run
+  // content scripts, because the frame is an error document.
+  EXPECT_FALSE(ScriptInjectionTracker::DidProcessRunContentScriptFromExtension(
+      *child_frame->GetProcess(), extension->id()));
 }
 
 }  // namespace extensions

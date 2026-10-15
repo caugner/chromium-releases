@@ -62,7 +62,8 @@ omnibox::NTPComposeboxConfig GetNTPComposeboxConfig() {
       "image/avif,image/bmp,image/jpeg,image/png,image/webp,image/heif,"
       "image/heic");
   auto* attachment_upload = composebox->mutable_attachment_upload();
-  attachment_upload->set_max_size_bytes(200000000);
+  // File upload size limit: 100 MiB.
+  attachment_upload->set_max_size_bytes(100 * 1024 * 1024);
   attachment_upload->set_mime_types_allowed(".pdf,application/pdf");
 
   composebox->set_input_placeholder_text(
@@ -126,6 +127,10 @@ omnibox::NTPComposeboxConfig GetNTPComposeboxConfig() {
 }  // namespace
 
 bool IsNtpComposeboxEnabled(Profile* profile) {
+// TODO(b/502297163): Implement for Android.
+#if BUILDFLAG(IS_ANDROID)
+  return true;
+#else
   if (!profile) {
     return false;
   }
@@ -152,6 +157,7 @@ bool IsNtpComposeboxEnabled(Profile* profile) {
   return base::FeatureList::IsEnabled(kNtpComposebox) &&
          aim_eligibility_service->IsAimEligible() &&
          aim_eligibility_service->IsFuseboxEligible();
+#endif
 }
 
 bool IsDeepSearchEnabled(Profile* profile) {
@@ -239,14 +245,18 @@ const base::FeatureParam<int> kContextMenuMaxTabSuggestions(
 const base::FeatureParam<bool> kContextMenuEnableMultiTabSelection(
     &kNtpComposebox,
     "NtpComposeboxContextMenuEnableMultiTabSelection",
-    false);
+    true);
 
 const base::FeatureParam<bool> kEnableThreadsRail(&kNtpComposebox,
                                                   "EnableThreadsRail",
-                                                  true);
+                                                  false);
 const base::FeatureParam<bool> kEnableThreadsRailLogo(&kNtpComposebox,
                                                       "EnableThreadsRailLogo",
                                                       false);
+
+const base::FeatureParam<bool> kUseNtpComposeboxFork(&kNtpComposebox,
+                                                     "useNtpComposeboxFork",
+                                                     false);
 
 FeatureConfig::FeatureConfig() : config(GetNTPComposeboxConfig()) {}
 
@@ -261,6 +271,10 @@ FeatureConfig::~FeatureConfig() = default;
 namespace ntp_realbox {
 
 bool IsNtpRealboxNextEnabled(Profile* profile) {
+// TODO(b/502297163): Implement for Android.
+#if BUILDFLAG(IS_ANDROID)
+  return true;
+#else
   if (!profile) {
     return false;
   }
@@ -291,6 +305,7 @@ bool IsNtpRealboxNextEnabled(Profile* profile) {
   return base::FeatureList::IsEnabled(kNtpRealboxNext) &&
          aim_eligibility_service->IsAimEligible() &&
          aim_eligibility_service->IsFuseboxEligible();
+#endif
 }
 
 BASE_FEATURE(kNtpRealboxNext, base::FEATURE_DISABLED_BY_DEFAULT);

@@ -4,9 +4,14 @@
 
 #include "chrome/browser/indigo/indigo_service.h"
 
+#include "base/command_line.h"
+#include "base/files/file_path.h"
 #include "base/functional/bind.h"
 #include "base/task/sequenced_task_runner.h"
-#include "chrome/browser/indigo/indigo_alpha_rpc.h"
+#include "chrome/browser/component_updater/indigo_component_installer.h"
+#include "chrome/browser/extensions/component_loader.h"
+#include "chrome/browser/indigo/api_client.h"
+#include "chrome/browser/indigo/indigo_extension_utils.h"
 #include "chrome/browser/indigo/indigo_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_features.h"
@@ -43,12 +48,25 @@ bool CombinedEligibility::ReadyToOnboard() const {
   return !remote_eligibility->has_user_image || !has_onboarded_pref;
 }
 
+// static
+std::optional<base::FilePath> IndigoService::GetScriptPath() {
+  static constexpr char kIndigoScriptSwitch[] = "indigo-script";
+  base::FilePath override_path =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValuePath(
+          kIndigoScriptSwitch);
+  if (!override_path.empty()) {
+    return override_path;
+  }
+  return component_updater::GetIndigoContentScriptPath();
+}
+
 IndigoService::IndigoService(Profile* profile,
                              signin::IdentityManager* identity_manager,
                              PrefService* pref_service)
     : profile_(profile),
       identity_manager_(identity_manager),
       pref_service_(pref_service) {
+  CHECK(base::FeatureList::IsEnabled(features::kIndigo));
   if (identity_manager_) {
     identity_manager_observation_.Observe(identity_manager_);
   }
@@ -63,6 +81,19 @@ IndigoService::IndigoService(Profile* profile,
   }
 
   last_known_local_eligibility_ = ComputeLocalEligibility();
+  api_client_ = std::make_unique<ApiClient>(
+      identity_manager, profile->GetDefaultStoragePartition()
+                            ->GetURLLoaderFactoryForBrowserProcess());
+
+  // Register component extension for Indigo.
+  extensions::ComponentLoader::Get(profile_)->Add(
+      indigo_extension_utils::GetManifest(),
+      base::FilePath(FILE_PATH_LITERAL("indigo")));
+
+  indigo_component_ready_subscription_ =
+      component_updater::RegisterIndigoComponentReadyCallback(
+          base::BindRepeating(&IndigoService::OnIndigoComponentReady,
+                              base::Unretained(this)));
 }
 
 IndigoService::~IndigoService() = default;
@@ -102,6 +133,10 @@ void IndigoService::AnchoredMessageShown() {
 }
 
 LocalEligibility IndigoService::ComputeLocalEligibility() const {
+  if (!GetScriptPath().has_value()) {
+    return LocalEligibility::kMissingScript;
+  }
+
   if (pref_service_) {
     int policy_val = pref_service_->GetInteger(prefs::kIndigoPolicy);
     if (policy_val != prefs::Policy::kAllowed) {
@@ -135,6 +170,10 @@ void IndigoService::UpdateLocalEligibilityAndNotify() {
   }
 }
 
+void IndigoService::OnIndigoComponentReady() {
+  UpdateLocalEligibilityAndNotify();
+}
+
 void IndigoService::GetCombinedEligibility(
     CombinedEligibilityCallback callback) {
   CombinedEligibility status;
@@ -146,12 +185,6 @@ void IndigoService::GetCombinedEligibility(
   }
 
   if (status.local_eligibility != LocalEligibility::kEligible) {
-    std::move(callback).Run(status);
-    return;
-  }
-
-  if (remote_eligibility_.has_value()) {
-    status.remote_eligibility = remote_eligibility_.value();
     std::move(callback).Run(status);
     return;
   }
@@ -175,44 +208,25 @@ void IndigoService::TriggerRemoteEligibilityFetch() {
     return;
   }
 
-  if (!features::kIndigoAlphaStatusUrl.Get().empty()) {
-    LOG(WARNING) << "indigo: alpha status RPC in use";
-    scoped_refptr<network::SharedURLLoaderFactory> loader_factory =
-        profile_->GetDefaultStoragePartition()
-            ->GetURLLoaderFactoryForBrowserProcess();
-    ExecuteAlphaStatusRpc(
-        loader_factory.get(),
-        base::BindOnce([](base::expected<void, std::string> result) {
-          return result.transform([] {
-            return RemoteEligibility{.is_service_supported_for_account = true,
-                                     .has_user_image = true};
-          });
-        }).Then(std::move(on_rpc_status_received)));
-    return;
-  }
-
-  LOG(WARNING) << "indigo: status RPC stub in use";
-  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
-      FROM_HERE,
-      base::BindOnce(std::move(on_rpc_status_received),
-                     RemoteEligibility{.is_service_supported_for_account = true,
-                                       .has_user_image = true}));
+  api_client_->GetStatus(base::BindOnce(
+      [](RemoteEligibilityCallback callback,
+         base::expected<StatusResult, StatusError> result) {
+        if (!result.has_value()) {
+          std::move(callback).Run(base::unexpected(result.error().message));
+          return;
+        }
+        std::move(callback).Run(RemoteEligibility{
+            .is_service_supported_for_account =
+                result.value().is_service_supported_for_account,
+            .has_user_image = result.value().has_user_image});
+      },
+      std::move(on_rpc_status_received)));
 }
 
-void IndigoService::InvalidateRemoteEligibility() {
-  remote_eligibility_.reset();
-  remote_eligibility_fetch_in_progress_ = false;
-  remote_eligibility_weak_factory_.InvalidateWeakPtrs();
-
-  if (!pending_callbacks_.empty()) {
-    TriggerRemoteEligibilityFetch();
-  }
-}
 
 void IndigoService::OnRemoteEligibilityReceived(
     base::expected<RemoteEligibility, std::string> eligibility_or_error) {
   remote_eligibility_fetch_in_progress_ = false;
-  remote_eligibility_ = std::move(eligibility_or_error);
 
   std::vector<CombinedEligibilityCallback> callbacks;
   callbacks.swap(pending_callbacks_);
@@ -223,7 +237,7 @@ void IndigoService::OnRemoteEligibilityReceived(
     status.has_onboarded_pref =
         pref_service_->GetBoolean(prefs::kIndigoHasOnboarded);
   }
-  status.remote_eligibility = remote_eligibility_.value();
+  status.remote_eligibility = std::move(eligibility_or_error);
 
   for (auto& callback : callbacks) {
     std::move(callback).Run(status);

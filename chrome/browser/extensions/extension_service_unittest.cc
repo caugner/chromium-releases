@@ -65,7 +65,6 @@
 #include "chrome/browser/extensions/external_provider_manager.h"
 #include "chrome/browser/extensions/external_testing_loader.h"
 #include "chrome/browser/extensions/installed_loader.h"
-#include "chrome/browser/extensions/managed_installation_mode.h"
 #include "chrome/browser/extensions/pack_extension_job.h"
 #include "chrome/browser/extensions/plugin_manager.h"
 #include "chrome/browser/extensions/preinstalled_apps.h"
@@ -121,6 +120,7 @@
 #include "extensions/browser/fake_safe_browsing_database_manager.h"
 #include "extensions/browser/install_flag.h"
 #include "extensions/browser/load_error_reporter.h"
+#include "extensions/browser/managed_installation_mode.h"
 #include "extensions/browser/management_policy.h"
 #include "extensions/browser/mock_external_provider.h"
 #include "extensions/browser/pending_extension_info.h"
@@ -148,8 +148,8 @@
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_handlers/background_info.h"
 #include "extensions/common/manifest_handlers/content_scripts_handler.h"
+#include "extensions/common/manifest_handlers/manifest_url_handlers.h"
 #include "extensions/common/manifest_handlers/permissions_parser.h"
-#include "extensions/common/manifest_url_handlers.h"
 #include "extensions/common/permissions/permission_set.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/common/switches.h"
@@ -2496,7 +2496,7 @@ TEST_F(ExtensionServiceTest, TestInstallThemeWithExtensionsDisabled) {
 }
 
 #if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
-// Flaky on these platforms. http://crbug.com/1148894
+// Flaky on these platforms. http://crbug.com/40157248
 #define MAYBE_InstallTheme DISABLED_InstallTheme
 #else
 #define MAYBE_InstallTheme InstallTheme
@@ -2924,7 +2924,7 @@ TEST_F(ExtensionServiceTest, DefaultPackedFileAccessWithCreationFlag) {
 // access, but the associated pref for file access becomes mismatched to say
 // that the extension shouldn't have file access, then on the next reload of the
 // extension (e.g. on Chrome startup) the pref will take precedence.
-// Regression test for crbug.com/1414398.
+// Regression test for crbug.com/40062996.
 TEST_F(ExtensionServiceTest, FileAccessFlagAndPrefMismatch) {
   InitializeEmptyExtensionService();
   GURL file_url("file:///etc/passwd");
@@ -3774,7 +3774,7 @@ TEST_F(ExtensionServiceTest, SetUnsetBlocklistInPrefs) {
 
 // Tests that an extension that was disabled through Omaha won't be
 // re-enabled if it's not present in the Safe Browsing blocklist.
-// Regression test for https://crbug.com/1107040.
+// Regression test for https://crbug.com/40140699.
 TEST_F(ExtensionServiceTest, NoUnsetBlocklistInPrefs) {
   TestBlocklist test_blocklist;
   // A profile with 3 extensions installed: good0, good1, and good2.
@@ -5655,7 +5655,8 @@ TEST_F(ExtensionServiceTest, ClearExtensionData) {
   cookie_store->SetCanonicalCookieAsync(
       std::move(cookie), ext_url, net::CookieOptions::MakeAllInclusive(),
       base::BindOnce(&ExtensionCookieCallback::SetCookieCallback,
-                     base::Unretained(&callback)));
+                     base::Unretained(&callback)),
+      /*cookie_access_result=*/std::nullopt);
   task_environment()->RunUntilIdle();
   EXPECT_TRUE(callback.result_);
 

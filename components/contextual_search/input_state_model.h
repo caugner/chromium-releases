@@ -40,7 +40,8 @@ class InputStateModel {
       contextual_search::ContextualSearchSessionHandle& session_handle,
       const SearchboxConfig& config,
       const GURL& active_url,
-      bool is_off_the_record);
+      bool is_off_the_record,
+      bool browser_identity_matches_aim_identity);
   InputStateModel(
       const InputStateModel& other,
       contextual_search::ContextualSearchSessionHandle& new_session_handle);
@@ -65,7 +66,7 @@ class InputStateModel {
 
   // Set a new model.
   void setActiveModel(ModelMode model);
-  void UpdateModelFromUrl(const GURL& url);
+  void UpdateStateFromUrl(const GURL& url);
 
   // Called when an input of type `InputType` is added or deleted.
   void OnContextChanged();
@@ -113,6 +114,9 @@ class InputStateModel {
   // user preference from enterprise policy.
   bool IsSearchContentSharingEnabled() const;
 
+  // Helper to check if the Drive input type is supported.
+  bool IsDriveSupported() const;
+
   // Returns the rule for a given `model`.
   const omnibox::ModelRule* GetModelRule(ModelMode model) const;
 
@@ -127,6 +131,7 @@ class InputStateModel {
 
   raw_ptr<const PrefService> pref_service_ = nullptr;
   const bool is_off_the_record_;
+  const bool browser_identity_matches_aim_identity_;
 
   // Stores tools that are permanently disabled by an external trigger and must
   // persist through state updates. Persists after Initialize() is called.

@@ -26,11 +26,11 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_service_test_with_install.h"
 #include "chrome/browser/extensions/extension_util.h"
-#include "chrome/browser/extensions/managed_installation_mode.h"
 #include "chrome/browser/extensions/signin_test_util.h"
 #include "chrome/browser/extensions/sync/account_extension_tracker.h"
 #include "chrome/browser/extensions/sync/extension_sync_data.h"
 #include "chrome/browser/extensions/sync/extension_sync_util.h"
+#include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/profiles/profile_key.h"
 #include "chrome/browser/signin/identity_test_environment_profile_adaptor.h"
@@ -65,7 +65,7 @@
 #include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/extension_urls.h"
-#include "extensions/common/manifest_url_handlers.h"
+#include "extensions/common/manifest_handlers/manifest_url_handlers.h"
 #include "extensions/common/mojom/manifest.mojom-shared.h"
 #include "extensions/common/permissions/permission_set.h"
 
@@ -83,10 +83,12 @@ using extensions::ComponentLoader;
 using extensions::Extension;
 using extensions::ExtensionPrefs;
 using extensions::ExtensionRegistry;
+using extensions::ExtensionService;
 using extensions::ExtensionSyncData;
 using extensions::ExtensionSystem;
 using extensions::Manifest;
 using extensions::PermissionSet;
+using extensions::TestExtensionSystem;
 using extensions::mojom::ManifestLocation;
 using syncer::SyncChange;
 using syncer::SyncChangeList;
@@ -374,6 +376,63 @@ TEST_F(ExtensionSyncServiceTest, ReenableDisabledExtensionFromSync) {
   // The extension should be enabled.
   EXPECT_TRUE(registry()->enabled_extensions().GetByID(kExtensionId));
   EXPECT_TRUE(processor_raw->changes().empty());
+}
+
+// Regression test for crbug.com/500636349.
+//
+// Enabling an installed extension via sync should not crash when
+// GetGrantedPermissions() returns nullptr (e.g. because extension prefs were
+// deleted).
+TEST_F(ExtensionSyncServiceTest,
+       EnableFromSyncWithNullGrantedPermissionsDoesNotCrash) {
+  InitializeEmptyExtensionService();
+  service()->Init();
+
+  // Install an extension.
+  extensions::ChromeTestExtensionLoader extension_loader(profile());
+  extension_loader.set_pack_extension(true);
+  scoped_refptr<const Extension> extension = extension_loader.LoadExtension(
+      data_dir().AppendASCII("simple_with_file"));
+  ASSERT_TRUE(extension);
+  const std::string kExtensionId = extension->id();
+  ASSERT_TRUE(registry()->enabled_extensions().GetByID(kExtensionId));
+
+  // Start syncing.
+  extension_sync_service()->MergeDataAndStartSyncing(
+      syncer::EXTENSIONS, syncer::SyncDataList(),
+      std::make_unique<syncer::FakeSyncChangeProcessor>());
+
+  // Disable the extension via sync.
+  DisableExtensionFromSync(*extension,
+                           extensions::disable_reason::DISABLE_USER_ACTION);
+  ASSERT_TRUE(registry()->disabled_extensions().GetByID(kExtensionId));
+
+  // Delete the extension's prefs so that GetGrantedPermissions() returns
+  // nullptr.
+  ExtensionPrefs::Get(profile())->DeleteExtensionPrefs(kExtensionId);
+  ASSERT_FALSE(
+      ExtensionPrefs::Get(profile())->GetGrantedPermissions(kExtensionId));
+
+  // Re-enable via sync with a newer version so that grant_permissions is false
+  // and IsPrivilegeIncrease() is actually called (with a matching version,
+  // grant_permissions would be true and short-circuit past the bug).
+  sync_pb::EntitySpecifics specifics;
+  sync_pb::ExtensionSpecifics* ext_specifics = specifics.mutable_extension();
+  ext_specifics->set_id(kExtensionId);
+  ext_specifics->set_version("9.9.9.9");
+  ext_specifics->set_enabled(true);
+
+  SyncChangeList list =
+      MakeSyncChangeList(kExtensionId, specifics, SyncChange::ACTION_UPDATE);
+  // Previously this dereferenced the null unique_ptr returned by
+  // GetGrantedPermissions(), crashing in
+  // PermissionSet::HasEffectiveAccessToAllHosts().
+  extension_sync_service()->ProcessSyncChanges(FROM_HERE, list);
+
+  // The process should not crash. simple_with_file has no host permissions,
+  // so IsPrivilegeIncrease() returns false with an empty granted set and the
+  // extension gets enabled.
+  EXPECT_TRUE(registry()->enabled_extensions().GetByID(kExtensionId));
 }
 
 // Tests that default-installed extensions won't be affected by incoming sync
@@ -2405,3 +2464,72 @@ TEST_F(ExtensionSyncServiceTransportModeTest,
               ::testing::ElementsAre(second_extension.get()));
 }
 #endif  // !BUILDFLAG(IS_CHROMEOS)
+
+// Tests that, if disable reasons change during extension load, these are
+// properly handled and sent to the sync service.
+// Regression test for (part of) https://crbug.com/524951740.
+TEST_F(ExtensionSyncServiceTest, DisableReasonsChangedDuringLoad) {
+  InitializeEmptyExtensionService();
+  service()->Init();
+
+  // Install an extension. It starts enabled.
+  scoped_refptr<const Extension> extension =
+      InstallCRX(data_dir().AppendASCII("good.crx"), INSTALL_NEW);
+  ASSERT_TRUE(extension);
+  std::string extension_id = extension->id();
+
+  // Disable the extension for permissions increase (simulating somewhat bad
+  // state, since all the permissions are granted).
+  registrar()->DisableExtension(
+      extension_id, {extensions::disable_reason::DISABLE_PERMISSIONS_INCREASE});
+  ASSERT_FALSE(registrar()->IsExtensionEnabled(extension_id));
+
+  ExtensionPrefs* prefs = ExtensionPrefs::Get(profile());
+
+  // Manually clear NeedsSync. During installation and disabling, NeedsSync
+  // would have been set to true because sync is not active. We clear it here
+  // to simulate that the extension state was already synced before the reload.
+  prefs->SetNeedsSync(extension_id, false);
+
+  // Reload all extensions, simulating a restart.
+  // On startup, Chrome checks if any disabled extensions are disabled
+  // erroneously for permissions increases -- ours is, so it should be
+  // re-enabled.
+  service()->ReloadExtensionsForTest();
+
+  EXPECT_TRUE(registrar()->IsExtensionEnabled(extension_id));
+  EXPECT_FALSE(prefs->IsExtensionDisabled(extension_id));
+
+  // Now, start sync. The server state would have the extension as disabled
+  // (with DISABLE_PERMISSIONS_INCREASE).
+  ExtensionSyncData disable_sync_data = GetDisableSyncData(
+      *extension, {extensions::disable_reason::DISABLE_PERMISSIONS_INCREASE});
+
+  syncer::SyncDataList sync_data;
+  sync_data.push_back(disable_sync_data.GetSyncData());
+
+  // MergeDataAndStartSyncing. The extension should remain enabled, since the
+  // local state is newer than that of the sync server.
+  auto processor = std::make_unique<syncer::FakeSyncChangeProcessor>();
+  syncer::FakeSyncChangeProcessor* processor_raw = processor.get();
+  extension_sync_service()->MergeDataAndStartSyncing(
+      syncer::EXTENSIONS, sync_data, std::move(processor));
+
+  // Verify that the extension remains enabled...
+  EXPECT_TRUE(registry()->enabled_extensions().Contains(extension_id));
+
+  // ...And that the local enabled state was pushed to sync.
+  bool found_enabled_change = false;
+  for (const auto& change : processor_raw->changes()) {
+    if (change.change_type() == SyncChange::ACTION_UPDATE ||
+        change.change_type() == SyncChange::ACTION_ADD) {
+      std::unique_ptr<ExtensionSyncData> data =
+          ExtensionSyncData::CreateFromSyncData(change.sync_data());
+      if (data->id() == extension_id && data->enabled()) {
+        found_enabled_change = true;
+        break;
+      }
+    }
+  }
+  EXPECT_TRUE(found_enabled_change);
+}

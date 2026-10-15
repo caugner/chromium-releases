@@ -18,6 +18,7 @@
 #include "ui/base/interaction/element_tracker_mac.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/models/image_model.h"
+#include "ui/base/models/menu_model.h"
 #import "ui/events/event_utils.h"
 #include "ui/gfx/font_list.h"
 #include "ui/gfx/image/image.h"
@@ -47,6 +48,31 @@ bool MenuHasVisibleItems(const ui::MenuModel* model) {
     }
   }
   return false;
+}
+
+// Sets an icon on a menu item.
+//
+// This function is intentionally incomplete. The style of GM3 icons that are
+// currently in use do not quite fit in with the SF Symbols icons that AppKit
+// automatically adds to menus. These icons are being revised to fit in better,
+// and there is an ongoing UX redesign of context menus. Until those changes are
+// complete, only allow the icons that were a historical part of the menus (the
+// bitmap icons) to be be set.
+//
+// TODO(https://crbug.com/423632863): Come up with a consistent way to handle
+// icons, and return icons to menus when and where appropriate.
+void SetMenuItemIcon(NSMenuItem* menu_item, ui::ImageModel icon) {
+  if (icon.IsImage()) {
+    menu_item.image = icon.GetImage().ToNSImage();
+  } else if (icon.IsVectorIcon()) {
+    // Intentionally not set; see class comment above.
+    menu_item.image = nil;
+  } else if (icon.IsEmpty()) {
+    menu_item.image = nil;
+  } else {
+    CHECK(icon.IsImageGenerator());
+    NOTREACHED();
+  }
 }
 
 }  // namespace
@@ -188,11 +214,7 @@ bool MenuHasVisibleItems(const ui::MenuModel* model) {
                                                 action:@selector(itemSelected:)
                                          keyEquivalent:@""];
 
-  // If the menu item has an icon, set it.
-  ui::ImageModel icon = model->GetIconAt(index);
-  if (icon.IsImage()) {
-    item.image = icon.GetImage().ToNSImage();
-  }
+  SetMenuItemIcon(item, model->GetIconAt(index));
 
   ui::MenuModel::ItemType type = model->GetTypeAt(index);
   const NSInteger modelIndex = base::checked_cast<NSInteger>(index);
@@ -264,15 +286,16 @@ bool MenuHasVisibleItems(const ui::MenuModel* model) {
   BOOL checked = model->IsItemCheckedAt(modelIndex);
   menuItem.state = checked ? NSControlStateValueOn : NSControlStateValueOff;
   menuItem.hidden = !model->IsVisibleAt(modelIndex);
+
   if (model->IsItemDynamicAt(modelIndex)) {
     // Update the label and the icon.
     NSString* label =
         l10n_util::FixUpWindowsStyleLabel(model->GetLabelAt(modelIndex));
     menuItem.title = label;
 
-    ui::ImageModel icon = model->GetIconAt(modelIndex);
-    menuItem.image = icon.IsImage() ? icon.GetImage().ToNSImage() : nil;
+    SetMenuItemIcon(menuItem, model->GetIconAt(modelIndex));
   }
+
   const gfx::FontList* font_list = model->GetLabelFontListAt(modelIndex);
   if (font_list) {
     CTFontRef font = font_list->GetPrimaryFont().GetCTFont();

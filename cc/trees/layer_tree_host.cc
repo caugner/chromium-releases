@@ -50,12 +50,13 @@
 #include "cc/paint/paint_worklet_layer_painter.h"
 #include "cc/resources/ui_resource_manager.h"
 #include "cc/tiles/raster_dark_mode_filter.h"
+#include "cc/trees/client_layer_tree_host_impl.h"
 #include "cc/trees/clip_node.h"
 #include "cc/trees/commit_state.h"
 #include "cc/trees/compositor_commit_data.h"
 #include "cc/trees/draw_property_utils.h"
 #include "cc/trees/effect_node.h"
-#include "cc/trees/layer_tree_host_client.h"
+#include "cc/trees/layer_tree_host_delegate.h"
 #include "cc/trees/layer_tree_host_impl.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "cc/trees/mobile_optimized_viewport_util.h"
@@ -663,8 +664,8 @@ void LayerTreeHost::DidFailToInitializeLayerTreeFrameSink() {
   client_->DidFailToInitializeLayerTreeFrameSink();
 }
 
-std::unique_ptr<LayerTreeHostImpl> LayerTreeHost::CreateLayerTreeHostImpl(
-    LayerTreeHostImplClient* client) {
+std::unique_ptr<ClientLayerTreeHostImpl> LayerTreeHost::CreateLayerTreeHostImpl(
+    LayerTreeHostImplDelegate* delegate) {
   // This method is special: it should be the only LayerTreeHost method that
   // runs on the impl thread. As such, it cannot use LayerTreeHost getter
   // methods that enforce DCHECK(IsMainThread()). Because it only ever runs when
@@ -672,15 +673,15 @@ std::unique_ptr<LayerTreeHostImpl> LayerTreeHost::CreateLayerTreeHostImpl(
   DCHECK(IsImplThread());
   DCHECK(task_runner_provider_->IsMainThreadBlocked());
   return CreateLayerTreeHostImplInternal(
-      client, thread_unsafe_commit_state_.mutator_host, settings_,
+      delegate, thread_unsafe_commit_state_.mutator_host, settings_,
       task_runner_provider_.get(), dark_mode_filter_, id_, task_graph_runner_,
       image_worker_task_runner_, scheduling_client_,
       rendering_stats_instrumentation_.get(), compositor_delegate_weak_ptr_);
 }
 
-std::unique_ptr<LayerTreeHostImpl>
+std::unique_ptr<ClientLayerTreeHostImpl>
 LayerTreeHost::CreateLayerTreeHostImplInternal(
-    LayerTreeHostImplClient* client,
+    LayerTreeHostImplDelegate* delegate,
     MutatorHost* mutator_host,
     const LayerTreeSettings& settings,
     TaskRunnerProvider* task_runner_provider,
@@ -699,10 +700,12 @@ LayerTreeHost::CreateLayerTreeHostImplInternal(
         settings.scroll_animation_duration_for_testing);
   }
 
-  std::unique_ptr<LayerTreeHostImpl> host_impl = LayerTreeHostImpl::Create(
-      settings, client, task_runner_provider, rendering_stats_instrumentation,
-      task_graph_runner, std::move(mutator_host_impl), dark_mode_filter, id,
-      std::move(image_worker_task_runner), scheduling_client);
+  std::unique_ptr<ClientLayerTreeHostImpl> host_impl =
+      ClientLayerTreeHostImpl::Create(
+          settings, delegate, task_runner_provider,
+          rendering_stats_instrumentation, task_graph_runner,
+          std::move(mutator_host_impl), dark_mode_filter, id,
+          std::move(image_worker_task_runner), scheduling_client);
 
   task_graph_runner = nullptr;
   dark_mode_filter = nullptr;
@@ -740,7 +743,7 @@ LayerTreeHost::DeferMainFrameUpdate() {
 ScopedPauseRendering::ScopedPauseRendering(LayerTreeHost* host)
     : host_(host->weak_ptr_factory_.GetWeakPtr()) {
   host->pause_rendering_count_++;
-  host->proxy_->SetPauseRendering(true);
+  host->proxy_->SetPauseRendering(true, false);
 }
 
 ScopedPauseRendering::~ScopedPauseRendering() {
@@ -749,7 +752,7 @@ ScopedPauseRendering::~ScopedPauseRendering() {
     DCHECK_GT(host->pause_rendering_count_, 0u);
     if (--host->pause_rendering_count_ == 0) {
       host->SetNeedsCommit();
-      host->proxy_->SetPauseRendering(false);
+      host->proxy_->SetPauseRendering(false, delay_until_visibility_change_);
     }
   }
 }

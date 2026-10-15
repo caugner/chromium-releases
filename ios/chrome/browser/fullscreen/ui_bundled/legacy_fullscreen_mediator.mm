@@ -9,10 +9,10 @@
 #import "base/metrics/histogram_functions.h"
 #import "base/metrics/user_metrics.h"
 #import "base/metrics/user_metrics_action.h"
+#import "ios/chrome/browser/fullscreen/public/fullscreen_metrics.h"
 #import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_animator.h"
 #import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_content_adjustment_util.h"
 #import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_controller_observer.h"
-#import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_metrics.h"
 #import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_model.h"
 #import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_web_view_resizer.h"
 #import "ios/chrome/common/ui/util/ui_util.h"
@@ -135,6 +135,9 @@ void LegacyFullscreenMediator::Disconnect() {
 
 void LegacyFullscreenMediator::FullscreenModelToolbarHeightsUpdated(
     FullscreenModel* model) {
+  if (IsDisconnected()) {
+    return;
+  }
   for (auto& observer : observers_) {
     observer.FullscreenViewportInsetRangeChanged(controller_,
                                                  model_->min_toolbar_insets(),
@@ -160,6 +163,9 @@ void LegacyFullscreenMediator::FullscreenModelToolbarHeightsUpdated(
 
 void LegacyFullscreenMediator::FullscreenModelProgressUpdated(
     FullscreenModel* model) {
+  if (IsDisconnected()) {
+    return;
+  }
   DCHECK_EQ(model_, model);
   // Stops the animation only if there is a current animation running.
   if (animator_ && animator_.state == UIViewAnimatingStateActive) {
@@ -174,6 +180,9 @@ void LegacyFullscreenMediator::FullscreenModelProgressUpdated(
 
 void LegacyFullscreenMediator::FullscreenModelEnabledStateChanged(
     FullscreenModel* model) {
+  if (IsDisconnected()) {
+    return;
+  }
   DCHECK_EQ(model_, model);
   // Stops the animation only if there is a current animation running.
   if (animator_ && animator_.state == UIViewAnimatingStateActive) {
@@ -186,6 +195,9 @@ void LegacyFullscreenMediator::FullscreenModelEnabledStateChanged(
 
 void LegacyFullscreenMediator::FullscreenModelScrollEventStarted(
     FullscreenModel* model) {
+  if (IsDisconnected()) {
+    return;
+  }
   DCHECK_EQ(model_, model);
   start_progress_ = model_->progress();
   StopAnimating(true /* update_model */);
@@ -200,6 +212,9 @@ void LegacyFullscreenMediator::FullscreenModelScrollEventStarted(
 
 void LegacyFullscreenMediator::FullscreenModelScrollEventEnded(
     FullscreenModel* model) {
+  if (IsDisconnected()) {
+    return;
+  }
   DCHECK_EQ(model_, model);
   if (ios::provider::IsFullscreenSmoothScrollingSupported()) {
     if (model_->progress() >= 0.5) {
@@ -233,6 +248,9 @@ void LegacyFullscreenMediator::FullscreenModelScrollEventEnded(
 }
 
 void LegacyFullscreenMediator::FullscreenModelWasReset(FullscreenModel* model) {
+  if (IsDisconnected()) {
+    return;
+  }
   fullscreen_enter_trigger_ = std::nullopt;
   has_reached_bottom_once_ = false;
   // Stop any in-progress animations.  Don't update the model because this

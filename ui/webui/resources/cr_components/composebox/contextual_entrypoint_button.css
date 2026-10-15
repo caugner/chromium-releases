@@ -223,7 +223,12 @@ cr-button#entrypoint:focus {
   }
 }
 
+cr-icon-button {
+  border-radius: var(--cr-composebox-entrypoint-border-radius, 50%);
+}
+
 #entrypoint {
+  --composebox-favicon-border-color: #f2f2f2;
   --cr-button-disabled-text-color:
       var(--color-composebox-context-entrypoint-text-disabled);
   --cr-button-text-color: var(--color-composebox-file-chip-text);
@@ -231,20 +236,68 @@ cr-button#entrypoint:focus {
       var(--cr-icon-button-hover-background-color);
   --cr-icon-button-height: var(
       --cr-composebox-entrypoint-height, var(--cr-icon-button-size));
-  --cr-icon-button-margin-start: 6px;
+  /* Let parent ('contextual-entrypoint-and-menu') add margins around button.
+   */
+  --cr-icon-button-margin-start: 0;
   --cr-icon-button-width: var(
       --cr-composebox-entrypoint-width, var(--cr-icon-button-size));
   --icon-block-padding-small: 10px;
   border: initial;
-  border-radius: var(--cr-composebox-entrypoint-border-radius, 50%);
   gap: 4px;
   position: relative;
   z-index: 5;
 }
 
+@media (prefers-color-scheme: dark) {
+  :host([apply-context-button-background]) #entrypoint {
+    --composebox-favicon-border-color: #4e5059;
+  }
+}
+
 #entrypoint:not(:hover) {
   background-color:
       var(--cr-composebox-entrypoint-background-color, transparent);
+}
+
+:host([show-suggestion-label]) #entrypoint {
+  gap: 16px;
+}
+
+:host([show-suggestion-label]) cr-button#entrypoint {
+  color: var(
+    --color-sys-on-surface-subtle, --cr-fallback-color-on-surface-subtle);
+}
+
+:host([show-suggestion-label]) #entrypoint #description {
+  color: var(--color-searchbox-results-foreground);
+  font-size: var(--omnibox-font-size, 14px);
+  font-weight: 400;
+}
+
+:host([is-oblong-shape]) #entrypoint {
+  --cr-composebox-entrypoint-width: 40px;
+  border-radius: 100px;
+  color: var(
+    --color-sys-on-surface, --cr-fallback-color-on-surface);
+  /* This line handles specific margin spacing for the oblong shape in omnibox
+     and the composebox. */
+  margin-inline-start: var(
+    --contextual-entrypoint-oblong-margin-inline-start, 0);
+}
+
+:host([apply-context-button-background]) #entrypoint {
+  --cr-composebox-entrypoint-background-color: var(--color-composebox-context-entrypoint-background);
+}
+
+/* TODO: (crbug.com/510905121) - Move this override to css variables
+ if needed once the design is finalized. */
+:host([apply-context-button-background]) #entrypoint:hover {
+  /* Override the background-color directly to avoid overrides to other
+     components that share the compose box entrypoint button */
+  background-color: color-mix(
+      in srgb,
+      var(--color-composebox-context-entrypoint-hover-background),
+      var(--color-searchbox-results-foreground) 10%);
 }
 
 :host([has-popup-focus]) #entrypoint {
@@ -298,3 +351,16 @@ cr-button#entrypoint:focus {
     transform: none;
   }
 }
+
+.pill-button {
+  --cr-composebox-entrypoint-background-color: var(--color-composebox-context-entrypoint-hover-background, rgba(0, 0, 0, 0.05));
+  min-width: auto;
+  padding: 0 10px 0 8px;
+}
+
+.pill-button cr-icon {
+  width: 20px;
+  height: 20px;
+  margin-right: 4px;
+}
+

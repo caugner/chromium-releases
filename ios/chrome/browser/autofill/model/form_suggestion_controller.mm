@@ -10,7 +10,6 @@
 #import "base/feature_list.h"
 #import "base/functional/callback_helpers.h"
 #import "base/memory/raw_ptr.h"
-#import "base/metrics/histogram_functions.h"
 #import "base/not_fatal_until.h"
 #import "base/strings/sys_string_conversions.h"
 #import "base/strings/utf_string_conversions.h"
@@ -18,6 +17,7 @@
 #import "components/autofill/core/browser/ui/autofill_suggestion_delegate.h"
 #import "components/autofill/core/common/autofill_features.h"
 #import "components/autofill/core/common/autofill_prefs.h"
+#import "components/autofill/ios/browser/autofill_java_script_feature.h"
 #import "components/autofill/ios/browser/form_suggestion.h"
 #import "components/autofill/ios/browser/form_suggestion_provider.h"
 #import "components/autofill/ios/common/features.h"
@@ -34,6 +34,7 @@
 #import "ios/chrome/browser/shared/ui/symbols/symbols.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #import "ios/web/common/url_scheme_util.h"
+#import "ios/web/public/js_messaging/web_frame.h"
 #import "ios/web/public/js_messaging/web_frames_manager.h"
 #import "ios/web/public/ui/crw_web_view_proxy.h"
 #import "ios/web/public/web_state.h"
@@ -117,17 +118,6 @@ UIImage* DefaultIconForType(FormSuggestion* suggestion,
     case autofill::SuggestionType::kGeneratePasswordEntry:
       return MakeSymbolMulticolor(
           CustomSymbolWithPointSize(kPasswordManagerSymbol, kSymbolPointSize));
-    case autofill::SuggestionType::kFillExistingPlusAddress: {
-      BOOL isPlusAddressFeaturesEnabled = base::FeatureList::IsEnabled(
-          plus_addresses::features::kPlusAddressesEnabled);
-      return isPlusAddressFeaturesEnabled
-                 ? SymbolWithPalette(DefaultSymbolWithPointSize(
-                                         kShieldedEnvelope, kSymbolPointSize),
-                                     @[
-                                       [UIColor colorNamed:kTextPrimaryColor],
-                                     ])
-                 : nil;
-    }
     case autofill::SuggestionType::kAddressEntry: {
       switch (suggestion.suggestionIconType) {
         case SuggestionIconType::kAccountHome:
@@ -605,20 +595,8 @@ bool IsRequestDedupingAllowed() {
       _webState ? ProfileIOS::FromBrowserState(_webState->GetBrowserState())
                 : nullptr;
   if (profile) {
-    int dismissCount = profile->GetPrefs()->GetInteger(
-        prefs::kIosPasswordBottomSheetDismissCount);
     profile->GetPrefs()->SetInteger(prefs::kIosPasswordBottomSheetDismissCount,
                                     0);
-    if (dismissCount > 0) {
-      // Log how many times the bottom sheet had been dismissed before being
-      // re-enabled.
-      static constexpr int kHistogramMin = 1;
-      static constexpr int kHistogramMax = 4;
-      static constexpr size_t kHistogramBuckets = 3;
-      base::UmaHistogramCustomCounts(
-          "IOS.ResetDismissCount.Password.BottomSheet", dismissCount,
-          kHistogramMin, kHistogramMax, kHistogramBuckets);
-    }
   }
 }
 

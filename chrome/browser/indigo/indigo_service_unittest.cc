@@ -4,9 +4,13 @@
 
 #include "chrome/browser/indigo/indigo_service.h"
 
+#include "base/command_line.h"
 #include "base/test/mock_callback.h"
+#include "base/test/scoped_command_line.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "base/test/test_future.h"
+#include "chrome/browser/component_updater/indigo_component_installer.h"
 #include "chrome/browser/indigo/indigo_prefs.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/test/base/testing_profile.h"
@@ -18,12 +22,25 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+#if BUILDFLAG(IS_MAC)
+#include "base/mac/mac_util.h"
+#endif
+
 namespace indigo {
 
 class IndigoServiceTest : public testing::Test {
  public:
   void SetUp() override {
+    scoped_feature_list_.InitAndEnableFeature(features::kIndigo);
     ::indigo::prefs::RegisterProfilePrefs(prefs_.registry());
+    if (set_script_switch_in_setup_) {
+      scoped_command_line_.GetProcessCommandLine()->AppendSwitchASCII(
+          "indigo-script", "/dummy/path");
+    }
+  }
+
+  void TearDown() override {
+    component_updater::ResetIndigoInstallDirForTesting();
   }
 
   void CreateService() {
@@ -99,12 +116,15 @@ class IndigoServiceTest : public testing::Test {
   TestingPrefServiceSimple prefs_;
   signin::IdentityTestEnvironment identity_test_env_;
   std::unique_ptr<IndigoService> service_;
+  base::test::ScopedFeatureList scoped_feature_list_;
   RemoteEligibility mock_remote_eligibility_ =
       RemoteEligibility{.is_service_supported_for_account = true,
                         .has_user_image = true};
   int remote_eligibility_fetch_count_ = 0;
   IndigoService::RemoteEligibilityCallback pending_remote_eligibility_callback_;
   bool auto_complete_remote_eligibility_fetch_ = true;
+  bool set_script_switch_in_setup_ = true;
+  base::test::ScopedCommandLine scoped_command_line_;
 };
 
 TEST_F(IndigoServiceTest, DefaultStateNotSignedIn) {
@@ -147,6 +167,13 @@ TEST_F(IndigoServiceTest, PolicyChangeTriggersUpdate) {
 }
 
 TEST_F(IndigoServiceTest, AnchoredMessageTrigger) {
+#if BUILDFLAG(IS_MAC)
+  // TODO(crbug.com/434660312): Re-enable on macOS 26 once issues with
+  // unexpected test timeout failures are resolved.
+  if (base::mac::MacOSMajorVersion() == 26) {
+    GTEST_SKIP() << "Disabled on macOS Tahoe.";
+  }
+#endif
   CreateService();
 
   EXPECT_TRUE(service_->CanShowAnchoredMessage());
@@ -174,7 +201,28 @@ TEST_F(IndigoServiceTest, RemoteEligibilityUnsupported) {
   EXPECT_FALSE(combined_eligibility.remote_eligibility->has_user_image);
 }
 
-TEST_F(IndigoServiceTest, InvalidateRemoteEligibility_NoFetchInProgress) {
+TEST_F(IndigoServiceTest, MultipleCallsConsecutively_TriggersOneFetch) {
+  auto_complete_remote_eligibility_fetch_ = false;
+  CreateService();
+  MakeAccountAvailableAndCapable();
+  EXPECT_TRUE(LocalEligibilityBecomes(LocalEligibility::kEligible));
+
+  base::test::TestFuture<CombinedEligibility> future1;
+  base::test::TestFuture<CombinedEligibility> future2;
+
+  service_->GetCombinedEligibility(
+      future1.GetCallback<const CombinedEligibility&>());
+  service_->GetCombinedEligibility(
+      future2.GetCallback<const CombinedEligibility&>());
+
+  CompleteRemoteEligibilityFetch();
+
+  EXPECT_TRUE(future1.Get().remote_eligibility.has_value());
+  EXPECT_TRUE(future2.Get().remote_eligibility.has_value());
+  EXPECT_EQ(remote_eligibility_fetch_count_, 1);
+}
+
+TEST_F(IndigoServiceTest, CallsAfterCompletion_TriggersNewFetch) {
   CreateService();
   MakeAccountAvailableAndCapable();
   EXPECT_TRUE(LocalEligibilityBecomes(LocalEligibility::kEligible));
@@ -182,44 +230,11 @@ TEST_F(IndigoServiceTest, InvalidateRemoteEligibility_NoFetchInProgress) {
   CombinedEligibility combined_eligibility = GetCombinedEligibility();
   EXPECT_EQ(remote_eligibility_fetch_count_, 1);
   EXPECT_TRUE(combined_eligibility.remote_eligibility.has_value());
-  EXPECT_TRUE(combined_eligibility.remote_eligibility
-                  ->is_service_supported_for_account);
-
-  service_->InvalidateRemoteEligibility();
 
   // Next call should trigger a new fetch.
   combined_eligibility = GetCombinedEligibility();
   EXPECT_EQ(remote_eligibility_fetch_count_, 2);
   EXPECT_TRUE(combined_eligibility.remote_eligibility.has_value());
-  EXPECT_TRUE(combined_eligibility.remote_eligibility
-                  ->is_service_supported_for_account);
-}
-
-TEST_F(IndigoServiceTest, InvalidateRemoteEligibility_FetchInProgress) {
-  auto_complete_remote_eligibility_fetch_ = false;
-  CreateService();
-  MakeAccountAvailableAndCapable();
-  EXPECT_TRUE(LocalEligibilityBecomes(LocalEligibility::kEligible));
-
-  base::test::TestFuture<CombinedEligibility> future;
-  service_->GetCombinedEligibility(
-      future.GetCallback<const CombinedEligibility&>());
-  EXPECT_EQ(remote_eligibility_fetch_count_, 1);
-
-  service_->InvalidateRemoteEligibility();
-  // Invalidation should have cancelled the first fetch's reply (by invalidating
-  // weak ptrs) and started a *new* fetch because there was a pending callback.
-  EXPECT_EQ(remote_eligibility_fetch_count_, 2);
-
-  // Now complete the *second* fetch.
-  CompleteRemoteEligibilityFetch(base::ok(RemoteEligibility{
-      .is_service_supported_for_account = true, .has_user_image = true}));
-
-  // The first callback (which was restarted) should now complete.
-  CombinedEligibility combined_eligibility = future.Get();
-  EXPECT_TRUE(combined_eligibility.remote_eligibility.has_value());
-  EXPECT_TRUE(combined_eligibility.remote_eligibility
-                  ->is_service_supported_for_account);
 }
 
 TEST_F(IndigoServiceTest, ErrorMessageStored) {
@@ -237,6 +252,35 @@ TEST_F(IndigoServiceTest, ErrorMessageStored) {
   CombinedEligibility combined_eligibility = future.Get();
   EXPECT_FALSE(combined_eligibility.remote_eligibility.has_value());
   EXPECT_EQ(combined_eligibility.remote_eligibility.error(), "Server down");
+}
+
+class IndigoServiceNoScriptTest : public IndigoServiceTest {
+ public:
+  IndigoServiceNoScriptTest() { set_script_switch_in_setup_ = false; }
+};
+
+TEST_F(IndigoServiceNoScriptTest, ScriptNotAvailable) {
+  CreateService();
+  EXPECT_EQ(service_->GetLocalEligibility(), LocalEligibility::kMissingScript);
+}
+
+TEST_F(IndigoServiceNoScriptTest, DynamicComponentReady) {
+  CreateService();
+  EXPECT_EQ(service_->GetLocalEligibility(), LocalEligibility::kMissingScript);
+
+  base::test::TestFuture<LocalEligibility> future;
+  auto sub = service_->RegisterLocalEligibilityChangedCallback(
+      future.GetRepeatingCallback());
+
+  // Simulate component ready.
+  component_updater::IndigoComponentInstallerPolicy policy;
+  policy.ComponentReady(base::Version("1.0"),
+                        base::FilePath(FILE_PATH_LITERAL("/dummy/path")),
+                        base::DictValue());
+
+  // It should transition to kNotSignedIn (since we are not signed in).
+  EXPECT_EQ(future.Take(), LocalEligibility::kNotSignedIn);
+  EXPECT_EQ(service_->GetLocalEligibility(), LocalEligibility::kNotSignedIn);
 }
 
 }  // namespace indigo

@@ -255,8 +255,7 @@ Surface::QueueFrameResult Surface::QueueFrame(
     base::ScopedClosureRunner frame_rejected_callback) {
   if (frame.size_in_pixels() != surface_info_.size_in_pixels() ||
       frame.device_scale_factor() != surface_info_.device_scale_factor()) {
-    TRACE_EVENT_INSTANT0("viz", "Surface invariants violation",
-                         TRACE_EVENT_SCOPE_THREAD);
+    TRACE_EVENT_INSTANT("viz", "Surface invariants violation");
     return QueueFrameResult::REJECTED;
   }
 
@@ -272,9 +271,8 @@ Surface::QueueFrameResult Surface::QueueFrame(
     // Return oldest frame if uncommitted queue is full.
     DCHECK_LE(uncommitted_frames_.size(), max_uncommitted_frames_);
     if (uncommitted_frames_.size() == max_uncommitted_frames_) {
-      TRACE_EVENT_INSTANT1("viz", "DropUncommitedFrame",
-                           TRACE_EVENT_SCOPE_THREAD, "queue_length",
-                           uncommitted_frames_.size());
+      TRACE_EVENT_INSTANT("viz", "DropUncommitedFrame", "queue_length",
+                          uncommitted_frames_.size());
 
       UnrefFrameResourcesAndRunCallbacks(
           std::move(uncommitted_frames_.front()));
@@ -286,9 +284,8 @@ Surface::QueueFrameResult Surface::QueueFrame(
     // If we still have space in queue we should send ack the client because we
     // can receive another frame without dropping it.
     if (uncommitted_frames_.size() < max_uncommitted_frames_) {
-      TRACE_EVENT_INSTANT1("viz", "AckingUncommitedFrame",
-                           TRACE_EVENT_SCOPE_THREAD, "queue_length",
-                           uncommitted_frames_.size());
+      TRACE_EVENT_INSTANT("viz", "AckingUncommitedFrame", "queue_length",
+                          uncommitted_frames_.size());
       uncommitted_frames_.back().SendAckIfNeeded(surface_client_.get());
     }
 
@@ -511,10 +508,9 @@ void Surface::ActivatePendingFrame() {
 
   std::optional<base::TimeDelta> duration = deadline_->Cancel();
   if (duration.has_value()) {
-    TRACE_EVENT_INSTANT2("viz", "SurfaceSynchronizationEvent",
-                         TRACE_EVENT_SCOPE_THREAD, "surface_id",
-                         surface_info_.id().ToString(), "duration_ms",
-                         duration.value().InMilliseconds());
+    TRACE_EVENT_INSTANT("viz", "SurfaceSynchronizationEvent", "surface_id",
+                        surface_info_.id().ToString(), "duration_ms",
+                        duration.value().InMilliseconds());
   }
 
   ActivateFrame(std::move(frame_data));
@@ -727,7 +723,7 @@ void Surface::ActivateFrame(FrameData frame_data) {
   // completely processed.
   const auto& metadata = GetActiveFrameMetadata();
   if (surface_client_ && metadata.send_frame_token_to_embedder) {
-    if (!FrameTokenGT(metadata.frame_token, last_sent_frame_token_)) {
+    if (metadata.frame_token <= last_sent_frame_token_) {
       uint32_t current_token = metadata.frame_token;
       uint32_t last_token = last_sent_frame_token_;
       base::debug::Alias(&current_token);
@@ -796,6 +792,8 @@ void Surface::UpdateActivationDependencies(
   base::flat_set<raw_ptr<SurfaceAllocationGroup, CtnExperimental>>
       new_blocking_allocation_groups;
   std::vector<SurfaceId> new_activation_dependencies;
+  bool bypass_outdated_surface_activation =
+      base::FeatureList::IsEnabled(features::kBypassOutdatedSurfaceActivation);
   for (const SurfaceId& surface_id :
        current_frame.metadata.activation_dependencies) {
     SurfaceAllocationGroup* group =
@@ -805,7 +803,25 @@ void Surface::UpdateActivationDependencies(
     if (group)
       group->UpdateLastPendingReferenceAndMaybeActivate(surface_id);
     Surface* dependency = surface_manager_->GetSurfaceForId(surface_id);
-    if (dependency && dependency->HasActiveFrame()) {
+    bool is_active = dependency && dependency->HasActiveFrame();
+
+    if (!is_active && bypass_outdated_surface_activation && group &&
+        group->last_created_surface()) {
+      // Proactive Monotonic Range Check: Mitigates display server deadlocks
+      // caused by outdated surface activation dependency tokens when parent
+      // frames lag behind child renderer execution. If the demanded
+      // `surface_id` isn't currently active, but the allocation group's latest
+      // active surface already satisfies the monotonic range boundary, we
+      // natively treat the dependency as fulfilled upfront. This avoids blind
+      // storage of deadlocked blockers downstream.
+      SurfaceRange range(surface_id,
+                         group->last_created_surface()->surface_id());
+      if (group->FindLatestActiveSurfaceInRange(range)) {
+        is_active = true;
+      }
+    }
+
+    if (is_active) {
       // Normally every creation of SurfaceAllocationGroup should be followed by
       // a call to Register* to keep it alive. However, since this one already
       // has a registered surface, we don't have to do that.

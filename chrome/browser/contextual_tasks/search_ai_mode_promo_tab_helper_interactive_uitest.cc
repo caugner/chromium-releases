@@ -7,7 +7,10 @@
 #include "base/callback_list.h"
 #include "base/check_deref.h"
 #include "base/test/bind.h"
+#include "base/test/metrics/histogram_tester.h"
+#include "base/test/scoped_feature_list.h"
 #include "chrome/browser/autocomplete/aim_eligibility_service_factory.h"
+#include "chrome/browser/contextual_tasks/contextual_tasks_eligibility_manager.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_service_factory.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service_factory.h"
 #include "chrome/browser/contextual_tasks/mock_contextual_tasks_ui_service.h"
@@ -29,6 +32,7 @@
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/omnibox/browser/mock_aim_eligibility_service.h"
 #include "components/signin/public/base/consent_level.h"
+#include "components/signin/public/base/signin_metrics.h"
 #include "components/signin/public/base/signin_switches.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
 #include "components/signin/public/identity_manager/identity_test_utils.h"
@@ -69,17 +73,17 @@ std::unique_ptr<KeyedService> BuildMockAimServiceEligibilityServiceInstance(
 }
 }  // namespace
 
-class SearchAiModePromoTabHelperInteractiveUiTest
-    : public InteractiveBrowserTest,
-      public testing::WithParamInterface<bool> {
+class SearchAiModePromoTabHelperInteractiveUiTestBase
+    : public InteractiveBrowserTest {
  public:
-  SearchAiModePromoTabHelperInteractiveUiTest() {
+  explicit SearchAiModePromoTabHelperInteractiveUiTestBase(
+      bool load_original_aim_search) {
     std::vector<base::test::FeatureRef> enabled_features = {
         switches::kEnableSearchAIModeSigninPromo,
         contextual_tasks::kContextualTasks};
     std::vector<base::test::FeatureRef> disabled_features;
 
-    if (GetParam()) {
+    if (load_original_aim_search) {
       enabled_features.push_back(
           contextual_tasks::kEnableLoadOriginalAIMSearchAfterSigninPromo);
     } else {
@@ -90,12 +94,14 @@ class SearchAiModePromoTabHelperInteractiveUiTest
                                                 disabled_features);
   }
 
+  ~SearchAiModePromoTabHelperInteractiveUiTestBase() override = default;
+
   void SetUpOnMainThread() override {
     InteractiveBrowserTest::SetUpOnMainThread();
 
     host_resolver()->AddRule("*", "127.0.0.1");
     embedded_test_server()->RegisterRequestHandler(base::BindRepeating(
-        &SearchAiModePromoTabHelperInteractiveUiTest::HandleRequest,
+        &SearchAiModePromoTabHelperInteractiveUiTestBase::HandleRequest,
         base::Unretained(this)));
     ASSERT_TRUE(embedded_test_server()->Start());
 
@@ -114,7 +120,7 @@ class SearchAiModePromoTabHelperInteractiveUiTest
     create_services_subscription_ =
         BrowserContextDependencyManager::GetInstance()
             ->RegisterCreateServicesCallbackForTesting(base::BindRepeating(
-                &SearchAiModePromoTabHelperInteractiveUiTest::
+                &SearchAiModePromoTabHelperInteractiveUiTestBase::
                     OnWillCreateBrowserContextServices,
                 base::Unretained(this)));
   }
@@ -162,7 +168,7 @@ class SearchAiModePromoTabHelperInteractiveUiTest
     // Replace the real service with a mock one.
     ContextualTasksUiServiceFactory::GetInstance()->SetTestingFactory(
         context,
-        base::BindRepeating(&SearchAiModePromoTabHelperInteractiveUiTest::
+        base::BindRepeating(&SearchAiModePromoTabHelperInteractiveUiTestBase::
                                 BuildMockContextualTasksUiService,
                             base::Unretained(this)));
     AimEligibilityServiceFactory::GetInstance()->SetTestingFactory(
@@ -177,11 +183,17 @@ class SearchAiModePromoTabHelperInteractiveUiTest
   std::unique_ptr<KeyedService> BuildMockContextualTasksUiService(
       content::BrowserContext* context) {
     Profile* profile = Profile::FromBrowserContext(context);
+    auto eligibility_manager =
+        std::make_unique<ContextualTasksEligibilityManager>(
+            profile->GetPrefs(), IdentityManagerFactory::GetForProfile(profile),
+            AimEligibilityServiceFactory::GetForProfile(profile));
     auto mock_ui_service =
         std::make_unique<testing::NiceMock<MockContextualTasksUiService>>(
             profile, ContextualTasksServiceFactory::GetForProfile(profile),
             IdentityManagerFactory::GetForProfile(profile),
-            AimEligibilityServiceFactory::GetForProfile(profile));
+            AimEligibilityServiceFactory::GetForProfile(profile),
+            std::move(eligibility_manager),
+            /*cookie_synchronizer=*/nullptr);
     mock_ui_service_ = mock_ui_service.get();
     CHECK(mock_ui_service_);
 
@@ -238,6 +250,16 @@ class SearchAiModePromoTabHelperInteractiveUiTest
       identity_test_env_adaptor_;
 };
 
+class SearchAiModePromoTabHelperInteractiveUiTest
+    : public SearchAiModePromoTabHelperInteractiveUiTestBase,
+      public testing::WithParamInterface<bool> {
+ public:
+  SearchAiModePromoTabHelperInteractiveUiTest()
+      : SearchAiModePromoTabHelperInteractiveUiTestBase(GetParam()) {}
+
+  ~SearchAiModePromoTabHelperInteractiveUiTest() override = default;
+};
+
 IN_PROC_BROWSER_TEST_P(SearchAiModePromoTabHelperInteractiveUiTest,
                        SigninPromoShownForNonSignedInUser) {
   const GURL ai_url =
@@ -248,6 +270,8 @@ IN_PROC_BROWSER_TEST_P(SearchAiModePromoTabHelperInteractiveUiTest,
   DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kSourceTabId);
   DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kNewTabId);
   DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kSignInTabId);
+
+  base::HistogramTester histogram_tester;
 
   RunTestSequence(InAnyContext(
       CheckResult([this]() { return browser()->tab_strip_model()->count(); },
@@ -278,10 +302,99 @@ IN_PROC_BROWSER_TEST_P(SearchAiModePromoTabHelperInteractiveUiTest,
       WaitForShow(kContextualTasksSidePanelWebViewElementId),
       CheckResult([this]() { return browser()->tab_strip_model()->count(); },
                   3)));
+
+  histogram_tester.ExpectUniqueSample(
+      "Signin.SignInPromo.Accepted",
+      signin_metrics::AccessPoint::kSearchAIModeBubble, 1);
+  histogram_tester.ExpectUniqueSample(
+      "Signin.SignIn.Completed",
+      signin_metrics::AccessPoint::kSearchAIModeBubble, 1);
 }
 
 INSTANTIATE_TEST_SUITE_P(All,
                          SearchAiModePromoTabHelperInteractiveUiTest,
                          testing::Bool());
 
+class SearchAiModePromoTabHelperInteractiveBubbleDismissalUiTest
+    : public SearchAiModePromoTabHelperInteractiveUiTestBase {
+ public:
+  SearchAiModePromoTabHelperInteractiveBubbleDismissalUiTest()
+      : SearchAiModePromoTabHelperInteractiveUiTestBase(
+            /*load_original_aim_search=*/false) {}
+
+  ~SearchAiModePromoTabHelperInteractiveBubbleDismissalUiTest() override =
+      default;
+};
+
+IN_PROC_BROWSER_TEST_F(
+    SearchAiModePromoTabHelperInteractiveBubbleDismissalUiTest,
+    SigninPromoSelfDismissedOnTimeout) {
+  const GURL ai_url =
+      embedded_test_server()->GetURL(kGoogleHost, kSearchAimPath);
+  const GURL result_url =
+      embedded_test_server()->GetURL(kGoogleHost, kSearchResultRelativeUrl);
+  DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kSourceTabId);
+  DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kNewTabId);
+
+  RunTestSequence(InAnyContext(
+      InstrumentTab(kSourceTabId), NavigateWebContents(kSourceTabId, ai_url),
+      WaitForElementVisible(kSourceTabId, DeepQuery{"#link"}),
+      InstrumentNextTab(kNewTabId),
+      ClickElement(kSourceTabId, DeepQuery{"#link"}),
+      WaitForWebContentsNavigation(kNewTabId, result_url),
+      // Promo should be visible for a non-signed-in user initially.
+      WaitForShow(kSearchAIModeSignInPromoFrameViewId),
+      EnsurePresent(kSearchAIModeSignInPromoViewId),
+      WithView(kSearchAIModeSignInPromoViewId,
+               [](SearchAIModeSignInPromoView* view) {
+                 view->FireTimerForTesting();
+               }),
+      WaitForHide(kSearchAIModeSignInPromoFrameViewId),
+      PollUntil(
+          [this]() {
+            return SearchAiModePromoTabHelper::FromWebContents(
+                       browser()->tab_strip_model()->GetActiveWebContents()) ==
+                   nullptr;
+          },
+          "Wait for tab helper to be destroyed")));
+}
+
+IN_PROC_BROWSER_TEST_F(
+    SearchAiModePromoTabHelperInteractiveBubbleDismissalUiTest,
+    TabHelperDestroyedOnPromoDismissal) {
+  const GURL ai_url =
+      embedded_test_server()->GetURL(kGoogleHost, kSearchAimPath);
+  const GURL result_url =
+      embedded_test_server()->GetURL(kGoogleHost, kSearchResultRelativeUrl);
+
+  DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kSourceTabId);
+  DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kNewTabId);
+
+  RunTestSequence(InAnyContext(
+      InstrumentTab(kSourceTabId), NavigateWebContents(kSourceTabId, ai_url),
+      WaitForElementVisible(kSourceTabId, DeepQuery{"#link"}),
+      InstrumentNextTab(kNewTabId),
+      ClickElement(kSourceTabId, DeepQuery{"#link"}),
+      WaitForWebContentsNavigation(kNewTabId, result_url),
+      // Promo should be visible for a non-signed-in user initially.
+      WaitForShow(kSearchAIModeSignInPromoFrameViewId),
+      CheckResult(
+          [this]() {
+            return SearchAiModePromoTabHelper::FromWebContents(
+                       browser()->tab_strip_model()->GetActiveWebContents()) !=
+                   nullptr;
+          },
+          true),
+      // Dismiss the promo using the close button.
+      PressButton(views::BubbleFrameView::kCloseButtonElementId),
+      WaitForHide(kSearchAIModeSignInPromoFrameViewId),
+      // Verify the tab helper is destroyed.
+      PollUntil(
+          [this]() {
+            return SearchAiModePromoTabHelper::FromWebContents(
+                       browser()->tab_strip_model()->GetActiveWebContents()) ==
+                   nullptr;
+          },
+          "Wait for tab helper destruction")));
+}
 }  // namespace contextual_tasks

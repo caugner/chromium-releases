@@ -115,6 +115,7 @@
   [_mediator disconnect];
   [self dismissActionSheetCoordinator];
   _mediator.consumer = nil;
+  _node = nullptr;
   _mediator.snackbarCommandsHandler = nil;
   _mediator = nil;
   _viewController.delegate = nil;
@@ -131,7 +132,7 @@
 }
 
 - (void)dealloc {
-  CHECK(!_navigationController, base::NotFatalUntil::M150);
+  DUMP_WILL_BE_CHECK(!_navigationController);
 }
 
 - (BOOL)canDismiss {
@@ -153,12 +154,12 @@
     return;
   }
 
-  std::set<raw_ptr<const bookmarks::BookmarkNode>> hiddenNodes{
+  std::set<raw_ptr<const bookmarks::BookmarkNode>> movedNodes{
       [_mediator bookmark]};
   _folderChooserCoordinator = [[BookmarksFolderChooserCoordinator alloc]
       initWithBaseNavigationController:_navigationController
                                browser:self.browser
-                           hiddenNodes:hiddenNodes];
+                            movedNodes:movedNodes];
   [_folderChooserCoordinator setSelectedFolder:_mediator.folder];
   _folderChooserCoordinator.delegate = self;
   _mediator.UIDisabled = YES;

@@ -8,8 +8,8 @@
 
 #include "base/metrics/statistics_recorder.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/metrics/histogram_tester.h"
-#include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.h"
 #include "chrome/browser/extensions/chrome_test_extension_loader.h"
@@ -23,7 +23,9 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_header_view.h"
+#include "chrome/browser/ui/views/omnibox/omnibox_popup_presenter.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_popup_view_views_test.h"
+#include "chrome/browser/ui/views/omnibox/omnibox_popup_view_webui.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_result_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
 #include "chrome/browser/ui/views/omnibox/rounded_omnibox_results_frame.h"
@@ -381,7 +383,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxPopupViewViewsTest, ThemeIntegrationInIncognito) {
   EXPECT_EQ(selection_color_dark, GetSelectedColor(incognito_browser));
 }
 
-// TODO(tapted): https://crbug.com/905508 Fix and enable on Mac.
+// TODO(tapted): https://crbug.com/40602507 Fix and enable on Mac.
 #if BUILDFLAG(IS_MAC)
 #define MAYBE_ClickOmnibox DISABLED_ClickOmnibox
 #else
@@ -456,7 +458,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxPopupViewViewsTest, MAYBE_ClickOmnibox) {
   EXPECT_TRUE(GetPopupWidget()->IsClosed());
 }
 
-// Flaky on Mac: https://crbug.com/1140153.
+// Flaky on Mac: https://crbug.com/40726476.
 #if BUILDFLAG(IS_MAC)
 #define MAYBE_EmitAccessibilityEvents DISABLED_EmitAccessibilityEvents
 #else
@@ -499,8 +501,8 @@ IN_PROC_BROWSER_TEST_F(OmniboxPopupViewViewsTest,
   EXPECT_EQ(observer.value_changed_count(), 2);
 
   edit_model()->SetPopupSelection(OmniboxPopupSelection(1));
-  EXPECT_EQ(observer.selected_children_changed_count(), 2);
-  EXPECT_EQ(observer.selection_changed_count(), 2);
+  EXPECT_EQ(observer.selected_children_changed_count(), 3);
+  EXPECT_EQ(observer.selection_changed_count(), 3);
   EXPECT_EQ(observer.active_descendant_changed_count(), 2);
   EXPECT_EQ(observer.value_changed_count(), 3);
   EXPECT_TRUE(contains(observer.omnibox_value(), "2 of 3"));
@@ -519,8 +521,8 @@ IN_PROC_BROWSER_TEST_F(OmniboxPopupViewViewsTest,
   EXPECT_TRUE(contains(ax_name, "location from history"));
 
   edit_model()->SetPopupSelection(OmniboxPopupSelection(2));
-  EXPECT_EQ(observer.selected_children_changed_count(), 3);
-  EXPECT_EQ(observer.selection_changed_count(), 3);
+  EXPECT_EQ(observer.selected_children_changed_count(), 5);
+  EXPECT_EQ(observer.selection_changed_count(), 5);
   EXPECT_EQ(observer.active_descendant_changed_count(), 3);
   EXPECT_EQ(observer.value_changed_count(), 4);
   EXPECT_TRUE(contains(observer.omnibox_value(), "3 of 3"));
@@ -610,7 +612,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxPopupViewViewsTest,
             u"FooBarBazCom https://foobarbaz.com location from history");
 }
 
-// Flaky on Mac: https://crbug.com/1146627.
+// Flaky on Mac: https://crbug.com/40730186.
 #if BUILDFLAG(IS_MAC)
 #define MAYBE_EmitAccessibilityEventsOnButtonFocusHint \
   DISABLED_EmitAccessibilityEventsOnButtonFocusHint
@@ -637,8 +639,8 @@ IN_PROC_BROWSER_TEST_F(OmniboxPopupViewViewsTest,
   popup_view()->UpdatePopupAppearance();
 
   edit_model()->SetPopupSelection(OmniboxPopupSelection(1));
-  EXPECT_EQ(observer.selected_children_changed_count(), 2);
-  EXPECT_EQ(observer.selection_changed_count(), 2);
+  EXPECT_EQ(observer.selected_children_changed_count(), 3);
+  EXPECT_EQ(observer.selection_changed_count(), 3);
   EXPECT_EQ(observer.active_descendant_changed_count(), 2);
   EXPECT_EQ(observer.value_changed_count(), 2);
   EXPECT_TRUE(contains(observer.omnibox_value(), "The Foo Of All Bars"));
@@ -658,8 +660,8 @@ IN_PROC_BROWSER_TEST_F(OmniboxPopupViewViewsTest,
   edit_model()->SetPopupSelection(
       OmniboxPopupSelection(1, OmniboxPopupSelection::FOCUSED_BUTTON_ACTION));
   EXPECT_TRUE(contains(observer.omnibox_value(), "Tab switch button"));
-  EXPECT_EQ(observer.selected_children_changed_count(), 3);
-  EXPECT_EQ(observer.selection_changed_count(), 3);
+  EXPECT_EQ(observer.selected_children_changed_count(), 6);
+  EXPECT_EQ(observer.selection_changed_count(), 5);
   EXPECT_EQ(observer.value_changed_count(), 3);
   EXPECT_TRUE(contains(observer.omnibox_value(), "press Enter to switch"));
   EXPECT_FALSE(contains(observer.omnibox_value(), "2 of 2"));
@@ -675,8 +677,8 @@ IN_PROC_BROWSER_TEST_F(OmniboxPopupViewViewsTest,
   edit_model()->SetPopupSelection(
       OmniboxPopupSelection(1, OmniboxPopupSelection::NORMAL));
   EXPECT_TRUE(contains(observer.omnibox_value(), "The Foo Of All Bars"));
-  EXPECT_EQ(observer.selected_children_changed_count(), 4);
-  EXPECT_EQ(observer.selection_changed_count(), 4);
+  EXPECT_EQ(observer.selected_children_changed_count(), 8);
+  EXPECT_EQ(observer.selection_changed_count(), 7);
   EXPECT_EQ(observer.value_changed_count(), 4);
   EXPECT_TRUE(contains(observer.omnibox_value(), "press Tab then Enter"));
   EXPECT_TRUE(contains(observer.omnibox_value(), "2 of 2"));
@@ -734,15 +736,15 @@ IN_PROC_BROWSER_TEST_F(OmniboxPopupViewViewsTest,
 
   // This is equivalent of the user arrowing down in the omnibox.
   edit_model()->SetPopupSelection(OmniboxPopupSelection(1));
-  EXPECT_EQ(observer.selected_children_changed_count(), 1);
-  EXPECT_EQ(observer.selection_changed_count(), 1);
+  EXPECT_EQ(observer.selected_children_changed_count(), 2);
+  EXPECT_EQ(observer.selection_changed_count(), 2);
   EXPECT_EQ(observer.value_changed_count(), 1);
   EXPECT_EQ(observer.active_descendant_changed_count(), 1);
 
   // This is equivalent of the user arrowing up in the omnibox.
   edit_model()->SetPopupSelection(OmniboxPopupSelection(0));
-  EXPECT_EQ(observer.selected_children_changed_count(), 2);
-  EXPECT_EQ(observer.selection_changed_count(), 2);
+  EXPECT_EQ(observer.selected_children_changed_count(), 4);
+  EXPECT_EQ(observer.selection_changed_count(), 4);
   EXPECT_EQ(observer.value_changed_count(), 2);
   EXPECT_EQ(observer.active_descendant_changed_count(), 2);
 
@@ -917,7 +919,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxPopupViewViewsTest, DeleteSuggestion) {
   EXPECT_EQ(OmniboxPopupSelection(1), edit_model()->GetPopupSelection());
 }
 
-// Flaky on Mac: https://crbug.com/1511356
+// Flaky on Mac: https://crbug.com/41483942
 // Flaky on Win and Linux: https://crbug.com/365250293
 #if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
 #define MAYBE_SpaceEntersKeywordMode DISABLED_SpaceEntersKeywordMode
@@ -942,7 +944,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxPopupViewViewsTest,
 }
 
 IN_PROC_BROWSER_TEST_F(OmniboxPopupViewViewsTest,
-                       AccesibilityAttributePopupForId) {
+                       AccessibilityAttributePopupForId) {
   CreatePopupForTestQuery();
   popup_view()->UpdatePopupAppearance();
   edit_model()->SetPopupSelection(OmniboxPopupSelection(0));
@@ -1232,4 +1234,146 @@ IN_PROC_BROWSER_TEST_F(OmniboxPopupViewViewsTest,
   // Check consolidated metric.
   histogram_tester.ExpectTotalCount(
       "TopChromeUI.OmniboxPopup.RequestToFirstContentfulPaint", 1);
+}
+
+class WidgetBoundsWaiter : public views::WidgetObserver {
+ public:
+  explicit WidgetBoundsWaiter(views::Widget* widget) {
+    observation_.Observe(widget);
+  }
+  WidgetBoundsWaiter(const WidgetBoundsWaiter&) = delete;
+  WidgetBoundsWaiter& operator=(const WidgetBoundsWaiter&) = delete;
+  ~WidgetBoundsWaiter() override = default;
+
+  void Wait() { run_loop_.Run(); }
+
+  // views::WidgetObserver:
+  void OnWidgetBoundsChanged(views::Widget* widget,
+                             const gfx::Rect& new_bounds) override {
+    run_loop_.Quit();
+  }
+
+ private:
+  base::RunLoop run_loop_;
+  base::ScopedObservation<views::Widget, views::WidgetObserver> observation_{
+      this};
+};
+
+class OmniboxPopupPermissionBrowserTest : public InProcessBrowserTest {
+ public:
+  OmniboxPopupPermissionBrowserTest() {
+    feature_list_.InitAndEnableFeature(omnibox::internal::kWebUIOmniboxPopup);
+  }
+
+  views::Widget* GetPopupWidget() {
+    auto* browser_view = BrowserView::GetBrowserViewForBrowser(browser());
+    auto* location_bar_view = browser_view->toolbar()->location_bar_view();
+    auto* popup_view = static_cast<OmniboxPopupViewWebUI*>(
+        location_bar_view->GetOmniboxPopupViewForTesting());
+    if (!popup_view || !popup_view->presenter()) {
+      return nullptr;
+    }
+    popup_view->presenter()->Show();
+    location_bar_view->GetOmniboxController()
+        ->popup_state_manager()
+        ->SetPopupState(OmniboxPopupState::kClassic);
+    return popup_view->presenter()->get_widget_for_testing();
+  }
+
+  void SetBrowserBounds(views::Widget* popup_widget, const gfx::Rect& bounds) {
+    views::Widget* browser_widget = views::Widget::GetWidgetForNativeWindow(
+        browser()->window()->GetNativeWindow());
+    WidgetBoundsWaiter browser_waiter(browser_widget);
+    WidgetBoundsWaiter popup_waiter(popup_widget);
+    browser()->window()->SetBounds(bounds);
+    browser_waiter.Wait();
+    popup_waiter.Wait();
+  }
+
+  void SimulateFrontendMojoMessage(bool is_showing,
+                                   const gfx::Size& prompt_size) {
+    auto* browser_view = BrowserView::GetBrowserViewForBrowser(browser());
+    auto* location_bar_view = browser_view->toolbar()->location_bar_view();
+    auto* popup_view = static_cast<OmniboxPopupViewWebUI*>(
+        location_bar_view->GetOmniboxPopupViewForTesting());
+    if (popup_view && popup_view->presenter()) {
+      views::Widget* popup_widget =
+          popup_view->presenter()->get_widget_for_testing();
+      std::optional<WidgetBoundsWaiter> waiter;
+      if (popup_widget) {
+        waiter.emplace(popup_widget);
+      }
+      popup_view->presenter()->OnEmbeddedPermissionDialogChanged(is_showing,
+                                                                 prompt_size);
+      if (waiter) {
+        waiter->Wait();
+      }
+    }
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+// Open Large -> Shrink, Open Small -> Grow
+IN_PROC_BROWSER_TEST_F(OmniboxPopupPermissionBrowserTest,
+                       DynamicWindowResizing) {
+  browser()->window()->GetLocationBar()->GetOmniboxView()->SetUserText(u"test");
+  views::Widget* popup_widget = GetPopupWidget();
+  ASSERT_TRUE(popup_widget);
+
+  // Force browser window to be small.
+  SetBrowserBounds(popup_widget, gfx::Rect(0, 0, 400, 600));
+
+  // Open PEPC prompt requesting 500px.
+  SimulateFrontendMojoMessage(true, gfx::Size(500, 400));
+
+  // PEPC prompt forced omnibox popup to grow to 500px.
+  EXPECT_GE(popup_widget->GetRestoredBounds().width(), 500);
+
+  // User manually drags browser window to be big.
+  SetBrowserBounds(popup_widget, gfx::Rect(0, 0, 1000, 600));
+
+  // Popup should adjust to the window size.
+  EXPECT_GE(popup_widget->GetRestoredBounds().width(), 800);
+
+  // User manually drags browser window back to small.
+  SetBrowserBounds(popup_widget, gfx::Rect(0, 0, 300, 600));
+
+  // Width of popup should adjust.
+  const int expected_width =
+      500 + RoundedOmniboxResultsFrame::GetShadowInsets().width();
+  EXPECT_EQ(popup_widget->GetRestoredBounds().width(), expected_width);
+}
+
+IN_PROC_BROWSER_TEST_F(OmniboxPopupPermissionBrowserTest,
+                       ResetsOnAllFrontendClosureActions) {
+  browser()->window()->GetLocationBar()->GetOmniboxView()->SetUserText(u"test");
+  views::Widget* popup_widget = GetPopupWidget();
+
+  // Small browser width.
+  SetBrowserBounds(popup_widget, gfx::Rect(0, 0, 400, 600));
+
+  auto test_frontend_closure = [&](const std::string& action_name) {
+    // Open the PEPC prompt.
+    SimulateFrontendMojoMessage(true, gfx::Size(500, 400));
+    EXPECT_GE(popup_widget->GetRestoredBounds().width(), 500)
+        << "Failed to expand for " << action_name;
+
+    // Simulate the user triggering the specific UI action that closes the
+    // prompt. In the frontend, clicking 'Allow', 'Deny', 'Allow Always', or
+    // blurring out all result in the UI sending [false, 0, 0] to the C++
+    // backend.
+    SimulateFrontendMojoMessage(false, gfx::Size());
+
+    // Assert the physical OS window actually shrunk back down to standard
+    // size.
+    EXPECT_LT(popup_widget->GetRestoredBounds().width(), 500)
+        << "Physical window failed to shrink after action: " << action_name;
+  };
+
+  test_frontend_closure("Allow");
+  test_frontend_closure("Deny/Close");
+  test_frontend_closure("Out of Focus (Blur)");
+  test_frontend_closure("Allow Always");
 }

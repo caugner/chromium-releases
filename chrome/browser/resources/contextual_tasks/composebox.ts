@@ -37,16 +37,17 @@ const ICON_TYPE_TO_NAME: {[id: number]: string} = {
   [IconType.kImage]: 'image',
   [IconType.kDrivePdf]: 'drivePdf',
   [IconType.kCheck]: 'check',
+  [IconType.kInvertedFormatQuoteFilled]: 'invertedQuoteFilled',
 };
 
 function recordVoiceSearchAction(voiceSearchState: VoiceSearchState) {
   // Safety return statement in rare case chrome metrics is not available.
-  if (!chrome.metricsPrivate) {
+  if (!chrome.histograms) {
     return;
   }
 
-  chrome.metricsPrivate.recordEnumerationValue(
-      'ContextualTasks.VoiceSearch.State', voiceSearchState,
+  chrome.histograms.recordEnumerationValue(
+      'ContextualTasks.VoiceSearch.StateV2', voiceSearchState,
       VoiceSearchState.MAX_VALUE + 1);
 }
 
@@ -114,6 +115,10 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
         type: Boolean,
         value: loadTimeData.getBoolean('composeboxShowContextMenu'),
       },
+      voiceSearchCoherenceEnabled_: {
+        type: Boolean,
+        reflect: true,
+      },
       zeroStateSuggestions_: {type: Object},
       inputState_: {
         type: Object,
@@ -141,13 +146,12 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
       selectedMatchIndex_: {type: Number},
       enableFileHint_: {type: Boolean},
       lensButtonDisabled_: {type: Boolean},
-      isCanvasQuerySubmitted: {type: Boolean},
       caretAnimationsEnabled_: {type: Boolean},
+      usePecApi_: {type: Boolean},
       energyEffectEnabled_: {type: Boolean, reflect: true},
       energyEffectAnimationEnabled_: {type: Boolean, reflect: true},
     };
   }
-
   accessor enableNativeZeroStateSuggestions: boolean = false;
   accessor inNlm: boolean = false;
   accessor inToolMode_: boolean = false;
@@ -156,7 +160,8 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
   accessor isLensOverlayShowing: boolean = false;
   accessor isOverlayOpenForAimVisualSearch: boolean = false;
   accessor inputEnabled: boolean = true;
-  accessor isCanvasQuerySubmitted: boolean = false;
+  private focusRetryCount_ = 0;
+  private focusAnimationFrameId_: number|null = null;
 
   protected accessor zeroStateSuggestions_: AutocompleteResult = {
     input: '',
@@ -174,6 +179,8 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
   protected accessor isComposeboxFocused_: boolean = false;
   protected accessor showContextMenu_: boolean =
       loadTimeData.getBoolean('composeboxShowContextMenu');
+  protected accessor voiceSearchCoherenceEnabled_: boolean =
+      loadTimeData.getBoolean('voiceSearchCoherenceComposeboxesEnabled');
   protected accessor inputState_: InputState|null = null;
   protected accessor showSuggestionsActivityLink_: boolean = false;
   protected accessor inVoiceSearchMode_: boolean = false;
@@ -200,6 +207,8 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
   private forceSkipSubmitGlifAnimation_: boolean = false;
   protected accessor caretAnimationsEnabled_: boolean =
       loadTimeData.getBoolean('caretAnimationEnabled');
+  protected accessor usePecApi_: boolean =
+      loadTimeData.getBoolean('contextualMenuUsePecApi');
   protected accessor energyEffectEnabled_: boolean =
       loadTimeData.getBoolean('energyEffectEnabled');
   // The use of energyEffectEnabled to set energyEffectAnimationEnabled_ is
@@ -342,13 +351,12 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
   }
 
   // Must have `$` access in updated to avoid violating Lit contract since
-  // since `willUpdate` runs before `render`, which will cause `$`
-  // to not be populated yet.
+  // `willUpdate` runs before `render`, which will cause `$` to not be
+  // populated yet.
   override updated(changedProperties: PropertyValues<this>) {
     super.updated(changedProperties);
     if (changedProperties.has('isZeroState')) {
       if (this.isZeroState) {
-        this.isCanvasQuerySubmitted = false;
         // Opening zero state triggers animation.
         this.$.composebox.animationState = GlowAnimationState.SUBMITTING;
       }
@@ -418,6 +426,7 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
       return;
     }
     this.lensButtonDisabled_ = false;
+    this.fire('update-tooltip-visibility');
   }
 
   protected onSuggestionsResultChanged_(e: CustomEvent<AutocompleteResult>) {
@@ -461,6 +470,10 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
     }
     this.clearInputAndFocus(/* querySubmitted= */ true);
     this.selectedMatchIndex_ = -1;
+  }
+
+  override focus() {
+    this.$.composebox.focusInput();
   }
 
   clearInputAndFocus(querySubmitted: boolean = false): void {
@@ -543,36 +556,15 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
     this.$.composebox.deleteFile(fileToken);
   }
 
+  isCanvasQuerySubmitted(): boolean {
+    return !this.isZeroState &&
+        (this.inputState?.isCanvasQuerySubmitted ?? false);
+  }
+
   getComposebox() {
     return this.$.composebox;
   }
 
-  setActiveTool(toolMode: ToolMode) {
-    this.searchboxHandler_.setActiveToolMode(toolMode);
-  }
-  setToolFromUrl(urlString: string) {
-    const urlObj = new URL(urlString);
-    const inputState = this.inputState;
-    if (inputState && inputState.toolConfigs) {
-      for (const config of inputState.toolConfigs) {
-        if (config.aimUrlParams && config.aimUrlParams.length > 0) {
-          const hasParam = config.aimUrlParams.some(p => {
-            const value = urlObj.searchParams.get(p.paramKey);
-            return value === p.paramValue;
-          });
-          if (hasParam) {
-            if (config.tool === 2 /* ToolMode.kCanvas */) {
-              this.isCanvasQuerySubmitted = true;
-            }
-            if (inputState.activeTool !== config.tool) {
-              this.setActiveTool(config.tool);
-            }
-            break;
-          }
-        }
-      }
-    }
-  }
 
   get isComposeboxFocusedForTesting() {
     return this.isComposeboxFocused_;
@@ -592,6 +584,36 @@ export class ContextualTasksComposeboxElement extends I18nMixinLit
 
   get resizeObserverForTesting() {
     return this.resizeObserver_;
+  }
+
+  tryFocus() {
+    if (this.focusAnimationFrameId_ !== null) {
+      cancelAnimationFrame(this.focusAnimationFrameId_);
+      this.focusAnimationFrameId_ = null;
+    }
+    this.focusRetryCount_ = 0;
+    this.runFocusLoop_();
+  }
+
+  private runFocusLoop_() {
+    this.focus();
+    if (this.isInputFocused_()) {
+      this.focusAnimationFrameId_ = null;
+      this.fire('composebox-focused');
+    } else if (this.focusRetryCount_ < 10) {
+      this.focusRetryCount_++;
+      this.focusAnimationFrameId_ =
+          requestAnimationFrame(() => this.runFocusLoop_());
+    } else {
+      this.focusAnimationFrameId_ = null;
+    }
+  }
+
+  private isInputFocused_(): boolean {
+    const inputEl = this.$.composebox.getInputElement()?.inputElement;
+    return inputEl ?
+        (inputEl.getRootNode() as ShadowRoot).activeElement === inputEl :
+        false;
   }
 }
 

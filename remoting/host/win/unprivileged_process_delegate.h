@@ -37,9 +37,15 @@ namespace remoting {
 class UnprivilegedProcessDelegate : public IPC::Listener,
                                     public WindowsProcessDelegate {
  public:
+  enum class IntegrityLevel {
+    kLow,
+    kUntrusted,
+  };
+
   UnprivilegedProcessDelegate(
       scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
-      std::unique_ptr<base::CommandLine> target_command);
+      std::unique_ptr<base::CommandLine> target_command,
+      IntegrityLevel integrity_level);
 
   UnprivilegedProcessDelegate(const UnprivilegedProcessDelegate&) = delete;
   UnprivilegedProcessDelegate& operator=(const UnprivilegedProcessDelegate&) =
@@ -55,6 +61,9 @@ class UnprivilegedProcessDelegate : public IPC::Listener,
   void CrashProcess(const base::Location& location) override;
   void KillProcess() override;
 
+ protected:
+  virtual void ReportProcessLaunched(base::win::ScopedHandle worker_process);
+
  private:
   // IPC::Listener implementation.
   void OnChannelConnected(int32_t peer_pid) override;
@@ -64,7 +73,6 @@ class UnprivilegedProcessDelegate : public IPC::Listener,
       mojo::ScopedInterfaceEndpointHandle handle) override;
 
   void ReportFatalError();
-  void ReportProcessLaunched(base::win::ScopedHandle worker_process);
 
   // The task runner serving job object notifications.
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
@@ -77,6 +85,8 @@ class UnprivilegedProcessDelegate : public IPC::Listener,
   std::unique_ptr<IPC::ChannelProxy> channel_;
 
   mojo::AssociatedRemote<mojom::WorkerProcessControl> worker_process_control_;
+
+  IntegrityLevel integrity_level_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 };

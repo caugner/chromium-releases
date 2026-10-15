@@ -1750,18 +1750,12 @@ void MenuController::SetSelection(MenuItemView* menu_item,
   }
 
   if (should_notify_selected_child_changed) {
-    // Notify an accessibility selected children changed event on the parent
-    // submenu.
+    // Update the active descendant on the containing SubmenuView to point to
+    // the selected menu item, unless a hot button has focus (in which case
+    // the hot button is the active descendant).
     if (menu_item->GetParentMenuItem() &&
         menu_item->GetParentMenuItem()->GetSubmenu()) {
       SubmenuView* submenu = menu_item->GetParentMenuItem()->GetSubmenu();
-      submenu->NotifyAccessibilityEventDeprecated(
-          ax::mojom::Event::kSelectedChildrenChanged,
-          /*send_native_event=*/true);
-
-      // Update the active descendant on the containing SubmenuView to point to
-      // the selected menu item, unless a hot button has focus (in which case
-      // the hot button is the active descendant).
       if (!hot_button_) {
         submenu->GetViewAccessibility().SetActiveDescendant(*menu_item);
       }
@@ -3764,6 +3758,10 @@ void MenuController::SetHotTrackedButton(Button* new_hot_button) {
         submenu->GetViewAccessibility().SetActiveDescendant(*hot_button_);
       }
     }
+
+    // TODO(crbug.com/40672441): Handle this manually fired event for ViewsAX.
+    hot_button_->NotifyAccessibilityEventDeprecated(
+        ax::mojom::Event::kSelection, true);
   } else {
     // When clearing the hot button, restore active descendant to the selected
     // menu item if one exists.

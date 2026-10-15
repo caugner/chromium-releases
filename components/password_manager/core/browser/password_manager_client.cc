@@ -191,7 +191,8 @@ PasswordManagerClient::GetWebAuthnCredManDelegateForDriver(
   return nullptr;
 }
 
-void PasswordManagerClient::MarkSharedCredentialsAsNotified(const GURL& url) {}
+void PasswordManagerClient::MarkSharedCredentialsAsNotified(
+    const url::Origin& origin) {}
 
 #endif  // BUILDFLAG(IS_ANDROID)
 
@@ -211,10 +212,8 @@ PasswordManagerClient::GetUndoPasswordChangeController() {
   return nullptr;
 }
 
-#if !BUILDFLAG(IS_ANDROID)
 bool PasswordManagerClient::IsActorTaskActive() {
   return false;
 }
-#endif  // !BUILDFLAG(IS_ANDROID)
 
 }  // namespace password_manager

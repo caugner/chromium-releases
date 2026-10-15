@@ -1,6 +1,7 @@
 // Copyright 2025 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+import {isDistilledByReadability} from '../shared/common.js';
 import {getTextNodeOffsets} from '../shared/dom_queries.js';
 
 import {NodeStore} from './node_store.js';
@@ -111,10 +112,25 @@ export class SelectionController {
       return;
     }
 
+    // Only notify about selection changes if the side panel has focus. This
+    // ensures the change originates from direct user interaction within the
+    // side panel.
+    if (!document.hasFocus()) {
+      return;
+    }
+
     if ((selection === null) || !selection.anchorNode || !selection.focusNode) {
       // The selection was collapsed by clicking inside the selection.
       chrome.readingMode.onCollapseSelection();
       return;
+    }
+
+    // If we're using Readability with select text enabled, report a user
+    // selection attempt to try to log this as an early selection attempt from
+    // the side panel.
+    if (isDistilledByReadability() &&
+        chrome.readingMode.isReadabilitySelectTextEnabled) {
+      chrome.readingMode.attemptLogEarlySelection(/*fromSidePanel=*/ true);
     }
 
     const {anchorNodeId, anchorOffset, focusNodeId, focusOffset} =
@@ -122,6 +138,10 @@ export class SelectionController {
             selection.anchorNode, selection.anchorOffset, selection.focusNode,
             selection.focusOffset);
     if (!anchorNodeId || !focusNodeId) {
+      // The selection is on a node that doesn't map to the article text (e.g.
+      // the background or UI elements). Collapse the main panel selection to
+      // match the resulting collapsed state in the side panel.
+      chrome.readingMode.onCollapseSelection();
       return;
     }
 
@@ -145,20 +165,24 @@ export class SelectionController {
       focusOffset: number): SelectionWithIds {
     let anchorNodeId = this.nodeStore_.getAxId(anchorNode);
     let focusNodeId = this.nodeStore_.getAxId(focusNode);
-    let adjustedAnchorOffset = anchorOffset;
-    let adjustedFocusOffset = focusOffset;
+    let adjustedAnchorOffset =
+        anchorOffset + this.nodeStore_.getAxNodeOffset(anchorNode);
+    let adjustedFocusOffset =
+        focusOffset + this.nodeStore_.getAxNodeOffset(focusNode);
     if (!anchorNodeId) {
       const ancestor = this.nodeStore_.getAncestor(anchorNode);
       if (ancestor) {
         anchorNodeId = this.nodeStore_.getAxId(ancestor.node);
-        adjustedAnchorOffset += ancestor.offset;
+        adjustedAnchorOffset +=
+            ancestor.offset + this.nodeStore_.getAxNodeOffset(ancestor.node);
       }
     }
     if (!focusNodeId) {
       const ancestor = this.nodeStore_.getAncestor(focusNode);
       if (ancestor) {
         focusNodeId = this.nodeStore_.getAxId(ancestor.node);
-        adjustedFocusOffset += ancestor.offset;
+        adjustedFocusOffset +=
+            ancestor.offset + this.nodeStore_.getAxNodeOffset(ancestor.node);
       }
     }
     return {
@@ -181,9 +205,17 @@ export class SelectionController {
     }
     const {startNodeId, endNodeId, hasValidSelection} = chrome.readingMode;
     if (!startNodeId || !endNodeId || !hasValidSelection) {
-      // The selection is the main panel collapsed, so clear the selection here.
+      // The selection in the main panel collapsed, so clear the selection here.
       selectionToUpdate.removeAllRanges();
       return;
+    }
+
+    // If we're using Readability with select text enabled, report a user
+    // selection attempt to try to log this as an early selection attempt from
+    // the main panel.
+    if (isDistilledByReadability() &&
+        chrome.readingMode.isReadabilitySelectTextEnabled) {
+      chrome.readingMode.attemptLogEarlySelection(/*fromSidePanel=*/ false);
     }
 
     const newSelection = this.getNewSelection_(container);
@@ -218,7 +250,9 @@ export class SelectionController {
       return;
     }
     this.scrollingOnSelection_ = true;
-    anchorElement.scrollIntoViewIfNeeded();
+    requestAnimationFrame(() => {
+      anchorElement.scrollIntoViewIfNeeded();
+    });
   }
 
   private getNewSelection_(container: Node): ReadOnlySelection|null {
@@ -229,9 +263,13 @@ export class SelectionController {
       focusOffset: chrome.readingMode.endOffset,
     };
 
-    return chrome.readingMode.isReadabilityEnabled ?
-        this.getNewSelectionWithoutAxIds_(container, selectionIds) :
-        this.getNewSelectionWithAxIds_(selectionIds);
+    if (isDistilledByReadability()) {
+      return chrome.readingMode.isReadabilitySelectTextEnabled ?
+          this.getNewSelectionWithAxIds_(selectionIds) :
+          this.getNewSelectionWithoutAxIds_(container, selectionIds);
+    }
+
+    return this.getNewSelectionWithAxIds_(selectionIds);
   }
 
   private getNewSelectionWithoutAxIds_(
@@ -303,6 +341,18 @@ export class SelectionController {
     let anchorNode = this.nodeStore_.getDomNode(anchorNodeId);
     let focusNode = this.nodeStore_.getDomNode(focusNodeId);
     if (!anchorNode || !focusNode) {
+      return null;
+    }
+
+    // Convert AXNode-relative offsets to offsets relative to the side panel's
+    // distilled text fragment.
+    anchorOffset -= this.nodeStore_.getAxNodeOffset(anchorNode);
+    focusOffset -= this.nodeStore_.getAxNodeOffset(focusNode);
+
+    // Filter out main panel selections that don't overlap the text shown
+    // in the side panel.
+    if (anchorOffset < 0 ||
+        anchorOffset > (anchorNode.textContent?.length ?? 0)) {
       return null;
     }
 

@@ -50,6 +50,7 @@
 #include "services/network/public/cpp/permissions_policy/permissions_policy_declaration.h"
 #include "services/network/public/mojom/network_context.mojom.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
+#include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/mojom/on_device_translation/translation_manager.mojom-forward.h"
 #include "third_party/blink/public/mojom/worker/shared_worker_info.mojom.h"
 #include "ui/base/clipboard/clipboard_metadata.h"
@@ -218,11 +219,11 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       const GURL& precursor,
       const GURL& url) override;
   bool DoesWebUIUrlRequireProcessLock(const GURL& url) override;
-  bool ShouldTreatURLSchemeAsFirstPartyWhenTopLevel(
-      std::string_view scheme,
+  bool ShouldTreatAsFirstPartyWhenTopLevel(
+      const url::Origin& top_frame_origin,
       bool is_embedded_origin_secure) override;
   bool ShouldIgnoreSameSiteCookieRestrictionsWhenTopLevel(
-      std::string_view scheme,
+      const url::Origin& top_frame_origin,
       bool is_embedded_origin_secure) override;
   std::string GetSiteDisplayNameForCdmProcess(
       content::BrowserContext* browser_context,
@@ -304,8 +305,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   bool IsInitialWebUIURL(const GURL& url) override;
 #endif  // !BUILDFLAG(IS_ANDROID)
   bool IsTopChromeWebUIURL(const GURL& url) override;
-  bool IsIsolatedContextAllowedForUrl(content::BrowserContext* browser_context,
-                                      const GURL& lock_url) override;
   bool IsMultiCaptureAllowed(
       content::RenderFrameHost* render_frame_host) override;
   bool IsFileAccessAllowed(const base::FilePath& path,
@@ -320,6 +319,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   std::string GetAcceptLangs(content::BrowserContext* context) override;
   gfx::ImageSkia GetDefaultFavicon() override;
   bool IsDataSaverEnabled(content::BrowserContext* context) override;
+  bool IsPinchToZoomAllowed(content::BrowserContext* context) override;
   void UpdateRendererPreferencesForWorker(
       content::BrowserContext* browser_context,
       blink::RendererPreferences* out_prefs) override;
@@ -354,6 +354,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   bool AllowCompressionDictionaryTransport(
       content::BrowserContext* context) override;
   bool AllowSharedWorkerBlobURLFix(content::BrowserContext* context) override;
+  bool IsDataUrlInWebWorkerOpaqueOriginEnabled(
+      content::BrowserContext* context) override;
   bool AllowSharedWorkerExtendedLifetime(
       content::BrowserContext* context) override;
   void RequestFilesAccess(
@@ -522,7 +524,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   media::mojom::AvailabilityStatus
   GetOnDeviceSpeechRecognitionAvailabilityStatus(
       content::BrowserContext* context,
-      const std::string& language) override;
+      const std::string& language,
+      media::mojom::SpeechRecognitionQuality quality) override;
 #if BUILDFLAG(IS_CHROMEOS)
   content::TtsControllerDelegate* GetTtsControllerDelegate() override;
 #endif
@@ -613,8 +616,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::WebUIBrowserInterfaceBrokerRegistry& registry) override;
   void RegisterMojoBinderPoliciesForSameOriginPrerendering(
       content::MojoBinderPolicyMap& policy_map) override;
-  void RegisterMojoBinderPoliciesForPreview(
-      content::MojoBinderPolicyMap& policy_map) override;
+
   void RegisterBrowserInterfaceBindersForServiceWorker(
       content::BrowserContext* browser_context,
       const content::ServiceWorkerVersionBaseInfo& service_worker_version_info,
@@ -686,6 +688,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::FrameTreeNodeId frame_tree_node_id) override;
   void RegisterNonNetworkWorkerMainResourceURLLoaderFactories(
       content::BrowserContext* browser_context,
+      const std::optional<url::Origin>& request_initiator,
+      network::mojom::RequestDestination request_destination,
       NonNetworkURLLoaderFactoryMap* factories) override;
   void RegisterNonNetworkServiceWorkerUpdateURLLoaderFactories(
       content::BrowserContext* browser_context,
@@ -870,11 +874,13 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   void StartRtcDiagnosticLogging(
       content::RenderFrameHost& frame_host,
       bool should_upload_on_stop,
-      base::flat_map<std::string, std::string> metadata,
+      const base::flat_map<std::string, std::string>& metadata,
       base::OnceCallback<void(const std::string&)> callback) override;
 
-  void FinishRtcDiagnosticLogging(content::RenderFrameHost& frame_host,
-                                  base::OnceClosure callback) override;
+  void FinishRtcDiagnosticLogging(
+      content::RenderFrameHost& frame_host,
+      const base::flat_map<std::string, std::string>& metadata,
+      base::OnceClosure callback) override;
 
   void CancelRtcDiagnosticLogging(content::RenderFrameHost& frame_host,
                                   base::OnceClosure callback) override;
@@ -1061,6 +1067,11 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::WebContents* web_contents) override;
 
   bool ShouldUseFirstPartyStorageKey(const url::Origin& origin) override;
+  content::RenderFrameHost* GetPostMessageTargetOverride(
+      content::RenderFrameHost* target_rfh,
+      const std::optional<blink::LocalFrameToken>& source_frame_token,
+      const url::Origin& source_origin,
+      const std::optional<url::Origin>& target_origin) override;
 
   bool ShouldSkipBeforeUnloadDialog(content::RenderFrameHost* rfh) override;
 
@@ -1203,6 +1214,9 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       net::HttpRequestHeaders& modified_cors_exempt_headers) override;
   void UpdateCorsExemptHeaderForPrefetch(
       network::mojom::NetworkContextParams* params) override;
+
+  std::optional<int> GetCpuPerformanceTierOverride(
+      content::BrowserContext* browser_context) override;
 
   void RecordAssistedLogin(
       content::ContentBrowserClient::AssistedLoginType login_type) override;

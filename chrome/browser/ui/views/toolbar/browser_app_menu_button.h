@@ -39,6 +39,7 @@ class BrowserAppMenuButton : public AppMenuButton {
 
   // Shows the app menu. |run_types| denotes the MenuRunner::RunTypes associated
   // with the menu.
+  using AppMenuButton::ShowMenu;
   void ShowMenu(int run_types);
 
   // Opens the app menu immediately during a drag-and-drop operation.
@@ -57,11 +58,17 @@ class BrowserAppMenuButton : public AppMenuButton {
   // Updates the presentation according to |severity_| and the theme provider.
   void UpdateIcon() override;
 
+  // ToolbarButton:
+  void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
+
   // views::AnimationDelegate:
   void AnimationProgressed(const gfx::Animation* animation) override;
 
   // Need to override to implement the Expand and Collapse actions.
   bool HandleAccessibleAction(const ui::AXActionData& action_data) override;
+
+  // views::View:
+  gfx::Size GetMinimumSize() const override;
 
  private:
   void OnTouchUiChanged();

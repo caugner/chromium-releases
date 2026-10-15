@@ -692,18 +692,19 @@ final class ChromeAndroidTaskImpl
     }
 
     @Override
-    public <T extends ChromeAndroidTaskFeature> void addFeature(
+    public <T extends ChromeAndroidTaskFeature> @Nullable ChromeAndroidTaskFeature addFeature(
             ChromeAndroidTaskFeatureKey featureKey, Supplier<@Nullable T> featureSupplier) {
         ThreadUtils.assertOnUiThread();
         assertPendingCreateOrIdle();
 
-        if (mFeatures.containsKey(featureKey)) {
-            return;
+        ChromeAndroidTaskFeature feature = mFeatures.get(featureKey);
+        if (feature != null) {
+            return feature;
         }
 
-        var feature = featureSupplier.get();
+        feature = featureSupplier.get();
         if (feature == null) {
-            return;
+            return null;
         }
 
         mFeatures.put(featureKey, feature);
@@ -740,6 +741,8 @@ final class ChromeAndroidTaskImpl
         if (tabModelSelector != null) {
             feature.onTabModelSelected(tabModelSelector.getCurrentModel());
         }
+
+        return feature;
     }
 
     @Override
@@ -759,6 +762,25 @@ final class ChromeAndroidTaskImpl
         var browserWindow = getTopmostWindowWithProfile(profile);
         assert browserWindow != null : "No AndroidBrowserWindow found for given Profile.";
         return browserWindow.getOrCreateNativePtr();
+    }
+
+    @Override
+    public long getNativeBrowserWindowPtr(Profile profile, Activity activity) {
+        ThreadUtils.assertOnUiThread();
+        assert mState == State.PENDING_CREATE
+                        || mState == State.IDLE
+                        || mState == State.PENDING_UPDATE
+                : "This Task is not pending or alive.";
+        for (var obj : mActivityScopedObjectsDeque) {
+            if (obj.mActivityScopedObjects.mActivityWindowAndroid.getActivity().get() == activity) {
+                var browserWindow = obj.mAndroidBrowserWindows.get(profile);
+                if (browserWindow != null) {
+                    return browserWindow.getNativePtr();
+                }
+                return 0;
+            }
+        }
+        return 0;
     }
 
     @Override
@@ -821,6 +843,7 @@ final class ChromeAndroidTaskImpl
                     == internalActivityScopedObjects.mActivityScopedObjects.mActivityWindowAndroid;
         }
         long ptr = browserWindow.getNativePtr();
+        assert ptr != 0 : "Native object has not been created.";
 
         if (internalActivityScopedObjects != null) {
             var profile = browserWindow.getProfile();

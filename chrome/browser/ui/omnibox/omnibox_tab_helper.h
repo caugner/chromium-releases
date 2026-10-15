@@ -91,14 +91,14 @@ class OmniboxTabHelper
   // page_content_annotations::PageContentExtractionService::Observer
   void OnPageContentExtracted(
       content::Page& page,
-      scoped_refptr<
-          const page_content_annotations::RefCountedAnnotatedPageContent>
-          page_content) override;
+      page_content_annotations::PageContent page_content) override;
 
   // content::WebContentsObserver
   void PrimaryPageChanged(content::Page& page) override;
   void PrimaryMainDocumentElementAvailable() override;
   void DOMContentLoaded(content::RenderFrameHost* render_frame_host) override;
+  void DidFinishNavigation(
+      content::NavigationHandle* navigation_handle) override;
 
   // Logs the timings from a navigation to the omnibox being focused, IFF they
   // have not already been logged for this navigation.

@@ -25,6 +25,7 @@ import org.junit.Test;
 import org.junit.experimental.runners.Enclosed;
 import org.junit.runner.RunWith;
 
+import org.chromium.android_webview.common.SafeModeAction;
 import org.chromium.android_webview.common.SafeModeController;
 import org.chromium.android_webview.common.services.ISafeModeService;
 import org.chromium.android_webview.services.ComponentUpdaterResetSafeModeAction;
@@ -172,13 +173,17 @@ public class ComponentsProviderServiceTest {
             assertBundleForValidComponent(resultBundle, componentId, sequenceNumber, version);
 
             Intent intent = new Intent(ContextUtils.getApplicationContext(), SafeModeService.class);
-            final String componentUpdaterResetActionId =
-                    new ComponentUpdaterResetSafeModeAction().getId();
+            SafeModeAction componentUpdaterSafeModeAction =
+                    new ComponentUpdaterResetSafeModeAction();
+            final String componentUpdaterResetActionId = componentUpdaterSafeModeAction.getId();
             try (ServiceConnectionHelper helper =
                     new ServiceConnectionHelper(intent, Context.BIND_AUTO_CREATE)) {
                 ISafeModeService service = ISafeModeService.Stub.asInterface(helper.getBinder());
                 service.setSafeMode(Arrays.asList(componentUpdaterResetActionId));
             }
+            // Must call registerActions before queryActions.
+            SafeModeController.getInstance()
+                    .registerActions(new SafeModeAction[] {componentUpdaterSafeModeAction});
 
             Assert.assertTrue(
                     "SafeMode should be enabled",
@@ -209,14 +214,17 @@ public class ComponentsProviderServiceTest {
             assertBundleForValidComponent(resultBundle, componentId, sequenceNumber, version);
 
             Intent intent = new Intent(ContextUtils.getApplicationContext(), SafeModeService.class);
-            final String variationsSeedSafeModeActionId =
-                    new VariationsSeedSafeModeAction().getId();
+            SafeModeAction variationsSeedSafeModeAction = new VariationsSeedSafeModeAction();
+            final String variationsSeedSafeModeActionId = variationsSeedSafeModeAction.getId();
 
             try (ServiceConnectionHelper helper =
                     new ServiceConnectionHelper(intent, Context.BIND_AUTO_CREATE)) {
                 ISafeModeService service = ISafeModeService.Stub.asInterface(helper.getBinder());
                 service.setSafeMode(Arrays.asList(variationsSeedSafeModeActionId));
             }
+            // Must call registerActions before queryActions.
+            SafeModeController.getInstance()
+                    .registerActions(new SafeModeAction[] {variationsSeedSafeModeAction});
 
             Assert.assertTrue(
                     "SafeMode should be enabled",
@@ -261,6 +269,9 @@ public class ComponentsProviderServiceTest {
             Assert.assertNotNull(componentId + " should not return a null result Bundle", bundle);
             Assert.assertFalse(
                     componentId + " should not return an empty result Bundle", bundle.isEmpty());
+            // Bundle.getSerializable returns Serializable; parameterized cast is inherently
+            // unchecked.
+            @SuppressWarnings("unchecked")
             final HashMap<String, ParcelFileDescriptor> map =
                     (HashMap<String, ParcelFileDescriptor>)
                             bundle.getSerializable(ComponentsProviderService.KEY_RESULT);

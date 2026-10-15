@@ -4,6 +4,7 @@
 
 #include "chrome/browser/extensions/api/tabs/tabs_api.h"
 
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/pattern.h"
 #include "base/strings/string_number_conversions.h"
@@ -28,12 +29,12 @@
 #include "chrome/browser/resource_coordinator/utils.h"
 #include "chrome/browser/tab_list/tab_list_interface.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
-#include "chrome/browser/ui/browser_navigator.h"
-#include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
 #include "chrome/browser/ui/browser_window/public/create_browser_window.h"
 #include "chrome/browser/ui/incognito_allowed_url.h"
+#include "chrome/browser/ui/navigator/browser_navigator.h"
+#include "chrome/browser/ui/navigator/browser_navigator_params.h"
 #include "chrome/browser/ui/recently_audible_helper.h"
 #include "chrome/browser/ui/tabs/tab_muted_utils.h"
 #include "chrome/browser/web_applications/web_app_helpers.h"
@@ -48,6 +49,9 @@
 #include "components/zoom/zoom_controller.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/navigation_handle.h"
+#include "extensions/browser/api/constants.h"
+#include "extensions/browser/extension_user_activation_service.h"
 #include "extensions/browser/extension_zoom_request_client.h"
 #include "extensions/browser/extensions_browser_client.h"
 #include "extensions/buildflags/buildflags.h"
@@ -56,6 +60,8 @@
 #include "extensions/common/manifest_handlers/incognito_info.h"
 #include "extensions/common/mojom/api_permission_id.mojom-shared.h"
 #include "extensions/common/permissions/permissions_data.h"
+#include "services/metrics/public/cpp/ukm_builders.h"
+#include "services/metrics/public/cpp/ukm_recorder.h"
 #include "third_party/blink/public/common/page/page_zoom.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/base_window.h"
@@ -64,15 +70,12 @@
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "chrome/browser/resource_coordinator/tab_lifecycle_unit_external.h"
-#include "chrome/browser/resource_coordinator/tab_manager.h"
 #endif
 
 #if !BUILDFLAG(IS_ANDROID)
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/tabs/tab_model.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/web_applications/app_browser_controller.h"
 #include "chrome/browser/ui/web_applications/web_app_launch_utils.h"
 #include "chrome/browser/ui/window_sizer/window_sizer.h"
@@ -189,7 +192,7 @@ bool SetOpenerOfTab(Profile& profile,
                     ::tabs::TabInterface& tab,
                     ::tabs::TabInterface& opener,
                     std::string& error) {
-  // Bug fix for crbug.com/1197888. Don't let the extension update the tab
+  // Bug fix for crbug.com/40055514. Don't let the extension update the tab
   // if the user is dragging tabs.
   if (!ExtensionTabUtil::IsTabStripEditable(profile)) {
     error = ExtensionTabUtil::kTabStripNotEditableError;
@@ -526,6 +529,149 @@ std::vector<::tabs::TabHandle> GetTabsInSplit(
   }
 
   return split_tabs;
+}
+
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class UpdateActionType {
+  // Updates that are not redirects for the default search engine page.
+  kOtherUpdates = 0,
+  // Updates that are redirects for the default search engine page which are
+  // not a result of a user gesture.
+  kDSERedirectsWithoutUserGesture = 1,
+  // Updates that are redirects for the default search engine page after a user
+  // gesture has occurred.
+  kDSERedirectsWithUserGesture = 2,
+  // Updates that are redirects after the user has landed on the search engine
+  // results page (SERP) for a while.
+  kDSERedirectsAfterLandingOnSERP = 3,
+  // The maximum value of the UpdateActionType enum.
+  kMaxValue = kDSERedirectsAfterLandingOnSERP,
+};
+
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class RemoveActionType {
+  // Removals that are not for the default search engine page.
+  kOtherRemovals = 0,
+  // Removals of the default search engine page which are not a result of a user
+  // gesture.
+  kDSERemovalsWithoutUserGesture = 1,
+  // Removals of the default search engine page after a user gesture has
+  // occurred.
+  kDSERemovalsWithUserGesture = 2,
+  // Removals of the default search engine page after the user has landed on the
+  // search engine results page (SERP) for a while.
+  kDSERemovalsAfterLandingOnSERP = 3,
+  // The maximum value of the RemoveActionType enum.
+  kMaxValue = kDSERemovalsAfterLandingOnSERP,
+};
+
+bool HasUserActivation(const ExtensionId& extension_id,
+                       content::BrowserContext& browser_context,
+                       content::RenderFrameHost* calling_render_frame_host,
+                       content::WebContents& tab_web_contents,
+                       bool extension_function_user_gesture) {
+  return extension_function_user_gesture ||
+         ExtensionUserActivationService::Get(&browser_context)
+             ->HasTransientActivation(extension_id) ||
+         (calling_render_frame_host &&
+          calling_render_frame_host->HasTransientUserActivation()) ||
+         (tab_web_contents.GetPrimaryMainFrame() &&
+          tab_web_contents.GetPrimaryMainFrame()->HasTransientUserActivation());
+}
+
+// Returns true if a Tabs API update call is a default search engine (DSE)
+// redirect without a user gesture.
+// An update is considered a DSE redirect if the source URL is the DSE page and
+// the destination URL is not the DSE page, and the update is not a result of a
+// user gesture.
+bool IsDSERedirect(const ExtensionId& extension_id,
+                   content::BrowserContext& browser_context,
+                   content::RenderFrameHost* calling_render_frame_host,
+                   content::WebContents& tab_web_contents,
+                   const GURL& destination_url,
+                   bool extension_function_user_gesture) {
+  auto is_dse_redirect = [&browser_context,
+                          &destination_url](const GURL& source_url) {
+    return ExtensionsBrowserClient::Get()->IsDefaultSearchEngineRedirect(
+        &browser_context, source_url, destination_url);
+  };
+
+  // If there is a pending entry, proceed to checking user gestures since the
+  // user may have not yet landed on the DSE page.
+  content::NavigationEntry* entry =
+      tab_web_contents.GetController().GetPendingEntry();
+  if (!entry) {
+    entry = tab_web_contents.GetController().GetLastCommittedEntry();
+    // Assume no redirect if user has landed on the DSE page for a while.
+    if (entry && base::Time::Now() - entry->GetTimestamp() > base::Seconds(5)) {
+      base::UmaHistogramEnumeration(
+          "Extensions.Tabs.UpdateAction",
+          is_dse_redirect(entry->GetURL())
+              ? UpdateActionType::kDSERedirectsAfterLandingOnSERP
+              : UpdateActionType::kOtherUpdates);
+      return false;
+    }
+  }
+  if (!entry || !is_dse_redirect(entry->GetURL())) {
+    base::UmaHistogramEnumeration("Extensions.Tabs.UpdateAction",
+                                  UpdateActionType::kOtherUpdates);
+    return false;
+  }
+  bool has_user_activation = HasUserActivation(
+      extension_id, browser_context, calling_render_frame_host,
+      tab_web_contents, extension_function_user_gesture);
+  base::UmaHistogramEnumeration(
+      "Extensions.Tabs.UpdateAction",
+      has_user_activation ? UpdateActionType::kDSERedirectsWithUserGesture
+                          : UpdateActionType::kDSERedirectsWithoutUserGesture);
+  return !has_user_activation;
+}
+
+// Returns true if a Tabs API remove call is a default search engine (DSE)
+// removal without a user gesture.
+// A removal is considered a DSE removal if the source URL is the DSE page and
+// the removal is not a result of a user gesture.
+bool IsDSERemoval(const ExtensionId& extension_id,
+                  content::BrowserContext& browser_context,
+                  content::RenderFrameHost* calling_render_frame_host,
+                  content::WebContents& tab_web_contents,
+                  bool extension_function_user_gesture) {
+  auto is_dse = [&browser_context](const GURL& source_url) {
+    return ExtensionsBrowserClient::Get()->IsDefaultSearchEngineRedirect(
+        &browser_context, source_url, GURL());
+  };
+
+  // If there is a pending entry, proceed to checking user gestures since the
+  // user may have not yet landed on the DSE page.
+  content::NavigationEntry* entry =
+      tab_web_contents.GetController().GetPendingEntry();
+  if (!entry) {
+    entry = tab_web_contents.GetController().GetLastCommittedEntry();
+    // Assume no removal if user has landed on the DSE page for a while.
+    if (entry && base::Time::Now() - entry->GetTimestamp() > base::Seconds(5)) {
+      base::UmaHistogramEnumeration(
+          "Extensions.Tabs.RemoveAction",
+          is_dse(entry->GetURL())
+              ? RemoveActionType::kDSERemovalsAfterLandingOnSERP
+              : RemoveActionType::kOtherRemovals);
+      return false;
+    }
+  }
+  if (!entry || !is_dse(entry->GetURL())) {
+    base::UmaHistogramEnumeration("Extensions.Tabs.RemoveAction",
+                                  RemoveActionType::kOtherRemovals);
+    return false;
+  }
+  bool has_user_activation = HasUserActivation(
+      extension_id, browser_context, calling_render_frame_host,
+      tab_web_contents, extension_function_user_gesture);
+  base::UmaHistogramEnumeration(
+      "Extensions.Tabs.RemoveAction",
+      has_user_activation ? RemoveActionType::kDSERemovalsWithUserGesture
+                          : RemoveActionType::kDSERemovalsWithoutUserGesture);
+  return !has_user_activation;
 }
 
 }  // namespace
@@ -938,13 +1084,6 @@ ExtensionFunction::ResponseAction WindowsCreateFunction::Run() {
     if (!bounds_error.empty()) {
       return RespondNow(Error(std::move(bounds_error)));
     }
-
-    // Record the window height and width to determine if we
-    // can set a mininimum value for them (crbug.com/1369103).
-    UMA_HISTOGRAM_COUNTS_1000("Extensions.CreateWindowWidth",
-                              window_bounds.width());
-    UMA_HISTOGRAM_COUNTS_1000("Extensions.CreateWindowHeight",
-                              window_bounds.height());
 
     set_self_as_opener_ =
         create_data_->set_self_as_opener && *create_data_->set_self_as_opener;
@@ -1768,7 +1907,11 @@ bool TabsQueryFunction::MatchesWindow(
 
   WindowController* window_controller =
       BrowserExtensionWindowController::From(candidate_browser);
-  CHECK(window_controller);
+  // Some browser candidates don't have window controllers.
+  // https://crbug.com/501003339
+  if (!window_controller) {
+    return false;
+  }
   if (!window_controller->IsVisibleToTabsAPIForExtension(
           extension(), /*include_dev_tools_windows=*/false)) {
     return false;
@@ -1861,6 +2004,8 @@ bool TabsQueryFunction::MatchesTab(::tabs::TabInterface* candidate_tab,
       resource_coordinator::TabLifecycleUnitExternal::FromWebContents(
           web_contents);
 
+  // TODO(https://crbug.com/505306735): Add support (or appropriately handle)
+  // tab freezing, discarding, and auto-discarding on desktop android.
   if (!MatchesBool(query_info_.frozen,
                    tab_lifecycle_unit_external->GetTabState() ==
                        ::mojom::LifecycleUnitState::FROZEN)) {
@@ -1936,7 +2081,7 @@ ExtensionFunction::ResponseAction TabsCreateFunction::Run() {
   index_ = create_properties.index;
   original_url_ = std::move(create_properties.url);
 
-  validated_url_ = GURL(chrome::kChromeUINewTabURL);
+  validated_url_ = chrome::ChromeUINewTabURLAsGURL();
   if (original_url_) {
     base::expected<GURL, std::string> maybe_url =
         ExtensionTabUtil::PrepareURLForNavigation(*original_url_, extension(),
@@ -2439,7 +2584,7 @@ ExtensionFunction::ResponseAction TabsUpdateFunction::Run() {
     }
   }
 
-  // TODO(https://crbug.com/447211263): Support on desktop android.
+  // TODO(https://crbug.com/505306735): Support on desktop android.
 #if !BUILDFLAG(IS_ANDROID)
   if (params->update_properties.auto_discardable) {
     bool state = *params->update_properties.auto_discardable;
@@ -2453,7 +2598,7 @@ ExtensionFunction::ResponseAction TabsUpdateFunction::Run() {
     bool pinned = *params->update_properties.pinned;
 
     if (target_tab->IsPinned() != pinned) {
-      // Bug fix for crbug.com/1197888. Don't let the extension update the tab
+      // Bug fix for crbug.com/40055514. Don't let the extension update the tab
       // if the user is dragging tabs.
       if (!ExtensionTabUtil::IsTabStripEditable(*window->profile())) {
         return RespondNow(Error(ExtensionTabUtil::kTabStripNotEditableError));
@@ -2563,7 +2708,7 @@ bool TabsUpdateFunction::UpdateActiveTab(
   }
 #endif
 
-  // Bug fix for crbug.com/1197888. Don't let the extension update the tab
+  // Bug fix for crbug.com/40055514. Don't let the extension update the tab
   // if the user is dragging tabs.
   if (!ExtensionTabUtil::IsTabStripEditable(profile)) {
     error = ExtensionTabUtil::kTabStripNotEditableError;
@@ -2595,7 +2740,7 @@ bool TabsUpdateFunction::UpdateHighlightedTab(
     return true;
   }
 
-  // Bug fix for crbug.com/1197888. Don't let the extension update the tab
+  // Bug fix for crbug.com/40055514. Don't let the extension update the tab
   // if the user is dragging tabs.
   if (!ExtensionTabUtil::IsTabStripEditable(profile)) {
     error = ExtensionTabUtil::kTabStripNotEditableError;
@@ -2662,6 +2807,20 @@ bool TabsUpdateFunction::UpdateURL(content::WebContents* web_contents,
     return false;
   }
 
+  if (IsDSERedirect(extension()->id(), *browser_context(), render_frame_host(),
+                    *web_contents, *url, user_gesture())) {
+    ukm::builders::Extensions_Tabs_UpdateDSE(
+        ukm::UkmRecorder::GetSourceIdForExtensionUrl(
+            base::PassKey<TabsUpdateFunction>(), extension()->url()))
+        .SetSeen(true)
+        .Record(ukm::UkmRecorder::Get());
+    ukm::builders::Extensions_SearchRedirect(
+        ukm::UkmRecorder::GetSourceIdForRedirectUrl(
+            base::PassKey<TabsUpdateFunction>(), *url))
+        .SetApi(
+            static_cast<int64_t>(ExtensionSearchRedirectedByApi::kTabsUpdate))
+        .Record(ukm::UkmRecorder::Get());
+  }
   content::NavigationController::LoadURLParams load_params(*url);
 
   // Treat extension-initiated navigations as renderer-initiated so that the URL
@@ -2677,7 +2836,7 @@ bool TabsUpdateFunction::UpdateURL(content::WebContents* web_contents,
       load_params.initiator_origin->GetURL());
 
   // Marking the navigation as initiated via an API means that the focus
-  // will stay in the omnibox - see https://crbug.com/1085779.
+  // will stay in the omnibox - see https://crbug.com/40693812.
   load_params.transition_type = ui::PAGE_TRANSITION_FROM_API;
 
   base::WeakPtr<content::NavigationHandle> navigation_handle =
@@ -2992,6 +3151,15 @@ bool TabsRemoveFunction::RemoveTab(int tab_id, std::string* error) {
                                  &contents, nullptr, error) ||
       !window) {
     return false;
+  }
+
+  if (IsDSERemoval(extension()->id(), *browser_context(), render_frame_host(),
+                   *contents, user_gesture())) {
+    ukm::builders::Extensions_Tabs_RemoveDSE(
+        ukm::UkmRecorder::GetSourceIdForExtensionUrl(
+            base::PassKey<TabsRemoveFunction>(), extension()->url()))
+        .SetSeen(true)
+        .Record(ukm::UkmRecorder::Get());
   }
 
   // Don't let the extension remove a tab if the user is dragging tabs around.
@@ -3874,8 +4042,7 @@ ExtensionFunction::ResponseAction TabsDiscardFunction::Run() {
   content::WebContents* contents = nullptr;
 
   // If `tab_id` is given, find the web_contents respective to it.
-  // Otherwise invoke discard function in TabManager with null web_contents
-  // that will discard the least important tab.
+  // Otherwise, discard the least important tab.
   if (params->tab_id) {
     int tab_id = *params->tab_id;
     std::string error;

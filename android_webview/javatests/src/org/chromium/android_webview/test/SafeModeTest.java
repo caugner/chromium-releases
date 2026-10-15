@@ -394,6 +394,8 @@ public class SafeModeTest extends AwParameterizedTest {
     @MediumTest
     @Feature({"AndroidWebView"})
     public void testQueryActions_disabled() throws Throwable {
+        // Must call registerActions before queryActions.
+        SafeModeController.getInstance().registerActions(new SafeModeAction[0]);
         Assert.assertEquals(
                 "Querying the ContentProvider should yield empty set when SafeMode is disabled",
                 asSet(),
@@ -404,6 +406,8 @@ public class SafeModeTest extends AwParameterizedTest {
     @MediumTest
     @Feature({"AndroidWebView"})
     public void testQueryActions_singleAction() throws Throwable {
+        // Must call registerActions before queryActions.
+        SafeModeController.getInstance().registerActions(new SafeModeAction[0]);
         final String variationsActionId = new VariationsSeedSafeModeAction().getId();
         setSafeMode(Arrays.asList(variationsActionId));
 
@@ -420,6 +424,8 @@ public class SafeModeTest extends AwParameterizedTest {
     @MediumTest
     @Feature({"AndroidWebView"})
     public void testQueryActions_multipleActions() throws Throwable {
+        // Must call registerActions before queryActions.
+        SafeModeController.getInstance().registerActions(new SafeModeAction[0]);
         final String variationsActionId = new VariationsSeedSafeModeAction().getId();
         setSafeMode(Arrays.asList(SAFEMODE_ACTION_NAME, variationsActionId));
 
@@ -436,6 +442,8 @@ public class SafeModeTest extends AwParameterizedTest {
     @MediumTest
     @Feature({"AndroidWebView"})
     public void testQueryActions_autoDisableAfter30Days() throws Throwable {
+        // Must call registerActions before queryActions.
+        SafeModeController.getInstance().registerActions(new SafeModeAction[0]);
         final String variationsActionId = new VariationsSeedSafeModeAction().getId();
         final long initialStartTimeMs = 12345L;
         SafeModeService.setClockForTesting(
@@ -482,6 +490,8 @@ public class SafeModeTest extends AwParameterizedTest {
     @MediumTest
     @Feature({"AndroidWebView"})
     public void testQueryActions_autoDisableIfTimestampInFuture() throws Throwable {
+        // Must call registerActions before queryActions.
+        SafeModeController.getInstance().registerActions(new SafeModeAction[0]);
         final String variationsActionId = new VariationsSeedSafeModeAction().getId();
         final long initialStartTimeMs = 12345L;
         SafeModeService.setClockForTesting(
@@ -514,6 +524,8 @@ public class SafeModeTest extends AwParameterizedTest {
     @MediumTest
     @Feature({"AndroidWebView"})
     public void testQueryActions_extendTimeoutWithDuplicateConfig() throws Throwable {
+        // Must call registerActions before queryActions.
+        SafeModeController.getInstance().registerActions(new SafeModeAction[0]);
         final String variationsActionId = new VariationsSeedSafeModeAction().getId();
         final long initialStartTimeMs = 12345L;
         SafeModeService.setClockForTesting(
@@ -560,6 +572,8 @@ public class SafeModeTest extends AwParameterizedTest {
     @MediumTest
     @Feature({"AndroidWebView"})
     public void testQueryActions_autoDisableIfMissingTimestamp() throws Throwable {
+        // Must call registerActions before queryActions.
+        SafeModeController.getInstance().registerActions(new SafeModeAction[0]);
         final String variationsActionId = new VariationsSeedSafeModeAction().getId();
         setSafeMode(Arrays.asList(variationsActionId));
 
@@ -583,6 +597,8 @@ public class SafeModeTest extends AwParameterizedTest {
     @MediumTest
     @Feature({"AndroidWebView"})
     public void testQueryActions_autoDisableIfMissingActions() throws Throwable {
+        // Must call registerActions before queryActions.
+        SafeModeController.getInstance().registerActions(new SafeModeAction[0]);
         final String variationsActionId = new VariationsSeedSafeModeAction().getId();
         setSafeMode(Arrays.asList(variationsActionId));
 
@@ -606,6 +622,8 @@ public class SafeModeTest extends AwParameterizedTest {
     @MediumTest
     @Feature({"AndroidWebView"})
     public void testQueryActions_emptyAction() throws Throwable {
+        // Must call registerActions before queryActions.
+        SafeModeController.getInstance().registerActions(new SafeModeAction[0]);
         final String invalidWebViewPackageName = "org.chromium.android_webview.test";
 
         Assert.assertFalse(
@@ -617,7 +635,24 @@ public class SafeModeTest extends AwParameterizedTest {
                 SafeModeController.getInstance().queryActions(invalidWebViewPackageName));
     }
 
-    private class TestSafeModeAction implements SafeModeAction {
+    @Test
+    @MediumTest
+    @Feature({"AndroidWebView"})
+    public void testQueryActions_enablesActions() throws Throwable {
+        TestSafeModeAction testAction1 = new TestSafeModeAction("test1");
+        TestSafeModeAction testAction2 = new TestSafeModeAction("test2");
+        setSafeMode(List.of("test2"));
+        SafeModeController controller = SafeModeController.getInstance();
+        controller.registerActions(new SafeModeAction[] {testAction1, testAction2});
+        Assert.assertFalse(controller.isActionEnabled(testAction1.getId()));
+        Assert.assertFalse(controller.isActionEnabled(testAction2.getId()));
+
+        controller.queryActions(TEST_WEBVIEW_PACKAGE_NAME);
+        Assert.assertFalse(controller.isActionEnabled(testAction1.getId()));
+        Assert.assertTrue(controller.isActionEnabled(testAction2.getId()));
+    }
+
+    private class TestSafeModeAction extends SafeModeAction {
         private int mCallCount;
         private int mExecutionOrder;
         private final String mId;
@@ -639,7 +674,7 @@ public class SafeModeTest extends AwParameterizedTest {
         }
 
         @Override
-        public boolean execute() {
+        public boolean executeAtStartup() {
             mCallCount++;
             mExecutionOrder = mTestSafeModeActionExecutionCounter.incrementAndGet();
             return mSuccess;
@@ -654,7 +689,7 @@ public class SafeModeTest extends AwParameterizedTest {
         }
     }
 
-    private static class TestNonEmbeddedSafeModeAction implements NonEmbeddedSafeModeAction {
+    private static class TestNonEmbeddedSafeModeAction extends NonEmbeddedSafeModeAction {
         private int mActivatedCount;
         private int mDeactivatedCount;
         private final String mId;
@@ -702,15 +737,11 @@ public class SafeModeTest extends AwParameterizedTest {
     public void testSafeModeAction_cannotRegisterActionsTwice() throws Throwable {
         TestSafeModeAction testAction1 = new TestSafeModeAction("test1");
         TestSafeModeAction testAction2 = new TestSafeModeAction("test2");
-        SafeModeController.getInstance().registerActions(new SafeModeAction[] {testAction1});
-        try {
-            SafeModeController.getInstance().registerActions(new SafeModeAction[] {testAction2});
-            Assert.fail(
-                    "SafeModeController should have thrown an exception when "
-                            + "re-registering actions");
-        } catch (IllegalStateException e) {
-            // Expected
-        }
+        SafeModeController controller = SafeModeController.getInstance();
+        controller.registerActions(new SafeModeAction[] {testAction1});
+        Assert.assertThrows(
+                IllegalStateException.class,
+                () -> controller.registerActions(new SafeModeAction[] {testAction2}));
     }
 
     @Test
@@ -732,6 +763,7 @@ public class SafeModeTest extends AwParameterizedTest {
         }
     }
 
+    @SafeVarargs
     private static <T> Set<T> asSet(T... values) {
         Set<T> set = new HashSet<>();
         for (T value : values) {
@@ -1076,7 +1108,7 @@ public class SafeModeTest extends AwParameterizedTest {
             VariationsUtils.updateStampTime();
             FastVariationsSeedSafeModeAction action =
                     new FastVariationsSeedSafeModeAction(TEST_WEBVIEW_PACKAGE_NAME);
-            boolean success = action.execute();
+            boolean success = action.executeAtStartup();
             Assert.assertTrue("VariationsSeedSafeModeAction should indicate success", success);
 
             TestLoader loader = new TestLoader(new TestLoaderResult());
@@ -1116,7 +1148,7 @@ public class SafeModeTest extends AwParameterizedTest {
         FastVariationsSeedSafeModeAction.setAlternateSeedFilePath(embeddedSeedFile);
 
         try {
-            boolean success = action.execute();
+            boolean success = action.executeAtStartup();
             Assert.assertFalse(
                     "FastVariationsSeedSafeModeAction should indicate"
                             + " failure with no variations seed",
@@ -1168,7 +1200,7 @@ public class SafeModeTest extends AwParameterizedTest {
             VariationsTestUtils.writeMockSeed(newFile);
             setSafeMode(Arrays.asList(action.getId()));
 
-            boolean success = action.execute();
+            boolean success = action.executeAtStartup();
             Assert.assertTrue(
                     "FastVariationsSeedSafeModeAction should not indicate"
                             + " failure with variations seed in ContentProvider's data directory",
@@ -1196,7 +1228,7 @@ public class SafeModeTest extends AwParameterizedTest {
                     now + VariationsFastFetchModeUtils.MAX_ALLOWABLE_SEED_AGE_MS - 1);
             FastVariationsSeedSafeModeAction action =
                     new FastVariationsSeedSafeModeAction(TEST_WEBVIEW_PACKAGE_NAME);
-            boolean success = action.execute();
+            boolean success = action.executeAtStartup();
             Assert.assertTrue("VariationsSeedSafeModeAction should indicate success", success);
 
             TestLoader loader = new TestLoader(new TestLoaderResult());
@@ -1219,7 +1251,7 @@ public class SafeModeTest extends AwParameterizedTest {
         // Since no seed file exists in the embedding app directory, and the ContentProvider
         // does not have a valid seed to return to the FastVariationsSeedSafeModeAction,
         // it fails with no valid seed to load.
-        boolean success = action.execute();
+        boolean success = action.executeAtStartup();
         Assert.assertFalse(
                 "FastVariationsSeedSafeModeAction should indicate"
                         + " failure with no variations seed",
@@ -1242,7 +1274,7 @@ public class SafeModeTest extends AwParameterizedTest {
             VariationsTestUtils.writeMockSeed(oldFile);
             VariationsTestUtils.writeMockSeed(newFile);
             VariationsSeedSafeModeAction action = new VariationsSeedSafeModeAction();
-            boolean success = action.execute();
+            boolean success = action.executeAtStartup();
             Assert.assertTrue("VariationsSeedSafeModeAction should indicate success", success);
             Assert.assertFalse(
                     "Old seed should have been deleted but it still exists", oldFile.exists());
@@ -1264,7 +1296,7 @@ public class SafeModeTest extends AwParameterizedTest {
             VariationsTestUtils.writeMockSeed(oldFile);
             VariationsTestUtils.writeMockSeed(newFile);
             VariationsSeedSafeModeAction action = new VariationsSeedSafeModeAction();
-            boolean success = action.execute();
+            boolean success = action.executeAtStartup();
             Assert.assertTrue("VariationsSeedSafeModeAction should indicate success", success);
 
             TestLoader loader = new TestLoader(new TestLoaderResult());
@@ -1285,7 +1317,7 @@ public class SafeModeTest extends AwParameterizedTest {
             File oldFile = VariationsUtils.getSeedFile();
             File newFile = VariationsUtils.getNewSeedFile();
             VariationsSeedSafeModeAction action = new VariationsSeedSafeModeAction();
-            boolean success = action.execute();
+            boolean success = action.executeAtStartup();
             Assert.assertTrue("VariationsSeedSafeModeAction should indicate success", success);
             Assert.assertFalse("Old seed should never have existed", oldFile.exists());
             Assert.assertFalse("New seed should never have existed", newFile.exists());
@@ -1664,6 +1696,8 @@ public class SafeModeTest extends AwParameterizedTest {
     })
     public void testDisableCrashyClassSafeModeAction() throws Throwable {
         DisableCrashyClassSafeModeAction testAction = new DisableCrashyClassSafeModeAction();
+        SafeModeController.getInstance().registerActions(new SafeModeAction[] {testAction});
+
         Assert.assertTrue(
                 "Crashy class should not be disabled initially",
                 AwCrashyClassUtils.shouldCrashJava());
@@ -1671,9 +1705,7 @@ public class SafeModeTest extends AwParameterizedTest {
                 "Crashy class should not be disabled initially",
                 AwCrashyClassUtils.shouldCrashJava());
 
-        SafeModeController.getInstance().registerActions(new SafeModeAction[] {testAction});
-        SafeModeController.getInstance()
-                .executeActions(Set.of(SafeModeActionIds.DISABLE_CRASHY_CLASS));
+        SafeModeController.getInstance().enableAllRegisteredActionsForTesting();
 
         Assert.assertFalse(
                 "Crashy class should be disabled after executing the action",

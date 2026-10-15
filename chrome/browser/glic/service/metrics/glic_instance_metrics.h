@@ -11,6 +11,7 @@
 #include "base/callback_list.h"
 #include "base/containers/flat_map.h"
 #include "base/memory/raw_ptr.h"
+#include "base/memory/raw_ref.h"
 #include "chrome/browser/glic/host/glic.mojom.h"
 #include "chrome/browser/glic/public/glic_instance_metrics_backwards_compatibility.h"
 #include "chrome/browser/glic/service/glic_state_tracker.h"
@@ -20,12 +21,21 @@
 
 class PrefService;
 
+namespace metrics {
+
+class ProfileMetricsService;
+}
+
 namespace content {
 class WebContents;
 }
 
 namespace tabs {
 class TabInterface;
+}
+
+namespace enterprise_reporting {
+class SaasUsageReportingController;
 }
 
 namespace base {
@@ -147,9 +157,14 @@ class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
     kFloaty,
   };
 
-  GlicInstanceMetrics();
-  explicit GlicInstanceMetrics(GlicSharingManager* sharing_manager,
-                               PrefService* pref_service = nullptr);
+  explicit GlicInstanceMetrics(
+      const metrics::ProfileMetricsService* profile_metrics_service);
+  GlicInstanceMetrics(
+      const metrics::ProfileMetricsService* profile_metrics_service,
+      GlicSharingManager* sharing_manager,
+      enterprise_reporting::SaasUsageReportingController*
+          saas_usage_reporting_controller,
+      PrefService* pref_service = nullptr);
   ~GlicInstanceMetrics() override;
 
   GlicInstanceMetrics(const GlicInstanceMetrics&) = delete;
@@ -160,11 +175,10 @@ class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
   void DidRequestContextFromTab(tabs::TabInterface& tab) override;
   void OnResponseStarted() override;
   void OnResponseStopped(mojom::ResponseStopCause cause) override;
-  void OnTurnCompleted(mojom::WebClientModel model,
-                       base::TimeDelta duration) override;
-  void OnReaction(mojom::MetricUserInputReactionType reaction_type) override;
-  void OnGlicScrollAttempt() override;
-  void OnGlicScrollComplete(bool success) override;
+  void OnTurnCompleted(mojom::WebClientModel model, base::TimeDelta duration);
+  void OnReaction(mojom::MetricUserInputReactionType reaction_type);
+  void OnGlicScrollAttempt();
+  void OnGlicScrollComplete(bool success);
 
   // Called when the opt-in CTA is shown.
   void OnOptinImpression();
@@ -280,6 +294,7 @@ class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
   void OnUserResizeEnded(const gfx::Size& end_size);
 
   void OnSelectionAreasChanged(int count);
+  void OnPolylinePointsChanged(const std::vector<int>& counts);
 
   void OnZoomLevelChange();
 
@@ -331,8 +346,6 @@ class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
     // should be removed, see crbug.com/399151164.
     bool response_started_ = false;
     bool did_request_context_ = false;
-    bool reported_reaction_time_canned_ = false;
-    bool reported_reaction_time_modelled_ = false;
     EmbedderType ui_mode_ = EmbedderType::kUnknown;
     mojom::WebClientMode input_mode_ = mojom::WebClientMode::kUnknown;
     bool pending_scroll_complete_ = false;
@@ -408,10 +421,15 @@ class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
 
   base::CallbackListSubscription pinned_tabs_changed_subscription_;
   base::CallbackListSubscription tab_pinning_status_subscription_;
+  const raw_ref<const metrics::ProfileMetricsService> profile_metrics_service_;
   raw_ptr<GlicSharingManager> sharing_manager_ = nullptr;
+  raw_ptr<enterprise_reporting::SaasUsageReportingController>
+      saas_usage_reporting_controller_ = nullptr;
   raw_ptr<PrefService> pref_service_ = nullptr;
 
   bool first_side_panel_close_recorded_ = false;
+  bool first_floaty_close_recorded_ = false;
+  bool saas_usage_recorded_ = false;
 
   // The following variables are used for recording scroll related metrics.
   //
@@ -421,6 +439,7 @@ class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
 
   // Whether region selection is active.
   int selection_areas_count_ = 0;
+  std::vector<int> polyline_point_counts_;
 
   // The number of zoom change attempts (tracked per instance and reset when
   // the instance is destroyed).

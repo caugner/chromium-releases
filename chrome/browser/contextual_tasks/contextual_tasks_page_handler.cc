@@ -20,10 +20,10 @@
 #include "chrome/browser/global_features.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_list/tab_list_interface.h"
-#include "chrome/browser/ui/browser_navigator.h"
-#include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/navigator/browser_navigator.h"
+#include "chrome/browser/ui/navigator/browser_navigator_params.h"
 #include "chrome/browser/ui/side_panel/side_panel_ui.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/branded_strings.h"
@@ -36,6 +36,7 @@
 #include "components/contextual_tasks/public/features.h"
 #include "components/contextual_tasks/public/prefs.h"
 #include "components/lens/lens_url_utils.h"
+#include "components/omnibox/common/logger.h"
 #include "components/prefs/pref_service.h"
 #include "components/sessions/core/session_id.h"
 #include "components/tabs/public/tab_interface.h"
@@ -122,6 +123,8 @@ contextual_tasks::mojom::IconType IconTypeToMojom(lens::AimIconType icon_id) {
       return contextual_tasks::mojom::IconType::kCheck;
     case lens::AimIconType::ICON_TYPE_FORMAT_QUOTE_FILLED:
       return contextual_tasks::mojom::IconType::kFormatQuoteFilled;
+    case lens::AimIconType::ICON_TYPE_INVERTED_FORMAT_QUOTE_FILLED:
+      return contextual_tasks::mojom::IconType::kInvertedFormatQuoteFilled;
     case lens::AimIconType::ICON_TYPE_IMAGE:
       return contextual_tasks::mojom::IconType::kImage;
     case lens::AimIconType::ICON_TYPE_DRIVE_PDF:
@@ -199,11 +202,13 @@ ContextualTasksPageHandler::ContextualTasksPageHandler(
     mojo::PendingReceiver<contextual_tasks::mojom::PageHandler> receiver,
     contextual_tasks::ContextualTasksUIInterface* web_ui_controller,
     contextual_tasks::ContextualTasksUiService* ui_service,
-    contextual_tasks::ContextualTasksService* contextual_tasks_service)
+    contextual_tasks::ContextualTasksService* contextual_tasks_service,
+    contextual_tasks::ContextualTasksPanelController* panel_controller)
     : receiver_(this, std::move(receiver)),
       web_ui_controller_(web_ui_controller),
       ui_service_(ui_service),
-      contextual_tasks_service_(contextual_tasks_service) {
+      contextual_tasks_service_(contextual_tasks_service),
+      panel_controller_(panel_controller) {
   CHECK(contextual_tasks_service_);
   contextual_tasks_service_observation_.Observe(contextual_tasks_service_);
 
@@ -232,18 +237,37 @@ void ContextualTasksPageHandler::GetThreadUrl(GetThreadUrlCallback callback) {
 
 void ContextualTasksPageHandler::GetUrlForTask(const base::Uuid& uuid,
                                                GetUrlForTaskCallback callback) {
+  // Wrap the callback to ensure previous_query is set on the session handle
+  // regardless of whether the URL is returned synchronously or asynchronously.
+  auto wrapped_callback = base::BindOnce(
+      [](base::WeakPtr<ContextualTasksPageHandler> self,
+         GetUrlForTaskCallback original_callback, const GURL& url) {
+        if (self && self->web_ui_controller_) {
+          if (auto* session_handle =
+                  self->web_ui_controller_
+                      ->GetOrCreateContextualSessionHandle()) {
+            std::string query = lens::ExtractTextQueryParameterValue(url);
+            if (!query.empty()) {
+              session_handle->set_previous_query(query);
+            }
+          }
+        }
+        std::move(original_callback).Run(url);
+      },
+      weak_ptr_factory_.GetWeakPtr(), std::move(callback));
+
   // First check if there's an initial URL.
   std::optional<GURL> initial_url = ui_service_->GetInitialUrlForTask(uuid);
   if (initial_url) {
-    std::move(callback).Run(
-        contextual_tasks::ContextualTasksUiService::CopyParamsFromWebUIUrl(
+    std::move(wrapped_callback)
+        .Run(contextual_tasks::ContextualTasksUiService::CopyParamsFromWebUIUrl(
             initial_url.value(), web_ui_controller_->GetWebUiUrl()));
     return;
   }
 
   // If the task is waiting for a URL to be generated, register a callback.
   if (ui_service_->IsTaskWaitingForUrl(uuid)) {
-    ui_service_->AddPendingUrlCallback(uuid, std::move(callback));
+    ui_service_->AddPendingUrlCallback(uuid, std::move(wrapped_callback));
     return;
   }
 
@@ -256,9 +280,9 @@ void ContextualTasksPageHandler::GetUrlForTask(const base::Uuid& uuid,
       base::BindOnce(
           [](GetUrlForTaskCallback callback, GURL webui_url, GURL url) {
             std::move(callback).Run(contextual_tasks::ContextualTasksUiService::
-                                        CopyParamsFromWebUIUrl(url, webui_url));
+                                        GetAiUrlFromWebUIUrl(url, webui_url));
           },
-          std::move(callback), web_ui_controller_->GetWebUiUrl()));
+          std::move(wrapped_callback), web_ui_controller_->GetWebUiUrl()));
 }
 
 void ContextualTasksPageHandler::SetTaskId(const base::Uuid& uuid) {
@@ -300,7 +324,11 @@ void ContextualTasksPageHandler::IsEmbeddedPageErrorDocument(
 }
 
 void ContextualTasksPageHandler::CloseSidePanel() {
-  web_ui_controller_->CloseSidePanel();
+  if (panel_controller_) {
+    panel_controller_->Close();
+  } else {
+    web_ui_controller_->CloseSidePanel();
+  }
 }
 
 void ContextualTasksPageHandler::ShowThreadHistory() {
@@ -318,9 +346,12 @@ void ContextualTasksPageHandler::IsShownInTab(IsShownInTabCallback callback) {
 }
 
 void ContextualTasksPageHandler::OpenMyActivityUi() {
+  BrowserWindowInterface* browser = web_ui_controller_->GetBrowser();
+  if (!browser) {
+    return;
+  }
   OpenUrlWithDisposition(web_ui_controller_->GetProfile(), GURL(kMyActivityUrl),
-                         WindowOpenDisposition::NEW_FOREGROUND_TAB,
-                         web_ui_controller_->GetBrowser());
+                         WindowOpenDisposition::NEW_FOREGROUND_TAB, browser);
 }
 
 void ContextualTasksPageHandler::OpenFeedbackUi() {
@@ -343,11 +374,14 @@ void ContextualTasksPageHandler::OpenFeedbackUi() {
 }
 
 void ContextualTasksPageHandler::OpenOnboardingHelpUi() {
+  BrowserWindowInterface* browser = web_ui_controller_->GetBrowser();
+  if (!browser) {
+    return;
+  }
   OpenUrlWithDisposition(
       web_ui_controller_->GetProfile(),
       GURL(contextual_tasks::GetContextualTasksOnboardingTooltipHelpUrl()),
-      WindowOpenDisposition::NEW_FOREGROUND_TAB,
-      web_ui_controller_->GetBrowser());
+      WindowOpenDisposition::NEW_FOREGROUND_TAB, browser);
 }
 
 void ContextualTasksPageHandler::OpenUrl(const GURL& url,
@@ -390,6 +424,9 @@ void ContextualTasksPageHandler::OnWebviewMessage(
     return;
   }
 
+  OMNIBOX_LOG_WITH_PROTO("OnWebviewMessage", aim_to_client_message,
+                         std::string("lens.chrome.AimToClientMessage"));
+
   if (aim_to_client_message.has_handshake_response()) {
     web_ui_controller_->GetPageRemote()->OnHandshakeComplete();
     web_ui_controller_->OnSidePanelStateChanged();
@@ -428,6 +465,24 @@ void ContextualTasksPageHandler::OnWebviewMessage(
     web_ui_controller_->GetPageRemote()->LockInput();
   } else if (aim_to_client_message.has_unlock_input()) {
     web_ui_controller_->GetPageRemote()->UnlockInput();
+  } else if (aim_to_client_message.has_open_link_in_side_panel_mode()) {
+    tabs::TabInterface* tab = tabs::TabInterface::MaybeGetFromContents(
+        web_ui_controller_->GetWebUIWebContents());
+    BrowserWindowInterface* browser = web_ui_controller_->GetBrowser();
+    GURL target_url(aim_to_client_message.open_link_in_side_panel_mode().url());
+    // Only accept valid URLs that are HTTP or HTTPS.
+    if (target_url.is_valid() && target_url.SchemeIsHTTPOrHTTPS()) {
+      ui_service_->OnThreadLinkClicked(
+          target_url, web_ui_controller_->GetTaskId().value_or(base::Uuid()),
+          tab ? tab->GetWeakPtr() : nullptr,
+          browser ? browser->GetWeakPtr() : nullptr,
+          /*initiator_origin=*/
+          web_ui_controller_->GetInnerWebContents()
+              ? web_ui_controller_->GetInnerWebContents()
+                    ->GetPrimaryMainFrame()
+                    ->GetLastCommittedOrigin()
+              : url::Origin());
+    }
   }
 }
 
@@ -488,6 +543,9 @@ void ContextualTasksPageHandler::PostMessageToWebview(
     LOG(ERROR) << "Failed to serialize ClientToAimMessage.";
     return;
   }
+
+  OMNIBOX_LOG_WITH_PROTO("PostMessageToWebview", message,
+                         std::string("lens.chrome.ClientToAimMessage"));
 
   web_ui_controller_->GetPageRemote()->PostMessageToWebview(serialized_message);
 }
@@ -647,6 +705,22 @@ void ContextualTasksPageHandler::PinSidePanel() {
   }
   web_ui_controller_->GetProfile()->GetPrefs()->SetBoolean(
       prefs::kPinContextualTaskButton, true);
+}
+
+void ContextualTasksPageHandler::RegisterWindow(
+    const contextual_tasks::ContextualTaskId& task_id,
+    const GURL& url,
+    const contextual_tasks::ContextualWindowId& window_id) {
+  if (ui_service_) {
+    ui_service_->RegisterWindow(task_id, url, window_id);
+  }
+}
+
+void ContextualTasksPageHandler::CloseWindow(
+    const contextual_tasks::ContextualWindowId& window_id) {
+  if (ui_service_) {
+    ui_service_->CloseTrackedWindow(window_id);
+  }
 }
 
 void ContextualTasksPageHandler::UnpinSidePanel() {

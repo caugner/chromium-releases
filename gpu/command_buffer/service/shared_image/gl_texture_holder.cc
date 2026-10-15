@@ -4,6 +4,8 @@
 
 #include "gpu/command_buffer/service/shared_image/gl_texture_holder.h"
 
+#include <optional>
+
 #include "base/bits.h"
 #include "build/build_config.h"
 #include "gpu/command_buffer/service/shared_context_state.h"
@@ -12,10 +14,12 @@
 #include "gpu/command_buffer/service/skia_utils.h"
 #include "third_party/skia/include/gpu/ganesh/GrContextThreadSafeProxy.h"
 #include "third_party/skia/include/private/chromium/GrPromiseImageTexture.h"
+#include "ui/gl/gl_context.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_version_info.h"
 #include "ui/gl/progress_reporter.h"
 #include "ui/gl/scoped_binders.h"
+#include "ui/gl/scoped_make_current.h"
 #include "ui/gl/scoped_restore_texture.h"
 
 namespace gpu {
@@ -106,6 +110,7 @@ GLTextureHolder& GLTextureHolder::operator=(GLTextureHolder&& other) {
   texture_ = other.texture_;
   other.texture_ = nullptr;
   passthrough_texture_ = std::move(other.passthrough_texture_);
+  context_ = std::move(other.context_);
   format_desc_ = other.format_desc_;
   progress_reporter_ = other.progress_reporter_;
   return *this;
@@ -138,6 +143,11 @@ void GLTextureHolder::Initialize(
     const std::string& debug_label) {
   DCHECK(!texture_ && !passthrough_texture_);
 
+  // Cache the current context and surface to ensure they can be made current
+  // during subsequent GL operations if needed.
+  context_ = gl::GLContext::GetCurrent();
+  CHECK(context_);
+
   format_desc_.target = GL_TEXTURE_2D;
   format_desc_.data_format = format_info.gl_format;
   format_desc_.data_type = format_info.gl_type;
@@ -150,21 +160,18 @@ void GLTextureHolder::Initialize(
 
   if (is_passthrough_) {
     passthrough_texture_->SetEstimatedSize(format_.EstimatedSizeInBytes(size_));
-  } else {
-    // TODO(piman): We pretend the texture was created in an ES2 context, so
-    // that it can be used in other ES2 contexts, and so we have to pass
-    // gl_format as the internal format in the LevelInfo.
-    // https://crbug.com/628064
-    texture_->SetLevelInfo(format_desc_.target, 0, format_desc_.data_format,
-                           size_.width(), size_.height(), /*depth=*/1, 0,
-                           format_desc_.data_format, format_desc_.data_type,
-                           /*cleared_rect=*/gfx::Rect());
-    texture_->SetImmutable(true, format_info.supports_storage);
   }
 
   gl::GLApi* api = gl::g_current_gl_context;
   gl::ScopedRestoreTexture scoped_restore(api, format_desc_.target,
                                           GetServiceId());
+
+  // Drain any pre-existing GL errors so the post-allocation check
+  // below is attributable to the storage call. Silently squelching
+  // these errors is unfortunate, but is done in order to mirror other
+  // allocation checks done in the command decoder.
+  while (api->glGetErrorFn() != GL_NO_ERROR) {
+  }
 
   // Initialize the texture storage/image parameters and upload initial pixels
   // if available.
@@ -214,6 +221,27 @@ void GLTextureHolder::Initialize(
   }
 
   if (!is_passthrough_) {
+    // Only commit decoder-side LevelInfo / immutable state once the native
+    // allocation has succeeded. If the driver rejected the allocation (e.g.
+    // GL_OUT_OF_MEMORY), leaving LevelInfo at {0,0,0} ensures
+    // Texture::ValidForTexture rejects subsequent TexSubImage calls instead of
+    // forwarding oversized writes to a zero-storage native texture. This
+    // mirrors the fix in GLES2DecoderImpl::TexStorageImpl.
+    if (api->glGetErrorFn() == GL_NO_ERROR) {
+      // TODO(piman): We pretend the texture was created in an ES2 context, so
+      // that it can be used in other ES2 contexts, and so we have to pass
+      // gl_format as the internal format in the LevelInfo.
+      // https://crbug.com/628064
+      const gfx::Rect cleared_rect =
+          !pixel_data.empty() ? gfx::Rect(size_) : gfx::Rect();
+      texture_->SetLevelInfo(
+          format_desc_.target, /*level=*/0, format_desc_.data_format,
+          size_.width(), size_.height(), /*depth=*/1, /*border=*/0,
+          format_desc_.data_format, format_desc_.data_type, cleared_rect);
+      texture_->SetImmutable(true, format_info.supports_storage);
+    } else {
+      LOG(ERROR) << "GLTextureHolder: native storage allocation failed";
+    }
     // Must be set after initial pixel upload.
     texture_->SetCompatibilitySwizzle(format_info.swizzle);
   }
@@ -231,6 +259,11 @@ void GLTextureHolder::InitializeWithTexture(
   DCHECK(!texture_ && !passthrough_texture_);
   DCHECK(is_passthrough_);
 
+  // Cache the current context and surface to ensure they can be made current
+  // during subsequent GL operations if needed.
+  context_ = gl::GLContext::GetCurrent();
+  CHECK(context_);
+
   format_desc_ = format_desc;
   passthrough_texture_ = std::move(texture);
 }
@@ -240,6 +273,11 @@ void GLTextureHolder::InitializeWithTexture(const GLFormatDesc& format_desc,
   DCHECK(!texture_ && !passthrough_texture_);
   DCHECK(!is_passthrough_);
 
+  // Cache the current context and surface to ensure they can be made current
+  // during subsequent GL operations if needed.
+  context_ = gl::GLContext::GetCurrent();
+  CHECK(context_);
+
   format_desc_ = format_desc;
   texture_ = texture;
 }
@@ -247,6 +285,17 @@ void GLTextureHolder::InitializeWithTexture(const GLFormatDesc& format_desc,
 bool GLTextureHolder::UploadFromMemory(const SkPixmap& pixmap) {
   DCHECK_EQ(pixmap.width(), size_.width());
   DCHECK_EQ(pixmap.height(), size_.height());
+
+  // Ensure the correct GL context and surface are current for the upload.
+  std::optional<ui::ScopedMakeCurrent> scoped_make_current;
+  if (!context_->IsCurrent(/*surface=*/nullptr)) {
+    scoped_make_current.emplace(context_.get(), context_->default_surface());
+    if (!scoped_make_current->IsContextCurrent()) {
+      LOG(ERROR)
+          << "GLTextureHolder::UploadFromMemory failed to make context current";
+      return false;
+    }
+  }
 
   const GLuint texture_id = GetServiceId();
   const GLenum gl_format = format_desc_.data_format;
@@ -322,6 +371,17 @@ bool GLTextureHolder::UploadFromMemory(const SkPixmap& pixmap) {
 bool GLTextureHolder::ReadbackToMemory(const SkPixmap& pixmap) {
   DCHECK_EQ(pixmap.width(), size_.width());
   DCHECK_EQ(pixmap.height(), size_.height());
+
+  // Ensure the correct GL context and surface are current for the readback.
+  std::optional<ui::ScopedMakeCurrent> scoped_make_current;
+  if (!context_->IsCurrent(/*surface=*/nullptr)) {
+    scoped_make_current.emplace(context_.get(), context_->default_surface());
+    if (!scoped_make_current->IsContextCurrent()) {
+      LOG(ERROR)
+          << "GLTextureHolder::ReadbackToMemory failed to make context current";
+      return false;
+    }
+  }
 
   const GLuint texture_id = GetServiceId();
   GLenum gl_format = format_desc_.data_format;

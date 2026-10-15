@@ -184,7 +184,8 @@ class ReadAnythingController : public tabs::ContentsObservingTabFeature {
   // the WebUIContentsWrapper to this controller.
   void TransferWebUiOwnership(
       std::unique_ptr<WebUIContentsWrapperT<ReadAnythingUntrustedUI>>
-          web_ui_wrapper);
+          web_ui_wrapper,
+      PresentationState from_presentation);
 
   // Recreates the WebUI on the next GetOrCreateWebUIWrapper() call. This should
   // be called if Reading mode crashes so that we don't get stuck in a crashed
@@ -202,11 +203,13 @@ class ReadAnythingController : public tabs::ContentsObservingTabFeature {
   void OnSoftNavigation();
 
  private:
-  // Called when the tab will detach.
-  void TabWillDetach(tabs::TabInterface* tab,
-                     tabs::TabInterface::DetachReason reason);
   // Saves the presentation state to the user's preferences.
   void SavePresentationPreference(PresentationState state);
+
+  // Updates the FindBarController's target WebContents if necessary. This
+  // ensures that find-in-page (Cmd-F) targets the IRM overlay when it's open,
+  // rather than the occluded main WebContents.
+  void MaybeUpdateFindBarController();
 
   std::unique_ptr<WebContentsObserverInstance> ra_web_ui_observer_;
   std::unique_ptr<ReadAnythingOmniboxController> omnibox_controller_;

@@ -15,7 +15,6 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/raw_ref.h"
-#include "base/memory/weak_ptr.h"
 #include "ui/base/dragdrop/mojom/drag_drop_types.mojom-forward.h"
 #include "ui/base/x/x11_desktop_window_move_client.h"
 #include "ui/base/x/x11_drag_drop_client.h"
@@ -71,8 +70,6 @@ class X11Window : public PlatformWindow,
 
   virtual void Initialize(PlatformWindowInitProperties properties);
 
-  base::WeakPtr<X11Window> GetWeakPtr();
-
   // X11WindowManager calls this.
   void OnXWindowLostCapture();
 
@@ -102,7 +99,7 @@ class X11Window : public PlatformWindow,
   void Maximize() override;
   void Minimize() override;
   void Restore() override;
-  void ShowWindowControlsMenu(const gfx::Point& point) override;
+  void ShowWindowControlsMenu(const gfx::Point& point_in_dip) override;
   PlatformWindowState GetPlatformWindowState() const override;
   void Activate() override;
   void Deactivate() override;

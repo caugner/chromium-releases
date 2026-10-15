@@ -213,6 +213,11 @@ public class UrlBarCoordinator
         setAllowMultilineInput(false);
     }
 
+    /** Sets whether this {@link UrlBar} should enable bounds ellipsis. */
+    public void setBoundsEllipsisEnabled(boolean enabled) {
+        mUrlBar.setBoundsEllipsisEnabled(enabled);
+    }
+
     @Override
     public int getSelectionStart() {
         return mUrlBar.getSelectionStart();
@@ -282,7 +287,6 @@ public class UrlBarCoordinator
 
     /* package */ void clearFocus() {
         mUrlBar.clearFocus();
-        restartImfInput();
     }
 
     /* package */ void requestAccessibilityFocus() {
@@ -401,15 +405,25 @@ public class UrlBarCoordinator
     }
 
     /**
-     * Restarts Android input method framework on the UrlBar, resetting any existing input
-     * connection.
+     * Tell the UrlBar that it is being relocated to a new parent. Focus change notifications are
+     * dropped while this process is ongoing.
      */
-    void restartImfInput() {
-        InputMethodManager imm =
-                (InputMethodManager)
-                        mUrlBar.getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
-        if (imm != null) {
-            imm.restartInput(mUrlBar);
+    public void startReparenting() {
+        mMediator.startReparenting();
+    }
+
+    /**
+     * Tell the UrlBar that it has been relocated to a new parent and set its new focus state.
+     *
+     * @param postReparentingFocus Whether the UrlBar should be focused now that the reparenting
+     *     process has completed.
+     */
+    public void finishReparenting(boolean postReparentingFocus) {
+        mMediator.finishReparenting();
+        if (postReparentingFocus) {
+            mUrlBar.requestFocus();
+        } else {
+            mUrlBar.clearFocus();
         }
     }
 }

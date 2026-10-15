@@ -68,6 +68,7 @@ class OmniboxViewViews;
 class OmniboxChipButton;
 class PageActionIconController;
 class PageActionIconContainerView;
+class PermissionChipView;
 class PermissionDashboardView;
 class Profile;
 class SelectedKeywordView;
@@ -200,6 +201,11 @@ class LocationBarView
   // Controls the permission dashboard in the LocationBarView.
   PermissionDashboardController* permission_dashboard_controller() {
     return permission_dashboard_controller_.get();
+  }
+
+  PermissionChipView* chip_view() { return chip_view_; }
+  PermissionDashboardView* permission_dashboard_view() {
+    return permission_dashboard_view_;
   }
 
   IntentChipButton* intent_chip() { return intent_chip_; }
@@ -552,6 +558,11 @@ class LocationBarView
   // permission information and requests.
   std::unique_ptr<ChipController> chip_controller_ = nullptr;
 
+  // The concrete native view used for the permission chip. Stored separately
+  // from the controller to allow layout calculations to bypass the UI-agnostic
+  // PermissionChipInterface.
+  raw_ptr<PermissionChipView> chip_view_ = nullptr;
+
   std::unique_ptr<PermissionDashboardController>
       permission_dashboard_controller_;
   raw_ptr<PermissionDashboardView> permission_dashboard_view_;
@@ -603,6 +614,9 @@ class LocationBarView
   // An [x] that appears in touch mode (when the OSK is visible) and allows the
   // user to clear all text.
   raw_ptr<views::ImageButton> clear_all_button_ = nullptr;
+
+  // A label to show the AI Mode hint text.
+  raw_ptr<views::Label> ai_mode_hint_label_ = nullptr;
 
   // Animation to change whole location bar background color on hover.
   gfx::SlideAnimation hover_animation_{this};

@@ -4,6 +4,7 @@
 
 import './icons.html.js';
 import './composebox_tab_favicon.js';
+import './composebox_favicon_group.js';
 import './contextual_action_menu.js';
 import '//resources/cr_elements/icons.html.js';
 import '//resources/cr_elements/cr_button/cr_button.js';
@@ -16,6 +17,7 @@ import {EventTracker} from '//resources/js/event_tracker.js';
 import {loadTimeData} from '//resources/js/load_time_data.js';
 import type {PropertyValues} from '//resources/lit/v3_0/lit.rollup.js';
 import {CrLitElement} from '//resources/lit/v3_0/lit.rollup.js';
+import type {TabInfo} from '//resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
 import type {InputState} from '//resources/mojo/components/omnibox/composebox/composebox_query.mojom-webui.js';
 import {ToolMode} from '//resources/mojo/components/omnibox/composebox/composebox_query.mojom-webui.js';
 
@@ -46,22 +48,32 @@ export class ContextualEntrypointButtonElement extends
       // Public properties
       // =========================================================================
       showContextMenuDescription: {type: Boolean},
+      showSuggestionLabel: {type: Boolean, reflect: true},
       inputState: {type: Object},
       glifAnimationState: {type: String, reflect: true},
       uploadButtonDisabled: {type: Boolean},
       hasPopupFocus: {type: Boolean, reflect: true},
+      applyContextButtonBackground: {type: Boolean, reflect: true},
+      isOblongShape: {type: Boolean, reflect: true},
       windowWidthBelowThreshold_: {type: Boolean},
+      sharedTabs: {type: Array},
+      tabFaviconChipsToCoinsEnabled_: {type: Boolean},
     };
   }
 
   accessor showContextMenuDescription: boolean = false;
+  accessor showSuggestionLabel: boolean = false;
   accessor inputState: InputState|null = null;
+  accessor sharedTabs: TabInfo[] = [];
   accessor glifAnimationState: GlifAnimationState =
       GlifAnimationState.INELIGIBLE;
   accessor uploadButtonDisabled: boolean = false;
   accessor hasPopupFocus: boolean = false;
+  accessor applyContextButtonBackground: boolean = false;
+  accessor isOblongShape: boolean = false;
   protected accessor windowWidthBelowThreshold_: boolean = false;
-
+  protected accessor tabFaviconChipsToCoinsEnabled_: boolean =
+      loadTimeData.getBoolean('tabFaviconChipsToCoinsEnabled');
   private showContextMenuDescriptionEnabled_: boolean =
       loadTimeData.getBoolean('composeboxShowContextMenuDescription');
   private metricsSource_: string = loadTimeData.getString('composeboxSource');
@@ -90,6 +102,7 @@ export class ContextualEntrypointButtonElement extends
 
     if (changedProperties.has('inputState') && this.inputState) {
       const inToolMode = this.inputState.activeTool !== ToolMode.kUnspecified;
+
       if (this.showContextMenuDescriptionEnabled_) {
         this.showContextMenuDescription = !inToolMode;
       }

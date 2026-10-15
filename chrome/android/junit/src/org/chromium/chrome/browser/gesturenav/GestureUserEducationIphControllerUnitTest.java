@@ -26,6 +26,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
+import org.robolectric.shadows.ShadowLooper;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.chrome.browser.ActivityTabProvider;
@@ -40,14 +41,18 @@ import org.chromium.components.feature_engagement.FeatureConstants;
 import org.chromium.components.feature_engagement.Tracker;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.content_public.browser.WebContentsAccessibility;
 import org.chromium.ui.base.MotionEventTestUtils;
 import org.chromium.ui.base.TestActivity;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.url.JUnitTestGURLs;
 
+import java.util.concurrent.TimeUnit;
+
 @RunWith(BaseRobolectricTestRunner.class)
 public class GestureUserEducationIphControllerUnitTest {
+    private static final int PAGE_LOAD_DELAY = 4000;
 
     @Rule public MockitoRule mMockitoRule = MockitoJUnit.rule();
 
@@ -62,6 +67,7 @@ public class GestureUserEducationIphControllerUnitTest {
     @Mock private Tracker mTracker;
     @Mock private Profile mProfile;
     @Mock private WebContents mWebContents;
+    @Mock private WebContentsAccessibility mWebContentsAccessibility;
     @Mock private NavigationController mNavigationController;
     @Mock private WindowAndroid mWindowAndroid;
     @Mock private Window mWindow;
@@ -83,6 +89,7 @@ public class GestureUserEducationIphControllerUnitTest {
         mController =
                 new GestureUserEducationIphController(
                         mAnchorView, mActivityTabProvider, mBackPressManager, mScrimManager);
+        mController.setWebContentsAccessibilityForTesting(mWebContentsAccessibility);
         TrackerFactory.setTrackerForTests(mTracker);
         when(mTab.getProfile()).thenReturn(mProfile);
         when(mTab.getContext()).thenReturn(mActivity);
@@ -91,6 +98,7 @@ public class GestureUserEducationIphControllerUnitTest {
         when(mWindowAndroid.getWindow()).thenReturn(mWindow);
         when(mTab.getWebContents()).thenReturn(mWebContents);
         when(mWebContents.getNavigationController()).thenReturn(mNavigationController);
+        mController.setDisableAnimationsForTesting(true);
     }
 
     @Test
@@ -107,8 +115,11 @@ public class GestureUserEducationIphControllerUnitTest {
 
         var tabObserver = mController.getTabObserverForTesting();
         tabObserver.onPageLoadFinished(mTab, JUnitTestGURLs.EXAMPLE_URL);
+        ShadowLooper.idleMainLooper(PAGE_LOAD_DELAY, TimeUnit.MILLISECONDS);
         verify(mScrimManager).showScrim(any());
         Assert.assertEquals(1, mAnchorView.getChildCount());
+
+        verify(mWebContentsAccessibility).setObscuredByAnotherView(true);
     }
 
     @Test
@@ -179,17 +190,24 @@ public class GestureUserEducationIphControllerUnitTest {
 
         var tabObserver = mController.getTabObserverForTesting();
         tabObserver.onPageLoadFinished(mTab, JUnitTestGURLs.EXAMPLE_URL);
+        ShadowLooper.idleMainLooper(PAGE_LOAD_DELAY, TimeUnit.MILLISECONDS);
 
         ArgumentCaptor<PropertyModel> scrimPropertyModelCaptor =
                 ArgumentCaptor.forClass(PropertyModel.class);
         verify(mScrimManager).showScrim(scrimPropertyModelCaptor.capture());
+        Assert.assertEquals(
+                "Layout should be present before hiding", 1, mAnchorView.getChildCount());
 
         scrimPropertyModelCaptor
                 .getValue()
                 .get(ScrimProperties.GESTURE_DETECTOR)
                 .onTouchEvent(MotionEventTestUtils.getTrackpadTouchDownEventNoClick());
+        ShadowLooper.idleMainLooper();
+
         verify(mScrimManager).hideScrim(any(), anyBoolean());
         Assert.assertEquals(0, mAnchorView.getChildCount());
+
+        verify(mWebContentsAccessibility).setObscuredByAnotherView(false);
     }
 
     @Test
@@ -209,6 +227,7 @@ public class GestureUserEducationIphControllerUnitTest {
 
         var tabObserver = mController.getTabObserverForTesting();
         tabObserver.onPageLoadFinished(mTab, JUnitTestGURLs.EXAMPLE_URL);
+        ShadowLooper.idleMainLooper(PAGE_LOAD_DELAY, TimeUnit.MILLISECONDS);
 
         Assert.assertTrue(mAnchorView.getChildCount() > 0);
 
@@ -216,6 +235,83 @@ public class GestureUserEducationIphControllerUnitTest {
         mActivityTabProvider.setForTesting(null);
 
         verify(mScrimManager).hideScrim(any(), anyBoolean());
+        Assert.assertEquals(0, mAnchorView.getChildCount());
+        verify(mWebContentsAccessibility).setObscuredByAnotherView(false);
+    }
+
+    @Test
+    public void testOnPageLoadStarted_HidesIph() {
+        mController.setIsGestureNavModeForTesting(true);
+        when(mNavigationController.canGoToOffset(
+                        GestureUserEducationIphController.PAGE_HISTORY_MIN_OFFSET))
+                .thenReturn(true);
+        when(mBackPressManager.isBackPressHandlerConsumingBackEvent(
+                        BackPressHandler.Type.TAB_HISTORY))
+                .thenReturn(true);
+        when(mTracker.shouldTriggerHelpUi(FeatureConstants.GESTURE_USER_EDUCATION))
+                .thenReturn(true);
+
+        var tabObserver = mController.getTabObserverForTesting();
+        tabObserver.onPageLoadFinished(mTab, JUnitTestGURLs.EXAMPLE_URL);
+        ShadowLooper.idleMainLooper(PAGE_LOAD_DELAY, TimeUnit.MILLISECONDS);
+
+        Assert.assertEquals(1, mAnchorView.getChildCount());
+
+        tabObserver.onPageLoadStarted(mTab, JUnitTestGURLs.EXAMPLE_URL);
+
+        verify(mScrimManager).hideScrim(any(), anyBoolean());
+        Assert.assertEquals(0, mAnchorView.getChildCount());
+        verify(mWebContentsAccessibility).setObscuredByAnotherView(false);
+    }
+
+    @Test
+    public void testOnPageLoadStarted_CancelsScheduledIph() {
+        mController.setIsGestureNavModeForTesting(true);
+        when(mNavigationController.canGoToOffset(
+                        GestureUserEducationIphController.PAGE_HISTORY_MIN_OFFSET))
+                .thenReturn(true);
+        when(mBackPressManager.isBackPressHandlerConsumingBackEvent(
+                        BackPressHandler.Type.TAB_HISTORY))
+                .thenReturn(true);
+        when(mTracker.shouldTriggerHelpUi(FeatureConstants.GESTURE_USER_EDUCATION))
+                .thenReturn(true);
+
+        var tabObserver = mController.getTabObserverForTesting();
+
+        tabObserver.onPageLoadFinished(mTab, JUnitTestGURLs.EXAMPLE_URL);
+        tabObserver.onPageLoadStarted(mTab, JUnitTestGURLs.EXAMPLE_URL);
+        ShadowLooper.idleMainLooper(PAGE_LOAD_DELAY, TimeUnit.MILLISECONDS);
+
+        verify(mScrimManager, never()).showScrim(any());
+        Assert.assertEquals(0, mAnchorView.getChildCount());
+    }
+
+    @Test
+    public void testOnObservingDifferentTab_CancelsScheduledIph() {
+        mController.setIsGestureNavModeForTesting(true);
+        when(mNavigationController.canGoToOffset(
+                        GestureUserEducationIphController.PAGE_HISTORY_MIN_OFFSET))
+                .thenReturn(true);
+        when(mBackPressManager.isBackPressHandlerConsumingBackEvent(
+                        BackPressHandler.Type.TAB_HISTORY))
+                .thenReturn(true);
+        when(mTracker.shouldTriggerHelpUi(FeatureConstants.GESTURE_USER_EDUCATION))
+                .thenReturn(true);
+
+        var tabObserver = mController.getTabObserverForTesting();
+
+        // Set the tab to something non-null first so that switching to null triggers
+        // onObservingDifferentTab.
+        mActivityTabProvider.setForTesting(mTab);
+
+        tabObserver.onPageLoadFinished(mTab, JUnitTestGURLs.EXAMPLE_URL);
+
+        // Switch to a different tab (null in this case) triggers onObservingDifferentTab.
+        mActivityTabProvider.setForTesting(null);
+
+        ShadowLooper.idleMainLooper(PAGE_LOAD_DELAY, TimeUnit.MILLISECONDS);
+
+        verify(mScrimManager, never()).showScrim(any());
         Assert.assertEquals(0, mAnchorView.getChildCount());
     }
 }

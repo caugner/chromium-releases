@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/bookmarks/bookmark_bar_controller.h"
 
+#include "base/types/to_address.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/profiles/profile.h"
@@ -12,6 +13,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/fullscreen/browser_window_fullscreen_controller.h"
 #include "chrome/browser/ui/sad_tab.h"
 #include "chrome/browser/ui/tabs/saved_tab_groups/saved_tab_group_utils.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -93,6 +95,16 @@ const BookmarkBarController* BookmarkBarController::From(
       browser_window_interface->GetUnownedUserDataHost());
 }
 
+void BookmarkBarController::SetDelegate(Delegate* delegate) {
+  delegate_ = delegate;
+}
+
+void BookmarkBarController::FocusBookmarksToolbar() {
+  if (delegate_) {
+    delegate_->OnFocusBookmarksToolbar();
+  }
+}
+
 void BookmarkBarController::SetForceShowBookmarkBarFlag(ForceShowFlag flag) {
   force_show_bookmark_bar_flags_ |= flag;
   UpdateBookmarkBarState(StateChangeReason::kForceShow);
@@ -122,11 +134,11 @@ void BookmarkBarController::UpdateBookmarkBarState(StateChangeReason reason) {
 
   bool should_animate = reason == StateChangeReason::kPrefChange ||
                         reason == StateChangeReason::kForceShow;
-  Browser* browser = browser_->GetBrowserForMigrationOnly();
-  if (browser && browser->window()) {
-    browser->window()->BookmarkBarStateChanged(
-        should_animate ? BookmarkBar::ANIMATE_STATE_CHANGE
-                       : BookmarkBar::DONT_ANIMATE_STATE_CHANGE);
+  BookmarkBar::AnimateChangeType change_type =
+      should_animate ? BookmarkBar::ANIMATE_STATE_CHANGE
+                     : BookmarkBar::DONT_ANIMATE_STATE_CHANGE;
+  if (delegate_) {
+    delegate_->OnBookmarkBarStateChanged(change_type);
   }
 }
 
@@ -145,7 +157,8 @@ bool BookmarkBarController::ShouldShowBookmarkBar() const {
 
   if (browser_defaults::bookmarks_enabled &&
       profile->GetPrefs()->GetBoolean(bookmarks::prefs::kShowBookmarkBar) &&
-      !browser_->ShouldHideUIForFullscreen()) {
+      !BrowserWindowFullscreenController::From(base::to_address(browser_))
+           ->ShouldHideUIForFullscreen()) {
     return true;
   }
 
