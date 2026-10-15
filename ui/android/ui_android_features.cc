@@ -13,6 +13,10 @@ BASE_FEATURE(kAndroidUseCorrectDisplayWorkArea,
              "AndroidUseCorrectDisplayWorkArea",
              base::FEATURE_DISABLED_BY_DEFAULT);
 
+BASE_FEATURE(kAndroidUseCorrectWindowBounds,
+             "AndroidUseCorrectWindowBounds",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 BASE_FEATURE(kAndroidWindowManagementWebApi,
              "AndroidWindowManagementWebApi",
              base::FEATURE_DISABLED_BY_DEFAULT);
@@ -39,7 +43,7 @@ BASE_FEATURE(kFormFactorUseMaxWindowMetrics,
 
 BASE_FEATURE(kMirrorBackForwardGesturesInRTL,
              "MirrorBackForwardGesturesInRTL",
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kReportBottomOverscrolls,
              "ReportBottomOverscrolls",
@@ -60,5 +64,9 @@ BASE_FEATURE(kSendTouchMovesToEventForwarderObservers,
 BASE_FEATURE(kUseNewEtc1Encoder,
              "UseNewEtc1Encoder",
              base::FEATURE_ENABLED_BY_DEFAULT);
+
+BASE_FEATURE(kCheckHitEligibility,
+             "CheckHitEligibility",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 }  // namespace ui

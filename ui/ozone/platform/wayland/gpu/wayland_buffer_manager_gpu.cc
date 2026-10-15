@@ -4,8 +4,11 @@
 
 #include "ui/ozone/platform/wayland/gpu/wayland_buffer_manager_gpu.h"
 
+#include <drm_fourcc.h>
+
 #include <utility>
 
+#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/process/process.h"
 #include "base/task/current_thread.h"
@@ -194,6 +197,8 @@ void WaylandBufferManagerGpu::CreateDmabufBasedBuffer(
     const std::vector<uint64_t>& modifiers,
     uint32_t current_format,
     uint32_t planes_count,
+    const gfx::ColorSpace& color_space,
+    const gfx::HDRMetadata& hdr_metadata,
     uint32_t buffer_id) {
   DCHECK(gpu_thread_runner_);
   if (!gpu_thread_runner_->BelongsToCurrentThread()) {
@@ -204,14 +209,15 @@ void WaylandBufferManagerGpu::CreateDmabufBasedBuffer(
                        base::Unretained(this), std::move(dmabuf_fd),
                        std::move(size), std::move(strides), std::move(offsets),
                        std::move(modifiers), current_format, planes_count,
-                       buffer_id));
+                       color_space, hdr_metadata, buffer_id));
     return;
   }
 
-  base::OnceClosure task = base::BindOnce(
-      &WaylandBufferManagerGpu::CreateDmabufBasedBufferTask,
-      base::Unretained(this), std::move(dmabuf_fd), size, strides, offsets,
-      modifiers, current_format, planes_count, buffer_id);
+  base::OnceClosure task =
+      base::BindOnce(&WaylandBufferManagerGpu::CreateDmabufBasedBufferTask,
+                     base::Unretained(this), std::move(dmabuf_fd), size,
+                     strides, offsets, modifiers, current_format, planes_count,
+                     color_space, hdr_metadata, buffer_id);
   RunOrQueueTask(std::move(task));
 }
 
@@ -353,6 +359,15 @@ WaylandBufferManagerGpu::GetModifiersForBufferFormat(
     return it->second;
   }
   return {};
+}
+
+bool WaylandBufferManagerGpu::AllowsImplicitModifierForBufferFormat(
+    gfx::BufferFormat buffer_format) const {
+  auto it = supported_buffer_formats_with_modifiers_.find(buffer_format);
+  if (it != supported_buffer_formats_with_modifiers_.end()) {
+    return base::Contains(it->second, DRM_FORMAT_MOD_INVALID);
+  }
+  return false;
 }
 
 uint32_t WaylandBufferManagerGpu::AllocateBufferID() {
@@ -508,13 +523,16 @@ void WaylandBufferManagerGpu::CreateDmabufBasedBufferTask(
     const std::vector<uint64_t>& modifiers,
     uint32_t current_format,
     uint32_t planes_count,
+    const gfx::ColorSpace& color_space,
+    const gfx::HDRMetadata& hdr_metadata,
     uint32_t buffer_id) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(gpu_sequence_checker_);
   DCHECK(remote_host_);
 
   remote_host_->CreateDmabufBasedBuffer(
       mojo::PlatformHandle(std::move(dmabuf_fd)), size, strides, offsets,
-      modifiers, current_format, planes_count, buffer_id);
+      modifiers, current_format, planes_count, color_space, hdr_metadata,
+      buffer_id);
 }
 
 void WaylandBufferManagerGpu::CreateShmBasedBufferTask(base::ScopedFD shm_fd,

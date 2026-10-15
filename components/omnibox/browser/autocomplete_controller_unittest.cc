@@ -2066,6 +2066,7 @@ TEST_F(AutocompleteControllerTest, UpdateResult_ContextualSuggestionsAndLens) {
   contextual_search_config.Get().contextual_zps_limit = 3;
   contextual_search_config.Get().show_open_lens_action = true;
   contextual_search_config.Get().use_apc_paywall_signal = true;
+  contextual_search_config.Get().show_suggestions_on_no_apc = true;
 
   // Populate TemplateURLService with a keyword.
   TemplateURLData turl_data;
@@ -2143,9 +2144,9 @@ TEST_F(AutocompleteControllerTest, UpdateResult_ContextualSuggestionsAndLens) {
     check_results(/*expect_contextual=*/false, /*expect_lens=*/true);
   }
 
-  // Paywall is unknown. No contextual suggestions but has Lens entrypoint.
+  // Paywall is unknown. Contextual suggestions and Lens entrypoint.
   {
-    SCOPED_TRACE("Paywall statis is unknown");
+    SCOPED_TRACE("Paywall status is unknown");
     EXPECT_CALL(*provider_client(), AreLensEntrypointsVisible())
         .WillRepeatedly(testing::Return(true));
     EXPECT_CALL(*provider_client(), IsPagePaywalled())
@@ -2153,7 +2154,7 @@ TEST_F(AutocompleteControllerTest, UpdateResult_ContextualSuggestionsAndLens) {
 
     controller_.SimulateAutocompletePass(/*sync=*/true, /*done=*/true,
                                          provider_matches, zps_input);
-    check_results(/*expect_contextual=*/false, /*expect_lens=*/true);
+    check_results(/*expect_contextual=*/true, /*expect_lens=*/true);
   }
 }
 #endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
@@ -2615,7 +2616,7 @@ TEST_F(AutocompleteControllerTest, UpdateSearchboxStatsForAnswerAction) {
           ->search_terms_args->searchbox_stats.SerializeAsString());
 }
 
-// Anroid and iOS have different handling for pedals.
+// Android and iOS have different handling for pedals.
 #if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
 TEST_F(AutocompleteControllerTest, NoActionsAttachedToLensSearchboxMatches) {
   std::unordered_map<OmniboxPedalId, scoped_refptr<OmniboxPedal>> pedals;
@@ -2672,6 +2673,48 @@ TEST_F(AutocompleteControllerTest, NoActionsAttachedToLensSearchboxMatches) {
       controller_.internal_result_.match_at(1)->takeover_action->ActionId());
   EXPECT_TRUE(
       controller_.internal_result_.match_at(2)->has_tab_match.value_or(false));
+}
+#endif
+
+// Android and iOS have different handling for pedals.
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+TEST_F(AutocompleteControllerTest, NoActionsAttachedToNtpComposeboxMatches) {
+  // Create input with lens searchbox page classification.
+  controller_.input_ = AutocompleteInput(
+      u"Clear History", metrics::OmniboxEventProto::NTP_COMPOSEBOX,
+      TestSchemeClassifier());
+
+  SetAutocompleteMatches(
+      {CreateSearchMatch(u"search 2"),
+       CreateHistoryURLMatch(
+           /*destination_url=*/"http://this-site-matches.com")});
+
+  static_cast<FakeTabMatcher&>(
+      const_cast<TabMatcher&>(provider_client()->GetTabMatcher()))
+      .set_url_substring_match("matches");
+
+  controller_.AttachActions();
+
+  // For a Lens Searchbox, AttachActions shouldn't attach a switch to this tab
+  // action to the last match.
+  EXPECT_FALSE(
+      controller_.internal_result_.match_at(1)->has_tab_match.value_or(false));
+
+  controller_.input_ =
+      AutocompleteInput(u"Clear History", metrics::OmniboxEventProto::OTHER,
+                        TestSchemeClassifier());
+
+  SetAutocompleteMatches(
+      {CreateSearchMatch(u"Clear History"),
+       CreateHistoryURLMatch(
+           /*destination_url=*/"http://this-site-matches.com")});
+
+  controller_.AttachActions();
+
+  // For any other page classification, AttachActions should attach a switch
+  // to this tab action to the relevant matches.
+  EXPECT_TRUE(
+      controller_.internal_result_.match_at(1)->has_tab_match.value_or(false));
 }
 #endif
 
@@ -3247,5 +3290,28 @@ TEST_F(AutocompleteControllerTest,
   EXPECT_EQ(
       OmniboxActionId::CONTEXTUAL_SEARCH_OPEN_LENS,
       controller_.internal_result_.match_at(1)->takeover_action->ActionId());
+}
+
+TEST_F(AutocompleteControllerTest, SmartComposeClearedWithNewResults) {
+  auto match1 = CreateSearchMatch("match1", true, 1300);
+  EXPECT_THAT(controller_.SimulateAutocompletePass(true, false, {match1}),
+              testing::ElementsAreArray({
+                  "match1",
+              }));
+
+  controller_.internal_result_.set_smart_compose_inline_hint("smart compose!");
+
+  // Verify smart compose field is set initially
+  ASSERT_TRUE(
+      !controller_.internal_result_.smart_compose_inline_hint().empty());
+
+  EXPECT_THAT(controller_.SimulateAutocompletePass(true, false, {match1}),
+              testing::ElementsAreArray({
+                  "match1",
+              }));
+
+  // Smart compose field should not be set after autocomplete pass with no
+  // smart compose result.
+  ASSERT_TRUE(controller_.internal_result_.smart_compose_inline_hint().empty());
 }
 #endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)

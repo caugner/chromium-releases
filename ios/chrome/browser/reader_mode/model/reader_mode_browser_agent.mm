@@ -5,8 +5,12 @@
 #import "ios/chrome/browser/reader_mode/model/reader_mode_browser_agent.h"
 
 #import "base/task/single_thread_task_runner.h"
+#import "components/feature_engagement/public/event_constants.h"
+#import "components/feature_engagement/public/tracker.h"
 #import "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/crash_report/model/crash_keys_helper.h"
+#import "ios/chrome/browser/feature_engagement/model/tracker_factory.h"
+#import "ios/chrome/browser/find_in_page/model/find_tab_helper.h"
 #import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_controller.h"
 #import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
 #import "ios/chrome/browser/shared/public/commands/page_side_swipe_commands.h"
@@ -45,6 +49,9 @@ ReaderModeBrowserAgent::ReaderModeBrowserAgent(Browser* browser)
 }
 
 void ReaderModeBrowserAgent::ShowReaderModeUI(BOOL animated) {
+  // Notify that the Reader Mode UI has been started.
+  feature_engagement::TrackerFactory::GetForProfile(browser_->GetProfile())
+      ->NotifyEvent(feature_engagement::events::kIOSReaderModeUsed);
   crash_keys::SetCurrentlyInReaderMode(true);
   [delegate_ readerModeBrowserAgent:this showContentAnimated:animated];
 
@@ -109,6 +116,16 @@ void ReaderModeBrowserAgent::WebStateListDidChange(
   if (new_tab_helper) {
     // If there is a new active WebState, start observing it.
     new_tab_helper->AddObserver(this);
+  }
+
+  // TODO(crbug.com/438125409): Remove this call to `SetFullscreenController`
+  // once dependency installation is handled correctly.
+  if (new_tab_helper && new_tab_helper->GetReaderModeWebState()) {
+    FindTabHelper* reader_mode_find_tab_helper =
+        FindTabHelper::FromWebState(new_tab_helper->GetReaderModeWebState());
+    FullscreenController* fullscreen_controller =
+        FullscreenController::FromBrowser(browser_);
+    reader_mode_find_tab_helper->SetFullscreenController(fullscreen_controller);
   }
 
   // Show or hide the Reader mode UI if necessary.

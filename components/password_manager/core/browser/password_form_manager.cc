@@ -15,6 +15,7 @@
 
 #include "base/check.h"
 #include "base/containers/lru_cache.h"
+#include "base/debug/crash_logging.h"
 #include "base/feature_list.h"
 #include "base/i18n/case_conversion.h"
 #include "base/memory/ptr_util.h"
@@ -93,6 +94,11 @@ namespace password_manager {
 bool PasswordFormManager::wait_for_server_predictions_for_filling_ = true;
 
 namespace {
+
+// Number of fields that recently had user input to be considered as potential
+// single username fields for forgot password voting purposes (to allow for one
+// possible username and one OTP/captcha field).
+constexpr size_t kNumFieldsForForgotPasswordVoting = 2;
 
 bool FormContainsFieldWithName(const FormData* form,
                                const std::u16string& element) {
@@ -754,6 +760,10 @@ void PasswordFormManager::UpdateStateOnUserInput(
   if (!HasGeneratedPassword()) {
     return;
   }
+
+  SCOPED_CRASH_KEY_NUMBER("Bug40072712", "pmf_genElemId",
+                          generation_element_.value());
+
   // Update the presaved password form. Even if generated password was not
   // modified, the user might have modified the username.
   std::u16string generated_password =
@@ -1755,8 +1765,9 @@ void PasswordFormManager::HandleForgotPasswordFormData() {
     return;
   }
 
-  std::vector<FieldInfo> field_info =
-      field_info_manager->GetFieldInfo(parsed_submitted_form_->signon_realm);
+  std::vector<FieldInfo> field_info = field_info_manager->GetFieldInfo(
+      parsed_submitted_form_->signon_realm,
+      /*num_fields_to_consider=*/kNumFieldsForForgotPasswordVoting);
   // No info available for the current eTLD => no voting on potential username
   // forms.
   if (field_info.empty() &&

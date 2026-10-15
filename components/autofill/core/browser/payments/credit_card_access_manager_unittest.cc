@@ -44,14 +44,15 @@
 #include "components/autofill/core/common/autofill_prefs.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+#if BUILDFLAG(IS_ANDROID)
+#include "base/android/device_info.h"
+#endif
+
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_ANDROID)
 #include "components/autofill/core/browser/payments/test_credit_card_fido_authenticator.h"
 #include "components/autofill/core/browser/strike_databases/payments/fido_authentication_strike_database.h"
 #endif
 
-#if BUILDFLAG(IS_ANDROID)
-#include "base/android/build_info.h"
-#endif
 
 using base::ASCIIToUTF16;
 using testing::NiceMock;
@@ -132,7 +133,7 @@ INSTANTIATE_TEST_SUITE_P(,
 // Tests retrieving local cards.
 TEST_F(CreditCardAccessManagerTest, FetchLocalCardSuccess) {
 #if BUILDFLAG(IS_ANDROID)
-  if (base::android::BuildInfo::GetInstance()->is_automotive()) {
+  if (base::android::device_info::is_automotive()) {
     GTEST_SKIP() << "This test should not run on automotive.";
   }
 #endif  // BUILDFLAG(IS_ANDROID)
@@ -154,6 +155,29 @@ TEST_F(CreditCardAccessManagerTest, FetchLocalCardSuccess) {
           .payment_method_type_if_non_interactive_authentication_flow_completed();
   ASSERT_TRUE(type.has_value());
   ASSERT_EQ(type.value(), NonInteractivePaymentMethodType::kLocalCard);
+}
+
+// Tests that fetching a local card correctly updates the fetched payments data
+// context in FormDataImporter. Exists to ensure crbug.com/448461590 stays
+// fixed.
+TEST_F(CreditCardAccessManagerTest, FetchLocalCard_UpdatesPaymentsContext) {
+  int64_t instrument_id = 12345;
+  CreditCard local_card = test::GetCreditCard();
+  local_card.set_instrument_id(instrument_id);
+  personal_data().payments_data_manager().AddCreditCard(local_card);
+  const CreditCard* card =
+      personal_data().payments_data_manager().GetCreditCardByGUID(
+          local_card.guid());
+  auto* form_data_importer = autofill_client_.GetFormDataImporter();
+  ASSERT_TRUE(form_data_importer);
+
+  PrepareToFetchCreditCardAndWaitForCallbacks();
+  FetchCreditCard(card);
+
+  const auto& context = form_data_importer->fetched_payments_data_context();
+  EXPECT_EQ(context.fetched_card_instrument_id, instrument_id);
+  ASSERT_TRUE(context.card_was_fetched_from_cache.has_value());
+  EXPECT_FALSE(*context.card_was_fetched_from_cache);
 }
 
 // Ensures that FetchCreditCard() returns the full PAN upon a successful
@@ -1731,7 +1755,7 @@ TEST_F(CreditCardAccessManagerTest,
   base::HistogramTester histogram_tester;
 
 #if BUILDFLAG(IS_ANDROID)
-  if (base::android::BuildInfo::GetInstance()->is_automotive()) {
+  if (base::android::device_info::is_automotive()) {
     GTEST_SKIP() << "This test should not run on automotive.";
   }
 #endif  // BUILDFLAG(IS_ANDROID)

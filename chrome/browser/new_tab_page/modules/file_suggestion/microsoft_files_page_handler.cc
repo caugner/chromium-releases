@@ -78,8 +78,6 @@ constexpr net::NetworkTrafficAnnotationTag traffic_annotation =
           }
         })");
 
-const int kMaxResponseSize = 1024 * 1024;
-
 const int kNumberOfDaysPerWeek = 7;
 
 const char kFakeTrendingData[] =
@@ -153,17 +151,20 @@ const char kFakeTrendingData[] =
 constexpr base::TimeDelta kModuleDismissalDuration = base::Hours(12);
 
 const char kBatchRequestUrl[] = "https://graph.microsoft.com/v1.0/$batch";
-const char kNonInsightsRequestBody[] = R"({
+const char kNonInsightsRequestBody[] =
+    R"({
   "requests": [
   {
     "id": "recent",
     "method": "GET",
-    "url": "/me/drive/recent?orderby=fileSystemInfo/lastAccessedDateTime+desc"
+    "url": "/me/drive/recent?orderby=fileSystemInfo/lastAccessedDateTime+desc)"
+    R"(&$top=6"
   },
   {
     "id": "shared",
     "method": "GET",
-    "url": "/me/drive/sharedWithMe"
+    "url": "/me/drive/sharedWithMe?$select=id,name,webUrl,file,)"
+    R"(remoteItem&$orderBy=lastModifiedDateTime+desc"
   }]})";
 
 const char kNonInsightsFakeData[] =
@@ -450,7 +451,7 @@ void MicrosoftFilesPageHandler::RequestFiles(
       url_loader_factory_.get(),
       base::BindOnce(&MicrosoftFilesPageHandler::OnJsonReceived,
                      weak_factory_.GetWeakPtr(), std::move(callback)),
-      kMaxResponseSize);
+      network::SimpleURLLoader::kMaxBoundedStringDownloadSize);
 }
 
 void MicrosoftFilesPageHandler::ParseFakeData(GetFilesCallback callback) {
@@ -479,13 +480,14 @@ void MicrosoftFilesPageHandler::OnJsonReceived(
   // Check for unauthorized and throttling errors.
   auto* response_info = url_loader_->ResponseInfo();
   if (net_error != net::OK && response_info && response_info->headers) {
-    int64_t wait_time =
+    std::optional<int64_t> wait_time =
         response_info->headers->GetInt64HeaderValue("Retry-After");
-    if (wait_time != -1) {
+    if (wait_time) {
       request_result_ = MicrosoftFilesRequestResult::kThrottlingError;
-      RecordThrottlingWaitTime(base::Seconds(wait_time));
-      pref_service_->SetTime(prefs::kNtpMicrosoftFilesModuleRetryAfterTime,
-                             base::Time::Now() + base::Seconds(wait_time));
+      RecordThrottlingWaitTime(base::Seconds(wait_time.value()));
+      pref_service_->SetTime(
+          prefs::kNtpMicrosoftFilesModuleRetryAfterTime,
+          base::Time::Now() + base::Seconds(wait_time.value()));
     } else if (response_info->headers->response_code() ==
                net::HTTP_UNAUTHORIZED) {
       request_result_ = MicrosoftFilesRequestResult::kAuthError;
@@ -563,8 +565,7 @@ MicrosoftFilesPageHandler::GetTrendingFiles(base::Value::Dict result) {
         "resourceVisualization.mediaType");
 
     if (!id || !title || !url || !mime_type) {
-      request_result_ = MicrosoftFilesRequestResult::kContentError;
-      return std::vector<file_suggestion::mojom::FilePtr>();
+      continue;
     }
 
     std::string file_extension =
@@ -634,8 +635,6 @@ MicrosoftFilesPageHandler::GetNonInsightFiles(const base::Value::List* values,
     const std::string* last_opened_time_str =
         suggestion_dict.FindStringByDottedPath(
             "fileSystemInfo.lastAccessedDateTime");
-    const std::string* last_modified_time_str =
-        suggestion_dict.FindString("lastModifiedDateTime");
     const std::string* shared_by = suggestion_dict.FindStringByDottedPath(
         "remoteItem.shared.sharedBy.user.displayName");
     const std::string* shared_time_str = suggestion_dict.FindStringByDottedPath(
@@ -662,11 +661,8 @@ MicrosoftFilesPageHandler::GetNonInsightFiles(const base::Value::List* values,
             : shared_by && shared_time_str &&
                   base::Time::FromUTCString(shared_time_str->c_str(),
                                             &sort_time);
-    if (!id || !title || !item_url || !last_modified_time_str ||
-        !suggestion_has_formatted_time) {
-      request_result_ = MicrosoftFilesRequestResult::kContentError;
-      return std::vector<
-          std::pair<base::Time, file_suggestion::mojom::FilePtr>>();
+    if (!id || !title || !item_url || !suggestion_has_formatted_time) {
+      continue;
     }
 
     std::string file_extension =

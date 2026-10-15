@@ -23,6 +23,10 @@ UI_ANDROID_EXPORT BASE_DECLARE_FEATURE(kAndroidHDR);
 // availWidth/availHeight/availTop/availLeft.
 UI_ANDROID_EXPORT BASE_DECLARE_FEATURE(kAndroidUseCorrectDisplayWorkArea);
 
+// Use Android WindowManager's WindowMetrics as the data source for top-level
+// browser window bounds in Blink.
+UI_ANDROID_EXPORT BASE_DECLARE_FEATURE(kAndroidUseCorrectWindowBounds);
+
 // TODO(crbug.com/401215712): Clean up the flag after making sure tha the Window
 // Management Web API works well.
 UI_ANDROID_EXPORT BASE_DECLARE_FEATURE(kAndroidWindowManagementWebApi);
@@ -65,6 +69,12 @@ UI_ANDROID_EXPORT BASE_DECLARE_FEATURE(
 
 // Enables the new ETC1 encoder (used in tab and back/forward thumbnails).
 UI_ANDROID_EXPORT BASE_DECLARE_FEATURE(kUseNewEtc1Encoder);
+
+// Conducts a check to determine if the View is eligible to a Hit. This is a
+// mitigation of when the prerendered view (hidden) somehow receives the touch
+// event even though it is hidden, due to the ordering of the `children_` in
+// `ViewAndroid`. Refer to crbug.com/442832509 for more details.
+UI_ANDROID_EXPORT BASE_DECLARE_FEATURE(kCheckHitEligibility);
 
 }  // namespace ui
 

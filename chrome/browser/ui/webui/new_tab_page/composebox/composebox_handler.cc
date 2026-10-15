@@ -4,36 +4,42 @@
 
 #include "chrome/browser/ui/webui/new_tab_page/composebox/composebox_handler.h"
 
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "base/containers/flat_tree.h"
+#include "base/containers/span.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/notreached.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/tabs/public/tab_features.h"
+#include "chrome/browser/ui/tabs/tab_renderer_data.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/webui/new_tab_page/composebox/composebox_omnibox_client.h"
 #include "chrome/browser/ui/webui/new_tab_page/composebox/variations/composebox_fieldtrial.h"
-#include "chrome/browser/ui/webui/searchbox/searchbox_omnibox_client.h"
+#include "chrome/browser/ui/webui/webui_embedding_context.h"
+#include "components/lens/contextual_input.h"
+#include "components/lens/tab_contextualization_controller.h"
 #include "components/omnibox/browser/omnibox_controller.h"
-#include "components/omnibox/composebox/composebox_image_helper.h"
 #include "content/public/browser/page_navigator.h"
 
+using composebox::SessionState;
+
 namespace {
-class ComposeboxOmniboxClient final : public SearchboxOmniboxClient {
- public:
-  ComposeboxOmniboxClient(Profile* profile, content::WebContents* web_contents);
-  ~ComposeboxOmniboxClient() override;
 
-  // OmniboxClient:
-  metrics::OmniboxEventProto::PageClassification GetPageClassification(
-      bool is_prefetch) const override;
-};
-
-ComposeboxOmniboxClient::ComposeboxOmniboxClient(
-    Profile* profile,
-    content::WebContents* web_contents)
-    : SearchboxOmniboxClient(profile, web_contents) {}
-
-ComposeboxOmniboxClient::~ComposeboxOmniboxClient() = default;
-
-metrics::OmniboxEventProto::PageClassification
-ComposeboxOmniboxClient::GetPageClassification(bool is_prefetch) const {
-  // TODO(crbug.com/434711904): Create new page classification
-  return metrics::OmniboxEventProto::NTP_REALBOX;
+std::optional<lens::ImageEncodingOptions> CreateImageEncodingOptions() {
+  auto image_upload_config =
+      ntp_composebox::FeatureConfig::Get().config.composebox().image_upload();
+  return lens::ImageEncodingOptions{
+      .enable_webp_encoding = image_upload_config.enable_webp_encoding(),
+      .max_size = image_upload_config.downscale_max_image_size(),
+      .max_height = image_upload_config.downscale_max_image_height(),
+      .max_width = image_upload_config.downscale_max_image_width(),
+      .compression_quality = image_upload_config.image_compression_quality()};
 }
 
 }  // namespace
@@ -48,10 +54,18 @@ ComposeboxHandler::ComposeboxHandler(
     Profile* profile,
     content::WebContents* web_contents,
     MetricsReporter* metrics_reporter)
-    : SearchboxHandler(std::move(pending_searchbox_handler),
-                       profile,
-                       web_contents,
-                       metrics_reporter),
+    : SearchboxHandler(
+          std::move(pending_searchbox_handler),
+          profile,
+          web_contents,
+          metrics_reporter,
+          std::make_unique<OmniboxController>(
+              /*view=*/nullptr,
+              std::make_unique<composebox::ComposeboxOmniboxClient>(
+                  profile,
+                  web_contents,
+                  this,
+                  query_controller.get()))),
       query_controller_(std::move(query_controller)),
       metrics_recorder_(std::move(metrics_recorder)),
       web_contents_(web_contents),
@@ -59,17 +73,14 @@ ComposeboxHandler::ComposeboxHandler(
       handler_(this, std::move(pending_handler)) {
   query_controller_->AddObserver(this);
 
-  // TODO(crbug.com/435470637): Consider moving to SearchboxHandler base class.
-  owned_controller_ = std::make_unique<OmniboxController>(
-      /*view=*/nullptr,
-      std::make_unique<ComposeboxOmniboxClient>(profile_, web_contents_));
-  controller_ = owned_controller_.get();
-
   autocomplete_controller_observation_.Observe(autocomplete_controller());
 }
 
 ComposeboxHandler::~ComposeboxHandler() {
   query_controller_->RemoveObserver(this);
+  autocomplete_controller_observation_.Reset();
+  controller_ = nullptr;
+  owned_controller_.reset();
 }
 
 void ComposeboxHandler::NotifySessionStarted() {
@@ -82,24 +93,58 @@ void ComposeboxHandler::NotifySessionAbandoned() {
   metrics_recorder_->NotifySessionStateChanged(SessionState::kSessionAbandoned);
 }
 
+void ComposeboxHandler::SubmitQuery(
+    const std::string& query_text,
+    WindowOpenDisposition disposition,
+    std::map<std::string, std::string> additional_params) {
+  // Update the query controller state to reflect any deleted contexts.
+  std::erase_if(deleted_context_tokens_,
+                [this](const base::UnguessableToken& context_token) {
+                  ComposeboxQueryController::FileInfo* file_info =
+                      query_controller_->GetFileInfo(context_token);
+
+                  if (file_info == nullptr) {
+                    return false;
+                  }
+
+                  lens::MimeType file_type = file_info
+                                                 ? file_info->mime_type_
+                                                 : lens::MimeType::kUnknown;
+                  FileUploadStatus file_status =
+                      file_info ? file_info->GetFileUploadStatus()
+                                : FileUploadStatus::kNotUploaded;
+
+                  bool success = query_controller_->DeleteFile(context_token);
+                  metrics_recorder_->RecordFileDeletedMetrics(
+                      success, file_type, file_status);
+
+                  return success;
+                });
+
+  // This is the time that the user clicked the submit button, however optional
+  // autocomplete logic may be run before this if there was a match associated
+  // with the query.
+  base::Time query_start_time = base::Time::Now();
+  metrics_recorder_->NotifySessionStateChanged(SessionState::kQuerySubmitted);
+  OpenUrl(query_controller_->CreateAimUrl(query_text, query_start_time,
+                                          additional_params),
+          disposition);
+  metrics_recorder_->NotifySessionStateChanged(
+      SessionState::kNavigationOccurred);
+  metrics_recorder_->RecordQueryMetrics(
+      query_text.size(), query_controller_->num_files_in_request());
+}
+
 void ComposeboxHandler::SubmitQuery(const std::string& query_text,
                                     uint8_t mouse_button,
                                     bool alt_key,
                                     bool ctrl_key,
                                     bool meta_key,
                                     bool shift_key) {
-  // This is the time that the user clicked the submit button, and should not
-  // go any lower in this method.
-  base::Time query_start_time = base::Time::Now();
-  metrics_recorder_->NotifySessionStateChanged(SessionState::kQuerySubmitted);
   const WindowOpenDisposition disposition = ui::DispositionFromClick(
       /*middle_button=*/mouse_button == 1, alt_key, ctrl_key, meta_key,
       shift_key);
-  OpenUrl(query_controller_->CreateAimUrl(query_text, query_start_time), disposition);
-  metrics_recorder_->NotifySessionStateChanged(
-      SessionState::kNavigationOccurred);
-  metrics_recorder_->RecordQueryMetrics(
-      query_text.size(), query_controller_->num_files_in_request());
+  SubmitQuery(query_text, disposition, /*additional_params=*/{});
 }
 
 void ComposeboxHandler::FocusChanged(bool focused) {
@@ -114,64 +159,112 @@ void ComposeboxHandler::OpenUrl(GURL url,
   web_contents_->OpenURL(params, base::DoNothing());
 }
 
-void ComposeboxHandler::AddFile(
+void ComposeboxHandler::AddFileContext(
     composebox::mojom::SelectedFileInfoPtr file_info_mojom,
     mojo_base::BigBuffer file_bytes,
-    AddFileCallback callback) {
-  scoped_refptr<base::RefCountedBytes> file_data =
-      base::MakeRefCounted<base::RefCountedBytes>(file_bytes);
+    AddFileContextCallback callback) {
+  base::UnguessableToken file_token = base::UnguessableToken::Create();
 
-  auto file_info_metadata =
-      std::make_unique<ComposeboxQueryController::FileInfo>();
-  file_info_metadata->file_name = file_info_mojom->file_name;
-  file_info_metadata->file_size_bytes = file_bytes.size();
-  file_info_metadata->webui_selection_time = file_info_mojom->selection_time;
-  file_info_metadata->file_token_ = base::UnguessableToken::Create();
-
-  std::optional<composebox::ImageEncodingOptions> image_options = std::nullopt;
+  std::optional<lens::ImageEncodingOptions> image_options = std::nullopt;
+  lens::MimeType mime_type;
 
   if ((file_info_mojom->mime_type).find("pdf") != std::string::npos) {
-    file_info_metadata->mime_type_ = lens::MimeType::kPdf;
+    mime_type = lens::MimeType::kPdf;
   } else if ((file_info_mojom->mime_type).find("image") != std::string::npos) {
-    file_info_metadata->mime_type_ = lens::MimeType::kImage;
-    auto image_upload_config =
-        ntp_composebox::FeatureConfig::Get().config.composebox().image_upload();
-    image_options = composebox::ImageEncodingOptions{
-        .enable_webp_encoding = image_upload_config.enable_webp_encoding(),
-        .max_size = image_upload_config.downscale_max_image_size(),
-        .max_height = image_upload_config.downscale_max_image_height(),
-        .max_width = image_upload_config.downscale_max_image_width(),
-        .compression_quality = image_upload_config.image_compression_quality()};
+    mime_type = lens::MimeType::kImage;
+    image_options = CreateImageEncodingOptions();
   } else {
     NOTREACHED();
   }
 
-  std::move(callback).Run(file_info_metadata->file_token_);
-  metrics_recorder_->RecordFileSizeMetric(file_info_metadata->mime_type_,
-                                          file_bytes.size());
-  query_controller_->StartFileUploadFlow(std::move(file_info_metadata),
-                                         std::move(file_data),
+  std::unique_ptr<lens::ContextualInputData> input_data =
+      std::make_unique<lens::ContextualInputData>();
+  input_data->context_input = std::vector<lens::ContextualInput>();
+  input_data->primary_content_type = mime_type;
+
+  base::span<const uint8_t> file_data_span = base::span(file_bytes);
+  std::vector<uint8_t> file_data_vector(file_data_span.begin(),
+                                        file_data_span.end());
+  input_data->context_input->push_back(
+      lens::ContextualInput(std::move(file_data_vector), mime_type));
+
+  std::move(callback).Run(file_token);
+  metrics_recorder_->RecordFileSizeMetric(mime_type, file_bytes.size());
+  query_controller_->StartFileUploadFlow(file_token, std::move(input_data),
                                          std::move(image_options));
 }
 
-void ComposeboxHandler::DeleteFile(const base::UnguessableToken& file_token) {
-  ComposeboxQueryController::FileInfo* file_info =
-      query_controller_->GetFileInfo(file_token);
-  lens::MimeType file_type =
-      file_info ? file_info->mime_type_ : lens::MimeType::kUnknown;
-  FileUploadStatus file_status = file_info ? file_info->GetFileUploadStatus()
-                                           : FileUploadStatus::kNotUploaded;
-
-  // If an UnguessabledToken that wasn't in the cache was sent, delete fails.
-  // Report a bad message.
-  bool success = query_controller_->DeleteFile(file_token);
-  metrics_recorder_->RecordFileDeletedMetrics(success, file_type, file_status);
-  if (!success) {
-    handler_.ReportBadMessage("An invalid file token was sent to DeleteFile");
+void ComposeboxHandler::AddTabContext(int32_t tab_id,
+                                      AddTabContextCallback callback) {
+  const tabs::TabHandle handle = tabs::TabHandle(tab_id);
+  tabs::TabInterface* const tab = handle.Get();
+  if (!tab) {
+    return;
   }
+
+  RecordTabClickedMetric(tab);
+
+  lens::TabContextualizationController* tab_contextualization_controller =
+      tab->GetTabFeatures()->tab_contextualization_controller();
+  auto token = base::UnguessableToken::Create();
+  tab_contextualization_controller->GetPageContext(
+      base::BindOnce(&ComposeboxHandler::OnGetTabPageContext,
+                     weak_ptr_factory_.GetWeakPtr(), token));
+
+  std::move(callback).Run(token);
+}
+
+void ComposeboxHandler::RecordTabClickedMetric(tabs::TabInterface* const tab) {
+  bool has_duplicate_title = false;
+  auto* browser_window_interface =
+      webui::GetBrowserWindowInterface(web_contents_);
+  if (browser_window_interface) {
+    auto* tab_strip_model = browser_window_interface->GetTabStripModel();
+    int tab_index = tab_strip_model->GetIndexOfTab(tab);
+    if (tab_index != TabStripModel::kNoTab) {
+      TabRendererData current_tab_renderer_data =
+          TabRendererData::FromTabInModel(tab_strip_model, tab_index);
+      const std::u16string& current_title = current_tab_renderer_data.title;
+
+      int title_count = 0;
+      for (int i = 0; i < tab_strip_model->count(); i++) {
+        TabRendererData tab_renderer_data =
+            TabRendererData::FromTabInModel(tab_strip_model, i);
+        if (tab_renderer_data.title == current_title) {
+          title_count++;
+        }
+      }
+      if (title_count > 1) {
+        has_duplicate_title = true;
+      }
+    }
+  }
+
+  UMA_HISTOGRAM_BOOLEAN("NewTabPage.Composebox.TabContextAdded", true);
+
+  UMA_HISTOGRAM_BOOLEAN("NewTabPage.Composebox.TabWithDuplicateTitleClicked",
+                        has_duplicate_title);
+}
+
+void ComposeboxHandler::DeleteContext(
+    const base::UnguessableToken& context_token) {
+  // It is possible to receive a call to delete a context before that context
+  // has been created in the query controller. We queue all context tokens for
+  // deletion at query submission time.
+  deleted_context_tokens_.insert(context_token);
+  query_controller_->ClearSuggestInputs();
+}
+
+void ComposeboxHandler::OnGetTabPageContext(
+    const base::UnguessableToken& context_token,
+    std::unique_ptr<lens::ContextualInputData> page_content_data) {
+  query_controller_->StartFileUploadFlow(context_token,
+                                         std::move(page_content_data),
+                                         CreateImageEncodingOptions());
 }
 
 void ComposeboxHandler::ClearFiles() {
+  deleted_context_tokens_.clear();
   query_controller_->ClearFiles();
 }
 
@@ -180,13 +273,10 @@ void ComposeboxHandler::OnFileUploadStatusChanged(
     lens::MimeType mime_type,
     composebox_query::mojom::FileUploadStatus file_upload_status,
     const std::optional<FileUploadErrorType>& error_type) {
-  page_->OnFileUploadStatusChanged(file_token, file_upload_status, error_type);
+  page_->OnContextualInputStatusChanged(file_token, file_upload_status,
+                                        error_type);
   metrics_recorder_->OnFileUploadStatusChanged(mime_type, file_upload_status,
                                                error_type);
-}
-
-void ComposeboxHandler::DeleteAutocompleteMatch(uint8_t line, const GURL& url) {
-  NOTREACHED();
 }
 
 void ComposeboxHandler::ExecuteAction(uint8_t line,

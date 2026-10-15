@@ -734,6 +734,27 @@ void CanvasRenderingContext2D::drawElement(Element* element,
   DrawElementInternal(element, x, y, dwidth, dheight, options, exception_state);
 }
 
+void CanvasRenderingContext2D::drawHTMLElement(
+    Element* element,
+    double x,
+    double y,
+    Canvas2DDrawElementOption* options,
+    ExceptionState& exception_state) {
+  DrawElementInternal(element, x, y, std::nullopt, std::nullopt, options,
+                      exception_state);
+}
+
+void CanvasRenderingContext2D::drawHTMLElement(
+    Element* element,
+    double x,
+    double y,
+    double dwidth,
+    double dheight,
+    Canvas2DDrawElementOption* options,
+    ExceptionState& exception_state) {
+  DrawElementInternal(element, x, y, dwidth, dheight, options, exception_state);
+}
+
 void CanvasRenderingContext2D::setHitTestRegions(
     VectorOf<CanvasElementHitTestRegion> hit_test_regions,
     ExceptionState& exception_state) {
@@ -774,7 +795,7 @@ void CanvasRenderingContext2D::DrawElementInternal(
     return;
   }
 
-  if (!IsDrawElementEligible(element, "drawElement()", exception_state)) {
+  if (!IsDrawElementEligible(element, "drawHTMLElement()", exception_state)) {
     return;
   }
 
@@ -788,7 +809,8 @@ void CanvasRenderingContext2D::DrawElementInternal(
   CHECK(layout_box->IsStacked());
   PaintLayer* layer = layout_box->EnclosingLayer();
 
-  auto box_rect = gfx::Rect(ToCeiledSize(layer->GetLayoutBox()->Size()));
+  auto box_rect =
+      gfx::Rect(ToCeiledSize(layer->GetLayoutBox()->StitchedSize()));
   // TODO(https://issues.chromium.org/379143301): Figure out the actual painted
   // rect of the element plus its descendants, and use that instead of the
   // box's size.
@@ -1394,33 +1416,34 @@ void CanvasRenderingContext2D::
 CanvasResourceProvider*
 CanvasRenderingContext2D::RecreateCanvasResourceProviderForCanvas2D() {
   CHECK(GetHibernationHandler());
+  CHECK(!resource_provider_);
 
-  auto* resource_provider = GetResourceProviderForCanvas2D();
-  if (!resource_provider && !did_fail_to_create_resource_provider_) {
-    if (canvas()->IsValidImageSize()) {
-      resource_provider_ = CreateCanvasResourceProvider();
-      canvas()->UpdateMemoryUsage();
-      resource_provider = GetResourceProviderForCanvas2D();
-    }
-    if (!resource_provider) {
-      did_fail_to_create_resource_provider_ = true;
-    } else if (resource_provider->IsValid()) {
-      base::UmaHistogramBoolean("Blink.Canvas.ResourceProviderIsAccelerated",
-                                resource_provider->IsAccelerated());
-      base::UmaHistogramEnumeration("Blink.Canvas.ResourceProviderType",
-                                    resource_provider->GetType());
-    }
+  if (did_fail_to_create_resource_provider_) {
+    return nullptr;
   }
-  if (!resource_provider || !resource_provider->IsValid()) {
+
+  if (canvas()->IsValidImageSize()) {
+    resource_provider_ = CreateCanvasResourceProvider();
+    canvas()->UpdateMemoryUsage();
+  }
+  if (!resource_provider_) {
+    did_fail_to_create_resource_provider_ = true;
+  } else if (resource_provider_->IsValid()) {
+    base::UmaHistogramBoolean("Blink.Canvas.ResourceProviderIsAccelerated",
+                              resource_provider_->IsAccelerated());
+    base::UmaHistogramEnumeration("Blink.Canvas.ResourceProviderType",
+                                  resource_provider_->GetType());
+  }
+  if (!resource_provider_ || !resource_provider_->IsValid()) {
     return nullptr;
   }
 
   auto* hibernation_handler = GetHibernationHandler();
   if (!hibernation_handler->IsHibernating()) {
-    return resource_provider;
+    return resource_provider_.get();
   }
 
-  if (resource_provider->IsAccelerated()) {
+  if (resource_provider_->IsAccelerated()) {
     CanvasHibernationHandler::ReportHibernationEvent(
         CanvasHibernationHandler::HibernationEvent::kHibernationEndedNormally);
   } else {
@@ -1439,8 +1462,8 @@ CanvasRenderingContext2D::RecreateCanvasResourceProviderForCanvas2D() {
   builder.set_image(hibernation_handler->GetImage(),
                     PaintImage::GetNextContentId());
   builder.set_id(PaintImage::GetNextId());
-  resource_provider->RestoreBackBuffer(builder.TakePaintImage());
-  resource_provider->SetRecorder(hibernation_handler->ReleaseRecorder());
+  resource_provider_->RestoreBackBuffer(builder.TakePaintImage());
+  resource_provider_->SetRecorder(hibernation_handler->ReleaseRecorder());
   // The hibernation image is no longer valid, clear it.
   hibernation_handler->Clear();
   DCHECK(!hibernation_handler->IsHibernating());
@@ -1448,7 +1471,7 @@ CanvasRenderingContext2D::RecreateCanvasResourceProviderForCanvas2D() {
   // shouldBeDirectComposited() may have changed.
   canvas()->SetNeedsCompositingUpdate();
 
-  return resource_provider;
+  return resource_provider_.get();
 }
 
 void CanvasRenderingContext2D::SetCanvas2DResourceProviderForTesting(

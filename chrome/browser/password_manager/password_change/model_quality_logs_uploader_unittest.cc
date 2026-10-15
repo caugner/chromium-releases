@@ -43,6 +43,26 @@ namespace {
 
 constexpr char kChangePasswordURL[] = "https://example.com/password/";
 
+void VerifyLoginCheckStep(
+    const optimization_guide::proto::LogAiDataRequest& log,
+    const QualityStatus& expected_status,
+    const int expected_retry_count,
+    bool was_skipped) {
+  EXPECT_EQ(
+      log.password_change_submission().quality().logged_in_check().status(),
+      expected_status);
+  EXPECT_EQ(log.password_change_submission()
+                .quality()
+                .logged_in_check()
+                .classification_overridden_by_user(),
+            was_skipped);
+  EXPECT_EQ(log.password_change_submission()
+                .quality()
+                .logged_in_check()
+                .retry_count(),
+            expected_retry_count);
+}
+
 void CheckOpenFormStatus(const optimization_guide::proto::LogAiDataRequest& log,
                          const QualityStatus& expected_status) {
   EXPECT_EQ(log.password_change_submission().quality().open_form().status(),
@@ -376,6 +396,56 @@ TEST_F(ModelQualityLogsUploaderTest, OpenFormTargetElementNotFound) {
       final_log,
       QualityStatus::
           PasswordChangeQuality_StepQuality_SubmissionStatus_ELEMENT_NOT_FOUND);
+}
+
+TEST_F(ModelQualityLogsUploaderTest, LoginCheckSkipped) {
+  ModelQualityLogsUploader logs_uploader(web_contents(), GURL());
+  logs_uploader.LoginCheckSkipped();
+  VerifyLoginCheckStep(
+      logs_uploader.GetFinalLog(),
+      QualityStatus::
+          PasswordChangeQuality_StepQuality_SubmissionStatus_UNKNOWN_STATUS,
+      /*expected_retry_count=*/0,
+      /*was_skipped=*/true);
+}
+
+TEST_F(ModelQualityLogsUploaderTest, LoginCheckRetryCountSet) {
+  const int login_state_checks = 3;
+  ModelQualityLogsUploader logs_uploader(web_contents(), GURL());
+  QualityStatus quality_status = QualityStatus::
+      PasswordChangeQuality_StepQuality_SubmissionStatus_ACTION_SUCCESS;
+  logs_uploader.SetLoggedInCheckQuality(login_state_checks, quality_status);
+  const optimization_guide::proto::LogAiDataRequest final_log =
+      logs_uploader.GetFinalLog();
+  VerifyLoginCheckStep(logs_uploader.GetFinalLog(), quality_status,
+                       /*expected_retry_count=*/login_state_checks - 1,
+                       /*was_skipped=*/false);
+}
+
+TEST_F(ModelQualityLogsUploaderTest, LoginCheckReachedMaxAttempts) {
+  const int login_state_checks = 5;
+  ModelQualityLogsUploader logs_uploader(web_contents(), GURL());
+  QualityStatus quality_status = QualityStatus::
+      PasswordChangeQuality_StepQuality_SubmissionStatus_FAILURE_STATUS;
+  logs_uploader.SetLoggedInCheckQuality(login_state_checks, quality_status);
+  const optimization_guide::proto::LogAiDataRequest final_log =
+      logs_uploader.GetFinalLog();
+  VerifyLoginCheckStep(logs_uploader.GetFinalLog(), quality_status,
+                       /*expected_retry_count=*/login_state_checks - 1,
+                       /*was_skipped=*/false);
+}
+
+TEST_F(ModelQualityLogsUploaderTest, LastLoginCheckHadUnexpectedState) {
+  const int login_state_checks = 5;
+  ModelQualityLogsUploader logs_uploader(web_contents(), GURL());
+  QualityStatus quality_status = QualityStatus::
+      PasswordChangeQuality_StepQuality_SubmissionStatus_UNEXPECTED_STATE;
+  logs_uploader.SetLoggedInCheckQuality(login_state_checks, quality_status);
+  const optimization_guide::proto::LogAiDataRequest final_log =
+      logs_uploader.GetFinalLog();
+  VerifyLoginCheckStep(logs_uploader.GetFinalLog(), quality_status,
+                       /*expected_retry_count=*/login_state_checks - 1,
+                       /*was_skipped=*/false);
 }
 
 TEST_F(ModelQualityLogsUploaderTest, OpenFormFlowInterrupted) {

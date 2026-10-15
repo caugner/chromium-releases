@@ -63,6 +63,10 @@ DEFAULT_SIZES_ENV_VAR = "CHROME_REMOTE_DESKTOP_DEFAULT_DESKTOP_SIZES"
 # launch Xvfb.
 USE_XVFB_ENV_VAR = "CHROME_REMOTE_DESKTOP_USE_XVFB"
 
+# If this environment variable is set, the script will launch a Wayland
+# session instead of X11.
+USE_WAYLAND_ENV_VAR = "CHROME_REMOTE_DESKTOP_USE_WAYLAND"
+
 # The amount of video RAM the dummy driver should claim to have, which limits
 # the maximum possible resolution.
 # 1048576 KiB = 1 GiB, which is the amount of video RAM needed to have a
@@ -286,9 +290,13 @@ def is_supported_platform():
 
 
 def is_crash_reporting_enabled(config):
-  # Enable crash reporting for Google hosts or when usage_stats_consent is true.
-  return (config.get("host_owner", "").endswith("@google.com") or
-          config.get("usage_stats_consent", False))
+  # Use the value in the host config for usage_stats_consent if it exists,
+  # otherwise opt into crash reporting if the owner is a Googler.
+  usage_stats_consent = config.get("usage_stats_consent", None)
+  if usage_stats_consent is not None:
+    return usage_stats_consent
+  else:
+    return config.get("host_owner", "").endswith("@google.com")
 
 
 def get_pipewire_session_manager():
@@ -638,7 +646,10 @@ class Desktop(abc.ABC):
     self.child_env = {}
     # These are the values set by the remoting-user-session binary when it
     # launches this script.
-    for key in "USER", "LOGNAME", "HOME", "SHELL", "PATH":
+    for key in ["USER", "LOGNAME", "HOME", "SHELL", "PATH",
+        # DBUS_SESSION_BUS_ADDRESS is needed by `gnome-session-binary` - see
+        # https://crbug.com/432108529 for more details.
+        "DBUS_SESSION_BUS_ADDRESS"]:
       if key in os.environ:
         self.child_env[key] = os.environ[key]
 
@@ -1173,7 +1184,6 @@ class WaylandDesktop(Desktop):
 
   def _init_child_env(self):
     super(WaylandDesktop, self)._init_child_env()
-    self.child_env["GDK_BACKEND"] = "wayland,x11"
     self.child_env["XDG_SESSION_TYPE"] = "wayland"
     self.child_env["XDG_RUNTIME_DIR"] = self.runtime_dir
 
@@ -1225,6 +1235,23 @@ class WaylandDesktop(Desktop):
       sys.exit(1)
     else:
       self.child_env["WAYLAND_DISPLAY"] = self._wayland_socket
+    # Remove the display layout file, which will cause problems if it is applied
+    # right after the gnome session is launched. See: http://crbug.com/444052254
+    display_layout_file = os.path.join(
+        CONFIG_DIR, "host#%s.display_layout.pb" % g_host_hash)
+    logging.info("Existing display layout file deleted.")
+    try:
+      os.remove(display_layout_file)
+    except FileNotFoundError:
+      pass
+
+    # Remove variables from the systemd environment that are known to cause
+    # problems in the GNOME Wayland session if present - see
+    # http://crbug.com/444255720.
+    subprocess.call(["systemctl", "--user", "unset-environment",
+                     "GDK_BACKEND", "SSH_CONNECTION"],
+                    stdout=subprocess.DEVNULL)
+
     self.server_proc = subprocess.Popen([GNOME_SESSION],
                                         stdout=subprocess.PIPE,
                                         stderr=subprocess.STDOUT,
@@ -2586,7 +2613,9 @@ def main():
   if HOST_EXTRA_PARAMS_ENV_VAR in os.environ:
       extra_start_host_args = \
           re.split(r"\s+", os.environ[HOST_EXTRA_PARAMS_ENV_VAR].strip())
-  is_wayland = any([opt == '--enable-wayland' for opt in extra_start_host_args])
+  if USE_WAYLAND_ENV_VAR in os.environ:
+      extra_start_host_args.append('--enable-wayland')
+  is_wayland = '--enable-wayland' in extra_start_host_args
   if is_wayland:
     desktop = WaylandDesktop(sizes, host_config)
   else:

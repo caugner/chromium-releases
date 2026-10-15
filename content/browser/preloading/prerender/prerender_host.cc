@@ -56,6 +56,41 @@ namespace content {
 
 namespace {
 
+// When enabled, the SiteInstance used to initialize a prerender frame tree is
+// associated with a SiteInfo derived from the prerendering URL, rather than an
+// empty SiteInfo. This ensures that RenderProcessHost selection for a prerender
+// navigation follows the same rules as a regular navigation to the same URL.
+//
+// Extra details:
+//
+// A PrerenderHost creates a 1st SiteInstance to init the frame tree. This is
+// the SiteInstance for which this features changes the SiteInfo. This
+// SiteInstance gets its RenderProcessHost in this stack:
+//
+//     content::SiteInstanceImpl::GetOrCreateProcess
+//     content::RenderFrameHostManager::CreateRenderFrameHost
+//     content::RenderFrameHostManager::InitRoot
+//     content::FrameTree::Init
+//     content::PrerenderHost::PrerenderHost
+//
+// Then, when the prerender navigation occurs, the SiteInstance for that
+// navigation attempts to reuse the same process in this stack:
+//
+//     content::SiteInstanceImpl::ReuseExistingProcessIfPossible
+//     content::RenderFrameHostManager::GetSiteInstanceForNavigation
+//     content::RenderFrameHostManager::GetSiteInstanceForNavigationRequest
+//     content::RenderFrameHostManager::GetFrameHostForNavigation
+//     content::NavigationRequest::SelectFrameHostForOnResponseStarted
+//     content::NavigationRequest::OnResponseStarted
+//     content::NavigationRequest::OnResponseStarted
+//     content::NavigationURLLoaderImpl::NotifyResponseStarted
+//
+// The fact that the 2nd SiteInstance attempts to reuse the same
+// RenderProcessHost as the 1st SiteInstance is what makes it important to
+// carefully choose the RenderProcessHost for the 1st SiteInstance.
+BASE_FEATURE(CreatePrerenderSiteInstanceWithURL,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 base::OnceCallback<void(FrameTreeNodeId)>& GetHostCreationCallback() {
   static base::NoDestructor<base::OnceCallback<void(FrameTreeNodeId)>>
       host_creation_callback;
@@ -399,7 +434,10 @@ PrerenderHost::PrerenderHost(
     frame_tree_delegate_ = std::make_unique<PrerenderFrameTreeDelegate>(
         web_contents.GetBrowserContext(), web_contents, *this);
     scoped_refptr<SiteInstanceImpl> site_instance =
-        SiteInstanceImpl::Create(web_contents.GetBrowserContext());
+        base::FeatureList::IsEnabled(kCreatePrerenderSiteInstanceWithURL)
+            ? SiteInstanceImpl::CreateForURL(web_contents.GetBrowserContext(),
+                                             attributes.prerendering_url)
+            : SiteInstanceImpl::Create(web_contents.GetBrowserContext());
     GetFrameTree()->Init(site_instance.get(),
                          /*renderer_initiated_creation=*/false,
                          /*main_frame_name=*/"", /*opener_for_origin=*/nullptr,
@@ -676,6 +714,19 @@ void PrerenderHost::DidFinishNavigation(NavigationHandle* navigation_handle) {
     return;
   }
 
+  if (PreloadServingMetrics::IsEnabled()) {
+    // If `DidFinishNavigation()` is called multiple times, ignore
+    // `PreloadServingMetrics` of that navigation and keep the first one.
+    if (!prerender_initial_preload_serving_metrics_) {
+      // Take `PreloadServingMetrics` of prerender initial navigation.
+      auto& initial_preload_serving_metrics_holder =
+          *PreloadServingMetricsHolder::GetOrCreateForNavigationHandle(
+              *navigation_handle);
+      prerender_initial_preload_serving_metrics_ =
+          initial_preload_serving_metrics_holder.Take();
+    }
+  }
+
   const bool is_prerender_main_frame =
       navigation_request->GetFrameTreeNodeId() == frame_tree_node_id_;
 
@@ -839,6 +890,17 @@ std::unique_ptr<StoredPage> PrerenderHost::Activate(
     }
   }
 
+  // Associate `PreloadServingMetrics` of prerender initial navigation to ones
+  // of activation.
+  if (PreloadServingMetrics::IsEnabled()) {
+    auto& activation_preload_serving_metrics_holder =
+        *PreloadServingMetricsHolder::GetOrCreateForNavigationHandle(
+            navigation_request);
+    activation_preload_serving_metrics_holder
+        .SetPrerenderInitialPreloadServingMetrics(
+            std::move(prerender_initial_preload_serving_metrics_));
+  }
+
   RecordActivation(navigation_request);
 
   // Prerender is activated. Set the status to kSuccess.
@@ -944,8 +1006,7 @@ bool PrerenderHost::AreInitialPrerenderNavigationParamsCompatibleWithNavigation(
 // The flag below is provided in case the workaround had a bug. Use the flag to
 // revert back to the previous behavior.
 // TODO(crbug.com/399478939): Remove the workaround and this flag.
-BASE_FEATURE(kPrerenderActivationMismatchWebViewWorkaround,
-             "PrerenderActivationMismatchWebViewWorkaround",
+BASE_FEATURE(PrerenderActivationMismatchWebViewWorkaround,
              base::FEATURE_ENABLED_BY_DEFAULT);
 #endif
 
@@ -1747,6 +1808,68 @@ void PrerenderHost::AddAdditionalRequestHeaders(
 void PrerenderHost::NotifyReused() {
   for (auto& observer : observers_) {
     observer.OnHostReused();
+  }
+}
+
+void PrerenderHost::OnWillBeCancelled(
+    const PrerenderCancellationReason& reason) {
+  if (!PreloadServingMetrics::IsEnabled()) {
+    return;
+  }
+
+  [&]() {
+    // There are two cases:
+    //
+    // 1. `DidFinishNavigation()` is already called and then prerender is
+    //    cancelled.
+    // 2. Cancelled before `DidFinishNavigation()`. (E.g.
+    //    `PrerenderURLLoaderThrottle`.)
+    //
+    // In the case 1, `prerender_initial_preload_serving_metrics_` is already
+    // set. So, nothing to do and return.
+    if (prerender_initial_preload_serving_metrics_) {
+      return;
+    }
+
+    // We believe that `NavigationRequest` exist in this case, but some tests
+    // fails If we use `CHECK` for `frame_tree_node` and `navigation_request`.
+    // (We don't check which causes the failure.) Give up to record metrics in
+    // such case.
+    //
+    // TODO(crbug.com/360094997): Investigate why and Use `CHECK` instead if
+    // possible.
+    auto* frame_tree_node =
+        FrameTreeNode::GloballyFindByID(frame_tree_node_id_);
+    if (!frame_tree_node) {
+      return;
+    }
+
+    NavigationRequest* navigation_request =
+        frame_tree_node->navigation_request();
+    if (!navigation_request) {
+      // Cancellation can be occur in prerender initial navigation or after
+      // `DidFinishNavigation()`. `!navigation_request` implies that the latter
+      // case, but it is handled in `DidFinishNavigation()` and already taken
+      // the log.
+      //
+      // TODO(crbug.com/360094997): Ditto. Investigate test failure. Use
+      // `DUMP_WILL_BE_NOTREACHED` instead.
+      // TODO(crbug.com/360094997): Use `CHECK` instead once we checked the
+      // safety by `DUMP_WILL_BE_NOTREACHED`.
+      return;
+    }
+
+    // Take `PreloadServingMetrics` of prerender initial navigation.
+    auto& initial_preload_serving_metrics_holder =
+        *PreloadServingMetricsHolder::GetOrCreateForNavigationHandle(
+            *navigation_request);
+    prerender_initial_preload_serving_metrics_ =
+        initial_preload_serving_metrics_holder.Take();
+  }();
+
+  if (prerender_initial_preload_serving_metrics_) {
+    prerender_initial_preload_serving_metrics_
+        ->RecordMetricsForPrerenderInitialNavigationFailed();
   }
 }
 

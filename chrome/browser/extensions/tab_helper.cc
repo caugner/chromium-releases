@@ -7,7 +7,6 @@
 #include <memory>
 
 #include "base/check_op.h"
-#include "base/notimplemented.h"
 #include "base/notreached.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/activity_log/activity_log.h"
@@ -20,6 +19,7 @@
 #include "chrome/common/buildflags.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "content/public/browser/back_forward_cache.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
@@ -226,13 +226,7 @@ void TabHelper::WebContentsDestroyed() {
 }
 
 WindowController* TabHelper::GetExtensionWindowController() const {
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-  // TODO(crbug.com/393179880): Support this method.
   return ExtensionTabUtil::GetWindowControllerOfTab(web_contents());
-#else
-  NOTIMPLEMENTED_LOG_ONCE();
-  return nullptr;
-#endif
 }
 
 WebContents* TabHelper::GetAssociatedWebContents() const {

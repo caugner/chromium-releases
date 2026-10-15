@@ -750,7 +750,9 @@ void OmniboxEditModel::EnterKeywordModeForDefaultSearchProvider(
 }
 
 void OmniboxEditModel::OpenAiMode(bool via_keyboard) {
-  std::u16string query_text = current_match_.contents;
+  std::u16string query_text =
+      AutocompleteMatch::IsSearchType(current_match_.type) ?
+      current_match_.contents : u"";
   RecordAiModeMetrics(query_text, /*activated=*/true, via_keyboard);
   GURL ai_mode_url =
       GetUrlForAim(controller_->client()->GetTemplateURLService(),
@@ -1794,32 +1796,19 @@ void OmniboxEditModel::SetPopupSelection(OmniboxPopupSelection new_selection,
   popup_selection_ = new_selection;
   popup_view_->OnSelectionChanged(old_selection, popup_selection_);
 
-  // Special case for removing focus ring from the AIM button.
-  if (old_selection.state == OmniboxPopupSelection::FOCUSED_BUTTON_AIM) {
-    view_->ApplyFocusRingToAimButton(false);
-    return;
-  }
-
-  // Special case for applying focus to the AIM button.
-  if (popup_selection_.state == OmniboxPopupSelection::FOCUSED_BUTTON_AIM) {
-    view_->ApplyFocusRingToAimButton(true);
-    // Without this, focus indicators may appear stale (see crbug.com/1369229).
-    // Specifically, if the last suggestion in the list has one or more buttons,
-    // the focus ring will remain around the last one when focus wraps back
-    // around to the AIM button in the zero-input state.
-    popup_view_->UpdatePopupAppearance();
-    return;
-  }
-
-  // This occurs when e.g., pressing escape to select the null match in
-  // zero-input mode.
-  if (popup_selection_.line == OmniboxPopupSelection::kNoMatch) {
-    current_match_ = AutocompleteMatch();
-    return;
+  // Special case for updating the focus ring around the AIM button.
+  bool apply_focus_ring_to_aim_button =
+      popup_selection_.state == OmniboxPopupSelection::FOCUSED_BUTTON_AIM;
+  bool remove_focus_ring_from_aim_button =
+      old_selection.state == OmniboxPopupSelection::FOCUSED_BUTTON_AIM;
+  if (apply_focus_ring_to_aim_button || remove_focus_ring_from_aim_button) {
+    view_->ApplyFocusRingToAimButton(apply_focus_ring_to_aim_button);
   }
 
   const AutocompleteMatch& match =
-      autocomplete_controller()->result().match_at(popup_selection_.line);
+      popup_selection_.line == OmniboxPopupSelection::kNoMatch ?
+          AutocompleteMatch() :
+          autocomplete_controller()->result().match_at(popup_selection_.line);
 
   DCHECK((popup_selection_.state != OmniboxPopupSelection::KEYWORD_MODE) ||
          match.associated_keyword.get());
@@ -1829,7 +1818,9 @@ void OmniboxEditModel::SetPopupSelection(OmniboxPopupSelection new_selection,
     // TODO(tommycli): Fold the focus hint into
     // popup_view_->OnSelectionChanged(). Caveat: We must update the
     // accessibility label before notifying the View.
-    popup_view_->ProvideButtonFocusHint(GetPopupSelection().line);
+    if (popup_selection_.line != OmniboxPopupSelection::kNoMatch) {
+      popup_view_->ProvideButtonFocusHint(GetPopupSelection().line);
+    }
   }
 
   std::u16string keyword;
@@ -1969,7 +1960,6 @@ std::u16string OmniboxEditModel::GetPopupAccessibilityLabelForCurrentSelection(
         additional_message_id = IDS_ACC_KEYWORD_SUFFIX;
         available_actions_count++;
       }
-      // TODO(crbug.com/432744091): Add a message for the AIM button here.
       if (OmniboxPopupSelection(line,
                                 OmniboxPopupSelection::FOCUSED_BUTTON_ACTION)
               .IsControlPresentOnMatch(autocomplete_controller()->result())) {
@@ -2074,6 +2064,11 @@ std::u16string OmniboxEditModel::GetPopupAccessibilityLabelForCurrentSelection(
       match_text, line, total_matches, additional_message, label_prefix_length);
 }
 
+std::u16string OmniboxEditModel::GetPopupAccessibilityLabelForAimButton() {
+  DCHECK(popup_selection_.state == OmniboxPopupSelection::FOCUSED_BUTTON_AIM);
+  return l10n_util::GetStringUTF16(IDS_ACC_AI_MODE_BUTTON_FOCUSED);
+}
+
 std::u16string
 OmniboxEditModel::MaybeGetPopupAccessibilityLabelForIPHSuggestion() {
   DCHECK(popup_view_);
@@ -2097,8 +2092,8 @@ OmniboxEditModel::MaybeGetPopupAccessibilityLabelForIPHSuggestion() {
           autocomplete_controller()->input(),
           autocomplete_controller()->result(),
           controller_->client()->GetTemplateURLService(),
-          autocomplete_controller()->autocomplete_provider_client(),
-          OmniboxPopupSelection::kForward, OmniboxPopupSelection::kStateOrLine);
+          view_->AimButtonVisible(), OmniboxPopupSelection::kForward,
+          OmniboxPopupSelection::kStateOrLine);
       if (next_selection.line == next_line &&
           next_selection.state ==
               OmniboxPopupSelection::FOCUSED_BUTTON_REMOVE_SUGGESTION) {
@@ -2271,9 +2266,8 @@ void OmniboxEditModel::StepPopupSelection(
   const OmniboxPopupSelection old_selection = GetPopupSelection();
   OmniboxPopupSelection new_selection = old_selection.GetNextSelection(
       autocomplete_controller()->input(), autocomplete_controller()->result(),
-      controller_->client()->GetTemplateURLService(),
-      autocomplete_controller()->autocomplete_provider_client(), direction,
-      step);
+      controller_->client()->GetTemplateURLService(), view_->AimButtonVisible(),
+      direction, step);
   if (kIsDesktop) {
     if (old_selection.IsChangeToKeyword(new_selection)) {
       ClearKeyword();

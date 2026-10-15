@@ -333,10 +333,12 @@
 <translation id="2083190527011054446">ليلة سعيدة <ph name="GIVEN_NAME" />،</translation>
 <translation id="2086334242442703436">فتح "أداة اختيار رموز الإيموجي"</translation>
 <translation id="2088116547584365419">الألعاب</translation>
+<translation id="2093792000875799555">‏أخبار "Steam لأجهزة Chromebook"</translation>
 <translation id="209965399369889474">لا يتوفّر اتصال بالشبكة</translation>
 <translation id="2107581415810719320">الزر الآخر "<ph name="BUTTON_NUMBER" />"</translation>
 <translation id="2107914222138020205">‏لا يتوافق الكابل المزوّد بمنفذ USB-C مع جهاز Thunderbolt. وقد يصبح أداء الجهاز محدودًا.</translation>
 <translation id="2108303511227308752">‏تم تغيير اختصارات لوحة المفاتيح "Alt + Backspace". لاستخدام مفتاح Delete، اضغط على المفتاحَين "<ph name="LAUNCHER_KEY_NAME" /> + Backspace".</translation>
+<translation id="2115680839221566783">مستوى البطارية %<ph name="PERCENTAGE" />، والشحن معلَّق.</translation>
 <translation id="2126242104232412123">سطح مكتب جديد</translation>
 <translation id="2132302418721800944">تسجيل فيديو في وضع ملء الشاشة</translation>
 <translation id="2135456203358955318">المكبّر الذي تم إرساؤه</translation>
@@ -1368,6 +1370,7 @@
 <translation id="5429993543155113935">هذا الخيار غير متوفّر حاليًا لنوافذ التصفّح المتخفي.</translation>
 <translation id="5431318178759467895">بالألوان</translation>
 <translation id="5433020815079095860">إدخال الصوت</translation>
+<translation id="543584294741034249">يمكنك توصيل شاشات عرض خارجية يصل عددها إلى <ph name="DISPLAY_LIMIT" /> بحد أقصى.</translation>
 <translation id="544691375626129091">تمت إضافة كل المستخدمين المتوفرين لهذه الجلسة.</translation>
 <translation id="54609108002486618">تتم إدارته</translation>
 <translation id="5460938382730614333">أداة التحديد مفعَّلة.</translation>
@@ -1585,6 +1588,7 @@
 <translation id="612734058257491180">‏لا يتوفر "مساعد Google" في جلسة ضيف.</translation>
 <translation id="6127395413317891856">جهازك غير متصل بالإنترنت. يُرجى التحقّق من الاتصال والمحاولة مجددًا.</translation>
 <translation id="6129953537138746214">مسافة</translation>
+<translation id="6136872094979134163">‏تعذّر استرجاع أخبار "Steam لأجهزة Chromebook".</translation>
 <translation id="6137566720514957455">فتح مربع الحوار لإزالة الحساب <ph name="USER_EMAIL_ADDRESS" /></translation>
 <translation id="6141205840878048728">ما الذي تريد التركيز عليه؟</translation>
 <translation id="6141988275892716286">تأكيد التنزيل</translation>
@@ -1674,6 +1678,7 @@
 <translation id="6445835306623867477"><ph name="ROUTE_TITLE" /> في <ph name="RECEIVER_NAME" /></translation>
 <translation id="6445915701151710649">‏وحدة المعالجة المركزية (CPU)</translation>
 <translation id="6447111710783417522"><ph name="DATE" />، حدث واحد (<ph name="NUMBER" />)</translation>
+<translation id="6448529022565414427">الشحن معلَّق</translation>
 <translation id="6449483711453944360">‏هذا الخيار غير متوفّر حاليًا لتطبيقات Linux ونوافذ التصفّح المتخفي.</translation>
 <translation id="6450245544201845082">اختصار النقر بزر الماوس الأيمن غير مفعَّل حاليًا.</translation>
 <translation id="6452181791372256707">رفض</translation>

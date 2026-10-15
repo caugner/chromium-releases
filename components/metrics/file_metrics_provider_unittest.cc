@@ -757,8 +757,9 @@ TEST_P(FileMetricsProviderTest, AccessCountLimitedDirectory) {
 
 TEST_P(FileMetricsProviderTest, AccessSizeLimitedDirectory) {
   // This only works with large files that are big enough to count.
-  if (!create_large_files_)
+  if (!create_large_files_) {
     return;
+  }
 
   ASSERT_FALSE(PathExists(metrics_file()));
 
@@ -1492,7 +1493,9 @@ INSTANTIATE_TEST_SUITE_P(FRETrialFirstRunGroups,
                          FileMetricsProviderFRETrialFirstRunGroupsTest,
                          testing::Values(fre_source_trial::kDefaultGroup,
                                          fre_source_trial::kControlGroup,
-                                         fre_source_trial::kEnabledGroup));
+                                         fre_source_trial::kEnabledGroup,
+                                         fre_source_trial::kControlGroup20,
+                                         fre_source_trial::kEnabledGroup20));
 
 TEST_P(FileMetricsProviderFRETrialFirstRunGroupsTest, FRETrialKeepTrialGroup) {
   const std::string_view trial_group = GetParam();
@@ -1541,7 +1544,8 @@ TEST_P(FileMetricsProviderFRETrialFirstRunGroupsTest,
 
   task_environment()->RunUntilIdle();
 
-  bool should_keep_dir = trial_group == fre_source_trial::kEnabledGroup;
+  bool should_keep_dir = trial_group == fre_source_trial::kEnabledGroup ||
+                         trial_group == fre_source_trial::kEnabledGroup20;
   EXPECT_EQ(base::PathExists(dir), should_keep_dir);
 }
 
@@ -1553,7 +1557,9 @@ INSTANTIATE_TEST_SUITE_P(FRETrialSubsequentRunGroups,
                          FileMetricsProviderFRETrialSubsequentRunGroupsTest,
                          testing::Values(fre_source_trial::kDefaultGroup,
                                          fre_source_trial::kControlGroup,
-                                         fre_source_trial::kEnabledGroup));
+                                         fre_source_trial::kEnabledGroup,
+                                         fre_source_trial::kControlGroup20,
+                                         fre_source_trial::kEnabledGroup20));
 
 TEST_P(FileMetricsProviderFRETrialSubsequentRunGroupsTest, FRETrialPostFRERun) {
   const std::string_view trial_group = GetParam();

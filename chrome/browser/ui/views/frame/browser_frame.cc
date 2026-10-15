@@ -134,7 +134,15 @@ BrowserFrame::BrowserFrame(BrowserView* browser_view)
   set_focus_on_creation(false);
 }
 
-BrowserFrame::~BrowserFrame() = default;
+BrowserFrame::~BrowserFrame() {
+  set_widget_closed();
+  // Window placement is expected to be saved when the window closes. Under the
+  // CLIENT_OWNS_WIDGET ownership scheme this signal is received in the
+  // Widget destructor. `SaveWindowPlacement()` must be called here as this
+  // depends on state in BrowserFrame, which will have been torn down by the
+  // time the Widget destructor runs.
+  SaveWindowPlacementIfNeeded();
+}
 
 void BrowserFrame::InitBrowserFrame() {
   native_browser_frame_ =
@@ -209,7 +217,9 @@ void BrowserFrame::InitBrowserFrame() {
 }
 
 int BrowserFrame::GetMinimizeButtonOffset() const {
-  return native_browser_frame_->GetMinimizeButtonOffset();
+  return native_browser_frame_
+             ? native_browser_frame_->GetMinimizeButtonOffset()
+             : 0;
 }
 
 gfx::Rect BrowserFrame::GetBoundsForTabStripRegion(
@@ -304,11 +314,12 @@ BrowserNonClientFrameView* BrowserFrame::GetFrameView() const {
 }
 
 bool BrowserFrame::UseCustomFrame() const {
-  return native_browser_frame_->UseCustomFrame();
+  return native_browser_frame_ && native_browser_frame_->UseCustomFrame();
 }
 
 bool BrowserFrame::ShouldSaveWindowPlacement() const {
-  return native_browser_frame_->ShouldSaveWindowPlacement();
+  return native_browser_frame_ &&
+         native_browser_frame_->ShouldSaveWindowPlacement();
 }
 
 bool BrowserFrame::ShouldDrawFrameHeader() const {
@@ -318,17 +329,22 @@ bool BrowserFrame::ShouldDrawFrameHeader() const {
 void BrowserFrame::GetWindowPlacement(
     gfx::Rect* bounds,
     ui::mojom::WindowShowState* show_state) const {
-  return native_browser_frame_->GetWindowPlacement(bounds, show_state);
+  if (native_browser_frame_) {
+    native_browser_frame_->GetWindowPlacement(bounds, show_state);
+  }
 }
 
 content::KeyboardEventProcessingResult BrowserFrame::PreHandleKeyboardEvent(
     const input::NativeWebKeyboardEvent& event) {
-  return native_browser_frame_->PreHandleKeyboardEvent(event);
+  return native_browser_frame_
+             ? native_browser_frame_->PreHandleKeyboardEvent(event)
+             : content::KeyboardEventProcessingResult::NOT_HANDLED;
 }
 
 bool BrowserFrame::HandleKeyboardEvent(
     const input::NativeWebKeyboardEvent& event) {
-  return native_browser_frame_->HandleKeyboardEvent(event);
+  return native_browser_frame_ &&
+         native_browser_frame_->HandleKeyboardEvent(event);
 }
 
 void BrowserFrame::OnBrowserViewInitViewsComplete() {
@@ -440,7 +456,7 @@ void BrowserFrame::OnNativeWidgetWorkspaceChanged() {
   // otherwise.  This is done by MoveBrowsersInWorkspaceToFront()
   // which reorders the browsers such that the ones in the current
   // workspace appear before ones in other workspaces.
-  auto workspace = display::Screen::GetScreen()->GetCurrentWorkspace();
+  auto workspace = display::Screen::Get()->GetCurrentWorkspace();
   if (!workspace.empty()) {
     BrowserList::MoveBrowsersInWorkspaceToFront(workspace);
   }

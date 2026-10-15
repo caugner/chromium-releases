@@ -165,7 +165,7 @@ class OutsideSettingsCSPDelegate final
   }
 
   void DidAddContentSecurityPolicies(
-      WTF::Vector<network::mojom::blink::ContentSecurityPolicyPtr>) override {
+      Vector<network::mojom::blink::ContentSecurityPolicyPtr>) override {
     DCHECK_CALLED_ON_VALID_THREAD(worker_thread_checker_);
     // We do nothing here, because if the added policies should be reported to
     // LocalFrameClient, then they are already reported on the parent
@@ -178,6 +178,8 @@ class OutsideSettingsCSPDelegate final
     DCHECK_CALLED_ON_VALID_THREAD(worker_thread_checker_);
     global_scope_for_logging_->AddInspectorIssue(std::move(issue));
   }
+
+  bool ScriptSrcExtendedHashesEnabled() override { return false; }
 
  private:
   const Member<const FetchClientSettingsObject> outside_settings_object_;

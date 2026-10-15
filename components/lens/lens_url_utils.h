@@ -5,16 +5,22 @@
 #ifndef COMPONENTS_LENS_LENS_URL_UTILS_H_
 #define COMPONENTS_LENS_LENS_URL_UTILS_H_
 
+#include <array>
+#include <map>
 #include <string>
 #include <vector>
 
 #include "components/lens/lens_entrypoints.h"
 #include "components/lens/lens_metadata.mojom.h"
+#include "components/lens/lens_overlay_mime_type.h"
+#include "third_party/lens_server_proto/lens_overlay_request_id.pb.h"
 
 class GURL;
 
 namespace lens {
 
+// Query parameter for the search text query.
+inline constexpr char kTextQueryParameterKey[] = "q";
 // Query parameter for the payload.
 inline constexpr char kPayloadQueryParameter[] = "p";
 // Query parameter for the translate source language.
@@ -27,6 +33,14 @@ inline constexpr char kTranslateFilterTypeQueryParameterValue[] = "tr";
 inline constexpr char kLensRequestQueryParameter[] = "vsrid";
 inline constexpr char kUnifiedDrillDownQueryParameter[] = "udm";
 inline constexpr char kLensSurfaceQueryParameter[] = "lns_surface";
+
+inline constexpr char kContextualVisualInputTypeQueryParameterValue[] = "video";
+inline constexpr char kPdfVisualInputTypeQueryParameterValue[] = "pdf";
+inline constexpr char kImageVisualInputTypeQueryParameterValue[] = "img";
+inline constexpr char kWebpageVisualInputTypeQueryParameterValue[] = "wp";
+
+inline constexpr std::array<lens::MimeType, 3> kUnsupportedVitMimeTypes = {
+    lens::MimeType::kVideo, lens::MimeType::kAudio};
 
 // Appends logs to query param as a string
 void AppendLogsQueryParam(
@@ -49,6 +63,15 @@ bool IsValidLensResultUrl(const GURL& url);
 // Returns true if the given URL corresponds to a Lens mWeb result page. This is
 // done by checking the URL and its parameters.
 bool IsLensMWebResult(const GURL& url);
+
+std::string Base64EncodeRequestId(LensOverlayRequestId request_id);
+
+std::string VitQueryParamValueForMimeType(MimeType mime_type);
+
+// Returns a key-value map of all parameters in `url` except the query
+// parameter.
+std::map<std::string, std::string> GetParametersMapWithoutQuery(
+    const GURL& url);
 
 }  // namespace lens
 

@@ -6,7 +6,6 @@ package org.chromium.chrome.browser.suggestions.tile;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -46,7 +45,6 @@ import java.util.concurrent.TimeUnit;
 
 /** Tests for {@link TileInteractionDelegateTest}. */
 @RunWith(BaseRobolectricTestRunner.class)
-@EnableFeatures(ChromeFeatureList.NEW_TAB_PAGE_ANDROID_TRIGGER_FOR_PRERENDER2)
 public class TileInteractionDelegateTest {
 
     private static class TileGroupForTest extends TileGroup {
@@ -89,8 +87,6 @@ public class TileInteractionDelegateTest {
     @Mock private TileGroup.Delegate mTileGroupDelegate;
     @Mock private TileDragDelegate mTileDragDelegate;
     @Mock private OfflinePageBridge mOfflinePageBridge;
-    @Mock private Runnable mSnapshotTileGridChangedRunnable;
-    @Mock private Runnable mTileCountChangedRunnable;
     @Mock private TileGroup.Observer mTileGroupObserver;
     @Mock private TileRenderer mTileRenderer;
     @Mock private AndroidPrerenderManager mAndroidPrerenderManager;
@@ -107,7 +103,6 @@ public class TileInteractionDelegateTest {
     public void setUp() {
         when(mTile.getUrl()).thenReturn(new GURL("https://example.com"));
         when(mTile.getData()).thenReturn(mData);
-        when(mAndroidPrerenderManager.startPrerendering(any())).thenReturn(true);
         AndroidPrerenderManagerJni.setInstanceForTesting(mNativeMock);
     }
 
@@ -120,7 +115,6 @@ public class TileInteractionDelegateTest {
                         mTileGroupDelegate,
                         mTileDragDelegate,
                         mCustomTileModificationDelegate,
-                        /* prerenderDelay= */ 0,
                         mTile,
                         mTileView);
     }

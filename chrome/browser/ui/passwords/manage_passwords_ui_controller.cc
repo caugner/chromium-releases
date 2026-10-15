@@ -219,7 +219,9 @@ void MaybeTriggerPasswordChangeDelayedSurvey(
             }
             password_change_hats->MaybeLaunchSurvey(
                 kHatsSurveyTriggerPasswordChangeDelayed,
-                /*password_change_duration=*/std::nullopt, web_contents.get());
+                /*password_change_duration=*/std::nullopt,
+                /*blocking_challenge_detected=*/std::nullopt,
+                web_contents.get());
           },
           std::move(password_change_hats), web_contents),
       base::Seconds(1));
@@ -506,7 +508,7 @@ void ManagePasswordsUIController::OnCredentialLeak(
 
   // Hide the manage passwords bubble if currently shown.
   if (IsShowingBubble()) {
-    HidePasswordBubble();
+    HideBubble();
   } else {
     ClearPopUpFlagForBubble();
   }
@@ -1242,12 +1244,6 @@ ManagePasswordsUIController::BypassUserAuthtForTesting() {
                                                  true);
 }
 
-void ManagePasswordsUIController::HidePasswordBubble() {
-  if (TabDialogs* tab_dialogs = TabDialogs::FromWebContents(web_contents())) {
-    tab_dialogs->HideManagePasswordsBubble();
-  }
-}
-
 void ManagePasswordsUIController::ShowChangePasswordBubble(
     const std::u16string& username,
     const std::u16string& new_password) {
@@ -1394,7 +1390,7 @@ void ManagePasswordsUIController::PrimaryPageChanged(content::Page& page) {
 void ManagePasswordsUIController::OnVisibilityChanged(
     content::Visibility visibility) {
   if (visibility == content::Visibility::HIDDEN) {
-    HidePasswordBubble();
+    HideBubble();
   }
 }
 
@@ -1440,7 +1436,7 @@ void ManagePasswordsUIController::ClearPopUpFlagForBubble() {
 }
 
 void ManagePasswordsUIController::DestroyPopups() {
-  HidePasswordBubble();
+  HideBubble();
   if (dialog_controller_ && dialog_controller_->IsShowingAccountChooser()) {
     dialog_controller_.reset();
     passwords_data_.TransitionToState(password_manager::ui::MANAGE_STATE);
@@ -1458,7 +1454,7 @@ void ManagePasswordsUIController::WebContentsDestroyed() {
   if (account_password_store) {
     account_password_store->RemoveObserver(this);
   }
-  HidePasswordBubble();
+  HideBubble();
   web_contents()->RemoveUserData(UserDataKey());
   // `this` is now destroyed - do not add code here.
 }
@@ -1517,6 +1513,45 @@ bool ManagePasswordsUIController::IsPendingPasswordPhished() const {
 
 bool ManagePasswordsUIController::IsPasswordChangeOngoing() const {
   return GetPasswordChangeDelegate();
+}
+
+void ManagePasswordsUIController::ShowBubble() {
+  if (TabDialogs* tab_dialogs = TabDialogs::FromWebContents(web_contents())) {
+    tab_dialogs->ShowManagePasswordsBubble(!IsAutomaticallyOpeningBubble());
+  }
+}
+
+void ManagePasswordsUIController::HideBubble() {
+  is_mouse_hovered_ = false;
+  if (TabDialogs* tab_dialogs = TabDialogs::FromWebContents(web_contents())) {
+    tab_dialogs->HideManagePasswordsBubble();
+  }
+}
+
+autofill::BubbleType ManagePasswordsUIController::GetBubbleType() const {
+  return autofill::BubbleType::kPassword;
+}
+
+bool ManagePasswordsUIController::IsShowingBubble() const {
+  return bubble_status_ == BubbleStatus::SHOWN ||
+         bubble_status_ == BubbleStatus::SHOWN_PENDING_ICON_UPDATE;
+}
+
+base::WeakPtr<autofill::BubbleControllerBase>
+ManagePasswordsUIController::GetBubbleControllerBaseWeakPtr() {
+  return weak_ptr_factory_.GetWeakPtr();
+}
+
+void ManagePasswordsUIController::OnMouseEntered() {
+  is_mouse_hovered_ = true;
+}
+
+void ManagePasswordsUIController::OnMouseExited() {
+  is_mouse_hovered_ = false;
+}
+
+bool ManagePasswordsUIController::IsMouseHovered() const {
+  return is_mouse_hovered_;
 }
 
 WEB_CONTENTS_USER_DATA_KEY_IMPL(ManagePasswordsUIController);

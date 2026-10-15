@@ -50,6 +50,15 @@ extern const char
 extern const char kHistogramNoServiceWorkerDomContentLoadedSearch[];
 extern const char kHistogramNoServiceWorkerLoadSearch[];
 
+extern const char kHistogramPrerenderHostReused[];
+extern const char kHistogramGWSPrerenderNavigationToActivation[];
+extern const char kHistogramGWSActivationToFirstContentfulPaint[];
+extern const char kHistogramGWSActivationToLargestContentfulPaint[];
+extern const char kFineGrainedHistogramGWSActivationToLargestContentfulPaint[];
+
+extern const char kHistogramPrerenderSuffix[];
+extern const char kHistogramNonPrerenderSuffix[];
+
 }  // namespace internal
 
 class GWSPageLoadMetricsObserver
@@ -145,7 +154,7 @@ class GWSPageLoadMetricsObserver
  private:
   void LogMetricsOnComplete();
   void RecordNavigationTimingHistograms();
-  void RecordLatencyHitograms(base::TimeTicks response_start_time);
+  void RecordLatencyHistograms(base::TimeTicks response_start_time);
 
   // Records the histograms required before commit. This is to ensure that we
   // are getting the metrics only for GWS navigations.
@@ -165,6 +174,7 @@ class GWSPageLoadMetricsObserver
   bool is_first_navigation_ = false;
   bool was_cached_ = false;
   bool is_prerendered_ = false;
+  bool is_header_from_synthetic_response_ = false;
 
   NavigationSourceType source_type_ = kUnknown;
   net::HttpConnectionInfoCoarse http_connection_info_ =

@@ -14,7 +14,7 @@ import android.os.Looper;
 
 import androidx.annotation.VisibleForTesting;
 
-import org.chromium.base.BuildInfo;
+import org.chromium.base.ApkInfo;
 import org.chromium.base.Callback;
 import org.chromium.base.Log;
 import org.chromium.base.metrics.RecordHistogram;
@@ -225,7 +225,7 @@ public class BookmarkUtils {
                                     },
                                     Snackbar.TYPE_NOTIFICATION,
                                     Snackbar.UMA_BOOKMARK_ADDED)
-                            .setSingleLine(false);
+                            .setDefaultLines(false);
             RecordUserAction.record("EnhancedBookmarks.AddingFailed");
         } else {
             String folderName =
@@ -236,7 +236,7 @@ public class BookmarkUtils {
                             activity, tab.getProfile(), bookmarkId, bookmarkManagerOpener);
             if (getLastUsedParent() == null) {
                 if (fromCustomTab) {
-                    String packageLabel = BuildInfo.getInstance().hostPackageLabel;
+                    String packageLabel = ApkInfo.getHostPackageLabel();
                     snackbar =
                             Snackbar.make(
                                     activity.getString(R.string.bookmark_page_saved, packageLabel),
@@ -259,7 +259,7 @@ public class BookmarkUtils {
                                 Snackbar.TYPE_ACTION,
                                 Snackbar.UMA_BOOKMARK_ADDED);
             }
-            snackbar.setSingleLine(false)
+            snackbar.setDefaultLines(false)
                     .setAction(activity.getString(R.string.bookmark_item_edit), null);
         }
         snackbarManager.showSnackbar(snackbar);
@@ -420,7 +420,7 @@ public class BookmarkUtils {
                         snackbarController,
                         Snackbar.TYPE_ACTION,
                         Snackbar.UMA_BOOKMARK_ADDED);
-        snackbar.setSingleLine(false)
+        snackbar.setDefaultLines(false)
                 .setAction(activity.getString(R.string.bookmark_item_edit), null);
         snackbarManager.showSnackbar(snackbar);
     }

@@ -212,9 +212,6 @@ class BrowserWindow : public ui::BaseWindow {
   // Returns the ColorProvider associated with the frame.
   virtual const ui::ColorProvider* GetColorProvider() const = 0;
 
-  // Returns the context for use with ElementTracker, InteractionSequence, etc.
-  virtual ui::ElementContext GetElementContext() = 0;
-
   // Returns the height of the browser's top controls. This height doesn't
   // change with the current shown ratio above. Renderers will call this to
   // calculate the top-chrome shown ratio from the gesture scroll offset.
@@ -247,7 +244,7 @@ class BrowserWindow : public ui::BaseWindow {
 
   // Inform the frame that the dev tools window for the selected tab has
   // changed.
-  virtual void UpdateDevTools() = 0;
+  virtual void UpdateDevTools(content::WebContents* inspected_web_contents) = 0;
 
   // Update any loading animations running in the window. |is_visible| is true
   // if the window is visible.
@@ -321,7 +318,7 @@ class BrowserWindow : public ui::BaseWindow {
 
   // Tries to focus the location bar.  Clears the window focus (to avoid
   // inconsistent state) if this fails.
-  virtual void SetFocusToLocationBar(bool select_all) = 0;
+  virtual void SetFocusToLocationBar(bool is_user_initiated) = 0;
 
   // Informs the view whether or not a load is in progress for the current tab.
   // The view can use this notification to update the reload/stop button.
@@ -337,9 +334,6 @@ class BrowserWindow : public ui::BaseWindow {
   // Updates whether or not the custom tab bar is visible. Animates the
   // transition if |animate| is true.
   virtual void UpdateCustomTabBarVisibility(bool visible, bool animate) = 0;
-
-  // Updates the visibility of the scrim that covers the content area.
-  virtual void SetContentScrimVisibility(bool visible) = 0;
 
   // Updates the visibility of the scrim that covers the devtools area.
   virtual void SetDevToolsScrimVisibility(bool visible) = 0;
@@ -519,9 +513,6 @@ class BrowserWindow : public ui::BaseWindow {
   // Shows the app menu (for accessibility).
   virtual void ShowAppMenu() = 0;
 
-  // Allows the BrowserWindow object to handle the specified mouse event
-  // before sending it to the renderer.
-  virtual bool PreHandleMouseEvent(const blink::WebMouseEvent& event) = 0;
   // Allows the BrowserWindow object to handle a mouse drag update
   // before sending it to the renderer.
   // `point` is relative to the content view.
@@ -547,6 +538,13 @@ class BrowserWindow : public ui::BaseWindow {
   // instance during tab drag on Views/Win32).
   virtual web_modal::WebContentsModalDialogHost*
   GetWebContentsModalDialogHost() = 0;
+
+  // Return the WebContentsModalDialogHost for use in positioning web contents
+  // modal dialogs relative to its corresponding container view if possible,
+  // otherwise falls back to returning the WebContentsModalDialogHost that is
+  // responsible for modal positioning relative to the browser window.
+  virtual web_modal::WebContentsModalDialogHost*
+  GetWebContentsModalDialogHostFor(content::WebContents* web_contents) = 0;
 
   // Construct a BrowserWindow implementation for the specified |browser|.
   static BrowserWindow* CreateBrowserWindow(std::unique_ptr<Browser> browser,

@@ -18,11 +18,11 @@ message NTPComposeboxConfig {
     optional int32 num_page_load_animations = 1;
   }
   optional EntryPoint entry_point = 1;
-  // Next ID: 7
+  // Next ID: 8
   message Composebox {
     optional bool close_by_escape = 1;
     optional bool close_by_click_outside = 2;
-    // Next ID: 8
+    // Next ID: 7
     message ImageUpload {
       optional bool enable_webp_encoding = 1;
       optional int32 downscale_max_image_size = 2;

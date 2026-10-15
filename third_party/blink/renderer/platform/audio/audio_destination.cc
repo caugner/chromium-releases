@@ -79,25 +79,11 @@ const char* DeviceStateToString(AudioDestination::DeviceState state) {
   }
 }
 
-bool BypassOutputBuffer(const WebAudioLatencyHint& latency_hint) {
+bool BypassOutputBuffer() {
   if (RuntimeEnabledFeatures::WebAudioBypassOutputBufferingOptOutEnabled()) {
     return false;
   }
-  if (!RuntimeEnabledFeatures::WebAudioBypassOutputBufferingEnabled()) {
-    return false;
-  }
-  switch (latency_hint.Category()) {
-    case WebAudioLatencyHint::kCategoryInteractive:
-      return features::kWebAudioBypassOutputBufferingInteractive.Get();
-    case WebAudioLatencyHint::kCategoryBalanced:
-      return features::kWebAudioBypassOutputBufferingBalanced.Get();
-    case WebAudioLatencyHint::kCategoryPlayback:
-      return features::kWebAudioBypassOutputBufferingPlayback.Get();
-    case WebAudioLatencyHint::kCategoryExact:
-      return features::kWebAudioBypassOutputBufferingExact.Get();
-    default:
-      return false;
-  }
+  return RuntimeEnabledFeatures::WebAudioBypassOutputBufferingEnabled();
 }
 
 }  // namespace
@@ -444,7 +430,7 @@ AudioDestination::AudioDestination(
           AudioDestinationUmaReporter(latency_hint,
                                       callback_buffer_size_,
                                       web_audio_device_->SampleRate())),
-      is_output_buffer_bypassed_(BypassOutputBuffer(latency_hint)) {
+      is_output_buffer_bypassed_(BypassOutputBuffer()) {
   CHECK(web_audio_device_);
 
   SendLogMessage(__func__, String::Format("({output_channels=%u})",
@@ -665,7 +651,7 @@ void AudioDestination::ProvideResamplerInput(int resampler_frame_delay,
   TRACE_EVENT("webaudio", "AudioDestination::ProvideResamplerInput",
               "delay (frames)", resampler_frame_delay);
   auto adjusted_delay = delay_to_report_ + audio_utilities::FramesToTime(
-      resampler_frame_delay, context_sample_rate_);;
+      resampler_frame_delay, context_sample_rate_);
   PullFromCallback(dest, adjusted_delay);
 }
 

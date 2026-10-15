@@ -1,6 +1,6 @@
 {
-  "browser": "Chrome",
-  "channel": "Stable",
-  "platform": "Android",
-  "version": "139.0.7258.62"
+  "browser": "chrome",
+  "channel": "stable",
+  "platform": "android",
+  "version": "140.0.7339.35"
 }

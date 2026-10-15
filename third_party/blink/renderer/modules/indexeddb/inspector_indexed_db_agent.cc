@@ -181,7 +181,7 @@ class ExecutableWithIdbFactory
   }
 
   void GetBucketIDBFactory(LocalFrame* frame,
-                           const WTF::String& storage_bucket_name) {
+                           const String& storage_bucket_name) {
     LocalDOMWindow* dom_window = frame->DomWindow();
     CHECK(dom_window);
 
@@ -265,8 +265,8 @@ class ExecutableWithDatabase
     frame_ = frame;
     ExecutableWithIdbFactory::Start(
         frame_, std::move(storage_bucket),
-        WTF::BindOnce(&ExecutableWithDatabase::OnGetIDBFactory,
-                      WrapRefCounted(this)));
+        blink::BindOnce(&ExecutableWithDatabase::OnGetIDBFactory,
+                        WrapRefCounted(this)));
   }
 
  private:
@@ -341,7 +341,7 @@ class OpenDatabaseCallback final : public NativeEventListener {
     }
 
     IDBOpenDBRequest* idb_open_db_request =
-        static_cast<IDBOpenDBRequest*>(event->target());
+        static_cast<IDBOpenDBRequest*>(event->RawTarget());
     IDBAny* request_result = idb_open_db_request->ResultAsAny();
     if (request_result->GetType() != IDBAny::kIDBDatabaseType) {
       executable_with_database_->GetRequestCallback()->sendFailure(
@@ -391,7 +391,7 @@ class UpgradeDatabaseCallback final : public NativeEventListener {
     // had previously been enumerated was deleted. We don't want to
     // implicitly re-create it here, so abort the transaction.
     IDBOpenDBRequest* idb_open_db_request =
-        static_cast<IDBOpenDBRequest*>(event->target());
+        static_cast<IDBOpenDBRequest*>(event->RawTarget());
     NonThrowableExceptionState exception_state;
     idb_open_db_request->transaction()->abort(exception_state);
     executable_with_database_->GetRequestCallback()->sendFailure(
@@ -613,22 +613,22 @@ class DataLoader;
 class OpenCursorCallback final : public NativeEventListener {
  public:
   static OpenCursorCallback* Create(
-      v8_inspector::V8InspectorSession* v8_session,
+      InspectorIndexedDBAgent* agent,
       ScriptState* script_state,
       std::unique_ptr<RequestDataCallback> request_callback,
       int skip_count,
       unsigned page_size) {
-    return MakeGarbageCollected<OpenCursorCallback>(v8_session, script_state,
+    return MakeGarbageCollected<OpenCursorCallback>(agent, script_state,
                                                     std::move(request_callback),
                                                     skip_count, page_size);
   }
 
-  OpenCursorCallback(v8_inspector::V8InspectorSession* v8_session,
+  OpenCursorCallback(InspectorIndexedDBAgent* agent,
                      ScriptState* script_state,
                      std::unique_ptr<RequestDataCallback> request_callback,
                      int skip_count,
                      unsigned page_size)
-      : v8_session_(v8_session),
+      : agent_(agent),
         script_state_(script_state),
         request_callback_(std::move(request_callback)),
         skip_count_(skip_count),
@@ -638,13 +638,19 @@ class OpenCursorCallback final : public NativeEventListener {
   ~OpenCursorCallback() override = default;
 
   void Invoke(ExecutionContext*, Event* event) override {
+    if (!agent_) {
+      request_callback_->sendFailure(protocol::Response::ServerError(
+          "DevTools session detached during operation."));
+      return;
+    }
+
     if (event->type() != event_type_names::kSuccess) {
       request_callback_->sendFailure(
           protocol::Response::ServerError("Unexpected event type."));
       return;
     }
 
-    IDBRequest* idb_request = static_cast<IDBRequest*>(event->target());
+    IDBRequest* idb_request = static_cast<IDBRequest*>(event->RawTarget());
     IDBAny* request_result = idb_request->ResultAsAny();
     if (request_result->GetType() == IDBAny::kIDBValueType) {
       end(false);
@@ -688,19 +694,21 @@ class OpenCursorCallback final : public NativeEventListener {
     if (!script_state_->ContextIsValid()) {
       return;
     }
+
+    v8_inspector::V8InspectorSession* v8_session = agent_->v8_session();
     ScriptState::Scope scope(script_state_);
     v8::Local<v8::Context> context = script_state_->GetContext();
     v8_inspector::StringView object_group =
         ToV8InspectorStringView(kIndexedDBObjectGroup);
     std::unique_ptr<DataEntry> data_entry =
         DataEntry::create()
-            .setKey(v8_session_->wrapObject(
+            .setKey(v8_session->wrapObject(
                 context, idb_cursor->key(script_state_).V8Value(), object_group,
                 true /* generatePreview */))
-            .setPrimaryKey(v8_session_->wrapObject(
+            .setPrimaryKey(v8_session->wrapObject(
                 context, idb_cursor->primaryKey(script_state_).V8Value(),
                 object_group, true /* generatePreview */))
-            .setValue(v8_session_->wrapObject(
+            .setValue(v8_session->wrapObject(
                 context, idb_cursor->value(script_state_).V8Value(),
                 object_group, true /* generatePreview */))
             .build();
@@ -712,12 +720,13 @@ class OpenCursorCallback final : public NativeEventListener {
   }
 
   void Trace(Visitor* visitor) const override {
+    visitor->Trace(agent_);
     visitor->Trace(script_state_);
     NativeEventListener::Trace(visitor);
   }
 
  private:
-  raw_ptr<v8_inspector::V8InspectorSession> v8_session_;
+  WeakMember<InspectorIndexedDBAgent> agent_;
   Member<ScriptState> script_state_;
   std::unique_ptr<RequestDataCallback> request_callback_;
   int skip_count_;
@@ -728,21 +737,28 @@ class OpenCursorCallback final : public NativeEventListener {
 class DataLoader final : public ExecutableWithDatabase<RequestDataCallback> {
  public:
   static scoped_refptr<DataLoader> Create(
-      v8_inspector::V8InspectorSession* v8_session,
+      InspectorIndexedDBAgent* agent,
       std::unique_ptr<RequestDataCallback> request_callback,
       const String& object_store_name,
       const String& index_name,
       IDBKeyRange* idb_key_range,
       int skip_count,
       unsigned page_size) {
-    return base::AdoptRef(new DataLoader(
-        v8_session, std::move(request_callback), object_store_name, index_name,
-        idb_key_range, skip_count, page_size));
+    return base::AdoptRef(new DataLoader(agent, std::move(request_callback),
+                                         object_store_name, index_name,
+                                         idb_key_range, skip_count, page_size));
   }
 
   ~DataLoader() override = default;
 
   void Execute(IDBDatabase* idb_database, ScriptState* script_state) override {
+    if (!agent_) {
+      request_callback_->sendFailure(protocol::Response::ServerError(
+          "The DevTools session was detached before the operation could "
+          "complete."));
+      return;
+    }
+
     IDBTransaction* idb_transaction =
         TransactionForDatabase(script_state, idb_database, object_store_name_);
     if (!idb_transaction) {
@@ -774,7 +790,7 @@ class DataLoader final : public ExecutableWithDatabase<RequestDataCallback> {
           script_state, idb_key_range_.Get(), mojom::IDBCursorDirection::Next);
     }
     OpenCursorCallback* open_cursor_callback = OpenCursorCallback::Create(
-        v8_session_, script_state, std::move(request_callback_), skip_count_,
+        agent_.Get(), script_state, std::move(request_callback_), skip_count_,
         page_size_);
     idb_request->addEventListener(event_type_names::kSuccess,
                                   open_cursor_callback, false);
@@ -783,14 +799,14 @@ class DataLoader final : public ExecutableWithDatabase<RequestDataCallback> {
   RequestDataCallback* GetRequestCallback() override {
     return request_callback_.get();
   }
-  DataLoader(v8_inspector::V8InspectorSession* v8_session,
+  DataLoader(InspectorIndexedDBAgent* agent,
              std::unique_ptr<RequestDataCallback> request_callback,
              const String& object_store_name,
              const String& index_name,
              IDBKeyRange* idb_key_range,
              int skip_count,
              unsigned page_size)
-      : v8_session_(v8_session),
+      : agent_(agent),
         request_callback_(std::move(request_callback)),
         object_store_name_(object_store_name),
         index_name_(index_name),
@@ -798,7 +814,7 @@ class DataLoader final : public ExecutableWithDatabase<RequestDataCallback> {
         skip_count_(skip_count),
         page_size_(page_size) {}
 
-  raw_ptr<v8_inspector::V8InspectorSession> v8_session_;
+  WeakPersistent<InspectorIndexedDBAgent> agent_;
   std::unique_ptr<RequestDataCallback> request_callback_;
   String object_store_name_;
   String index_name_;
@@ -859,7 +875,7 @@ void InspectorIndexedDBAgent::requestDatabaseNames(
   LocalFrame* frame = frame_or_response.value();
   ExecutableWithIdbFactory::Start(
       frame, std::move(storage_bucket),
-      WTF::BindOnce(
+      BindOnce(
           [](std::unique_ptr<RequestDatabaseNamesCallback> request_callback,
              LocalFrame* frame, protocol::Response response,
              IDBFactory* idb_factory) {
@@ -873,8 +889,8 @@ void InspectorIndexedDBAgent::requestDatabaseNames(
                   protocol::Response::InternalError());
               return;
             }
-            idb_factory->GetDatabaseInfoForDevTools(WTF::BindOnce(
-                &OnGotDatabaseNames, std::move(request_callback)));
+            idb_factory->GetDatabaseInfoForDevTools(
+                BindOnce(&OnGotDatabaseNames, std::move(request_callback)));
           },
           std::move(request_callback), WrapPersistent(frame)));
 }
@@ -923,9 +939,9 @@ void InspectorIndexedDBAgent::requestData(
     request_callback->sendFailure(frame_or_response.error());
     return;
   }
-  scoped_refptr<DataLoader> data_loader = DataLoader::Create(
-      v8_session_, std::move(request_callback), object_store_name, index_name,
-      idb_key_range, skip_count, page_size);
+  scoped_refptr<DataLoader> data_loader =
+      DataLoader::Create(this, std::move(request_callback), object_store_name,
+                         index_name, idb_key_range, skip_count, page_size);
 
   data_loader->Start(frame_or_response.value(), std::move(storage_bucket),
                      database_name);
@@ -945,7 +961,7 @@ class GetMetadataListener final : public NativeEventListener {
       return;
     }
 
-    IDBRequest* idb_request = static_cast<IDBRequest*>(event->target());
+    IDBRequest* idb_request = static_cast<IDBRequest*>(event->RawTarget());
     IDBAny* request_result = idb_request->ResultAsAny();
     if (request_result->GetType() != IDBAny::kIntegerType) {
       NotifySubtaskDone(owner_, "Unexpected result type.");
@@ -1300,7 +1316,7 @@ void InspectorIndexedDBAgent::deleteDatabase(
   LocalFrame* frame = frame_or_response.value();
   ExecutableWithIdbFactory::Start(
       frame, std::move(storage_bucket),
-      WTF::BindOnce(
+      BindOnce(
           [](std::unique_ptr<DeleteDatabaseCallback> request_callback,
              LocalFrame* frame, String database_name,
              protocol::Response response, IDBFactory* idb_factory) {

@@ -851,6 +851,9 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   // FrameTokenMessageQueue::Client:
   void OnInvalidFrameToken(uint32_t frame_token) override;
 
+  // FrameTokenMessageQueue::Client:
+  std::string GetMainFrameLastCommittedURLSpec() override;
+
   void ProgressFlingIfNeeded(base::TimeTicks current_time);
   void StopFling();
 
@@ -1026,6 +1029,10 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   // cpu-priority boosted to run discard logic.
   void SetIsDiscarding(bool is_discarding);
 
+  SyntheticGestureController* SyntheticGestureControllerForTesting() {
+    return synthetic_gesture_controller_.get();
+  }
+
  protected:
   // |routing_id| must not be IPC::mojom::kRoutingIdNone.
   // If this object outlives |delegate|, DetachDelegate() must be called when
@@ -1080,6 +1087,8 @@ class CONTENT_EXPORT RenderWidgetHostImpl
                            AddAndRemoveImeInputEventObserver);
   FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostTest,
                            InputRouterReceivesHasTouchEventHandlers);
+  FRIEND_TEST_ALL_PREFIXES(OOPIFScrollBubblingTest,
+                           ScrollBubblingWithTouchMoveInjection);
   FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostTest, EventDispatchPostDetach);
   FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostTest, InputEventRWHLatencyComponent);
   FRIEND_TEST_ALL_PREFIXES(DevToolsAgentHostImplTest,

@@ -60,6 +60,19 @@
   CHECK(!_identityInteractionManager, base::NotFatalUntil::M144);
 }
 
+#pragma mark - BuggyAuthenticationViewOwner
+
+- (BOOL)viewWillPersist {
+  if (@available(iOS 26, *)) {
+    // The authentication view don’t disappear silently on iOS 26.
+    return YES;
+  }
+  // Once the authentication is done, the manager is set to nil and the view
+  // can’t have disappeared.
+  CHECK(_identityInteractionManager, base::NotFatalUntil::M144);
+  return _identityInteractionManager == nil;
+}
+
 #pragma mark - ChromeCoordinator
 
 - (void)start {
@@ -84,15 +97,15 @@
 }
 
 - (void)stop {
+  [super stop];
   if (_identityInteractionManager) {
     // The operation hasn't finished yet - cancel.
     [_identityInteractionManager cancelAuthActivityAnimated:NO];
     _identityInteractionManager = nil;
-    [self.delegate reauthFinishedWithResult:ReauthResult::kInterrupted];
     [self recordReauthFlowEvent:signin_metrics::ReauthFlowEvent::kInterrupted];
+    // Do not use self after this line, the owner might delete this coordinator.
+    [self.delegate reauthFinishedWithResult:ReauthResult::kInterrupted];
   }
-
-  [super stop];
 }
 
 #pragma mark - Private
@@ -121,6 +134,7 @@
     [self recordReauthFlowEvent:signin_metrics::ReauthFlowEvent::kCancelled];
   }
 
+  // Do not use self after this line, the owner might delete this coordinator.
   [self.delegate reauthFinishedWithResult:result];
 }
 

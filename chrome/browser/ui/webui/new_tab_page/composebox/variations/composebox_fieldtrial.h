@@ -30,6 +30,17 @@ extern const base::FeatureParam<std::string> kConfigParam;
 extern const base::FeatureParam<bool> kSendLnsSurfaceParam;
 // Whether to show zps suggestions under the composebox.
 extern const base::FeatureParam<bool> kShowComposeboxZps;
+// Whether to show typed suggestions under the composebox.
+extern const base::FeatureParam<bool> kShowComposeboxTypedSuggest;
+// Whether to show image suggestions under the composebox.
+extern const base::FeatureParam<bool> kShowComposeboxImageSuggestions;
+// Whether to show the + entrypoint and contextual input menu in the realbox and
+// composebox.
+extern const base::FeatureParam<bool> kShowContextMenu;
+// The maximum number of tab suggestions to show in the composebox context menu.
+extern const base::FeatureParam<int> kContextMenuMaxTabSuggestions;
+// The maximum number of file attachments to upload.
+extern const base::FeatureParam<int> kMaxNumFiles;
 
 bool IsNtpComposeboxEnabled(Profile* profile);
 
@@ -37,6 +48,12 @@ class FeatureConfig : public omnibox_feature_configs::Config<FeatureConfig> {
  public:
   // The configuration proto for the feature.
   omnibox::NTPComposeboxConfig config;
+
+  FeatureConfig(const FeatureConfig&);
+  FeatureConfig(FeatureConfig&&);
+  FeatureConfig& operator=(const FeatureConfig&);
+  FeatureConfig& operator=(FeatureConfig&&);
+  ~FeatureConfig();
 
  private:
   friend class omnibox_feature_configs::Config<FeatureConfig>;

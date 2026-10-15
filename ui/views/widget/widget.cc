@@ -43,7 +43,7 @@
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/image/image_skia.h"
-#include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/native_window_types.h"
 #include "ui/views/accessibility/tree/widget_ax_manager.h"
 #include "ui/views/controls/menu/menu_controller.h"
 #include "ui/views/drag_controller.h"
@@ -59,6 +59,7 @@
 #include "ui/views/widget/tooltip_manager.h"
 #include "ui/views/widget/widget_delegate.h"
 #include "ui/views/widget/widget_deletion_observer.h"
+#include "ui/views/widget/widget_enumerator.h"
 #include "ui/views/widget/widget_observer.h"
 #include "ui/views/widget/widget_removals_observer.h"
 #include "ui/views/window/dialog_delegate.h"
@@ -253,6 +254,7 @@ Widget::Widget(InitParams params) {
 Widget::~Widget() {
   // DestroyRootView() will cause InvalidateLayout() to ScheduleLayout() which
   // is unnecessary.
+  is_destroying_ = true;
   widget_closed_ = true;
   autosize_task_factory_.InvalidateWeakPtrs();
 
@@ -389,6 +391,15 @@ Widget::Widgets Widget::GetAllOwnedWidgets(gfx::NativeView native_view) {
   return native_view
              ? internal::NativeWidgetPrivate::GetAllOwnedWidgets(native_view)
              : Widget::Widgets();
+}
+
+// static
+void Widget::ForEachOwnedWidget(gfx::NativeView native_view,
+                                base::FunctionRef<void(Widget*)> on_widget) {
+  WidgetEnumerator widget_iterator(GetAllOwnedWidgets(native_view));
+  while (!widget_iterator.IsEmpty()) {
+    on_widget(widget_iterator.Next());
+  }
 }
 
 // static
@@ -599,7 +610,10 @@ void Widget::Init(InitParams params) {
     parent_->OnChildAdded(this);
   }
 
-  native_widget_->OnWidgetThemeChanged(GetColorMode(), background_color_);
+  native_widget_->OnWidgetThemeChanged(
+      GetColorMode(), background_color_ ? GetColorProvider()->GetColor(
+                                              background_color_.value())
+                                        : std::optional<SkColor>());
 
   UpdateAccessibleNameForRootView();
   native_theme_observation_.Observe(GetNativeTheme());
@@ -657,7 +671,7 @@ gfx::NativeWindow Widget::GetNativeWindow() const {
 
 std::optional<display::Display> Widget::GetNearestDisplay() {
   if (auto native_view = GetNativeView()) {
-    return display::Screen::GetScreen()->GetDisplayNearestView(native_view);
+    return display::Screen::Get()->GetDisplayNearestView(native_view);
   }
   return std::nullopt;
 }
@@ -929,8 +943,6 @@ void Widget::CloseWithReason(ClosedReason closed_reason) {
   if (override_close_) {
     base::WeakPtr<Widget> weak_this = weak_ptr_factory_.GetWeakPtr();
     std::move(override_close_).Run(closed_reason);
-    // Ensure that `this` was destroyed.
-    CHECK(!weak_this);
     return;
   }
 
@@ -1470,7 +1482,10 @@ void Widget::ThemeChanged() {
   NotifyColorProviderChanged();
 
   if (native_widget_) {
-    native_widget_->OnWidgetThemeChanged(GetColorMode(), background_color_);
+    native_widget_->OnWidgetThemeChanged(
+        GetColorMode(), background_color_ ? GetColorProvider()->GetColor(
+                                                background_color_.value())
+                                          : std::optional<SkColor>());
   }
 }
 
@@ -1600,8 +1615,7 @@ gfx::Rect Widget::GetWorkAreaBoundsInScreen() const {
 
 void Widget::SynthesizeMouseMoveEvent() {
   // In screen coordinate.
-  gfx::Point mouse_location =
-      display::Screen::GetScreen()->GetCursorScreenPoint();
+  gfx::Point mouse_location = display::Screen::Get()->GetCursorScreenPoint();
   if (!GetWindowBoundsInScreen().Contains(mouse_location)) {
     return;
   }
@@ -1700,6 +1714,12 @@ void Widget::OnParentShouldPaintAsActiveChanged() {
 }
 
 void Widget::NotifyPaintAsActiveChanged() {
+  // In the case the Widget has closed do not notify paint as active changes to
+  // mitigate the risk of UAFs and attempted accesses to torn-down Widget
+  // subclass state.
+  if (widget_closed_) {
+    return;
+  }
   paint_as_active_callbacks_.Notify();
   if (native_widget_) {
     native_widget_->PaintAsActiveChanged();
@@ -2389,7 +2409,7 @@ void Widget::OnAXModeAdded(ui::AXMode mode) {
 
 void Widget::SetColorModeOverride(
     std::optional<ui::ColorProviderKey::ColorMode> color_mode,
-    std::optional<SkColor> background_color) {
+    std::optional<ui::ColorId> background_color) {
   if (color_mode != color_mode_override_ ||
       background_color != background_color_) {
     color_mode_override_ = color_mode;
@@ -2467,6 +2487,12 @@ void Widget::UpdateAccessibleURLForRootView(const GURL& url) {
   }
 }
 
+void Widget::SaveWindowPlacementIfNeeded() {
+  if (native_widget_initialized_ && save_window_placement_allowed_) {
+    SaveWindowPlacement();
+  }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Widget, protected:
 
@@ -2516,20 +2542,14 @@ void Widget::SaveWindowPlacement() {
   // by go/crash) that in some circumstances we can end up here after
   // WM_DESTROY, at which point the window delegate is likely gone. So just
   // bail.
-  if (!widget_delegate_ || !widget_delegate_->ShouldSaveWindowPlacement() ||
-      !native_widget_) {
+  if (is_destroying_ || !widget_delegate_ ||
+      !widget_delegate_->ShouldSaveWindowPlacement() || !native_widget_) {
     return;
   }
   ui::mojom::WindowShowState show_state = ui::mojom::WindowShowState::kNormal;
   gfx::Rect bounds;
   native_widget_->GetWindowPlacement(&bounds, &show_state);
   widget_delegate_->SaveWindowPlacement(bounds, show_state);
-}
-
-void Widget::SaveWindowPlacementIfNeeded() {
-  if (native_widget_initialized_ && save_window_placement_allowed_) {
-    SaveWindowPlacement();
-  }
 }
 
 void Widget::SetInitialBounds(const gfx::Rect& bounds) {

@@ -32,6 +32,7 @@ class PasswordFormManager;
 class ChangePasswordFormFillingSubmissionHelper;
 class ChangePasswordFormFinder;
 class CrossOriginNavigationObserver;
+class LoginStateChecker;
 class ModelQualityLogsUploader;
 class PasswordChangeUIController;
 class PasswordChangeHats;
@@ -64,6 +65,7 @@ class PasswordChangeDelegateImpl : public PasswordChangeDelegate,
 #if defined(UNIT_TEST)
   ModelQualityLogsUploader* logs_uploader() { return logs_uploader_.get(); }
   OtpDetectionHelper* otp_helper() { return otp_detection_.get(); }
+  LoginStateChecker* login_checker() { return login_state_checker_.get(); }
   ChangePasswordFormFinder* form_finder() { return form_finder_.get(); }
   content::WebContents* executor() { return executor_.get(); }
   PasswordChangeUIController* ui_controller() { return ui_controller_.get(); }
@@ -90,14 +92,18 @@ class PasswordChangeDelegateImpl : public PasswordChangeDelegate,
   void OnPasswordFormSubmission(content::WebContents* web_contents) override;
   void OnPrivacyNoticeAccepted() override;
   void OnPasswordChangeDeclined() override;
+  void OnUserSkippedLoginCheck() override;
   void AddObserver(PasswordChangeDelegate::Observer* observer) override;
   void RemoveObserver(PasswordChangeDelegate::Observer* observer) override;
+
+  void ProceedToChangePassword();
 
   void OnOtpNotFound();
 
   void OnTabWillDetach(tabs::TabInterface* tab_interface,
                        tabs::TabInterface::DetachReason reason);
 
+  void OnLoginStateCheckResult(bool is_logged_in);
   // Updates `current_state_` and notifies `observers_`.
   void UpdateState(State new_state);
 
@@ -137,6 +143,9 @@ class PasswordChangeDelegateImpl : public PasswordChangeDelegate,
   std::unique_ptr<ChangePasswordFormFillingSubmissionHelper>
       submission_verifier_;
 
+  // Helper class for checking the login state in the main tab.
+  std::unique_ptr<LoginStateChecker> login_state_checker_;
+
   base::ObserverList<PasswordChangeDelegate::Observer, /*check_empty=*/true>
       observers_;
 
@@ -162,6 +171,9 @@ class PasswordChangeDelegateImpl : public PasswordChangeDelegate,
       otp_observation_{this};
 
   ukm::SourceId ukm_source_id_ = ukm::kInvalidSourceId;
+
+  // Whether a blocking challenge (e.g. an OTP) was detected in the main tab.
+  bool blocking_challenge_detected_ = false;
 
   base::WeakPtrFactory<PasswordChangeDelegateImpl> weak_ptr_factory_{this};
 };

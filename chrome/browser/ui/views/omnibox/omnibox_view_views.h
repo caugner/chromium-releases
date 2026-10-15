@@ -135,6 +135,7 @@ class OmniboxViewViews
   void RevertAll() override;
   void SetFocus(bool is_user_initiated) override;
   void ApplyFocusRingToAimButton(bool focus_aim) override;
+  bool AimButtonVisible() const override;
   bool IsImeComposing() const override;
   gfx::NativeView GetRelativeWindowForPopup() const override;
   bool IsImeShowingPopup() const override;
@@ -326,13 +327,18 @@ class OmniboxViewViews
   // DSE placeholder.
   void UpdatePlaceholderTextColor();
 
-  // Returns true if the AIM placeholder text should be visible instead of the
+  // Returns true if the AIM placeholder text should be installed instead of the
   // DSE placeholder text.
+  bool ShouldInstallAimPlaceholderText() const;
+
+  // Returns true if the AIM placeholder text should be visible. This differs
+  // from ShouldInstallAimPlaceholderText() because there are certain scenarios
+  // where the AIM placeholder text is installed but not visible.
   bool ShouldShowAimPlaceholderText() const;
 
   // Returns the AI Mode page action icon view, if present, or nullptr if the
   // view doesn't exist.
-  PageActionIconView* GetAiModePageActionIconView();
+  PageActionIconView* GetAiModePageActionIconView() const;
 
   // When true, the location bar view is read only and also is has a slightly
   // different presentation (smaller font size). This is used for popups.
