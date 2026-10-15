@@ -76,7 +76,7 @@
 #endif
 
 #if BUILDFLAG(SKIA_USE_METAL)
-#include "components/viz/common/gpu/metal_context_provider.h"
+#include "gpu/command_buffer/service/metal_context_provider.h"
 #endif
 
 #if BUILDFLAG(SKIA_USE_DAWN)
@@ -270,6 +270,7 @@ SharedContextState::SharedContextState(
     viz::MetalContextProvider* metal_context_provider,
     DawnContextProvider* dawn_context_provider,
     scoped_refptr<gpu::MemoryTracker::Observer> peak_memory_monitor,
+    bool direct_rendering_display_compositor_enabled,
     bool created_on_compositor_gpu_thread,
     const GrContextOptionsProvider* gr_context_options_provider)
     : use_virtualized_gl_contexts_(use_virtualized_gl_contexts),
@@ -295,6 +296,7 @@ SharedContextState::SharedContextState(
       dawn_context_provider_(dawn_context_provider),
       gr_context_options_provider_(gr_context_options_provider),
       created_on_compositor_gpu_thread_(created_on_compositor_gpu_thread),
+      is_drdc_enabled_(direct_rendering_display_compositor_enabled),
       share_group_(std::move(share_group)),
       context_(context),
       real_context_(std::move(context)),
@@ -455,7 +457,6 @@ bool SharedContextState::InitializeSkia(
     gpu::raster::GrShaderCache* cache,
     GpuProcessShmCount* use_shader_cache_shm_count,
     gl::ProgressReporter* progress_reporter) {
-  is_drdc_enabled_ = features::IsDrDcEnabled() && !workarounds.disable_drdc;
 
   if (gr_context_type_ == GrContextType::kNone) {
     // SharedContextState only exists to hold a GL context for WebGL fallback
@@ -466,7 +467,8 @@ bool SharedContextState::InitializeSkia(
 
   if (gr_context_type_ == GrContextType::kGraphiteDawn ||
       gr_context_type_ == GrContextType::kGraphiteMetal) {
-    return InitializeGraphite(gpu_preferences, workarounds);
+    return InitializeGraphite(gpu_preferences, workarounds,
+                              use_shader_cache_shm_count);
   }
 
   return InitializeGanesh(gpu_preferences, workarounds, cache,
@@ -581,7 +583,8 @@ bool SharedContextState::InitializeGanesh(
 
 bool SharedContextState::InitializeGraphite(
     const GpuPreferences& gpu_preferences,
-    const GpuDriverBugWorkarounds& workarounds) {
+    const GpuDriverBugWorkarounds& workarounds,
+    GpuProcessShmCount* use_shader_cache_shm_count) {
   const skgpu::graphite::ContextOptions context_options =
       GetDefaultGraphiteContextOptions(workarounds);
 
@@ -589,7 +592,8 @@ bool SharedContextState::InitializeGraphite(
   if (gr_context_type_ == GrContextType::kGraphiteDawn) {
 #if BUILDFLAG(SKIA_USE_DAWN)
     CHECK(dawn_context_provider_);
-    if (dawn_context_provider_->InitializeGraphiteContext(context_options)) {
+    if (dawn_context_provider_->InitializeGraphiteContext(
+            context_options, use_shader_cache_shm_count)) {
       graphite_shared_context =
           dawn_context_provider_->GetGraphiteSharedContext();
     } else {
@@ -606,7 +610,8 @@ bool SharedContextState::InitializeGraphite(
     CHECK_EQ(gr_context_type_, GrContextType::kGraphiteMetal);
 #if BUILDFLAG(SKIA_USE_METAL)
     if (metal_context_provider_ &&
-        metal_context_provider_->InitializeGraphiteContext(context_options)) {
+        metal_context_provider_->InitializeGraphiteContext(
+            context_options, use_shader_cache_shm_count)) {
       graphite_shared_context =
           metal_context_provider_->GetGraphiteSharedContext();
     } else {

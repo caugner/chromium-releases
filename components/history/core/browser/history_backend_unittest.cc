@@ -83,7 +83,9 @@ using favicon::FaviconBitmapType;
 using favicon::IconMapping;
 using favicon_base::IconType;
 using favicon_base::IconTypeSet;
+using ::testing::_;
 using ::testing::ElementsAre;
+using ::testing::Pair;
 using ::testing::UnorderedElementsAre;
 using ::testing::UnorderedElementsAreArray;
 
@@ -1622,6 +1624,11 @@ TEST_F(HistoryBackendTest, AddPageVisitSource) {
                          /*external_referrer_url=*/GURL(),
                          ui::PAGE_TRANSITION_TYPED, false, SOURCE_SYNCED, true,
                          false, true);
+  // Assume this url is actor-caused.
+  backend_->AddPageVisit(url, base::Time::Now(), /*referring_visit=*/0,
+                         /*external_referrer_url=*/GURL(),
+                         ui::PAGE_TRANSITION_TYPED, false, SOURCE_ACTOR, true,
+                         false, true);
 
   // Fetch the row information about the url from history db.
   VisitVector visits;
@@ -1629,27 +1636,15 @@ TEST_F(HistoryBackendTest, AddPageVisitSource) {
   backend_->db_->GetVisitsForURL(row_id, &visits);
 
   // Check if all the visits to the url are stored in database.
-  ASSERT_EQ(3U, visits.size());
+  ASSERT_EQ(4U, visits.size());
   VisitSourceMap visit_sources;
   ASSERT_TRUE(backend_->GetVisitsSource(visits, &visit_sources));
-  ASSERT_EQ(3U, visit_sources.size());
-  int sources = 0;
-  for (int i = 0; i < 3; i++) {
-    switch (visit_sources[visits[i].visit_id]) {
-      case SOURCE_EXTENSION:
-        sources |= 0x1;
-        break;
-      case SOURCE_FIREFOX_IMPORTED:
-        sources |= 0x2;
-        break;
-      case SOURCE_SYNCED:
-        sources |= 0x4;
-        break;
-      default:
-        break;
-    }
-  }
-  EXPECT_EQ(0x7, sources);
+  ASSERT_EQ(4U, visit_sources.size());
+
+  EXPECT_THAT(visit_sources,
+              UnorderedElementsAre(
+                  Pair(_, SOURCE_EXTENSION), Pair(_, SOURCE_FIREFOX_IMPORTED),
+                  Pair(_, SOURCE_SYNCED), Pair(_, SOURCE_ACTOR)));
 }
 
 TEST_F(HistoryBackendTest, AddPageVisitNotLastVisit) {
@@ -2236,6 +2231,86 @@ TEST_F(HistoryBackendTest, AddPageMetadata) {
       visit_id, &got_content_annotations));
 }
 
+TEST_F(HistoryBackendTest, QueryHistoryWithEmptyQueryIncludesActorSource) {
+  ASSERT_TRUE(backend_.get());
+
+  // Add a SOURCE_BROWSED visit.
+  GURL url1("http://pagewithvisit1.com");
+  ContextID context_id1 = 1;
+  int nav_entry_id1 = 1;
+
+  HistoryAddPageArgs request1(
+      url1, base::Time::Now(), context_id1, nav_entry_id1,
+      /*local_navigation_id=*/std::nullopt, GURL(), RedirectList(),
+      ui::PAGE_TRANSITION_TYPED, false, SOURCE_BROWSED, false, true);
+  backend_->AddPage(request1);
+
+  // Add a SOURCE_ACTOR visit.
+  GURL url2("http://pagewithvisit2.com");
+  ContextID context_id2 = 2;
+  int nav_entry_id2 = 2;
+
+  HistoryAddPageArgs request2(
+      url2, base::Time::Now() + base::Minutes(1), context_id2, nav_entry_id2,
+      /*local_navigation_id=*/std::nullopt, GURL(), RedirectList(),
+      ui::PAGE_TRANSITION_TYPED, false, SOURCE_ACTOR, false, true);
+  backend_->AddPage(request2);
+
+  QueryOptions options;
+  options.duplicate_policy = QueryOptions::KEEP_ALL_DUPLICATES;
+  QueryResults results = backend_->QueryHistory(/*text_query=*/{}, options);
+
+  // Both BROWSED and ACTOR visit should be returned.
+  EXPECT_THAT(results,
+              testing::UnorderedElementsAre(
+                  testing::AllOf(
+                      testing::Property(&URLResult::url, url1),
+                      testing::Property(&URLResult::has_actor_source, false)),
+                  testing::AllOf(
+                      testing::Property(&URLResult::url, url2),
+                      testing::Property(&URLResult::has_actor_source, true))));
+}
+
+TEST_F(HistoryBackendTest, QueryHistoryWithTextQueryIncludesActorSource) {
+  ASSERT_TRUE(backend_.get());
+
+  // Add a SOURCE_BROWSED visit.
+  GURL url1("http://pagewithvisit1.com");
+  ContextID context_id1 = 1;
+  int nav_entry_id1 = 1;
+
+  HistoryAddPageArgs request1(
+      url1, base::Time::Now(), context_id1, nav_entry_id1,
+      /*local_navigation_id=*/std::nullopt, GURL(), RedirectList(),
+      ui::PAGE_TRANSITION_TYPED, false, SOURCE_BROWSED, false, true);
+  backend_->AddPage(request1);
+
+  // Add a SOURCE_ACTOR visit.
+  GURL url2("http://pagewithvisit2.com");
+  ContextID context_id2 = 2;
+  int nav_entry_id2 = 2;
+
+  HistoryAddPageArgs request2(
+      url2, base::Time::Now() + base::Minutes(1), context_id2, nav_entry_id2,
+      /*local_navigation_id=*/std::nullopt, GURL(), RedirectList(),
+      ui::PAGE_TRANSITION_TYPED, false, SOURCE_ACTOR, false, true);
+  backend_->AddPage(request2);
+
+  QueryOptions options;
+  options.duplicate_policy = QueryOptions::KEEP_ALL_DUPLICATES;
+  QueryResults results = backend_->QueryHistory(/*text_query=*/u"com", options);
+
+  // Both BROWSED and ACTOR visit should be returned.
+  EXPECT_THAT(results,
+              testing::UnorderedElementsAre(
+                  testing::AllOf(
+                      testing::Property(&URLResult::url, url1),
+                      testing::Property(&URLResult::has_actor_source, false)),
+                  testing::AllOf(
+                      testing::Property(&URLResult::url, url2),
+                      testing::Property(&URLResult::has_actor_source, true))));
+}
+
 TEST_F(HistoryBackendTest, SetHasUrlKeyedImage) {
   ASSERT_TRUE(backend_.get());
 
@@ -2489,6 +2564,51 @@ TEST_F(HistoryBackendTest, RemoveVisitsSource) {
   ASSERT_EQ(2U, visit_sources.size());
   for (int i = 0; i < 2; i++)
     EXPECT_EQ(SOURCE_SYNCED, visit_sources[visits[i].visit_id]);
+}
+
+// Test for migration of adding visit_source table.
+TEST_F(HistoryBackendTest, MigrationVisitSource) {
+  ASSERT_TRUE(backend_.get());
+  backend_->Closing();
+  backend_ = nullptr;
+
+  base::FilePath old_history_path;
+  ASSERT_TRUE(GetTestDataHistoryDir(&old_history_path));
+  old_history_path = old_history_path.AppendASCII("HistoryNoSource");
+
+  // Copy history database file to current directory so that it will be deleted
+  // in Teardown.
+  base::FilePath new_history_path(test_dir());
+  base::DeletePathRecursively(new_history_path);
+  base::CreateDirectory(new_history_path);
+  base::FilePath new_history_file = new_history_path.Append(kHistoryFilename);
+  ASSERT_TRUE(base::CopyFile(old_history_path, new_history_file));
+
+  backend_ = base::MakeRefCounted<TestHistoryBackend>(
+      std::make_unique<HistoryBackendTestDelegate>(this),
+      history_client_.CreateBackendClient(),
+      base::SingleThreadTaskRunner::GetCurrentDefault());
+  backend_->Init(false, TestHistoryDatabaseParamsForPath(new_history_path));
+  backend_->Closing();
+  backend_ = nullptr;
+
+  // Now the database should already be migrated.
+  // Check version first.
+  int cur_version = HistoryDatabase::GetCurrentVersion();
+  sql::Database db(sql::test::kTestTag);
+  ASSERT_TRUE(db.Open(new_history_file));
+  sql::Statement s(
+      db.GetUniqueStatement("SELECT value FROM meta WHERE key='version'"));
+  ASSERT_TRUE(s.Step());
+  int file_version = s.ColumnInt(0);
+  EXPECT_EQ(cur_version, file_version);
+
+  // Check visit_source table is created and empty.
+  s.Assign(db.GetUniqueStatement(
+      "SELECT name FROM sqlite_schema WHERE name='visit_source'"));
+  ASSERT_TRUE(s.Step());
+  s.Assign(db.GetUniqueStatement("SELECT * FROM visit_source LIMIT 10"));
+  EXPECT_FALSE(s.Step());
 }
 
 // Test that `recent_redirects_` stores the full redirect chain in case of
@@ -3015,6 +3135,51 @@ TEST_F(HistoryBackendTest, MarkVisitAsKnownToSync) {
   ASSERT_TRUE(backend_->db()->GetVisitsForURL(url_id1, &visits1));
   ASSERT_EQ(1U, visits1.size());
   EXPECT_TRUE(visits1[0].is_known_to_sync);
+}
+
+// Test for migration of adding visit_duration column.
+TEST_F(HistoryBackendTest, MigrationVisitDuration) {
+  ASSERT_TRUE(backend_.get());
+  backend_->Closing();
+  backend_ = nullptr;
+
+  base::FilePath old_history_path, old_history;
+  ASSERT_TRUE(GetTestDataHistoryDir(&old_history_path));
+  old_history = old_history_path.AppendASCII("HistoryNoDuration");
+
+  // Copy history database file to current directory so that it will be deleted
+  // in Teardown.
+  base::FilePath new_history_path(test_dir());
+  base::DeletePathRecursively(new_history_path);
+  base::CreateDirectory(new_history_path);
+  base::FilePath new_history_file = new_history_path.Append(kHistoryFilename);
+  ASSERT_TRUE(base::CopyFile(old_history, new_history_file));
+
+  backend_ = base::MakeRefCounted<TestHistoryBackend>(
+      std::make_unique<HistoryBackendTestDelegate>(this),
+      history_client_.CreateBackendClient(),
+      base::SingleThreadTaskRunner::GetCurrentDefault());
+  backend_->Init(false, TestHistoryDatabaseParamsForPath(new_history_path));
+  backend_->Closing();
+  backend_ = nullptr;
+
+  // Now the history database should already be migrated.
+
+  // Check version in history database first.
+  int cur_version = HistoryDatabase::GetCurrentVersion();
+  sql::Database db(sql::test::kTestTag);
+  ASSERT_TRUE(db.Open(new_history_file));
+  sql::Statement s(db.GetUniqueStatement(
+      "SELECT value FROM meta WHERE key = 'version'"));
+  ASSERT_TRUE(s.Step());
+  int file_version = s.ColumnInt(0);
+  EXPECT_EQ(cur_version, file_version);
+
+  // Check visit_duration column in visits table is created and set to 0.
+  s.Assign(db.GetUniqueStatement(
+      "SELECT visit_duration FROM visits LIMIT 1"));
+  ASSERT_TRUE(s.Step());
+  EXPECT_EQ(0, s.ColumnInt(0));
 }
 
 TEST_F(HistoryBackendTest, AddPageNoVisitForBookmark) {

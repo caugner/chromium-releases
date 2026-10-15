@@ -33,8 +33,6 @@ BASE_DECLARE_FEATURE(kNtpAlphaBackgroundCollections);
 BASE_DECLARE_FEATURE(kNtpBackgroundImageErrorDetection);
 BASE_DECLARE_FEATURE(kNtpCalendarModule);
 BASE_DECLARE_FEATURE(kNtpChromeCartModule);
-BASE_DECLARE_FEATURE(kNtpSearchboxComposebox);
-BASE_DECLARE_FEATURE(kNtpSearchboxComposeEntrypoint);
 BASE_DECLARE_FEATURE(kNtpDriveModule);
 BASE_DECLARE_FEATURE(kNtpDriveModuleNoSyncRequirement);
 BASE_DECLARE_FEATURE(kNtpDriveModuleSegmentation);
@@ -82,6 +80,7 @@ BASE_DECLARE_FEATURE(kNtpMobilePromo);
 BASE_DECLARE_FEATURE(kNtpMicrosoftAuthenticationModule);
 BASE_DECLARE_FEATURE(kNtpOneGoogleBarAsyncBarParts);
 BASE_DECLARE_FEATURE(kNtpFooter);
+BASE_DECLARE_FEATURE(kNtpTabGroupsModule);
 
 // Parameter for controlling the luminosity difference for NTP elements on light
 // backgrounds.
@@ -150,6 +149,8 @@ extern const char kNtpMostRelevantTabResumptionModuleDataParam[];
 // Parameter determining the max visits to show.
 extern const char kNtpMostRelevantTabResumptionModuleMaxVisitsParam[];
 extern const char kNtpRealboxWidthBehaviorParam[];
+// Parameter determining the type of tab groups data to render.
+extern const char kNtpTabGroupsModuleDataParam[];
 // Parameter for determining the categories a tab must not fall into
 // to be shown.
 extern const char kNtpTabResumptionModuleCategoriesBlocklistParam[];
@@ -253,7 +254,6 @@ int GetWallpaperSearchButtonHideCondition();
 
 std::string GetMobilePromoTargetURL();
 
-bool IsNtpComposeboxEnabled();
 }  // namespace ntp_features
 
 #endif  // COMPONENTS_SEARCH_NTP_FEATURES_H_

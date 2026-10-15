@@ -22,6 +22,7 @@
 #import "ios/chrome/browser/first_run/ui_bundled/guided_tour/guided_tour_coordinator.h"
 #import "ios/chrome/browser/first_run/ui_bundled/guided_tour/guided_tour_promo_coordinator.h"
 #import "ios/chrome/browser/safari_data_import/coordinator/safari_data_import_ui_handler.h"
+#import "ios/chrome/browser/safari_data_import/public/safari_data_import_entry_point.h"
 #import "ios/chrome/browser/scoped_ui_blocker/ui_bundled/scoped_ui_blocker.h"
 #import "ios/chrome/browser/shared/coordinator/scene/scene_state.h"
 #import "ios/chrome/browser/shared/coordinator/scene/scene_state_observer.h"
@@ -220,8 +221,7 @@ const char kGuidedTourStepDidFinishHistogram[] = "IOS.GuidedTour.DidFinishStep";
 
   id<BrowserProvider> presentingInterface =
       _presentingSceneState.browserProviderInterface.currentBrowserProvider;
-  Browser* browser = presentingInterface.browser;
-  ProfileIOS* profile = browser->GetProfile()->GetOriginalProfile();
+  ProfileIOS* profile = [self originalProfile];
 
   DCHECK(!_firstRunUIBlocker);
   _firstRunUIBlocker = std::make_unique<ScopedUIBlocker>(_presentingSceneState);
@@ -235,7 +235,7 @@ const char kGuidedTourStepDidFinishHistogram[] = "IOS.GuidedTour.DidFinishStep";
 
   _firstRunCoordinator = [[FirstRunCoordinator alloc]
       initWithBaseViewController:presentingInterface.viewController
-                         browser:browser
+                         browser:presentingInterface.browser
                   screenProvider:provider];
   _firstRunCoordinator.delegate = self;
   [_firstRunCoordinator start];
@@ -245,7 +245,8 @@ const char kGuidedTourStepDidFinishHistogram[] = "IOS.GuidedTour.DidFinishStep";
 // finished presenting.
 - (void)performNextPostFirstRunAction {
   if (!_postActionsProvider) {
-    _postActionsProvider = [[FirstRunPostActionProvider alloc] init];
+    _postActionsProvider = [[FirstRunPostActionProvider alloc]
+        initWithProfile:[self originalProfile]];
   }
   switch ([_postActionsProvider nextScreenType]) {
     case kGuidedTour:
@@ -335,7 +336,9 @@ const char kGuidedTourStepDidFinishHistogram[] = "IOS.GuidedTour.DidFinishStep";
 - (void)displaySafariDataImportEntryPoint {
   id<ApplicationCommands> applicationHandler =
       HandlerForProtocol([self commandDispatcher], ApplicationCommands);
-  [applicationHandler displaySafariDataImportEntryPointWithUIHandler:self];
+  [applicationHandler displaySafariDataImportFromEntryPoint:
+                          SafariDataImportEntryPoint::kFirstRun
+                                              withUIHandler:self];
 }
 
 // Logs the user decision for the Guided Tour promo.
@@ -427,6 +430,20 @@ const char kGuidedTourStepDidFinishHistogram[] = "IOS.GuidedTour.DidFinishStep";
 
 - (void)safariDataImportDidDismiss {
   [self performNextPostFirstRunAction];
+}
+
+#pragma mark - Private
+
+// Returns the original (i.e., not off-the-record) profile associated with the
+// current browser. May return nullptr.
+- (ProfileIOS*)originalProfile {
+  id<BrowserProvider> presentingInterface =
+      _presentingSceneState.browserProviderInterface.currentBrowserProvider;
+  Browser* browser = presentingInterface.browser;
+  if (!browser || !browser->GetProfile()) {
+    return nullptr;
+  }
+  return browser->GetProfile()->GetOriginalProfile();
 }
 
 @end

@@ -27,8 +27,10 @@ import org.chromium.ui.modelutil.PropertyModel.WritableBooleanPropertyKey;
 import org.chromium.ui.modelutil.PropertyModel.WritableIntPropertyKey;
 import org.chromium.ui.modelutil.PropertyModel.WritableObjectPropertyKey;
 
+import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
 
 /** List of properties to designate information about a single tab. */
 @NullMarked
@@ -37,19 +39,29 @@ public class TabProperties {
     @IntDef({
         UiType.TAB,
         UiType.STRIP,
-        UiType.MESSAGE,
-        UiType.LARGE_MESSAGE,
-        UiType.CUSTOM_MESSAGE,
-        UiType.TAB_GROUP
+        UiType.TAB_GROUP,
+        UiType.PRICE_MESSAGE,
+        UiType.INCOGNITO_REAUTH_PROMO_MESSAGE,
+        UiType.ARCHIVED_TABS_IPH_MESSAGE,
+        UiType.ARCHIVED_TABS_MESSAGE,
+        UiType.TAB_GROUP_SUGGESTION_MESSAGE,
+        UiType.IPH_MESSAGE,
+        UiType.COLLABORATION_ACTIVITY_MESSAGE,
     })
     @Retention(RetentionPolicy.SOURCE)
     public @interface UiType {
         int TAB = 0;
         int STRIP = 1;
-        int MESSAGE = 2;
-        int LARGE_MESSAGE = 3;
-        int CUSTOM_MESSAGE = 4;
-        int TAB_GROUP = 5;
+        int TAB_GROUP = 2;
+
+        // Message Cards
+        int PRICE_MESSAGE = 3;
+        int INCOGNITO_REAUTH_PROMO_MESSAGE = 4;
+        int ARCHIVED_TABS_MESSAGE = 5;
+        int ARCHIVED_TABS_IPH_MESSAGE = 6;
+        int TAB_GROUP_SUGGESTION_MESSAGE = 7;
+        int IPH_MESSAGE = 8;
+        int COLLABORATION_ACTIVITY_MESSAGE = 9;
     }
 
     /** IDs for possible tab action states. */
@@ -59,6 +71,31 @@ public class TabProperties {
         int UNSET = 0;
         int SELECTABLE = 1;
         int CLOSABLE = 2;
+    }
+
+    /**
+     * States for showing the tab card highlight. Used to prevent showing animations upon a tab card
+     * being recycled and rebound.
+     */
+    @Target(ElementType.TYPE_USE)
+    @IntDef({
+        TabCardHighlightState.TO_BE_HIGHLIGHTED,
+        TabCardHighlightState.HIGHLIGHTED,
+        TabCardHighlightState.NOT_HIGHLIGHTED
+    })
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface TabCardHighlightState {
+        /** The card is not highlighted. Triggers a fade-out animation if previously highlighted. */
+        int NOT_HIGHLIGHTED = 0;
+
+        /**
+         * A transient state that triggers a fade-in animation. The state should be set to {@link
+         * TabCardHighlightState#HIGHLIGHTED} immediately after to represent the final state.
+         */
+        int TO_BE_HIGHLIGHTED = 1;
+
+        /** The card is statically highlighted without any animation. */
+        int HIGHLIGHTED = 2;
     }
 
     /** The {@link TabActionState} for the view, either CLOSABLE or SELECTABLE. */
@@ -76,8 +113,8 @@ public class TabProperties {
     public static final WritableObjectPropertyKey<TabActionListener> TAB_LONG_CLICK_LISTENER =
             new WritableObjectPropertyKey<>();
 
-    public static final WritableBooleanPropertyKey IS_HIGHLIGHTED =
-            new WritableBooleanPropertyKey();
+    // This will be initialized to 0, which is TabCardHighlightState.NOT_HIGHLIGHTED.
+    public static final WritableIntPropertyKey HIGHLIGHT_STATE = new WritableIntPropertyKey();
 
     public static final WritableObjectPropertyKey<TabActionButtonData> TAB_ACTION_BUTTON_DATA =
             new WritableObjectPropertyKey<>();
@@ -160,6 +197,9 @@ public class TabProperties {
     public static final WritableObjectPropertyKey<String> TAB_GROUP_SYNC_ID =
             new WritableObjectPropertyKey<>();
 
+    /** The {@link org.chromium.chrome.browser.tab.TabImpl.MediaState} indicator of the tab. */
+    public static final WritableIntPropertyKey MEDIA_INDICATOR = new WritableIntPropertyKey();
+
     private static final PropertyKey[] COMMON_KEYS_TAB_AND_GROUP_GRID =
             new PropertyKey[] {
                 IS_INCOGNITO,
@@ -198,7 +238,8 @@ public class TabProperties {
                         SHOULD_SHOW_PRICE_DROP_TOOLTIP,
                         HAS_NOTIFICATION_BUBBLE,
                         TAB_CARD_LABEL_DATA,
-                        IS_HIGHLIGHTED
+                        HIGHLIGHT_STATE,
+                        MEDIA_INDICATOR
                     },
                     COMMON_KEYS_TAB_AND_GROUP_GRID);
 

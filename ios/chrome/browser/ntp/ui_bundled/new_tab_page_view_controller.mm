@@ -4,6 +4,7 @@
 
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_view_controller.h"
 
+#import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 
 #import <algorithm>
@@ -23,6 +24,7 @@
 #import "ios/chrome/browser/ntp/ui_bundled/discover_feed_constants.h"
 #import "ios/chrome/browser/ntp/ui_bundled/feed_header_view_controller.h"
 #import "ios/chrome/browser/ntp/ui_bundled/feed_wrapper_view_controller.h"
+#import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_color_palette.h"
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_constants.h"
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_content_delegate.h"
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_feature.h"
@@ -31,6 +33,7 @@
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_mutator.h"
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_quick_actions_view_controller.h"
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_shortcuts_handler.h"
+#import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_trait.h"
 #import "ios/chrome/browser/overscroll_actions/ui_bundled/overscroll_actions_controller.h"
 #import "ios/chrome/browser/shared/model/utils/first_run_util.h"
 #import "ios/chrome/browser/shared/public/commands/help_commands.h"
@@ -53,6 +56,10 @@ const CGFloat kFeedContainerMinimumHeight = 1000;
 // Added height to the feed container so that it doesn't end abruptly on
 // overscroll.
 const CGFloat kFeedContainerExtraHeight = 500;
+
+// The spacing for the quick actions buttons.
+const CGFloat kQuickActionSpacingTop = 3.0;
+const CGFloat kQuickActionSpacingBotttom = 19.0;
 
 // Vertical spacing between modules.
 CGFloat SpaceBetweenModules() {
@@ -182,6 +189,8 @@ CGFloat SpaceBetweenModules() {
   // The view controller holding the NTP quick actions buttons.
   // Only created when the fakebox buttons are replaced.
   NewTabPageQuickActionsViewController* _quickActionsViewController;
+  // Whether AIM is allowed.
+  BOOL _isAIMAllowed;
 }
 
 // Properties synthesized from NewTabPageConsumer.
@@ -233,7 +242,6 @@ CGFloat SpaceBetweenModules() {
   AddSameConstraints(_backgroundGradientView, self.view);
   [self updateModularHomeBackgroundColorForUserInterfaceStyle:
             self.traitCollection.userInterfaceStyle];
-  self.view.backgroundColor = [UIColor colorNamed:@"ntp_background_color"];
 
   if (IsNTPBackgroundCustomizationEnabled()) {
     _backgroundImageView = [[UIImageView alloc] init];
@@ -242,6 +250,8 @@ CGFloat SpaceBetweenModules() {
     [self updateBackgroundImageView];
     [self.view addSubview:_backgroundImageView];
     AddSameConstraints(_backgroundImageView, self.view);
+  } else {
+    self.view.backgroundColor = [UIColor colorNamed:@"ntp_background_color"];
   }
 
   [self registerNotifications];
@@ -264,7 +274,13 @@ CGFloat SpaceBetweenModules() {
       [weakSelf updateUIOnTraitChange:previousCollection];
     };
     [self registerForTraitChanges:traits withHandler:handler];
+    if (IsNTPBackgroundCustomizationEnabled()) {
+      [self registerForTraitChanges:@[ NewTabPageTrait.class ]
+                         withAction:@selector(applyBackgroundColors)];
+      [self applyBackgroundColors];
+    }
   }
+  [self.mutator checkNewBadgeEligibility];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
@@ -473,7 +489,9 @@ CGFloat SpaceBetweenModules() {
     _feedContainer = [[UIView alloc] initWithFrame:CGRectZero];
     _feedContainer.userInteractionEnabled = YES;
     _feedContainer.translatesAutoresizingMaskIntoConstraints = NO;
-    _feedContainer.backgroundColor = [UIColor colorNamed:kBackgroundColor];
+    if (!IsNTPBackgroundCustomizationEnabled()) {
+      _feedContainer.backgroundColor = [UIColor colorNamed:kBackgroundColor];
+    }
 
     // Add corner radius to the top border.
     _feedContainer.clipsToBounds = YES;
@@ -668,6 +686,10 @@ CGFloat SpaceBetweenModules() {
         viewController == self.feedHeaderViewController) {
       heightAboveFeed += SpaceBetweenModules();
     }
+
+    if (viewController == _quickActionsViewController) {
+      heightAboveFeed += kQuickActionSpacingBotttom;
+    }
   }
   return heightAboveFeed;
 }
@@ -812,6 +834,10 @@ CGFloat SpaceBetweenModules() {
   _backgroundImage = backgroundImage;
 
   [self updateBackgroundImageView];
+}
+
+- (void)setAIMAllowed:(BOOL)allowed {
+  _isAIMAllowed = allowed;
 }
 
 #pragma mark - UIScrollViewDelegate
@@ -1069,6 +1095,26 @@ CGFloat SpaceBetweenModules() {
 
 #pragma mark - Private
 
+// Sets the background using the current color palette, or defaults if none is
+// set.
+- (void)applyBackgroundColors {
+  NewTabPageColorPalette* colorPalette =
+      [self.traitCollection objectForNewTabPageTrait];
+
+  if (colorPalette) {
+    self.view.backgroundColor = colorPalette.primaryColor;
+    [_backgroundGradientView setStartColor:colorPalette.secondaryColor
+                                  endColor:colorPalette.primaryColor];
+    _feedContainer.backgroundColor = colorPalette.secondaryCellColor;
+  } else {
+    self.view.backgroundColor = [UIColor colorNamed:@"ntp_background_color"];
+    [_backgroundGradientView
+        setStartColor:[UIColor colorNamed:kSecondaryBackgroundColor]
+             endColor:[UIColor colorNamed:kPrimaryBackgroundColor]];
+    _feedContainer.backgroundColor = [UIColor colorNamed:kBackgroundColor];
+  }
+}
+
 - (void)setNTPShortcutsHandler:
     (id<NewTabPageShortcutsHandler>)NTPShortcutsHandler {
   _NTPShortcutsHandler = NTPShortcutsHandler;
@@ -1077,8 +1123,7 @@ CGFloat SpaceBetweenModules() {
 
 // Whether the quick actions button row is visible.
 - (BOOL)quickActionsVisible {
-  return self.headerViewController.isGoogleDefaultSearchEngine &&
-         ShouldShowQuickActionsRow();
+  return _isAIMAllowed && ShouldShowQuickActionsRow();
 }
 
 // Returns YES if scroll should be skipped when focusing the omnibox.
@@ -1259,7 +1304,9 @@ CGFloat SpaceBetweenModules() {
     self.fakeOmniboxConstraints = @[
       [viewBelowHeader.topAnchor
           constraintEqualToAnchor:self.headerViewController.view.bottomAnchor
-                         constant:SpaceBetweenModules()],
+                         constant:self.quickActionsVisible
+                                      ? kQuickActionSpacingTop
+                                      : SpaceBetweenModules()],
     ];
   }
   [NSLayoutConstraint activateConstraints:self.fakeOmniboxConstraints];
@@ -1509,11 +1556,16 @@ CGFloat SpaceBetweenModules() {
     NSUInteger headerIndex =
         [self.viewControllersAboveFeed indexOfObject:self.headerViewController];
     for (NSUInteger index = startIndex; index > headerIndex + 1; --index) {
+      BOOL isQuickActions = _quickActionsViewController ==
+                            self.viewControllersAboveFeed[index - 1];
       UIView* view = self.viewControllersAboveFeed[index].view;
       UIView* viewAbove = self.viewControllersAboveFeed[index - 1].view;
+
+      CGFloat spacingToUse =
+          isQuickActions ? kQuickActionSpacingBotttom : SpaceBetweenModules();
       [NSLayoutConstraint activateConstraints:@[
         [view.topAnchor constraintEqualToAnchor:viewAbove.bottomAnchor
-                                       constant:SpaceBetweenModules()],
+                                       constant:spacingToUse],
       ]];
     }
   }
@@ -1662,7 +1714,7 @@ CGFloat SpaceBetweenModules() {
   // to the top of the screen. Also computes the total NTP scrolling height
   // for Discover infinite feed.
   CGFloat minimumHeight = collectionViewHeight + headerHeight;
-  if (!IsRegularXRegularSizeClass(self.collectionView)) {
+  if (!CanShowTabStrip(self.collectionView)) {
     minimumHeight -= self.collectionView.contentInset.bottom;
     if (IsSplitToolbarMode(self)) {
       minimumHeight -= [self stickyOmniboxHeight];
@@ -1827,7 +1879,7 @@ CGFloat SpaceBetweenModules() {
 // toolbar. The former is for narrower devices like portait iPhones, and the
 // latter is for wider devices like iPads and landscape iPhones.
 - (BOOL)shouldPinFakeOmnibox {
-  return !IsRegularXRegularSizeClass(self) && IsSplitToolbarMode(self);
+  return !CanShowTabStrip(self) && IsSplitToolbarMode(self);
 }
 
 // Modifies the view controller depending on which UITrait was changed.

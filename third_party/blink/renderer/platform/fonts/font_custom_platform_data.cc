@@ -61,7 +61,7 @@ RetrieveVariationDesignParametersByTag(sk_sp<SkTypeface> base_typeface,
   int axes_count = base_typeface->getVariationDesignParameters({});
   if (axes_count <= 0)
     return std::nullopt;
-  Vector<SkFontParameters::Variation::Axis> axes;
+  blink::Vector<SkFontParameters::Variation::Axis> axes;
   axes.resize(axes_count);
   int axes_read =
       base_typeface->getVariationDesignParameters(axes);
@@ -282,8 +282,10 @@ const FontPlatformData* FontCustomPlatformData::GetFontPlatformData(
     }
   }
   return MakeGarbageCollected<FontPlatformData>(
-      std::move(return_typeface), std::string(), size, synthetic_bold,
-      synthetic_italic, text_rendering, resolved_font_features, orientation);
+      std::move(return_typeface), std::string(), size,
+      synthetic_bold && !base_typeface_->isBold(),
+      synthetic_italic && !base_typeface_->isItalic(), text_rendering,
+      resolved_font_features, orientation);
 }
 
 Vector<VariationAxis> FontCustomPlatformData::GetVariationAxes() const {

@@ -15,13 +15,11 @@
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/content_extraction/inner_html.h"
-#include "chrome/browser/content_extraction/inner_text.h"
 #include "chrome/browser/lens/core/mojom/geometry.mojom.h"
 #include "chrome/browser/lens/core/mojom/lens.mojom.h"
 #include "chrome/browser/lens/core/mojom/lens_side_panel.mojom.h"
 #include "chrome/browser/lens/core/mojom/overlay_object.mojom.h"
 #include "chrome/browser/lens/core/mojom/page_content_type.mojom.h"
-#include "chrome/browser/lens/core/mojom/text.mojom-forward.h"
 #include "chrome/browser/lens/core/mojom/text.mojom.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
@@ -38,6 +36,7 @@
 #include "chrome/browser/ui/views/side_panel/side_panel_coordinator.h"
 #include "chrome/browser/ui/webui/searchbox/lens_searchbox_client.h"
 #include "chrome/common/chrome_render_frame.mojom.h"
+#include "components/content_extraction/content/browser/inner_text.h"
 #include "components/find_in_page/find_result_observer.h"
 #include "components/lens/lens_overlay_dismissal_source.h"
 #include "components/lens/lens_overlay_first_interaction_type.h"
@@ -242,6 +241,10 @@ class LensOverlayController : public lens::mojom::LensPageHandler,
   // logging.
   uint64_t GetInvocationTimeSinceEpoch();
 
+  // Testing helper method for checking the blur layer delegate.
+  lens::LensOverlayBlurLayerDelegate*
+  GetLensOverlayBlurLayerDelegateForTesting();
+
   // Testing helper method for checking view housing our overlay.
   views::View* GetOverlayViewForTesting();
 
@@ -305,6 +308,12 @@ class LensOverlayController : public lens::mojom::LensPageHandler,
 
   // Updates the metrics related to navigations for the current page.
   void UpdateNavigationMetrics();
+
+  // Clears any selections currently made in the overlay.
+  void ClearAllSelections();
+
+  // Handles a new region thumbnail being created.
+  void HandleRegionBitmapCreated(const SkBitmap& region_bitmap);
 
   // Testing function to issue a Lens region selection request.
   void IssueLensRegionRequestForTesting(lens::mojom::CenterRotatedBoxPtr region,
@@ -429,14 +438,14 @@ class LensOverlayController : public lens::mojom::LensPageHandler,
   void ShowUI(lens::LensOverlayInvocationSource invocation_sourc,
               lens::LensOverlayQueryController* lens_overlay_query_controller);
 
-  // Issues a contextual search request for Lens to fulfill.
+  // Issues a text search request for Lens to fulfill, which may or may not be
+  // contextualized.
   // No-op if the Lens Overlay is off or closing. If the Lens Overlay is in the
   // process of opening, the request will be queued until the overlay is fully
   // opened.
-  // TODO(crbug.com/403629222): Revisit if it makes sense to pass the
-  // destination URL instead of the query text directly.
-  void IssueContextualSearchRequest(
-      const GURL& destination_url,
+  void IssueTextSearchRequest(
+      std::string query_text,
+      std::map<std::string, std::string> additional_query_parameters,
       lens::LensOverlayQueryController* lens_overlay_query_controller,
       AutocompleteMatchType::Type match_type,
       bool is_zero_prefix_suggestion,
@@ -488,9 +497,6 @@ class LensOverlayController : public lens::mojom::LensPageHandler,
 
   // Clears the selected region.
   void ClearRegionSelection();
-
-  // Clears any selections currently made in the overlay.
-  void ClearAllSelections();
 
   // Called by the searchbox controller when the focus on the searchbox changes.
   void OnSearchboxFocusChanged(bool focused);
@@ -659,6 +665,16 @@ class LensOverlayController : public lens::mojom::LensPageHandler,
 
   class UnderlyingWebContentsObserver;
 
+  // Implementation of IssueTextSearchRequest() for passing query_start_time.
+  void IssueTextSearchRequestInner(
+      base::Time query_start_time,
+      std::string query_text,
+      std::map<std::string, std::string> additional_query_parameters,
+      lens::LensOverlayQueryController* lens_overlay_query_controller,
+      AutocompleteMatchType::Type match_type,
+      bool is_zero_prefix_suggestion,
+      lens::LensOverlayInvocationSource invocation_source);
+
   // Takes a screenshot of the current viewport.
   void CaptureScreenshot();
 
@@ -688,6 +704,12 @@ class LensOverlayController : public lens::mojom::LensPageHandler,
       const std::vector<gfx::Rect>& bounds,
       std::optional<uint32_t> pdf_current_page);
 
+  // Called when the page context eligibility is fetched.
+  void OnPageContextEligibilityFetched(const SkBitmap& bitmap,
+                                       const std::vector<gfx::Rect>& all_bounds,
+                                       std::optional<uint32_t> pdf_current_page,
+                                       bool is_page_context_eligible);
+
   // Process the bitmap and creates all necessary data to initialize the
   // overlay. Happens on a separate thread to prevent main thread from hanging.
   void CreateInitializationData(const SkBitmap& screenshot,
@@ -716,10 +738,6 @@ class LensOverlayController : public lens::mojom::LensPageHandler,
   // Updates state of the ghost loader. |suppress_ghost_loader| is true when
   // the page bytes can't be uploaded.
   void SuppressGhostLoader();
-
-  // Enables/disables the background blur updating live. This should be used to
-  // save resources on blurring the background when not needed.
-  void SetLiveBlur(bool enabled);
 
   // Called when the UI needs to show the overlay via a view that is a child of
   // the tab contents view.
@@ -829,6 +847,7 @@ class LensOverlayController : public lens::mojom::LensPageHandler,
   void ActivityRequestedByOverlay(
       ui::mojom::ClickModifiersPtr click_modifiers) override;
   void AddBackgroundBlur() override;
+  void SetLiveBlur(bool enabled) override;
   void ClosePreselectionBubble() override;
   void CloseRequestedByOverlayCloseButton() override;
   void CloseRequestedByOverlayBackgroundClick() override;
@@ -920,7 +939,9 @@ class LensOverlayController : public lens::mojom::LensPageHandler,
   // Callback to run when the page context has been updated and the suggestion
   // query should now be issued.
   void OnPageContextUpdatedForSuggestion(
-      const GURL& destination_url,
+      base::Time query_start_time,
+      std::string query_text,
+      std::map<std::string, std::string> additional_query_parameters,
       AutocompleteMatchType::Type match_type,
       bool is_zero_prefix_suggestion,
       lens::LensOverlayInvocationSource invocation_source);

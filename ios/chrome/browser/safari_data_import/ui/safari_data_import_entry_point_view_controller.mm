@@ -4,9 +4,10 @@
 
 #import "ios/chrome/browser/safari_data_import/ui/safari_data_import_entry_point_view_controller.h"
 
-#import "ios/chrome/browser/safari_data_import/public/safari_data_import_screen_type.h"
-#import "ios/chrome/browser/safari_data_import/ui/safari_data_import_transition_delegate.h"
-#import "ios/chrome/common/ui/confirmation_alert/confirmation_alert_action_handler.h"
+#import "components/strings/grit/components_strings.h"
+#import "ios/chrome/browser/safari_data_import/public/ui_utils.h"
+#import "ios/chrome/browser/safari_data_import/public/utils.h"
+#import "ios/chrome/common/ui/promo_style/utils.h"
 #import "ios/chrome/grit/ios_branded_strings.h"
 #import "ios/chrome/grit/ios_strings.h"
 #import "ui/base/l10n/l10n_util_mac.h"
@@ -22,12 +23,44 @@
       l10n_util::GetNSString(IDS_IOS_SAFARI_IMPORT_ENTRY_POINT_SUBTITLE);
   self.primaryActionString =
       l10n_util::GetNSString(IDS_IOS_SAFARI_IMPORT_ENTRY_POINT_PRIMARY_ACTION);
-  self.secondaryActionString = l10n_util::GetNSString(
-      IDS_IOS_SAFARI_IMPORT_ENTRY_POINT_SECONDARY_ACTION);
+  self.secondaryActionString = l10n_util::GetNSString(IDS_NO_THANKS);
+  if (self.showReminderButton) {
+    /// TODO(crbug.com/438946348): Rename the string ID.
+    self.tertiaryActionString = l10n_util::GetNSString(
+        IDS_IOS_SAFARI_IMPORT_ENTRY_POINT_SECONDARY_ACTION);
+  }
   self.image = [UIImage imageNamed:@"safari_data_import"];
   self.imageHasFixedSize = YES;
-  self.dismissBarButtonSystemItem = UIBarButtonSystemItemClose;
+  self.topAlignedLayout = YES;
+  /// Create an empty title view to show in the navigation bar if dismiss
+  /// button would not be displayed.
+  self.titleView = [[UIView alloc] initWithFrame:CGRectZero];
+  self.showDismissBarButton = NO;
   [super viewDidLoad];
+  self.view.accessibilityIdentifier =
+      GetSafariDataEntryPointAccessibilityIdentifier();
+  /// Hide the image on compact height.
+  self.alwaysShowImage = NO;
+  [self updateUIOnTraitChange];
+  NSArray<UITrait>* traits = @[
+    UITraitVerticalSizeClass.class, UITraitHorizontalSizeClass.class,
+    UITraitPreferredContentSizeCategory.class
+  ];
+  [self registerForTraitChanges:traits
+                     withAction:@selector(updateUIOnTraitChange)];
+}
+
+#pragma mark - Accessor
+
+- (UIFontTextStyle)titleTextStyle {
+  return GetSafariDataImportTitleLabelFontTextStyle(self.traitCollection);
+}
+
+#pragma mark - Private
+
+/// Method that updates the title font on trait collection change.
+- (void)updateUIOnTraitChange {
+  self.titleLabel.font = GetFRETitleFont(self.titleTextStyle);
 }
 
 @end

@@ -22,8 +22,7 @@ namespace {
 // Each of the content filters have their own kill switch. This function
 // returns true if the feature is enabled for the given setting.
 bool IsFeatureEnabledForSetting(std::string_view setting_name) {
-  if (!base::FeatureList::IsEnabled(
-          kPropagateDeviceContentFiltersToSupervisedUser)) {
+  if (!UseLocalSupervision()) {
     return false;
   }
 
@@ -53,8 +52,7 @@ ContentFiltersObserverBridge::ContentFiltersObserverBridge(
     base::RepeatingClosure on_disabled)
     : setting_name_(setting_name),
       on_enabled_(on_enabled),
-      on_disabled_(on_disabled) {
-}
+      on_disabled_(on_disabled) {}
 
 ContentFiltersObserverBridge::~ContentFiltersObserverBridge() {
   if (bridge_) {
@@ -74,6 +72,7 @@ void ContentFiltersObserverBridge::OnChange(JNIEnv* env, bool enabled) {
     return;
   }
 
+  enabled_ = enabled;
   if (enabled) {
     on_enabled_.Run();
   } else {
@@ -106,13 +105,11 @@ void ContentFiltersObserverBridge::Shutdown() {
 }
 
 bool ContentFiltersObserverBridge::IsEnabled() const {
-  if (!IsFeatureEnabledForSetting(setting_name_)) {
-    // Called from UI thread: do not add logs here to not spam the adb console.
-    return false;
-  }
+  return enabled_;
+}
 
-  JNIEnv* env = base::android::AttachCurrentThread();
-  return Java_ContentFiltersObserverBridge_isEnabled(env, bridge_);
+void ContentFiltersObserverBridge::SetEnabled(bool enabled) {
+  enabled_ = enabled;
 }
 
 }  // namespace supervised_user

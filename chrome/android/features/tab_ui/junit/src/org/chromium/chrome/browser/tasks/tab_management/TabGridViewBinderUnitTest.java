@@ -57,6 +57,7 @@ import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.tab.Tab.MediaState;
 import org.chromium.chrome.browser.tab.state.ShoppingPersistedTabData;
 import org.chromium.chrome.browser.tab.state.ShoppingPersistedTabData.PriceDrop;
 import org.chromium.chrome.browser.tab_ui.TabListFaviconProvider.TabFavicon;
@@ -67,6 +68,7 @@ import org.chromium.chrome.browser.tasks.tab_management.TabListMediator.TabActio
 import org.chromium.chrome.browser.tasks.tab_management.TabListMediator.TabActionButtonData.TabActionButtonType;
 import org.chromium.chrome.browser.tasks.tab_management.TabListMediator.TabActionListener;
 import org.chromium.chrome.browser.tasks.tab_management.TabProperties.TabActionState;
+import org.chromium.chrome.browser.tasks.tab_management.TabProperties.TabCardHighlightState;
 import org.chromium.components.browser_ui.util.motion.MotionEventInfo;
 import org.chromium.components.browser_ui.util.motion.OnPeripheralClickListener;
 import org.chromium.ui.modelutil.PropertyModel;
@@ -84,6 +86,7 @@ public final class TabGridViewBinderUnitTest {
     @Mock private TabThumbnailView mThumbnailView;
     @Mock private FrameLayout mTabGroupColorViewContainer;
     @Mock private ImageView mFaviconView;
+    @Mock private ImageView mMediaIndicatorView;
     @Mock private ViewStub mTabCardLabelStub;
     @Mock private TabCardLabelView mTabCardLabelView;
     @Mock private ImageView mActionButton;
@@ -122,6 +125,8 @@ public final class TabGridViewBinderUnitTest {
         when(mViewGroup.fastFindViewById(R.id.tab_group_color_view_container))
                 .thenReturn(mTabGroupColorViewContainer);
         when(mViewGroup.fastFindViewById(R.id.tab_favicon)).thenReturn(mFaviconView);
+        when(mViewGroup.fastFindViewById(R.id.media_indicator_icon))
+                .thenReturn(mMediaIndicatorView);
         when(mViewGroup.fastFindViewById(R.id.price_info_box_outer)).thenReturn(mPriceCardView);
         when(mViewGroup.fastFindViewById(R.id.tab_card_label_stub)).thenReturn(mTabCardLabelStub);
         when(mViewGroup.fastFindViewById(R.id.action_button)).thenReturn(mActionButton);
@@ -136,6 +141,7 @@ public final class TabGridViewBinderUnitTest {
                 .when(mTabCardLabelStub)
                 .inflate();
         when(mFaviconView.getContext()).thenReturn(mContext);
+        when(mMediaIndicatorView.getContext()).thenReturn(mContext);
         when(mViewGroup.getContext()).thenReturn(mContext);
         when(mViewGroup.getResources()).thenReturn(mContext.getResources());
 
@@ -502,6 +508,44 @@ public final class TabGridViewBinderUnitTest {
 
         verify(mActionButton).setOnClickListener(any());
         verify(mActionButton).setOnTouchListener(isA(OnPeripheralClickListener.class));
+    }
+
+    @Test
+    public void testBindHighlightState() {
+        mModel.set(TabProperties.HIGHLIGHT_STATE, TabCardHighlightState.NOT_HIGHLIGHTED);
+        TabGridViewBinder.bindTab(mModel, mViewGroup, TabProperties.HIGHLIGHT_STATE);
+        verify(mViewGroup).setIsHighlighted(TabCardHighlightState.NOT_HIGHLIGHTED, false);
+
+        mModel.set(TabProperties.HIGHLIGHT_STATE, TabCardHighlightState.TO_BE_HIGHLIGHTED);
+        TabGridViewBinder.bindTab(mModel, mViewGroup, TabProperties.HIGHLIGHT_STATE);
+        verify(mViewGroup).setIsHighlighted(TabCardHighlightState.TO_BE_HIGHLIGHTED, false);
+
+        mModel.set(TabProperties.HIGHLIGHT_STATE, TabCardHighlightState.HIGHLIGHTED);
+        TabGridViewBinder.bindTab(mModel, mViewGroup, TabProperties.HIGHLIGHT_STATE);
+        verify(mViewGroup).setIsHighlighted(TabCardHighlightState.HIGHLIGHTED, false);
+
+        mModel.set(TabProperties.HIGHLIGHT_STATE, TabCardHighlightState.NOT_HIGHLIGHTED);
+        TabGridViewBinder.bindTab(mModel, mViewGroup, TabProperties.HIGHLIGHT_STATE);
+        verify(mViewGroup, times(2)).setIsHighlighted(TabCardHighlightState.NOT_HIGHLIGHTED, false);
+    }
+
+    @Test
+    public void testBindHighlightState_updateTransientState() {
+        mModel.set(TabProperties.HIGHLIGHT_STATE, TabCardHighlightState.TO_BE_HIGHLIGHTED);
+        TabGridViewBinder.bindTab(mModel, mViewGroup, TabProperties.HIGHLIGHT_STATE);
+        verify(mViewGroup).setIsHighlighted(TabCardHighlightState.TO_BE_HIGHLIGHTED, false);
+        assertThat(
+                mModel.get(TabProperties.HIGHLIGHT_STATE),
+                equalTo(TabCardHighlightState.HIGHLIGHTED));
+    }
+
+    @Test
+    @EnableFeatures(ChromeFeatureList.MEDIA_INDICATORS_ANDROID)
+    public void testMediaIndicator() {
+        mModel.set(TabProperties.MEDIA_INDICATOR, MediaState.AUDIBLE);
+        TabGridViewBinder.bindTab(mModel, mViewGroup, TabProperties.MEDIA_INDICATOR);
+
+        verify(mViewGroup).setMediaIndicator(eq(MediaState.AUDIBLE));
     }
 
     private void assertImageMatrix(

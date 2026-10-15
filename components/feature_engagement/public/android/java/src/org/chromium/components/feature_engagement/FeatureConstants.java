@@ -78,6 +78,7 @@ import java.lang.annotation.RetentionPolicy;
     FeatureConstants.IDENTITY_DISC_FEATURE,
     FeatureConstants.TAB_GROUP_SHARE_NOTICE_FEATURE,
     FeatureConstants.TAB_GROUP_SHARE_UPDATE_FEATURE,
+    FeatureConstants.TAB_GROUP_SHARE_VERSION_UPDATE_FEATURE,
     FeatureConstants.TAB_GROUPS_DRAG_AND_DROP_FEATURE,
     FeatureConstants.TAB_GROUPS_REMOTE_GROUP,
     FeatureConstants.TAB_GROUPS_SURFACE,
@@ -89,6 +90,7 @@ import java.lang.annotation.RetentionPolicy;
     FeatureConstants.CHROME_REENGAGEMENT_NOTIFICATION_1_FEATURE,
     FeatureConstants.CHROME_REENGAGEMENT_NOTIFICATION_2_FEATURE,
     FeatureConstants.CHROME_REENGAGEMENT_NOTIFICATION_3_FEATURE,
+    FeatureConstants.MOST_VISITED_TILES_CUSTOMIZATION_PIN,
     FeatureConstants.PAGE_INFO_FEATURE,
     FeatureConstants.PAGE_INFO_STORE_INFO_FEATURE,
     FeatureConstants.PAGE_ZOOM_FEATURE,
@@ -108,6 +110,7 @@ import java.lang.annotation.RetentionPolicy;
     FeatureConstants.IPH_SHARING_HUB_LINK_TOGGLE_FEATURE,
     FeatureConstants.IPH_TAB_SWITCHER_XR,
     FeatureConstants.IPH_TAB_TEARING_XR,
+    FeatureConstants.IPH_TOUCH_TO_SEARCH_CALLOUT,
     FeatureConstants.IPH_WEB_FEED_FOLLOW_FEATURE,
     FeatureConstants.IPH_WEB_FEED_POST_FOLLOW_DIALOG_FEATURE,
     FeatureConstants.IPH_WEB_FEED_POST_FOLLOW_DIALOG_FEATURE_WITH_UI_UPDATE,
@@ -267,6 +270,12 @@ public @interface FeatureConstants {
     String TAB_GROUP_SHARE_UPDATE_FEATURE = "IPH_TabGroupShareUpdate";
 
     /**
+     * A simple IPH bubble and highlight on the tab switcher button or tab group pane button when
+     * the user updates their version of Chrome and regains access to shared tab groups.
+     */
+    String TAB_GROUP_SHARE_VERSION_UPDATE_FEATURE = "IPH_TabGroupShareVersionUpdate";
+
+    /**
      * An IPH feature that shows a notification bubble for updated tab groups. The bubble appears on
      * the group title when the group is collapsed and on updated tabs when the group is expanded.
      */
@@ -366,6 +375,9 @@ public @interface FeatureConstants {
     /** An IPH feature to show the third re-engagement notification. */
     String CHROME_REENGAGEMENT_NOTIFICATION_3_FEATURE = "IPH_ChromeReengagementNotification3";
 
+    /** An IPH feature to inform users about Most Visited Tile context menu "Pin this shortcut". */
+    String MOST_VISITED_TILES_CUSTOMIZATION_PIN = "IPH_MostVisitedTilesCustomizationPin";
+
     /** An IPH feature to inform about changing permissions in PageInfo. */
     String PAGE_INFO_FEATURE = "IPH_PageInfo";
 
@@ -413,4 +425,7 @@ public @interface FeatureConstants {
 
     /** An IPH feature to inform users about the tab tearing gesture on an XR device. */
     String IPH_TAB_TEARING_XR = "IPH_TabTearingXR";
+
+    /** An IPH feature to inform users that the touch to search panel can be expanded. */
+    String IPH_TOUCH_TO_SEARCH_CALLOUT = "IPH_TouchToSearchCallout";
 }

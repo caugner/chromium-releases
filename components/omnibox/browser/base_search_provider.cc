@@ -19,9 +19,11 @@
 #include "base/strings/utf_string_conversions.h"
 #include "components/omnibox/browser/actions/omnibox_action_in_suggest.h"
 #include "components/omnibox/browser/actions/omnibox_answer_action.h"
+#include "components/omnibox/browser/aim_eligibility_service.h"
 #include "components/omnibox/browser/autocomplete_provider_client.h"
 #include "components/omnibox/browser/autocomplete_provider_listener.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
+#include "components/omnibox/browser/omnibox_prefs.h"
 #include "components/omnibox/browser/page_classification_functions.h"
 #include "components/omnibox/browser/remote_suggestions_service.h"
 #include "components/omnibox/browser/search_scoring_signals_annotator.h"
@@ -129,7 +131,7 @@ AutocompleteMatch BaseSearchProvider::CreateSearchSuggestion(
   // populating information from EntityInfo.
   const auto& suggest_template_info = suggestion.suggest_template_info();
   if (suggest_template_info) {
-    match.suggest_template = *suggest_template_info;
+    match.suggest_template = suggest_template_info;
     if (suggest_template_info->has_image()) {
       match.image_dominant_color =
           suggest_template_info->image().dominant_color();
@@ -236,13 +238,30 @@ AutocompleteMatch BaseSearchProvider::CreateSearchSuggestion(
   // Attach Actions in Suggest to the newly created match on Android if Google
   // is the default search engine.
   if ((is_android || is_ios) && is_google) {
-    // TODO(crbug.com/417745802): Use TemplateAction from SuggestTemplateInfo
-    // if available.
-    for (const omnibox::ActionInfo& action_info :
-         suggestion.entity_info().action_suggestions()) {
-      match.actions.emplace_back(CreateActionInSuggest(action_info, search_url,
-                                                       *match.search_terms_args,
-                                                       search_terms_data));
+    if (suggest_template_info &&
+        suggest_template_info->action_suggestions_size() > 0) {
+      for (const omnibox::SuggestTemplateInfo_TemplateAction& action :
+           suggest_template_info->action_suggestions()) {
+        match.actions.emplace_back(CreateActionInSuggest(
+            action, search_url, *match.search_terms_args, search_terms_data));
+      }
+    } else {
+      // TODO(crbug.com/417745802): Remove once actions are migrated from
+      // EntityInfo to SuggestTemplateInfo.
+      for (const omnibox::ActionInfo& action_info :
+           suggestion.entity_info().action_suggestions()) {
+        omnibox::SuggestTemplateInfo::TemplateAction template_action;
+        template_action.set_action_uri(action_info.action_uri());
+        template_action.set_logs_action_type(action_info.logs_action_type());
+        template_action.set_action_type(
+            static_cast<omnibox::SuggestTemplateInfo_TemplateAction_ActionType>(
+                action_info.action_type()));
+        *template_action.mutable_search_parameters() =
+            action_info.search_parameters();
+        match.actions.emplace_back(
+            CreateActionInSuggest(template_action, search_url,
+                                  *match.search_terms_args, search_terms_data));
+      }
     }
   }
 
@@ -262,7 +281,7 @@ AutocompleteMatch BaseSearchProvider::CreateSearchSuggestion(
 }
 
 scoped_refptr<OmniboxAction> BaseSearchProvider::CreateActionInSuggest(
-    omnibox::ActionInfo action_info,
+    omnibox::SuggestTemplateInfo::TemplateAction template_action,
     const TemplateURLRef& search_url,
     const TemplateURLRef::SearchTermsArgs& original_search_terms_args,
     const SearchTermsData& search_terms_data) {
@@ -270,15 +289,15 @@ scoped_refptr<OmniboxAction> BaseSearchProvider::CreateActionInSuggest(
   // If the Action's URL is empty, but the Action supplies additional search
   // parameters, compute new URL based on the base URL (that is specific to
   // the entire suggestion).
-  if (action_info.action_uri().empty() &&
-      !action_info.search_parameters().empty()) {
+  if (template_action.action_uri().empty() &&
+      !template_action.search_parameters().empty()) {
     action_search_terms_args = original_search_terms_args;
     action_search_terms_args->additional_query_params =
-        CreateQueryParamStringFromMap(action_info.search_parameters());
+        CreateQueryParamStringFromMap(template_action.search_parameters());
   }
 
   return base::MakeRefCounted<OmniboxActionInSuggest>(
-      std::move(action_info), std::move(action_search_terms_args));
+      std::move(template_action), std::move(action_search_terms_args));
 }
 
 // static
@@ -581,6 +600,11 @@ void BaseSearchProvider::AddMatchToMap(
       accepted_suggestion, ShouldAppendExtraParams(result));
   if (!match.destination_url.is_valid())
     return;
+  if (match.IsSearchAimSuggestion() &&
+      (!omnibox_feature_configs::AiMode::Get().allow_ai_mode_matches ||
+       !AimEligibilityService::IsAimAllowedByPolicy(client_->GetPrefs()))) {
+    return;
+  }
   match.RecordAdditionalInfo(kRelevanceFromServerKey,
                              result.relevance_from_server() ? kTrue : kFalse);
   match.RecordAdditionalInfo(kShouldPrefetchKey,

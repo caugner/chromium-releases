@@ -8,7 +8,7 @@
 
 # Version # should always be incremented up whenever this (or any pem file that
 # it references) is changed.
-version_major: 21
+version_major: 25
 
 # CN=Actalis Authentication Root CA, O=Actalis S.p.A./03358520967, L=Milan, C=IT
 # https://ssltest-a.actalis.it:8443
@@ -107,10 +107,10 @@ trust_anchors {
   sha256_hex: "c0a6f4dc63a24bfdcf54ef2a6a082a0a72de35803e2ff5ff527ae5d87206dfd5"
   constraints: {
     sct_not_after_sec: 1754006399
-    min_version: "135"
+    min_version: "139"
   }
   constraints: {
-    max_version_exclusive: "135"
+    max_version_exclusive: "139"
   }
 }
 
@@ -249,21 +249,6 @@ trust_anchors {
   }
 }
 
-# CN=AffirmTrust Networking, O=AffirmTrust, C=US
-# https://networking.affirmtrust.com:4431
-# Constraint date: Mon Nov 11, 2024 23:59:59 GMT+0000
-trust_anchors {
-  sha256_hex: "0a81ec5a929777f145904af38d5d509f66b5e2c58fcdb531058b0e17f3f0b41b"
-  ev_policy_oids: "2.23.140.1.1"
-  constraints: {
-    sct_not_after_sec: 1731369599
-    min_version: "131"
-  }
-  constraints: {
-    max_version_exclusive: "131"
-  }
-}
-
 # CN=Entrust Root Certification Authority - G2, OU=(c) 2009 Entrust, Inc. - for authorized use only, OU=See www.entrust.net/legal-terms, O=Entrust, Inc., C=US
 # https://validg2.entrust.net
 # Constraint date: Mon Nov 11, 2024 23:59:59 GMT+0000
@@ -279,41 +264,11 @@ trust_anchors {
   }
 }
 
-# CN=AffirmTrust Premium, O=AffirmTrust, C=US
-# https://premium.affirmtrust.com:4432/
-# Constraint date: Mon Nov 11, 2024 23:59:59 GMT+0000
-trust_anchors {
-  sha256_hex: "70a73f7f376b60074248904534b11482d5bf0e698ecc498df52577ebf2e93b9a"
-  ev_policy_oids: "2.23.140.1.1"
-  constraints: {
-    sct_not_after_sec: 1731369599
-    min_version: "131"
-  }
-  constraints: {
-    max_version_exclusive: "131"
-  }
-}
-
 # CN=Entrust Root Certification Authority, OU=(c) 2006 Entrust, Inc., OU=www.entrust.net/CPS is incorporated by reference, O=Entrust, Inc., C=US
 # https://www.entrust.net/
 # Constraint date: Mon Nov 11, 2024 23:59:59 GMT+0000
 trust_anchors {
   sha256_hex: "73c176434f1bc6d5adf45b0e76e727287c8de57616c1e6e6141a2b2cbc7d8e4c"
-  ev_policy_oids: "2.23.140.1.1"
-  constraints: {
-    sct_not_after_sec: 1731369599
-    min_version: "131"
-  }
-  constraints: {
-    max_version_exclusive: "131"
-  }
-}
-
-# CN=AffirmTrust Premium ECC, O=AffirmTrust, C=US
-# https://premiumecc.affirmtrust.com:4433/
-# Constraint date: Mon Nov 11, 2024 23:59:59 GMT+0000
-trust_anchors {
-  sha256_hex: "bd71fdf6da97e4cf62d1647add2581b07d79adf8397eb4ecba9c5e8488821423"
   ev_policy_oids: "2.23.140.1.1"
   constraints: {
     sct_not_after_sec: 1731369599
@@ -381,16 +336,19 @@ trust_anchors {
 # CN=GTS Root R3, O=Google Trust Services LLC, C=US
 trust_anchors {
   sha256_hex: "34d8a73ee208d9bcdb0d956520934b4e40e69482596e8b6f73c8426b010a6f48"
+  trust_anchor_id: "\xd6\x79\x09\x03"  # 11129.9.3
 }
 
 # CN=GTS Root R1, O=Google Trust Services LLC, C=US
 trust_anchors {
   sha256_hex: "d947432abde7b7fa90fc2e6b59101b1280e0e1c7e4e40fa3c6887fff57a7f4cf"
+  trust_anchor_id: "\xd6\x79\x09\x01"  # 11129.9.1
 }
 
 # CN=GTS Root R4, O=Google Trust Services LLC, C=US
 trust_anchors {
   sha256_hex: "349dfa4058c5e263123b398ae795573c4e1313c83fe68f93556cd5e8031b3c7d"
+  trust_anchor_id: "\xd6\x79\x09\x04"  # 11129.9.4
 }
 
 # CN=GlobalSign, O=GlobalSign, OU=GlobalSign ECC Root CA - R4
@@ -401,6 +359,7 @@ trust_anchors {
 # CN=GTS Root R2, O=Google Trust Services LLC, C=US
 trust_anchors {
   sha256_hex: "8d25cd97229dbf70356bda4eb3cc734031e24cf00fafcfd32dc76eb5841c7ea8"
+  trust_anchor_id: "\xd6\x79\x09\x02"  # 11129.9.2
 }
 
 # CN=Hongkong Post Root CA 3, O=Hongkong Post, L=Hong Kong, ST=Hong Kong, C=HK
@@ -435,6 +394,7 @@ trust_anchors {
 # CN=ISRG Root X1, O=Internet Security Research Group, C=US
 trust_anchors {
   sha256_hex: "96bcec06264976f37460779acf28c5a7cfe8a3c0aae11a8ffcee05c0bddf08c6"
+  trust_anchor_id: "\x82\xdf\x13\x02\x01"  # 44947.2.1
 }
 
 # CN=Izenpe.com, O=IZENPE S.A., C=ES
@@ -474,9 +434,17 @@ trust_anchors {
 
 # CN=NetLock Arany (Class Gold) Főtanúsítvány, OU=Tanúsítványkiadók (Certification Services), O=NetLock Kft., L=Budapest, C=HU
 # https://valid.ev.tanusitvany.hu
+# Constraint date: Thu Jul 31 2025 23:59:59 GMT+0000
 trust_anchors {
   sha256_hex: "6c61dac3a2def031506be036d2a6fe401994fbd13df9c8d466599274c446ec98"
   ev_policy_oids: "2.23.140.1.1"
+  constraints: {
+    sct_not_after_sec: 1754006399
+    min_version: "139"
+  }
+  constraints: {
+    max_version_exclusive: "139"
+  }
 }
 
 # CN=OISTE WISeKey Global Root GB CA, OU=OISTE Foundation Endorsed, O=WISeKey, C=CH
@@ -667,17 +635,6 @@ trust_anchors {
   ev_policy_oids: "2.23.140.1.1"
 }
 
-# CN=GLOBALTRUST 2020, O=e-commerce monitoring GmbH, C=AT
-# https://testok-2020-server-qualified-ev-1.e-monitoring.at/
-# Constraint date: Sun Jun 30, 2024 23:59:59 GMT+0000
-trust_anchors {
-  sha256_hex: "9a296a5182d1d451a2e37f439b74daafa267523329f90f9a0d2007c334e23c9a"
-  ev_policy_oids: "2.23.140.1.1"
-  constraints: {
-    sct_not_after_sec: 1719791999
-  }
-}
-
 # CN=HARICA TLS ECC Root CA 2021, O=Hellenic Academic and Research Institutions CA, C=GR
 # https://tls-ecc-valid-ev.root2021.harica.gr
 trust_anchors {
@@ -693,13 +650,22 @@ trust_anchors {
 }
 
 # CN=HiPKI Root CA - G1, O=Chunghwa Telecom Co., Ltd., C=TW
+# Constraint date: Thu Jul 31 2025 23:59:59 GMT+0000
 trust_anchors {
   sha256_hex: "f015ce3cc239bfef064be9f1d2c417e1a0264a0a94be1f0c8d121864eb6949cc"
+  constraints: {
+    sct_not_after_sec: 1754006399
+    min_version: "139"
+  }
+  constraints: {
+    max_version_exclusive: "139"
+  }
 }
 
 # CN=ISRG Root X2, O=Internet Security Research Group, C=US
 trust_anchors {
   sha256_hex: "69729b8e15a86efc177a57afb7171dfc64add28c2fca8cf1507e34453ccb1470"
+  trust_anchor_id: "\x82\xdf\x13\x02\x06"  # 44947.2.6
 }
 
 # CN=NAVER Global Root Certification Authority, O=NAVER BUSINESS PLATFORM Corp., C=KR
@@ -807,6 +773,20 @@ trust_anchors {
 # CN=TWCA CYBER Root CA, OU=Root CA, O=TAIWAN-CA, C=TW
 trust_anchors {
   sha256_hex: "3f63bb2814be174ec8b6439cf08d6d56f0b7c405883a5648a334424d6b3ec558"
+  ev_policy_oids: "2.23.140.1.1"
+}
+
+# CN=TrustAsia TLS ECC Root CA, O=TrustAsia Technologies, Inc., C=CN
+# https://ev-ecctls-valid.trustasia.com 
+trust_anchors {
+  sha256_hex: "c0076b9ef0531fb1a656d67c4ebe97cd5dbaa41ef44598acc2489878c92d8711"
+  ev_policy_oids: "2.23.140.1.1"
+}
+
+# CN=TrustAsia TLS RSA Root CA, O=TrustAsia Technologies, Inc., C=CN
+# https://ev-rsatls-valid.trustasia.com 
+trust_anchors {
+  sha256_hex: "06c08d7dafd876971eb1124fe67f847ec0c7a158d3ea53cbe940e2ea9791f4c3"
   ev_policy_oids: "2.23.140.1.1"
 }
 
@@ -1470,4 +1450,103 @@ additional_certs {
 additional_certs {
   sha256_hex: "fe95a24e7f94978e58d99350ab7ab789774a987cd25187c128c191d207523bb1"
   eutl: true
+}
+
+# "CN=WR1, O=Google Trust Services, C=US"
+additional_certs {
+  sha256_hex: "b10b6f00e609509e8700f6d34687a2bfce38ea05a8fdf1cdc40c3a2a0d0d0e45"
+  enforce_anchor_constraints: true
+  enforce_anchor_expiry: true
+  tls_trust_anchor: true
+  trust_anchor_id: "\xd6\x79\x09\x05"  # 11129.9.5
+}
+
+# "CN=WR2, O=Google Trust Services, C=US"
+additional_certs {
+  sha256_hex: "e6fe22bf45e4f0d3b85c59e02c0f495418e1eb8d3210f788d48cd5e1cb547cd4"
+  enforce_anchor_constraints: true
+  enforce_anchor_expiry: true
+  tls_trust_anchor: true
+  trust_anchor_id: "\xd6\x79\x09\x06"  # 11129.9.6
+}
+
+# "CN=WR3, O=Google Trust Services, C=US"
+additional_certs {
+  sha256_hex: "2fe357db13751ff9160e87354975b3407498f41c9bd16a48657866e6e5a9b4c7"
+  enforce_anchor_constraints: true
+  enforce_anchor_expiry: true
+  tls_trust_anchor: true
+  trust_anchor_id: "\xd6\x79\x09\x07"  # 11129.9.7
+}
+
+# "CN=WR4, O=Google Trust Services, C=US"
+additional_certs {
+  sha256_hex: "dc9416c2f855126d6de977677538f2f967ff4998e90dfa435a17219be077fc06"
+  enforce_anchor_constraints: true
+  enforce_anchor_expiry: true
+  tls_trust_anchor: true
+  trust_anchor_id: "\xd6\x79\x09\x08"  # 11129.9.8
+}
+
+# "CN=WR5, O=Google Trust Services, C=US"
+additional_certs {
+  sha256_hex: "ae0fc852280f1b87cedaf73cfb84cf106efec88e8294253af352ed4034460d7b"
+  enforce_anchor_constraints: true
+  enforce_anchor_expiry: true
+  tls_trust_anchor: true
+  trust_anchor_id: "\xd6\x79\x09\x09"  # 11129.9.9
+}
+
+# "CN=WE1, O=Google Trust Services, C=US"
+additional_certs {
+  sha256_hex: "1dfc1605fbad358d8bc844f76d15203fac9ca5c1a79fd4857ffaf2864fbebf96"
+  enforce_anchor_constraints: true
+  enforce_anchor_expiry: true
+  tls_trust_anchor: true
+  trust_anchor_id: "\xd6\x79\x09\x0a"  # 11129.9.10
+}
+
+# "CN=WE2, O=Google Trust Services, C=US"
+additional_certs {
+  sha256_hex: "9c3f2fd11c57d7c649ad5a0932c0f0d29756f6a0a1c74c43e1e89a62d64cd320"
+  enforce_anchor_constraints: true
+  enforce_anchor_expiry: true
+  tls_trust_anchor: true
+  trust_anchor_id: "\xd6\x79\x09\x0b"  # 11129.9.11
+}
+
+# "CN=WE3, O=Google Trust Services, C=US"
+additional_certs {
+  sha256_hex: "9f819a4c876e12dc84e6fe0e37c1a69b137094b453fa98449398f4b71f4d0092"
+  enforce_anchor_constraints: true
+  enforce_anchor_expiry: true
+  tls_trust_anchor: true
+  trust_anchor_id: "\xd6\x79\x09\x0c"  # 11129.9.12
+}
+
+# "CN=WE4, O=Google Trust Services, C=US"
+additional_certs {
+  sha256_hex: "d0c97e56c7b0ba812d944ad771f7799b5d4144a2327a4e416554f7ee2aa0aeae"
+  enforce_anchor_constraints: true
+  enforce_anchor_expiry: true
+  tls_trust_anchor: true
+  trust_anchor_id: "\xd6\x79\x09\x0d"  # 11129.9.13
+}
+
+# "CN=WE5, O=Google Trust Services, C=US"
+additional_certs {
+  sha256_hex: "847409e63526f162753ac49f75218efaafa7d5c94ade9095ce72e7f6b6e3ac99"
+  enforce_anchor_constraints: true
+  enforce_anchor_expiry: true
+  tls_trust_anchor: true
+  trust_anchor_id: "\xd6\x79\x09\x0e"  # 11129.9.14
+}
+
+# "CN=AE1, O=Google Trust Services, C=US"
+additional_certs {
+  sha256_hex: "812c212e9e45dc5005c7f47411183f5fb2ff1baee184d3354b2e93d78c280164"
+  enforce_anchor_constraints: true
+  enforce_anchor_expiry: true
+  tls_trust_anchor: true
+  trust_anchor_id: "\xd6\x79\x09\x0f"  # 11129.9.15
 }

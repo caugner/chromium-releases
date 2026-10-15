@@ -31,12 +31,32 @@ void FakeEndpointFetcher::PerformRequest(
   }
 }
 
+bool FakeVariationsClient::IsOffTheRecord() const {
+  return false;
+}
+
+variations::mojom::VariationsHeadersPtr
+FakeVariationsClient::GetVariationsHeaders() const {
+  base::flat_map<variations::mojom::GoogleWebVisibility, std::string> headers =
+      {{variations::mojom::GoogleWebVisibility::FIRST_PARTY, "123xyz"}};
+  return variations::mojom::VariationsHeaders::New(headers);
+}
+
 TestComposeboxQueryController::TestComposeboxQueryController(
     signin::IdentityManager* identity_manager,
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
-    version_info::Channel channel)
-    : ComposeboxQueryController(identity_manager, url_loader_factory, channel) {
-}
+    version_info::Channel channel,
+    std::string locale,
+    TemplateURLService* template_url_service,
+    variations::VariationsClient* variations_client,
+    bool send_lns_surface)
+    : ComposeboxQueryController(identity_manager,
+                                url_loader_factory,
+                                channel,
+                                locale,
+                                template_url_service,
+                                variations_client,
+                                send_lns_surface) {}
 TestComposeboxQueryController::~TestComposeboxQueryController() = default;
 
 std::unique_ptr<EndpointFetcher>
@@ -68,7 +88,20 @@ TestComposeboxQueryController::CreateEndpointFetcher(
           fake_cluster_info_response_.SerializeAsString();
     }
   } else {
-    NOTREACHED();
+    num_file_upload_requests_sent_++;
+    last_sent_fetch_url_ = fetch_url;
+    if (next_file_upload_request_should_return_error_) {
+      fake_server_response_code =
+          google_apis::ApiErrorCode::HTTP_INTERNAL_SERVER_ERROR;
+    }
+
+    last_sent_file_upload_request_ = lens::LensOverlayServerRequest();
+    last_sent_file_upload_request_->ParseFromString(request_string);
+  }
+
+  last_sent_cors_exempt_headers_.clear();
+  for (const auto& header : cors_exempt_headers) {
+    last_sent_cors_exempt_headers_.push_back(header);
   }
 
   // Create the fake endpoint fetcher to return the fake response.
@@ -79,4 +112,12 @@ TestComposeboxQueryController::CreateEndpointFetcher(
   auto response = std::make_unique<FakeEndpointFetcher>(fake_endpoint_response);
   response->disable_responding_ = disable_response;
   return response;
+}
+
+void TestComposeboxQueryController::ResetRequestClusterInfoState(
+    int session_id) {
+  if (!enable_cluster_info_ttl_) {
+    return;
+  }
+  ComposeboxQueryController::ResetRequestClusterInfoState(session_id);
 }

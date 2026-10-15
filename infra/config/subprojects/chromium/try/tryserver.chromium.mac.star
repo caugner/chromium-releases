@@ -3,27 +3,30 @@
 # found in the LICENSE file.
 """Definitions of builders in the tryserver.chromium.mac builder group."""
 
-load("//lib/branches.star", "branches")
-load("//lib/builder_config.star", "builder_config")
-load("//lib/builders.star", "cpu", "os", "siso")
-load("//lib/consoles.star", "consoles")
-load("//lib/gn_args.star", "gn_args")
-load("//lib/html.star", "linkify_builder")
-load("//lib/targets.star", "targets")
-load("//lib/try.star", "try_")
+load("@chromium-luci//branches.star", "branches")
+load("@chromium-luci//builder_config.star", "builder_config")
+load("@chromium-luci//builders.star", "cpu", "os")
+load("@chromium-luci//consoles.star", "consoles")
+load("@chromium-luci//gn_args.star", "gn_args")
+load("@chromium-luci//html.star", "linkify_builder")
+load("@chromium-luci//targets.star", "targets")
+load("@chromium-luci//try.star", "try_")
+load("//lib/gpu.star", "gpu")
+load("//lib/siso.star", "siso")
+load("//lib/try_constants.star", "try_constants")
 load("//lib/xcode.star", "xcode")
 
 try_.defaults.set(
-    executable = try_.DEFAULT_EXECUTABLE,
+    executable = try_constants.DEFAULT_EXECUTABLE,
     builder_group = "tryserver.chromium.mac",
-    pool = try_.DEFAULT_POOL,
+    pool = try_constants.DEFAULT_POOL,
     builderless = True,
     os = os.MAC_DEFAULT,
     ssd = True,
-    execution_timeout = try_.DEFAULT_EXECUTION_TIMEOUT,
+    execution_timeout = try_constants.DEFAULT_EXECUTION_TIMEOUT,
     orchestrator_cores = 2,
     orchestrator_siso_remote_jobs = siso.remote_jobs.HIGH_JOBS_FOR_CQ,
-    service_account = try_.DEFAULT_SERVICE_ACCOUNT,
+    service_account = try_constants.DEFAULT_SERVICE_ACCOUNT,
     siso_project = siso.project.DEFAULT_UNTRUSTED,
 )
 
@@ -198,28 +201,6 @@ try_.compilator_builder(
 )
 
 try_.builder(
-    name = "mac11-arm64-rel",
-    branch_selector = branches.selector.MAC_BRANCHES,
-    mirrors = [
-        "ci/mac-arm64-rel",
-        "ci/mac11-arm64-rel-tests",
-    ],
-    gn_args = gn_args.config(
-        configs = [
-            "arm64",
-            "gpu_tests",
-            "release_try_builder",
-            "remoteexec",
-            "no_symbols",
-            "mac",
-        ],
-    ),
-    builderless = True,
-    cores = None,
-    cpu = cpu.ARM64,
-)
-
-try_.builder(
     name = "mac-libfuzzer-asan-rel",
     # TODO(crbug.com/41492669): Can delete this description when it's
     # automatically generated.
@@ -234,7 +215,7 @@ try_.builder(
             "skip_generate_fuzzer_owners",
         ],
     ),
-    contact_team_email = "chrome-deet-core@google.com",
+    contact_team_email = "chrome-fuzzing-core@google.com",
 )
 
 try_.builder(
@@ -359,7 +340,7 @@ try_.orchestrator_builder(
         # TODO (crbug.com/415099984): change to 100,
         # then move out of experimental CQ after,
         # mac15-arm64-rel replaces mac14-arm64-rel on CQ.
-        experiment_percentage = 1,
+        experiment_percentage = 30,
     ),
 )
 
@@ -372,25 +353,6 @@ try_.compilator_builder(
     # TODO (crbug.com/1245171): Revert when root issue is fixed
     grace_period = 4 * time.minute,
     main_list_view = "try",
-)
-
-# NOTE: the following trybots aren't sensitive to Mac version on which
-# they are built, hence no additional dimension is specified.
-# The 10.xx version translates to which bots will run isolated tests.
-try_.builder(
-    name = "mac_chromium_11.0_rel_ng",
-    branch_selector = branches.selector.MAC_BRANCHES,
-    mirrors = [
-        "ci/Mac Builder",
-        "ci/Mac11 Tests",
-    ],
-    gn_args = gn_args.config(
-        configs = [
-            "ci/Mac Builder",
-            "release_try_builder",
-        ],
-    ),
-    builderless = False,
 )
 
 try_.builder(
@@ -602,7 +564,7 @@ ios_builder(
     builderless = True,
     cpu = cpu.ARM64,
     execution_timeout = 4 * time.hour,
-    xcode = xcode.x16betabots,
+    xcode = xcode.x26betabots,
 )
 
 ios_builder(
@@ -766,6 +728,7 @@ ios_builder(
     builderless = True,
     cpu = cpu.ARM64,
     contact_team_email = "cobalt-appletv@google.com",
+    xcode = xcode.x16betabots,
 )
 
 ios_builder(
@@ -801,7 +764,7 @@ ios_builder(
     ],
     gn_args = "ci/ios18-sdk-simulator",
     cpu = cpu.ARM64,
-    xcode = xcode.x16betabots,
+    xcode = xcode.x26betabots,
 )
 
 ios_builder(
@@ -826,7 +789,7 @@ ios_builder(
     execution_timeout = 20 * time.hour,
 )
 
-try_.gpu.optional_tests_builder(
+gpu.try_.optional_tests_builder(
     name = "mac_optional_gpu_tests_rel",
     branch_selector = branches.selector.IOS_BRANCHES,
     description_html = ("Runs GPU tests on Mac Minis with Intel UHD 630 GPUs and Macbook Pros with AMD GPUs. " +
@@ -873,6 +836,7 @@ try_.gpu.optional_tests_builder(
     cpu = None,
     ssd = None,
     free_space = None,
+    alerts_enabled = False,
     contact_team_email = "chrome-gpu-infra@google.com",
     main_list_view = "try",
     max_concurrent_builds = 7,

@@ -44,6 +44,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
 #include "chrome/browser/devtools/devtools_window.h"
+#include "chrome/browser/devtools/features.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/download/download_stats.h"
 #include "chrome/browser/glic/glic_enabling.h"
@@ -94,6 +95,7 @@
 #include "chrome/browser/ui/exclusive_access/keyboard_lock_controller.h"
 #include "chrome/browser/ui/lens/lens_overlay_entry_point_controller.h"
 #include "chrome/browser/ui/lens/lens_search_controller.h"
+#include "chrome/browser/ui/lens/lens_string_utils.h"
 #include "chrome/browser/ui/passwords/ui_utils.h"
 #include "chrome/browser/ui/profiles/profile_colors_util.h"
 #include "chrome/browser/ui/profiles/profile_view_utils.h"
@@ -101,14 +103,17 @@
 #include "chrome/browser/ui/send_tab_to_self/send_tab_to_self_bubble.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/tabs/public/tab_features.h"
+#include "chrome/browser/ui/tabs/split_tab_metrics.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/translate/partial_translate_bubble_model.h"
 #include "chrome/browser/ui/ui_features.h"
+#include "chrome/browser/ui/user_education/browser_user_education_interface.h"
 #include "chrome/browser/ui/views/side_panel/read_anything/read_anything_side_panel_controller_utils.h"
 #include "chrome/browser/ui/web_applications/app_browser_controller.h"
 #include "chrome/browser/ui/webauthn/context_menu_helper.h"
 #include "chrome/browser/ui/webui/history/foreign_session_handler.h"
 #include "chrome/browser/user_education/user_education_service.h"
+#include "chrome/browser/user_education/user_education_service_factory.h"
 #include "chrome/browser/web_applications/mojom/user_display_mode.mojom.h"
 #include "chrome/browser/web_applications/web_app_helpers.h"
 #include "chrome/browser/web_applications/web_app_icon_manager.h"
@@ -192,6 +197,7 @@
 #include "content/public/browser/spare_render_process_host_manager.h"
 #include "content/public/browser/ssl_status.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/buildflags.h"
 #include "content/public/common/referrer.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/common/url_utils.h"
@@ -201,7 +207,6 @@
 #include "net/base/network_anonymization_key.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "pdf/buildflags.h"
-#include "ppapi/buildflags/buildflags.h"
 #include "printing/buildflags/buildflags.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
@@ -261,8 +266,8 @@
 #endif
 
 #if BUILDFLAG(ENABLE_GLIC)
-#include "chrome/browser/glic/glic_keyed_service.h"
-#include "chrome/browser/glic/glic_keyed_service_factory.h"
+#include "chrome/browser/glic/public/glic_keyed_service.h"
+#include "chrome/browser/glic/public/glic_keyed_service_factory.h"
 #endif  // BUILDFLAG(ENABLE_GLIC)
 
 #if BUILDFLAG(ENABLE_PDF)
@@ -1015,6 +1020,26 @@ void RenderViewContextMenu::IssuePreconnectionToUrl(
   loading_predictor->PreconnectURLIfAllowed(GURL(preconnect_url),
                                             /*allow_credentials=*/true,
                                             network_anonymization_key);
+}
+
+ui::IsNewFeatureAtValue RenderViewContextMenu::GetIsNewFeatureAtValue(
+    const std::string& feature_name) const {
+  Profile* profile = Profile::FromBrowserContext(browser_context_);
+  UserEducationService* user_education_service =
+      UserEducationServiceFactory::GetForBrowserContext(profile);
+  if (!user_education_service ||
+      !user_education_service->new_badge_registry()) {
+    return ui::IsNewFeatureAtValue();
+  }
+  auto& feature_data =
+      user_education_service->new_badge_registry()->feature_data();
+  for (const auto& [feature, spec] : feature_data) {
+    if (feature_name == feature->name) {
+      return UserEducationService::MaybeShowNewBadge(browser_context_,
+                                                     *feature);
+    }
+  }
+  return ui::IsNewFeatureAtValue();
 }
 
 bool RenderViewContextMenu::IsInProgressiveWebApp() const {
@@ -1975,7 +2000,9 @@ void RenderViewContextMenu::AppendSearchWebForImageItems() {
         vector_icons::kSearchChromeRefreshIcon;
 #endif
     menu_model_.AddItemWithStringIdAndIcon(
-        search_for_image_idc, IDS_CONTENT_CONTEXT_LENS_OVERLAY,
+        search_for_image_idc,
+        lens::GetLensOverlayImageEntrypointLabelAltIds(
+            IDS_CONTENT_CONTEXT_LENS_OVERLAY),
         ui::ImageModel::FromVectorIcon(icon));
   } else {
     menu_model_.AddItem(
@@ -2052,7 +2079,9 @@ void RenderViewContextMenu::AppendVideoItems() {
           vector_icons::kSearchChromeRefreshIcon;
 #endif
       menu_model_.AddItemWithStringIdAndIcon(
-          search_for_video_frame_idc, IDS_CONTENT_CONTEXT_LENS_OVERLAY,
+          search_for_video_frame_idc,
+          lens::GetLensOverlayVideoEntrypointLabelAltIds(
+              IDS_CONTENT_CONTEXT_LENS_OVERLAY),
           ui::ImageModel::FromVectorIcon(icon));
     } else {
       const auto* provider = GetImageSearchProvider();
@@ -2328,11 +2357,19 @@ void RenderViewContextMenu::AppendSearchProvider() {
       return;
     }
 
-    menu_model_.AddItem(
-        IDC_CONTENT_CONTEXT_SEARCHWEBFOR,
-        l10n_util::GetStringFUTF16(IDS_CONTENT_CONTEXT_SEARCHWEBFOR,
-                                   default_provider->short_name(),
-                                   printable_selection_text));
+    // When the Lens text selection entrypoint flag is enabled, checking for the
+    // availability of Lens requires the browser, so hide the menu item if the
+    // flag is enabled and there is no browser (e.g. when selecting in the side
+    // panel).
+    if (!lens::features::
+            IsLensOverlayTextSelectionContextMenuEntrypointEnabled() ||
+        GetBrowser()) {
+      menu_model_.AddItem(
+          IDC_CONTENT_CONTEXT_SEARCHWEBFOR,
+          l10n_util::GetStringFUTF16(IDS_CONTENT_CONTEXT_SEARCHWEBFOR,
+                                     default_provider->short_name(),
+                                     printable_selection_text));
+    }
   } else {
     if ((selection_navigation_url_ != params_.link_url) &&
         ChildProcessSecurityPolicy::GetInstance()->IsWebSafeScheme(
@@ -2644,7 +2681,9 @@ void RenderViewContextMenu::AppendRegionSearchItem() {
 #endif
     menu_model_.AddItemWithStringIdAndIcon(
         IDC_CONTENT_CONTEXT_LENS_REGION_SEARCH,
-        IDS_CONTENT_CONTEXT_LENS_OVERLAY, ui::ImageModel::FromVectorIcon(icon));
+        lens::GetLensOverlayEntrypointLabelAltIds(
+            IDS_CONTENT_CONTEXT_LENS_OVERLAY),
+        ui::ImageModel::FromVectorIcon(icon));
     const int command_index =
         menu_model_.GetIndexOfCommandId(IDC_CONTENT_CONTEXT_LENS_REGION_SEARCH)
             .value();
@@ -3433,6 +3472,12 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
     case IDC_CONTENT_CONTEXT_SEARCHWEBFOR: {
       RecordAmbientSearchQuery(
           lens::AmbientSearchEntryPoint::CONTEXT_MENU_SEARCH_WEB_FOR);
+#if BUILDFLAG(ENABLE_LENS_DESKTOP_GOOGLE_BRANDED_FEATURES)
+      if (ShouldOpenTextQueryInLens()) {
+        OpenTextQueryInLens();
+        break;
+      }
+#endif  // BUILDFLAG(ENABLE_LENS_DESKTOP_GOOGLE_BRANDED_FEATURES)
       [[fallthrough]];
     }
     case IDC_CONTENT_CONTEXT_SEARCHWEBFORNEWTAB:
@@ -3615,6 +3660,16 @@ bool RenderViewContextMenu::IsSaveAsItemAllowedByPolicy(
 bool RenderViewContextMenu::IsUntrustedNetworkDisabled() const {
   return GetRenderFrameHost() &&
          GetRenderFrameHost()->IsUntrustedNetworkDisabled();
+}
+
+bool RenderViewContextMenu::ShouldOpenTextQueryInLens() const {
+  BrowserWindowInterface* browser = GetBrowser();
+  return lens::features::
+             IsLensOverlayTextSelectionContextMenuEntrypointEnabled() &&
+         browser &&
+         browser->GetFeatures()
+             .lens_overlay_entry_point_controller()
+             ->IsEnabled();
 }
 
 // Controller functions --------------------------------------------------------
@@ -4041,8 +4096,8 @@ void RenderViewContextMenu::ExecOpenCompose() {
         autofill::FieldGlobalId(
             frame_token, autofill::FieldRendererId(params_.field_renderer_id)),
         compose::ComposeManagerImpl::UiEntryPoint::kContextMenu);
-    GetBrowser()->window()->NotifyNewBadgeFeatureUsed(
-        compose::features::kEnableCompose);
+    BrowserUserEducationInterface::From(GetBrowser())
+        ->NotifyNewBadgeFeatureUsed(compose::features::kEnableCompose);
   } else {
     compose::LogOpenComposeDialogResult(
         compose::OpenComposeDialogResult::kNoContentAutofillDriver);
@@ -4253,15 +4308,19 @@ void RenderViewContextMenu::ExecSearchLensForImage(int event_flags) {
     return;
   }
 
-  bool entered_through_keyboard =
-      IsLensOptionEnteredThroughKeyboard(event_flags);
+  // TODO(crbug.com/428031945): Clean up once LensOverlayKeyboardSelection
+  // lands.
+  bool use_keyboard_accessibility_fallback =
+      IsLensOptionEnteredThroughKeyboard(event_flags) &&
+      !lens::features::IsLensOverlayKeyboardSelectionEnabled();
   bool lens_overlay_for_image_search_enabled =
       GetBrowser()
           ->GetFeatures()
           .lens_overlay_entry_point_controller()
           ->IsEnabled() &&
       lens::features::UseLensOverlayForImageSearch();
-  if (lens_overlay_for_image_search_enabled && !entered_through_keyboard) {
+  if (lens_overlay_for_image_search_enabled &&
+      !use_keyboard_accessibility_fallback) {
     lens::RecordAmbientSearchQuery(
         lens::AmbientSearchEntryPoint::
             CONTEXT_MENU_SEARCH_IMAGE_WITH_LENS_OVERLAY);
@@ -4283,9 +4342,10 @@ void RenderViewContextMenu::ExecSearchLensForImage(int event_flags) {
         weak_pointer_factory_.GetWeakPtr(), std::move(chrome_render_frame),
         tab_bounds, view_bounds, device_scale_factor));
   } else {
-    // When the Lens image search feature is entered via the context menu
-    // with a Keyboard action, use the Lens region search flow through
-    // core_tab_helper instead of the Lens Overlay flow.
+    // If keyboard selection in Lens Overlay is disabled, when the Lens image
+    // search feature is entered via the context menu with a Keyboard action,
+    // use the Lens region search flow through core_tab_helper instead of the
+    // Lens Overlay flow.
     lens::RecordAmbientSearchQuery(
         lens_overlay_for_image_search_enabled
             ? lens::AmbientSearchEntryPoint::
@@ -4328,17 +4388,18 @@ void RenderViewContextMenu::ExecRegionSearch(
           ->GetFeatures()
           .lens_overlay_entry_point_controller()
           ->IsEnabled();
-  // If Lens overlay is enabled, but the user triggered the context menu
-  // option via keyboard, use the Lens region search flow (with results
-  // forced into a new tab) instead of the Lens Overlay flow.
-  // TODO(crbug/353984457): Clean this branching when the new server
-  // results flow is ready.
-  bool entered_through_keyboard =
-      IsLensOptionEnteredThroughKeyboard(event_flags);
+  // If Lens overlay is enabled but keyboard selection is disabled and the user
+  // triggered the context menu option via keyboard, use the Lens region search
+  // flow (with results forced into a new tab) instead of the Lens Overlay flow.
+  // TODO(crbug.com/428031945): Clean up once LensOverlayKeyboardSelection
+  // lands.
+  bool use_keyboard_accessibility_fallback =
+      IsLensOptionEnteredThroughKeyboard(event_flags) &&
+      !lens::features::IsLensOverlayKeyboardSelectionEnabled();
   if (lens_overlay_for_region_search_enabled) {
     UserEducationService::MaybeNotifyNewBadgeFeatureUsed(
         GetBrowserContext(), lens::features::kLensOverlay);
-    if (!entered_through_keyboard) {
+    if (!use_keyboard_accessibility_fallback) {
       lens::RecordAmbientSearchQuery(
           lens::AmbientSearchEntryPoint::
               CONTEXT_MENU_SEARCH_REGION_WITH_LENS_OVERLAY);
@@ -4354,9 +4415,9 @@ void RenderViewContextMenu::ExecRegionSearch(
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   // If Lens fullscreen search is enabled, we want to send every region search
   // as a fullscreen capture.
-  // TODO(crbug/353984457): Clean this branching when the new server
-  // results flow is ready.
-  const bool use_fullscreen_capture = entered_through_keyboard;
+  // TODO(crbug.com/428031945): Clean up once LensOverlayKeyboardSelection
+  // lands.
+  const bool use_fullscreen_capture = use_keyboard_accessibility_fallback;
 
   if (!lens_region_search_controller_) {
     lens_region_search_controller_ =
@@ -4706,6 +4767,23 @@ void RenderViewContextMenu::PluginActionAt(
   }
 }
 
+void RenderViewContextMenu::OpenTextQueryInLens() {
+  auto* const controller =
+      LensSearchController::FromTabWebContents(source_web_contents_);
+  CHECK(controller);
+  controller->IssueTextSearchRequest(
+      lens::LensOverlayInvocationSource::kContentAreaContextMenuText,
+      base::UTF16ToUTF8(params_.selection_text),
+      /*additional_query_parameters=*/{},
+      // TODO(crbug.com/432490312): Match type here is likely not ideal.
+      // Investigate removing match type from this function.
+      AutocompleteMatchType::Type::SEARCH_WHAT_YOU_TYPED,
+      /*is_zero_prefix_suggestion=*/false,
+      /*suppress_contextualization=*/
+      !lens::features::
+          IsLensOverlayTextSelectionContextMenuEntrypointContextualized());
+}
+
 Browser* RenderViewContextMenu::GetBrowser() const {
   return chrome::FindBrowserWithTab(embedder_web_contents_);
 }
@@ -4817,8 +4895,9 @@ void RenderViewContextMenu::OpenLinkInSplitView() {
         params_.link_url, new_tab_index, false,
         tab_strip_model->GetTabGroupForTab(active_index));
     tabs::TabInterface* new_tab = tab_strip_model->GetTabAtIndex(new_tab_index);
-    tab_strip_model->AddToNewSplit({new_tab_index},
-                                   split_tabs::SplitTabVisualData());
+    tab_strip_model->AddToNewSplit(
+        {new_tab_index}, split_tabs::SplitTabVisualData(),
+        split_tabs::SplitTabCreatedSource::kLinkContextMenu);
     tab_strip_model->ActivateTabAt(tab_strip_model->GetIndexOfTab(new_tab));
   }
 }

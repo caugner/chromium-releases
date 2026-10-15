@@ -31,6 +31,7 @@
 #include "build/build_config.h"
 #include "components/omnibox/browser/actions/contextual_search_action.h"
 #include "components/omnibox/browser/actions/omnibox_action_concepts.h"
+#include "components/omnibox/browser/actions/omnibox_action_in_suggest.h"
 #include "components/omnibox/browser/actions/omnibox_pedal.h"
 #include "components/omnibox/browser/actions/omnibox_pedal_provider.h"
 #include "components/omnibox/browser/actions/tab_switch_action.h"
@@ -49,6 +50,7 @@
 #include "components/omnibox/common/omnibox_feature_configs.h"
 #include "components/omnibox/common/omnibox_features.h"
 #include "components/search_engines/template_url_service.h"
+#include "components/search_engines/util.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/url_formatter/url_fixer.h"
 #include "extensions/buildflags/buildflags.h"
@@ -56,6 +58,7 @@
 #include "third_party/metrics_proto/omnibox_event.pb.h"
 #include "third_party/metrics_proto/omnibox_focus_type.pb.h"
 #include "third_party/metrics_proto/omnibox_input_type.pb.h"
+#include "third_party/omnibox_proto/chrome_aim_entry_point.pb.h"
 #include "third_party/omnibox_proto/groups.pb.h"
 #include "ui/base/device_form_factor.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -91,6 +94,17 @@ constexpr size_t kMaxPedalCount =
 // Maximum index of a match in a result for which the pedal should be displayed.
 constexpr size_t kMaxPedalMatchIndex =
     is_ios ? 3 : std::numeric_limits<size_t>::max();
+
+#if BUILDFLAG(IS_IOS) || BUILDFLAG(IS_ANDROID)
+// The entrypoint id associated with aim being invoked from the AIM shortcut of
+// typed state. Used for logging purposes.
+// Do not change without changing the IDs in chrome_aim_entry_point.proto
+omnibox::ChromeAimEntryPoint GetAimActionEntrypointID() {
+  return is_android
+             ? omnibox::ANDROID_CHROME_AIM_SHORTCUT_TYPED_STATE_ENTRY_POINT
+             : omnibox::IOS_CHROME_OMNIBOX_SEARCH_ENTRY_POINT;
+}
+#endif
 
 }  // namespace
 
@@ -456,8 +470,8 @@ void AutocompleteResult::SortAndCull(
       } else if (omnibox::IsNTPPage(page_classification)) {
         // IPH is shown for NTP ZPS in the Omnibox only.  If it is shown, reduce
         // the limit of the normal NTP ZPS Section to make room for the IPH.
-        bool has_iph_match = std::ranges::any_of(
-            matches_, [](auto match) { return match.IsIPHSuggestion(); });
+        bool has_iph_match =
+            std::ranges::any_of(matches_, &AutocompleteMatch::IsIphSuggestion);
         bool add_iph_section =
             page_classification != OmniboxEventProto::NTP_REALBOX &&
             has_iph_match;
@@ -888,13 +902,56 @@ void AutocompleteResult::AttachPedalsToMatches(
   }
 }
 
+#if BUILDFLAG(IS_IOS) || BUILDFLAG(IS_ANDROID)
+void AutocompleteResult::AttachAimAction(
+    TemplateURLService* template_url_service,
+    AutocompleteProviderClient* client) {
+  if (!OmniboxFieldTrial::IsDeterministicAimActionInTypedStateEnabled(client)) {
+    return;
+  }
+
+  for (AutocompleteMatch& match : matches_) {
+    if (!match.actions.empty()) {
+      continue;
+    }
+    if (match.allowed_to_be_default_match &&
+        AutocompleteMatch::IsSearchType(match.type) &&
+        match.contents.length() >=
+            static_cast<size_t>(
+                OmniboxFieldTrial::kMinimumTypedCharactersToInvokeAimShortcut
+                    .Get())) {
+      omnibox::SuggestTemplateInfo::TemplateAction template_action;
+      template_action.set_action_type(
+          omnibox::SuggestTemplateInfo_TemplateAction_ActionType_CHROME_AIM);
+      template_action.set_action_uri(
+          GetUrlForAim(template_url_service, GetAimActionEntrypointID(),
+                       /*query_start_time=*/base::Time::Now(), match.contents)
+              .spec());
+      match.actions.emplace_back(base::MakeRefCounted<OmniboxActionInSuggest>(
+          std::move(template_action), std::nullopt));
+      // Only attach to the first eligible match.
+      return;
+    }
+  }
+}
+#endif
+
 void AutocompleteResult::AttachContextualSearchFulfillmentActionToMatches() {
   for (AutocompleteMatch& match : matches_) {
-    if (match.IsContextualSearchSuggestion()) {
+    if (match.IsContextualSearchSuggestion() && !match.HasLensSearchAction()) {
       match.takeover_action =
           base::MakeRefCounted<ContextualSearchFulfillmentAction>(
               match.destination_url, match.type,
               match.subtypes.contains(omnibox::SUBTYPE_ZERO_PREFIX));
+    }
+  }
+}
+
+void AutocompleteResult::AttachContextualSearchOpenLensActionToMatches() {
+  for (AutocompleteMatch& match : matches_) {
+    if (match.IsContextualSearchSuggestion() && match.HasLensSearchAction()) {
+      match.takeover_action =
+          base::MakeRefCounted<ContextualSearchOpenLensAction>();
     }
   }
 }
@@ -1281,10 +1338,10 @@ void AutocompleteResult::DeduplicateMatches(
     match.ComputeStrippedDestinationURL(input, template_url_service);
   }
 
-  // Group matches by stripped URL and whether it's a calculator suggestion.
+  // Group matches by stripped URL and `AutocompleteMatchDedupeType`.
   std::unordered_map<AutocompleteResult::MatchDedupComparator,
                      std::vector<ACMatches::iterator>,
-                     ACMatchKeyHash<std::string, bool, bool, bool>>
+                     ACMatchKeyHash<std::string, AutocompleteMatchDedupeType>>
       url_to_matches;
   for (auto i = matches->begin(); i != matches->end(); ++i) {
     url_to_matches[GetMatchComparisonFields(*i)].push_back(i);
@@ -1551,16 +1608,26 @@ void AutocompleteResult::MergeMatchesByProvider(ACMatches* old_matches,
 
 AutocompleteResult::MatchDedupComparator
 AutocompleteResult::GetMatchComparisonFields(const AutocompleteMatch& match) {
-  bool is_answer =
-      (match.answer_template.has_value() &&
+  AutocompleteMatchDedupeType type;
+  if ((match.answer_template.has_value() &&
        OmniboxFieldTrial::kAnswerActionsShowAboveKeyboard.Get()) ||
-      match.type == AutocompleteMatchType::HISTORY_EMBEDDINGS_ANSWER;
-  return std::make_tuple(
-      match.stripped_destination_url.spec(),
-      match.type == ACMatchType::CALCULATOR,
-      match.provider != nullptr &&
-          match.provider->type() == AutocompleteProvider::TYPE_VERBATIM_MATCH,
-      is_answer);
+      match.type == AutocompleteMatchType::HISTORY_EMBEDDINGS_ANSWER) {
+    type = AutocompleteMatchDedupeType::kHistoryEmbeddingAnswer;
+  } else if (match.provider != nullptr &&
+             match.provider->type() ==
+                 AutocompleteProvider::TYPE_VERBATIM_MATCH) {
+    type = AutocompleteMatchDedupeType::kVerbatimProvider;
+  } else if (match.type == ACMatchType::CALCULATOR) {
+    type = AutocompleteMatchDedupeType::kCalculator;
+  } else if (match.IsSearchAimSuggestion() &&
+             omnibox_feature_configs::AiMode::Get()
+                 .do_not_dedupe_aim_suggestions) {
+    type = AutocompleteMatchDedupeType::kAiMode;
+  } else {
+    type = AutocompleteMatchDedupeType::kNormal;
+  }
+
+  return std::make_tuple(match.stripped_destination_url.spec(), type);
 }
 
 void AutocompleteResult::LimitNumberOfURLsShown(

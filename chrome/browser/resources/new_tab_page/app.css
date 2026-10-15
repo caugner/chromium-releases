@@ -33,6 +33,18 @@
 }
 
 /**
+ * Hide everything that should not display when the composebox is open
+ * so they are not tabbable.
+ */
+:host([show-composebox_]:not([closing-composebox])) cr-most-visited,
+:host([show-composebox_]:not([closing-composebox])) ntp-middle-slot-promo,
+:host([show-composebox_]:not([closing-composebox])) ntp-modules,
+:host([show-composebox_]:not([closing-composebox])) #backgroundImageAttribution,
+:host([show-composebox_]:not([closing-composebox])) ntp-customize-buttons {
+  display: none;
+}
+
+/**
  * Maintain a larger width if the secondary side can be shown and was at any
  * point available to be shown.
  */
@@ -263,6 +275,10 @@ ntp-composebox {
       var(--color-new-tab-page-composebox-background);
 }
 
+ntp-composebox.fade-out {
+  opacity: 0;
+}
+
 ntp-composebox,
 ntp-lens-upload-dialog {
   left: 0;
@@ -273,10 +289,18 @@ ntp-lens-upload-dialog {
 }
 
 #composeboxScrim {
-  background: var(--color-new-tab-page-background);
+  background: var(--color-new-tab-page-composebox-scrim-background);
   inset: 0;
-  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  position: fixed;
+  transition: opacity 1s ease-in-out;
   z-index: 1;
+}
+
+#composeboxScrim.fade {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 #webstoreToast {

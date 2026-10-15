@@ -33,6 +33,8 @@ chromium-metrics-reviews@google.com.
   <int value="2" label="Directions"/>
   <int value="3" label="Website"/>
   <int value="4" label="Reviews"/>
+  <int value="5" label="Aim"/>
+  <int value="6" label="Lens"/>
 </enum>
 
 <enum name="BooleanNavigated">
@@ -141,6 +143,7 @@ chromium-metrics-reviews@google.com.
   <int value="6" label="mouse click on hint view"/>
   <int value="7" label="tap gesture on hint view"/>
   <int value="8" label="select suggestion"/>
+  <int value="9" label="toolbelt"/>
 </enum>
 
 <enum name="OmniboxEscapeAction">
@@ -286,6 +289,32 @@ chromium-metrics-reviews@google.com.
   <int value="3" label="kCompleted"/>
 </enum>
 
+<!-- LINT.IfChange(SearchPreloadSignalResult) -->
+
+<enum name="SearchPreloadSignalResult">
+  <int value="0" label="kNotTriggeredMisc">kNotTriggeredMisc</int>
+  <int value="1" label="kPrefetchTriggered">kPrefetchTriggered</int>
+  <int value="2" label="kPrerenderTriggered">kPrerenderTriggered</int>
+  <int value="3" label="kNotTriggeredAlreadyTriggered">
+    kNotTriggeredAlreadyTriggered
+  </int>
+  <int value="4" label="kNotTriggeredPrefetchNotAlive">
+    kNotTriggeredPrefetchNotAlive
+  </int>
+  <int value="5" label="kNotTriggeredLimitExceeded">
+    kNotTriggeredLimitExceeded
+  </int>
+  <int value="6" label="kNotTriggeredIncognito">kNotTriggeredIncognito</int>
+  <int value="7" label="kNotTriggeredOnPressNotSearchType">
+    kNotTriggeredOnPressNotSearchType
+  </int>
+  <int value="8" label="kNotTriggeredOnPressNoSearchProviderOptIn">
+    kNotTriggeredOnPressNoSearchProviderOptIn
+  </int>
+</enum>
+
+<!-- LINT.ThenChange(//chrome/browser/preloading/search_preload/search_preload_signal_result.h) -->
+
 <enum name="SearchSuggestRequestEvent">
   <int value="1" label="requests sent">Request was sent.</int>
   <int value="2" label="requests invalidated">
@@ -296,6 +325,20 @@ chromium-metrics-reviews@google.com.
     Response was received asynchronously.
   </int>
 </enum>
+
+<!-- LINT.IfChange(ServerAimEligibilityRequestStatus) -->
+
+<enum name="ServerAimEligibilityRequestStatus">
+  <summary>
+    The status of a HTTP GET request sent to a backend to fetch AIM eligibility.
+  </summary>
+  <int value="0" label="kSent"/>
+  <int value="1" label="kErrorResponse"/>
+  <int value="2" label="kFailedToParse"/>
+  <int value="3" label="kSuccess"/>
+</enum>
+
+<!-- LINT.ThenChange(//components/omnibox/browser/aim_eligibility_service.h:ServerRequestStatus) -->
 
 <enum name="SuggestionAnswerOptionalType">
   <summary>

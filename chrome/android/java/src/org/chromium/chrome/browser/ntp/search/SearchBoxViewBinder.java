@@ -30,11 +30,9 @@ class SearchBoxViewBinder
         implements PropertyModelChangeProcessor.ViewBinder<PropertyModel, View, PropertyKey> {
     @Override
     public final void bind(PropertyModel model, View view, PropertyKey propertyKey) {
-        ImageView voiceSearchButton =
-                view.findViewById(org.chromium.chrome.R.id.voice_search_button);
-        ImageView lensButton = view.findViewById(org.chromium.chrome.R.id.lens_camera_button);
-        LottieAnimationView composeplateButton =
-                view.findViewById(org.chromium.chrome.R.id.composeplate_button);
+        ImageView voiceSearchButton = view.findViewById(R.id.voice_search_button);
+        ImageView lensButton = view.findViewById(R.id.lens_camera_button);
+        LottieAnimationView composeplateButton = view.findViewById(R.id.composeplate_button);
         View searchBoxContainer = view;
         final TextView searchBoxTextView = searchBoxContainer.findViewById(R.id.search_box_text);
 
@@ -75,13 +73,17 @@ class SearchBoxViewBinder
         } else if (SearchBoxProperties.LENS_CLICK_CALLBACK == propertyKey) {
             lensButton.setOnClickListener(model.get(SearchBoxProperties.LENS_CLICK_CALLBACK));
         } else if (SearchBoxProperties.SEARCH_BOX_CLICK_CALLBACK == propertyKey) {
-            searchBoxTextView.setOnClickListener(
-                    model.get(SearchBoxProperties.SEARCH_BOX_CLICK_CALLBACK));
+            var searchBoxClickListener = model.get(SearchBoxProperties.SEARCH_BOX_CLICK_CALLBACK);
+            searchBoxTextView.setOnClickListener(searchBoxClickListener);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                searchBoxTextView.setHandwritingDelegatorCallback(
-                        () ->
-                                model.get(SearchBoxProperties.SEARCH_BOX_CLICK_CALLBACK)
-                                        .onClick(searchBoxTextView));
+                if (searchBoxClickListener != null) {
+                    searchBoxTextView.setHandwritingDelegatorCallback(
+                            () ->
+                                    model.get(SearchBoxProperties.SEARCH_BOX_CLICK_CALLBACK)
+                                            .onClick(searchBoxTextView));
+                } else {
+                    searchBoxTextView.setHandwritingDelegatorCallback(null);
+                }
             }
         } else if (SearchBoxProperties.SEARCH_BOX_DRAG_CALLBACK == propertyKey) {
             searchBoxTextView.setOnDragListener(
@@ -95,8 +97,7 @@ class SearchBoxViewBinder
             boolean isHintVisible = model.get(SearchBoxProperties.SEARCH_HINT_VISIBILITY);
             searchBoxTextView.setHint(
                     isHintVisible
-                            ? view.getContext()
-                                    .getString(org.chromium.chrome.R.string.omnibox_empty_hint)
+                            ? view.getContext().getString(R.string.omnibox_empty_hint)
                             : null);
         } else if (SearchBoxProperties.VOICE_SEARCH_CLICK_CALLBACK == propertyKey) {
             voiceSearchButton.setOnClickListener(

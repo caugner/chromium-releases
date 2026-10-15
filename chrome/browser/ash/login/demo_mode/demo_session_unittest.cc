@@ -29,10 +29,10 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/prefs/browser_prefs.h"
+#include "chrome/browser/ui/ash/session/session_controller_client_impl.h"
 #include "chrome/browser/ui/ash/wallpaper/test_wallpaper_controller.h"
 #include "chrome/browser/ui/ash/wallpaper/wallpaper_controller_client_impl.h"
 #include "chrome/test/base/browser_process_platform_part_test_api_chromeos.h"
-#include "chrome/test/base/scoped_testing_local_state.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
@@ -196,6 +196,12 @@ TEST_F(DemoSessionTest, LoginDemoSession) {
   session_manager_->SetSessionState(session_manager::SessionState::ACTIVE);
   EXPECT_EQ(1,
             user_action_tester_.GetActionCount("DemoMode.DemoSessionStarts"));
+}
+
+TEST_F(DemoSessionTest, CannotLockScreen) {
+  ASSERT_TRUE(DemoSession::StartIfInDemoMode());
+  EXPECT_TRUE(DemoSession::Get());
+  EXPECT_FALSE(SessionControllerClientImpl::CanLockScreen());
 }
 
 TEST_F(DemoSessionTest, ShowAndRemoveSplashScreen) {

@@ -360,9 +360,7 @@ class RasterCommandsCompletedQuery : public QueryManager::Query {
         info.fFinishedContext = new base::WeakPtr<RasterCommandsCompletedQuery>(
             weak_ptr_factory_.GetWeakPtr());
         shared_context_state_->graphite_shared_context()->insertRecording(info);
-        shared_context_state_->graphite_shared_context()->submit();
 
-#if BUILDFLAG(IS_WIN) && BUILDFLAG(SKIA_USE_DAWN)
         // Canvas typically uses Commands Completed query to implement
         // backpressures. We need to flush any delayed commands to make sure the
         // query can be completed in finite time.
@@ -371,9 +369,8 @@ class RasterCommandsCompletedQuery : public QueryManager::Query {
         // redrawn multiple times. Flushing here ensures that we send the draw
         // commands to GPU earlier, reducing the chance the canvas' rate limiter
         // kicks in.
-        shared_context_state_->dawn_context_provider()
-            ->FlushD3D11CommandsIfDelayed();
-#endif
+        shared_context_state_->graphite_shared_context()
+            ->submitAndFlushBackend();
       } else {
         finished_ = true;
       }
@@ -3047,6 +3044,7 @@ error::Error RasterDecoderImpl::DoRasterCHROMIUM(GLuint raster_shm_id,
   }
 
   cc::PlaybackParams playback_params(nullptr, SkM44());
+  playback_params.destination_hdr_headroom = sk_surface_hdr_headroom_;
   TransferCacheDeserializeHelperImpl impl(raster_decoder_id_, transfer_cache());
   cc::PaintOp::DeserializeOptions options{
       .transfer_cache = &impl,
@@ -3056,7 +3054,6 @@ error::Error RasterDecoderImpl::DoRasterCHROMIUM(GLuint raster_shm_id,
           *shared_context_state_->scratch_deserialization_buffer(),
       .crash_dump_on_failure = !gpu_preferences_.disable_oopr_debug_crash_dump,
       .is_privileged = is_privileged_,
-      .hdr_headroom = sk_surface_hdr_headroom_,
       .shared_image_provider = paint_op_shared_image_provider_.get()};
 
   alignas(cc::PaintOpBuffer::kPaintOpAlign) char

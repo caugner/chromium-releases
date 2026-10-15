@@ -22,6 +22,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/typed_macros.h"
 #include "build/branding_buildflags.h"
@@ -57,6 +58,7 @@
 #include "components/omnibox/browser/omnibox_popup_view.h"
 #include "components/omnibox/browser/omnibox_prefs.h"
 #include "components/omnibox/browser/omnibox_text_util.h"
+#include "components/omnibox/browser/omnibox_triggered_feature_service.h"
 #include "components/omnibox/browser/omnibox_view.h"
 #include "components/omnibox/browser/page_classification_functions.h"
 #include "components/omnibox/browser/search_provider.h"
@@ -65,17 +67,18 @@
 #include "components/omnibox/common/omnibox_feature_configs.h"
 #include "components/omnibox/common/omnibox_features.h"
 #include "components/omnibox/common/omnibox_focus_state.h"
-#include "components/prefs/pref_service.h"
 #include "components/search_engines/search_engine_type.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_prepopulate_data.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/search_engines/template_url_starter_pack_data.h"
+#include "components/search_engines/util.h"
 #include "components/strings/grit/components_strings.h"
 #include "net/cookies/cookie_util.h"
 #include "third_party/icu/source/common/unicode/ubidi.h"
 #include "third_party/metrics_proto/omnibox_event.pb.h"
 #include "third_party/metrics_proto/omnibox_focus_type.pb.h"
+#include "third_party/omnibox_proto/chrome_aim_entry_point.pb.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -105,6 +108,12 @@ using omnibox::mojom::NavigationPredictor;
 
 namespace {
 
+const char kOmniboxAimEntrypointShown[] = "Omnibox.AimEntrypoint.Shown";
+const char kOmniboxAimEntrypointActivatedUserTextPresent[] =
+    "Omnibox.AimEntrypoint.Activated.UserTextPresent";
+const char kOmniboxAimEntrypointActivatedViaKeyboard[] =
+    "Omnibox.AimEntrypoint.Activated.ViaKeyboard";
+
 // The possible histogram values emitted when escape is pressed.
 // These values are persisted to logs. Entries should not be renumbered and
 // numeric values should never be reused.
@@ -130,6 +139,11 @@ const char kOmniboxFocusResultedInNavigation[] =
 // enum XML file.
 const char kEnteredKeywordModeHistogram[] = "Omnibox.EnteredKeywordMode2";
 
+// Like `kEnteredKeywordModeHistogram` but only logged when user has additional
+// text input at the time keyword mode was entered.
+const char kEnteredKeywordModeWithInputHistogram[] =
+    "Omnibox.EnteredKeywordModeWithInput";
+
 // Histogram name which counts the number of times the user completes a search
 // in keyword mode, enumerated by how they enter keyword mode.
 const char kAcceptedKeywordSuggestionHistogram[] =
@@ -147,10 +161,16 @@ const char kKeywordModeUsageByEngineTypeAcceptedHistogramName[] =
 
 void EmitEnteredKeywordModeHistogram(
     OmniboxEventProto::KeywordModeEntryMethod entry_method,
-    const TemplateURL* turl) {
+    const TemplateURL* turl,
+    bool entered_with_input) {
   UMA_HISTOGRAM_ENUMERATION(
       kEnteredKeywordModeHistogram, static_cast<int>(entry_method),
       static_cast<int>(OmniboxEventProto::KeywordModeEntryMethod_MAX + 1));
+  if (entered_with_input) {
+    UMA_HISTOGRAM_ENUMERATION(
+        kEnteredKeywordModeWithInputHistogram, static_cast<int>(entry_method),
+        static_cast<int>(OmniboxEventProto::KeywordModeEntryMethod_MAX + 1));
+  }
 
   if (turl != nullptr) {
     base::UmaHistogramEnumeration(
@@ -713,7 +733,8 @@ void OmniboxEditModel::EnterKeywordMode(
     }
   }
 
-  EmitEnteredKeywordModeHistogram(entry_method, template_url);
+  EmitEnteredKeywordModeHistogram(entry_method, template_url,
+                                  !user_text_.empty());
 }
 
 void OmniboxEditModel::EnterKeywordModeForDefaultSearchProvider(
@@ -728,9 +749,31 @@ void OmniboxEditModel::EnterKeywordModeForDefaultSearchProvider(
                    u"");
 }
 
+void OmniboxEditModel::OpenAiMode(bool via_keyboard) {
+  std::u16string query_text = current_match_.contents;
+  RecordAiModeMetrics(query_text, /*activated=*/true, via_keyboard);
+  GURL ai_mode_url =
+      GetUrlForAim(controller_->client()->GetTemplateURLService(),
+                   omnibox::DESKTOP_CHROME_OMNIBOX_KEYWORD_ENTRY_POINT,
+                   /*query_start_time=*/base::Time::Now(), query_text);
+  controller_->client()->OpenUrl(ai_mode_url);
+}
+
 void OmniboxEditModel::OpenSelection(OmniboxPopupSelection selection,
                                      base::TimeTicks timestamp,
-                                     WindowOpenDisposition disposition) {
+                                     WindowOpenDisposition disposition,
+                                     bool via_keyboard) {
+  // Check for AIM button focus state first, since it can have a line selection
+  // of `kNoMatch`, which would otherwise be handled by the `AcceptInput` case
+  // below.
+  if (selection.state == OmniboxPopupSelection::FOCUSED_BUTTON_AIM) {
+    OpenAiMode(via_keyboard);
+    return;
+  }
+  // If the AIM page action was NOT activated, then make sure we still record
+  // the appropriate AI Mode UMA metrics.
+  RecordAiModeMetrics(/*query_text=*/u"", /*activated=*/false, via_keyboard);
+
   // Intentionally accept input when selection has no line.
   // This will usually reach `OpenMatch` indirectly.
   if (selection.line >= autocomplete_controller()->result().size()) {
@@ -768,8 +811,9 @@ void OmniboxEditModel::OpenSelection(OmniboxPopupSelection selection,
 }
 
 void OmniboxEditModel::OpenSelection(base::TimeTicks timestamp,
-                                     WindowOpenDisposition disposition) {
-  OpenSelection(popup_selection_, timestamp, disposition);
+                                     WindowOpenDisposition disposition,
+                                     bool via_keyboard) {
+  OpenSelection(popup_selection_, timestamp, disposition, via_keyboard);
 }
 
 bool OmniboxEditModel::AcceptKeyword(
@@ -825,7 +869,7 @@ bool OmniboxEditModel::AcceptKeyword(
   const TemplateURL* turl =
       controller_->client()->GetTemplateURLService()->GetTemplateURLForKeyword(
           keyword_);
-  EmitEnteredKeywordModeHistogram(entry_method, turl);
+  EmitEnteredKeywordModeHistogram(entry_method, turl, !user_text_.empty());
   return true;
 }
 
@@ -1169,37 +1213,6 @@ bool OmniboxEditModel::OnSpacePressed() {
   return false;
 }
 
-bool OmniboxEditModel::MaybeAccelerateKeywordSelection(
-    std::u16string_view input_text,
-    char16_t ch) {
-#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
-  // Only check for acceleration when the current input text is "@" exactly.
-  if (AutocompleteInput::GetFeaturedKeywordMode(input_text) !=
-          AutocompleteInput::FeaturedKeywordMode::kExact ||
-      !history_embeddings::GetFeatureParameters().at_keyword_acceleration) {
-    return false;
-  }
-  TemplateURLService* turl_service =
-      controller_->client()->GetTemplateURLService();
-  const AutocompleteResult& result = autocomplete_controller()->result();
-  for (size_t i = 0; i < result.size(); i++) {
-    const AutocompleteMatch& match = result.match_at(i);
-    // TODO(b/332783748): If this gets used in practice, a more general
-    //  matching mechanism would be needed to handle keywords with a
-    //  prefix in common. This is simple for the prototype where all
-    //  first characters are unique.
-    if (match.HasInstantKeyword(turl_service) && match.keyword.size() > 1 &&
-        match.keyword[1] == ch) {
-      SetPopupSelection(OmniboxPopupSelection(i), true, true);
-      // TODO(b/332783748): Use a different entry method.
-      AcceptKeyword(metrics::OmniboxEventProto::TAB);
-      return true;
-    }
-  }
-#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
-  return false;
-}
-
 void OmniboxEditModel::OnNavigationLikely(
     size_t line,
     NavigationPredictor navigation_predictor) {
@@ -1415,7 +1428,8 @@ bool OmniboxEditModel::OnAfterPossibleChange(
     const TemplateURL* turl = controller_->client()
                                   ->GetTemplateURLService()
                                   ->GetTemplateURLForKeyword(keyword_);
-    EmitEnteredKeywordModeHistogram(OmniboxEventProto::SPACE_IN_MIDDLE, turl);
+    EmitEnteredKeywordModeHistogram(OmniboxEventProto::SPACE_IN_MIDDLE, turl,
+                                    !user_text_.empty());
     allow_exact_keyword_match_ = false;
   }
 
@@ -1780,6 +1794,23 @@ void OmniboxEditModel::SetPopupSelection(OmniboxPopupSelection new_selection,
   popup_selection_ = new_selection;
   popup_view_->OnSelectionChanged(old_selection, popup_selection_);
 
+  // Special case for removing focus ring from the AIM button.
+  if (old_selection.state == OmniboxPopupSelection::FOCUSED_BUTTON_AIM) {
+    view_->ApplyFocusRingToAimButton(false);
+    return;
+  }
+
+  // Special case for applying focus to the AIM button.
+  if (popup_selection_.state == OmniboxPopupSelection::FOCUSED_BUTTON_AIM) {
+    view_->ApplyFocusRingToAimButton(true);
+    // Without this, focus indicators may appear stale (see crbug.com/1369229).
+    // Specifically, if the last suggestion in the list has one or more buttons,
+    // the focus ring will remain around the last one when focus wraps back
+    // around to the AIM button in the zero-input state.
+    popup_view_->UpdatePopupAppearance();
+    return;
+  }
+
   // This occurs when e.g., pressing escape to select the null match in
   // zero-input mode.
   if (popup_selection_.line == OmniboxPopupSelection::kNoMatch) {
@@ -1844,8 +1875,7 @@ bool OmniboxEditModel::IsPopupSelectionOnInitialLine() const {
 bool OmniboxEditModel::IsPopupControlPresentOnMatch(
     OmniboxPopupSelection selection) const {
   DCHECK(popup_view_);
-  return selection.IsControlPresentOnMatch(autocomplete_controller()->result(),
-                                           GetPrefService());
+  return selection.IsControlPresentOnMatch(autocomplete_controller()->result());
 }
 
 void OmniboxEditModel::TryDeletingPopupLine(size_t line) {
@@ -1926,28 +1956,30 @@ std::u16string OmniboxEditModel::GetPopupAccessibilityLabelForCurrentSelection(
   int additional_message_id = 0;
   std::u16string additional_message;
   // This switch statement should be updated when new selection types are added.
-  static_assert(OmniboxPopupSelection::LINE_STATE_MAX_VALUE == 7);
+  static_assert(OmniboxPopupSelection::LINE_STATE_MAX_VALUE == 8);
   switch (popup_selection_.state) {
     case OmniboxPopupSelection::NORMAL: {
       int available_actions_count = 0;
+      if (line + 1 < autocomplete_controller()->result().size() &&
+          autocomplete_controller()->result().match_at(line + 1).IsToolbelt()) {
+        additional_message_id = IDS_ACC_OMNIBOX_TOOLBELT_NEXT_SUFFIX;
+      }
       if (OmniboxPopupSelection(line, OmniboxPopupSelection::KEYWORD_MODE)
-              .IsControlPresentOnMatch(autocomplete_controller()->result(),
-                                       GetPrefService())) {
+              .IsControlPresentOnMatch(autocomplete_controller()->result())) {
         additional_message_id = IDS_ACC_KEYWORD_SUFFIX;
         available_actions_count++;
       }
+      // TODO(crbug.com/432744091): Add a message for the AIM button here.
       if (OmniboxPopupSelection(line,
                                 OmniboxPopupSelection::FOCUSED_BUTTON_ACTION)
-              .IsControlPresentOnMatch(autocomplete_controller()->result(),
-                                       GetPrefService())) {
+              .IsControlPresentOnMatch(autocomplete_controller()->result())) {
         additional_message =
             match.GetActionAt(0u)->GetLabelStrings().accessibility_suffix;
         available_actions_count++;
       }
       if (OmniboxPopupSelection(line,
                                 OmniboxPopupSelection::FOCUSED_BUTTON_THUMBS_UP)
-              .IsControlPresentOnMatch(autocomplete_controller()->result(),
-                                       GetPrefService())) {
+              .IsControlPresentOnMatch(autocomplete_controller()->result())) {
         // No need to set `additional_message_id`. Thumbs up and thumbs down
         // button are always present together; `additional_message_id` is set to
         // `IDS_ACC_MULTIPLE_ACTIONS_SUFFIX` further down.
@@ -1955,8 +1987,7 @@ std::u16string OmniboxEditModel::GetPopupAccessibilityLabelForCurrentSelection(
       }
       if (OmniboxPopupSelection(
               line, OmniboxPopupSelection::FOCUSED_BUTTON_THUMBS_DOWN)
-              .IsControlPresentOnMatch(autocomplete_controller()->result(),
-                                       GetPrefService())) {
+              .IsControlPresentOnMatch(autocomplete_controller()->result())) {
         // No need to set `additional_message_id`. Thumbs up and thumbs down
         // button are always present together; `additional_message_id` is set to
         // `IDS_ACC_MULTIPLE_ACTIONS_SUFFIX` further down.
@@ -1964,8 +1995,7 @@ std::u16string OmniboxEditModel::GetPopupAccessibilityLabelForCurrentSelection(
       }
       if (OmniboxPopupSelection(
               line, OmniboxPopupSelection::FOCUSED_BUTTON_REMOVE_SUGGESTION)
-              .IsControlPresentOnMatch(autocomplete_controller()->result(),
-                                       GetPrefService())) {
+              .IsControlPresentOnMatch(autocomplete_controller()->result())) {
         additional_message_id = IDS_ACC_REMOVE_SUGGESTION_SUFFIX;
         available_actions_count++;
       }
@@ -1995,11 +2025,16 @@ std::u16string OmniboxEditModel::GetPopupAccessibilityLabelForCurrentSelection(
           ask_keyword ? IDS_ACC_ASK_KEYWORD_MODE : IDS_ACC_KEYWORD_MODE;
       return l10n_util::GetStringFUTF16(message_id, replacement_string);
     }
-    case OmniboxPopupSelection::FOCUSED_BUTTON_ACTION:
+    case OmniboxPopupSelection::FOCUSED_BUTTON_ACTION: {
       // When pedal button is focused, the autocomplete suggestion isn't
       // read because it's not relevant to the button's action.
-      DCHECK(match.GetActionAt(0u));
-      return match.GetActionAt(0u)->GetLabelStrings().accessibility_hint;
+      // When dealing with toolbelt actions, we need to ensure that the proper
+      // action a11y label is announced based on the action index.
+      DCHECK(match.GetActionAt(popup_selection_.action_index));
+      return match.GetActionAt(popup_selection_.action_index)
+          ->GetLabelStrings()
+          .accessibility_hint;
+    }
     case OmniboxPopupSelection::FOCUSED_BUTTON_THUMBS_UP:
       additional_message_id = IDS_ACC_THUMBS_UP_SUGGESTION_FOCUSED_PREFIX;
       break;
@@ -2007,7 +2042,7 @@ std::u16string OmniboxEditModel::GetPopupAccessibilityLabelForCurrentSelection(
       additional_message_id = IDS_ACC_THUMBS_DOWN_SUGGESTION_FOCUSED_PREFIX;
       break;
     case OmniboxPopupSelection::FOCUSED_BUTTON_REMOVE_SUGGESTION:
-      additional_message_id = match.IsIPHSuggestion()
+      additional_message_id = match.IsIphSuggestion()
                                   ? IDS_ACC_DISMISS_CHROME_TIP_FOCUSED_PREFIX
                                   : IDS_ACC_REMOVE_SUGGESTION_FOCUSED_PREFIX;
       break;
@@ -2052,18 +2087,18 @@ OmniboxEditModel::MaybeGetPopupAccessibilityLabelForIPHSuggestion() {
   if (next_line < autocomplete_controller()->result().size()) {
     const AutocompleteMatch& next_match =
         autocomplete_controller()->result().match_at(next_line);
-    if (next_match.IsIPHSuggestion()) {
+    if (next_match.IsIphSuggestion()) {
       label =
           l10n_util::GetStringFUTF16(IDS_ACC_CHROME_TIP, next_match.contents);
 
       // Iff the next selection (the next time the user presses tab) is the
       // remove suggestion button for the IPH row, also append its a11y label.
       auto next_selection = popup_selection_.GetNextSelection(
-          autocomplete_controller()->result(), GetPrefService(),
+          autocomplete_controller()->input(),
+          autocomplete_controller()->result(),
           controller_->client()->GetTemplateURLService(),
-          OmniboxPopupSelection::kForward, OmniboxPopupSelection::kStateOrLine,
-          OmniboxFieldTrial::IsHideSuggestionGroupHeadersEnabledInContext(
-              GetPageClassification()));
+          autocomplete_controller()->autocomplete_provider_client(),
+          OmniboxPopupSelection::kForward, OmniboxPopupSelection::kStateOrLine);
       if (next_selection.line == next_line &&
           next_selection.state ==
               OmniboxPopupSelection::FOCUSED_BUTTON_REMOVE_SUGGESTION) {
@@ -2084,6 +2119,7 @@ void OmniboxEditModel::OnPopupResultChanged() {
   const AutocompleteResult& result = autocomplete_controller()->result();
   size_t old_selected_line = GetPopupSelection().line;
 
+  OmniboxPopupSelection::LineState old_selected_state = popup_selection_.state;
   if (result.default_match()) {
     OmniboxPopupSelection selection = GetPopupSelection();
     selection.line = 0;
@@ -2102,6 +2138,12 @@ void OmniboxEditModel::OnPopupResultChanged() {
   } else {
     popup_selection_ = OmniboxPopupSelection(OmniboxPopupSelection::kNoMatch,
                                              OmniboxPopupSelection::NORMAL);
+  }
+  // If the AI button was previously focused and the selection state changed,
+  // remove the focus ring from the AI mode button.
+  if (old_selected_state == OmniboxPopupSelection::FOCUSED_BUTTON_AIM &&
+      popup_selection_.state != OmniboxPopupSelection::FOCUSED_BUTTON_AIM) {
+    view_->ApplyFocusRingToAimButton(false);
   }
   popup_view_->UpdatePopupAppearance();
 }
@@ -2228,10 +2270,10 @@ void OmniboxEditModel::StepPopupSelection(
   // wrong suggestion when stepping backwards.
   const OmniboxPopupSelection old_selection = GetPopupSelection();
   OmniboxPopupSelection new_selection = old_selection.GetNextSelection(
-      autocomplete_controller()->result(), GetPrefService(),
-      controller_->client()->GetTemplateURLService(), direction, step,
-      OmniboxFieldTrial::IsHideSuggestionGroupHeadersEnabledInContext(
-          GetPageClassification()));
+      autocomplete_controller()->input(), autocomplete_controller()->result(),
+      controller_->client()->GetTemplateURLService(),
+      autocomplete_controller()->autocomplete_provider_client(), direction,
+      step);
   if (kIsDesktop) {
     if (old_selection.IsChangeToKeyword(new_selection)) {
       ClearKeyword();
@@ -2655,9 +2697,8 @@ void OmniboxEditModel::OpenMatch(OmniboxPopupSelection selection,
       if (const TemplateURL* starter_pack_turl =
               template_url_service->FindStarterPackTemplateURL(
                   context.enter_starter_pack_id_)) {
-        // TODO(crbug.com/422575584): Use new KeywordModeEntryMethod.
         EnterKeywordMode(
-            OmniboxEventProto::SELECT_SUGGESTION, starter_pack_turl,
+            OmniboxEventProto::TOOLBELT, starter_pack_turl,
             AutocompleteMatch::GetKeywordPlaceholder(
                 starter_pack_turl,
                 controller_->client()->IsHistoryEmbeddingsEnabled()));
@@ -2829,12 +2870,10 @@ void OmniboxEditModel::SetFocusState(OmniboxFocusState state,
   if (state == focus_state_)
     return;
 
-  // Update state and notify view if the omnibox has focus and the caret
-  // visibility changed.
+  // Update state and notify view if the omnibox caret visibility changed.
   const bool was_caret_visible = is_caret_visible();
   focus_state_ = state;
-  if (focus_state_ != OMNIBOX_FOCUS_NONE &&
-      is_caret_visible() != was_caret_visible && view_) {
+  if (is_caret_visible() != was_caret_visible && view_) {
     view_->ApplyCaretVisibility();
   }
 
@@ -2873,4 +2912,47 @@ void OmniboxEditModel::SetKeyword(const std::u16string& keyword) {
 void OmniboxEditModel::SetKeywordPlaceholder(
     const std::u16string& keyword_placeholder) {
   keyword_placeholder_ = keyword_placeholder;
+}
+
+void OmniboxEditModel::RecordAiModeMetrics(const std::u16string& query_text,
+                                           bool activated,
+                                           bool via_keyboard) {
+  const auto* triggered_feature_service =
+      autocomplete_controller()
+          ->autocomplete_provider_client()
+          ->GetOmniboxTriggeredFeatureService();
+  const std::string page_context =
+      ::metrics::OmniboxEventProto::PageClassification_Name(
+          GetPageClassification());
+
+  // Record whether or not the AIM page action was shown during the session.
+  const bool shown_in_session =
+      triggered_feature_service->GetFeatureTriggeredInSession(
+          metrics::OmniboxEventProto_Feature::
+              OmniboxEventProto_Feature_AIM_PAGE_ACTION_OMNIBOX_ENTRYPOINT);
+  base::UmaHistogramBoolean(kOmniboxAimEntrypointShown, shown_in_session);
+  base::UmaHistogramBoolean(base::StrCat({kOmniboxAimEntrypointShown,
+                                          ".ByPageContext.", page_context}),
+                            shown_in_session);
+
+  if (!activated) {
+    return;
+  }
+
+  // Record whether or not the AIM page action was activated with non-empty
+  // query text.
+  base::UmaHistogramBoolean(kOmniboxAimEntrypointActivatedUserTextPresent,
+                            !query_text.empty());
+  base::UmaHistogramBoolean(
+      base::StrCat({kOmniboxAimEntrypointActivatedUserTextPresent,
+                    ".ByPageContext.", page_context}),
+      !query_text.empty());
+
+  // Record the entry method used to activate the AIM page action.
+  base::UmaHistogramBoolean(kOmniboxAimEntrypointActivatedViaKeyboard,
+                            via_keyboard);
+  base::UmaHistogramBoolean(
+      base::StrCat({kOmniboxAimEntrypointActivatedViaKeyboard,
+                    ".ByPageContext.", page_context}),
+      via_keyboard);
 }

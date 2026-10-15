@@ -105,7 +105,12 @@ BrowserFrameViewWin::BrowserFrameViewWin(BrowserFrame* frame,
   // is true. Everything else here is only used when
   // ShouldBrowserCustomDrawTitlebar() is true.
 
-  if (browser_view->GetSupportsIcon()) {
+  Browser* browser = browser_view->browser();
+  bool supports_title_bar =
+      browser->SupportsWindowFeature(Browser::FEATURE_TITLEBAR);
+
+  // Only show icons if the browser supports title bars.
+  if (supports_title_bar) {
     InitThrobberIcons();
 
     AddChildView(views::Builder<TabIconView>()
@@ -120,9 +125,13 @@ BrowserFrameViewWin::BrowserFrameViewWin(BrowserFrame* frame,
                      .Build());
   }
 
+  bool supports_title =
+      supports_title_bar ||
+      WebUITabStripContainerView::SupportsTouchableTabStrip(browser);
+
   // If this is a web app window, the window title will be part of the
   // BrowserView and thus we don't need to create another one here.
-  if (!browser_view->GetIsWebAppType() && browser_view->GetSupportsTitle()) {
+  if (!browser_view->GetIsWebAppType() && supports_title) {
     window_title_ = new views::Label(browser_view->GetWindowTitle());
     window_title_->SetSubpixelRenderingEnabled(false);
     window_title_->SetHorizontalAlignment(gfx::ALIGN_LEFT);

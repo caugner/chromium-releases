@@ -5,6 +5,7 @@
 package org.chromium.chrome.browser.toolbar.top;
 
 import static org.chromium.build.NullUtil.assumeNonNull;
+import static org.chromium.chrome.browser.data_sharing.ui.versioning.VersionUpdateIphHandler.maybeShowVersioningIph;
 
 import android.content.Context;
 import android.content.res.ColorStateList;
@@ -28,6 +29,7 @@ import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.layouts.LayoutStateProvider;
 import org.chromium.chrome.browser.layouts.LayoutStateProvider.LayoutStateObserver;
 import org.chromium.chrome.browser.layouts.LayoutType;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.CurrentTabObserver;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
@@ -316,6 +318,15 @@ public class ToggleTabStackButtonCoordinator extends ToolbarChild {
     void handlePageLoadFinished() {
         if (!mToggleTabStackButton.isShown()) return;
 
+        Profile profile = mTabModelSelectorSupplier.get().getCurrentModel().getProfile();
+        if (profile != null) {
+            maybeShowVersioningIph(
+                    mUserEducationHelper,
+                    mToggleTabStackButton,
+                    profile,
+                    /* requiresAutoOpenSettingEnabled= */ true);
+        }
+
         HighlightParams params = new HighlightParams(HighlightShape.CIRCLE);
         params.setBoundsRespectPadding(true);
         IphCommandBuilder builder = null;
@@ -422,11 +433,15 @@ public class ToggleTabStackButtonCoordinator extends ToolbarChild {
         params.setBoundsRespectPadding(true);
         assumeNonNull(mArchivedTabsIphShownCallback);
         assumeNonNull(mArchivedTabsIphDismissedCallback);
+        int declutterIphTextRes =
+                ChromeFeatureList.sAndroidTabDeclutterArchiveTabGroups.isEnabled()
+                        ? R.string.iph_android_tab_declutter_text_with_tab_groups
+                        : R.string.iph_android_tab_declutter_text;
         mUserEducationHelper.requestShowIph(
                 new IphCommandBuilder(
                                 mContext.getResources(),
                                 FeatureConstants.ANDROID_TAB_DECLUTTER_FEATURE,
-                                R.string.iph_android_tab_declutter_text,
+                                declutterIphTextRes,
                                 R.string.iph_android_tab_declutter_accessibility_text)
                         .setAnchorView(mToggleTabStackButton)
                         .setHighlightParams(params)

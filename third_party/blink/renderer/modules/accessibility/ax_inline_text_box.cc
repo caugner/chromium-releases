@@ -141,7 +141,7 @@ void AXInlineTextBox::TextCharacterOffsets(Vector<int>& offsets) const {
 void AXInlineTextBox::GetWordBoundaries(Vector<int>& word_starts,
                                         Vector<int>& word_ends) const {
   ax::mojom::blink::NameFrom name_not_used;
-  if (GetName(name_not_used, /*name_objects=*/nullptr)
+  if (GetName(name_not_used, /*name_objects=*/nullptr, /*name_sources=*/nullptr)
           .ContainsOnlyWhitespaceOrEmpty()) {
     return;
   }
@@ -210,7 +210,8 @@ int AXInlineTextBox::TextOffsetInContainer(int offset) const {
 }
 
 String AXInlineTextBox::GetName(ax::mojom::blink::NameFrom& name_from,
-                                AXObject::AXObjectVector* name_objects) const {
+                                AXObject::AXObjectVector* name_objects,
+                                NameSources* name_sources) const {
   if (IsDetached())
     return String();
 
@@ -287,8 +288,10 @@ AXObject* AXInlineTextBox::PreviousOnLine() const {
   if (IsDetached())
     return nullptr;
 
-  if (IsPartOfAListItem()) {
-    return ParentObject()->PreviousOnLine();
+  if (IsPartOfAListItem() &&
+      ParentObject()->FirstChildIncludingIgnored() == this) {
+    AXObject* candidate = ParentObject()->PreviousOnLine();
+    return candidate;
   }
 
   if (GetInlineTextBox()) {
@@ -516,7 +519,7 @@ bool AXInlineTextBox::IsPartOfAListItem() const {
   // An AXInlineTextBox that is part of a list item needs special handling, as
   // the list marker content is rendered in a separate box than the list item
   // content, but accessibility still wants to connect the two in the same line.
-  if (ParentObject()->ParentObject()->RoleValue() ==
+  if (ParentObjectIncludedInTree()->ParentObjectIncludedInTree()->RoleValue() ==
       ax::mojom::blink::Role::kListItem) {
     return true;
   }

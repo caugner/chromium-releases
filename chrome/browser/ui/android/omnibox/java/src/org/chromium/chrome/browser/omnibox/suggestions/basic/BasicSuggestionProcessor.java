@@ -23,7 +23,6 @@ import org.chromium.chrome.browser.omnibox.suggestions.SuggestionHost;
 import org.chromium.chrome.browser.omnibox.suggestions.base.BaseSuggestionViewProcessor;
 import org.chromium.components.omnibox.AutocompleteInput;
 import org.chromium.components.omnibox.AutocompleteMatch;
-import org.chromium.components.omnibox.GroupsProto.GroupId;
 import org.chromium.components.omnibox.OmniboxSuggestionType;
 import org.chromium.components.omnibox.SuggestTemplateInfoProto.SuggestTemplateInfo;
 import org.chromium.components.omnibox.suggestions.OmniboxSuggestionUiType;
@@ -102,6 +101,10 @@ public class BasicSuggestionProcessor extends BaseSuggestionViewProcessor {
 
             case SuggestTemplateInfo.IconType.TRENDING_VALUE:
                 return R.drawable.trending_up_black_24dp;
+
+            case SuggestTemplateInfo.IconType.SUB_ARROW_RIGHT_VALUE:
+                // TODO(crbug.com/437177158): Replace with the correct symbol when it's available.
+                return R.drawable.ic_suggestion_magnifier;
 
             default: // Icon type is specified, but not recognized
                 assert false : "Unrecognized IconType: " + iconType;
@@ -192,7 +195,7 @@ public class BasicSuggestionProcessor extends BaseSuggestionViewProcessor {
     }
 
     protected @Nullable SuggestionSpannable getSuggestionDescription(AutocompleteMatch match) {
-        if (match.getGroupId() == GroupId.GROUP_PERSONALIZED_ZERO_SUGGEST_WITH_MIA.getNumber()) {
+        if (match.getDescription() != null) {
             return new SuggestionSpannable(match.getDescription());
         }
         return null;

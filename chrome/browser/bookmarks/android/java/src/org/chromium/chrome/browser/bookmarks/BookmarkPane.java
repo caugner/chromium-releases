@@ -45,7 +45,7 @@ public class BookmarkPane implements Pane {
 
     // Below are dependencies of the pane itself.
     private final DoubleConsumer mOnToolbarAlphaChange;
-    private final ObservableSupplierImpl<DisplayButtonData> mReferenceButtonSupplier =
+    private final ObservableSupplierImpl<@Nullable DisplayButtonData> mReferenceButtonSupplier =
             new ObservableSupplierImpl<>();
     private final ObservableSupplier<FullButtonData> mEmptyActionButtonSupplier =
             new ObservableSupplierImpl<>();
@@ -142,7 +142,9 @@ public class BookmarkPane implements Pane {
                             new BookmarkUiPrefs(ChromeSharedPreferences.getInstance()),
                             mBookmarkOpener,
                             new BookmarkManagerOpenerImpl(),
-                            PriceDropNotificationManagerFactory.create(originalProfile));
+                            PriceDropNotificationManagerFactory.create(originalProfile),
+                            // TODO(crbug.com/427776544): make bookmark pane support edge to edge.
+                            /* edgeToEdgePadAdjusterGenerator= */ null);
             mBookmarkManager.updateForUrl(UrlConstants.BOOKMARKS_URL);
             mRootView.addView(mBookmarkManager.getView());
         } else if (loadHint == LoadHint.COLD) {
@@ -156,7 +158,7 @@ public class BookmarkPane implements Pane {
     }
 
     @Override
-    public ObservableSupplier<DisplayButtonData> getReferenceButtonDataSupplier() {
+    public ObservableSupplier<@Nullable DisplayButtonData> getReferenceButtonDataSupplier() {
         return mReferenceButtonSupplier;
     }
 

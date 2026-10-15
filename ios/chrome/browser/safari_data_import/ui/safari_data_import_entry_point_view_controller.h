@@ -5,11 +5,14 @@
 #ifndef IOS_CHROME_BROWSER_SAFARI_DATA_IMPORT_UI_SAFARI_DATA_IMPORT_ENTRY_POINT_VIEW_CONTROLLER_H_
 #define IOS_CHROME_BROWSER_SAFARI_DATA_IMPORT_UI_SAFARI_DATA_IMPORT_ENTRY_POINT_VIEW_CONTROLLER_H_
 
-#import "ios/chrome/common/ui/confirmation_alert/confirmation_alert_view_controller.h"
+#import "ios/chrome/browser/shared/ui/bottom_sheet/bottom_sheet_view_controller.h"
 
 /// Screen presented for `SafariDataImportScreen::kEntryPoint`.
-@interface SafariDataImportEntryPointViewController
-    : ConfirmationAlertViewController
+@interface SafariDataImportEntryPointViewController : BottomSheetViewController
+
+/// Whether the "remind me later" button should be displayed. Must be set before
+/// the view is loaded.
+@property(nonatomic, assign) BOOL showReminderButton;
 
 @end
 

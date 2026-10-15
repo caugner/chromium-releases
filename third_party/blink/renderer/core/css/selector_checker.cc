@@ -400,6 +400,37 @@ bool NeedsScopeActivation(
 
 }  // namespace
 
+SelectorChecker::FeaturelessMatch
+SelectorChecker::MatchesShadowHostInComplexSelector(
+    const SelectorCheckingContext& context,
+    MatchResult& result) const {
+  SelectorCheckingContext sub_context(context);
+  FeaturelessMatch match = kFeaturelessMatches;
+  while (sub_context.selector) {
+    if (sub_context.selector->Relation() != CSSSelector::kSubSelector) {
+      // We have a combinator left of a :host. Such selectors should evaluate to
+      // false, even when negated. For instance: :not(#foo > :host) { ... }
+      return kFeaturelessUnknown;
+    }
+    SubResult sub_result(result);
+    switch (MatchShadowHost(sub_context, sub_result)) {
+      case kFeaturelessMatches:
+        break;
+      case kFeaturelessFails:
+        // We need to keep matching within the compound for non-matching simple
+        // selectors since `:not(:not(:host))` should match,
+        // but `:not(:not(:host)#foo)` shouldn't, and we need to reach #foo to
+        // know that we need to return kFeaturelessUnknown.
+        match = kFeaturelessFails;
+        break;
+      case kFeaturelessUnknown:
+        return kFeaturelessUnknown;
+    }
+    sub_context.selector = sub_context.selector->NextSimpleSelector();
+  }
+  return match;
+}
+
 SelectorChecker::FeaturelessMatch SelectorChecker::MatchesShadowHostInList(
     const SelectorCheckingContext& context,
     const CSSSelector* selector_list,
@@ -408,21 +439,20 @@ SelectorChecker::FeaturelessMatch SelectorChecker::MatchesShadowHostInList(
   sub_context.is_sub_selector = true;
   sub_context.in_nested_complex_selector = true;
   sub_context.pseudo_id = kPseudoIdNone;
-  FeaturelessMatch fail = kFeaturelessUnknown;
+  FeaturelessMatch match = kFeaturelessUnknown;
   for (sub_context.selector = selector_list; sub_context.selector;
        sub_context.selector = CSSSelectorList::Next(*sub_context.selector)) {
-    SubResult sub_result(result);
-    switch (MatchShadowHost(sub_context, sub_result)) {
+    switch (MatchesShadowHostInComplexSelector(sub_context, result)) {
       case kFeaturelessMatches:
         return kFeaturelessMatches;
       case kFeaturelessFails:
-        fail = kFeaturelessFails;
+        match = kFeaturelessFails;
         break;
       case kFeaturelessUnknown:
         break;
     }
   }
-  return fail;
+  return match;
 }
 
 SelectorChecker::FeaturelessMatch SelectorChecker::MatchShadowHost(
@@ -508,7 +538,6 @@ SelectorChecker::FeaturelessMatch SelectorChecker::MatchShadowHost(
     case CSSSelector::kPseudoFocusWithin:
     case CSSSelector::kPseudoFullPageMedia:
     case CSSSelector::kPseudoHasInterest:
-    case CSSSelector::kPseudoHasPartialInterest:
     case CSSSelector::kPseudoHasSlotted:
     case CSSSelector::kPseudoHorizontal:
     case CSSSelector::kPseudoHover:
@@ -559,7 +588,6 @@ SelectorChecker::FeaturelessMatch SelectorChecker::MatchShadowHost(
     case CSSSelector::kPseudoState:
     case CSSSelector::kPseudoTarget:
     case CSSSelector::kPseudoTargetOfInterest:
-    case CSSSelector::kPseudoTargetOfPartialInterest:
     case CSSSelector::kPseudoUnknown:
     case CSSSelector::kPseudoUnparsed:
     case CSSSelector::kPseudoUserInvalid:
@@ -595,6 +623,7 @@ SelectorChecker::FeaturelessMatch SelectorChecker::MatchShadowHost(
     case CSSSelector::kPseudoMultiSelectFocus:
     case CSSSelector::kPseudoOpen:
     case CSSSelector::kPseudoPastCue:
+    case CSSSelector::kPseudoPatching:
     case CSSSelector::kPseudoPopoverInTopLayer:
     case CSSSelector::kPseudoPopoverOpen:
     case CSSSelector::kPseudoRelativeAnchor:
@@ -855,7 +884,25 @@ SelectorChecker::MatchStatus SelectorChecker::MatchForRelation(
       if (!next_context.element) {
         return kSelectorFailsCompletely;
       }
-      return MatchSelector(next_context, result);
+      MatchStatus match = MatchSelector(next_context, result);
+      if (match == kSelectorFailsLocally) {
+        // If we have a selector like .a > .b ~ .c, and .b's parent
+        // isn't .a, then no other sibling ancestor of .c is going to
+        // match either (they all have the same parent). If we are
+        // matching .a > .b in some other context (i.e., not related
+        // to a sibling combinator), then kSelectorFailsAllSiblings
+        // and kSelectorFailsLocally are the same and this rewrite
+        // is harmless.
+        //
+        // For kDescendant (e.g., .a .b ~ .c), we have similar logic,
+        // but there, we are allowed to return kSelectorFailsCompletely,
+        // which is even stronger. (We cannot do so here, because we
+        // could be in something like .a > .b .c, where we'd have to
+        // keep searching for .b up in the tree.)
+        return kSelectorFailsAllSiblings;
+      } else {
+        return match;
+      }
     }
     case CSSSelector::kRelativeDirectAdjacent:
       DCHECK(result.has_argument_leftmost_compound_matches);
@@ -965,10 +1012,10 @@ SelectorChecker::MatchStatus SelectorChecker::MatchForRelation(
         // parent scope of the rule but somehow ignoring everything that isn't
         // :host.
         const TreeScope& host_tree_scope =
-            next_context.selector->IsDeeplyHostPseudoClass()
+            next_context.selector->IsDeeplyHostPseudoClass() &&
+                    context.element->GetTreeScope() == context.tree_scope
                 ? *context.tree_scope->ParentTreeScope()
                 : *context.tree_scope;
-
         if (next_context.element->GetTreeScope() == host_tree_scope) {
           return MatchSelector(next_context, result);
         }
@@ -2114,34 +2161,16 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
       }
       return element.HasFocusWithin();
     case CSSSelector::kPseudoHasInterest:
-      DCHECK(RuntimeEnabledFeatures::HTMLInterestTargetAttributeEnabled(
+      DCHECK(RuntimeEnabledFeatures::HTMLInterestForAttributeEnabled(
           element.GetDocument().GetExecutionContext()));
       return element.GetInterestState() != Element::InterestState::kNoInterest;
-    case CSSSelector::kPseudoHasPartialInterest:
-      DCHECK(RuntimeEnabledFeatures::HTMLInterestTargetAttributeEnabled(
-          element.GetDocument().GetExecutionContext()));
-      return element.GetInterestState() ==
-                 Element::InterestState::kPartialInterest ||
-             element.GetInterestState() ==
-                 Element::InterestState::kPotentialPartialInterest;
     case CSSSelector::kPseudoTargetOfInterest: {
-      DCHECK(RuntimeEnabledFeatures::HTMLInterestTargetAttributeEnabled(
+      DCHECK(RuntimeEnabledFeatures::HTMLInterestForAttributeEnabled(
           element.GetDocument().GetExecutionContext()));
       Element* invoker = element.GetInterestInvoker();
       DCHECK(!invoker || invoker->GetInterestState() !=
                              Element::InterestState::kNoInterest);
       return invoker;
-    }
-    case CSSSelector::kPseudoTargetOfPartialInterest: {
-      DCHECK(RuntimeEnabledFeatures::HTMLInterestTargetAttributeEnabled(
-          element.GetDocument().GetExecutionContext()));
-      Element* invoker = element.GetInterestInvoker();
-      DCHECK(!invoker || invoker->GetInterestState() !=
-                             Element::InterestState::kNoInterest);
-      return invoker && (invoker->GetInterestState() ==
-                             Element::InterestState::kPartialInterest ||
-                         invoker->GetInterestState() ==
-                             Element::InterestState::kPotentialPartialInterest);
     }
     case CSSSelector::kPseudoHasSlotted:
       DCHECK(RuntimeEnabledFeatures::CSSPseudoHasSlottedEnabled());
@@ -2433,41 +2462,9 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
       return element.CachedDirectionality() == direction;
     }
     case CSSSelector::kPseudoDialogInTopLayer:
-      if (auto* dialog = DynamicTo<HTMLDialogElement>(element)) {
-        if (dialog->IsModal() &&
-            dialog->FastHasAttribute(html_names::kOpenAttr)) {
-          DCHECK(dialog->GetDocument().TopLayerElements().Contains(dialog));
-          return true;
-        }
-        // When the dialog is transitioning to closed, we have to check the
-        // elements which are in the top layer but are pending removal to see if
-        // this element used to be open as a dialog.
-        std::optional<Document::TopLayerReason> top_layer_reason =
-            dialog->GetDocument().IsScheduledForTopLayerRemoval(dialog);
-        return top_layer_reason &&
-               *top_layer_reason == Document::TopLayerReason::kDialog;
-      }
-      return false;
+      return element.IsDialogInTopLayer();
     case CSSSelector::kPseudoPopoverInTopLayer:
-      if (auto* html_element = DynamicTo<HTMLElement>(element);
-          html_element && html_element->IsPopover()) {
-        // When the popover is open and is not transitioning to closed,
-        // popoverOpen will return true.
-        if (html_element->popoverOpen()) {
-          DCHECK(html_element->GetDocument().TopLayerElements().Contains(
-              html_element));
-          return true;
-        }
-        // When the popover is transitioning to closed, popoverOpen won't return
-        // true and we have to check the elements which are in the top layer but
-        // are pending removal to see if this element used to be popoverOpen.
-        std::optional<Document::TopLayerReason> top_layer_reason =
-            html_element->GetDocument().IsScheduledForTopLayerRemoval(
-                html_element);
-        return top_layer_reason &&
-               *top_layer_reason == Document::TopLayerReason::kPopover;
-      }
-      return false;
+      return element.IsPopoverInTopLayer();
     case CSSSelector::kPseudoPopoverOpen:
       if (auto* html_element = DynamicTo<HTMLElement>(element);
           html_element && html_element->IsPopover()) {
@@ -2573,6 +2570,9 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
     case CSSSelector::kPseudoPastCue: {
       auto* vtt_element = DynamicTo<VTTElement>(element);
       return vtt_element && vtt_element->IsPastNode();
+    }
+    case CSSSelector::kPseudoPatching: {
+      return element.currentPatch();
     }
     case CSSSelector::kPseudoScope:
       return CheckPseudoScope(context, result);

@@ -28,12 +28,12 @@ import android.widget.FrameLayout;
 
 import androidx.annotation.VisibleForTesting;
 
+import org.chromium.base.DeviceInfo;
 import org.chromium.base.ObserverList;
 import org.chromium.base.TraceEvent;
 import org.chromium.build.annotations.EnsuresNonNullIf;
 import org.chromium.build.annotations.NullUnmarked;
 import org.chromium.build.annotations.Nullable;
-import org.chromium.components.autofill.AndroidAutofillFeatures;
 import org.chromium.components.embedder_support.util.TouchEventFilter;
 import org.chromium.content_public.browser.GestureListenerManager;
 import org.chromium.content_public.browser.ImeAdapter;
@@ -43,7 +43,6 @@ import org.chromium.content_public.browser.ViewEventSink;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsAccessibility;
 import org.chromium.ui.accessibility.AccessibilityState;
-import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.base.EventForwarder;
 import org.chromium.ui.base.EventOffsetHandler;
 import org.chromium.ui.base.ViewAndroidDelegate;
@@ -86,6 +85,7 @@ public class ContentView extends FrameLayout
 
     // TODO(b/422918648): Remove this.
     @Nullable private MotionEvent mPendingTwoFingerSwipeDownEvent;
+    @Nullable private VirtualStructureProvider mVirtualStructureProvider;
 
     /**
      * The desired size of this view in {@link MeasureSpec}. Set by the host when it should be
@@ -201,6 +201,10 @@ public class ContentView extends FrameLayout
 
     public void setStylusWritingIconSupplier(Supplier<PointerIcon> iconSupplier) {
         mStylusWritingIconSupplier = iconSupplier;
+    }
+
+    public void setVirtualStructureProvider(VirtualStructureProvider virtualStructureProvider) {
+        mVirtualStructureProvider = virtualStructureProvider;
     }
 
     @Override
@@ -384,9 +388,17 @@ public class ContentView extends FrameLayout
     }
 
     @Override
+    public boolean onKeyPreIme(int keyCode, KeyEvent event) {
+        if (hasValidWebContents()) {
+            ImeAdapter.fromWebContents(mWebContents).onKeyPreIme(keyCode, event);
+        }
+        return super.onKeyPreIme(keyCode, event);
+    }
+
+    @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
         EventForwarder forwarder = getEventForwarder();
-        return forwarder != null ? forwarder.onKeyUp(keyCode, event) : false;
+        return forwarder != null ? forwarder.onKeyUp(event) : false;
     }
 
     @Override
@@ -416,7 +428,7 @@ public class ContentView extends FrameLayout
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
                 && Build.VERSION.SDK_INT <= 38
-                && DeviceFormFactor.isDesktop()) {
+                && DeviceInfo.isDesktop()) {
             if (mPendingTwoFingerSwipeDownEvent != null) {
                 // We expect to receive a two finger swipe event after having received a down from
                 // two finger swipe.
@@ -637,6 +649,12 @@ public class ContentView extends FrameLayout
 
     @Override
     public void onProvideVirtualStructure(final ViewStructure structure) {
+        if (hasValidWebContents() && mVirtualStructureProvider != null) {
+            mVirtualStructureProvider.provideVirtualStructureForWebContents(
+                    structure, mWebContents);
+            return;
+        }
+
         WebContentsAccessibility wcax = getWebContentsAccessibility();
         if (wcax != null) wcax.onProvideVirtualStructure(structure, false);
     }
@@ -645,9 +663,7 @@ public class ContentView extends FrameLayout
     public void autofill(final SparseArray<AutofillValue> values) {
         ViewAndroidDelegate viewDelegate = mWebContents.getViewAndroidDelegate();
         if (viewDelegate == null || !viewDelegate.providesAutofillStructure()) {
-            if (allowAutofillViaAccessibilityAPI()) {
-                super.autofill(values);
-            }
+            super.autofill(values);
             return;
         }
         viewDelegate.autofill(values);
@@ -657,16 +673,10 @@ public class ContentView extends FrameLayout
     public void onProvideAutofillVirtualStructure(ViewStructure structure, int flags) {
         ViewAndroidDelegate viewDelegate = mWebContents.getViewAndroidDelegate();
         if (viewDelegate == null || !viewDelegate.providesAutofillStructure()) {
-            if (allowAutofillViaAccessibilityAPI()) {
-                super.onProvideAutofillVirtualStructure(structure, flags);
-            }
+            super.onProvideAutofillVirtualStructure(structure, flags);
             return;
         }
         viewDelegate.onProvideAutofillVirtualStructure(structure, flags);
-    }
-
-    private boolean allowAutofillViaAccessibilityAPI() {
-        return !AndroidAutofillFeatures.ANDROID_AUTOFILL_DEPRECATE_ACCESSIBILITY_API.isEnabled();
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////////

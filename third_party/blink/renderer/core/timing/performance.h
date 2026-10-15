@@ -36,13 +36,15 @@
 #include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "third_party/blink/public/mojom/timing/resource_timing.mojom-blink.h"
+#include "third_party/blink/public/web/web_performance_metrics_for_reporting.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_function.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/dom_high_res_time_stamp.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/core/loader/frame_loader_types.h"
+#include "third_party/blink/renderer/core/timing/navigation_id_generator.h"
 #include "third_party/blink/renderer/core/timing/performance_entry.h"
-#include "third_party/blink/renderer/core/timing/performance_navigation_timing.h"
 #include "third_party/blink/renderer/core/timing/performance_paint_timing.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_deque.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_linked_hash_set.h"
@@ -67,6 +69,7 @@ class EventCounts;
 class ExceptionState;
 class ExecutionContext;
 class LargestContentfulPaint;
+class InteractionContentfulPaint;
 class LayoutShift;
 class MemoryInfo;
 class MemoryMeasurement;
@@ -78,6 +81,7 @@ class PerformanceMark;
 class PerformanceMarkOptions;
 class PerformanceMeasure;
 class PerformanceNavigation;
+class PerformanceNavigationTiming;
 class PerformanceObserver;
 class PerformanceTiming;
 class ScriptState;
@@ -190,6 +194,10 @@ class CORE_EXPORT Performance : public EventTarget {
   DEFINE_ATTRIBUTE_EVENT_LISTENER(resourcetimingbufferfull,
                                   kResourcetimingbufferfull)
 
+  virtual uint32_t NavigationId() const {
+    return blink::kNavigationIdAbsentValue;
+  }
+
   void AddLongTaskTiming(base::TimeTicks start_time,
                          base::TimeTicks end_time,
                          const AtomicString& name,
@@ -219,6 +227,7 @@ class CORE_EXPORT Performance : public EventTarget {
   void AddToLayoutShiftBuffer(LayoutShift&);
 
   void AddLargestContentfulPaint(LargestContentfulPaint*);
+  void AddInteractionContentfulPaint(InteractionContentfulPaint*);
 
   void AddSoftNavigationToPerformanceTimeline(SoftNavigationEntry*);
 
@@ -233,7 +242,6 @@ class CORE_EXPORT Performance : public EventTarget {
   void AddBackForwardCacheRestoration(base::TimeTicks start_time,
                                       base::TimeTicks pageshow_start_time,
                                       base::TimeTicks pageshow_end_time);
-
 
   // This enum is used to index different possible strings for for UMA enum
   // histogram. New enum values can be added, but existing enums must never be
@@ -366,6 +374,13 @@ class CORE_EXPORT Performance : public EventTarget {
   void ProcessUserFeatureMark(const PerformanceMarkOptions* mark_options);
 
  protected:
+  enum class ParserYieldState {
+    kInitial = 0,
+    kPaused = 1,
+    kResumed = 2,
+    kMaxValue = kResumed
+  };
+
   Performance(base::TimeTicks time_origin,
               bool cross_origin_isolated_capability,
               scoped_refptr<base::SingleThreadTaskRunner>,
@@ -405,6 +420,7 @@ class CORE_EXPORT Performance : public EventTarget {
   unsigned element_timing_buffer_max_size_;
   PerformanceEntryVector layout_shift_buffer_;
   PerformanceEntryVector largest_contentful_paint_buffer_;
+  PerformanceEntryVector interaction_contentful_paint_buffer_;
   PerformanceEntryVector longtask_buffer_;
   PerformanceEntryVector visibility_state_buffer_;
   PerformanceEntryVector back_forward_cache_restoration_buffer_;
@@ -443,7 +459,7 @@ class CORE_EXPORT Performance : public EventTarget {
   // user timing API is used as a signal to the document. crbug.com/425962649
   // for more details.
   TaskHandle parser_yield_task_handle_;
-  bool is_parser_yielded_ = false;
+  ParserYieldState parser_yield_state_ = ParserYieldState::kInitial;
 };
 
 }  // namespace blink
