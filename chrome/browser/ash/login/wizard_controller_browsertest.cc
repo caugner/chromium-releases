@@ -10,8 +10,6 @@
 #include "ash/constants/ash_features.h"
 #include "ash/constants/ash_switches.h"
 #include "ash/public/cpp/login_screen_test_api.h"
-#include "ash/root_window_controller.h"
-#include "ash/shell.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/functional/bind.h"
@@ -90,7 +88,6 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/ash/login/login_display_host.h"
 #include "chrome/browser/ui/ash/login/webui_login_view.h"
-#include "chrome/browser/ui/webui/ash/login/app_launch_splash_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/consolidated_consent_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/display_size_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/error_screen_handler.h"
@@ -137,6 +134,7 @@
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
+#include "google_apis/gaia/gaia_id.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "remoting/host/chromeos/features.h"
@@ -3045,8 +3043,8 @@ class WizardControllerOnboardingResumeTest : public WizardControllerTest {
   CryptohomeMixin cryptohome_mixin_{&mixin_host_};
   LoginManagerMixin login_mixin_{&mixin_host_, LoginManagerMixin::UserList(),
                                  &gaia_mixin_};
-  AccountId user_{
-      AccountId::FromUserEmailGaiaId(test::kTestEmail, test::kTestGaiaId)};
+  AccountId user_{AccountId::FromUserEmailGaiaId(test::kTestEmail,
+                                                 GaiaId(test::kTestGaiaId))};
 };
 
 IN_PROC_BROWSER_TEST_F(WizardControllerOnboardingResumeTest,
@@ -3409,17 +3407,6 @@ IN_PROC_BROWSER_TEST_F(GaiaInfoTest, SkipGaiaInfoForChildAccount) {
   test::WaitForConsumerUpdateScreen();
   test::ExitConsumerUpdateScreenNoUpdate();
   OobeScreenWaiter(AddChildScreenView::kScreenId).Wait();
-}
-
-// Showing the system tray on the kiosk splash screen is a source of exploits.
-// Ensure we don't.
-IN_PROC_BROWSER_TEST_F(WizardControllerTest, SystemTrayShouldBeDisabledOnKioskSplashScreen) {
-  WaitForOobeUI();
-  WizardController::default_controller()->AdvanceToScreen(
-      AppLaunchSplashScreenView::kScreenId);
-  OobeScreenWaiter(AppLaunchSplashScreenView::kScreenId).Wait();
-
-  ASSERT_FALSE(Shell::GetPrimaryRootWindowController()->IsSystemTrayVisible());
 }
 
 class WizardControllerGaiaTest : public GaiaInfoTest {

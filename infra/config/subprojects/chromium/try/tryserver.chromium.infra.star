@@ -3,18 +3,16 @@
 # found in the LICENSE file.
 """Definitions of builders in the tryserver.chromium.infra builder group."""
 
-load("@chromium-luci//builder_config.star", "builder_config")
-load("@chromium-luci//builders.star", "os")
-load("@chromium-luci//consoles.star", "consoles")
-load("@chromium-luci//html.star", "linkify")
-load("@chromium-luci//try.star", "try_")
-load("//lib/siso.star", "siso")
-load("//lib/try_constants.star", "try_constants")
+load("//lib/builder_config.star", "builder_config")
+load("//lib/builders.star", "os", "siso")
+load("//lib/html.star", "linkify")
+load("//lib/try.star", "try_")
+load("//lib/consoles.star", "consoles")
 
 try_.defaults.set(
     builder_group = "tryserver.chromium.infra",
-    pool = try_constants.DEFAULT_POOL,
-    execution_timeout = try_constants.DEFAULT_EXECUTION_TIMEOUT,
+    pool = try_.DEFAULT_POOL,
+    execution_timeout = try_.DEFAULT_EXECUTION_TIMEOUT,
     service_account = "chromium-cipd-try-builder@chops-service-accounts.iam.gserviceaccount.com",
 )
 
@@ -98,7 +96,7 @@ try_.builder(
     os = os.LINUX_DEFAULT,
     contact_team_email = "chrome-browser-infra-team@google.com",
     execution_timeout = 36 * time.hour,  # We expect it can take a while.
-    service_account = try_constants.DEFAULT_SERVICE_ACCOUNT,
+    service_account = try_.DEFAULT_SERVICE_ACCOUNT,
     tryjob = try_.job(
         custom_cq_run_modes = [try_.MEGA_CQ_DRY_RUN_NAME, try_.MEGA_CQ_FULL_RUN_NAME],
     ),
@@ -116,6 +114,9 @@ try_.builder(
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(
             config = "chromium",
+            apply_configs = [
+                "use_clang_coverage",
+            ],
         ),
         chromium_config = builder_config.chromium_config(
             config = "chromium",
@@ -152,7 +153,7 @@ try_.builder(
             },
         ],
     },
-    service_account = try_constants.DEFAULT_SERVICE_ACCOUNT,
+    service_account = try_.DEFAULT_SERVICE_ACCOUNT,
     siso_project = siso.project.DEFAULT_UNTRUSTED,
     tryjob = try_.job(
         location_filters = [
@@ -174,6 +175,9 @@ try_.builder(
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(
             config = "chromium",
+            apply_configs = [
+                "use_clang_coverage",
+            ],
         ),
         chromium_config = builder_config.chromium_config(
             config = "chromium",
@@ -210,7 +214,7 @@ try_.builder(
             },
         ],
     },
-    service_account = try_constants.DEFAULT_SERVICE_ACCOUNT,
+    service_account = try_.DEFAULT_SERVICE_ACCOUNT,
     siso_project = siso.project.DEFAULT_UNTRUSTED,
     tryjob = try_.job(
         location_filters = [

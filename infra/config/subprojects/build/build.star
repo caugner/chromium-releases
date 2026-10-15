@@ -5,14 +5,12 @@
 # TODO: crbug.com/1502025 - Reduce duplicated configs from the shadow builders.
 # Note that CI builders can't use `mirrors`.
 
-load("@chromium-luci//builder_config.star", "builder_config")
-load("@chromium-luci//builders.star", "cpu", "os")
-load("@chromium-luci//ci.star", "ci")
-load("@chromium-luci//consoles.star", "consoles")
-load("@chromium-luci//gn_args.star", "gn_args")
-load("@chromium-luci//html.star", "linkify_builder")
-load("//lib/ci_constants.star", "ci_constants")
-load("//lib/siso.star", "siso")
+load("//lib/builder_config.star", "builder_config")
+load("//lib/builders.star", "cpu", "os", "siso")
+load("//lib/ci.star", "ci")
+load("//lib/consoles.star", "consoles")
+load("//lib/gn_args.star", "gn_args")
+load("//lib/html.star", "linkify_builder")
 load("//lib/xcode.star", "xcode")
 load("//project.star", "settings")
 
@@ -55,7 +53,7 @@ luci.bucket(
     name = "build.shadow",
     shadows = "build",
     constraints = luci.bucket_constraints(
-        pools = [ci_constants.DEFAULT_POOL],
+        pools = [ci.DEFAULT_POOL],
         service_accounts = [
             "chromium-build-perf-ci-builder@chops-service-accounts.iam.gserviceaccount.com",
         ],
@@ -86,14 +84,14 @@ ci.defaults.set(
     bucket = "build",
     triggered_by = ["chrome-build-gitiles-trigger"],
     builder_group = "chromium.build",
-    pool = ci_constants.DEFAULT_POOL,
+    pool = ci.DEFAULT_POOL,
     builderless = False,
     # rely on the builder dimension for the bot selection.
     cores = None,
     build_numbers = True,
     contact_team_email = "chrome-build-team@google.com",
     execution_timeout = 10 * time.hour,
-    priority = ci_constants.DEFAULT_FYI_PRIORITY,
+    priority = ci.DEFAULT_FYI_PRIORITY,
     resultdb_enable = False,
     service_account = "chromium-build-perf-ci-builder@chops-service-accounts.iam.gserviceaccount.com",
     siso_configs = [],
@@ -108,28 +106,20 @@ consoles.console_view(
 
 def cq_build_perf_builder(description_html, **kwargs):
     # Use CQ RBE instance and high remote_jobs/cores to simulate CQ builds.
-    if not kwargs.get("siso_configs"):
+    if not "siso_configs" in kwargs:
         kwargs["siso_configs"] = ["builder", "remote-link"]
-    props = {}
-    if not kwargs.get("siso_enabled", True):
-        props["$build/reclient"] = {
-            "instance": siso.project.DEFAULT_UNTRUSTED,
-            "jobs": 500,
-            "metrics_project": "chromium-reclient-metrics",
-            "scandeps_server": True,
-        }
     return ci.builder(
         description_html = description_html + "<br>Build stats is show in http://shortn/_gaAdI3x6o6.",
+        reclient_jobs = 500,
         siso_remote_jobs = siso.remote_jobs.HIGH_JOBS_FOR_CQ,
         siso_project = siso.project.DEFAULT_UNTRUSTED,
         use_clang_coverage = True,
-        properties = props,
         **kwargs
     )
 
 def ci_build_perf_builder(description_html, **kwargs):
     # Use CI RBE instance to simulate CI builds.
-    if not kwargs.get("siso_configs"):
+    if not "siso_configs" in kwargs:
         kwargs["siso_configs"] = ["builder", "remote-link"]
     return ci.builder(
         description_html = description_html + "<br>Build stats is show in http://shortn/_gaAdI3x6o6.",
@@ -152,7 +142,7 @@ cq_build_perf_builder(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "android",
+            config = "main_builder",
             apply_configs = [
                 "mb",
             ],
@@ -187,7 +177,7 @@ cq_build_perf_builder(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "android",
+            config = "main_builder",
             apply_configs = [
                 "mb",
             ],
@@ -297,6 +287,7 @@ cq_build_perf_builder(
         category = "windows",
         short_name = "ninja",
     ),
+    siso_configs = ["builder"],
     siso_enabled = False,
 )
 
@@ -329,6 +320,7 @@ cq_build_perf_builder(
         category = "windows",
         short_name = "siso",
     ),
+    siso_configs = ["builder"],
 )
 
 ci_build_perf_builder(
@@ -360,6 +352,7 @@ ci_build_perf_builder(
         category = "windows",
         short_name = "sisoci",
     ),
+    siso_configs = ["builder"],
     # TODO(333491525): enable no-fallback once OOM fallback mitigated.
     siso_experiments = [],
     siso_limits = "fastlocal=0",
@@ -456,6 +449,7 @@ cq_build_perf_builder(
         category = "mac",
         short_name = "ninja",
     ),
+    siso_configs = ["builder"],
     siso_enabled = False,
 )
 
@@ -491,6 +485,7 @@ cq_build_perf_builder(
         category = "mac",
         short_name = "siso",
     ),
+    siso_configs = ["builder"],
 )
 
 cq_build_perf_builder(
@@ -523,6 +518,7 @@ cq_build_perf_builder(
         category = "ios",
         short_name = "ninja",
     ),
+    siso_configs = ["builder"],
     siso_enabled = False,
     xcode = xcode.xcode_default,
 )
@@ -560,26 +556,19 @@ cq_build_perf_builder(
         category = "ios",
         short_name = "siso",
     ),
+    siso_configs = ["builder"],
     xcode = xcode.xcode_default,
 )
 
-def developer_build_perf_builder(description_html, reclient_jobs = None, **kwargs):
+def developer_build_perf_builder(description_html, **kwargs):
     # Use CQ siso.project and high siso_remote_jobs/cores to simulate CQ builds.
-    props = {
-        "$build/reclient": {
-            "instance": siso.project.DEFAULT_UNTRUSTED,
-            "jobs": reclient_jobs,
-            "metrics_project": "chromium-reclient-metrics",
-            "scandeps_server": True,
-        },
-    }
+    if not "siso_configs" in kwargs:
+        kwargs["siso_configs"] = ["remote-link"]
     return ci.builder(
         description_html = description_html + "<br>Build stats is show in http://shortn/_gaAdI3x6o6.",
         executable = "recipe:chrome_build/build_perf_developer",
         siso_project = siso.project.DEFAULT_UNTRUSTED,
-        siso_configs = ["remote-link"],
         shadow_siso_project = None,
-        properties = props,
         **kwargs
     )
 
@@ -598,7 +587,7 @@ This builder measures build performance for Android developer builds, by simulat
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "android",
+            config = "main_builder",
             apply_configs = [
                 "mb",
             ],
@@ -687,6 +676,7 @@ This builder measures build performance for Windows developer builds, by simulat
         short_name = "dev",
     ),
     reclient_jobs = 1000,
+    siso_configs = [],
 )
 
 developer_build_perf_builder(
@@ -721,6 +711,7 @@ This builder measures build performance for Mac developer builds, by simulating 
         short_name = "dev",
     ),
     reclient_jobs = 640,
+    siso_configs = [],
 )
 
 developer_build_perf_builder(
@@ -758,6 +749,7 @@ This builder measures build performance for iOS developer builds, by simulating 
         short_name = "dev",
     ),
     reclient_jobs = 640,
+    siso_configs = [],
     xcode = xcode.xcode_default,
 )
 

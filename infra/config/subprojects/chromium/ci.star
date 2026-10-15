@@ -2,13 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-load("@chromium-luci//branches.star", "branches")
-load("@chromium-luci//builders.star", "builders", "cpu")
-load("@chromium-luci//ci.star", "ci")
-load("@chromium-luci//consoles.star", "consoles")
-load("//lib/ci_constants.star", "ci_constants")
-load("//lib/gpu.star", "gpu")
-load("//lib/siso.star", "siso")
+load("//lib/branches.star", "branches")
+load("//lib/builders.star", "builders", "cpu", "siso")
+load("//lib/ci.star", "ci")
+load("//lib/consoles.star", "consoles")
 load("//project.star", "settings")
 
 # Bucket-wide defaults
@@ -81,15 +78,15 @@ luci.bucket(
                 "chromium-led-users",
             ],
             users = [
-                ci_constants.DEFAULT_SHADOW_SERVICE_ACCOUNT,
-                gpu.ci.SHADOW_SERVICE_ACCOUNT,
+                ci.DEFAULT_SHADOW_SERVICE_ACCOUNT,
+                ci.gpu.SHADOW_SERVICE_ACCOUNT,
             ],
         ),
         luci.binding(
             roles = "role/buildbucket.triggerer",
             users = [
-                ci_constants.DEFAULT_SHADOW_SERVICE_ACCOUNT,
-                gpu.ci.SHADOW_SERVICE_ACCOUNT,
+                ci.DEFAULT_SHADOW_SERVICE_ACCOUNT,
+                ci.gpu.SHADOW_SERVICE_ACCOUNT,
             ],
         ),
         # TODO(crbug.com/40941662): Remove this binding after shadow bucket
@@ -104,8 +101,8 @@ luci.bucket(
         luci.binding(
             roles = "role/resultdb.invocationCreator",
             users = [
-                ci_constants.DEFAULT_SHADOW_SERVICE_ACCOUNT,
-                gpu.ci.SHADOW_SERVICE_ACCOUNT,
+                ci.DEFAULT_SHADOW_SERVICE_ACCOUNT,
+                ci.gpu.SHADOW_SERVICE_ACCOUNT,
             ],
         ),
     ],
@@ -185,11 +182,10 @@ consoles.console_view(
 ) for name, category, short_name in (
     ("fuchsia-arm64-rel-ready", "p/chrome|arm64", "rel-ready"),
     ("fuchsia-arm64-nest-sd", "p/chrome|official", "nest-arm"),
+    ("fuchsia-ava-astro", "hardware|ava", "ast"),
     ("fuchsia-ava-nelson", "hardware|ava", "nsn"),
+    ("fuchsia-ava-sherlock", "hardware|ava", "sher"),
     ("fuchsia-builder-perf-arm64", "p/chrome|arm64", "perf-arm"),
-    ("fuchsia-cast-astro", "hardware|cast", "ast"),
-    ("fuchsia-cast-nelson", "hardware|cast", "nsn"),
-    ("fuchsia-cast-sherlock", "hardware|cast", "sher"),
     ("fuchsia-fyi-arm64-size", "p/chrome|arm64", "size"),
     ("fuchsia-fyi-astro", "hardware", "ast"),
     ("fuchsia-fyi-nelson", "hardware", "nsn"),
@@ -201,6 +197,9 @@ consoles.console_view(
     ("fuchsia-smoke-sherlock-roller", "hardware|smoke", "roll"),
     ("fuchsia-perf-nsn", "hardware|perf", "nsn"),
     ("fuchsia-perf-shk", "hardware|perf", "sher"),
+    ("fuchsia-webgl-astro", "hardware|webgl", "ast"),
+    ("fuchsia-webgl-nelson", "hardware|webgl", "nsn"),
+    ("fuchsia-webgl-sherlock", "hardware|webgl", "sher"),
     ("fuchsia-x64", "p/chrome|official", "x64"),
     ("fuchsia-x64-nest-sd", "p/chrome|official", "nest-x64"),
 )]

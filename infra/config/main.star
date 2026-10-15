@@ -8,22 +8,12 @@
 
 """Entrypoint for `lucicfg generate infra/config/main.star`."""
 
-load("@chromium-luci//branches.star", "branches")
-load("@chromium-luci//builders.star", "os")
-load("@chromium-luci//chromium_luci.star", "chromium_luci")
-load(
-    "//lib/builder_exemptions.star",
-    "exempted_from_contact_builders",
-    "exempted_from_description_builders",
-    "mega_cq_excluded_builders",
-    "mega_cq_excluded_gardener_rotations",
-    "standalone_trybot_excluded_builder_groups",
-    "standalone_trybot_excluded_builders",
-)
+load("//lib/branches.star", "branches")
+load("//lib/chrome_settings.star", "chrome_settings")
 load("//project.star", "settings")
 
 lucicfg.check_version(
-    min = "1.44.1",
+    min = "1.43.13",
     message = "Update depot_tools",
 )
 
@@ -36,7 +26,6 @@ lucicfg.config(
     tracked_files = [
         "builders/*/*/*",
         "builders/*/*/*/*",
-        "builders/alerting-builders.txt",
         "builders/gn_args_locations.json",
         "builder-owners/*.txt",
         "cq-builders.md",
@@ -63,6 +52,15 @@ lucicfg.config(
         "testing/*.pyl",
     ],
     fail_on_warnings = True,
+    lint_checks = [
+        "default",
+        "-confusing-name",
+        "-function-docstring",
+        "-function-docstring-args",
+        "-function-docstring-return",
+        "-function-docstring-header",
+        "-module-docstring",
+    ],
 )
 
 # Just copy Testhaus config to generated outputs.
@@ -164,65 +162,12 @@ luci.notify(
     tree_closing_enabled = True,
 )
 
-chromium_luci.configure_project(
-    name = settings.project,
-    ref = settings.ref,
-    is_main = settings.is_main,
-    platforms = settings.platforms,
-)
-
-chromium_luci.configure_per_builder_outputs(
+chrome_settings.per_builder_outputs(
     root_dir = "builders",
 )
 
-chromium_luci.configure_builder_config(
-    mega_cq_excluded_builders = mega_cq_excluded_builders,
-    mega_cq_excluded_gardener_rotations = mega_cq_excluded_gardener_rotations,
-    standalone_trybot_excluded_builder_groups = standalone_trybot_excluded_builder_groups,
-    standalone_trybot_excluded_builders = standalone_trybot_excluded_builders,
-    add_owner_to_description = False,
-)
-
-chromium_luci.configure_builder_health_indicators(
-    unhealthy_period_days = 7,
-    pending_time_p50_min = 20,
-    exempted_from_contact_builders = exempted_from_contact_builders,
-)
-
-chromium_luci.configure_builders(
-    enable_alerts_configuration = True,
-    os_dimension_overrides = {
-        os.LINUX_DEFAULT: chromium_luci.os_dimension_overrides(
-            default = os.LINUX_JAMMY,
-            overrides = json.decode(io.read_file("//lib/linux-default.json")),
-        ),
-        os.MAC_DEFAULT: os.MAC_15,
-        os.MAC_BETA: "Mac-15|Mac-26",
-        os.WINDOWS_DEFAULT: os.WINDOWS_10,
-    },
-    exempted_from_description_builders = exempted_from_description_builders,
-)
-
-chromium_luci.configure_ci(
-    main_console_view = "main" if not settings.is_main else None,
-    test_results_bq_dataset_name = "chromium",
-    resultdb_index_by_timestamp = True,
-)
-
-chromium_luci.configure_gardener_rotations(
-    rotation_files_path = "sheriff-rotations",
-)
-
-chromium_luci.configure_targets(
-    generate_pyl_files = True,
+chrome_settings.targets(
     autoshard_exceptions_file = "//targets/autoshard_exceptions.json",
-)
-
-chromium_luci.configure_try(
-    test_results_bq_dataset_name = "chromium",
-    resultdb_index_by_timestamp = True,
-    additional_default_exclude_path_regexps = ["docs/.+"],
-    add_default_disable_reuse_footers = False,
 )
 
 # An all-purpose public realm.
@@ -371,6 +316,7 @@ exec("//subprojects/infra.star")
 branches.exec("//subprojects/codesearch/subproject.star")
 branches.exec("//subprojects/findit/subproject.star")
 branches.exec("//subprojects/flakiness/subproject.star")
+branches.exec("//subprojects/reclient/subproject.star")
 branches.exec("//subprojects/reviver/subproject.star")
 branches.exec("//subprojects/webrtc/subproject.star")
 

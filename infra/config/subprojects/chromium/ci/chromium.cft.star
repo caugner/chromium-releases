@@ -3,29 +3,27 @@
 # found in the LICENSE file.
 """Definitions for the chromium.cft (chrome for testing) builder group."""
 
-load("@chromium-luci//builder_config.star", "builder_config")
-load("@chromium-luci//builder_health_indicators.star", "health_spec")
-load("@chromium-luci//builders.star", "cpu", "os")
-load("@chromium-luci//ci.star", "ci")
-load("@chromium-luci//consoles.star", "consoles")
-load("@chromium-luci//gn_args.star", "gn_args")
-load("@chromium-luci//targets.star", "targets")
-load("//lib/ci_constants.star", "ci_constants")
-load("//lib/gardener_rotations.star", "gardener_rotations")
-load("//lib/siso.star", "siso")
+load("//lib/builder_config.star", "builder_config")
+load("//lib/builder_health_indicators.star", "health_spec")
+load("//lib/builders.star", "cpu", "gardener_rotations", "os", "siso")
+load("//lib/ci.star", "ci")
+load("//lib/consoles.star", "consoles")
+load("//lib/gn_args.star", "gn_args")
+load("//lib/targets.star", "targets")
 
 ci.defaults.set(
-    executable = ci_constants.DEFAULT_EXECUTABLE,
+    executable = ci.DEFAULT_EXECUTABLE,
     builder_group = "chromium.cft",
-    pool = ci_constants.DEFAULT_POOL,
+    pool = ci.DEFAULT_POOL,
     builderless = True,
     cores = 8,
     gardener_rotations = gardener_rotations.CFT,
     tree_closing = False,
-    execution_timeout = ci_constants.DEFAULT_EXECUTION_TIMEOUT,
-    health_spec = health_spec.default(),
-    service_account = ci_constants.DEFAULT_SERVICE_ACCOUNT,
-    shadow_service_account = ci_constants.DEFAULT_SHADOW_SERVICE_ACCOUNT,
+    execution_timeout = ci.DEFAULT_EXECUTION_TIMEOUT,
+    health_spec = health_spec.DEFAULT,
+    service_account = ci.DEFAULT_SERVICE_ACCOUNT,
+    shadow_service_account = ci.DEFAULT_SHADOW_SERVICE_ACCOUNT,
+    siso_enabled = True,
     siso_project = siso.project.DEFAULT_TRUSTED,
     siso_remote_jobs = siso.remote_jobs.HIGH_JOBS_FOR_CI,
 )
@@ -248,6 +246,7 @@ ci.builder(
         short_name = "linux-rel-cft",
     ),
     contact_team_email = "browser-automation-staff@google.com",
+    siso_remote_linking = True,
 )
 
 ci.builder(
@@ -300,8 +299,6 @@ ci.builder(
             ),
             "browser_tests": targets.mixin(
                 args = [
-                    # crbug.com/868082
-                    "--disable-features=WebRTC-H264WithOpenH264FFmpeg",
                     "--test-launcher-filter-file=../../testing/buildbot/filters/win.win-rel-cft.browser_tests.filter",
                 ],
                 swarming = targets.swarming(
@@ -319,12 +316,6 @@ ci.builder(
             ),
             "components_browsertests_no_field_trial": targets.remove(
                 reason = "crbug.com/40630866",
-            ),
-            "content_browsertests": targets.mixin(
-                # crbug.com/868082
-                args = [
-                    "--disable-features=WebRTC-H264WithOpenH264FFmpeg",
-                ],
             ),
             "content_unittests": targets.mixin(
                 # crbug.com/337984655
@@ -379,7 +370,11 @@ ci.builder(
             ),
         },
     ),
+    # TODO: crbug.com/380151726 - any builderless 8-core bots don't have SSD
+    # at this moment. Use 8 cores after adding SSD to them.
+    cores = 16,
     os = os.WINDOWS_DEFAULT,
+    ssd = True,
     console_view_entry = consoles.console_view_entry(
         short_name = "win-rel-cft",
     ),

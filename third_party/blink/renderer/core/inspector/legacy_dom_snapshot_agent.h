@@ -21,17 +21,12 @@ class Element;
 class Node;
 class PaintLayer;
 
-struct OriginUrlMap {
-  WTF::HashMap<DOMNodeId, String> map;
-  base::WeakPtrFactory<OriginUrlMap> weak_ptr_factory{this};
-};
-
 class CORE_EXPORT LegacyDOMSnapshotAgent {
   STACK_ALLOCATED();
 
  public:
-  LegacyDOMSnapshotAgent(InspectorDOMDebuggerAgent*,
-                         base::WeakPtr<OriginUrlMap>);
+  using OriginUrlMap = WTF::HashMap<DOMNodeId, String>;
+  LegacyDOMSnapshotAgent(InspectorDOMDebuggerAgent*, OriginUrlMap*);
   LegacyDOMSnapshotAgent(const LegacyDOMSnapshotAgent&) = delete;
   LegacyDOMSnapshotAgent& operator=(const LegacyDOMSnapshotAgent&) = delete;
   ~LegacyDOMSnapshotAgent();
@@ -41,9 +36,9 @@ class CORE_EXPORT LegacyDOMSnapshotAgent {
   protocol::Response GetSnapshot(
       Document* document,
       std::unique_ptr<protocol::Array<String>> style_filter,
-      protocol::Maybe<bool> include_event_listeners,
-      protocol::Maybe<bool> include_paint_order,
-      protocol::Maybe<bool> include_user_agent_shadow_tree,
+      std::optional<bool> include_event_listeners,
+      std::optional<bool> include_paint_order,
+      std::optional<bool> include_user_agent_shadow_tree,
       std::unique_ptr<protocol::Array<protocol::DOMSnapshot::DOMNode>>*
           dom_nodes,
       std::unique_ptr<protocol::Array<protocol::DOMSnapshot::LayoutTreeNode>>*
@@ -102,7 +97,7 @@ class CORE_EXPORT LegacyDOMSnapshotAgent {
   PaintOrderMap* paint_order_map_ = nullptr;
   // Maps a backend node id to the url of the script (if any) that generates
   // the corresponding node.
-  base::WeakPtr<OriginUrlMap> origin_url_map_;
+  OriginUrlMap* origin_url_map_;
   using DocumentOrderMap = HeapHashMap<Member<Document>, int>;
   InspectorDOMDebuggerAgent* dom_debugger_agent_;
 };

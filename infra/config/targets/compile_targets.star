@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-load("@chromium-luci//targets.star", "targets")
+load("//lib/targets.star", "targets")
 
 targets.compile_target(
     name = "all",
@@ -223,6 +223,13 @@ targets.compile_target(
 targets.compile_target(
     name = "core_runtime_starboard",
     label = "//chromecast/cast_core:core_runtime_starboard",
+    # All references have been moved to starlark
+    skip_usage_check = True,
+)
+
+targets.compile_target(
+    name = "cronet_gn2bp_aosp_feedback_loop",
+    label = "//components/cronet/android:cronet_gn2bp_aosp_feedback_loop",
     # All references have been moved to starlark
     skip_usage_check = True,
 )

@@ -172,21 +172,11 @@ void LensPermissionBubbleController::OnHelpCenterLinkClicked(
 void LensPermissionBubbleController::OnPermissionDialogAccept() {
   RecordPermissionUserAction(LensPermissionUserAction::kAcceptButtonPressed,
                              invocation_source_);
-  base::WeakPtr<LensPermissionBubbleController>
-      lens_permission_bubble_controller = weak_ptr_factory_.GetWeakPtr();
   pref_service_->SetBoolean(prefs::kLensSharingPageScreenshotEnabled, true);
-  // TODO(crbug.com/401029609): Rethink permission bubble lifetime.
-  // Must check WeakPtr in case CloseUISync() is called in
-  // LensOverlayController. This happens if the LensOverlayController cannot
-  // successfully take a screenshot of the page. If CloseUISync() is called,
-  // LensPermissionBubbleController gets reset before the following.
-  if (lens_permission_bubble_controller.get() &&
-      lens::features::IsLensOverlayContextualSearchboxEnabled()) {
+  if (lens::features::IsLensOverlayContextualSearchboxEnabled()) {
     pref_service_->SetBoolean(prefs::kLensSharingPageContentEnabled, true);
   }
-  if (lens_permission_bubble_controller.get()) {
-    dialog_widget_ = nullptr;
-  }
+  dialog_widget_ = nullptr;
 }
 
 void LensPermissionBubbleController::OnPermissionDialogCancel() {

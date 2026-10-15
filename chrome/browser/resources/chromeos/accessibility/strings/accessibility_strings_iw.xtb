@@ -131,7 +131,6 @@
 <translation id="1722567105086139392">קישור</translation>
 <translation id="1727806147743597030">ftr</translation>
 <translation id="1730447754326314349">‏ברוך בואך למדריך ChromeVox. כדי לצאת מהמדריך בכל שלב, יש להקיש על מקש Escape שבפינה השמאלית העליונה של המקלדת. כדי לכבות את ChromeVox, יש להקיש הקשה ארוכה על Control ועל Alt, ולהקיש על Z. כשמוכנים, יש להקיש על מקש הרווח כדי לעבור לשיעור הבא.</translation>
-<translation id="1735957571918073979">מצמצמים את שתי העיניים</translation>
 <translation id="174268867904053074">פריט הגרפיקה הבא</translation>
 <translation id="1756785467854861272">מגנטה כהה</translation>
 <translation id="1758693804775271377">יש להחליק שמאלה או ימינה בעזרת אצבע אחת כדי לעיין בשיעורים בנושא זה</translation>
@@ -242,6 +241,7 @@
 <translation id="2556326187583116255">לוחצים בעזרת שתי אצבעות כדי להפסיק את הדיבור המופעל</translation>
 <translation id="2573256689920773241">ניווט בסיסי</translation>
 <translation id="257674075312929031">קבוצה</translation>
+<translation id="2577127557293415225">עוצמים את שתי העיניים לרגע</translation>
 <translation id="2582407057977008361">בצד</translation>
 <translation id="2592212930811759050">לחיצה פעמיים מפעילה עריכה</translation>
 <translation id="2598495320872286378">שגיאת דקדוק</translation>
@@ -845,6 +845,7 @@
 <translation id="6385591741672306837">עמודה</translation>
 <translation id="6387719785439924554">aside</translation>
 <translation id="6393014464788431702">השבתת כל מסנני האירועים</translation>
+<translation id="6406989068857078334">מהירות העכבר הופחתה, צריך <ph name="GESTURE" /> שוב כדי ללחוץ</translation>
 <translation id="6411569524720229058">סתיו</translation>
 <translation id="6417265370957905582">Google Assistant</translation>
 <translation id="641759969622533235">{COUNT,plural, =1{נקודתיים}one{# סימני נקודתיים}two{# סימני נקודתיים}other{# סימני נקודתיים}}</translation>
@@ -1099,6 +1100,7 @@
 <translation id="8205922869661890178">פתיחת דף מיומן המפתחים</translation>
 <translation id="8212109599554677485">מעבר לתצוגה בסגנון זה לצד זה</translation>
 <translation id="8215202828671303819">בחירה מרובה</translation>
+<translation id="822316432305106615">התחלת לחיצה מדויקת</translation>
 <translation id="8249864170673238087">‏<ph name="COLOR" />, ‎<ph name="OPACITY_PERCENTAGE" />%‎ שקיפות.</translation>
 <translation id="8261506727792406068">מחיקה</translation>
 <translation id="826825447994856889">מבוא</translation>

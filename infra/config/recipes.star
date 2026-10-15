@@ -2,8 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-load("@chromium-luci//bootstrap.star", "POLYMORPHIC", "register_recipe_bootstrappability")
-load("@chromium-luci//recipe_experiments.star", "register_recipe_experiments")
+load("//lib/bootstrap.star", "POLYMORPHIC", "register_recipe_bootstrappability")
+load("//lib/recipe_experiments.star", "register_recipe_experiments")
 
 _RECIPE_NAME_PREFIX = "recipe:"
 
@@ -120,7 +120,7 @@ build_recipe(
 )
 
 build_recipe(
-    name = "recipe:build_size_trybot",
+    name = "recipe:compile_size_trybot",
 )
 
 build_recipe(

@@ -21,6 +21,7 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
+#include "chrome/browser/extensions/account_extension_tracker.h"
 #include "chrome/browser/extensions/api/developer_private/developer_private_api.h"
 #include "chrome/browser/extensions/api/developer_private/inspectable_views_finder.h"
 #include "chrome/browser/extensions/chrome_test_extension_loader.h"
@@ -28,6 +29,7 @@
 #include "chrome/browser/extensions/extension_action_test_util.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_service_test_with_install.h"
+#include "chrome/browser/extensions/extension_sync_util.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/manifest_v2_experiment_manager.h"
 #include "chrome/browser/extensions/mv2_experiment_stage.h"
@@ -35,6 +37,7 @@
 #include "chrome/browser/extensions/permissions/permissions_updater.h"
 #include "chrome/browser/extensions/permissions/scripting_permissions_modifier.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/identity_test_environment_profile_adaptor.h"
 #include "chrome/browser/supervised_user/supervised_user_extensions_delegate_impl.h"
 #include "chrome/browser/supervised_user/supervised_user_test_util.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
@@ -44,7 +47,12 @@
 #include "chrome/grit/branded_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/crx_file/id_util.h"
+#include "components/signin/public/base/signin_pref_names.h"
+#include "components/signin/public/base/signin_switches.h"
+#include "components/signin/public/identity_manager/identity_test_environment.h"
+#include "components/signin/public/identity_manager/identity_test_utils.h"
 #include "components/supervised_user/core/common/features.h"
+#include "components/sync/base/features.h"
 #include "extensions/browser/blocklist_state.h"
 #include "extensions/browser/disable_reason.h"
 #include "extensions/browser/extension_prefs.h"
@@ -120,7 +128,7 @@ std::string SiteControlsToString(
 
 class ExtensionInfoGeneratorUnitTest : public ExtensionServiceTestWithInstall {
  public:
-  ExtensionInfoGeneratorUnitTest() {}
+  ExtensionInfoGeneratorUnitTest() = default;
 
   ExtensionInfoGeneratorUnitTest(const ExtensionInfoGeneratorUnitTest&) =
       delete;
@@ -1220,6 +1228,93 @@ TEST_F(ExtensionInfoGeneratorUnitTest, IsPinnedToToolbar) {
   EXPECT_FALSE(info->pinned_to_toolbar.has_value());
 }
 
+// Test that extensions cannot be uploaded to the user's account if they are
+// signed out or signed in with full sync consent (automatically syncs all data
+// types including extensions).
+TEST_F(ExtensionInfoGeneratorUnitTest, UploadAsAccountExtension_FullSync) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndDisableFeature(
+      syncer::kSyncEnableExtensionsInTransportMode);
+
+  // Create two extensions: one syncable and one non-syncable.
+  const scoped_refptr<const Extension> syncable_extension = CreateExtension(
+      "test1", base::Value::List(), ManifestLocation::kInternal);
+  EXPECT_TRUE(sync_util::ShouldSync(profile(), syncable_extension.get()));
+
+  const scoped_refptr<const Extension> unsyncable_extension = CreateExtension(
+      "test2", base::Value::List(), ManifestLocation::kUnpacked);
+  EXPECT_FALSE(sync_util::ShouldSync(profile(), unsyncable_extension.get()));
+
+  // Neither extension can be uploaded to the user's account since there is no
+  // signed in user to upload to.
+  std::unique_ptr<developer::ExtensionInfo> info =
+      GenerateExtensionInfo(syncable_extension->id());
+  EXPECT_FALSE(info->can_upload_as_account_extension);
+
+  info = GenerateExtensionInfo(unsyncable_extension->id());
+  EXPECT_FALSE(info->can_upload_as_account_extension);
+
+  // Now sign in with full sync.
+  auto identity_test_env_profile_adaptor =
+      std::make_unique<IdentityTestEnvironmentProfileAdaptor>(profile());
+  identity_test_env_profile_adaptor->identity_test_env()
+      ->MakePrimaryAccountAvailable("testy@mctestface.com",
+                                    signin::ConsentLevel::kSync);
+
+  // Since extensions should be automatically synced with sync enabled for the
+  // user's account, they can't be manually uploaded.
+  info = GenerateExtensionInfo(syncable_extension->id());
+  EXPECT_FALSE(info->can_upload_as_account_extension);
+
+  info = GenerateExtensionInfo(unsyncable_extension->id());
+  EXPECT_FALSE(info->can_upload_as_account_extension);
+}
+
+// Same test as above, except test that extensions CAN be uploaded if the user
+// is signed into transport mode with extensions sync enabled.
+TEST_F(ExtensionInfoGeneratorUnitTest, UploadAsAccountExtension_TransportMode) {
+  // Allow extensions to sync in transport mode.
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitWithFeatures({switches::kExplicitBrowserSigninUIOnDesktop,
+                                 syncer::kSyncEnableExtensionsInTransportMode},
+                                /*disabled_features=*/{});
+
+  // Sign the user in without full sync.
+  auto identity_test_env_profile_adaptor =
+      std::make_unique<IdentityTestEnvironmentProfileAdaptor>(profile());
+  identity_test_env_profile_adaptor->identity_test_env()
+      ->MakePrimaryAccountAvailable("testy@mctestface.com",
+                                    signin::ConsentLevel::kSignin);
+  // Pretend the user has now explcitly signed in. All this is required for
+  // extensions to sync in transport mode.
+  profile()->GetPrefs()->SetBoolean(prefs::kExplicitBrowserSignin, true);
+
+  // Create two extensions: one syncable and one non-syncable.
+  const scoped_refptr<const Extension> syncable_extension = CreateExtension(
+      "test1", base::Value::List(), ManifestLocation::kInternal);
+  EXPECT_TRUE(sync_util::ShouldSync(profile(), syncable_extension.get()));
+
+  const scoped_refptr<const Extension> unsyncable_extension = CreateExtension(
+      "test2", base::Value::List(), ManifestLocation::kUnpacked);
+  EXPECT_FALSE(sync_util::ShouldSync(profile(), unsyncable_extension.get()));
+
+  // Only the `syncable_extension` can be uploaded.
+  std::unique_ptr<developer::ExtensionInfo> info =
+      GenerateExtensionInfo(syncable_extension->id());
+  EXPECT_TRUE(info->can_upload_as_account_extension);
+
+  info = GenerateExtensionInfo(unsyncable_extension->id());
+  EXPECT_FALSE(info->can_upload_as_account_extension);
+
+  // Pretend the `syncable_extension` is already associated with the user's
+  // account. It cannot be uploaded anymore.
+  AccountExtensionTracker::Get(profile())->SetAccountExtensionTypeForTesting(
+      syncable_extension->id(),
+      AccountExtensionTracker::AccountExtensionType::kAccountInstalledSignedIn);
+  info = GenerateExtensionInfo(syncable_extension->id());
+  EXPECT_FALSE(info->can_upload_as_account_extension);
+}
+
 class ExtensionInfoGeneratorWithMV2DeprecationUnitTest
     : public ExtensionInfoGeneratorUnitTest,
       public testing::WithParamInterface<MV2ExperimentStage> {
@@ -1235,23 +1330,33 @@ class ExtensionInfoGeneratorWithMV2DeprecationUnitTest
             extensions_features::kExtensionManifestV2DeprecationWarning);
         disabled_features.push_back(
             extensions_features::kExtensionManifestV2Disabled);
+        disabled_features.push_back(
+            extensions_features::kExtensionManifestV2Unsupported);
         break;
       case MV2ExperimentStage::kDisableWithReEnable:
         enabled_features.push_back(
             extensions_features::kExtensionManifestV2Disabled);
         disabled_features.push_back(
             extensions_features::kExtensionManifestV2DeprecationWarning);
+        disabled_features.push_back(
+            extensions_features::kExtensionManifestV2Unsupported);
         break;
       case MV2ExperimentStage::kNone:
         disabled_features.push_back(
+            extensions_features::kExtensionManifestV2DeprecationWarning);
+        disabled_features.push_back(
             extensions_features::kExtensionManifestV2Disabled);
         disabled_features.push_back(
-            extensions_features::kExtensionManifestV2DeprecationWarning);
+            extensions_features::kExtensionManifestV2Unsupported);
         break;
       case MV2ExperimentStage::kUnsupported:
-        // TODO(https://crbug.com/367395349): Add tests for the kUnsupported
-        // experiment stage.
-        NOTREACHED();
+        enabled_features.push_back(
+            extensions_features::kExtensionManifestV2Unsupported);
+        disabled_features.push_back(
+            extensions_features::kExtensionManifestV2DeprecationWarning);
+        disabled_features.push_back(
+            extensions_features::kExtensionManifestV2Disabled);
+        break;
     }
 
     feature_list_.InitWithFeatures(enabled_features, disabled_features);
@@ -1272,7 +1377,20 @@ INSTANTIATE_TEST_SUITE_P(
     ExtensionInfoGeneratorWithMV2DeprecationUnitTest,
     testing::Values(MV2ExperimentStage::kNone,
                     MV2ExperimentStage::kWarning,
-                    MV2ExperimentStage::kDisableWithReEnable));
+                    MV2ExperimentStage::kDisableWithReEnable,
+                    MV2ExperimentStage::kUnsupported),
+    [](const testing::TestParamInfo<MV2ExperimentStage>& info) {
+      switch (info.param) {
+        case MV2ExperimentStage::kNone:
+          return "NoneExperiment";
+        case MV2ExperimentStage::kWarning:
+          return "WarningExperiment";
+        case MV2ExperimentStage::kDisableWithReEnable:
+          return "DisableExperiment";
+        case MV2ExperimentStage::kUnsupported:
+          return "UnsupportedExperiment";
+      }
+    });
 
 // Tests that acknowledging the MV2 deprecation notice updates the extension
 // info when the experiment stage is different than 'kNone'.
@@ -1305,8 +1423,10 @@ TEST_P(ExtensionInfoGeneratorWithMV2DeprecationUnitTest,
   {
     std::unique_ptr<developer::ExtensionInfo> info =
         GenerateExtensionInfo(extension->id());
-    if (experiment_stage() == MV2ExperimentStage::kNone) {
-      // Cannot acknowledge a notice that doesn't exist.
+    if (experiment_stage() == MV2ExperimentStage::kNone ||
+        experiment_stage() == MV2ExperimentStage::kUnsupported) {
+      // Cannot acknowledge a notice that doesn't exist (none stage) or cannot
+      // be dismissed (unsupported stage).
       EXPECT_FALSE(info->did_acknowledge_mv2_deprecation_notice);
     } else {
       EXPECT_TRUE(info->did_acknowledge_mv2_deprecation_notice);
@@ -1516,103 +1636,4 @@ INSTANTIATE_TEST_SUITE_P(
 
 #endif  // BUILDFLAG(ENABLE_SUPERVISED_USERS)
 
-#if BUILDFLAG(IS_CHROMEOS)
-
-enum PendingSettingType { kAllowIncognito, kAllowOnFileUrls };
-
-class ExtensionInfoGeneratorSettingPendingUnitTest
-    : public ExtensionInfoGeneratorUnitTest,
-      public testing::WithParamInterface<std::tuple<PendingSettingType, bool>> {
-};
-
-INSTANTIATE_TEST_SUITE_P(
-    SettingPending,
-    ExtensionInfoGeneratorSettingPendingUnitTest,
-    ::testing::Combine(::testing::Values(PendingSettingType::kAllowIncognito,
-                                         PendingSettingType::kAllowOnFileUrls),
-                       ::testing::Bool()));
-
-TEST_P(ExtensionInfoGeneratorSettingPendingUnitTest,
-       GenerateExtensionInfoWithPendingSettings) {
-  scoped_refptr<const Extension> extension = ExtensionBuilder("alpha").Build();
-  service()->AddExtension(extension.get());
-
-  auto [setting, initial_setting_value] = GetParam();
-  bool pending_setting_value = !initial_setting_value;
-  auto* prefs = ExtensionPrefs::Get(profile());
-
-  switch (setting) {
-    case PendingSettingType::kAllowIncognito:
-      prefs->SetIsIncognitoEnabled(extension->id(), initial_setting_value);
-      prefs->SetIsIncognitoEnabledDelayed(extension->id(),
-                                          pending_setting_value);
-      break;
-    case PendingSettingType::kAllowOnFileUrls:
-      prefs->SetAllowFileAccess(extension->id(), initial_setting_value);
-      prefs->SetAllowFileAccessDelayed(extension->id(), pending_setting_value);
-      break;
-    default:
-      break;
-  }
-
-  std::unique_ptr<api::developer_private::ExtensionInfo> info =
-      GenerateExtensionInfo(extension->id());
-  ASSERT_TRUE(info);
-
-  switch (setting) {
-    case PendingSettingType::kAllowIncognito:
-      ASSERT_TRUE(info->incognito_access_pending_change);
-      ASSERT_FALSE(info->file_access_pending_change);
-      ASSERT_EQ(info->incognito_access.is_active, pending_setting_value);
-      break;
-    case PendingSettingType::kAllowOnFileUrls:
-      ASSERT_TRUE(info->file_access_pending_change);
-      ASSERT_FALSE(info->incognito_access_pending_change);
-      ASSERT_EQ(info->file_access.is_active, pending_setting_value);
-      break;
-    default:
-      break;
-  }
-}
-
-TEST_P(ExtensionInfoGeneratorSettingPendingUnitTest,
-       GenerateExtensionInfoWithNoPendingSettings) {
-  scoped_refptr<const Extension> extension = ExtensionBuilder("alpha").Build();
-  service()->AddExtension(extension.get());
-
-  auto [setting, initial_setting_value] = GetParam();
-  auto* prefs = ExtensionPrefs::Get(profile());
-
-  switch (setting) {
-    case PendingSettingType::kAllowIncognito:
-      prefs->SetIsIncognitoEnabled(extension->id(), initial_setting_value);
-      prefs->SetIsIncognitoEnabledDelayed(extension->id(),
-                                          initial_setting_value);
-      break;
-    case PendingSettingType::kAllowOnFileUrls:
-      prefs->SetAllowFileAccess(extension->id(), initial_setting_value);
-      prefs->SetAllowFileAccessDelayed(extension->id(), initial_setting_value);
-      break;
-    default:
-      break;
-  }
-
-  std::unique_ptr<api::developer_private::ExtensionInfo> info =
-      GenerateExtensionInfo(extension->id());
-  ASSERT_TRUE(info);
-
-  ASSERT_FALSE(info->incognito_access_pending_change);
-  ASSERT_FALSE(info->file_access_pending_change);
-  switch (setting) {
-    case PendingSettingType::kAllowIncognito:
-      ASSERT_EQ(info->incognito_access.is_active, initial_setting_value);
-      break;
-    case PendingSettingType::kAllowOnFileUrls:
-      ASSERT_EQ(info->file_access.is_active, initial_setting_value);
-      break;
-    default:
-      break;
-  }
-}
-#endif  // BUILDFLAG(IS_CHROMEOS)
 }  // namespace extensions

@@ -3,36 +3,33 @@
 # found in the LICENSE file.
 """Definitions of builders in the chromium.mac builder group."""
 
-load("@chromium-luci//args.star", "args")
-load("@chromium-luci//branches.star", "branches")
-load("@chromium-luci//builder_config.star", "builder_config")
-load("@chromium-luci//builder_health_indicators.star", "health_spec")
-load("@chromium-luci//builders.star", "cpu", "os")
-load("@chromium-luci//ci.star", "ci")
-load("@chromium-luci//consoles.star", "consoles")
-load("@chromium-luci//gn_args.star", "gn_args")
-load("@chromium-luci//targets.star", "targets")
-load("//lib/ci_constants.star", "ci_constants")
-load("//lib/gardener_rotations.star", "gardener_rotations")
-load("//lib/siso.star", "siso")
+load("//lib/args.star", "args")
+load("//lib/branches.star", "branches")
+load("//lib/builder_config.star", "builder_config")
+load("//lib/builder_health_indicators.star", "health_spec")
+load("//lib/builders.star", "cpu", "gardener_rotations", "os", "siso")
+load("//lib/ci.star", "ci")
+load("//lib/consoles.star", "consoles")
+load("//lib/gn_args.star", "gn_args")
+load("//lib/targets.star", "targets")
 load("//lib/xcode.star", "xcode")
 
 ci.defaults.set(
-    executable = ci_constants.DEFAULT_EXECUTABLE,
+    executable = ci.DEFAULT_EXECUTABLE,
     builder_group = "chromium.mac",
     builder_config_settings = builder_config.ci_settings(
         retry_failed_shards = True,
     ),
-    pool = ci_constants.DEFAULT_POOL,
+    pool = ci.DEFAULT_POOL,
     os = os.MAC_DEFAULT,
     gardener_rotations = gardener_rotations.CHROMIUM,
     tree_closing = True,
-    tree_closing_notifiers = ci_constants.DEFAULT_TREE_CLOSING_NOTIFIERS,
     main_console_view = "main",
-    execution_timeout = ci_constants.DEFAULT_EXECUTION_TIMEOUT,
-    health_spec = health_spec.default(),
-    service_account = ci_constants.DEFAULT_SERVICE_ACCOUNT,
-    shadow_service_account = ci_constants.DEFAULT_SHADOW_SERVICE_ACCOUNT,
+    execution_timeout = ci.DEFAULT_EXECUTION_TIMEOUT,
+    health_spec = health_spec.DEFAULT,
+    service_account = ci.DEFAULT_SERVICE_ACCOUNT,
+    shadow_service_account = ci.DEFAULT_SHADOW_SERVICE_ACCOUNT,
+    siso_enabled = True,
     siso_project = siso.project.DEFAULT_TRUSTED,
     siso_remote_jobs = siso.remote_jobs.DEFAULT,
     thin_tester_cores = 8,
@@ -348,7 +345,7 @@ ci.builder(
 ci.thin_tester(
     name = "mac11-arm64-rel-tests",
     branch_selector = branches.selector.MAC_BRANCHES,
-    parent = "ci/mac-arm64-rel",
+    triggered_by = ["ci/mac-arm64-rel"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -396,7 +393,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "mac12-arm64-rel-tests",
     branch_selector = branches.selector.MAC_BRANCHES,
-    parent = "ci/mac-arm64-rel",
+    triggered_by = ["ci/mac-arm64-rel"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -456,7 +453,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "mac13-arm64-rel-tests",
     branch_selector = branches.selector.MAC_BRANCHES,
-    parent = "ci/mac-arm64-rel",
+    triggered_by = ["ci/mac-arm64-rel"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -512,7 +509,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "mac-skia-alt-arm64-rel-tests",
     description_html = "Runs web tests with Skia Graphite on Mac ARM machines",
-    parent = "ci/mac-arm64-rel",
+    triggered_by = ["ci/mac-arm64-rel"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -550,7 +547,7 @@ ci.thin_tester(
     name = "mac14-arm64-rel-tests",
     branch_selector = branches.selector.MAC_BRANCHES,
     description_html = "Runs MacOS 14 tests on ARM machines",
-    parent = "ci/mac-arm64-rel",
+    triggered_by = ["ci/mac-arm64-rel"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -610,7 +607,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "Mac11 Tests",
     branch_selector = branches.selector.MAC_BRANCHES,
-    parent = "ci/Mac Builder",
+    triggered_by = ["ci/Mac Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -684,7 +681,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "Mac12 Tests",
     branch_selector = branches.selector.MAC_BRANCHES,
-    parent = "ci/Mac Builder",
+    triggered_by = ["ci/Mac Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -771,7 +768,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "Mac13 Tests",
     branch_selector = branches.selector.MAC_BRANCHES,
-    parent = "ci/Mac Builder",
+    triggered_by = ["ci/Mac Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -860,7 +857,7 @@ ci.thin_tester(
     name = "mac14-tests-dbg",
     branch_selector = branches.selector.MAC_BRANCHES,
     description_html = "Runs Mac 14 tests with debug config.",
-    parent = "ci/Mac Builder (dbg)",
+    triggered_by = ["ci/Mac Builder (dbg)"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -956,7 +953,7 @@ ci.thin_tester(
     name = "mac14-tests",
     branch_selector = branches.selector.MAC_BRANCHES,
     description_html = "Runs default MacOS 14 tests on CI.",
-    parent = "ci/Mac Builder",
+    triggered_by = ["ci/Mac Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(

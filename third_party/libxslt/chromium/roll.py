@@ -72,7 +72,6 @@ import tempfile
 
 PATCHES = [
     'xslt-locale.patch',
-    '0004-Use-a-dedicated-node-type-to-maintain-the-list-of-ca.patch',
 ]
 
 

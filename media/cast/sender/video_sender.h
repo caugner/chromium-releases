@@ -25,7 +25,7 @@ class Sender;
 namespace media {
 class VideoEncoderMetricsProvider;
 class VideoFrame;
-}
+}  // namespace media
 
 namespace media::cast {
 
@@ -80,7 +80,7 @@ class VideoSender : public FrameSender::Client {
   base::TimeDelta GetEncoderBacklogDuration() const final;
 
  private:
-  // Called by the |video_encoder_| with the next EncodedFrame to send.
+  // Called by the `video_encoder_` with the next EncodedFrame to send.
   void OnEncodedVideoFrame(scoped_refptr<media::VideoFrame> video_frame,
                            const base::TimeTicks reference_time,
                            std::unique_ptr<SenderEncodedFrame> encoded_frame);

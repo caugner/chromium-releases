@@ -17,7 +17,6 @@
 #include <memory>
 #include <tuple>
 
-#include "base/check.h"
 #include "base/cpu_reduction_experiment.h"
 #include "base/functional/bind.h"
 #include "base/location.h"
@@ -159,11 +158,7 @@ void ChannelPosix::ShutDownImpl() {
 }
 
 void ChannelPosix::Write(MessagePtr message) {
-  if (ShouldRecordSubsampledHistograms()) {
-    UMA_HISTOGRAM_COUNTS_100000("Mojo.Channel.WriteMessageSize",
-                                message->data_num_bytes());
-    LogHistogramForIPCMetrics(MessageType::kSent);
-  }
+  RecordSentMessageMetrics(message->data_num_bytes());
 
   bool write_error = false;
   {
@@ -224,14 +219,11 @@ void ChannelPosix::StartOnIOThread() {
   base::CurrentThread::Get()->AddDestructionObserver(this);
   base::AutoLock lock(write_lock_);
   DCHECK(!read_watcher_);
-  read_watcher_ =
-      std::make_unique<base::MessagePumpForIO::FdWatchController>(FROM_HERE);
-  base::CurrentIOThread::Get()->WatchFileDescriptor(
-      socket_.get(), true /* persistent */, base::MessagePumpForIO::WATCH_READ,
-      read_watcher_.get(), this);
+  DCHECK(base::IOWatcher::Get());
+  read_watcher_ = base::IOWatcher::Get()->WatchFileDescriptor(
+      socket_.get(), base::IOWatcher::FdWatchDuration::kPersistent,
+      base::IOWatcher::FdWatchMode::kRead, *this);
   DCHECK(!write_watcher_);
-  write_watcher_ =
-      std::make_unique<base::MessagePumpForIO::FdWatchController>(FROM_HERE);
   FlushOutgoingMessagesNoLock();
 }
 
@@ -241,20 +233,21 @@ void ChannelPosix::WaitForWriteOnIOThread() {
 }
 
 void ChannelPosix::WaitForWriteOnIOThreadNoLock() {
-  if (pending_write_)
+  if (pending_write_ || reject_writes_) {
     return;
-  if (!write_watcher_)
-    return;
+  }
+
   // This may be called from a `RunOrPostTask()` callback running in sequence
   // with the IO thread, but on a different thread. In that case,
   // `RunsTaskInCurrentSequence()` would return true, so use
-  // `BelongsToCurrentThread()` to detect that we aren't on the IO thread
-  // (otherwise, `base::CurrentIOThread::Get()` would fail).
+  // `BelongsToCurrentThread()` to detect that we aren't on the designated IO
+  // thread for this channel (otherwise, `base::IOWatcher::Get()` could fail or
+  // be inconsistent).
   if (io_task_runner_->BelongsToCurrentThread()) {
     pending_write_ = true;
-    base::CurrentIOThread::Get()->WatchFileDescriptor(
-        socket_.get(), false /* persistent */,
-        base::MessagePumpForIO::WATCH_WRITE, write_watcher_.get(), this);
+    write_watcher_ = base::IOWatcher::Get()->WatchFileDescriptor(
+        socket_.get(), base::IOWatcher::FdWatchDuration::kOneShot,
+        base::IOWatcher::FdWatchMode::kWrite, *this);
   } else {
     io_task_runner_->PostTask(
         FROM_HERE, base::BindOnce(&ChannelPosix::WaitForWriteOnIOThread, this));
@@ -290,7 +283,7 @@ void ChannelPosix::WillDestroyCurrentMessageLoop() {
     ShutDownOnIOThread();
 }
 
-void ChannelPosix::OnFileCanReadWithoutBlocking(int fd) {
+void ChannelPosix::OnFdReadable(int fd) {
   CHECK_EQ(fd, socket_.get());
 
   bool validation_error = false;
@@ -342,7 +335,7 @@ void ChannelPosix::OnFileCanReadWithoutBlocking(int fd) {
   }
 }
 
-void ChannelPosix::OnFileCanWriteWithoutBlocking(int fd) {
+void ChannelPosix::OnFdWritable(int fd) {
   bool write_error = false;
   {
     base::AutoLock lock(write_lock_);
@@ -371,9 +364,6 @@ bool ChannelPosix::WriteNoLock(MessageView message_view) {
                    message_view.data_num_bytes()};
       size_t num_handles_to_send =
           std::min(num_handles - handles_written, kMaxSendmsgHandles);
-      // TODO(crbug.com/439305148): Sending a large number of handles without
-      // a payload causes the message to be dropped.
-      CHECK(num_handles_to_send && (message_view.data_num_bytes() > 0));
       std::vector<base::ScopedFD> fds(num_handles_to_send);
       for (size_t i = 0; i < num_handles_to_send; ++i)
         fds[i] = handles[i + handles_written].TakeHandle().TakeFD();

@@ -9,7 +9,7 @@
 # suite is no longer needed in //testing/buildbot, targets.bundle (which does
 # not yet exist) can be used for grouping tests in a more flexible manner.
 
-load("@chromium-luci//targets.star", "targets")
+load("//lib/targets.star", "targets")
 
 # TODO(gbeaty) - Make the resultdb information for tests using the same binaries
 # consistent and move the information onto the binaries
@@ -102,18 +102,16 @@ targets.legacy_basic_suite(
     name = "chromeos_chrome_all_tast_tests",
     tests = {
         "chrome_all_tast_tests": targets.legacy_test_config(
-            skylab = targets.skylab(
-                # `tast_expr` must be a non-empty string to run the tast tests. But the value of
-                # would be overridden by `tast_arrt_expr` defined in chromeos/BUILD.gn, so that we
-                # put the stub string here.
-                tast_expr = "STUB_STRING_TO_RUN_TAST_TESTS",
-                # Temporary increases the maximum retries due to the unstable cloudbots (b/377616158)
-                test_level_retries = 2,
-                # Number of shards. Might be overriden for slower boards.
-                shards = 15,
-                # Timeout including DUT privisioning.
-                timeout_sec = 14400,
-            ),
+            # `tast_expr` must be a non-empty string to run the tast tests. But the value of
+            # would be overridden by `tast_arrt_expr` defined in chromeos/BUILD.gn, so that we
+            # put the stub string here.
+            tast_expr = "STUB_STRING_TO_RUN_TAST_TESTS",
+            # Temporary increases the maximum retries due to the unstable cloudbots (b/377616158)
+            test_level_retries = 2,
+            # Timeout including DUT privisioning.
+            timeout_sec = 14400,
+            # Number of shards. Might be overriden for slower boards.
+            shards = 15,
         ),
     },
 )
@@ -123,17 +121,15 @@ targets.legacy_basic_suite(
     name = "chromeos_chrome_criticalstaging_tast_tests",
     tests = {
         "chrome_criticalstaging_tast_tests": targets.legacy_test_config(
+            # `tast_expr` must be a non-empty string to run the tast tests. But the value of
+            # would be overridden by `tast_arrt_expr` defined in chromeos/BUILD.gn, so that we
+            # put the stub string here.
+            tast_expr = "STUB_STRING_TO_RUN_TAST_TESTS",
+            test_level_retries = 2,
             ci_only = True,
-            skylab = targets.skylab(
-                # `tast_expr` must be a non-empty string to run the tast tests. But the value of
-                # would be overridden by `tast_arrt_expr` defined in chromeos/BUILD.gn, so that we
-                # put the stub string here.
-                tast_expr = "STUB_STRING_TO_RUN_TAST_TESTS",
-                test_level_retries = 2,
-                shards = 3,
-                timeout_sec = 14400,
-            ),
+            timeout_sec = 14400,
             experiment_percentage = 100,
+            shards = 3,
         ),
     },
 )
@@ -144,17 +140,15 @@ targets.legacy_basic_suite(
     name = "chromeos_chrome_disabled_tast_tests",
     tests = {
         "chrome_disabled_tast_tests": targets.legacy_test_config(
+            # `tast_expr` must be a non-empty string to run the tast tests. But the value of
+            # would be overridden by `tast_arrt_expr` defined in chromeos/BUILD.gn, so that we
+            # put the stub string here.
+            tast_expr = "STUB_STRING_TO_RUN_TAST_TESTS",
+            test_level_retries = 1,
             ci_only = True,
-            skylab = targets.skylab(
-                # `tast_expr` must be a non-empty string to run the tast tests. But the value of
-                # would be overridden by `tast_arrt_expr` defined in chromeos/BUILD.gn, so that we
-                # put the stub string here.
-                tast_expr = "STUB_STRING_TO_RUN_TAST_TESTS",
-                test_level_retries = 1,
-                shards = 2,
-                timeout_sec = 14400,
-            ),
+            timeout_sec = 14400,
             experiment_percentage = 100,
+            shards = 2,
         ),
     },
 )
@@ -523,7 +517,7 @@ targets.legacy_basic_suite(
         # running WPTs with forced device scale factor.
         "high_dpi_headless_shell_wpt_tests": targets.legacy_test_config(
             swarming = targets.swarming(
-                shards = 1,
+                shards = 3,
             ),
         ),
     },
@@ -549,7 +543,7 @@ targets.legacy_basic_suite(
         ),
         "headless_shell_wpt_tests": targets.legacy_test_config(
             swarming = targets.swarming(
-                shards = 4,
+                shards = 18,
             ),
         ),
     },
@@ -559,6 +553,7 @@ targets.legacy_basic_suite(
     name = "clang_tot_gtests",
     tests = {
         "base_unittests": targets.legacy_test_config(),
+        "highway_tests": targets.legacy_test_config(),
     },
 )
 
@@ -674,7 +669,7 @@ targets.legacy_basic_suite(
         ),
         "headless_shell_wpt_tests": targets.legacy_test_config(
             swarming = targets.swarming(
-                shards = 4,
+                shards = 18,
             ),
         ),
         "content_shell_crash_test": targets.legacy_test_config(),
@@ -1711,7 +1706,7 @@ targets.legacy_basic_suite(
         ),
         "not_site_per_process_headless_shell_wpt_tests": targets.legacy_test_config(
             swarming = targets.swarming(
-                shards = 3,
+                shards = 11,
             ),
         ),
         "webdriver_wpt_tests": targets.legacy_test_config(
@@ -1826,6 +1821,20 @@ targets.legacy_basic_suite(
 )
 
 targets.legacy_basic_suite(
+    name = "ondevice_stability_tests_light_suite",
+    tests = {
+        "ondevice_stability_tests_light": targets.legacy_test_config(
+            mixins = [
+                "has_native_resultdb_integration",
+            ],
+            linux_args = [
+                "--no-xvfb",
+            ],
+        ),
+    },
+)
+
+targets.legacy_basic_suite(
     name = "ondevice_stability_tests_suite",
     tests = {
         "ondevice_stability_tests": targets.legacy_test_config(
@@ -1864,12 +1873,29 @@ targets.legacy_basic_suite(
 )
 
 targets.legacy_basic_suite(
+    name = "opt_target_coverage_test_suite",
+    tests = {
+        "opt_target_coverage_test": targets.legacy_test_config(
+            mixins = [
+                "has_native_resultdb_integration",
+            ],
+            linux_args = [
+                "--no-xvfb",
+            ],
+        ),
+    },
+)
+
+targets.legacy_basic_suite(
     name = "chrome_ai_wpt_tests_suite",
     tests = {
         "chrome_ai_wpt_tests": targets.legacy_test_config(
             mixins = [
                 "has_native_resultdb_integration",
                 "blink_tests_write_run_histories",
+            ],
+            args = [
+                "--release",
             ],
             mac_args = [
                 "--driver-name",
@@ -1885,7 +1911,6 @@ targets.legacy_basic_suite(
 targets.legacy_basic_suite(
     name = "optimization_guide_android_gtests",
     tests = {
-        "optimization_guide_components_unittests": targets.legacy_test_config(),
         # TODO(mgeorgaklis): Add optimization_guide_unittests when they become Android compatible.
     },
 )
@@ -1894,7 +1919,6 @@ targets.legacy_basic_suite(
     name = "optimization_guide_cros_gtests",
     tests = {
         "optimization_guide_browser_tests": targets.legacy_test_config(),
-        "optimization_guide_components_unittests": targets.legacy_test_config(),
     },
 )
 
@@ -1919,11 +1943,6 @@ targets.legacy_basic_suite(
             ],
         ),
         "optimization_guide_browser_tests": targets.legacy_test_config(
-            linux_args = [
-                "--use-xvfb",
-            ],
-        ),
-        "optimization_guide_components_unittests": targets.legacy_test_config(
             linux_args = [
                 "--use-xvfb",
             ],

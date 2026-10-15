@@ -3,37 +3,34 @@
 # found in the LICENSE file.
 """Definitions of builders in the chromium.linux builder group."""
 
-load("@chromium-luci//args.star", "args")
-load("@chromium-luci//branches.star", "branches")
-load("@chromium-luci//builder_config.star", "builder_config")
-load("@chromium-luci//builder_health_indicators.star", "health_spec")
-load("@chromium-luci//builders.star", "builders", "os")
-load("@chromium-luci//ci.star", "ci")
-load("@chromium-luci//consoles.star", "consoles")
-load("@chromium-luci//gn_args.star", "gn_args")
-load("@chromium-luci//targets.star", "targets")
-load("//lib/ci_constants.star", "ci_constants")
-load("//lib/gardener_rotations.star", "gardener_rotations")
-load("//lib/siso.star", "siso")
+load("//lib/args.star", "args")
+load("//lib/branches.star", "branches")
+load("//lib/builder_config.star", "builder_config")
+load("//lib/builder_health_indicators.star", "health_spec")
+load("//lib/builders.star", "builders", "gardener_rotations", "os", "siso")
+load("//lib/ci.star", "ci")
+load("//lib/consoles.star", "consoles")
+load("//lib/gn_args.star", "gn_args")
+load("//lib/targets.star", "targets")
 
 ci.defaults.set(
-    executable = ci_constants.DEFAULT_EXECUTABLE,
+    executable = ci.DEFAULT_EXECUTABLE,
     builder_group = "chromium.linux",
     builder_config_settings = builder_config.ci_settings(
         retry_failed_shards = True,
     ),
-    pool = ci_constants.DEFAULT_POOL,
+    pool = ci.DEFAULT_POOL,
     cores = 8,
     os = os.LINUX_DEFAULT,
     gardener_rotations = gardener_rotations.CHROMIUM,
     tree_closing = True,
-    tree_closing_notifiers = ci_constants.DEFAULT_TREE_CLOSING_NOTIFIERS,
     main_console_view = "main",
-    execution_timeout = ci_constants.DEFAULT_EXECUTION_TIMEOUT,
-    health_spec = health_spec.default(),
+    execution_timeout = ci.DEFAULT_EXECUTION_TIMEOUT,
+    health_spec = health_spec.DEFAULT,
     notifies = ["chromium.linux"],
-    service_account = ci_constants.DEFAULT_SERVICE_ACCOUNT,
-    shadow_service_account = ci_constants.DEFAULT_SHADOW_SERVICE_ACCOUNT,
+    service_account = ci.DEFAULT_SERVICE_ACCOUNT,
+    shadow_service_account = ci.DEFAULT_SHADOW_SERVICE_ACCOUNT,
+    siso_enabled = True,
     siso_project = siso.project.DEFAULT_TRUSTED,
     siso_remote_jobs = siso.remote_jobs.HIGH_JOBS_FOR_CI,
 )
@@ -244,16 +241,17 @@ ci.builder(
     ),
     ssd = True,
     free_space = builders.free_space.high,
-    # Don't use the default tree closer, which filters by step name, and instead
-    # enable tree closing for any step failure.
-    tree_closing_notifiers = args.ignore_default(["close-on-any-step-failure"]),
+    # Set tree_closing to false to disable the defaualt tree closer, which
+    # filters by step name, and instead enable tree closing for any step
+    # failure.
+    tree_closing = False,
     console_view_entry = consoles.console_view_entry(
         category = "release",
         short_name = "det",
     ),
     contact_team_email = "chrome-build-team@google.com",
     execution_timeout = 6 * time.hour,
-    notifies = ["Deterministic Linux"],
+    notifies = ["Deterministic Linux", "close-on-any-step-failure"],
     siso_remote_jobs = siso.remote_jobs.DEFAULT,
 )
 
@@ -370,6 +368,7 @@ ci.builder(
     ),
     cq_mirrors_console_view = "mirrors",
     contact_team_email = "chrome-linux-engprod@google.com",
+    siso_remote_linking = True,
 )
 
 ci.builder(
@@ -462,7 +461,7 @@ ci.builder(
 ci.thin_tester(
     name = "Linux Tests",
     branch_selector = branches.selector.LINUX_BRANCHES,
-    parent = "ci/Linux Builder",
+    triggered_by = ["ci/Linux Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -567,7 +566,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "Linux Tests (dbg)(1)",
     branch_selector = branches.selector.LINUX_BRANCHES,
-    parent = "ci/Linux Builder (dbg)",
+    triggered_by = ["ci/Linux Builder (dbg)"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -610,6 +609,9 @@ ci.thin_tester(
                 ),
             ),
             "interactive_ui_tests": targets.mixin(
+                args = [
+                    "--test-launcher-filter-file=../../testing/buildbot/filters/ozone-linux.interactive_ui_tests.filter",
+                ],
                 swarming = targets.swarming(
                     shards = 10,
                 ),
@@ -653,7 +655,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "Linux Tests (Wayland)",
     branch_selector = branches.selector.LINUX_BRANCHES,
-    parent = "ci/Linux Builder (Wayland)",
+    triggered_by = ["ci/Linux Builder (Wayland)"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -922,6 +924,50 @@ ci.builder(
         short_name = "gcc",
     ),
     contact_team_email = "build@chromium.org",
+)
+
+ci.builder(
+    name = "linux-modules-compile-fyi-rel",
+    branch_selector = branches.selector.MAIN,
+    description_html = "Experimental compile with use_libcxx_modules=true.",
+    builder_spec = builder_config.builder_spec(
+        gclient_config = builder_config.gclient_config(config = "chromium"),
+        chromium_config = builder_config.chromium_config(
+            config = "chromium",
+            apply_configs = ["mb"],
+            build_config = builder_config.build_config.RELEASE,
+            target_bits = 64,
+            target_platform = builder_config.target_platform.LINUX,
+        ),
+        build_gs_bucket = "chromium-linux-archive",
+    ),
+    gn_args = gn_args.config(
+        configs = [
+            "libcxx_modules",
+            "linux",
+            "no_siso",
+            "release_builder",
+            "x64",
+        ],
+    ),
+    targets = targets.bundle(
+        additional_compile_targets = [
+            "all",
+        ],
+    ),
+    cores = 32,
+    ssd = True,
+    gardener_rotations = args.ignore_default(None),
+    tree_closing = False,
+    console_view_entry = consoles.console_view_entry(
+        console_view = "chromium.fyi",
+        category = "linux",
+        short_name = "mod",
+    ),
+    main_console_view = None,
+    contact_team_email = "chrome-build-team@google.com",
+    execution_timeout = 6 * time.hour,
+    notifies = args.ignore_default([]),
 )
 
 ci.builder(

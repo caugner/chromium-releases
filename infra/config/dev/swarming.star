@@ -4,12 +4,9 @@
 
 """Permissions for Chromium dev/staging swarming pools."""
 
-load("@chromium-luci//swarming.star", "swarming")
+load("//lib/swarming.star", "swarming")
 
-swarming.root_permissions(
-    owner_group = "project-chromium-admins",
-    viewer_group = "all",
-)
+swarming.root_permissions()
 
 swarming.task_accounts(
     realm = "@root",
@@ -45,6 +42,12 @@ swarming.pool_realm(
         #TODO(b/258041976): mac os vm experiments
         "chromium-swarming-dev-led-access",
     ],
+)
+
+swarming.task_triggerers(
+    builder_realm = "try",
+    pool_realm = "pools/tests",
+    groups = ["chromium-swarming-dev-led-access"],
 )
 
 swarming.task_triggerers(

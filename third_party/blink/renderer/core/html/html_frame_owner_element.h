@@ -138,6 +138,14 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
   // For unit tests, manually trigger the UpdateContainerPolicy method.
   void UpdateContainerPolicyForTests() { UpdateContainerPolicy(); }
 
+  // Updates the deferred fetch policy and notify the frame loader client of any
+  // changes after `LoadOrRedirectSubframe()` is called and navigating to
+  // a target URL.
+  // Must be called after navigation such that "inherited policy" is available.
+  // To be precise, after `ApplyPermissionsPolicy()` is called by
+  // `DocumentLoader::CommitNavigation()`.
+  void UpdateDeferredFetchPolicy();
+
   void CancelPendingLazyLoad();
 
   void ParseAttribute(const AttributeModificationParams&) override;
@@ -159,8 +167,9 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
   bool LoadOrRedirectSubframe(const KURL&,
                               const AtomicString& frame_name,
                               bool replace_current_item);
-  bool IsKeyboardFocusable(UpdateBehavior update_behavior =
-                               UpdateBehavior::kStyleAndLayout) const override;
+  bool IsKeyboardFocusableSlow(
+      UpdateBehavior update_behavior =
+          UpdateBehavior::kStyleAndLayout) const override;
   void FrameOwnerPropertiesChanged() override;
 
   void DisposePluginSoon(WebPluginContainerImpl*);

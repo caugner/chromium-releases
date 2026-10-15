@@ -169,12 +169,6 @@ void FileChooserImpl::OpenFileChooser(blink::mojom::FileChooserParamsPtr params,
     return;
   }
 
-  // Do not allow open dialogs to have renderer-controlled default_file_name.
-  // See https://crbug.com/433800617 for context.
-  if (params->mode != blink::mojom::FileChooserParams::Mode::kSave) {
-    params->default_file_name = base::FilePath();
-  }
-
   // Don't allow page with open FileChooser to enter BackForwardCache to avoid
   // any unexpected behaviour from BackForwardCache.
   BackForwardCache::DisableForRenderFrameHost(
@@ -198,7 +192,7 @@ void FileChooserImpl::EnumerateChosenDirectory(
   auto listener = base::MakeRefCounted<FileSelectListenerImpl>(this);
   listener_impl_ = listener.get();
   auto* policy = ChildProcessSecurityPolicyImpl::GetInstance();
-  if (policy->CanReadFile(render_frame_host()->GetProcess()->GetID(),
+  if (policy->CanReadFile(render_frame_host()->GetProcess()->GetDeprecatedID(),
                           directory_path)) {
     WebContentsImpl::FromRenderFrameHostImpl(render_frame_host())
         ->EnumerateDirectory(GetWeakPtr(), render_frame_host(),
@@ -215,10 +209,11 @@ void FileChooserImpl::FileSelected(
   listener_impl_ = nullptr;
   if (!render_frame_host()) {
     std::move(callback_).Run(nullptr);
+    weak_factory_.InvalidateWeakPtrs();
     return;
   }
   storage::FileSystemContext* file_system_context = nullptr;
-  const int pid = render_frame_host()->GetProcess()->GetID();
+  const int pid = render_frame_host()->GetProcess()->GetDeprecatedID();
   auto* policy = ChildProcessSecurityPolicyImpl::GetInstance();
   // Grant the security access requested to the given files.
   for (const auto& file : files) {
@@ -241,11 +236,14 @@ void FileChooserImpl::FileSelected(
     }
   }
   std::move(callback_).Run(FileChooserResult::New(std::move(files), base_dir));
+  weak_factory_.InvalidateWeakPtrs();
 }
 
 void FileChooserImpl::FileSelectionCanceled() {
   listener_impl_ = nullptr;
   std::move(callback_).Run(nullptr);
+
+  weak_factory_.InvalidateWeakPtrs();
 }
 
 RenderFrameHostImpl* FileChooserImpl::render_frame_host() {

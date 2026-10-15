@@ -65,7 +65,7 @@ VideoEncoderImpl::VideoEncoderImpl(
     StatusChangeCallback status_change_cb)
     : cast_environment_(cast_environment) {
   CHECK(cast_environment_->HasVideoThread());
-  DCHECK(status_change_cb);
+  CHECK(status_change_cb);
 
   VideoCodec codec = video_config.video_codec();
   if (codec == VideoCodec::kVP8 || codec == VideoCodec::kVP9) {
