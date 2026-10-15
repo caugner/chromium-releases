@@ -61,6 +61,10 @@ bool AudioFileReader::OpenDecoder() {
     return false;
   }
 
+  if (!config.IsValidConfig()) {
+    return false;
+  }
+
   // Verify the channel layout is supported by Chrome.  Acts as a sanity check
   // against invalid files.  See http://crbug.com/171962
   if (ChannelLayoutToChromeChannelLayout(codec_context_->ch_layout) ==
@@ -71,8 +75,7 @@ bool AudioFileReader::OpenDecoder() {
   // Under a very specific set of circumstances, we can use the
   // SymphoniaAudioDecoder.
 #if BUILDFLAG(ENABLE_SYMPHONIA)
-  if (base::FeatureList::IsEnabled(kSymphoniaAudioDecoding) &&
-      SymphoniaAudioDecoder::IsCodecSupported(config.codec())) {
+  if (SymphoniaAudioDecoder::IsCodecSupported(config.codec())) {
     decoder_ = std::make_unique<SymphoniaAudioDecoder>(
         nullptr, &media_log_,
         SymphoniaAudioDecoder::ExecutionMode::kSynchronous);
@@ -82,6 +85,17 @@ bool AudioFileReader::OpenDecoder() {
   if (!decoder_) {
     decoder_ = std::make_unique<FFmpegAudioDecoder>(
         nullptr, &media_log_, FFmpegAudioDecoder::ExecutionMode::kSynchronous);
+  }
+
+  // When demuxing opus from an Ogg container, ffmpeg somehow ends up generating
+  // the skip information twice. Once as discard adding and once as internally
+  // handled pre-skip. Setting the flag below forces FFmpegAudioDecoder to tell
+  // ffmpeg to disable any manual trimming of the stream. Trimming is instead
+  // handled by the AudioDiscardHelper within FFmpegAudioDecoder.
+  if (config.codec() == AudioCodec::kOpus &&
+      glue_->container() ==
+          container_names::MediaContainerName::kContainerOgg) {
+    config.disable_discard_decoder_delay();
   }
 
   std::optional<bool> initialize_status;

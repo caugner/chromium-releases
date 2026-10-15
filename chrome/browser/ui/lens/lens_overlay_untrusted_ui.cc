@@ -141,6 +141,7 @@ LensOverlayUntrustedUI::LensOverlayUntrustedUI(content::WebUI* web_ui)
   html_source->AddLocalizedString(
       "searchboxGhostLoaderNoSuggestText",
       IDS_GOOGLE_SEARCH_BOX_CONTEXTUAL_NO_SUGGEST_TEXT);
+  html_source->AddLocalizedString("close", IDS_CLOSE);
   html_source->AddLocalizedString(
       "searchButton", IDS_LENS_OVERLAY_SEARCH_LANGUAGE_PICKER_LABEL);
   html_source->AddLocalizedString(
@@ -240,7 +241,8 @@ LensOverlayUntrustedUI::LensOverlayUntrustedUI(content::WebUI* web_ui)
       lens::LensOverlayShouldUseDarkMode(
           ThemeServiceFactory::GetForProfile(Profile::FromWebUI(web_ui))));
   html_source->AddBoolean("enableOverlayContextualSearchbox",
-                          lens::IsLensOverlayContextualSearchboxEnabled());
+                          lens::IsLensOverlayContextualSearchboxEnabled(
+                              Profile::FromWebUI(web_ui)));
   html_source->AddBoolean(
       "enableGhostLoader",
       lens::features::EnableContextualSearchboxGhostLoader());
@@ -290,6 +292,7 @@ LensOverlayUntrustedUI::LensOverlayUntrustedUI(content::WebUI* web_ui)
   html_source->AddBoolean(
       "enableKeyboardSelection",
       lens::features::IsLensOverlayKeyboardSelectionEnabled());
+  html_source->AddBoolean("enableMultiRegionSelection", false);
 
   LensOverlayController& controller = GetLensOverlayController();
   html_source->AddDouble("invocationTime",
@@ -348,10 +351,6 @@ LensOverlayUntrustedUI::LensOverlayUntrustedUI(content::WebUI* web_ui)
   html_source->AddBoolean(
     "enableThumbnailSizingTweaks",
     lens::features::GetVisualSelectionUpdatesEnableThumbnailSizingTweaks());
-  html_source->AddBoolean("steadyComposeboxShowVoiceSearch", false);
-  html_source->AddBoolean("expandedComposeboxShowVoiceSearch", false);
-  html_source->AddBoolean("composeboxContextDragAndDropEnabled", false);
-  html_source->AddBoolean("composeboxShowRecentTabChip", false);
 
   // Determine if the cursor tooltip should appear.
   Profile* profile = Profile::FromWebUI(web_ui);
@@ -364,8 +363,7 @@ LensOverlayUntrustedUI::LensOverlayUntrustedUI(content::WebUI* web_ui)
   html_source->AddBoolean(
       "enablePrivacyNotice",
       lens::features::IsLensOverlayNonBlockingPrivacyNoticeEnabled() &&
-          !MaybeIncrementPrivacyNoticeShownCountAndGrantPermissions(
-              profile->GetPrefs()));
+          !MaybeIncrementPrivacyNoticeShownCountAndGrantPermissions(profile));
 }
 
 void LensOverlayUntrustedUI::BindInterface(

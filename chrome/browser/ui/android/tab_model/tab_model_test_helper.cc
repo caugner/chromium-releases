@@ -6,7 +6,9 @@
 
 #include <jni.h>
 
+#include <cstddef>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -39,7 +41,10 @@
 
 TestTabModel::TestTabModel(Profile* profile,
                            chrome::android::ActivityType activity_type)
-    : TabModel(profile, activity_type, TabModel::TabModelType::kStandard) {}
+    : TabModel(profile,
+               activity_type,
+               std::nullopt,
+               TabModel::TabModelType::kStandard) {}
 
 TestTabModel::~TestTabModel() = default;
 
@@ -167,8 +172,18 @@ tabs::TabInterface* TestTabModel::GetOpenerForTab(tabs::TabHandle target) {
   return nullptr;
 }
 
-void TestTabModel::DiscardTab(tabs::TabHandle tab) {
+tabs::TabInterface* TestTabModel::InsertWebContentsAt(
+    int index,
+    std::unique_ptr<content::WebContents> web_contents,
+    bool should_pin,
+    std::optional<tab_groups::TabGroupId> group) {
   NOTIMPLEMENTED();
+  return nullptr;
+}
+
+content::WebContents* TestTabModel::DiscardTab(tabs::TabHandle tab) {
+  NOTIMPLEMENTED();
+  return nullptr;
 }
 
 tabs::TabInterface* TestTabModel::DuplicateTab(tabs::TabHandle tab) {
@@ -294,7 +309,10 @@ void TestTabModel::AssociateWithBrowserWindow(BrowserWindowInterface* browser) {
 OwningTestTabModel::OwningTestTabModel(
     Profile* profile,
     chrome::android::ActivityType activity_type)
-    : TabModel(profile, activity_type, TabModel::TabModelType::kStandard) {
+    : TabModel(profile,
+               activity_type,
+               std::nullopt,
+               TabModel::TabModelType::kStandard) {
   TabModelList::AddTabModel(this);
 }
 
@@ -479,8 +497,18 @@ tabs::TabInterface* OwningTestTabModel::GetOpenerForTab(
   return nullptr;
 }
 
-void OwningTestTabModel::DiscardTab(tabs::TabHandle tab) {
+tabs::TabInterface* OwningTestTabModel::InsertWebContentsAt(
+    int index,
+    std::unique_ptr<content::WebContents> web_contents,
+    bool should_pin,
+    std::optional<tab_groups::TabGroupId> group) {
   NOTIMPLEMENTED();
+  return nullptr;
+}
+
+content::WebContents* OwningTestTabModel::DiscardTab(tabs::TabHandle tab) {
+  NOTIMPLEMENTED();
+  return nullptr;
 }
 
 tabs::TabInterface* OwningTestTabModel::DuplicateTab(tabs::TabHandle tab) {

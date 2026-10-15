@@ -52,12 +52,6 @@ BASE_FEATURE(kRealboxCr23Theming,
              "NtpRealboxCr23Theming",
              base::FEATURE_DISABLED_BY_DEFAULT);
 
-// If enabled, the real search box ("realbox") on the New Tab page will show a
-// Google (g) icon instead of the typical magnifying glass (aka loupe).
-BASE_FEATURE(kRealboxUseGoogleGIcon,
-             "NtpRealboxUseGoogleGIcon",
-             base::FEATURE_DISABLED_BY_DEFAULT);
-
 // If enabled, alpha NTP backgrounds will show in Customize Chrome.
 // This is a development switch. Keep indefinitely.
 BASE_FEATURE(kNtpAlphaBackgroundCollections, base::FEATURE_DISABLED_BY_DEFAULT);
@@ -240,7 +234,7 @@ BASE_FEATURE(kNtpTabGroupsModuleZeroState,
 
 // If enabled, stale modules will be auto-removed from the NTP.
 BASE_FEATURE(kNtpFeatureOptimizationModuleRemoval,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // If enabled, stale shortcuts will be auto-removed from the NTP.
 BASE_FEATURE(kNtpFeatureOptimizationShortcutsRemoval,
@@ -248,10 +242,13 @@ BASE_FEATURE(kNtpFeatureOptimizationShortcutsRemoval,
 
 // If enabled, the dismiss module buttons will be removed from the NTP modules.
 BASE_FEATURE(kNtpFeatureOptimizationDismissModulesRemoval,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // If enabled, animates the AIM caret on the NTP.
 BASE_FEATURE(kNtpAnimatedCaret, base::FEATURE_ENABLED_BY_DEFAULT);
+
+// If enabled, adds a Whats New Page Edition for Next Features.
+BASE_FEATURE(kLightningTakeoverEdition, base::FEATURE_DISABLED_BY_DEFAULT);
 
 const char kNtpModuleIgnoredCriteriaThreshold[] =
     "NtpModuleIgnoredCriteriaThreshold";
@@ -339,6 +336,10 @@ const base::FeatureParam<bool> kNtpNextShowStaticRecentTabChipParam(
     &ntp_features::kNtpNextFeatures,
     "NtpNextShowStaticRecentTabChipParam",
     true);
+const base::FeatureParam<bool> kNtpNextEnableCanvasChipParam(
+    &ntp_features::kNtpNextFeatures,
+    "NtpNextEnableCanvasChipParam",
+    false);
 const base::FeatureParam<bool> kNtpNextShowSimplificationUIParam(
     &ntp_features::kNtpNextFeatures,
     "NtpNextShowSimplificationUIParam",
@@ -346,6 +347,10 @@ const base::FeatureParam<bool> kNtpNextShowSimplificationUIParam(
 const base::FeatureParam<bool> kNtpNextShowDismissalUIParam(
     &ntp_features::kNtpNextFeatures,
     "NtpNextShowDismissalUIParam",
+    false);
+const base::FeatureParam<bool> kNtpNextDisablementContextMenuParam(
+    &ntp_features::kNtpNextFeatures,
+    "NtpNextDisablementContextMenuParam",
     false);
 const base::FeatureParam<int> kMaxTilesBeforeShowMore{
     &ntp_features::kNtpNextFeatures, "max_tiles_before_show_more", 5};

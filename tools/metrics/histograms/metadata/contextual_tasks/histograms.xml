@@ -24,7 +24,7 @@ chromium-metrics-reviews@google.com.
 <histograms>
 
 <histogram name="ContextualTasks.ActiveTab.UserAction.LinkClicked"
-    enum="Boolean" expires_after="2026-06-28">
+    enum="Boolean" expires_after="2026-08-30">
   <owner>sophiechang@chromium.org</owner>
   <owner>chrome-contextual-tasks-eng@google.com</owner>
   <summary>
@@ -34,7 +34,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="ContextualTasks.ActiveTasksCount" units="count"
-    expires_after="2026-06-28">
+    expires_after="2026-08-30">
   <owner>sophiechang@chromium.org</owner>
   <owner>chrome-contextual-tasks-eng@google.com</owner>
   <summary>
@@ -56,7 +56,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="ContextualTasks.AiResponse.UserAction.LinkClicked.{ContextualTasksUiSurface}"
-    enum="Boolean" expires_after="2026-06-21">
+    enum="Boolean" expires_after="2026-08-23">
   <owner>sophiechang@chromium.org</owner>
   <owner>chrome-contextual-tasks-eng@google.com</owner>
   <summary>
@@ -97,7 +97,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="ContextualTasks.Context.ContextCalculationLatency" units="ms"
-    expires_after="2026-06-28">
+    expires_after="2026-08-30">
   <owner>sophiechang@chromium.org</owner>
   <owner>abhayprakash@google.com</owner>
   <summary>
@@ -108,7 +108,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="ContextualTasks.Context.ContextDeterminationStatus"
-    enum="ContextualTasksContextDeterminationStatus" expires_after="2026-06-28">
+    enum="ContextualTasksContextDeterminationStatus" expires_after="2026-08-30">
   <owner>sophiechang@chromium.org</owner>
   <owner>abhayprakash@google.com</owner>
   <summary>
@@ -232,6 +232,18 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
+<histogram
+    name="ContextualTasks.HistoryNavigation.UserAction.NavigatedInFullTab"
+    enum="Boolean" expires_after="2026-06-28">
+  <owner>hujasonx@google.com</owner>
+  <owner>chrome-contextual-tasks-eng@google.com</owner>
+  <summary>
+    Logged when the back or forward button is clicked while the user is viewing
+    the Contextual Tasks full tab, causing a task switch. Always recorded as
+    true.
+  </summary>
+</histogram>
+
 <histogram name="ContextualTasks.InnerFrameContents.HttpResponseCode"
     enum="HttpResponseCode" expires_after="2026-09-05">
   <owner>juanmojica@google.com</owner>
@@ -256,7 +268,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="ContextualTasks.Session.Completed" enum="Boolean"
-    expires_after="2026-06-28">
+    expires_after="2026-08-30">
   <owner>sophiechang@chromium.org</owner>
   <owner>chrome-contextual-tasks-eng@google.com</owner>
   <summary>
@@ -269,7 +281,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="ContextualTasks.TabAffiliationCount" units="count"
-    expires_after="2026-06-28">
+    expires_after="2026-08-30">
   <owner>sophiechang@chromium.org</owner>
   <owner>nyquist@chromium.org</owner>
   <owner>chrome-contextual-tasks-eng@google.com</owner>
@@ -325,7 +337,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="ContextualTasks.WebUI.UserAction{ActionType}" enum="Boolean"
-    expires_after="2026-06-21">
+    expires_after="2026-08-23">
   <owner>sophiechang@chromium.org</owner>
   <owner>chrome-contextual-tasks-eng@google.com</owner>
   <summary>

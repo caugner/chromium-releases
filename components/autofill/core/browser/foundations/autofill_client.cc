@@ -110,6 +110,11 @@ AutofillPlusAddressDelegate* AutofillClient::GetPlusAddressDelegate() {
   return nullptr;
 }
 
+accessibility_annotator::AccessibilityQueryService*
+AutofillClient::GetAccessibilityQueryService() {
+  return nullptr;
+}
+
 PasswordManagerDelegate* AutofillClient::GetPasswordManagerDelegate(
     const FieldGlobalId& field_id) {
   return nullptr;
@@ -216,6 +221,10 @@ void AutofillClient::TriggerAutofillAiSavePromptSurvey(
 
 bool AutofillClient::IsTabInActorMode() const {
   return false;
+}
+
+ActorKeyMetricsRecorder* AutofillClient::GetActorKeyMetricsRecorder() {
+  return nullptr;
 }
 
 std::unique_ptr<device_reauth::DeviceAuthenticator>
@@ -326,6 +335,10 @@ void AutofillClient::ShowEmailVerifiedToast() {
 }
 
 OtpFieldDetector* AutofillClient::GetOtpFieldDetector() {
+  return nullptr;
+}
+
+FormPredictionsTracker* AutofillClient::GetFormPredictionsTracker() {
   return nullptr;
 }
 

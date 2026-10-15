@@ -10,7 +10,6 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/notreached.h"
 #include "base/types/expected.h"
-#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/browser/autocomplete/aim_eligibility_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -173,7 +172,7 @@ void WebuiOmniboxHandler::AddTabContext(int32_t tab_id,
   tabs::TabInterface* const tab = handle.Get();
   if (!tab) {
     std::move(callback).Run(base::unexpected(
-        contextual_search::FileUploadErrorType::kBrowserProcessingError));
+        contextual_search::ContextUploadErrorType::kBrowserProcessingError));
     return;
   }
 
@@ -181,7 +180,7 @@ void WebuiOmniboxHandler::AddTabContext(int32_t tab_id,
       browser_window_interface->GetFeatures().searchbox_context_data();
   if (!searchbox_context_data) {
     std::move(callback).Run(base::unexpected(
-        contextual_search::FileUploadErrorType::kBrowserProcessingError));
+        contextual_search::ContextUploadErrorType::kBrowserProcessingError));
     return;
   }
   auto context = searchbox_context_data->TakePendingContext();
@@ -420,6 +419,12 @@ void WebuiOmniboxHandler::WebContentsObserver::DidFinishNavigation(
 }
 
 int WebuiOmniboxHandler::GetContextMenuMaxTabSuggestions() {
+  omnibox::InputState input_state = GetInputState();
+  if (auto it = input_state.max_inputs_by_type.find(
+          omnibox::InputType::INPUT_TYPE_BROWSER_TAB);
+      it != input_state.max_inputs_by_type.end()) {
+    return it->second;
+  }
   return omnibox::kContextMenuMaxTabSuggestions.Get();
 }
 

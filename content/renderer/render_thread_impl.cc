@@ -86,6 +86,7 @@
 #include "content/public/common/url_constants.h"
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/public/renderer/render_frame.h"
+#include "content/public/renderer/render_frame_visitor.h"
 #include "content/public/renderer/render_thread_observer.h"
 #include "content/renderer/agent_scheduling_group.h"
 #include "content/renderer/browser_exposed_renderer_interfaces.h"
@@ -93,6 +94,7 @@
 #include "content/renderer/media/media_factory.h"
 #include "content/renderer/media/render_media_client.h"
 #include "content/renderer/net_info_helper.h"
+#include "content/renderer/render_frame_impl.h"
 #include "content/renderer/render_process_impl.h"
 #include "content/renderer/renderer_blink_platform_impl.h"
 #include "content/renderer/service_worker/service_worker_context_client.h"
@@ -623,6 +625,10 @@ void RenderThreadImpl::Shutdown() {
 
   blink::LogStatsDuringShutdown();
 
+  // Flush any buffered content.
+  fflush(stdout);
+  fflush(stderr);
+
   // In a single-process mode, we cannot call _exit(0) in Shutdown() because
   // it will exit the process before the browser side is ready to exit.
   if (!IsSingleProcess())
@@ -669,7 +675,8 @@ bool RenderThreadImpl::GenerateFrameRoutingID(
     int32_t& routing_id,
     blink::LocalFrameToken& frame_token,
     base::UnguessableToken& devtools_frame_token,
-    blink::DocumentToken& document_token) {
+    blink::DocumentToken& document_token,
+    std::unique_ptr<base::UnguessableToken>& sandbox_origin_token) {
   if (!use_cached_routing_table_) {
     mojom::FrameRoutingInfoPtr info;
     if (!render_message_filter()->GenerateSingleFrameRoutingInfo(&info)) {
@@ -679,6 +686,8 @@ bool RenderThreadImpl::GenerateFrameRoutingID(
     frame_token = info->frame_token;
     devtools_frame_token = info->devtools_frame_token;
     document_token = info->document_token;
+    sandbox_origin_token =
+        std::make_unique<base::UnguessableToken>(info->sandbox_origin_token);
     return true;
   }
 
@@ -698,6 +707,8 @@ bool RenderThreadImpl::GenerateFrameRoutingID(
   frame_token = front->frame_token;
   devtools_frame_token = front->devtools_frame_token;
   document_token = front->document_token;
+  sandbox_origin_token =
+      std::make_unique<base::UnguessableToken>(front->sandbox_origin_token);
   cached_frame_routing_.pop_front();
 
   // If the table drops to 2 or less, request an asynchronous populate.
@@ -1053,10 +1064,18 @@ RenderThreadImpl::SharedMainThreadContextProvider() {
     return nullptr;
   }
 
+  // Use kGpuStreamPriorityUI for Initial WebUI, otherwise Default.
+  gpu::SchedulingPriority stream_priority =
+      (base::FeatureList::IsEnabled(features::kInitialWebUI) &&
+       features::kInitialWebUIHighStreamPriority.Get() &&
+       base::CommandLine::ForCurrentProcess()->HasSwitch(
+           switches::kTopChromeWebUI))
+          ? kGpuStreamPriorityUI
+          : kGpuStreamPriorityDefault;
+
   shared_main_thread_contexts_ =
       viz::ContextProviderCommandBuffer::CreateForRaster(
-          std::move(gpu_channel_host), kGpuStreamIdDefault,
-          kGpuStreamPriorityDefault,
+          std::move(gpu_channel_host), kGpuStreamIdDefault, stream_priority,
           GURL("chrome://gpu/RenderThreadImpl::CreateOffscreenContext/"
                "RendererMainThread"),
           /*automatic_flushes=*/true, /*support_locking=*/false,
@@ -1453,12 +1472,11 @@ RenderThreadImpl::GetMediaSequencedTaskRunner() {
   DCHECK(main_thread_runner()->BelongsToCurrentThread());
   if (base::FeatureList::IsEnabled(kUseThreadPoolForMediaTaskRunner)) {
     if (!media_task_runner_) {
-      // TODO(crbug.com/470337728): ensure the sequenced task runner is executed
-      // in the right priority when blink::features::kWebRtcUseMediaThreadTypes
-      // is enabled.
-      media_task_runner_ = base::ThreadPool::CreateSequencedTaskRunner(
-          base::TaskTraits{base::TaskPriority::USER_VISIBLE,
-                           base::WithBaseSyncPrimitives(), base::MayBlock()});
+      media_task_runner_ =
+          base::ThreadPool::CreateSequencedTaskRunner(base::TaskTraits{
+              base::WithBaseSyncPrimitives(), base::MayBlock(),
+              base::InheritThreadType(),
+              base::MaxThreadType(base::ThreadType::kPresentation)});
     }
     return media_task_runner_;
   }

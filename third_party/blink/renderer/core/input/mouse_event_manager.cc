@@ -14,6 +14,7 @@
 #include "third_party/blink/renderer/core/clipboard/data_transfer_access_policy.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/focus_params.h"
+#include "third_party/blink/renderer/core/dom/pseudo_element.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
 #include "third_party/blink/renderer/core/editing/ephemeral_range.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
@@ -226,7 +227,6 @@ MouseEventManager::DispatchMouseEvent(
         mouse_event_type == event_type_names::kAuxclick) {
       click_count = click_count_;
     }
-    std::optional<EventTiming> event_timing;
     bool should_dispatch =
         !check_for_listener || target->HasEventListeners(mouse_event_type);
     if (mouse_event_type == event_type_names::kContextmenu ||
@@ -263,10 +263,7 @@ MouseEventManager::DispatchMouseEvent(
         HTMLDialogElement::HandleDialogLightDismissForClick(
             *pointer_down_target, *pointer_up_target);
       }
-      if (frame_ && frame_->DomWindow()) {
-        event_timing =
-            EventTiming::TryCreate(frame_->DomWindow(), *event, target);
-      }
+      UIEventTiming event_timing(frame_, *event, target);
       if (should_dispatch) {
         input_event_result = event_handling_util::ToWebInputEventResult(
             target->DispatchEvent(*event));
@@ -282,10 +279,7 @@ MouseEventManager::DispatchMouseEvent(
           mouse_event.FromTouch() ? MouseEvent::kFromTouch
                                   : MouseEvent::kRealOrIndistinguishable,
           mouse_event.menu_source_type);
-      if (frame_ && frame_->DomWindow()) {
-        event_timing =
-            EventTiming::TryCreate(frame_->DomWindow(), *event, target);
-      }
+      UIEventTiming event_timing(frame_, *event, target);
       if (should_dispatch) {
         input_event_result = event_handling_util::ToWebInputEventResult(
             target->DispatchEvent(*event));
@@ -392,8 +386,13 @@ void MouseEventManager::RecomputeMouseHoverState() {
   if (!view)
     return;
 
-  if (!frame_->GetPage() || !frame_->GetPage()->GetFocusController().IsActive())
+  const bool should_page_receive_mouse_hover =
+      frame_->GetPage() &&
+      (RuntimeEnabledFeatures::SyntheticMouseHoverOverInactivePageEnabled() ||
+       frame_->GetPage()->GetFocusController().IsActive());
+  if (!should_page_receive_mouse_hover) {
     return;
+  }
 
   // Don't dispatch a synthetic mouse move event if the mouse cursor is not
   // visible to the user.
@@ -464,13 +463,37 @@ void MouseEventManager::NodeWillBeRemoved(Node& node) {
   HandleRemoveSubtree(node, /*include_root=*/true);
 }
 
+void MouseEventManager::HandlePseudoElementRemoval(PseudoElement& pseudo) {
+  Element* parent = pseudo.ParentOrShadowHostElement();
+  if (mousedown_element_ && mousedown_element_->IsPseudoElement() &&
+      pseudo.IsShadowIncludingInclusiveAncestorOf(*mousedown_element_)) {
+    mousedown_element_ = parent;
+  }
+  if (mouse_press_node_ && mouse_press_node_->IsPseudoElement() &&
+      pseudo.IsShadowIncludingInclusiveAncestorOf(*mouse_press_node_)) {
+    mouse_press_node_ = parent;
+  }
+  if (element_under_mouse_ && element_under_mouse_->IsPseudoElement() &&
+      pseudo.IsShadowIncludingInclusiveAncestorOf(*element_under_mouse_)) {
+    element_under_mouse_ = parent;
+    original_element_under_mouse_removed_ = true;
+  }
+}
+
 void MouseEventManager::HandleRemoveSubtree(Node& node, bool include_root) {
   Node* remaining_node = include_root ? node.parentNode() : &node;
   if (mousedown_element_ && (include_root || mousedown_element_ != node) &&
       node.IsShadowIncludingInclusiveAncestorOf(*mousedown_element_)) {
     // We don't dispatch click events if the mousedown node is removed
     // before a mouseup event. It is compatible with IE and Firefox.
-    mousedown_element_ = nullptr;
+    // However, if the removed node is a pseudo-element, it's just a style
+    // change, so we should fallback to its originating element so that
+    // click events can still be dispatched.
+    if (node.IsPseudoElement()) {
+      mousedown_element_ = node.ParentOrShadowHostElement();
+    } else {
+      mousedown_element_ = nullptr;
+    }
   }
   if (mouse_press_node_ && (include_root || mouse_press_node_ != node) &&
       node.IsShadowIncludingInclusiveAncestorOf(*mouse_press_node_)) {
@@ -944,14 +967,30 @@ DragHandlingResult MouseEventManager::HandleDrag(
     // as a click.
     InvalidateClick();
 
-    // Since drag operation started we need to send a pointercancel for the
-    // corresponding pointer.
-    if (initiated_by_button_press) {
+    if (RuntimeEnabledFeatures::SuppressPointerStreamAfterDragEnabled()) {
+      const auto pointerType = initiator == DragAndDropToolType::kMouse
+                                   ? WebPointerProperties::PointerType::kMouse
+                               : initiator == DragAndDropToolType::kFinger
+                                   ? WebPointerProperties::PointerType::kTouch
+                                   : WebPointerProperties::PointerType::kPen;
+      // When a drag starts we need to suppress the pointer event stream for the
+      // corresponding pointer.
       frame_->GetEventHandler().HandlePointerEvent(
           WebPointerEvent::CreatePointerCausesUaActionEvent(
-              WebPointerProperties::PointerType::kMouse,
-              event.Event().TimeStamp()),
+              pointerType, event.Event().TimeStamp()),
           Vector<WebPointerEvent>(), Vector<WebPointerEvent>());
+    } else {
+      // TODO(crbug.com/452372355): Remove this branch of the `if` once the
+      // suppression feature flag is enabled by default.
+      // Since drag operation started we need to send a pointercancel for the
+      // corresponding pointer.
+      if (initiated_by_button_press) {
+        frame_->GetEventHandler().HandlePointerEvent(
+            WebPointerEvent::CreatePointerCausesUaActionEvent(
+                WebPointerProperties::PointerType::kMouse,
+                event.Event().TimeStamp()),
+            Vector<WebPointerEvent>(), Vector<WebPointerEvent>());
+      }
     }
     drag_initiator_ = initiator;
   }

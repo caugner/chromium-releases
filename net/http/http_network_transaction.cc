@@ -12,6 +12,7 @@
 
 #include "base/base64url.h"
 #include "base/compiler_specific.h"
+#include "base/debug/dump_without_crashing.h"
 #include "base/feature_list.h"
 #include "base/format_macros.h"
 #include "base/functional/bind.h"
@@ -101,6 +102,10 @@ namespace {
 // Max number of |retry_attempts| (excluding the initial request) after which
 // we give up and show an error page.
 const size_t kMaxRetryAttempts = 2;
+
+// Max number of `retry_attempts_on_connection_errors_` for connection errors,
+// after which we give up and crash early.
+const size_t kMaxRetryAttemptsOnConnectionErrors = 50;
 
 // Max number of calls to RestartWith* allowed for a single connection. A single
 // HttpNetworkTransaction should not signal very many restartable errors, but it
@@ -2081,6 +2086,13 @@ int HttpNetworkTransaction::HandleIOError(int error) {
     // preconnected but failed to be used before the server timed it out.
     case RetryReason::kEmptyResponse:
       if (ShouldResendRequest()) {
+        if (retry_attempts_on_connection_errors_ >=
+            kMaxRetryAttemptsOnConnectionErrors) {
+          base::UmaHistogramBoolean(
+              "Net.NetworkTransaction.TooManyRetriesOnConnectionErrors", true);
+          return ERR_TOO_MANY_RETRIES;
+        }
+        retry_attempts_on_connection_errors_++;
         net_log_.AddEventWithNetErrorCode(
             NetLogEventType::HTTP_TRANSACTION_RESTART_AFTER_ERROR, error);
         ResetConnectionAndRequestForResend(*retry_reason);

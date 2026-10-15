@@ -204,10 +204,10 @@ const base::TimeDelta kProgressBarEndAnimationDuration =
 
   [self updateUIOnTraitChange:nil];
 
-  NSArray<UITrait>* traits = TraitCollectionSetForTraits(@[
+  NSArray<UITrait>* traits = @[
     UITraitVerticalSizeClass.class, UITraitHorizontalSizeClass.class,
     UITraitPreferredContentSizeCategory.class
-  ]);
+  ];
   __weak __typeof(self) weakSelf = self;
   UITraitChangeHandler handler = ^(id<UITraitEnvironment> traitEnvironment,
                                    UITraitCollection* previousCollection) {
@@ -267,10 +267,6 @@ const base::TimeDelta kProgressBarEndAnimationDuration =
     self.view.locationBarContainer.hidden = YES;
   }
   [self updateProgressBarVisibility];
-}
-
-- (void)setLocationBarHeight:(CGFloat)height {
-  [self.view setLocationBarHeight:height];
 }
 
 #pragma mark - LegacyToolbarConsumer
@@ -455,13 +451,6 @@ const base::TimeDelta kProgressBarEndAnimationDuration =
 // Updates `locationBarContainer` height and adjusts its corner radius for the
 // fullscreen `progress`
 - (void)updateLocationBarHeightForFullscreenProgress:(CGFloat)progress {
-  /// When multiline omnibox is enabled and focused, refrain from updating the
-  /// location bar container height, this is already handled by the toolbar
-  /// height delegate.
-  if (IsMultilineBrowserOmniboxEnabled() && _locationBarFocused) {
-    return;
-  }
-
   const CGFloat expandedHeight =
       LocationBarHeight(self.traitCollection.preferredContentSizeCategory);
   const CGFloat collapsedHeight =
@@ -531,24 +520,51 @@ const base::TimeDelta kProgressBarEndAnimationDuration =
   }
 
   if (sender == self.view.backButton) {
+    if (self.isNTP) {
+      base::RecordAction(base::UserMetricsAction("MobileToolbarBackOnNTP"));
+    }
     base::RecordAction(base::UserMetricsAction("MobileToolbarBack"));
   } else if (sender == self.view.forwardButton) {
+    if (self.isNTP) {
+      base::RecordAction(base::UserMetricsAction("MobileToolbarForwardOnNTP"));
+    }
     base::RecordAction(base::UserMetricsAction("MobileToolbarForward"));
   } else if (sender == self.view.reloadButton) {
+    if (self.isNTP) {
+      base::RecordAction(base::UserMetricsAction("MobileToolbarReloadOnNTP"));
+    }
     base::RecordAction(base::UserMetricsAction("MobileToolbarReload"));
   } else if (sender == self.view.stopButton) {
+    if (self.isNTP) {
+      base::RecordAction(base::UserMetricsAction("MobileToolbarStopOnNTP"));
+    }
     base::RecordAction(base::UserMetricsAction("MobileToolbarStop"));
   } else if (sender == self.view.toolsMenuButton) {
+    if (self.isNTP) {
+      base::RecordAction(base::UserMetricsAction("MobileToolbarShowMenuOnNTP"));
+    }
     base::RecordAction(base::UserMetricsAction("MobileToolbarShowMenu"));
     if (self.adaptiveDelegate.isReaderModeActive) {
       base::RecordAction(
           base::UserMetricsAction("MobileToolbarShowMenuFromReaderMode"));
     }
   } else if (sender == self.view.tabGridButton) {
+    if (self.isNTP) {
+      base::RecordAction(
+          base::UserMetricsAction("MobileToolbarShowStackViewOnNTP"));
+    }
     base::RecordAction(base::UserMetricsAction("MobileToolbarShowStackView"));
   } else if (sender == self.view.shareButton) {
+    if (self.isNTP) {
+      base::RecordAction(
+          base::UserMetricsAction("MobileToolbarShareMenuOnNTP"));
+    }
     base::RecordAction(base::UserMetricsAction("MobileToolbarShareMenu"));
   } else if (sender == self.view.openNewTabButton) {
+    if (self.isNTP) {
+      base::RecordAction(
+          base::UserMetricsAction("MobileToolbarNewTabShortcutOnNTP"));
+    }
     base::RecordAction(base::UserMetricsAction("MobileToolbarNewTabShortcut"));
     base::RecordAction(base::UserMetricsAction("MobileTabNewTab"));
   } else {

@@ -89,6 +89,7 @@ Wacht een paar minuten voordat je uitlogt. Als je nu uitlogt, worden deze gegeve
 <translation id="2517624234762908348">Je Chromium-gegevens synchroniseren</translation>
 <translation id="2575968074225731646">Open Chromium sneller via het Dock van je iPhone.</translation>
 <translation id="2592940277904433508">Chromium blijven gebruiken</translation>
+<translation id="2601766165676560303">Chromium-thema voor iPhone en iPad</translation>
 <translation id="2607609479243848905">Als je je wachtwoordzin bent vergeten of deze instelling wilt wijzigen, <ph name="BEGIN_LINK" />verwijder je de Chromium-gegevens in je account<ph name="END_LINK" />.</translation>
 <translation id="2640367368802736659">Chromium-tip: Zoek wat je ziet met Google Lens</translation>
 <translation id="2650312721222849884">Zet de synchronisatie aan om je tabbladen te bekijken vanaf elk apparaat waarop je Chromium gebruikt</translation>
@@ -102,6 +103,7 @@ Wacht een paar minuten voordat je uitlogt. Als je nu uitlogt, worden deze gegeve
 Ga naar <ph name="BEGIN_LINK" />Google-services<ph name="END_LINK" /> voor meer instellingen die gegevens gebruiken om de functionaliteit van Chromium te verbeteren.</translation>
 <translation id="2832168932648876507">Zoek met je stem in Chromium.</translation>
 <translation id="2843571538056574338">Chromium gebruiken voor automatisch invullen</translation>
+<translation id="2899085719655668655">Video-instructies in beeld-in-beeld over hoe je Chromium instelt als standaardbrowser</translation>
 <translation id="2918709798697875261">Je organisatie vereist dat je uitgelogd blijft bij Chromium.</translation>
 <translation id="2942241131342758843">Gebruik standaard Chromium om links te openen, te zoeken via widgets en om wachtwoorden in andere apps automatisch in te vullen</translation>
 <translation id="2977470724722393594">Chromium is up-to-date</translation>
@@ -374,4 +376,5 @@ Wacht een paar minuten voordat je uitlogt. Als je nu uitlogt, worden deze gegeve
 <translation id="924957577793602335">Personaliseer Chromium</translation>
 <translation id="981812233959540767">Chromium Dino-game spelen</translation>
 <translation id="985602178874221306">De auteurs van Chromium</translation>
+<translation id="986520777495807752">Chromium instellen als standaard</translation>
 </translationbundle>

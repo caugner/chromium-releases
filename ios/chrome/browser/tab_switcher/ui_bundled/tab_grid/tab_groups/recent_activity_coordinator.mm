@@ -135,12 +135,10 @@
   }
   id<TabGroupsCommands> tabGroupsHandler = HandlerForProtocol(
       self.browser->GetCommandDispatcher(), TabGroupsCommands);
-  base::WeakPtr<const TabGroup> weakGroup = group->GetWeakPtr();
   [_viewController.presentingViewController
       dismissViewControllerAnimated:YES
                          completion:^{
-                           [tabGroupsHandler
-                               showTabGroupEditionForGroup:weakGroup];
+                           [tabGroupsHandler showTabGroupEditionForGroup:group];
                          }];
 }
 

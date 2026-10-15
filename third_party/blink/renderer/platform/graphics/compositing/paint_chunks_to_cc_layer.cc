@@ -956,6 +956,14 @@ ConversionContext<cc::DisplayItemList>::ComputeScrollTranslationAction(
     return {};
   }
 
+  if (RuntimeEnabledFeatures::CanvasDrawElementEnabled() &&
+      target_scroll_translation.ScrollNode() &&
+      target_scroll_translation.ScrollNode()
+              ->GetCompositedScrollingPreference() ==
+          CompositedScrollingPreference::kNotPreferred) {
+    return {};
+  }
+
   const auto& chunk_scroll_translation = chunk_to_layer_mapper_.ChunkState()
                                              .Transform()
                                              .NearestScrollTranslationNode();
@@ -1300,7 +1308,7 @@ void LayerPropertiesUpdater::UpdateWheelEventRegion(
 #if BUILDFLAG(IS_ANDROID)
 void LayerPropertiesUpdater::UpdateXrTargetRegion(
     const HitTestData& hit_test_data) {
-  xr_hit_test_order_.AppendVector(hit_test_data.xr_regions);
+  xr_hit_test_order_.append_range(hit_test_data.xr_regions);
 }
 #endif
 
@@ -1345,9 +1353,14 @@ void LayerPropertiesUpdater::UpdateScrollHitTestData(const PaintChunk& chunk) {
 
   if (RuntimeEnabledFeatures::RasterInducingScrollEnabled() &&
       hit_test_data.scroll_translation) {
-    CHECK_EQ(chunk.id.type, DisplayItem::Type::kScrollHitTest);
-    AddNonCompositedScroll(chunk);
-    return;
+    if (!RuntimeEnabledFeatures::CanvasDrawElementEnabled() ||
+        hit_test_data.scroll_translation->ScrollNode()
+                ->GetCompositedScrollingPreference() !=
+            CompositedScrollingPreference::kNotPreferred) {
+      CHECK_EQ(chunk.id.type, DisplayItem::Type::kScrollHitTest);
+      AddNonCompositedScroll(chunk);
+      return;
+    }
   }
 
   gfx::Rect rect =

@@ -70,24 +70,20 @@ class SharedTabGroupInteractiveUiTest
   void SetUp() override {
     std::vector<base::test::FeatureRefAndParams> enabled_features = {
         {data_sharing::features::kDataSharingFeature, {}},
-        {features::kTabGroupMenuImprovements, {}},
         {features::kTabGroupMenuMoreEntryPoints, {}}};
 
     std::vector<base::test::FeatureRef> disabled_features = {};
 
-    if (GetParam().page_actions_migration_enabled) {
-      enabled_features.push_back({
-          features::kPageActionsMigration,
-          {
-              {
-                  features::kPageActionsMigrationCollaborationMessaging.name,
-                  "true",
-              },
-          },
-      });
-    } else {
-      disabled_features.push_back(features::kPageActionsMigration);
-    }
+    enabled_features.push_back({
+        features::kPageActionsMigration,
+        {
+            {
+                features::kPageActionsMigrationCollaborationMessaging.name,
+                GetParam().page_actions_migration_enabled ? "true" : "false",
+            },
+        },
+    });
+
     scoped_feature_list_.InitWithFeaturesAndParameters(enabled_features,
                                                        disabled_features);
     CHECK_EQ(IsPageActionMigrated(PageActionIconType::kCollaborationMessaging),
@@ -340,14 +336,12 @@ IN_PROC_BROWSER_TEST_P(SharedTabGroupInteractiveUiTest,
   RunTestSequence(FinishTabstripAnimations(), ShowBookmarksBar(),
                   EnsurePresent(kSavedTabGroupButtonElementId),
                   PressButton(kSavedTabGroupButtonElementId),
-                  WaitForShow(STGTabsMenuModel::kOpenGroup),
-                  SelectMenuItem(STGTabsMenuModel::kOpenGroup),
                   WaitForShow(kTabGroupHeaderElementId));
 
   histogram_tester.ExpectUniqueSample(
       kRecallHistogram,
       saved_tab_groups::metrics::SharedTabGroupRecallTypeDesktop::
-          kOpenedFromSubmenuFromBookmarksBar,
+          kOpenedFromBookmarksBar,
       1);
 }
 

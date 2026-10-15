@@ -37,5 +37,7 @@ try/dawn-win11-arm64-deps-rel
 try/gpu-fyi-cq-android-arm64
 try/gpu-fyi-cq-mac-arm64
 try/linux_optional_gpu_tests_rel
+try/mac-gpu-rel
+try/mac-gpu-rel-compilator
 try/mac_optional_gpu_tests_rel
 try/win_optional_gpu_tests_rel

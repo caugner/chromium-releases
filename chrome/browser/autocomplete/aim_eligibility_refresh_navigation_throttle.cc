@@ -7,10 +7,9 @@
 #include "base/feature_list.h"
 #include "chrome/browser/autocomplete/aim_eligibility_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "components/google/core/common/google_util.h"
 #include "components/omnibox/browser/aim_eligibility_service.h"
 #include "components/omnibox/browser/aim_eligibility_service_features.h"
-#include "components/search_engines/template_url_service.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
 
@@ -56,22 +55,14 @@ AimEligibilityRefreshNavigationThrottle::ProcessNavigation() {
     return PROCEED;
   }
 
-  // Check if this is a search results URL.
-  TemplateURLService* template_url_service =
-      TemplateURLServiceFactory::GetForProfile(profile);
-  if (!template_url_service) {
+  // Check if this is a Google URL.
+  if (!google_util::IsGoogleDomainUrl(
+          url, google_util::ALLOW_SUBDOMAIN,
+          google_util::DISALLOW_NON_STANDARD_PORTS)) {
     return PROCEED;
   }
 
-  const TemplateURL* default_search_provider =
-      template_url_service->GetDefaultSearchProvider();
-  if (!default_search_provider ||
-      !default_search_provider->IsSearchURL(
-          url, template_url_service->search_terms_data())) {
-    return PROCEED;
-  }
-
-  // Check if this search URL has AIM-specific parameters.
+  // Check if the URL has AIM-specific parameters.
   if (!aim_service->HasAimUrlParams(url)) {
     return PROCEED;
   }
@@ -93,13 +84,14 @@ void AimEligibilityRefreshNavigationThrottle::MaybeCreateAndAdd(
   }
 
   // Ignore navigations that aren't in the outermost main frame.
-  if (!registry.GetNavigationHandle().IsInOutermostMainFrame()) {
+  content::NavigationHandle& nav_handle = registry.GetNavigationHandle();
+  if (!nav_handle.IsInOutermostMainFrame() ||
+      nav_handle.IsInPrerenderedMainFrame()) {
     return;
   }
 
   // Ignore embedded page navigations.
-  content::WebContents* web_contents =
-      registry.GetNavigationHandle().GetWebContents();
+  content::WebContents* web_contents = nav_handle.GetWebContents();
   if (web_contents != web_contents->GetResponsibleWebContents()) {
     return;
   }

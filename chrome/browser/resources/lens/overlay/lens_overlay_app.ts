@@ -481,6 +481,7 @@ export class LensOverlayAppElement extends LensOverlayAppElementBase {
     this.isPrivacyNoticeVisible = false;
     this.suppressGhostLoader = false;
     this.isSearchboxFocused = true;
+    this.triggerSearchboxSuggestions();
     this.$.translateButtonContainer.classList.remove('searchbox-unfocused');
 
     this.focusShimmerOnSearchbox();
@@ -488,7 +489,7 @@ export class LensOverlayAppElement extends LensOverlayAppElementBase {
     // Setup a listener on the suggestions container to change the shimmer when
     // the searchbox changes sizes or the selection overlay changes size.
     this.searchboxBoundingClientRectObserver.observe(
-        this.$.searchbox.getSuggestionsElement());
+        this.$.searchbox.getDropdownElement());
     this.searchboxBoundingClientRectObserver.observe(this.$.selectionOverlay);
   }
 
@@ -512,11 +513,11 @@ export class LensOverlayAppElement extends LensOverlayAppElementBase {
     this.focusShimmerOnSearchbox();
 
     this.searchboxSuggestionCount =
-        this.$.searchbox.getSuggestionsElement().selectableMatchElements.length;
+        this.$.searchbox.getDropdownElement().selectableMatchElements.length;
   }
 
   private focusShimmerOnSearchbox() {
-    const suggestionsContainer = this.$.searchbox.getSuggestionsElement();
+    const suggestionsContainer = this.$.searchbox.getDropdownElement();
     const areSuggestionsShowing =
         suggestionsContainer.offsetWidth * suggestionsContainer.offsetHeight >
         0;
@@ -755,10 +756,14 @@ export class LensOverlayAppElement extends LensOverlayAppElementBase {
       return;
     }
 
+    if (!this.isSearchboxFocused) {
+      return;
+    }
+
     // If the backend handshake has completed, then it is safe to issue the
     // autocomplete query immediately.
     if (this.isBackendHandshakeComplete) {
-      this.$.searchbox.queryAutocomplete();
+      this.$.searchbox.queryInputAutocomplete();
       return;
     }
 
@@ -772,10 +777,11 @@ export class LensOverlayAppElement extends LensOverlayAppElementBase {
   }
 
   private focusSearchbox() {
-    this.shadowRoot!.querySelector<HTMLElement>('cr-searchbox')
-        ?.shadowRoot!.querySelector<HTMLElement>('input')
-        ?.focus();
-    this.triggerSearchboxSuggestions();
+    const searchbox =
+        this.shadowRoot!.querySelector<SearchboxElement>('cr-searchbox');
+    if (searchbox) {
+      searchbox.focusInput();
+    }
   }
 
   private computeShouldFadeOutButtons(): boolean {

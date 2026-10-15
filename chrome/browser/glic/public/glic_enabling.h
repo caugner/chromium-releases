@@ -15,6 +15,7 @@
 #include "base/scoped_observation.h"
 #include "base/types/expected.h"
 #include "chrome/browser/glic/glic_user_status_fetcher.h"
+#include "chrome/browser/subscription_eligibility/subscription_eligibility_service.h"
 #include "components/optimization_guide/core/optimization_guide_features.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
@@ -69,7 +70,8 @@ class GlicGlobalEnabling {
     Delegate(const Delegate&) = delete;
     Delegate& operator=(const Delegate&) = delete;
 
-    virtual std::string GetCountryCode();
+    virtual std::string GetPermanentCountryCode();
+    virtual std::string GetSessionCountryCode();
     virtual std::string GetLocale();
   };
   explicit GlicGlobalEnabling(Delegate& delegate);
@@ -101,7 +103,9 @@ class GlicGlobalEnabling {
 // Finally, an eligible profile may be Glic-Enabled. In this state, Glic UI is
 // visible and usable by the user. This state can change at runtime so Glic
 // entry points should depend on this state.
-class GlicEnabling : public signin::IdentityManager::Observer {
+class GlicEnabling : public signin::IdentityManager::Observer,
+                     public subscription_eligibility::
+                         SubscriptionEligibilityService::Observer {
  public:
   // Returns whether the global Glic feature is enabled for Chrome. This status
   // will not change at runtime.
@@ -154,10 +158,8 @@ class GlicEnabling : public signin::IdentityManager::Observer {
   // Whether the Trust-First Onboarding flow should be shown.
   static bool IsTrustFirstOnboardingEnabledForProfile(Profile* profile);
 
-  // Returns true if the FRE UI (standard FRE or Trust-First Onboarding) should
-  // be bypassed for certain invocation sources for unconsented users.
-  static bool ShouldBypassFreUi(Profile* profile,
-                                mojom::InvocationSource invocation_source);
+  // Whether the auto open for pdf flow is enabled.
+  static bool IsAutoOpenForPdfEnabled(Profile* profile);
 
   // Whether the tab web contents contextual menu item is enabled.
   static bool IsContextualMenuItemEnabled(Profile* profile);
@@ -213,6 +215,9 @@ class GlicEnabling : public signin::IdentityManager::Observer {
     // Whether live (audio) functionality is disallowed for this account type.
     bool live_disallowed : 1 = false;
 
+    // Whether share image functionality is disallowed for this account type.
+    bool share_image_disallowed : 1 = false;
+
     enum class Reason {
       kFeatureDisabled = 0,
       kNotRegularProfile = 1,
@@ -259,6 +264,10 @@ class GlicEnabling : public signin::IdentityManager::Observer {
 
     bool EligibleForLive() const {
       return IsProfileEligible() && !live_disallowed;
+    }
+
+    bool EligibleForShareImage() const {
+      return IsProfileEligible() && !share_image_disallowed;
     }
 
     bool DisallowedByAdmin() const {
@@ -351,6 +360,9 @@ class GlicEnabling : public signin::IdentityManager::Observer {
   void OnPrimaryAccountChanged(
       const signin::PrimaryAccountChangeEvent& event_details) override;
 
+  // subscription_eligibility::SubscriptionEligibilityService::Observer:
+  void OnAiSubscriptionTierUpdated(int32_t new_subscription_tier) override;
+
   // Detects changes to capabilities.
   void OnExtendedAccountInfoUpdated(const AccountInfo& info) override;
   void OnExtendedAccountInfoRemoved(const AccountInfo& info) override;
@@ -401,6 +413,10 @@ class GlicEnabling : public signin::IdentityManager::Observer {
   base::ScopedObservation<signin::IdentityManager,
                           signin::IdentityManager::Observer>
       identity_manager_observation_{this};
+  base::ScopedObservation<
+      subscription_eligibility::SubscriptionEligibilityService,
+      subscription_eligibility::SubscriptionEligibilityService::Observer>
+      subscription_eligibility_service_observation_{this};
 };
 
 }  // namespace glic

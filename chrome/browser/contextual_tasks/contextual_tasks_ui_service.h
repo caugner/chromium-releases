@@ -10,9 +10,11 @@
 #include <vector>
 
 #include "base/functional/callback.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks.mojom.h"
+#include "chrome/browser/tab_list/tab_list_interface.h"
 #include "components/contextual_search/contextual_search_session_handle.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/frame_tree_node_id.h"
@@ -24,7 +26,6 @@ class AimEligibilityService;
 class BrowserWindowInterface;
 class GoogleServiceAuthError;
 class Profile;
-class TabStripModel;
 
 namespace base {
 class Uuid;
@@ -53,6 +54,9 @@ class ContextualTasksUIInterface;
 // thread. Events like tab switching and Intercepted navigations from both the
 // sidepanel and omnibox will be routed here.
 class ContextualTasksUiService : public KeyedService {
+  FRIEND_TEST_ALL_PREFIXES(ContextualTasksUiServiceTest,
+                           IsAllowedHost_WithOverride);
+
  public:
   ContextualTasksUiService(
       Profile* profile,
@@ -184,9 +188,10 @@ class ContextualTasksUiService : public KeyedService {
   // correct params and isn't a shopping query.
   bool IsValidSearchResultsPage(const GURL& url);
 
-  // Returns AIM URL found in the search param of the contextual tasks URL.
-  // Returns empty URL if not found or not from AIM.
-  static GURL GetAimUrlFromContextualTasksUrl(const GURL& url);
+  // Returns a copy of base_url with the URL params from webui_url applied to
+  // it. This will exclude chrome webui-specific params, specifically "task".
+  static GURL CopyParamsFromWebUIUrl(const GURL& base_url,
+                                     const GURL& webui_url);
 
   // Called when the Lens overlay is shown/hidden. No-op if the active UI is not
   // in the side panel since the Lens button is always hidden in a tab.
@@ -279,8 +284,10 @@ class ContextualTasksUiService : public KeyedService {
   // compared without text selection directives as they don't change the page
   // content and only tell the browser what text to highlight on the page. A
   // pointer to the selected tab is returned if found.
+  // TODO(crbug.com/483442073): Remove the ifdef block once we remove
+  // TabStripModel from MaybeFocusExistingOpenTab.
   tabs::TabInterface* MaybeFocusExistingOpenTab(const GURL& url,
-                                                TabStripModel* tab_strip_model,
+                                                TabListInterface* tab_list,
                                                 const base::Uuid& task_id);
 
   // A callback for checking whether text fragments from a URL are on a page.

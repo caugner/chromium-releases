@@ -94,6 +94,12 @@ void TipsNotificationPresenter::Present(TipsNotificationType type) {
     case TipsNotificationType::kTrustedVaultKeyRetrieval:
       StartTrustedVaultKeyRetrievalFlow();
       break;
+    case TipsNotificationType::kTabGroups:
+      ShowTabGroupsPromo();
+      break;
+    case TipsNotificationType::kPriceTracking:
+      ShowPriceTrackingPromo();
+      break;
     case TipsNotificationType::kIncognitoLock:
     case TipsNotificationType::kError:
       NOTREACHED();
@@ -231,6 +237,16 @@ void TipsNotificationPresenter::ShowCPEPromo() {
 void TipsNotificationPresenter::ShowLensOverlayPromo() {
   [HandlerForProtocol(browser_->GetCommandDispatcher(),
                       BrowserCoordinatorCommands) showSearchWhatYouSeePromo];
+}
+
+void TipsNotificationPresenter::ShowTabGroupsPromo() {
+  [HandlerForProtocol(browser_->GetCommandDispatcher(),
+                      BrowserCoordinatorCommands) showTabGroupsPromo];
+}
+
+void TipsNotificationPresenter::ShowPriceTrackingPromo() {
+  [HandlerForProtocol(browser_->GetCommandDispatcher(),
+                      BrowserCoordinatorCommands) showPriceTrackingPromo];
 }
 
 bool TipsNotificationPresenter::HasIdentitiesOnDevice() {

@@ -89,6 +89,7 @@ Oodake enne väljalogimist paar minutit. Kui logite kohe välja, siis need andme
 <translation id="2517624234762908348">Chromiumi andmete sünkroonimine</translation>
 <translation id="2575968074225731646">Avage Chromium kiiremini oma iPhone'i doki kaudu.</translation>
 <translation id="2592940277904433508">Jätkan Chromiumi kasutamist</translation>
+<translation id="2601766165676560303">Chromiumi teema iPhone’i ja iPadi jaoks</translation>
 <translation id="2607609479243848905">Kui unustasite parooli või soovite seda seadet muuta, <ph name="BEGIN_LINK" />kustutage oma kontol Chromiumi andmed<ph name="END_LINK" />.</translation>
 <translation id="2640367368802736659">Chromiumi nõuanne: otsige nähtavat Google Lensiga</translation>
 <translation id="2650312721222849884">Selleks et näha vahelehti kõikjalt, kus Chromiumi kasutate, lülitage sisse sünkroonimine</translation>
@@ -102,6 +103,7 @@ Oodake enne väljalogimist paar minutit. Kui logite kohe välja, siis need andme
 Kui soovite näha veel seadeid, mis kasutavad andmeid, et parandada teie Chromiumi kasutuskogemust, avage <ph name="BEGIN_LINK" />Google'i teenused<ph name="END_LINK" />.</translation>
 <translation id="2832168932648876507">Chromiumis hääle abil otsimine.</translation>
 <translation id="2843571538056574338">Automaattäite jaoks Chromiumi kasutamine</translation>
+<translation id="2899085719655668655">Pilt pildis videojuhised Chromiumi vaikebrauseriks määramiseks</translation>
 <translation id="2918709798697875261">Teie organisatsioon nõuab, et jääksite Chromiumist väljalogituks.</translation>
 <translation id="2942241131342758843">Kasutage linkide avamiseks, vidinatest otsimiseks ja muudes rakendustes paroolide automaatselt täitmiseks vaikimisi Chromiumi</translation>
 <translation id="2977470724722393594">Chromium on ajakohane</translation>
@@ -374,4 +376,5 @@ Oodake enne väljalogimist paar minutit. Kui logite kohe välja, siis need andme
 <translation id="924957577793602335">Isikupärastage Chromium</translation>
 <translation id="981812233959540767">Chromiumi dinosaurusemängu mängimine</translation>
 <translation id="985602178874221306">The Chromium Authors</translation>
+<translation id="986520777495807752">Kas määrata Chromium vaikebrauseriks?</translation>
 </translationbundle>

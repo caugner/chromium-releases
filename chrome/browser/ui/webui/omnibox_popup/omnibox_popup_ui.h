@@ -44,6 +44,7 @@ class OmniboxPopupUIConfig
 
   // content::WebUIConfig:
   bool IsWebUIEnabled(content::BrowserContext* browser_context) override;
+  bool ShouldCrashOnJavascriptErrorInDevelopmentBuild() const override;
 };
 
 // The Web UI controller for the chrome://omnibox-popup.top-chrome.

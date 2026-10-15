@@ -56,7 +56,6 @@ import org.chromium.components.browser_ui.share.ShareHelper;
 import org.chromium.components.browser_ui.util.FirstDrawDetector;
 import org.chromium.components.omnibox.OmniboxFeatures;
 import org.chromium.ui.KeyboardVisibilityDelegate;
-import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.base.KeyNavigationUtil;
 import org.chromium.ui.display.DisplayAndroid;
 import org.chromium.ui.display.DisplayUtil;
@@ -99,7 +98,6 @@ public class UrlBar extends AutocompleteEditText {
 
     private @Nullable UrlBarDelegate mUrlBarDelegate;
     private @Nullable Callback<String> mTextChangeListener;
-    private @Nullable Runnable mTypingStartedListener;
     private @Nullable OnKeyListener mKeyDownListener;
     private @Nullable UrlBarTextContextMenuDelegate mTextContextMenuDelegate;
     private @Nullable Callback<Integer> mUrlDirectionListener;
@@ -110,10 +108,10 @@ public class UrlBar extends AutocompleteEditText {
     private boolean mFocused;
     private boolean mFocusEventEmitted;
     private boolean mAllowFocus = true;
-    private boolean mShouldSendTypingStartedEvent;
+    private boolean mAllowMultilineInput;
+    private boolean mCurrentInputCanBeWrapped;
 
     private boolean mPendingScroll;
-    private boolean mIsInCct;
 
     // Captures the current intended text scroll type.
     // This may not be effective if mPendingScroll is true.
@@ -244,6 +242,11 @@ public class UrlBar extends AutocompleteEditText {
         int endPadding = getResources().getDimensionPixelSize(R.dimen.url_bar_end_padding);
         setPaddingRelative(0, verticalPadding, endPadding, verticalPadding);
 
+        // Always select all content if the focus is triggered by the user.
+        // Software triggered focus can apply selection at will, but when focus comes from
+        // the click/touch - the OS overrides.
+        setSelectAllOnFocus(true);
+
         setTextClassifier(TextClassifier.NO_OP);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             setIsHandwritingDelegate(true);
@@ -276,7 +279,6 @@ public class UrlBar extends AutocompleteEditText {
         setOnFocusChangeListener(null);
         mTextContextMenuDelegate = null;
         mTextChangeListener = null;
-        mTypingStartedListener = null;
     }
 
     /** Set the delegate to be used for text context menu actions. */
@@ -284,41 +286,12 @@ public class UrlBar extends AutocompleteEditText {
         mTextContextMenuDelegate = delegate;
     }
 
-    /**
-     * When predictive back gesture is enabled, keycode_back will not be sent from Android OS
-     * starting from T. {@link LocationBarMediator} will intercept the back press instead.
-     */
-    @Override
-    public boolean onKeyPreIme(int keyCode, KeyEvent event) {
-        // NOTE: Do not pass ENTER key to listeners from here. This is because Enter key may also
-        // come from a software keyboard.
-        // - If we pass the event here, it will be emitted twice (once before IME and once after),
-        // - if we don't pass the event after IME, soft keyboard navigation will not work.
-        // DPAD and TAB keys are also not passed into the listeners here. This is to prevent those
-        // keys from being consumed too early. Premature consumption of these keys can break certain
-        // IME features, for example, keyboard navigation within the Chinese / Japanese candidate
-        // window.
-        return (KeyNavigationUtil.isActionDown(event)
-                        // Pass NUMPAD_ENTER as IME inserts a newline character.
-                        && event.getKeyCode() != KeyEvent.KEYCODE_ENTER
-                        && !KeyNavigationUtil.isGoAnyDirection(event)
-                        && !KeyNavigationUtil.isTabNavigation(event)
-                        && (mKeyDownListener != null
-                                && mKeyDownListener.onKey(this, keyCode, event)))
-                || super_onKeyPreIme(keyCode, event);
-    }
-
-    @CheckDiscard("exposed for testing; should be inlined")
-    @VisibleForTesting
-    public boolean super_onKeyPreIme(int keyCode, KeyEvent event) {
-        return super.onKeyPreIme(keyCode, event);
-    }
-
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         return ((KeyNavigationUtil.isEnter(event)
                                 || KeyNavigationUtil.isGoAnyDirection(event)
-                                || KeyNavigationUtil.isTabNavigation(event))
+                                || KeyNavigationUtil.isTabNavigation(event)
+                                || event.getKeyCode() == KeyEvent.KEYCODE_DEL)
                         && (mKeyDownListener != null
                                 && mKeyDownListener.onKey(this, keyCode, event)))
                 || super_onKeyDown(keyCode, event);
@@ -346,29 +319,19 @@ public class UrlBar extends AutocompleteEditText {
     public void onFocusChanged(boolean focused, int direction, Rect previouslyFocusedRect) {
         mFocused = focused;
 
-        if (!mFocused) mFocusEventEmitted = false;
+        if (!mFocused) {
+            mCurrentInputCanBeWrapped = false;
+            mFocusEventEmitted = false;
+        }
         super.onFocusChanged(focused, direction, previouslyFocusedRect);
 
-        if (!mIsInCct
-                && !DeviceFormFactor.isNonMultiDisplayContextOnTablet(getContext())
-                && OmniboxFeatures.sMultilineEditField.isEnabled()) {
-            setInputIsMultilineEligible(false);
-            if (focused) {
-                setSingleLine(false);
-                setMaxLines(MULTILINE_EDIT_MAX_LINES);
-            } else {
-                setSingleLine(true);
-                setMaxLines(1);
-            }
-        }
+        updateUrlBarForMultilineInput();
         setHorizontalFadingEdgeEnabled(!focused);
 
         if (focused) {
             mPendingScroll = false;
         }
         fixupTextDirection();
-
-        mShouldSendTypingStartedEvent = focused;
     }
 
     @Override
@@ -395,9 +358,23 @@ public class UrlBar extends AutocompleteEditText {
         setFocusableInTouchMode(allowFocus);
     }
 
-    /** Sets the property indicating the URL bar is used by Custom Tab. */
-    public void setIsInCct(boolean isInCct) {
-        mIsInCct = isInCct;
+    /** Sets whether this {@link UrlBar} allows multiline input. */
+    public void setAllowMultilineInput(boolean allowMultilineInput) {
+        if (mAllowMultilineInput == allowMultilineInput) return;
+        mAllowMultilineInput = allowMultilineInput;
+        updateUrlBarForMultilineInput();
+    }
+
+    private void updateUrlBarForMultilineInput() {
+        if (mFocused && mAllowMultilineInput) {
+            setSingleLine(false);
+            setMaxLines(MULTILINE_EDIT_MAX_LINES);
+            setHorizontallyScrolling(!mCurrentInputCanBeWrapped);
+        } else {
+            setSingleLine(true);
+            setMaxLines(1);
+            setHorizontallyScrolling(true);
+        }
     }
 
     /**
@@ -467,13 +444,6 @@ public class UrlBar extends AutocompleteEditText {
 
     @Override
     protected void onTextChanged(CharSequence text, int start, int lengthBefore, int lengthAfter) {
-        if (mShouldSendTypingStartedEvent && lengthAfter > 0) {
-            if (mTypingStartedListener != null) {
-                mTypingStartedListener.run();
-            }
-            mShouldSendTypingStartedEvent = false;
-        }
-
         // Do not move this to the top of the method!
         // Make sure to emit the "TypingStarted" signal ahead of "onTextChanged", to allow the
         // Autocomplete session to begin.
@@ -512,10 +482,10 @@ public class UrlBar extends AutocompleteEditText {
 
     @Override
     public void setInputIsMultilineEligible(boolean isMultilineEligible) {
-        isMultilineEligible &= mFocused;
-        if (OmniboxFeatures.allowMultilineEditField() && !mIsInCct) {
-            setHorizontallyScrolling(!isMultilineEligible);
-        }
+        if (mCurrentInputCanBeWrapped == isMultilineEligible) return;
+
+        mCurrentInputCanBeWrapped = isMultilineEligible;
+        updateUrlBarForMultilineInput();
     }
 
     @Override
@@ -653,14 +623,6 @@ public class UrlBar extends AutocompleteEditText {
      */
     public void setTextChangeListener(Callback<String> listener) {
         mTextChangeListener = listener;
-    }
-
-    /**
-     * Install the listener notified when the user begins typing in recently focused Omnibox for the
-     * first time. When <null>, callback is removed.
-     */
-    /* package */ void setTypingStartedListener(@Nullable Runnable r) {
-        mTypingStartedListener = r;
     }
 
     /**
@@ -1232,21 +1194,6 @@ public class UrlBar extends AutocompleteEditText {
     }
 
     @Override
-    public void setTranslationY(float translationY) {
-        // Certain locale (e.g. Burmese) use particularly tall glyphs, which, combined with
-        // font_scale set to 2.0, render outside the Omnibox. We scale these fonts down (see
-        // enforceMaxTextHeight() call below). Despite the computation, Android's ElegantTextHeight
-        // feature imposes an extra margins around the text, forcing the already tall text to
-        // receive additional wide space on top and bottom, shifting the content upwards.
-        // We suppress Y translation here, as the Omnibox is not a vertically scrollable view, and
-        // our font height computation logic appears to produce correct glyph sizes.
-        //
-        // Allows translation in CCT that has to animate URL bar text for branding.
-        // TODO(crbug.com/357399658): Consider a new approach to remove this exception for CCT.
-        if (mIsInCct) super.setTranslationY(translationY);
-    }
-
-    @Override
     public Editable getText() {
         if (mRequestingAutofillStructure) {
             // crbug.com/1109186: mTextForAutofillServices must not be null here, but Autofill
@@ -1322,10 +1269,6 @@ public class UrlBar extends AutocompleteEditText {
     float getMaxHeightOfFont() {
         var fontMetrics = getPaint().getFontMetrics();
         return fontMetrics.bottom - fontMetrics.top;
-    }
-
-    boolean getIsInCctForTesting() {
-        return mIsInCct;
     }
 
     /**

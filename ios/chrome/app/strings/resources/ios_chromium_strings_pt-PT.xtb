@@ -89,6 +89,7 @@ Experimente aguardar alguns minutos antes de terminar sessão. Se terminar sess�
 <translation id="2517624234762908348">Sincronizar dados do Chromium</translation>
 <translation id="2575968074225731646">Aceda ao Chromium mais rapidamente a partir da Dock do iPhone.</translation>
 <translation id="2592940277904433508">Continuar a usar o Chromium</translation>
+<translation id="2601766165676560303">Tema do Chromium para iPhone e iPad</translation>
 <translation id="2607609479243848905">Se se esqueceu da frase de acesso ou quiser alterar esta definição, <ph name="BEGIN_LINK" />elimine os dados do Chromium na sua conta<ph name="END_LINK" />.</translation>
 <translation id="2640367368802736659">Dica do Chromium: pesquise o que vê com o Google Lens</translation>
 <translation id="2650312721222849884">Para ver os seus separadores onde quer que esteja a utilizar o Chromium, ative a sincronização.</translation>
@@ -102,6 +103,7 @@ Experimente aguardar alguns minutos antes de terminar sessão. Se terminar sess�
 Para ver mais definições que usam dados para melhorar a sua experiência do Chromium, aceda aos <ph name="BEGIN_LINK" />serviços Google<ph name="END_LINK" />.</translation>
 <translation id="2832168932648876507">Pesquise com a voz no Chromium.</translation>
 <translation id="2843571538056574338">Use o Chromium para o preenchimento automático</translation>
+<translation id="2899085719655668655">Instruções de vídeo no modo ecrã no ecrã sobre como definir o Chromium como predefinição</translation>
 <translation id="2918709798697875261">A sua entidade requer que se mantenha sem sessão iniciada no Chromium.</translation>
 <translation id="2942241131342758843">Utilize o Chromium por predefinição para abrir links, pesquisar a partir de widgets e preencher automaticamente palavras-passe noutras apps</translation>
 <translation id="2977470724722393594">O Chromium está atualizado</translation>
@@ -374,4 +376,5 @@ Experimente aguardar alguns minutos antes de terminar sessão. Se terminar sess�
 <translation id="924957577793602335">Personalize o Chromium</translation>
 <translation id="981812233959540767">Jogue Chromium Dino</translation>
 <translation id="985602178874221306">Os Autores do Chromium</translation>
+<translation id="986520777495807752">Definir o Chromium como predefinição</translation>
 </translationbundle>

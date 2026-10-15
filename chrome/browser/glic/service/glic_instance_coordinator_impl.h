@@ -56,6 +56,8 @@ BASE_DECLARE_FEATURE(kGlicHibernateAllOnMemoryPressure);
 
 BASE_DECLARE_FEATURE(kGlicHibernateOnMemoryUsage);
 
+BASE_DECLARE_FEATURE(kGlicMaxAwakeInstances);
+
 // An interface to GlicInstanceCoordinatorImpl. Should be used instead of direct
 // access to GlicInstanceCoordinatorImpl to allow for test fakes.
 class GlicInstanceCoordinator : public GlicWindowController {};
@@ -202,7 +204,8 @@ class GlicInstanceCoordinatorImpl
   GlicInstanceImpl* GetInstanceImplForConversationId(
       const std::string& conversation_id);
   GlicInstanceImpl* GetOrCreateInstanceImplForConversationId(
-      const std::string& conversation_id);
+      const std::string& conversation_id,
+      const std::optional<std::string>& turn_id);
   GlicInstanceImpl* GetOrCreateGlicInstanceImplForTab(tabs::TabInterface* tab);
   GlicInstanceImpl* GetOrCreateInstanceImplForFloaty();
   GlicInstanceImpl* CreateGlicInstance(
@@ -232,6 +235,7 @@ class GlicInstanceCoordinatorImpl
 
   void OnMemoryPressure(base::MemoryPressureLevel level) override;
   void CheckMemoryUsage();
+  void ApplyMaxAwakeInstancesLimit();
 
   void RemoveInstance(GlicInstanceImpl* instance) override;
 
@@ -239,12 +243,12 @@ class GlicInstanceCoordinatorImpl
   void ComputeContentAccessIndicator();
 
   void OnTabsInserted(const TabStripModelChange::Insert* insert);
-  void MaybeDaisyChainSidePanel(const TabCreationEvent& event);
   void MaybeDaisyChainNewTab(const TabCreationEvent& event);
   void MaybeDaisyChainFromLinkClick(const TabCreationEvent& event);
 
   void OnInvokeHandlerComplete(GlicInstance* instance,
                                GlicInvokeHandler* handler);
+
   GlicInstanceImpl* GetOrRestoreInstanceImpl(
       const GlicRestoredState::InstanceInfo& instance_info);
   void RestoreTab(content::WebContents* web_contents,

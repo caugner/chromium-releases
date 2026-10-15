@@ -12,6 +12,7 @@ import {EventTracker} from '//resources/js/event_tracker.js';
 import {loadTimeData} from '//resources/js/load_time_data.js';
 import {CrLitElement} from '//resources/lit/v3_0/lit.rollup.js';
 import type {SearchContext} from '//resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
+import type {InputState} from '//resources/mojo/components/omnibox/composebox/composebox_query.mojom-webui.js';
 
 import {getCss} from './aim_app.css.js';
 import {getHtml} from './aim_app.html.js';
@@ -37,8 +38,16 @@ export class OmniboxAimAppElement extends CrLitElement {
     return getHtml.bind(this)();
   }
 
-  protected searchboxLayoutMode_: string =
+  static override get properties() {
+    return {
+      searchboxLayoutMode_: {type: String},
+      hasAllowedInputs_: {type: Boolean},
+    };
+  }
+
+  protected accessor searchboxLayoutMode_: string =
       loadTimeData.getString('searchboxLayoutMode');
+  protected accessor hasAllowedInputs_: boolean = false;
   protected disableCaretColorAnimation_: boolean =
       loadTimeData.getBoolean('caretColorAnimationDisabled');
   protected disableComposeboxAnimation_: boolean =
@@ -66,12 +75,22 @@ export class OmniboxAimAppElement extends CrLitElement {
       this.callbackRouter_.onPopupShown.addListener(
           this.onPopupShown_.bind(this)),
       this.callbackRouter_.addContext.addListener(this.addContext_.bind(this)),
+      this.callbackRouter_.focusInput.addListener(this.focusInput_.bind(this)),
       this.callbackRouter_.clearPopup.addListener(this.clearPopup_.bind(this)),
       this.callbackRouter_.setPreserveContextOnClose.addListener(
           this.setPreserveContextOnClose_.bind(this)),
     ];
 
-    this.$.composebox.focusInput();
+    this.eventTracker_.add(
+        this.$.composebox, 'input-state-changed',
+        (e: CustomEvent<{inputState: InputState}>) => {
+          const inputState = e.detail.inputState;
+          this.hasAllowedInputs_ = inputState.allowedModels.length > 0 ||
+              inputState.allowedTools.length > 0 ||
+              inputState.allowedInputTypes.length > 0;
+        });
+
+    this.focusInput_();
 
     this.setupLocalizedLinkListener();
   }
@@ -86,6 +105,14 @@ export class OmniboxAimAppElement extends CrLitElement {
     this.listenerIds_ = [];
   }
 
+  protected getSearchboxLayoutMode_(): string {
+    if (this.searchboxLayoutMode_.startsWith('Tall') &&
+        !this.hasAllowedInputs_) {
+      return 'Compact';
+    }
+    return this.searchboxLayoutMode_;
+  }
+
   // As links do not navigate in the omnibox as they do in normal
   // web ui pages, set up a listener to open the link in the current
   // tab.
@@ -97,7 +124,7 @@ export class OmniboxAimAppElement extends CrLitElement {
     }
   }
 
-  protected onContextualEntryPointClicked_(
+  protected onContextMenuEntrypointClick_(
       e: CustomEvent<{x: number, y: number}>) {
     e.preventDefault();
     const point = {
@@ -125,12 +152,16 @@ export class OmniboxAimAppElement extends CrLitElement {
       this.$.composebox.setDefaultModel();
     }
     this.$.composebox.addSearchContext(context);
-    this.$.composebox.focusInput();
+    this.focusInput_();
     this.preserveContextOnClose_ = false;
   }
 
   private addContext_(context: SearchContext) {
     this.$.composebox.addSearchContext(context);
+    this.focusInput_();
+  }
+
+  private focusInput_() {
     this.$.composebox.focusInput();
   }
 
@@ -158,6 +189,22 @@ export class OmniboxAimAppElement extends CrLitElement {
     e.preventDefault();
     const href = (e.currentTarget as HTMLAnchorElement).href;
     this.pageHandler_.navigateCurrentTab(href);
+  }
+
+  setSearchboxLayoutModeForTesting(mode: string) {
+    this.searchboxLayoutMode_ = mode;
+  }
+
+  setHasAllowedInputsForTesting(hasAllowedInputs: boolean) {
+    this.hasAllowedInputs_ = hasAllowedInputs;
+  }
+
+  getSearchboxLayoutModeForTesting(): string {
+    return this.getSearchboxLayoutMode_();
+  }
+
+  getHasAllowedInputsForTesting(): boolean {
+    return this.hasAllowedInputs_;
   }
 }
 

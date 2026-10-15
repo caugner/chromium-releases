@@ -30,6 +30,9 @@
 
 namespace glic {
 
+// Returns whether tab context sharing is allowed.
+// If kGlicDefaultTabContextSetting is enabled, this always returns true as
+// permission is managed per-instance/tab rather than via a global preference.
 bool IsGlicTabContextEnabled(PrefService* pref_service) {
   if (base::FeatureList::IsEnabled(features::kGlicDefaultTabContextSetting)) {
     return true;
@@ -57,6 +60,9 @@ GlicGetContextResult TransformFetcherResult(
     case page_content_annotations::FetchPageContextError::
         kPageContextNotEligible:
       glic_error_code = GlicGetContextFromTabError::kPageContextNotEligible;
+      break;
+    case page_content_annotations::FetchPageContextError::kWebContentsWentAway:
+      glic_error_code = GlicGetContextFromTabError::kTabNotFound;
       break;
   }
   return base::unexpected(
@@ -326,7 +332,9 @@ void GlicSharingManagerImpl::GetContextFromTabImpl(
     base::OnceCallback<void(GlicGetContextResult)> callback) {
   FetchPageContext(
       tab, options,
-      base::BindOnce(&TransformFetcherResult).Then(std::move(callback)));
+      base::BindOnce(&TransformFetcherResult).Then(std::move(callback)),
+      /*progress_listener=*/nullptr,
+      /*is_screenshot_annotated=*/false);
 }
 
 }  // namespace glic

@@ -54,10 +54,12 @@
 #include "base/check.h"
 #include "base/command_line.h"
 #include "base/containers/adapters.h"
+#include "base/functional/bind.h"
 #include "base/functional/callback_forward.h"
 #include "base/i18n/time_formatting.h"
 #include "base/metrics/histogram_macros.h"
 #include "chromeos/ui/base/window_pin_type.h"
+#include "components/session_manager/session_manager_types.h"
 #include "ui/base/models/image_model.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
@@ -71,9 +73,9 @@ namespace ash {
 namespace {
 
 // Ensures that there is no id collision within the subtree of StatusAreaWidget.
-constexpr uint32_t kCustomIconsBaseId = 10000;
+constexpr uint64_t kCustomIconsBaseId = 10000;
 
-uint32_t GetCustomIconId(const TrayIconConfiguration& configuration) {
+uint64_t GetCustomIconId(const TrayIconConfiguration& configuration) {
   return configuration.id + kCustomIconsBaseId;
 }
 
@@ -695,7 +697,6 @@ bool StatusAreaWidget::AddTrayIcon(const TrayIconConfiguration& configuration,
       configuration.image ? ui::ImageModel::FromImageSkia(*configuration.image)
                           : ui::ImageModel();
 
-  // TODO(b:463430271): Add a new catalog name for custom icons.
   auto icon = std::make_unique<ImagedTrayIcon>(
       shelf_, std::move(image_model), tooltip_text,
       TrayBackgroundViewCatalogName::kChromeCustom);
@@ -703,10 +704,13 @@ bool StatusAreaWidget::AddTrayIcon(const TrayIconConfiguration& configuration,
   icon->SetCallback(std::move(callback));
   icon->GetViewAccessibility().SetName(std::move(tooltip_text));
   icon->SetVisiblePreferred(true);
+  icon->set_icon_visibility_callback(
+      base::BindRepeating([](session_manager::SessionState state) -> bool {
+        return !Shell::Get()->session_controller()->IsUserSessionBlocked();
+      }));
 
   custom_tray_buttons_ids_.insert(icon_id);
 
-  // TODO(b:463430271): Support correct order for `custom_tray_buttons_`.
   auto* icon_ptr = AddTrayButton(std::move(icon));
   icon_ptr->Initialize();
 

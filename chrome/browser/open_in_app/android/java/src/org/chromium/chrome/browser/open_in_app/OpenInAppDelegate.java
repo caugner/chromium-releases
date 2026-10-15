@@ -6,28 +6,16 @@ package org.chromium.chrome.browser.open_in_app;
 
 import android.graphics.drawable.Drawable;
 
-import org.chromium.base.ObserverList;
 import org.chromium.base.UserData;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.components.external_intents.ExternalNavigationHelper;
+import org.chromium.url.GURL;
 
 /** A delegate for handling the open in app action for a {@link Tab}. */
 @NullMarked
 public class OpenInAppDelegate implements UserData {
-    /** Observer for changes to the open in app state of the current tab. */
-    public interface Observer {
-        // TODO(crbug.com/450253146): OpenInAppInfo changes before the URL is loaded, so the
-        // implementing class should wait for the navigation to be committed before updating the UI.
-        /**
-         * Called when the open in app info changes.
-         *
-         * @param openInAppInfo The new {@link OpenInAppInfo}. Null if the new URL in the tab is
-         *     ineligible to open in app.
-         */
-        void onOpenInAppInfoChanged(@Nullable OpenInAppInfo openInAppInfo);
-    }
-
     /** Info needed to display open in app action UI. */
     public static class OpenInAppInfo {
         /** The {@link Runnable} to run to open in app. */
@@ -37,7 +25,7 @@ public class OpenInAppDelegate implements UserData {
          * App name to display for the open in app action. Null if the URL can be opened in more
          * than one app.
          */
-        public final @Nullable String appName;
+        public final @Nullable CharSequence appName;
 
         /**
          * App icon to display for the open in app action. Null if the URL can be opened in more
@@ -46,44 +34,50 @@ public class OpenInAppDelegate implements UserData {
         public final @Nullable Drawable appIcon;
 
         public OpenInAppInfo(
-                Runnable action, @Nullable String appName, @Nullable Drawable appIcon) {
+                Runnable action, @Nullable CharSequence appName, @Nullable Drawable appIcon) {
             this.action = action;
             this.appName = appName;
             this.appIcon = appIcon;
         }
     }
 
-    private final ObserverList<Observer> mObservers = new ObserverList<>();
+    private final Tab mTab;
     private @Nullable OpenInAppInfo mCurrentOpenInAppInfo;
-
-    /**
-     * Adds an {@link Observer} to be notified when the open in app info changes.
-     *
-     * @param observer The {@link Observer} to notify.
-     */
-    public void addOpenInAppInfoObserver(Observer observer) {
-        mObservers.addObserver(observer);
-    }
-
-    /**
-     * Removes an {@link Observer}.
-     *
-     * @param observer The {@link Observer} to notify.
-     */
-    public void removeOpenInAppInfoObserver(Observer observer) {
-        mObservers.removeObserver(observer);
-    }
+    private @Nullable ExternalNavigationHelper mExternalNavigationHelper;
+    private @Nullable GURL mLastNavigatedUrl;
 
     public void updateOpenInAppInfo(@Nullable OpenInAppInfo openInAppInfo) {
         mCurrentOpenInAppInfo = openInAppInfo;
-        for (Observer observer : mObservers) {
-            observer.onOpenInAppInfoChanged(openInAppInfo);
-        }
     }
 
     /** Returns the current {@link OpenInAppInfo}. */
     public @Nullable OpenInAppInfo getCurrentOpenInAppInfo() {
         return mCurrentOpenInAppInfo;
+    }
+
+    /** Sets the last navigated {@link GURL}. */
+    public void setLastNavigatedUrl(@Nullable GURL url) {
+        mLastNavigatedUrl = url;
+    }
+
+    /** Returns the last navigated {@link GURL}. */
+    public @Nullable GURL getLastNavigatedUrl() {
+        return mLastNavigatedUrl;
+    }
+
+    /** Sets a {@link ExternalNavigationHelper}. */
+    public void setExternalNavigationHelper(ExternalNavigationHelper helper) {
+        mExternalNavigationHelper = helper;
+    }
+
+    /** Returns the {@link ExternalNavigationHelper}. */
+    public @Nullable ExternalNavigationHelper getExternalNavigationHelper() {
+        return mExternalNavigationHelper;
+    }
+
+    /** Returns the {@link Tab} that hosts this {@link OpenInAppDelegate}. */
+    public Tab getTab() {
+        return mTab;
     }
 
     private static final Class<OpenInAppDelegate> USER_DATA_KEY = OpenInAppDelegate.class;
@@ -98,7 +92,7 @@ public class OpenInAppDelegate implements UserData {
     public static OpenInAppDelegate from(Tab tab) {
         OpenInAppDelegate delegate = get(tab);
         if (delegate == null) {
-            delegate = tab.getUserDataHost().setUserData(USER_DATA_KEY, new OpenInAppDelegate());
+            delegate = tab.getUserDataHost().setUserData(USER_DATA_KEY, new OpenInAppDelegate(tab));
         }
         return delegate;
     }
@@ -107,5 +101,7 @@ public class OpenInAppDelegate implements UserData {
         return tab.getUserDataHost().getUserData(USER_DATA_KEY);
     }
 
-    private OpenInAppDelegate() {}
+    private OpenInAppDelegate(Tab tab) {
+        mTab = tab;
+    }
 }

@@ -79,9 +79,6 @@ public class SavePasswordsPromoCoordinator
     @Override
     public void onCardClicked() {
         showInstructionalBottomSheet();
-
-        // Considered complete if the user clicks on the promo
-        SetupListModuleUtils.setModuleCompleted(ModuleType.SAVE_PASSWORDS_PROMO);
         mOnModuleClickedCallback.run();
     }
 
@@ -103,11 +100,10 @@ public class SavePasswordsPromoCoordinator
         }
 
         if (mSavePasswordsBottomSheetContent != null) {
-            mActionDelegate
-                    .getBottomSheetController()
-                    .hideContent(mSavePasswordsBottomSheetContent, /* animate= */ false);
-            mSavePasswordsBottomSheetContent.destroy();
+            SavePasswordsInstructionalBottomSheetContent content = mSavePasswordsBottomSheetContent;
             mSavePasswordsBottomSheetContent = null;
+            mActionDelegate.getBottomSheetController().hideContent(content, /* animate= */ false);
+            content.destroy();
         }
     }
 

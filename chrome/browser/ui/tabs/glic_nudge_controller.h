@@ -11,7 +11,7 @@
 #include "components/keyed_service/core/keyed_service.h"
 
 class BrowserWindowInterface;
-class ScopedWindowCallToAction;
+class ScopedCallToActionLock;
 
 namespace content {
 class WebContents;
@@ -45,7 +45,12 @@ class GlicNudgeController {
   GlicNudgeController& operator=(const GlicNudgeController& other) = delete;
   virtual ~GlicNudgeController();
 
-  void SetDelegate(GlicNudgeDelegate* delegate) { delegate_ = delegate; }
+  void SetTabStripDelegate(GlicNudgeDelegate* delegate) {
+    tab_strip_delegate_ = delegate;
+  }
+  void SetToolbarDelegate(GlicNudgeDelegate* delegate) {
+    toolbar_delegate_ = delegate;
+  }
 
   // Updates the `nudge_label` for `web_contents`, if the WebContents is active.
   // The nudge will be removed from `web_contents` if `nudge_label` is empty.
@@ -54,6 +59,7 @@ class GlicNudgeController {
   void UpdateNudgeLabel(content::WebContents* web_contents,
                         const std::string& nudge_label,
                         std::optional<std::string> prompt_suggestion,
+                        const std::string& anchored_message_text,
                         std::optional<GlicNudgeActivity> activity,
                         GlicNudgeActivityCallback callback);
 
@@ -72,10 +78,13 @@ class GlicNudgeController {
   // the tab.
   void OnActiveTabChanged(BrowserWindowInterface* browser_interface);
 
+  GlicNudgeDelegate* GetActiveDelegate();
+
   // The BrowserWindowInterface that owns `this`.
   const raw_ptr<BrowserWindowInterface> browser_window_interface_;
 
-  raw_ptr<GlicNudgeDelegate> delegate_ = nullptr;
+  raw_ptr<GlicNudgeDelegate> tab_strip_delegate_ = nullptr;
+  raw_ptr<GlicNudgeDelegate> toolbar_delegate_ = nullptr;
 
   // The suggested prompt associated with the nudge label.
   std::optional<std::string> prompt_suggestion_;
@@ -84,7 +93,7 @@ class GlicNudgeController {
   GlicNudgeActivityCallback nudge_activity_callback_;
 
   std::vector<base::CallbackListSubscription> browser_subscriptions_;
-  std::unique_ptr<ScopedWindowCallToAction> scoped_window_call_to_action_ptr;
+  std::unique_ptr<ScopedCallToActionLock> scoped_call_to_action_lock_;
 };
 
 }  // namespace tabs

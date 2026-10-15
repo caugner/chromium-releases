@@ -10,6 +10,7 @@
 #include <tuple>
 #include <utility>
 
+#include "base/feature_list.h"
 #include "base/notreached.h"
 #include "base/strings/strcat.h"
 #include "base/strings/stringprintf.h"
@@ -84,7 +85,8 @@ class BaseAutofillAiTest : public testing::Test {
   BaseAutofillAiTest() {
     scoped_feature_list_.InitWithFeatures(
         /*enabled_features=*/{features::kAutofillAiWithDataSchema,
-                              features::kAutofillAiWalletFlightReservation},
+                              features::kAutofillAiWalletFlightReservation,
+                              features::kAutofillUseAccessibilityAnnotator},
         /*disabled_features=*/{});
     autofill_client().set_entity_data_manager(
         std::make_unique<EntityDataManager>(
@@ -94,6 +96,7 @@ class BaseAutofillAiTest : public testing::Test {
             webdata_helper_.autofill_webdata_service(),
             /*history_service=*/nullptr,
             /*strike_database=*/nullptr,
+            /*accessibility_annotator_data_adapter=*/nullptr,
             /*variation_country_code=*/GeoIpCountryCode("US")));
     RecreateManager();
     autofill_client().SetUpPrefsAndIdentityForAutofillAi();
@@ -183,6 +186,14 @@ class BaseAutofillAiTest : public testing::Test {
         std::move(url));
   }
 
+  [[nodiscard]] std::unique_ptr<FormStructure> CreateOrderForm(
+      std::string url = std::string(kDefaultUrl)) {
+    return CreateFormStructure(
+        {ORDER_ACCOUNT, ORDER_DATE, ORDER_GRAND_TOTAL, ORDER_ID,
+         ORDER_MERCHANT_DOMAIN, ORDER_MERCHANT_NAME, ORDER_PRODUCT_NAMES},
+        std::move(url));
+  }
+
   [[nodiscard]] std::unique_ptr<FormStructure> CreateMergedForm(
       const std::vector<const FormStructure*>& forms,
       std::string url = std::string(kDefaultUrl)) {
@@ -224,6 +235,8 @@ class BaseAutofillAiTest : public testing::Test {
         return CreateNationalIdCardForm();
       case EntityTypeName::kFlightReservation:
         return CreateFlightReservationForm();
+      case EntityTypeName::kOrder:
+        return CreateOrderForm();
     }
     NOTREACHED();
   }
@@ -251,6 +264,8 @@ class BaseAutofillAiTest : public testing::Test {
         case EntityTypeName::kFlightReservation:
           return test::GetFlightReservationEntityInstance(
               {.record_type = record_type});
+        case EntityTypeName::kOrder:
+          return test::GetOrderEntityInstance({.record_type = record_type});
       }
       NOTREACHED();
     }();
@@ -276,9 +291,9 @@ class BaseAutofillAiTest : public testing::Test {
 TEST_F(BaseAutofillAiTest, NumberOfFilledFields) {
   std::unique_ptr<FormStructure> form = CreatePassportForm();
 
-  form->field(0)->set_is_autofilled(true);
+  form->field(0)->AddFieldModifier(FieldModifier::kAutofill);
   form->field(0)->set_filling_product(FillingProduct::kAddress);
-  form->field(1)->set_is_autofilled(true);
+  form->field(1)->AddFieldModifier(FieldModifier::kAutofill);
   form->field(1)->set_filling_product(FillingProduct::kAutocomplete);
   {
     manager().OnFormSeen(*form);
@@ -295,7 +310,7 @@ TEST_F(BaseAutofillAiTest, NumberOfFilledFields) {
   {
     AddOrUpdateEntityInstance(test::GetPassportEntityInstance());
     manager().OnFormSeen(*form);
-    form->field(2)->set_is_autofilled(true);
+    form->field(2)->AddFieldModifier(FieldModifier::kAutofill);
     form->field(2)->set_filling_product(FillingProduct::kAutofillAi);
     base::HistogramTester histogram_tester;
     manager().OnFormSubmitted(*form, /*ukm_source_id=*/{});
@@ -339,17 +354,17 @@ class AutofillAiFunnelMetricsTest
                              std::string_view funnel_name,
                              int sample) {
     for (bool use_submitted : {false, true}) {
-      auto expect_correct_histogram =
-          [&](std::string_view histogram_name, bool use_entity_type,
-              bool use_record_type) {
-            std::string histogram_name_str = GetFunnelHistogram(
-                histogram_name,
-                use_submitted ? std::optional(submitted()) : std::nullopt,
-                use_entity_type ? std::optional(entity_type()) : std::nullopt,
-                use_record_type ? std::optional(record_type()) : std::nullopt);
+      auto expect_correct_histogram = [&](std::string_view histogram_name,
+                                          bool use_entity_type,
+                                          bool use_record_type) {
+        std::string histogram_name_str = GetFunnelHistogram(
+            histogram_name,
+            use_submitted ? std::optional(submitted()) : std::nullopt,
+            use_entity_type ? std::optional(entity_type()) : std::nullopt,
+            use_record_type ? std::optional(record_type()) : std::nullopt);
 
-            histogram_tester.ExpectUniqueSample(histogram_name_str, sample, 1);
-          };
+        histogram_tester.ExpectUniqueSample(histogram_name_str, sample, 1);
+      };
 
       expect_correct_histogram(funnel_name, /*use_entity_type=*/false,
                                /*use_record_type=*/false);
@@ -998,11 +1013,11 @@ TEST_F(AutofillAiMqlsMetricsTest, KeyMetrics) {
   test_api(manager()).logger().OnSuggestionsShown(*form, *form->field(1),
                                                   {&entity},
                                                   /*ukm_source_id=*/{});
-  form->field(0)->set_is_autofilled(true);
+  form->field(0)->AddFieldModifier(FieldModifier::kAutofill);
   form->field(0)->set_filling_product(FillingProduct::kAddress);
-  form->field(1)->set_is_autofilled(true);
+  form->field(1)->AddFieldModifier(FieldModifier::kAutofill);
   form->field(1)->set_filling_product(FillingProduct::kAutofillAi);
-  form->field(2)->set_is_autofilled(true);
+  form->field(2)->AddFieldModifier(FieldModifier::kAutofill);
   form->field(2)->set_filling_product(FillingProduct::kAutocomplete);
 
   test_api(manager()).logger().OnDidFillSuggestion(*form, *form->field(1),
@@ -1013,8 +1028,7 @@ TEST_F(AutofillAiMqlsMetricsTest, KeyMetrics) {
 
   test_api(manager()).logger().OnEditedAutofilledField(*form, *form->field(1),
                                                        /*ukm_source_id=*/{});
-  form->field(1)->set_is_autofilled(false);
-  form->field(1)->set_is_user_edited(true);
+  form->field(1)->AddFieldModifier(FieldModifier::kUser);
 
   test_api(manager()).logger().RecordFormMetrics(*form, /*ukm_source_id=*/{},
                                                  /*submission_state=*/true,
@@ -1061,7 +1075,7 @@ TEST_F(AutofillAiMqlsMetricsTest, KeyMetrics_PerfectFilling) {
   EXPECT_TRUE(GetKeyMetricsLogs().perfect_filling());
 
   // Simulate a user edit for some field.
-  form->field(2)->set_is_user_edited(true);
+  form->field(2)->AddFieldModifier(FieldModifier::kUser);
 
   // Now the MQLS logs should not record a perfect filling.
   test_api(manager()).logger().RecordFormMetrics(*form, /*ukm_source_id=*/{},
@@ -1079,6 +1093,33 @@ TEST_F(AutofillAiMqlsMetricsTest, KeyMetrics_OptOut) {
                                                  /*submission_state=*/true,
                                                  /*opt_in_status=*/false);
   EXPECT_TRUE(mqls_logs().empty());
+}
+
+// Tests that when Autofill AI is available by default, MQLS metrics are not
+// emitted, but UMA Key metrics are.
+TEST_F(AutofillAiMqlsMetricsTest,
+       KeyMetrics_OptOut_AutofillAiAvailableByDefault) {
+  base::test::ScopedFeatureList feature_list{
+      features::kAutofillAiAvailableByDefault};
+  SetAutofillAiOptInStatus(autofill_client(), AutofillAiOptInStatus::kOptedOut);
+
+  std::unique_ptr<FormStructure> form = CreatePassportForm();
+  EntityInstance entity = test::GetPassportEntityInstance();
+  // Simulate data available for filling.
+  test_api(manager()).logger().OnFormHasDataToFill(form->global_id(),
+                                                   {entity.type()}, {entity});
+
+  base::HistogramTester histogram_tester;
+  test_api(manager()).logger().RecordFormMetrics(*form, /*ukm_source_id=*/{},
+                                                 /*submission_state=*/true,
+                                                 /*opt_in_status=*/false);
+
+  // MQLS metrics are not emitted if the user is not opted-in.
+  EXPECT_TRUE(mqls_logs().empty());
+
+  // UMA metrics are still emitted if the feature is available by default.
+  histogram_tester.ExpectUniqueSample("Autofill.Ai.KeyMetrics.FillingReadiness",
+                                      1, 1);
 }
 
 // Tests that KeyMetrics MQLS metrics aren't recorded if the form was abandoned

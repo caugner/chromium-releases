@@ -40,6 +40,7 @@
 #include "google_apis/gaia/gaia_constants.h"
 #include "net/base/url_util.h"
 #include "third_party/lens_server_proto/aim_communication.pb.h"
+#include "third_party/lens_server_proto/aim_icon.pb.h"
 #include "third_party/lens_server_proto/modality_chip_props.pb.h"
 #include "third_party/omnibox_proto/chrome_aim_entry_point.pb.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -111,17 +112,17 @@ PopulateContextualResources(contextual_tasks::ContextualTaskContext* context) {
   return context_items;
 }
 
-contextual_tasks::mojom::IconType IconTypeToMojom(lens::IconType icon_id) {
+contextual_tasks::mojom::IconType IconTypeToMojom(lens::AimIconType icon_id) {
   switch (icon_id) {
-    case lens::IconType::ICON_TYPE_ADD:
+    case lens::AimIconType::ICON_TYPE_ADD:
       return contextual_tasks::mojom::IconType::kAdd;
-    case lens::IconType::ICON_TYPE_CHECK:
+    case lens::AimIconType::ICON_TYPE_CHECK:
       return contextual_tasks::mojom::IconType::kCheck;
-    case lens::IconType::ICON_TYPE_FORMAT_QUOTE_FILLED:
+    case lens::AimIconType::ICON_TYPE_FORMAT_QUOTE_FILLED:
       return contextual_tasks::mojom::IconType::kFormatQuoteFilled;
-    case lens::IconType::ICON_TYPE_IMAGE:
+    case lens::AimIconType::ICON_TYPE_IMAGE:
       return contextual_tasks::mojom::IconType::kImage;
-    case lens::IconType::ICON_TYPE_DRIVE_PDF:
+    case lens::AimIconType::ICON_TYPE_DRIVE_PDF:
       return contextual_tasks::mojom::IconType::kDrivePdf;
     default:
       return contextual_tasks::mojom::IconType::kUnspecified;
@@ -202,20 +203,18 @@ void ContextualTasksPageHandler::GetUrlForTask(const base::Uuid& uuid,
     return;
   }
 
-  GURL aim_url = web_ui_controller_->GetAimUrl();
-  if (!aim_url.is_empty()) {
-    std::move(callback).Run(aim_url);
-    return;
-  }
-
   // There's a slight difference in the callback signature between the mojo
   // api (wants a reference) and the ui service (provided a moved object).
   // The latter can't provide a reference since we're not keeping it
   // long-term, hence wrapping this in a base::BindOnce.
   ui_service_->GetThreadUrlFromTaskId(
-      uuid, base::BindOnce([](GetUrlForTaskCallback callback,
-                              GURL url) { std::move(callback).Run(url); },
-                           std::move(callback)));
+      uuid,
+      base::BindOnce(
+          [](GetUrlForTaskCallback callback, GURL webui_url, GURL url) {
+            std::move(callback).Run(contextual_tasks::ContextualTasksUiService::
+                                        CopyParamsFromWebUIUrl(url, webui_url));
+          },
+          std::move(callback), web_ui_controller_->GetWebUiUrl()));
 }
 
 void ContextualTasksPageHandler::SetTaskId(const base::Uuid& uuid) {
@@ -247,6 +246,17 @@ void ContextualTasksPageHandler::IsPendingErrorPage(
     const base::Uuid& task_id,
     IsPendingErrorPageCallback callback) {
   std::move(callback).Run(ui_service_->IsPendingErrorPage(task_id));
+}
+
+void ContextualTasksPageHandler::IsEmbeddedPageErrorDocument(
+    IsEmbeddedPageErrorDocumentCallback callback) {
+  bool is_error = false;
+  if (auto* inner_contents = web_ui_controller_->GetInnerWebContents()) {
+    if (auto* main_frame = inner_contents->GetPrimaryMainFrame()) {
+      is_error = main_frame->IsErrorDocument();
+    }
+  }
+  std::move(callback).Run(is_error);
 }
 
 void ContextualTasksPageHandler::CloseSidePanel() {

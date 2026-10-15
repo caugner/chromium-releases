@@ -89,6 +89,7 @@
 <translation id="2517624234762908348">Синхронизировать данные Chromium</translation>
 <translation id="2575968074225731646">Вы сможете быстрее открывать Chromium на панели Dock вашего iPhone.</translation>
 <translation id="2592940277904433508">Продолжить работу в Chromium</translation>
+<translation id="2601766165676560303">Тема Chromium для iPhone и iPad</translation>
 <translation id="2607609479243848905">Если вы забыли кодовую фразу или хотите ее изменить, <ph name="BEGIN_LINK" />удалите данные Chromium из аккаунта<ph name="END_LINK" />.</translation>
 <translation id="2640367368802736659">Совет по работе с Chromium: находите то, что вам интересно, с помощью Google Объектива</translation>
 <translation id="2650312721222849884">Чтобы ваши вкладки всегда были доступны вам при работе с Chromium, включите синхронизацию.</translation>
@@ -102,6 +103,7 @@
 Чтобы посмотреть дополнительные настройки, которые используют информацию для улучшения работы Chromium, перейдите к <ph name="BEGIN_LINK" />сервисам Google<ph name="END_LINK" />.</translation>
 <translation id="2832168932648876507">Голосовой поиск в Chromium.</translation>
 <translation id="2843571538056574338">Используйте Chromium для автозаполнения</translation>
+<translation id="2899085719655668655">Видео в режиме "Картинка в картинке" с инструкциями о том, как сделать Chromium браузером по умолчанию</translation>
 <translation id="2918709798697875261">Согласно правилам вашей организации, входить в Chromium запрещено.</translation>
 <translation id="2942241131342758843">Сделайте Chromium браузером по умолчанию, чтобы открывать ссылки, выполнять поиск прямо из виджетов и автозаполнять пароли в других приложениях.</translation>
 <translation id="2977470724722393594">Вы используете последнюю версию Chromium</translation>
@@ -374,4 +376,5 @@
 <translation id="924957577793602335">Настройте Chromium для себя</translation>
 <translation id="981812233959540767">Играть в Chromium Dino</translation>
 <translation id="985602178874221306">Авторы Chromium</translation>
+<translation id="986520777495807752">Сделайте Chromium браузером по умолчанию</translation>
 </translationbundle>

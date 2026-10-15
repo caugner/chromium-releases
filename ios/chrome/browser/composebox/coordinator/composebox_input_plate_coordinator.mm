@@ -11,10 +11,10 @@
 #import "components/application_locale_storage/application_locale_storage.h"
 #import "components/contextual_search/contextual_search_service.h"
 #import "components/contextual_search/contextual_search_session_handle.h"
+#import "components/contextual_search/internal/ios/composebox_query_controller_ios.h"
 #import "components/lens/lens_overlay_invocation_source.h"
 #import "components/omnibox/browser/aim_eligibility_service.h"
 #import "components/omnibox/browser/location_bar_model_impl.h"
-#import "components/omnibox/composebox/ios/composebox_query_controller_ios.h"
 #import "components/search_engines/template_url_service.h"
 #import "components/signin/public/identity_manager/identity_manager.h"
 #import "ios/chrome/browser/aim/model/ios_chrome_aim_eligibility_service_factory.h"
@@ -78,6 +78,19 @@
 namespace {
 const size_t kMaxURLDisplayChars = 32 * 1024;
 const CGFloat kSnackbarBottomMargin = 10;
+
+// Converts ComposeboxEntrypoint to ContextualSearchSource.
+contextual_search::ContextualSearchSource ContextualSearchSourceFromEntrypoint(
+    ComposeboxEntrypoint entrypoint) {
+  switch (entrypoint) {
+    case ComposeboxEntrypoint::kNTPAIMButton:
+      return contextual_search::ContextualSearchSource::kNewTabPage;
+    case ComposeboxEntrypoint::kNTPFakebox:
+    case ComposeboxEntrypoint::kOther:
+      return contextual_search::ContextualSearchSource::kOmnibox;
+  }
+}
+
 }  // namespace
 
 @interface ComposeboxInputPlateCoordinator () <
@@ -172,7 +185,7 @@ const CGFloat kSnackbarBottomMargin = 10;
 
     contextualSearchSession = _contextualService->CreateSession(
         std::move(query_controller_config_params),
-        contextual_search::ContextualSearchSource::kOmnibox,
+        ContextualSearchSourceFromEntrypoint(_entrypoint),
         lens::LensOverlayInvocationSource::kOmniboxContextualQuery);
   }
 
@@ -308,7 +321,6 @@ const CGFloat kSnackbarBottomMargin = 10;
             (ComposeboxInputPlateViewController*)composeboxViewController
                 didTapLensButton:(UIButton*)lensButton {
   [_metricsRecorder recordLensSearchButtonUsed];
-
   OpenLensInputSelectionCommand* command = [[OpenLensInputSelectionCommand
       alloc]
           initWithEntryPoint:LensEntrypoint::Composebox
@@ -376,6 +388,15 @@ const CGFloat kSnackbarBottomMargin = 10;
   config.filter = [PHPickerFilter imagesFilter];
   _picker = [[PHPickerViewController alloc] initWithConfiguration:config];
   _picker.delegate = self;
+}
+
+- (void)composeboxViewController:
+            (ComposeboxInputPlateViewController*)composeboxViewController
+    didOpenPlusMenuWithVisibleInternalButtons:
+        (const std::vector<FuseboxAttachmentButtonType>&)
+            visibleInternalButtons {
+  [_mediator
+      recordPlusMenuOpenedWithVisibleInternalButtons:visibleInternalButtons];
 }
 
 - (void)composeboxViewControllerDidTapFileButton:
@@ -511,6 +532,8 @@ const CGFloat kSnackbarBottomMargin = 10;
     return;
   }
 
+  [_metricsRecorder recordImagesAttached:results.count];
+
   for (PHPickerResult* result in results) {
     [_mediator processImageItemProvider:result.itemProvider
                                 assetID:result.assetIdentifier];
@@ -524,6 +547,9 @@ const CGFloat kSnackbarBottomMargin = 10;
   if (urls.count == 0) {
     return;
   }
+
+  [_metricsRecorder recordFilesAttached:urls.count];
+
   [_mediator processPDFFileURL:net::GURLWithNSURL(urls.firstObject)];
 }
 
@@ -632,7 +658,6 @@ const CGFloat kSnackbarBottomMargin = 10;
 - (void)showComposeboxTabPicker {
   [_metricsRecorder
       recordAttachmentButtonUsed:FuseboxAttachmentButtonType::kTabPicker];
-
   _tabPickerCoordinator = [[ComposeboxTabPickerCoordinator alloc]
       initWithBaseViewController:_viewController
                          browser:self.browser

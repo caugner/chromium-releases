@@ -76,10 +76,6 @@ class GlicProfileManager : public ProfileManagerObserver,
   void ShouldPreloadForProfile(Profile* profile,
                                ShouldPreloadCallback callback);
 
-  // Callback will be invoked with true if the given profile should be
-  // considered for preloading the FRE.
-  void ShouldPreloadFreForProfile(Profile* profile,
-                                  ShouldPreloadCallback callback);
 
   // Returns the active Glic service, nullptr if there is none.
   GlicKeyedService* GetLastActiveGlic() const;
@@ -204,7 +200,7 @@ enum class GlicPrewarmingChecksResult {
   // The browser is being shutdown.
   kBrowserShuttingDown = 14,
 
-  // The user already went through the Glic FRE (applicable to FRE warming).
+  // Deprecated.
   kUserAlreadyWentTroughFre = 15,
 
   // Used by tests to prevent premature preloading. Not a valid value for

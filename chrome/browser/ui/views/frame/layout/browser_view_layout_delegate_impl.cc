@@ -17,6 +17,7 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/browser_widget.h"
 #include "chrome/browser/ui/views/infobars/infobar_container_view.h"
+#include "chrome/browser/ui/views/tabs/projects/projects_panel_utils.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/browser/ui/views/web_apps/frame_toolbar/web_app_frame_toolbar_view.h"
 #include "chrome/common/buildflags.h"
@@ -59,7 +60,7 @@ bool BrowserViewLayoutDelegateImpl::ShouldDrawWebAppFrameToolbar() const {
 }
 
 bool BrowserViewLayoutDelegateImpl::GetBorderlessModeEnabled() const {
-  return browser_view_->IsBorderlessModeEnabled();
+  return browser_view_->IsUnframedModeEnabled();
 }
 
 BrowserLayoutParams BrowserViewLayoutDelegateImpl::GetBrowserLayoutParams(
@@ -128,7 +129,7 @@ bool BrowserViewLayoutDelegateImpl::IsActiveTabSplit() const {
 bool BrowserViewLayoutDelegateImpl::IsActiveTabAtLeadingWindowEdge() const {
   if (auto* const frame = GetFrameView()) {
     const bool has_leading_search_button =
-        tabs::GetTabSearchPosition(browser_view_->GetProfile()) ==
+        tabs::GetTabSearchPosition(browser_view_->browser()) ==
         tabs::TabSearchPosition::kLeadingHorizontalTabstrip;
     if (!frame->CaptionButtonsOnLeadingEdge() && !has_leading_search_button) {
       return browser_view_->browser()->tab_strip_model()->IsTabInForeground(0);
@@ -210,6 +211,11 @@ int BrowserViewLayoutDelegateImpl::GetExtraInfobarOffset() const {
   }
 #endif
   return 0;
+}
+
+bool BrowserViewLayoutDelegateImpl::IsProjectsPanelVisible() const {
+  return projects_panel::IsProjectsPanelVisibleForProfile(
+      browser_view_->GetProfile());
 }
 
 const BrowserFrameView* BrowserViewLayoutDelegateImpl::GetFrameView() const {

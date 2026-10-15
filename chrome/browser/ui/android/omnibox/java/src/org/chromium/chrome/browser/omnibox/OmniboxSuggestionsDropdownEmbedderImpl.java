@@ -26,9 +26,11 @@ import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider.ControlsPosition;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.layouts.LayoutType;
 import org.chromium.chrome.browser.omnibox.fusebox.FuseboxCoordinator.FuseboxState;
 import org.chromium.chrome.browser.omnibox.styles.OmniboxResourceProvider;
 import org.chromium.chrome.browser.omnibox.suggestions.OmniboxSuggestionsDropdownEmbedder;
+import org.chromium.chrome.browser.ui.edge_to_edge.TopInsetProvider;
 import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.base.ViewUtils;
 import org.chromium.ui.base.WindowAndroid;
@@ -55,12 +57,16 @@ class OmniboxSuggestionsDropdownEmbedderImpl
     private final Supplier<Integer> mKeyboardHeightSupplier;
     private final Supplier<Integer> mBottomWindowPaddingSupplier;
     private final Context mContext;
+    private final TopInsetProvider mTopInsetProvider;
+    private final TopInsetProvider.Observer mTopInsetProviderObserver;
     // Reusable int array to pass to positioning methods that operate on a two element int array.
     // Keeping it as a member lets us avoid allocating a temp array every time.
     private final int[] mPositionArray = new int[2];
     private int mVerticalOffsetInWindow;
+    private int mHorizontalOffsetInWindow;
     private int mWindowWidthDp;
     private int mWindowHeightDp;
+    private int mTopPaddingForEdgeToEdge;
     private @Nullable WindowInsetsCompat mWindowInsetsCompat;
     private final @Nullable View mBaseChromeLayout;
     private final LocationBarDataProvider mLocationBarDataProvider;
@@ -86,6 +92,7 @@ class OmniboxSuggestionsDropdownEmbedderImpl
      *     suggestions list draws edge to edge when appropriate. This should only be used when the
      *     soft keyboard is not visible.
      * @param locationBarDataProvider Provides LocationBar data, e.g. the current URL.
+     * @param topInsetProvider Provider for edge-to-edge top inset changes.
      */
     OmniboxSuggestionsDropdownEmbedderImpl(
             WindowAndroid windowAndroid,
@@ -96,8 +103,9 @@ class OmniboxSuggestionsDropdownEmbedderImpl
             Supplier<@ControlsPosition Integer> controlsPositionSupplier,
             Supplier<Integer> keyboardHeightSupplier,
             Supplier<Integer> bottomWindowPaddingSupplier,
+            Supplier<Integer> fuseboxStateSupplier,
             LocationBarDataProvider locationBarDataProvider,
-            Supplier<Integer> fuseboxStateSupplier) {
+            TopInsetProvider topInsetProvider) {
         mWindowAndroid = windowAndroid;
         mAnchorView = anchorView;
         mAlignmentView = alignmentView;
@@ -111,9 +119,14 @@ class OmniboxSuggestionsDropdownEmbedderImpl
         mWindowWidthDp = configuration.smallestScreenWidthDp;
         mWindowHeightDp = configuration.screenHeightDp;
         mBaseChromeLayout = baseChromeLayout;
-        mLocationBarDataProvider = locationBarDataProvider;
         mFuseboxStateSupplier = fuseboxStateSupplier;
+        mLocationBarDataProvider = locationBarDataProvider;
+        mTopInsetProvider = topInsetProvider;
         recalculateOmniboxAlignment();
+
+        // Set up observer to handle edge-to-edge changes.
+        mTopInsetProviderObserver = this::onToEdgeChange;
+        mTopInsetProvider.addObserver(mTopInsetProviderObserver);
     }
 
     @Override
@@ -180,7 +193,9 @@ class OmniboxSuggestionsDropdownEmbedderImpl
     // OnGlobalLayoutListener
     @Override
     public void onGlobalLayout() {
-        if (offsetInWindowChanged(mAnchorView) || insetsHaveChanged(mAnchorView)) {
+        if (verticalOffsetInWindowChanged(mAnchorView)
+                || insetsHaveChanged(mAnchorView)
+                || horizontalOffsetInWindowChanged(mAlignmentView)) {
             recalculateOmniboxAlignment();
         }
     }
@@ -328,16 +343,19 @@ class OmniboxSuggestionsDropdownEmbedderImpl
             windowHeight = mWindowAndroid.getDisplay().getDisplayHeight();
         }
 
-        int paddingBottom = 0;
-        // Apply extra bottom padding if the keyboard isn't showing.
-        if (keyboardHeight <= 0) {
-            paddingBottom = mBottomWindowPaddingSupplier.get();
-            windowHeight += paddingBottom;
-        }
-
         int minSpaceAboveWindowBottom =
                 mContext.getResources()
                         .getDimensionPixelSize(R.dimen.omnibox_min_space_above_window_bottom);
+
+        int paddingBottom = 0;
+        // Apply extra bottom padding if the keyboard isn't showing. Reduce the padding applied by
+        // the "min height above window bottom".
+        if (keyboardHeight <= 0) {
+            paddingBottom =
+                    Math.max(mBottomWindowPaddingSupplier.get() - minSpaceAboveWindowBottom, 0);
+            windowHeight += paddingBottom;
+        }
+
         int windowSpace =
                 Math.min(windowHeight - keyboardHeight, windowHeight - minSpaceAboveWindowBottom);
 
@@ -357,18 +375,52 @@ class OmniboxSuggestionsDropdownEmbedderImpl
         // the previous alignment value.
         OmniboxAlignment omniboxAlignment =
                 new OmniboxAlignment(
-                        left, top, width, height, paddingLeft, paddingRight, paddingBottom);
+                        left,
+                        top,
+                        width,
+                        height,
+                        paddingLeft,
+                        paddingRight,
+                        mTopPaddingForEdgeToEdge,
+                        paddingBottom);
         mOmniboxAlignmentSupplier.set(omniboxAlignment);
+    }
+
+    void onToEdgeChange(int systemTopInset, boolean consumeTopInset, @LayoutType int layoutType) {
+        // When the toolbar is at the bottom, the omnibox suggestions container displays above the
+        // toolbar, starting from the top of the screen. In edge-to-edge mode, we need to add top
+        // padding to prevent content from entering the status bar area.
+        @ControlsPosition int controlsPosition = mControlsPositionSupplier.get();
+        int topPadding =
+                (consumeTopInset && controlsPosition == ControlsPosition.BOTTOM)
+                        ? systemTopInset
+                        : 0;
+        if (mTopPaddingForEdgeToEdge == topPadding) {
+            return;
+        }
+        mTopPaddingForEdgeToEdge = topPadding;
+        recalculateOmniboxAlignment();
+    }
+
+    /**
+     * Returns whether the given view's vertical position in the window has changed since the last
+     * call to offsetInWindowChanged().
+     */
+    private boolean verticalOffsetInWindowChanged(View view) {
+        view.getLocationInWindow(mPositionArray);
+        boolean result = mVerticalOffsetInWindow != mPositionArray[1];
+        mVerticalOffsetInWindow = mPositionArray[1];
+        return result;
     }
 
     /**
      * Returns whether the given view's position in the window has changed since the last call to
      * offsetInWindowChanged().
      */
-    private boolean offsetInWindowChanged(View view) {
+    private boolean horizontalOffsetInWindowChanged(View view) {
         view.getLocationInWindow(mPositionArray);
-        boolean result = mVerticalOffsetInWindow != mPositionArray[1];
-        mVerticalOffsetInWindow = mPositionArray[1];
+        boolean result = mHorizontalOffsetInWindow != mPositionArray[0];
+        mHorizontalOffsetInWindow = mPositionArray[0];
         return result;
     }
 
@@ -388,5 +440,6 @@ class OmniboxSuggestionsDropdownEmbedderImpl
 
     public void destroy() {
         mContext.unregisterComponentCallbacks(this);
+        mTopInsetProvider.removeObserver(mTopInsetProviderObserver);
     }
 }

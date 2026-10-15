@@ -101,14 +101,6 @@ class UrlBarMediator implements UrlBar.UrlBarTextContextMenuDelegate {
     }
 
     /**
-     * Sets a listener called when user input begins. See the {@link
-     * UrlBarCoordinator#setTypingStartedListener(Runnable)}.
-     */
-    public void setTypingStartedListener(Runnable listener) {
-        mModel.set(UrlBarProperties.TYPING_STARTED_LISTENER, listener);
-    }
-
-    /**
      * Updates the text content of the UrlBar.
      *
      * @param data The new data to be displayed.
@@ -300,19 +292,19 @@ class UrlBarMediator implements UrlBar.UrlBarTextContextMenuDelegate {
         }
     }
 
-    /** Sets whether the view should select all on focus. */
-    public void setSelectAllOnFocus(boolean selectAllOnFocus) {
-        mModel.set(UrlBarProperties.SELECT_ALL_ON_FOCUS, selectAllOnFocus);
+    /**
+     * Sets whether the view should *permit* multiline input.
+     *
+     * <p>The perimitted/allowed wrapping doesn't imply the wrapping will be applied. Only eligible
+     * input in focused state can wrap. This setting controls only whether wrapping is permitted.
+     */
+    public void setAllowMultilineInput(boolean allowMultilineInput) {
+        mModel.set(UrlBarProperties.ALLOW_MULTILINE_INPUT, allowMultilineInput);
     }
 
     /** Set the listener to be notified for URL direction changes. */
     public void setUrlDirectionListener(Callback<Integer> listener) {
         mModel.set(UrlBarProperties.URL_DIRECTION_LISTENER, listener);
-    }
-
-    /** Sets the property indicating the URL bar is used by Custom Tab. */
-    public void setIsInCct(boolean isInCct) {
-        mModel.set(UrlBarProperties.IS_IN_CCT, isInCct);
     }
 
     @Override

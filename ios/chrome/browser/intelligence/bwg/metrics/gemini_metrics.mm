@@ -8,7 +8,7 @@
 #import "base/metrics/user_metrics.h"
 #import "base/metrics/user_metrics_action.h"
 #import "base/time/time.h"
-#import "ios/chrome/browser/intelligence/bwg/utils/bwg_constants.h"
+#import "ios/chrome/browser/intelligence/bwg/utils/gemini_constants.h"
 #import "ios/public/provider/chrome/browser/bwg/bwg_api.h"
 
 namespace {
@@ -49,9 +49,36 @@ IOSGeminiAspectRatioBucket GetAspectRatioBucket(double aspect_ratio) {
 
 }  // namespace
 
+namespace gemini {
+IneligibilityReasons& IneligibilityReasons::set_workspace(bool value) {
+  workspace = value;
+  return *this;
+}
+
+IneligibilityReasons& IneligibilityReasons::set_chrome_enterprise(bool value) {
+  chrome_enterprise = value;
+  return *this;
+}
+
+IneligibilityReasons& IneligibilityReasons::set_account_capability(bool value) {
+  account_capability = value;
+  return *this;
+}
+
+IneligibilityReasons& IneligibilityReasons::set_authentication(bool value) {
+  authentication = value;
+  return *this;
+}
+}  // namespace gemini
+
 const char kEligibilityHistogram[] = "IOS.Gemini.Eligibility";
 
 const char kEntryPointHistogram[] = "IOS.Gemini.EntryPoint";
+
+const char kEntryPointImpressionHistogram[] =
+    "IOS.Gemini.EntryPoint.Impression";
+
+const char kEntryPointAvailableHistogram[] = "IOS.Gemini.EntryPoint.Available";
 
 const char kFeedbackHistogram[] = "IOS.Gemini.Feedback";
 
@@ -65,6 +92,11 @@ const char kFREEntryPointHistogram[] = "IOS.Gemini.FRE.EntryPoint";
 const char kPromoActionHistogram[] = "IOS.Gemini.FRE.PromoAction";
 
 const char kConsentActionHistogram[] = "IOS.Gemini.FRE.ConsentAction";
+
+const char kGeminiPageAvailabilityHistogram[] = "IOS.Gemini.PageAvailability";
+
+const char kGeminiIneligibilityReasonHistogram[] =
+    "IOS.Gemini.IneligibilityReason";
 
 const char kStartupTimeWithFREHistogram[] = "IOS.Gemini.StartupTime.FirstRun";
 
@@ -132,6 +164,9 @@ const char kFloatyShownFromSourceHistogram[] =
 const char kFloatyHiddenFromSourceHistogram[] =
     "IOS.Gemini.Floaty.HiddenFromSource";
 
+const char kFloatyDismissedStateHistogram[] =
+    "IOS.Gemini.Floaty.DismissedState";
+
 const char kImageRemixContextMenuEntryPointAspectRatioTappedHistogram[] =
     "IOS.Gemini.ImageRemix.ContextMenuEntryPoint.AspectRatio.Tapped";
 
@@ -152,6 +187,9 @@ const char kCameraFlowGeminiCameraPermissionAlertResultHistogram[] =
 
 const char kCameraFlowCameraPickerResultHistogram[] =
     "IOS.Gemini.CameraFlow.CameraPicker.Result";
+
+const char kEditMenuSelectedTextLengthHistogram[] =
+    "IOS.Gemini.EditMenuPrompt.SelectedText.Length";
 
 void RecordFREPromoAction(IOSGeminiFREAction action) {
   switch (action) {
@@ -182,6 +220,37 @@ void RecordFREConsentAction(IOSGeminiFREAction action) {
       break;
   }
   base::UmaHistogramEnumeration(kConsentActionHistogram, action);
+}
+
+void RecordGeminiPageAvailability(IOSGeminiPageAvailability reason) {
+  base::UmaHistogramEnumeration(kGeminiPageAvailabilityHistogram, reason);
+}
+
+void RecordGeminiEligibility(bool eligible) {
+  base::UmaHistogramBoolean(kEligibilityHistogram, eligible);
+}
+
+void RecordGeminiIneligibilityReasons(gemini::IneligibilityReasons reasons) {
+  if (reasons.workspace) {
+    base::UmaHistogramEnumeration(
+        kGeminiIneligibilityReasonHistogram,
+        IOSGeminiIneligibilityReason::kWorkspaceRestricted);
+  }
+  if (reasons.chrome_enterprise) {
+    base::UmaHistogramEnumeration(
+        kGeminiIneligibilityReasonHistogram,
+        IOSGeminiIneligibilityReason::kChromeEnterpriseDisabled);
+  }
+  if (reasons.account_capability) {
+    base::UmaHistogramEnumeration(
+        kGeminiIneligibilityReasonHistogram,
+        IOSGeminiIneligibilityReason::kInsufficientAccountCapability);
+  }
+  if (reasons.authentication) {
+    base::UmaHistogramEnumeration(
+        kGeminiIneligibilityReasonHistogram,
+        IOSGeminiIneligibilityReason::kAccountUnauthenticated);
+  }
 }
 
 void RecordGeminiSessionCancellation(
@@ -225,7 +294,7 @@ void RecordGeminiSessionLengthByType(base::TimeDelta session_duration,
   }
 }
 
-void RecordGeminiEntryPointImpression() {
+void RecordGeminiEntryPointImpression(gemini::EntryPoint entry_point) {
   base::TimeTicks now = base::TimeTicks::Now();
   base::TimeTicks& last_impression_time = GetLastGeminiImpressionTime();
 
@@ -234,8 +303,15 @@ void RecordGeminiEntryPointImpression() {
       (now - last_impression_time) >= kGeminiImpressionThrottleInterval) {
     base::RecordAction(
         base::UserMetricsAction("MobileGeminiEntryPointImpression"));
+    base::UmaHistogramEnumeration(kEntryPointImpressionHistogram, entry_point);
     last_impression_time = now;
   }
+}
+
+void RecordGeminiEntryPointAvailable(gemini::EntryPoint entry_point) {
+  base::RecordAction(
+      base::UserMetricsAction("MobileGeminiEntryPointAvailable"));
+  base::UmaHistogramEnumeration(kEntryPointAvailableHistogram, entry_point);
 }
 
 void RecordFREShown() {
@@ -322,9 +398,16 @@ void RecordFloatyCollapsedToExpanded() {
       IOSGeminiViewStateTransition::kCollapsedToExpanded);
 }
 
-void RecordFloatyDismissedWhileCollapsed() {
-  base::RecordAction(
-      base::UserMetricsAction("MobileGeminiFloatyCollapsedToDismissed"));
+void RecordFloatyDismissedState(ios::provider::GeminiViewState state) {
+  base::UmaHistogramEnumeration(kFloatyDismissedStateHistogram, state);
+
+  if (state == ios::provider::GeminiViewState::kCollapsed) {
+    base::RecordAction(
+        base::UserMetricsAction("MobileGeminiFloatyCollapsedToDismissed"));
+  } else if (state == ios::provider::GeminiViewState::kExpanded) {
+    base::RecordAction(
+        base::UserMetricsAction("MobileGeminiFloatyExpandedToDismissed"));
+  }
 }
 
 void RecordFloatyMinimizedTime(base::TimeTicks elapsed_minimized_floaty_time) {
@@ -533,4 +616,8 @@ void RecordGeminiInputPlateAttachmentOptionTapped(
   base::RecordAction(
       base::UserMetricsAction("MobileGeminiInputPlateAttachmentOptionTapped"));
   base::UmaHistogramEnumeration(kInputPlateAttachmentOptionHistogram, option);
+}
+
+void RecordGeminiEditMenuSelectedTextLength(int length) {
+  base::UmaHistogramCounts1000(kEditMenuSelectedTextLengthHistogram, length);
 }

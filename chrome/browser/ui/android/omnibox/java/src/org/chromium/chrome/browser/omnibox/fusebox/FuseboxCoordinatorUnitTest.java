@@ -8,13 +8,12 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -40,26 +39,27 @@ import org.mockito.junit.MockitoRule;
 import org.robolectric.Robolectric;
 import org.robolectric.android.controller.ActivityController;
 import org.robolectric.annotation.Config;
-import org.robolectric.shadows.ShadowLooper;
 
 import org.chromium.base.supplier.ObservableSuppliers;
 import org.chromium.base.supplier.OneshotSupplierImpl;
-import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
 import org.chromium.base.supplier.SettableNonNullObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.RobolectricUtil;
 import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.Features.EnableFeatures;
+import org.chromium.base.test.util.HistogramWatcher;
+import org.chromium.chrome.browser.omnibox.FuseboxSessionState;
 import org.chromium.chrome.browser.omnibox.R;
 import org.chromium.chrome.browser.omnibox.fusebox.FuseboxCoordinator.ViewportRectProvider;
 import org.chromium.chrome.browser.omnibox.styles.OmniboxResourceProvider;
 import org.chromium.chrome.browser.omnibox.suggestions.AutocompleteController;
-import org.chromium.chrome.browser.omnibox.suggestions.AutocompleteControllerJni;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.components.metrics.OmniboxEventProtos.OmniboxEventProto.PageClassification;
+import org.chromium.components.omnibox.AimModelsProto.ModelMode;
 import org.chromium.components.omnibox.AutocompleteInput;
 import org.chromium.components.omnibox.AutocompleteRequestType;
 import org.chromium.components.omnibox.OmniboxFeatureList;
@@ -68,9 +68,8 @@ import org.chromium.components.search_engines.TemplateUrlService;
 import org.chromium.ui.base.TestActivity;
 import org.chromium.ui.base.WindowAndroid;
 
-import java.util.ArrayList;
+import java.util.Collections;
 import java.util.EnumSet;
-import java.util.List;
 import java.util.Set;
 import java.util.function.Function;
 
@@ -80,38 +79,29 @@ public class FuseboxCoordinatorUnitTest {
     @Rule public final MockitoRule mMockitoRule = MockitoJUnit.rule();
 
     @Mock private AutocompleteController mAutocompleteController;
-    @Mock private AutocompleteController.Natives mControllerJniMock;
-    @Mock private ComposeboxQueryControllerBridge.Natives mComposeboxController;
+    @Mock private ComposeboxQueryControllerBridge mComposebox;
     @Mock private FuseboxMediator mMediator;
     @Mock private TabModelSelector mTabModelSelector;
     @Mock private TabModel mTabModel;
     @Mock private Bitmap mBitmap;
     @Mock private Profile mProfile;
-    @Mock private Profile mIncognitoProfile;
     @Mock private TemplateUrlService mTemplateUrlService;
     @Mock private SnackbarManager mSnackbarManager;
 
     private AutocompleteInput mAutocompleteInput;
-
     private ActivityController<TestActivity> mActivityController;
     private WindowAndroid mWindowAndroid;
     private FuseboxCoordinator mCoordinator;
 
-    private final SettableMonotonicObservableSupplier<Profile> mProfileSupplier =
-            ObservableSuppliers.createMonotonic();
     private final SettableNonNullObservableSupplier<TabModelSelector> mTabModelSelectorSupplier =
             ObservableSuppliers.createNonNull(mTabModelSelector);
     private final OneshotSupplierImpl<TemplateUrlService> mTemplateUrlServiceSupplier =
             new OneshotSupplierImpl<>();
     private final Function<Tab, Bitmap> mTabFaviconFunction = (tab) -> mBitmap;
-    private final List<Tab> mTabs = new ArrayList<>();
 
     @Before
     public void setUp() {
-        ComposeboxQueryControllerBridgeJni.setInstanceForTesting(mComposeboxController);
-
-        AutocompleteControllerJni.setInstanceForTesting(mControllerJniMock);
-        lenient().doReturn(mAutocompleteController).when(mControllerJniMock).getForProfile(any());
+        AutocompleteController.setInstanceForTesting(mAutocompleteController);
 
         mActivityController = Robolectric.buildActivity(TestActivity.class).setup();
         Activity activity = mActivityController.get();
@@ -123,13 +113,8 @@ public class FuseboxCoordinatorUnitTest {
         OmniboxResourceProvider.setTabFaviconFactory(mTabFaviconFunction);
 
         lenient().doReturn(mTabModel).when(mTabModelSelector).getCurrentModel();
-        lenient().doReturn(new ArrayList<>(mTabs).iterator()).when(mTabModel).iterator();
-        doReturn(true).when(mComposeboxController).isFuseboxEligible(anyLong());
-        doReturn(/* nativeInstance= */ 1L)
-                .when(mComposeboxController)
-                .init(any(Profile.class), any(ComposeboxQueryControllerBridge.class));
-
-        doReturn(true).when(mIncognitoProfile).isIncognitoBranded();
+        lenient().doReturn(Collections.emptyIterator()).when(mTabModel).iterator();
+        doReturn(true).when(mComposebox).isFuseboxEligible();
 
         mAutocompleteInput =
                 new AutocompleteInput()
@@ -142,15 +127,22 @@ public class FuseboxCoordinatorUnitTest {
                         activity,
                         mWindowAndroid,
                         parent,
-                        mProfileSupplier,
                         mTabModelSelectorSupplier,
                         mTemplateUrlServiceSupplier,
                         mSnackbarManager);
+    }
 
-        // By default, make the mediator available.
-        mProfileSupplier.set(mProfile);
-        mCoordinator.setMediatorForTesting(mMediator);
-        mCoordinator.beginInput(mAutocompleteInput);
+    private FuseboxSessionState createSession() {
+        return createSession(mProfile);
+    }
+
+    private FuseboxSessionState createSession(Profile profile) {
+        var session = mock(FuseboxSessionState.class);
+        lenient().doReturn(profile).when(session).getProfile();
+        lenient().doReturn(mAutocompleteController).when(session).getAutocompleteController();
+        lenient().doReturn(mAutocompleteInput).when(session).getAutocompleteInput();
+        lenient().doReturn(mComposebox).when(session).getComposeboxQueryControllerBridge();
+        return session;
     }
 
     @After
@@ -161,71 +153,34 @@ public class FuseboxCoordinatorUnitTest {
 
     @Test
     @EnableFeatures(OmniboxFeatureList.OMNIBOX_MULTIMODAL_INPUT)
-    public void testOnProfileAvailable_featureEnabled_withBridge() {
-        // Start with a default state.
-        mCoordinator.setMediatorForTesting(null);
-        mProfileSupplier.set(mock(Profile.class));
+    public void testBeginInput_initializesMediator() {
+        mCoordinator.beginInput(createSession(mProfile));
         assertNotNull(mCoordinator.getMediatorForTesting());
         assertNotEquals(mMediator, mCoordinator.getMediatorForTesting());
     }
 
     @Test
     @EnableFeatures(OmniboxFeatureList.OMNIBOX_MULTIMODAL_INPUT)
-    public void testOnProfileAvailable_featureEnabled_noBridge() {
-        // Start with a default state.
-        mCoordinator.setMediatorForTesting(null);
-        assertNull(mCoordinator.getMediatorForTesting());
+    public void testBeginInput_featureEnabled_noBridge() {
+        mComposebox = null;
+        mCoordinator.beginInput(createSession());
+        verify(mMediator, never()).beginInput(any());
     }
 
     @Test
     @DisableFeatures(OmniboxFeatureList.OMNIBOX_MULTIMODAL_INPUT)
-    public void testOnProfileAvailable_featureDisabled() {
-        // Start with a default state.
-        mCoordinator.setMediatorForTesting(null);
+    public void testBeginInput_featureDisabled() {
+        mCoordinator.beginInput(createSession());
         assertNull(mCoordinator.getMediatorForTesting());
-    }
-
-    @Test
-    @EnableFeatures(OmniboxFeatureList.OMNIBOX_MULTIMODAL_INPUT)
-    public void testOnProfileAvailable_tracksProfileChanges() {
-        // Start with a default state.
-        mCoordinator.setMediatorForTesting(null);
-        mProfileSupplier.set(mock(Profile.class));
-        assertNotNull(mCoordinator.getMediatorForTesting());
-        assertNotEquals(mMediator, mCoordinator.getMediatorForTesting());
-
-        mCoordinator.setMediatorForTesting(null);
-        mProfileSupplier.set(mock(Profile.class));
-        assertNotNull(mCoordinator.getMediatorForTesting());
-        assertNotEquals(mMediator, mCoordinator.getMediatorForTesting());
-    }
-
-    @Test
-    @EnableFeatures(OmniboxFeatureList.OMNIBOX_MULTIMODAL_INPUT)
-    public void testToolbarVisibility_featureEnabled_mediatorNotInitialized() {
-        // Contract is that Input is accepted only if Mediator is non-null, so
-        // let's begin from a valid start state.
-        mCoordinator.endInput();
-
-        // Case where the Profile is not initialized, or the Bridge was not instantiated.
-        mCoordinator.setMediatorForTesting(null);
-
-        // Nothing should happen (including no crashes).
-        mCoordinator.beginInput(mAutocompleteInput);
-        mCoordinator.endInput();
     }
 
     @Test
     @EnableFeatures(OmniboxFeatureList.OMNIBOX_MULTIMODAL_INPUT)
     public void testToolbarVisibility_featureEnabled_mediatorInitialized() {
-        // setUp pre-initializes input for most tests, but this test verifies what this
-        // step (beginInput) actually does, so let's reset to valid start state.
-        mCoordinator.endInput();
-        clearInvocations(mMediator);
+        mCoordinator.setMediatorForTesting(mMediator);
 
-        // Mediator set by setUp().
-        mCoordinator.beginInput(mAutocompleteInput);
-        verify(mMediator).beginInput(mAutocompleteInput);
+        mCoordinator.beginInput(createSession());
+        verify(mMediator).beginInput(any());
 
         mCoordinator.endInput();
         verify(mMediator).endInput();
@@ -233,7 +188,28 @@ public class FuseboxCoordinatorUnitTest {
 
     @Test
     @EnableFeatures(OmniboxFeatureList.OMNIBOX_MULTIMODAL_INPUT)
+    public void testToolbarVisibility_featureEnabled_disabledByServer() {
+        mCoordinator.setMediatorForTesting(mMediator);
+
+        doReturn(false).when(mComposebox).isFuseboxEligible();
+        mCoordinator.beginInput(createSession());
+        // We never activate the Fusebox in this scenario
+        verify(mMediator, never()).beginInput(any());
+        // ... but we want to be sure we reset the Fusebox UI if the user jumped tabs.
+        verify(mMediator).endInput();
+
+        clearInvocations(mMediator);
+
+        // Ensure we still call endInput in the event the fusebox was previously active when flag
+        // state changed (e.g. user jumped tabs) to properly reset UI state.
+        mCoordinator.endInput();
+        verify(mMediator).endInput();
+    }
+
+    @Test
+    @EnableFeatures(OmniboxFeatureList.OMNIBOX_MULTIMODAL_INPUT)
     public void testToolbarVisibility_featureEnabled() {
+        mCoordinator.beginInput(createSession());
         // ViewHolder should be initialized as part of the init method.
         assertNotNull(mCoordinator.getViewHolderForTesting());
     }
@@ -241,6 +217,7 @@ public class FuseboxCoordinatorUnitTest {
     @Test
     @DisableFeatures(OmniboxFeatureList.OMNIBOX_MULTIMODAL_INPUT)
     public void testToolbarVisibility_featureDisabled() {
+        mCoordinator.beginInput(createSession());
         // Nothing should get initialized.
         assertNull(mCoordinator.getViewHolderForTesting());
     }
@@ -248,6 +225,8 @@ public class FuseboxCoordinatorUnitTest {
     @Test
     @EnableFeatures(OmniboxFeatureList.OMNIBOX_MULTIMODAL_INPUT)
     public void testToolbarVisibility_basedOnPageClassification() {
+        mCoordinator.beginInput(createSession());
+        mCoordinator.setMediatorForTesting(mMediator);
         final Set<PageClassification> supportedPageClassifications =
                 EnumSet.of(
                         PageClassification.INSTANT_NTP_WITH_OMNIBOX_AS_STARTING_FOCUS,
@@ -258,10 +237,10 @@ public class FuseboxCoordinatorUnitTest {
             reset(mMediator);
             mAutocompleteInput.setPageClassification(pageClass.getNumber());
 
-            mCoordinator.beginInput(mAutocompleteInput);
+            mCoordinator.beginInput(createSession());
 
             boolean shouldBeVisible = supportedPageClassifications.contains(pageClass);
-            verify(mMediator, times(shouldBeVisible ? 1 : 0)).beginInput(mAutocompleteInput);
+            verify(mMediator, times(shouldBeVisible ? 1 : 0)).beginInput(any());
 
             mCoordinator.endInput();
         }
@@ -270,48 +249,34 @@ public class FuseboxCoordinatorUnitTest {
     @Test
     @EnableFeatures(OmniboxFeatureList.OMNIBOX_MULTIMODAL_INPUT)
     public void testNonGoogleDse() {
+        mCoordinator.beginInput(createSession());
+        mCoordinator.setMediatorForTesting(mMediator);
         doReturn(false).when(mTemplateUrlService).isDefaultSearchEngineGoogle();
-        mCoordinator.beginInput(mAutocompleteInput);
+        mCoordinator.beginInput(createSession());
         mTemplateUrlServiceSupplier.set(mTemplateUrlService);
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
+
         verify(mMediator).setToolbarVisible(false);
     }
 
     @Test
     @EnableFeatures(OmniboxFeatureList.OMNIBOX_MULTIMODAL_INPUT)
     public void testNtpAiModeButtonPress() {
-        mCoordinator.endInput();
-        clearInvocations(mMediator);
-
+        mCoordinator.beginInput(createSession());
+        mCoordinator.setMediatorForTesting(mMediator);
         mAutocompleteInput.setRequestType(AutocompleteRequestType.AI_MODE);
-        mCoordinator.beginInput(mAutocompleteInput);
-        verify(mMediator).beginInput(mAutocompleteInput);
-    }
 
-    @Test
-    @EnableFeatures({OmniboxFeatureList.OMNIBOX_MULTIMODAL_INPUT})
-    public void createImageButtonVisibility_regularProfile() {
-        doReturn(true).when(mComposeboxController).isCreateImagesEligible(anyLong());
-        mProfileSupplier.set(mock(Profile.class));
-        OmniboxFeatures.sShowImageGenerationButtonInIncognito.setForTesting(false);
-        assertTrue(
-                mCoordinator
-                        .getModelForTesting()
-                        .get(FuseboxProperties.POPUP_TOOL_CREATE_IMAGE_VISIBLE));
-
-        OmniboxFeatures.sShowImageGenerationButtonInIncognito.setForTesting(true);
-        mProfileSupplier.set(mIncognitoProfile);
-        mProfileSupplier.set(mProfile);
-        assertTrue(
-                mCoordinator
-                        .getModelForTesting()
-                        .get(FuseboxProperties.POPUP_TOOL_CREATE_IMAGE_VISIBLE));
+        mCoordinator.beginInput(createSession());
+        verify(mMediator).beginInput(any());
     }
 
     @Test
     @EnableFeatures({OmniboxFeatureList.OMNIBOX_MULTIMODAL_INPUT})
     public void testWrappingChange() {
+        mCoordinator.beginInput(createSession());
+        mCoordinator.setMediatorForTesting(mMediator);
         OmniboxFeatures.sCompactFusebox.setForTesting(true);
+
         mCoordinator.onFuseboxTextWrappingChanged(true);
         verify(mMediator).setUseCompactUi(false);
 
@@ -335,5 +300,29 @@ public class FuseboxCoordinatorUnitTest {
         int width = context.getResources().getDisplayMetrics().widthPixels;
         int height = context.getResources().getDisplayMetrics().heightPixels;
         assertEquals(new Rect(0, 0, width, height), viewportRectProvider.getRect());
+    }
+
+    @Test
+    @EnableFeatures(OmniboxFeatureList.OMNIBOX_MULTIMODAL_INPUT)
+    public void testNotifyOmniboxSessionEnded() {
+        mCoordinator.beginInput(createSession());
+        mCoordinator.setMediatorForTesting(mMediator);
+
+        mAutocompleteInput.setRequestType(AutocompleteRequestType.AI_MODE);
+        mAutocompleteInput.setModelMode(ModelMode.MODEL_MODE_GEMINI_REGULAR_VALUE);
+
+        HistogramWatcher histogramWatcher =
+                HistogramWatcher.newBuilder()
+                        .expectIntRecord(
+                                "Omnibox.MobileFusebox.AutocompleteRequestTypeAtNavigation",
+                                AutocompleteRequestType.AI_MODE)
+                        .expectIntRecord(
+                                "Omnibox.MobileFusebox.ModelAtNavigation",
+                                ModelMode.MODEL_MODE_GEMINI_REGULAR_VALUE)
+                        .build();
+
+        mCoordinator.notifyOmniboxSessionEnded(true);
+
+        histogramWatcher.assertExpected();
     }
 }

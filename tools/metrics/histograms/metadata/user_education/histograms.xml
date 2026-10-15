@@ -101,11 +101,14 @@ chromium-metrics-reviews@google.com.
   <variant name="SplitView" summary="the tutorial for the split view feature"/>
   <variant name="TabGroup" summary="the tutorial for tab groups"/>
   <variant name="Test" summary="the tutorial used for testing only"/>
+  <variant name="VerticalTabs"
+      summary="the tutorial for the vertical tabs feature"/>
 </variants>
 
 <variants name="WhatsNewModule">
   <variant name="archive"
       summary="the permanent module for What's New archive"/>
+  <variant name="ContextualTasks" summary="the module for contextual tasks"/>
   <variant name="FamilyLink" summary="the module for Family Link"/>
   <variant name="GANslate" summary="the module for GANslate"/>
   <variant name="GeminiShortcut" summary="the module for Gemini Shortcut"/>
@@ -130,6 +133,7 @@ chromium-metrics-reviews@google.com.
       summary="the module for iOS Lens Search What You See"/>
   <variant name="LensOverlayTranslateButton"
       summary="the module for Lens Overlay Full Page Translate"/>
+  <variant name="LightningVideo" summary="the module for the Lightning Video"/>
   <variant name="Mobilepasswords"
       summary="the module for getting passwords on mobile"/>
   <variant name="PdfInk2" summary="the module for PDF Ink Signatures"/>
@@ -148,7 +152,8 @@ chromium-metrics-reviews@google.com.
   <variant name="SidePanelPinning" summary="the module for Side Panel Pinning"/>
   <variant name="SyncAccountSettings"
       summary="the module for Wallet integration in Autofill"/>
-  <variant name="TabGroupsSync" summary="the module for Tab Groups that Sync"/>
+  <variant name="TabGroupsSync"
+      summary="the module for Tab Groups that Sync (obsolete)"/>
   <variant name="TabOrganizer" summary="the module for Tab Organizer"/>
   <variant name="TestDefaultModule"
       summary="the default module used for testing only"/>
@@ -156,6 +161,8 @@ chromium-metrics-reviews@google.com.
   <variant name="ToolbarPinning" summary="the module for toolbar pinning"/>
   <variant name="TranslationSettings"
       summary="the module for Translation Settings"/>
+  <variant name="WebUIOmniboxAimPopup"
+      summary="the module for WebUI Aim Omnibox"/>
 </variants>
 
 <histogram name="Tutorial.TabGroup.EditedTitle" enum="BooleanSuccess"
@@ -326,7 +333,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="UserEducation.MessageShown.TimeInQueue" units="ms"
-    expires_after="2026-06-28">
+    expires_after="2026-08-30">
   <owner>dfried@chromium.org</owner>
   <owner>frizzle-team@google.com</owner>
   <summary>
@@ -415,7 +422,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="UserEducation.Session.ActivePeriodDuration.Min.Under1Hour"
-    units="minutes" expires_after="2026-03-22">
+    units="minutes" expires_after="2026-07-26">
   <owner>mickeyburks@chromium.org</owner>
   <owner>frizzle-team@google.com</owner>
   <summary>
@@ -427,7 +434,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="UserEducation.Session.ActivePeriodDuration.Min.Under24Hours"
-    units="minutes" expires_after="2026-03-22">
+    units="minutes" expires_after="2026-07-26">
   <owner>mickeyburks@chromium.org</owner>
   <owner>frizzle-team@google.com</owner>
   <summary>
@@ -439,7 +446,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="UserEducation.Session.IdlePeriodDuration.Hr.Under28Days"
-    units="hours" expires_after="2026-03-22">
+    units="hours" expires_after="2026-07-26">
   <owner>mickeyburks@chromium.org</owner>
   <owner>frizzle-team@google.com</owner>
   <summary>
@@ -451,7 +458,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="UserEducation.Session.IdlePeriodDuration.Min.Under24Hours"
-    units="minutes" expires_after="2026-03-22">
+    units="minutes" expires_after="2026-07-26">
   <owner>mickeyburks@chromium.org</owner>
   <owner>frizzle-team@google.com</owner>
   <summary>
@@ -463,7 +470,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="UserEducation.Session.LongTermCount" units="count"
-    expires_after="2026-03-22">
+    expires_after="2026-07-26">
   <owner>dfried@chromium.org</owner>
   <owner>frizzle-team@google.com</owner>
   <summary>
@@ -510,7 +517,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="UserEducation.Session.RecentSuperActiveWeeks" units="count"
-    expires_after="2026-03-22">
+    expires_after="2026-07-26">
   <owner>dfried@chromium.org</owner>
   <owner>frizzle-team@google.com</owner>
   <summary>
@@ -522,7 +529,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="UserEducation.Session.ShortTermCount" units="count"
-    expires_after="2026-03-22">
+    expires_after="2026-07-26">
   <owner>dfried@chromium.org</owner>
   <owner>frizzle-team@google.com</owner>
   <summary>

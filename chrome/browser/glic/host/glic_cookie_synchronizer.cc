@@ -41,10 +41,6 @@
 #endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
 
 namespace glic {
-// If enabled, clears the glic partition's cookies before the first cookie sync.
-// This ensures a fresh cookie state after restart.
-BASE_FEATURE(kGlicClearCookiesOnFirstSync, base::FEATURE_DISABLED_BY_DEFAULT);
-
 namespace {
 
 BASE_FEATURE(kGlicCookieSyncTimeout, base::FEATURE_ENABLED_BY_DEFAULT);
@@ -53,6 +49,9 @@ BASE_FEATURE_PARAM(base::TimeDelta,
                    &kGlicCookieSyncTimeout,
                    "glic_cookie_sync_timeout_duration",
                    GlicCookieSynchronizer::kCookieSyncDefaultTimeout);
+// If enabled, clears the glic partition's cookies before the first cookie sync.
+// This ensures a fresh cookie state after restart.
+BASE_FEATURE(kGlicClearCookiesOnFirstSync, base::FEATURE_ENABLED_BY_DEFAULT);
 
 content::StoragePartitionConfig GetGlicMainStoragePartitionConfig(
     content::BrowserContext* browser_context) {

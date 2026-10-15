@@ -85,8 +85,13 @@ namespace version_info {
 enum class Channel;
 }
 
+namespace accessibility_annotator {
+class AccessibilityQueryService;
+}
+
 namespace autofill {
 
+class ActorKeyMetricsRecorder;
 class AutofillManager;
 class AddressNormalizer;
 class AutocompleteHistoryManager;
@@ -114,6 +119,7 @@ class FormFieldData;
 class LogManager;
 class OtpFieldDetector;
 class OtpPhishGuardDelegate;
+class FormPredictionsTracker;
 struct PasswordFormClassification;
 class PasswordManagerDelegate;
 class PersonalDataManager;
@@ -397,6 +403,11 @@ class AutofillClient {
   // the window of this tab.
   virtual AutofillPlusAddressDelegate* GetPlusAddressDelegate();
 
+  // Returns the `AccessibilityQueryService` associated with the profile of
+  // the window of this tab.
+  virtual accessibility_annotator::AccessibilityQueryService*
+  GetAccessibilityQueryService();
+
   // Returns the `PasswordManagerDelegate` responsible to provide
   // password suggestions for the given `field_id`.
   virtual PasswordManagerDelegate* GetPasswordManagerDelegate(
@@ -574,6 +585,9 @@ class AutofillClient {
   // one exists).
   virtual bool IsTabInActorMode() const;
 
+  // Returns the `ActorKeyMetricsRecorder` for the current tab (if one exists).
+  virtual ActorKeyMetricsRecorder* GetActorKeyMetricsRecorder();
+
   // Returns true if either Profile or CreditCard Autofill is enabled.
   virtual bool IsAutofillEnabled() const = 0;
 
@@ -590,8 +604,8 @@ class AutofillClient {
   // If the context is secure.
   virtual bool IsContextSecure() const = 0;
 
-  // Returns whether Google Wallet storage is supported.
-  virtual bool IsWalletStorageEnabled() const = 0;
+  // Returns whether Google Wallet public pass storage is supported.
+  virtual bool IsWalletPublicPassStorageEnabled() const = 0;
 
   // Returns true if the client supports saving CVCs. This allows specific
   // clients (IosWebView) to opt out of the CVC saving feature.
@@ -714,6 +728,10 @@ class AutofillClient {
   // Returns the delegate for OTP phish guard, which can be used to perform
   // security checks before offering an OTP. May return nullptr.
   virtual OtpPhishGuardDelegate* GetOtpPhishGuardDelegate();
+
+  // Returns the `FormPredictionsTracker` for the current tab. May return null
+  // on platforms where it is not supported.
+  virtual FormPredictionsTracker* GetFormPredictionsTracker();
 
   // May return null on platforms where no OneTimeTokenService is supported.
   virtual one_time_tokens::OneTimeTokenService* GetOneTimeTokenService() const;

@@ -89,6 +89,7 @@ Prueba a esperar unos minutos antes de cerrar sesión. Si cierras sesión ahora,
 <translation id="2517624234762908348">Sincronizar tus datos de Chromium</translation>
 <translation id="2575968074225731646">Accede más rápido a Chromium desde el Dock de tu iPhone.</translation>
 <translation id="2592940277904433508">Seguir usando Chromium</translation>
+<translation id="2601766165676560303">Tema de Chromium para iPhone y iPad</translation>
 <translation id="2607609479243848905">Si has olvidado tu frase de contraseña o quieres cambiar este ajuste, <ph name="BEGIN_LINK" />elimina los datos de Chromium de tu cuenta<ph name="END_LINK" />.</translation>
 <translation id="2640367368802736659">Consejo de Chromium: busca lo que ves con Google Lens</translation>
 <translation id="2650312721222849884">Activa la sincronización para ver tus pestañas dondequiera que uses Chromium</translation>
@@ -102,6 +103,7 @@ Prueba a esperar unos minutos antes de cerrar sesión. Si cierras sesión ahora,
 Si quieres ver más ajustes que usan datos para mejorar tu experiencia con Chromium, ve a los <ph name="BEGIN_LINK" />servicios de Google<ph name="END_LINK" />.</translation>
 <translation id="2832168932648876507">Busca por voz en Chromium.</translation>
 <translation id="2843571538056574338">Usa la función Autocompletar con Chromium</translation>
+<translation id="2899085719655668655">Instrucciones en vídeo de imagen en imagen sobre cómo establecer Chromium como navegador predeterminado</translation>
 <translation id="2918709798697875261">Tu organización requiere que mantengas tu sesión cerrada en Chromium.</translation>
 <translation id="2942241131342758843">Usa Chromium de forma predeterminada para abrir enlaces, hacer búsquedas desde widgets y autocompletar contraseñas en otras aplicaciones</translation>
 <translation id="2977470724722393594">Chromium está actualizado</translation>
@@ -374,4 +376,5 @@ Prueba a esperar unos minutos antes de cerrar sesión. Si cierras sesión ahora,
 <translation id="924957577793602335">Personaliza Chromium a tu gusto</translation>
 <translation id="981812233959540767">Jugar a El dinosaurio de Chromium</translation>
 <translation id="985602178874221306">Los creadores de Chromium</translation>
+<translation id="986520777495807752">Establecer Chromium como predeterminado</translation>
 </translationbundle>

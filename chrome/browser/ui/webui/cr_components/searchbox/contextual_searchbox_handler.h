@@ -25,6 +25,9 @@
 #include "components/contextual_search/contextual_search_session_handle.h"
 #include "components/contextual_search/contextual_search_types.h"
 #include "components/contextual_search/input_state_model.h"
+#include "components/contextual_tasks/public/contextual_task_context.h"
+#include "components/contextual_tasks/public/contextual_tasks_service.h"
+#include "components/contextual_tasks/public/query_contextualizer.h"
 #include "components/lens/contextual_input.h"
 #include "components/omnibox/browser/searchbox.mojom.h"
 #include "components/omnibox/composebox/composebox_query.mojom.h"
@@ -85,11 +88,12 @@ class ContextualOmniboxClient : public SearchboxOmniboxClient {
 // shared between the composebox and realbox to support contextual search.
 class ContextualSearchboxHandler
     : public contextual_search::ContextualSearchContextController::
-          FileUploadStatusObserver,
+          ContextUploadStatusObserver,
       public SearchboxHandler,
-      public TabStripModelObserver {
+      public TabStripModelObserver,
+      public contextual_tasks::QueryContextualizer::Delegate {
  public:
-  DECLARE_FEATURE(kExhaustiveGetRecentTabs);
+  using RecontextualizeTabCallback = base::OnceCallback<void(bool)>;
 
   explicit ContextualSearchboxHandler(
       mojo::PendingReceiver<searchbox::mojom::PageHandler>
@@ -121,6 +125,14 @@ class ContextualSearchboxHandler
   void GetRecentTabs(GetRecentTabsCallback callback) override;
   void GetTabPreview(int32_t tab_id, GetTabPreviewCallback callback) override;
   void GetInputState(GetInputStateCallback callback) override;
+  void OpenAutocompleteMatch(uint8_t line,
+                             const GURL& url,
+                             bool are_matches_showing,
+                             uint8_t mouse_button,
+                             bool alt_key,
+                             bool ctrl_key,
+                             bool meta_key,
+                             bool shift_key) override;
 
   // Continues the process of adding tab context for a given `tab_id`.
   // This method is used when a `context_token` has already been generated
@@ -142,20 +154,13 @@ class ContextualSearchboxHandler
       std::optional<lens::ImageEncodingOptions> image_encoding_options,
       AddFileContextCallback callback);
 
-  using RecontextualizeTabCallback = base::OnceCallback<void(bool success)>;
-  virtual void UploadTabContextWithData(
-      int32_t tab_id,
-      std::optional<int64_t> context_id,
-      std::unique_ptr<lens::ContextualInputData> data,
-      RecontextualizeTabCallback callback);
-
-  // contextual_search::FileUploadStatusObserver:
-  void OnFileUploadStatusChanged(
-      const base::UnguessableToken& file_token,
+  // contextual_search::ContextUploadStatusObserver:
+  void OnContextUploadStatusChanged(
+      const base::UnguessableToken& context_token,
       lens::MimeType mime_type,
-      contextual_search::FileUploadStatus file_upload_status,
-      const std::optional<contextual_search::FileUploadErrorType>& error_type)
-      override;
+      contextual_search::ContextUploadStatus context_upload_status,
+      const std::optional<contextual_search::ContextUploadErrorType>&
+          error_type) override;
 
   // TabStripModelObserver:
   void OnTabStripModelChanged(
@@ -176,7 +181,9 @@ class ContextualSearchboxHandler
   // Resets `input_state_model_`.
   void ResetInputStateModel();
   void SetActiveToolMode(omnibox::ToolMode tool) override;
+  void RecordToolSelectionAction(omnibox::ToolMode tool) override;
   void SetActiveModelMode(omnibox::ModelMode model) override;
+  void RecordModelSelectionAction(omnibox::ModelMode model) override;
   void ActivateMetricsFunnel(const std::string& funnel_name) override;
 
   void OnInputStateChangedForTesting(
@@ -208,11 +215,17 @@ class ContextualSearchboxHandler
                            AddTabContext_DelayUpload);
   FRIEND_TEST_ALL_PREFIXES(ContextualSearchboxHandlerTestTabsTest,
                            DeleteContext_DelayUpload);
+  FRIEND_TEST_ALL_PREFIXES(ContextualSearchboxHandlerTest,
+                           OpenAutocompleteMatch_ZeroSuggestClick);
+  FRIEND_TEST_ALL_PREFIXES(ContextualSearchboxHandlerTest,
+                           OpenAutocompleteMatch_TypedSuggestNavigation);
 
   std::optional<lens::ImageEncodingOptions> CreateTabPreviewEncodingOptions(
       content::WebContents* web_contents);
 
   contextual_search::ContextualSearchMetricsRecorder* GetMetricsRecorder();
+
+  raw_ptr<contextual_tasks::ContextualTasksService> contextual_tasks_service_;
 
   // Helper function that uploads the cached tab context if it exists.
   void UploadTabContext(
@@ -236,6 +249,20 @@ class ContextualSearchboxHandler
                             bool is_tab_suggestion_chip);
 
   virtual void InitializeInputStateModel();
+
+  // contextual_tasks::QueryContextualizer::Delegate:
+  GURL GetTabUrl(int32_t id) override;
+  SessionID GetTabSessionId(int32_t id) override;
+  void GetPageContext(
+      int32_t id,
+      base::OnceCallback<void(std::unique_ptr<lens::ContextualInputData>)>
+          callback) override;
+  void UploadTabContextWithData(int32_t id,
+                                std::optional<int64_t> context_id,
+                                std::unique_ptr<lens::ContextualInputData> data,
+                                RecontextualizeTabCallback callback) override;
+  void OnPageContextIneligible() override;
+  void OnTabProcessedForQueryContextualization(int32_t id) override;
 
   std::unique_ptr<contextual_search::InputStateModel> input_state_model_;
 
@@ -267,6 +294,9 @@ class ContextualSearchboxHandler
   std::optional<std::pair<base::UnguessableToken,
                           std::unique_ptr<lens::ContextualInputData>>>
       tab_context_snapshot_;
+
+  std::unique_ptr<contextual_tasks::QueryContextualizer> query_contextualizer_;
+
 #if !BUILDFLAG(IS_ANDROID)
   raw_ptr<contextual_tasks::ContextualTasksContextService>
       contextual_tasks_context_service_;

@@ -29,11 +29,13 @@ import org.chromium.base.test.util.HistogramWatcher;
 import org.chromium.net.CronetTestFramework.CronetImplementation;
 import org.chromium.net.CronetTestRule.IgnoreFor;
 import org.chromium.net.MetricsTestUtil.TestExecutor;
+import org.chromium.net.impl.NativeCronetProvider;
 
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -154,7 +156,7 @@ public class NQETest {
         byte[] data = new byte[(int) file.length()];
         fileInputStream.read(data);
         fileInputStream.close();
-        return new String(data, "UTF-8").contains(content);
+        return new String(data, StandardCharsets.UTF_8).contains(content);
     }
 
     @Test
@@ -276,7 +278,9 @@ public class NQETest {
                             .build();
 
             ExperimentalCronetEngine.Builder cronetEngineBuilder =
-                    new ExperimentalCronetEngine.Builder(mTestRule.getTestFramework().getContext());
+                    (ExperimentalCronetEngine.Builder)
+                            new NativeCronetProvider(mTestRule.getTestFramework().getContext())
+                                    .createBuilder();
             assertThat(RttThroughputValues.INVALID_RTT_THROUGHPUT).isLessThan(0);
             Executor listenersExecutor =
                     Executors.newSingleThreadExecutor(new ExecutorThreadFactory());

@@ -363,9 +363,6 @@ actions::ActionItem* LensOverlayEntryPointController::GetToolbarEntrypoint() {
 }
 
 void LensOverlayEntryPointController::UpdatePageActionState() {
-  if (!IsPageActionMigrated(PageActionIconType::kLensOverlay)) {
-    return;
-  }
   // This may not have been initialized (e.g. for non-normal browser types).
   if (!location_bar_) {
     return;
@@ -423,7 +420,8 @@ bool LensOverlayEntryPointController::IsOverlayActive() const {
   // The side panel coordinator getter will throw a CHECK error if the
   // LensSearchController is not initialized. Check if it is active to avoid
   // crashing.
-  if (!search_controller || search_controller->IsOff()) {
+  if (!search_controller || search_controller->IsOff() ||
+      search_controller->IsClosing()) {
     return false;
   }
 

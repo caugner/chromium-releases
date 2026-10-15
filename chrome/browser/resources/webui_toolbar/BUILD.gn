@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//ui/webui/resources/tools/build_webui.gni")
+import("//ui/webui/webui_features.gni")
 
 assert(!is_android)
 
@@ -17,6 +18,8 @@ build_webui("build") {
   ts_files = [
     "app.html.ts",
     "app.ts",
+    "back_forward_button.html.ts",
+    "back_forward_button.ts",
     "browser_proxy.ts",
     "metrics_recorder.ts",
     "reload_button.html.ts",
@@ -28,12 +31,15 @@ build_webui("build") {
   ]
   css_files = [
     "app.css",
+    "back_forward_button.css",
     "reload_button.css",
     "split_tabs_button.css",
+    "toolbar_button.css",
   ]
 
   webui_context_type = "trusted"
   optimize = optimize_webui
+  generate_code_cache = enable_webui_generate_code_cache
   if (optimize) {
     optimize_webui_host = "webui-toolbar.top-chrome"
     optimize_webui_in_files = [
@@ -65,10 +71,14 @@ build_webui("build") {
   mojo_files_deps = [
     "//components/browser_apis/browser_controls:mojom_data_model_ts__generator",
     "//components/browser_apis/browser_controls:mojom_ts__generator",
+    "//components/browser_apis/ui_controllers/toolbar:mojom_data_model_ts__generator",
+    "//components/browser_apis/ui_controllers/toolbar:mojom_ts__generator",
   ]
 
   mojo_files = [
     "$root_gen_dir/components/browser_apis/browser_controls/browser_controls_api.mojom-webui.ts",
     "$root_gen_dir/components/browser_apis/browser_controls/browser_controls_api_data_model.mojom-webui.ts",
+    "$root_gen_dir/components/browser_apis/ui_controllers/toolbar/toolbar_ui_api.mojom-webui.ts",
+    "$root_gen_dir/components/browser_apis/ui_controllers/toolbar/toolbar_ui_api_data_model.mojom-webui.ts",
   ]
 }

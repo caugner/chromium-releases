@@ -197,7 +197,9 @@ bool StoreRemoteResponse(const std::string& response_json,
           /*default_result_relevance=*/
           omnibox::kDefaultRemoteZeroSuggestRelevance,
           /*is_keyword_result=*/false,
-          {.allow_empty_suggestion = omnibox::IsOmniboxComposebox(page_class)},
+          {.allow_empty_suggestion =
+               (omnibox::IsOmniboxComposebox(page_class) ||
+                omnibox::IsNTPComposebox(page_class))},
           results)) {
     return false;
   }
@@ -262,7 +264,9 @@ bool ReadStoredResponse(const AutocompleteProviderClient* client,
           /*default_result_relevance=*/
           omnibox::kDefaultRemoteZeroSuggestRelevance,
           /*is_keyword_result=*/false,
-          {.allow_empty_suggestion = omnibox::IsOmniboxComposebox(page_class)},
+          {.allow_empty_suggestion =
+               (omnibox::IsOmniboxComposebox(page_class) ||
+                omnibox::IsNTPComposebox(page_class))},
           results)) {
     return false;
   }
@@ -347,12 +351,6 @@ std::u16string TruncateUTF16(const std::u16string& input, size_t max_length) {
   return input.substr(0, it.array_pos());
 }
 
-std::string EncodeURIComponent(const std::string& component) {
-  url::RawCanonOutputT<char> encoded;
-  url::EncodeURIComponent(component, &encoded);
-  return std::string(encoded.view());
-}
-
 void MaybeAddContextualSuggestParams(
     const AutocompleteProviderClient* client,
     const AutocompleteInput& input,
@@ -385,9 +383,9 @@ void MaybeAddContextualSuggestParams(
         client->IsPersonalizedUrlDataCollectionActive()) {
       std::string page_title =
           !input.context_tab_title().empty()
-              ? EncodeURIComponent(base::UTF16ToUTF8(TruncateUTF16(
+              ? url::EncodeUriComponent(base::UTF16ToUTF8(TruncateUTF16(
                     input.context_tab_title(), kMaxPageTitleLength)))
-              : EncodeURIComponent(base::UTF16ToUTF8(
+              : url::EncodeUriComponent(base::UTF16ToUTF8(
                     TruncateUTF16(input.current_title(), kMaxPageTitleLength)));
       if (client->ShouldSendPageTitleSuggestParam() && !page_title.empty()) {
         additional_query_params.push_back(

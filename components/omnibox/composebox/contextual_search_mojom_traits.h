@@ -50,20 +50,20 @@ struct EnumTraits<composebox_query::mojom::InputType, omnibox::InputType> {
 template <>
 
 struct EnumTraits<composebox_query::mojom::ContextUploadStatus,
-                  contextual_search::FileUploadStatus> {
+                  contextual_search::ContextUploadStatus> {
   static composebox_query::mojom::ContextUploadStatus ToMojom(
-      contextual_search::FileUploadStatus input);
+      contextual_search::ContextUploadStatus input);
   static bool FromMojom(composebox_query::mojom::ContextUploadStatus input,
-                        contextual_search::FileUploadStatus* output);
+                        contextual_search::ContextUploadStatus* output);
 };
 
 template <>
 struct EnumTraits<composebox_query::mojom::ContextUploadErrorType,
-                  contextual_search::FileUploadErrorType> {
+                  contextual_search::ContextUploadErrorType> {
   static composebox_query::mojom::ContextUploadErrorType ToMojom(
-      contextual_search::FileUploadErrorType input);
+      contextual_search::ContextUploadErrorType input);
   static bool FromMojom(composebox_query::mojom::ContextUploadErrorType input,
-                        contextual_search::FileUploadErrorType* output);
+                        contextual_search::ContextUploadErrorType* output);
 };
 
 template <>
@@ -151,7 +151,7 @@ struct StructTraits<composebox_query::mojom::InputStateDataView,
   static const std::optional<omnibox::SectionConfig>& model_section_config(
       const omnibox::InputState& input);
   static const std::string& hint_text(const omnibox::InputState& input);
-  static const std::map<omnibox::InputType, int>& max_instances(
+  static const std::map<omnibox::InputType, int>& max_inputs_by_type(
       const omnibox::InputState& input);
   static int32_t max_total_inputs(const omnibox::InputState& input);
 

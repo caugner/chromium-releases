@@ -16,6 +16,7 @@
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom-shared.h"
 #include "third_party/blink/public/platform/web_content_settings_client.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_microtasks_scope.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_sync_iterator_view_transition_type_set.h"
 #include "third_party/blink/renderer/core/css/css_rule.h"
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
@@ -293,9 +294,6 @@ void ViewTransition::SkipTransition(PromiseResponse response) {
   if (delegate_) {
     delegate_->OnTransitionFinished(this);
   }
-
-  // TODO(khushalsagar): Figure out the promise handling when this is on the
-  // old Document for a cross-document navigation.
 
   // Cleanup logic which is tied to ViewTransition objects created using the
   // script API. script_delegate_ is cleared when the Document is being torn
@@ -1135,9 +1133,7 @@ void ViewTransition::ActivateFromSnapshot() {
   // rendering steps (rAF, style/layout etc) as in the cross-document case
   // activating the view-transition is not called from inside a script. See
   // https://github.com/whatwg/html/pull/10284
-  v8::MicrotasksScope microtasks_scope(
-      window->GetIsolate(), ToMicrotaskQueue(window),
-      v8::MicrotasksScope::Type::kRunMicrotasks);
+  V8RunMicrotasksScope microtasks_scope(window);
 
   // This function implies that rendering has started. If we were waiting
   // for render-blocking resources to be loaded, they must have been fetched (or

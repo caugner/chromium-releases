@@ -24,6 +24,14 @@ constexpr auto kPageActionProperties =
                 .element_identifier = kAiModePageActionIconElementId,
             },
         },
+        {
+            kActionIndigo,
+            {
+                .histogram_name = "Indigo",
+                .type = PageActionIconType::kIndigo,
+                .element_identifier = kIndigoPageActionIconElementId,
+            },
+        },
 
         {
             kActionSidePanelShowLensOverlayResults,
@@ -62,6 +70,14 @@ constexpr auto kPageActionProperties =
                 .histogram_name = "JsOptimizations",
                 .type = PageActionIconType::kJsOptimizations,
                 .element_identifier = kJsOptimizationsIconElementId,
+            },
+        },
+        {
+            kActionRecordReplay,
+            {
+                .histogram_name = "RecordReplay",
+                .type = PageActionIconType::kRecordReplay,
+                .element_identifier = kRecordButtonElementId,
             },
         },
         {
@@ -223,6 +239,13 @@ constexpr auto kPageActionProperties =
                 .is_ephemeral = false,
                 .type = PageActionIconType::kBookmarkStar,
                 .element_identifier = kBookmarkStarViewElementId,
+            },
+        },
+        {
+            kActionGlicContextualCueing,
+            {
+                .histogram_name = "Glic",
+                .type = PageActionIconType::kGlic,
             },
         },
     });

@@ -214,7 +214,6 @@ class CONTENT_EXPORT PrerenderHostRegistry
 
   // Returns the non-reserved host with the given id. Returns nullptr if the id
   // does not match any non-reserved host.
-  PrerenderHost* FindNonReservedHostById(FrameTreeNodeId frame_tree_node_id);
   PrerenderHost* FindNonReservedHostById(PrerenderHostId prerender_host_id);
 
   // Returns true if this registry reserves a host for activation.
@@ -288,6 +287,9 @@ class CONTENT_EXPORT PrerenderHostRegistry
 
   PrerenderHostId GetPrerenderHostIdForNavigation(
       NavigationRequest* navigation_request);
+  void SchedulePendingDeletionPrerenderNewTabHandle(
+      base::PassKey<PrerenderNewTabHandle>,
+      std::unique_ptr<PrerenderNewTabHandle> handle);
 
  private:
   // WebContentsObserver implementation:
@@ -310,8 +312,6 @@ class CONTENT_EXPORT PrerenderHostRegistry
   void ScheduleToDeleteAbandonedHost(
       std::unique_ptr<PrerenderHost> prerender_host,
       const PrerenderCancellationReason& cancellation_reason);
-  void SchedulePendingDeletionPrerenderNewTabHandle(
-      std::unique_ptr<PrerenderNewTabHandle> handle);
 
   void DeleteAbandonedHosts();
 
@@ -369,6 +369,8 @@ class CONTENT_EXPORT PrerenderHostRegistry
       const PrerenderAttributes& attributes);
 
   scoped_refptr<base::SingleThreadTaskRunner> GetTimerTaskRunner();
+
+  int GetCurrentMemoryLimit();
 
   // Holds the PrerenderHostId of running PrerenderHost. Reset to an invalid
   // value when there's no running PrerenderHost. Tracks only the host id of

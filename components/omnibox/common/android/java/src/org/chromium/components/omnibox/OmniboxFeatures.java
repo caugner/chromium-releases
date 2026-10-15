@@ -82,7 +82,7 @@ public class OmniboxFeatures {
     // session.
     public static final int DEFAULT_MAX_PREFETCHES_PER_OMNIBOX_SESSION = 5;
 
-    // Timeout requests after 30 minutes if we somehow fail to remove our listener.
+    // Timeout requests after 10 minutes if we somehow fail to remove our listener.
     private static final int DEFAULT_GEOLOCATION_REQUEST_TIMEOUT_MIN = 10;
 
     // Minimum number of characters required to trigger rich inline autocomplete.
@@ -95,11 +95,6 @@ public class OmniboxFeatures {
 
     /// Holds the information whether logic should focus on preserving memory on this device.
     private static @Nullable Boolean sIsLowMemoryDevice;
-
-    public static final CachedFlag sAnimateSuggestionsListAppearance =
-            newFlag(
-                    OmniboxFeatureList.ANIMATE_SUGGESTIONS_LIST_APPEARANCE,
-                    FeatureState.ENABLED_IN_PROD);
 
     public static final CachedFlag sTouchDownTriggerForPrefetch =
             newFlag(
@@ -116,6 +111,11 @@ public class OmniboxFeatures {
      */
     public static final CachedFlag sUseFusedLocationProvider =
             newFlag(OmniboxFeatureList.USE_FUSED_LOCATION_PROVIDER, FeatureState.ENABLED_IN_PROD);
+
+    public static final CachedFlag sOmniboxXGeoPermissionGranularity =
+            newFlag(
+                    OmniboxFeatureList.OMNIBOX_X_GEO_PERMISSION_GRANULARITY,
+                    FeatureState.ENABLED_IN_PROD);
 
     public static final CachedFlag sAsyncViewInflation =
             newFlag(OmniboxFeatureList.OMNIBOX_ASYNC_VIEW_INFLATION, FeatureState.ENABLED_IN_TEST);
@@ -169,13 +169,18 @@ public class OmniboxFeatures {
             newBooleanParam(sOmniboxMultimodalInput, "wrap_autocomplete_text", false);
 
     public static final CachedFlag sAndroidHubSearchTabGroups =
-            newFlag(OmniboxFeatureList.ANDROID_HUB_SEARCH_TAB_GROUPS, FeatureState.ENABLED_IN_TEST);
+            newFlag(OmniboxFeatureList.ANDROID_HUB_SEARCH_TAB_GROUPS, FeatureState.ENABLED_IN_PROD);
 
     public static final CachedFlag sOmniboxImprovementForLFF =
             newFlag(OmniboxFeatureList.OMNIBOX_IMPROVEMENT_FOR_LFF, FeatureState.DISABLED);
 
     public static final CachedFlag sRemoveSearchReadyOmnibox =
             newFlag(OmniboxFeatureList.REMOVE_SEARCH_READY_OMNIBOX, FeatureState.DISABLED);
+
+    public static final CachedFlag sServeJavaCachedZeroSuggest =
+            newFlag(
+                    OmniboxFeatureList.SERVE_JAVA_CACHED_ZERO_SUGGEST,
+                    FeatureState.ENABLED_IN_PROD);
 
     public static final BooleanCachedFeatureParam sRemoveSroIncludingVerbatimMatch =
             newBooleanParam(
@@ -367,14 +372,6 @@ public class OmniboxFeatures {
         return sTouchDownTriggerMaxPrefetchesPerSession.getValue();
     }
 
-    /**
-     * Whether the appearance of the omnibox suggestions list should animated in sync with the soft
-     * keyboard.
-     */
-    public static boolean shouldAnimateSuggestionsListAppearance() {
-        return sAnimateSuggestionsListAppearance.isEnabled();
-    }
-
     /** Indicate a low memory device for testing purposes. */
     public static void setIsLowMemoryDeviceForTesting(boolean isLowMemDevice) {
         sIsLowMemoryDevice = isLowMemDevice;
@@ -467,10 +464,6 @@ public class OmniboxFeatures {
     }
 
     public static boolean allowMultilineEditField() {
-        return (!DeviceFormFactor.isTablet() && sMultilineEditField.isEnabled());
-    }
-
-    public static boolean shouldJumpStartOmnibox() {
-        return isJumpStartOmniboxEnabled();
+        return sMultilineEditField.isEnabled();
     }
 }

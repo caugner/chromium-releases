@@ -167,6 +167,7 @@
 <translation id="1621067168122174824">ఛార్జ్ పరీక్షను రన్ చేయండి</translation>
 <translation id="1622402072367425417">మెరుస్తున్న బబుల్స్</translation>
 <translation id="1626590945318984973">షార్ట్‌కట్ అందుబాటులో లేదు. ఫంక్షన్, <ph name="META_KEY" /> కీలను ఉపయోగించకుండా కొత్త షార్ట్‌కట్‌ను నొక్కండి.</translation>
+<translation id="163774412591892664">మీ అడ్మినిస్ట్రేటర్, మీ డివైజ్‌ను డిజేబుల్ చేశారు, అలాగే దాని లొకేషన్‌ను యాక్సెస్ చేయగలరు.</translation>
 <translation id="1639239467298939599">లోడ్ చేస్తోంది</translation>
 <translation id="1641857168437328880">డాక్యుమెంట్ ఫీడర్ (ఒక వైపున)</translation>
 <translation id="1642396894598555413">సైకిళ్లు</translation>
@@ -727,6 +728,7 @@
 <translation id="4212169537710712814"><ph name="LANGUAGE_NAME" /> మాటల టైపింగ్ మోడల్ డౌన్‌లోడ్ పూర్తయింది</translation>
 <translation id="42126664696688958">ఎగుమతి చేయండి</translation>
 <translation id="4213104098953699324">USB కీబోర్డ్</translation>
+<translation id="4217571870635786043">డిక్టేషన్</translation>
 <translation id="4227825898293920515"><ph name="TIME" />లో పాస్‌వర్డ్‌ గడువు ముగుస్తుంది</translation>
 <translation id="4238516577297848345">ప్రింట్ టాస్క్‌లు ఏవీ ప్రోగ్రెస్‌లో లేవు</translation>
 <translation id="4239069858505860023">GPRS</translation>
@@ -1685,6 +1687,7 @@
 <translation id="8420955526972171689">హార్డ్‌వేర్ సమస్యలకు టెస్ట్‌లను రన్ చేసి, సమస్యలను పరిష్కరించండి</translation>
 <translation id="8422748173858722634">IMEI</translation>
 <translation id="8424039430705546751">క్రిందికి</translation>
+<translation id="8427213022735114808">మీరు రాయాలనుకునేది Googleకు చెబితే చాలు వెంటనే వచన రూపంలోకి మారుస్తుంది.</translation>
 <translation id="8428213095426709021">సెట్టింగ్‌లు</translation>
 <translation id="8431300646573772016">ChromeOSలో కొత్తవి ఏంటి</translation>
 <translation id="8433186206711564395">నెట్‌వర్క్ సెట్టింగ్‌లు</translation>
@@ -1723,6 +1726,7 @@
 <translation id="8584654835905316966"><ph name="DEVICE_NAME" /> కోసం <ph name="VERSION" /> వెర్షన్‌లో ఫర్మ్‌వేర్ ఇన్‌స్టాలేషన్‌ను పూర్తి చేయడానికి, రీస్టార్ట్ చేయాల్సి ఉంటుంది. మీ కంప్యూటర్ చాలాసార్లు రీబూట్ అవుతున్నట్లు అనిపించవచ్చు. ఇలా జరగడం మామూలే.</translation>
 <translation id="8593058461203131755">మీడియాను పాజ్ చేస్తుంది</translation>
 <translation id="8620617069779373398">రోమింగ్ స్థితి</translation>
+<translation id="8624524972189162859">మీ <ph name="DOMAIN_NAME" /> అడ్మినిస్ట్రేటర్ మీ డివైజ్‌ను డిజేబుల్ చేశారు, అలాగే దాని లొకేషన్‌ను యాక్సెస్ చేయగలరు.</translation>
 <translation id="8626489604350149811"><ph name="APN_NAME" /> కోసం మరిన్ని చర్యలు</translation>
 <translation id="86356131183441916">లేత ఊదా రంగు</translation>
 <translation id="8647595191512746911">ఆడియో మాటల టైపింగ్</translation>

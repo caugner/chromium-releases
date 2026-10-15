@@ -21,8 +21,6 @@
 #include "chrome/browser/contextual_tasks/contextual_tasks_panel_controller.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_interface.h"
 #include "chrome/browser/contextual_tasks/task_info_delegate.h"
-#include "chrome/browser/ui/webui/top_chrome/top_chrome_web_ui_controller.h"
-#include "chrome/browser/ui/webui/top_chrome/top_chrome_webui_config.h"
 #include "chrome/common/webui_url_constants.h"
 #include "components/contextual_search/contextual_search_session_handle.h"
 #include "components/contextual_tasks/public/contextual_task_context.h"
@@ -32,7 +30,9 @@
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_ui_controller.h"
+#include "content/public/browser/webui_config.h"
 #include "content/public/common/url_constants.h"
+#include "contextual_tasks_composebox_handler_interface.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/backoff_entry.h"
@@ -50,6 +50,7 @@ class WebContentsObserver;
 }  // namespace content
 
 namespace contextual_tasks {
+class ContextualTasksComposeboxHandlerInterface;
 class ContextualTasksPanelController;
 class ContextualTasksUiService;
 }  // namespace contextual_tasks
@@ -58,7 +59,6 @@ namespace tabs {
 class TabInterface;
 }  // namespace tabs
 
-class ContextualTasksComposeboxHandler;
 class ContextualTasksInternalsPageHandler;
 
 class ContextualTasksPageHandler;
@@ -129,13 +129,13 @@ class ContextualTasksUI
   void SetThreadTitle(std::optional<std::string> title) override;
   void SetAimUrl(const GURL& url) override;
   void SetIsAiPage(bool is_ai_page) override;
+  void UpdateModelModeFromUrl(const GURL& url) override;
   bool IsShownInTab() override;
   BrowserWindowInterface* GetBrowser() override;
   content::WebContents* GetWebUIWebContents() override;
   void OnZeroStateChange(bool is_zero_state) override;
   void PrepareForTaskChange() override;
   void OnTaskChanged() override;
-  GURL GetAimUrl() override;
 
   // contextual_tasks::ContextualTasksUIInterface implementation:
   Profile* GetProfile() override;
@@ -155,6 +155,7 @@ class ContextualTasksUI
   void PostMessageToWebview(const lens::ClientToAimMessage& message) override;
   contextual_search::ContextualSearchSessionHandle*
   GetOrCreateContextualSessionHandle() override;
+  GURL GetWebUiUrl() override;
 
   void ClearContextualSessionHandle();
 
@@ -162,6 +163,7 @@ class ContextualTasksUI
       override;
   mojo::Remote<contextual_tasks::mojom::Page>& GetPageRemote() override;
   const GURL& GetInnerFrameUrl() const override;
+  content::WebContents* GetInnerWebContents() const override;
 
   // ContextualTaskService::Observer impl:
   void OnTaskUpdated(
@@ -220,7 +222,9 @@ class ContextualTasksUI
       const CoreAccountInfo& account_info) override;
 
   void SetComposeboxHandlerForTesting(
-      std::unique_ptr<ContextualTasksComposeboxHandler> handler) {
+      std::unique_ptr<
+          contextual_tasks::ContextualTasksComposeboxHandlerInterface>
+          handler) {
     composebox_handler_ = std::move(handler);
   }
 
@@ -282,7 +286,8 @@ class ContextualTasksUI
 
   contextual_tasks::ContextualTasksPanelController* GetPanelController();
 
-  std::unique_ptr<ContextualTasksComposeboxHandler> composebox_handler_;
+  std::unique_ptr<contextual_tasks::ContextualTasksComposeboxHandlerInterface>
+      composebox_handler_;
   std::unique_ptr<contextual_tasks::ContextualTasksCookieSynchronizer>
       cookie_synchronizer_;
   raw_ptr<contextual_tasks::ContextualTasksUiService> ui_service_;
@@ -355,14 +360,14 @@ class ContextualTasksUI
   WEB_UI_CONTROLLER_TYPE_DECL();
 };
 
-class ContextualTasksUIConfig
-    : public DefaultTopChromeWebUIConfig<ContextualTasksUI> {
+class ContextualTasksUIConfig : public content::WebUIConfig {
  public:
   ContextualTasksUIConfig()
-      : DefaultTopChromeWebUIConfig(content::kChromeUIScheme,
-                                    chrome::kChromeUIContextualTasksHost) {}
+      : content::WebUIConfig(content::kChromeUIScheme,
+                             chrome::kChromeUIContextualTasksHost) {}
 
   bool IsWebUIEnabled(content::BrowserContext* browser_context) override;
+  bool ShouldCrashOnJavascriptErrorInDevelopmentBuild() const override;
 
   std::unique_ptr<content::WebUIController> CreateWebUIController(
       content::WebUI* web_ui,

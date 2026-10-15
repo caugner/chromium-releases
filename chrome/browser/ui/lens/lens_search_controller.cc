@@ -31,9 +31,9 @@
 #include "chrome/browser/ui/lens/lens_search_feature_flag_utils.h"
 #include "chrome/browser/ui/lens/lens_searchbox_controller.h"
 #include "chrome/browser/ui/lens/lens_session_metrics_logger.h"
+#include "chrome/browser/ui/side_panel/side_panel_entry_key.h"
+#include "chrome/browser/ui/side_panel/side_panel_ui.h"
 #include "chrome/browser/ui/tabs/public/tab_features.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_entry_key.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_ui.h"
 #include "chrome/browser/ui/webui/util/image_util.h"
 #include "chrome/browser/ui/webui/webui_embedding_context.h"
 #include "chrome/grit/branded_strings.h"
@@ -229,6 +229,9 @@ void LensSearchController::OpenLensOverlay(
   if (IsOff()) {
     // Setup all state necessary for this Lens session.
     StartLensSession(invocation_source);
+  } else {
+    // Update the invocation source if the session is already active.
+    invocation_source_ = invocation_source;
   }
 
   should_show_csb_ = should_show_csb;
@@ -354,6 +357,26 @@ void LensSearchController::IssueTextSearchRequest(
     StartLensSession(invocation_source, suppress_contextualization);
   }
 
+  // If routing to contextual tasks, ignore fetching context via the Lens
+  // contextualization controller. Instead, the context will be uploaded by
+  // the Lens query flow router using a session handle.
+  if (should_route_to_contextual_tasks()) {
+    auto lens_selection_type = lens::UNKNOWN_SELECTION_TYPE;
+    if (is_zero_prefix_suggestion) {
+      lens_selection_type = lens::MULTIMODAL_SUGGEST_ZERO_PREFIX;
+    } else if (match_type ==
+               AutocompleteMatchType::Type::SEARCH_WHAT_YOU_TYPED) {
+      lens_selection_type = lens::MULTIMODAL_SEARCH;
+    } else {
+      lens_selection_type = lens::MULTIMODAL_SUGGEST_TYPEAHEAD;
+    }
+    CHECK(query_router_);
+    query_router_->SendContextualTextQuery(
+        /*query_start_time=*/base::Time::Now(), query_text, lens_selection_type,
+        additional_query_parameters, invocation_source);
+    return;
+  }
+
   // TODO(crbug.com/404941800): This flow should not start the overlay once
   // contextualization is separated from the overlay.
   lens_overlay_controller_->IssueTextSearchRequest(
@@ -396,7 +419,7 @@ void LensSearchController::CloseLensAsync(
   // moved. It needs to be reset here to avoid a crash when the query router is
   // eventually destroyed.
   if (query_router_) {
-    query_router_->reset_file_upload_status_observation();
+    query_router_->reset_context_upload_status_observation();
   }
 
   // Close the side panel if it is showing. This provides a smooth closing
@@ -638,6 +661,16 @@ LensSearchController::invocation_source() {
   return invocation_source_;
 }
 
+void LensSearchController::SetInvocationSource(
+    lens::LensOverlayInvocationSource invocation_source) {
+  invocation_source_ = invocation_source;
+
+  // Inform the UI of the state change with the new invocation source.
+  if (results_panel_router_ && results_panel_router_->IsEntryShowing()) {
+    results_panel_router_->OnOverlayShown();
+  }
+}
+
 std::unique_ptr<LensOverlayController>
 LensSearchController::CreateLensOverlayController(
     tabs::TabInterface* tab,
@@ -683,6 +716,11 @@ LensSearchController::CreateLensComposeboxController() {
   Profile* profile =
       Profile::FromBrowserContext(tab_->GetContents()->GetBrowserContext());
   return std::make_unique<lens::LensComposeboxController>(this, profile);
+}
+
+std::unique_ptr<lens::LensQueryFlowRouter>
+LensSearchController::CreateLensQueryFlowRouter() {
+  return std::make_unique<lens::LensQueryFlowRouter>(this);
 }
 
 std::unique_ptr<lens::LensSearchContextualizationController>
@@ -743,7 +781,7 @@ void LensSearchController::StartLensSession(
   // Create the query controller to be used for the current invocation.
   CHECK(!lens_overlay_query_controller_);
   lens_overlay_query_controller_ = CreateLensQueryController(invocation_source);
-  query_router_ = std::make_unique<lens::LensQueryFlowRouter>(this);
+  query_router_ = CreateLensQueryFlowRouter();
   query_router_->SetSuggestInputsReadyCallback(
       base::BindRepeating(&LensSearchController::OnSuggestInputsReady,
                           weak_ptr_factory_.GetWeakPtr()));
@@ -794,7 +832,7 @@ bool LensSearchController::RunLensEligibilityChecks(
   // If the user hasn't granted permission, request user permission before
   // showing the UI.
   if (!lens::CanSharePageScreenshotWithLensOverlay(pref_service_) ||
-      (lens::IsLensOverlayContextualSearchboxEnabled() &&
+      (lens::IsLensOverlayContextualSearchboxEnabled(GetProfile()) &&
        !lens::CanSharePageContentWithLensOverlay(pref_service_))) {
     if (!lens_permission_bubble_controller_) {
       lens_permission_bubble_controller_ =
@@ -1125,3 +1163,6 @@ void LensSearchController::OnPageContextUpdatedForZeroStateRequest(
   }
 }
 
+Profile* LensSearchController::GetProfile() {
+  return Profile::FromBrowserContext(tab_->GetContents()->GetBrowserContext());
+}

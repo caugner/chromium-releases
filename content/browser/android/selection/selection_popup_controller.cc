@@ -126,8 +126,9 @@ ScopedJavaLocalRef<jobject> SelectionPopupController::GetContext() const {
   JNIEnv* env = AttachCurrentThread();
 
   ScopedJavaLocalRef<jobject> obj = java_obj_.get(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return nullptr;
+  }
 
   return Java_SelectionPopupControllerImpl_getContext(env, obj);
 }
@@ -142,8 +143,9 @@ void SelectionPopupController::SetTextHandlesHiddenForDropdownMenu(
 
 void SelectionPopupController::SetTextHandlesTemporarilyHidden(JNIEnv* env,
                                                                bool hidden) {
-  if (rwhva_)
+  if (rwhva_) {
     rwhva_->SetTextHandlesTemporarilyHidden(hidden);
+  }
 }
 
 ScopedJavaLocalRef<jobjectArray> SelectionPopupController::GetTouchHandleRects(
@@ -230,8 +232,9 @@ void SelectionPopupController::OnSelectionEvent(
     const gfx::RectF& selection_rect) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_obj_.get(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return;
+  }
 
   Java_SelectionPopupControllerImpl_onSelectionEvent(
       env, obj, event, selection_rect.x(), selection_rect.y(),
@@ -243,8 +246,9 @@ void SelectionPopupController::OnDragUpdate(
     const gfx::PointF& position) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_obj_.get(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return;
+  }
 
   Java_SelectionPopupControllerImpl_onDragUpdate(
       env, obj, static_cast<int>(type), position.x(), position.y());
@@ -253,8 +257,9 @@ void SelectionPopupController::OnDragUpdate(
 void SelectionPopupController::OnSelectionChanged(const std::string& text) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_obj_.get(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return;
+  }
   ScopedJavaLocalRef<jstring> jtext = ConvertUTF8ToJavaString(env, text);
   Java_SelectionPopupControllerImpl_onSelectionChanged(env, obj, jtext);
 }
@@ -265,8 +270,9 @@ bool SelectionPopupController::ShowSelectionMenu(
     int handle_height) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_obj_.get(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return false;
+  }
 
   // Display paste pop-up only when selection is empty and editable.
   const bool from_touch =
@@ -349,8 +355,9 @@ void SelectionPopupController::OnSelectAroundCaretAck(
 void SelectionPopupController::HidePopupsAndPreserveSelection() {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_obj_.get(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return;
+  }
 
   menu_model_bridge_.reset();
   extra_items_menu_model_.reset();
@@ -360,8 +367,9 @@ void SelectionPopupController::HidePopupsAndPreserveSelection() {
 void SelectionPopupController::RestoreSelectionPopupsIfNecessary() {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_obj_.get(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return;
+  }
   Java_SelectionPopupControllerImpl_restoreSelectionPopupsIfNecessary(env, obj);
 }
 

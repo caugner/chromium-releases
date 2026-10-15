@@ -4,11 +4,12 @@
 
 package org.chromium.chrome.browser.omnibox.suggestions.tabgroup;
 
+import static org.robolectric.Shadows.shadowOf;
+
 import android.content.Context;
 import android.graphics.drawable.ShapeDrawable;
 import android.text.style.ImageSpan;
 
-import androidx.core.content.ContextCompat;
 import androidx.test.filters.SmallTest;
 
 import org.junit.After;
@@ -43,6 +44,7 @@ import org.chromium.components.omnibox.AutocompleteInput;
 import org.chromium.components.omnibox.AutocompleteMatch;
 import org.chromium.components.omnibox.AutocompleteMatchBuilder;
 import org.chromium.components.omnibox.OmniboxSuggestionType;
+import org.chromium.components.omnibox.action.OmniboxActionDelegate;
 import org.chromium.components.tab_groups.TabGroupColorId;
 import org.chromium.components.tab_groups.TabGroupColorPickerUtils;
 import org.chromium.ui.modelutil.PropertyModel;
@@ -67,6 +69,7 @@ public class TabGroupSuggestionProcessorUnitTest {
     private @Mock Supplier<Tab> mTabSupplier;
     private @Mock Supplier<ShareDelegate> mShareDelegateSupplier;
     private @Mock BookmarkState mBookmarkState;
+    private @Mock OmniboxActionDelegate mActionDelegate;
 
     private Context mContext;
     private TabGroupSuggestionProcessor mProcessor;
@@ -88,7 +91,8 @@ public class TabGroupSuggestionProcessorUnitTest {
                         mBookmarkState,
                         mTabSupplier,
                         mShareDelegateSupplier,
-                        ObservableSuppliers.createNonNull(ControlsPosition.TOP));
+                        ObservableSuppliers.createNonNull(ControlsPosition.TOP),
+                        mActionDelegate);
         mProcessor = new TabGroupSuggestionProcessor(uiContext);
         mInput = new AutocompleteInput();
         OmniboxResourceProvider.disableCachesForTesting();
@@ -113,24 +117,16 @@ public class TabGroupSuggestionProcessorUnitTest {
         mProcessor.populateModel(mInput, mSuggestion, mModel, 0);
     }
 
-    // TODO(crbug.com/481749357): Fix failure on SDK 30+ due to drawable comparison failures.
-    @Config(sdk = 29)
     @Test
     @SmallTest
     public void testPopulateModelTabGroupSuggestions() {
         mInput.setPageClassification(PageClassification.ANDROID_HUB_VALUE);
 
         createTabGroupSuggestion(OmniboxSuggestionType.TAB_GROUP);
-        PropertyModel model = mProcessor.createModel();
-
-        mProcessor.populateModel(mInput, mSuggestion, model, 0);
-        Assert.assertTrue(
-                ContextCompat.getDrawable(mContext, R.drawable.ic_features_24dp)
-                        .getConstantState()
-                        .equals(
-                                mModel.get(BaseSuggestionViewProperties.ICON)
-                                        .drawable
-                                        .getConstantState()));
+        Assert.assertEquals(
+                R.drawable.ic_features_24dp,
+                shadowOf(mModel.get(BaseSuggestionViewProperties.ICON).drawable)
+                        .getCreatedFromResId());
 
         SuggestionSpannable suggestion = mModel.get(SuggestionViewProperties.TEXT_LINE_1_TEXT);
         ImageSpan[] imageSpans = suggestion.getSpans(0, suggestion.length(), ImageSpan.class);

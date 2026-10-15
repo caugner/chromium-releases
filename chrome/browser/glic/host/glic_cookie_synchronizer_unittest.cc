@@ -341,9 +341,6 @@ TEST_F(GlicCookieSynchronizerTest, StandaloneFreUsesFrePartition) {
 }
 
 TEST_F(GlicCookieSynchronizerTest, ClearsCookiesOnFirstSync) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(kGlicClearCookiesOnFirstSync);
-
   base::test::TestFuture<bool> result;
   SetResponseForResult(signin::SetAccountsInCookieResult::kSuccess);
   EXPECT_EQ(0, test_cookie_manager().delete_cookies_called_count());

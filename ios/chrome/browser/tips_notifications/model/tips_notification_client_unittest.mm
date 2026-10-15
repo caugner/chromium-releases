@@ -12,6 +12,7 @@
 #import "base/test/scoped_mock_clock_override.h"
 #import "base/test/simple_test_clock.h"
 #import "base/threading/thread_restrictions.h"
+#import "components/feature_engagement/public/event_constants.h"
 #import "components/feature_engagement/public/tracker.h"
 #import "components/prefs/scoped_user_pref_update.h"
 #import "components/safe_browsing/core/common/safe_browsing_prefs.h"
@@ -67,6 +68,16 @@ using startup_metric_utils::FirstRunSentinelCreationResult;
                                         completion:(ProceduralBlock)completion {
   completion();
 }
+
+// Allow registering the stub as a SceneCommands handler.
+// Any call to one of these methods will crash.
+- (BOOL)conformsToProtocol:(Protocol*)protocol {
+  if (protocol == @protocol(SceneCommands)) {
+    return YES;
+  }
+  return [super conformsToProtocol:protocol];
+}
+
 @end
 
 class TipsNotificationClientTest : public PlatformTest {
@@ -827,7 +838,7 @@ TEST_F(TipsNotificationClientTest,
   base::test::ScopedFeatureList feature_list;
   feature_list.InitAndEnableFeature(kIOSOneTimeDefaultBrowserNotification);
   SetFalseChromeLikelyDefaultBrowser();
-  tracker_->NotifyEvent("default_browser_fre_shown");
+  tracker_->NotifyEvent(feature_engagement::events::kIOSDefaultBrowserFREShown);
   RecordDefaultBrowserPromoLastAction(IOSDefaultBrowserPromoAction::kCancel);
 
   StubGetPendingRequests(nil);
@@ -846,7 +857,7 @@ TEST_F(TipsNotificationClientTest,
   base::test::ScopedFeatureList feature_list;
   feature_list.InitAndEnableFeature(kIOSOneTimeDefaultBrowserNotification);
   SetFalseChromeLikelyDefaultBrowser();
-  tracker_->NotifyEvent("default_browser_fre_shown");
+  tracker_->NotifyEvent(feature_engagement::events::kIOSDefaultBrowserFREShown);
   test_clock_.Advance(base::Days(8));
   RecordDefaultBrowserPromoLastAction(IOSDefaultBrowserPromoAction::kCancel);
 
