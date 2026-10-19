@@ -69,14 +69,16 @@ else
   start_milestone=$start_arg
 fi
 
-versions=$(curl -fsSL "$bcd_url" | jq -r '
+release_rows=$(curl -fsSL "$bcd_url" | jq -r --argjson start "$start_milestone" '
   .browsers.chrome.releases
-  | to_entries[]
-  | select(.value.status == "current" or .value.status == "retired")
-  | .key
-' | awk -v start="$start_milestone" '$1 ~ /^[0-9]+$/ && $1 >= start' | sort -n)
+  | to_entries
+  | map(select((.value.status == "current" or .value.status == "retired") and (.key | tonumber) >= $start))
+  | sort_by(.key | tonumber)[]
+  | [.key, (.value.release_date // "")]
+  | @tsv
+')
 
-if [[ -z "$versions" ]]; then
+if [[ -z "$release_rows" ]]; then
   echo "No stable Chrome milestones at or after $start_milestone."
   exit 0
 fi
@@ -85,7 +87,12 @@ tag_listing=$(git ls-remote --tags --refs "$source_repo")
 git -C "$releases_dir" config user.name "github-actions[bot]"
 git -C "$releases_dir" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-for milestone in $versions; do
+while IFS=$'\t' read -r milestone release_date; do
+  if [[ ! "$release_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    echo "No valid stable release date for Chrome $milestone." >&2
+    exit 1
+  fi
+
   release_tag=$(printf '%s\n' "$tag_listing" | awk -v milestone="$milestone" '
     {
       tag = $2
@@ -118,7 +125,12 @@ for milestone in $versions; do
 
   filter_snapshot "$releases_dir"
   git -C "$releases_dir" add --all
-  git -C "$releases_dir" commit -m "release: Chromium $milestone (${release_tag})"
+  GIT_AUTHOR_DATE="${release_date}T12:00:00Z" \
+    GIT_COMMITTER_DATE="${release_date}T12:00:00Z" \
+    git -C "$releases_dir" commit \
+      -m "release: Chromium $milestone (${release_tag})" \
+      -m "Stable release date: ${release_date}" \
+      -m "Source tag: https://github.com/chromium/chromium/tree/${release_tag}"
   git -C "$releases_dir" tag "v$milestone"
 
   if [[ "$dry_run" == true ]]; then
@@ -129,5 +141,5 @@ for milestone in $versions; do
 
   rm -rf "$temp_dir"
   trap - EXIT
-done
+done <<< "$release_rows"
 

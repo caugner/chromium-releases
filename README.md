@@ -17,7 +17,7 @@ git blame releases -- path/to/file
 
 ## Updating the history
 
-The scheduled workflow checks Chrome release metadata, finds the matching version tag in the Chromium source mirror, imports each missing stable milestone, and pushes its commit and `v<major>` tag to `releases`. The workflow can also be run manually with a starting milestone or in dry-run mode. Dry runs create commits and tags in the temporary runner checkout but do not push them.
+The scheduled workflow checks Chrome release metadata, finds the matching version tag in the Chromium source mirror, imports each missing stable milestone, and pushes its commit and `v<major>` tag to `releases`. Commit author and committer timestamps use the stable release date at noon UTC, and the date is included in the commit message. The workflow can also be run manually with a starting milestone or in dry-run mode. Dry runs create commits and tags in the temporary runner checkout but do not push them.
 
 For a local import, check out both this branch and `releases`, then run:
 
