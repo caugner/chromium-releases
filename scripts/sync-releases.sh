@@ -131,7 +131,8 @@ while IFS=$'\t' read -r milestone release_date; do
       -m "release: Chromium $milestone (${release_tag})" \
       -m "Stable release date: ${release_date}" \
       -m "Source tag: https://github.com/chromium/chromium/tree/${release_tag}"
-  git -C "$releases_dir" tag "v$milestone"
+  GIT_COMMITTER_DATE="${release_date}T12:00:00Z" \
+    git -C "$releases_dir" tag -a "v$milestone" -m "Chromium $milestone"
 
   if [[ "$dry_run" == true ]]; then
     git -C "$releases_dir" log -1 --format='%h %s'
