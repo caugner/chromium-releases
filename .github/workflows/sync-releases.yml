@@ -1,0 +1,53 @@
+name: sync-releases
+
+on:
+  schedule:
+    - cron: "0 15 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      start_milestone:
+        description: First stable milestone to import (defaults to the one after the latest snapshot)
+        required: false
+        default: ""
+      dry_run:
+        description: Build commits and tags without pushing
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: sync-releases
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: write
+    steps:
+      - name: Check out control branch
+        uses: actions/checkout@v4
+
+      - name: Check out release history
+        uses: actions/checkout@v4
+        with:
+          ref: releases
+          path: releases
+          fetch-depth: 1
+          fetch-tags: true
+
+      - name: Import stable milestones
+        env:
+          START_MILESTONE: ${{ inputs.start_milestone }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          args=()
+          if [ -n "$START_MILESTONE" ]; then
+            args+=("$START_MILESTONE")
+          fi
+          if [ "$DRY_RUN" = "true" ]; then
+            args+=(--dry-run)
+          fi
+          scripts/sync-releases.sh "${args[@]}"
