@@ -20,14 +20,13 @@
 #include "base/trace_event/trace_event.h"
 #include "chrome/browser/android/preferences/autofill/settings_navigation_helper.h"
 #include "chrome/browser/autofill/android/autofill_fallback_surface_launcher.h"
-#include "chrome/browser/autofill/personal_data_manager_factory.h"
-#include "chrome/browser/autofill/valuables_data_manager_factory.h"
 #include "chrome/browser/keyboard_accessory/android/manual_filling_controller.h"
 #include "chrome/browser/keyboard_accessory/android/manual_filling_utils.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/vr/vr_tab_helper.h"
+#include "components/autofill/content/browser/content_autofill_client.h"
 #include "components/autofill/content/browser/content_autofill_driver.h"
 #include "components/autofill/core/browser/data_manager/payments/payments_data_manager.h"
+#include "components/autofill/core/browser/data_manager/personal_data_manager.h"
 #include "components/autofill/core/browser/data_manager/valuables/valuables_data_manager.h"
 #include "components/autofill/core/browser/data_model/payments/bnpl_issuer.h"
 #include "components/autofill/core/browser/data_model/payments/credit_card.h"
@@ -39,8 +38,6 @@
 #include "components/autofill/core/browser/payments/iban_access_manager.h"
 #include "components/autofill/core/browser/payments/payments_autofill_client.h"
 #include "components/autofill/core/browser/suggestions/payments/payments_suggestion_generator_util.h"
-#include "components/autofill/core/common/autofill_features.h"
-#include "components/autofill/core/common/autofill_payments_features.h"
 #include "components/strings/grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -171,7 +168,7 @@ const CreditCard* UnwrapCardOrVirtualCard(
 
 PromoCodeInfo TranslateOffer(const AutofillOfferData* data) {
   DCHECK(data);
-  DCHECK(data->IsGPayPromoCodeOffer());
+  DCHECK(!data->GetPromoCode().empty());
 
   std::u16string promo_code = base::ASCIIToUTF16(data->GetPromoCode());
   std::u16string details_text =
@@ -411,7 +408,7 @@ PaymentMethodAccessoryControllerImpl::PaymentMethodAccessoryControllerImpl(
           *web_contents) {
   ContentAutofillClient* client =
       ContentAutofillClient::FromWebContents(web_contents);
-  if (!client) {
+  if (!client || !client->HasPersonalDataManager()) {
     return;
   }
   paydm_observation_.Observe(
@@ -420,12 +417,9 @@ PaymentMethodAccessoryControllerImpl::PaymentMethodAccessoryControllerImpl(
           client->GetValuablesDataManager()) {
     valuables_data_manager_observation_.Observe(valuables_data_manager);
   }
-  if (base::FeatureList::IsEnabled(
-          features::kAutofillTouchToFillShowManualFillForVcnFix)) {
-    autofill_managers_observation_.Observe(
-        client, ScopedAutofillManagersObservation::InitializationPolicy::
-                    kObservePreexistingManagers);
-  }
+  autofill_managers_observation_.Observe(
+      client, ScopedAutofillManagersObservation::InitializationPolicy::
+                  kObservePreexistingManagers);
 }
 
 // TODO(crbug.com/481734563): Use TestContentAutofillClient for manager setup
@@ -448,14 +442,11 @@ PaymentMethodAccessoryControllerImpl::PaymentMethodAccessoryControllerImpl(
   if (valuables_data_manager) {
     valuables_data_manager_observation_.Observe(valuables_data_manager);
   }
-  if (base::FeatureList::IsEnabled(
-          features::kAutofillTouchToFillShowManualFillForVcnFix)) {
-    if (ContentAutofillClient* client =
-            ContentAutofillClient::FromWebContents(web_contents)) {
-      autofill_managers_observation_.Observe(
-          client, ScopedAutofillManagersObservation::InitializationPolicy::
-                      kObservePreexistingManagers);
-    }
+  if (ContentAutofillClient* client =
+          ContentAutofillClient::FromWebContents(web_contents)) {
+    autofill_managers_observation_.Observe(
+        client, ScopedAutofillManagersObservation::InitializationPolicy::
+                    kObservePreexistingManagers);
   }
 }
 
@@ -555,9 +546,7 @@ PaymentMethodAccessoryControllerImpl::GetAutofillManager() const {
 
 BrowserAutofillManager*
 PaymentMethodAccessoryControllerImpl::GetAutofillManager() {
-  if (base::FeatureList::IsEnabled(
-          features::kAutofillTouchToFillShowManualFillForVcnFix) &&
-      browser_autofill_manager_) {
+  if (browser_autofill_manager_) {
     return browser_autofill_manager_.get();
   } else {
     DCHECK(GetWebContents().GetFocusedFrame());
@@ -567,11 +556,12 @@ PaymentMethodAccessoryControllerImpl::GetAutofillManager() {
     ContentAutofillDriver* driver =
         ContentAutofillDriver::GetForRenderFrameHost(
             GetWebContents().GetFocusedFrame());
-    // This cast is always safe in Chrome - only WebView has a different
-    // AutofillManager implementation.
-    return driver ? static_cast<BrowserAutofillManager*>(
-                        &driver->GetAutofillManager())
-                  : nullptr;
+    if (!driver || driver->GetAutofillClient().UsesPlatformAutofill()) {
+      return nullptr;
+    }
+    // This cast is safe when platform autofill (WebView or 3P Autofill on
+    // Android) is not used.
+    return static_cast<BrowserAutofillManager*>(&driver->GetAutofillManager());
   }
 }
 

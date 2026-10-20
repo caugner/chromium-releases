@@ -32,6 +32,7 @@
 #import "ios/chrome/browser/location_bar/ui_bundled/fakebox_buttons_snapshot_provider.h"
 #import "ios/chrome/browser/location_bar/ui_bundled/highlight_utils.h"
 #import "ios/chrome/browser/location_bar/ui_bundled/location_bar_constants.h"
+#import "ios/chrome/browser/location_bar/ui_bundled/location_bar_content_size_delegate.h"
 #import "ios/chrome/browser/location_bar/ui_bundled/location_bar_metrics.h"
 #import "ios/chrome/browser/location_bar/ui_bundled/location_bar_mutator.h"
 #import "ios/chrome/browser/location_bar/ui_bundled/location_bar_placeholder_type.h"
@@ -119,7 +120,8 @@ const CGFloat kGeminiLiveCircleSize = 20.0;
 }
 @end
 
-@interface LocationBarViewController () <UIContextMenuInteractionDelegate,
+@interface LocationBarViewController () <LocationBarContentSizeDelegate,
+                                         UIContextMenuInteractionDelegate,
                                          UIIndirectScribbleInteractionDelegate>
 // The injected edit view.
 @property(nonatomic, strong) UIView<TextFieldViewContaining>* editView;
@@ -207,6 +209,9 @@ const CGFloat kGeminiLiveCircleSize = 20.0;
 
   // The type of custom leading view to display.
   CustomLeadingViewType _customLeadingViewType;
+
+  // Cached share icon image with balanced vertical padding.
+  UIImage* _cachedPaddedShareImage;
 }
 
 #pragma mark - public
@@ -217,6 +222,7 @@ const CGFloat kGeminiLiveCircleSize = 20.0;
     _textOnly = textOnly;
     _locationBarSteadyView =
         [[LocationBarSteadyView alloc] initWithTextOnly:textOnly];
+    _locationBarSteadyView.contentSizeDelegate = self;
     if (!_textOnly && IsGlassToolbarEnabled()) {
       _steadyViewLayoutGuide = [[UILayoutGuide alloc] init];
     }
@@ -358,8 +364,10 @@ const CGFloat kGeminiLiveCircleSize = 20.0;
     [self.locationBarSteadyView setIncognitoBadgeView:self.incognitoBadgeView];
   }
 
-  DCHECK(self.badgeView) << "The badge view must be set at this point";
-  [self.locationBarSteadyView setBadgeView:self.badgeView];
+  if (!_textOnly) {
+    DCHECK(self.badgeView) << "The badge view must be set at this point";
+    [self.locationBarSteadyView setBadgeView:self.badgeView];
+  }
   if (self.readerModeChipView) {
     [self.locationBarSteadyView setReaderModeChipView:self.readerModeChipView];
   }
@@ -563,6 +571,14 @@ const CGFloat kGeminiLiveCircleSize = 20.0;
   }
 }
 
+#pragma mark - LocationBarContentSizeDelegate
+
+- (void)locationBarContentSizeDidChange {
+  // Received from the steady view; re-publish it to the owner of this location
+  // bar, which is the only one able to react to a width change.
+  [self.contentSizeDelegate locationBarContentSizeDidChange];
+}
+
 #pragma mark - LocationBarSteadyViewConsumer
 
 - (void)updateLocationText:(NSString*)string clipTail:(BOOL)clipTail {
@@ -591,8 +607,9 @@ const CGFloat kGeminiLiveCircleSize = 20.0;
   _shareButtonEnabled = enabled;
   if (self.trailingButtonState == kShareButton) {
     [self.locationBarSteadyView enableTrailingButton:enabled];
-
-    if (_shareButtonEnabled) {
+    if (IsChromeNextIaEnabled()) {
+      [self updateShareButtonGuide];
+    } else if (_shareButtonEnabled) {
       [self.layoutGuideCenter
           referenceView:self.locationBarSteadyView.trailingButton
               underName:kShareButtonGuide];
@@ -833,35 +850,15 @@ const CGFloat kGeminiLiveCircleSize = 20.0;
                     action:@selector(shareButtonPressed)
           forControlEvents:UIControlEventTouchUpInside];
 
-      // The system share image has uneven vertical padding. Add a small bottom
-      // padding to balance it.
-      UIImage* shareImage =
-          SymbolWithPointSize(SymbolShare, kSymbolImagePointSize);
-
-      UIGraphicsImageRendererFormat* format =
-          [UIGraphicsImageRendererFormat preferredFormat];
-      format.scale = 0.0;
-      format.opaque = NO;
-      UIGraphicsImageRenderer* renderer = [[UIGraphicsImageRenderer alloc]
-          initWithSize:CGSizeMake(shareImage.size.width,
-                                  shareImage.size.height +
-                                      kShareIconBalancingHeightPadding)
-                format:format];
-      UIImage* paddedShareImage = [renderer
-          imageWithActions:^(UIGraphicsImageRendererContext* context) {
-            [shareImage drawInRect:CGRectMake(0, 0, shareImage.size.width,
-                                              shareImage.size.height)];
-          }];
-
-      [self.locationBarSteadyView.trailingButton setImage:paddedShareImage
-                                                 forState:UIControlStateNormal];
+      [self.locationBarSteadyView.trailingButton
+          setImage:[self paddedShareImage]
+          forState:UIControlStateNormal];
       self.locationBarSteadyView.trailingButton.accessibilityLabel =
           l10n_util::GetNSString(IDS_IOS_TOOLS_MENU_SHARE);
       self.locationBarSteadyView.trailingButton.accessibilityIdentifier =
           kOmniboxShareButtonIdentifier;
       [self.locationBarSteadyView enableTrailingButton:self.shareButtonEnabled];
-
-      if (self.shareButtonEnabled) {
+      if (!IsChromeNextIaEnabled() && self.shareButtonEnabled) {
         [self.layoutGuideCenter
             referenceView:self.locationBarSteadyView.trailingButton
                 underName:kShareButtonGuide];
@@ -893,6 +890,40 @@ const CGFloat kGeminiLiveCircleSize = 20.0;
       [self.locationBarSteadyView enableTrailingButton:self.voiceSearchEnabled];
     }
   }
+  if (IsChromeNextIaEnabled()) {
+    [self updateShareButtonGuide];
+  }
+}
+
+// Returns the share icon image with balanced vertical padding, caching the
+// rasterized image when `kLocationBarPerformanceImprovements` is enabled.
+- (UIImage*)paddedShareImage {
+  if (IsLocationBarPerformanceImprovementsEnabled() &&
+      _cachedPaddedShareImage) {
+    return _cachedPaddedShareImage;
+  }
+  // The system share image has uneven vertical padding. Add a small bottom
+  // padding to balance it.
+  UIImage* shareImage = SymbolWithPointSize(SymbolShare, kSymbolImagePointSize);
+
+  UIGraphicsImageRendererFormat* format =
+      [UIGraphicsImageRendererFormat preferredFormat];
+  format.scale = 0.0;
+  format.opaque = NO;
+  UIGraphicsImageRenderer* renderer = [[UIGraphicsImageRenderer alloc]
+      initWithSize:CGSizeMake(shareImage.size.width,
+                              shareImage.size.height +
+                                  kShareIconBalancingHeightPadding)
+            format:format];
+  UIImage* paddedShareImage =
+      [renderer imageWithActions:^(UIGraphicsImageRendererContext* context) {
+        [shareImage drawInRect:CGRectMake(0, 0, shareImage.size.width,
+                                          shareImage.size.height)];
+      }];
+  if (IsLocationBarPerformanceImprovementsEnabled()) {
+    _cachedPaddedShareImage = paddedShareImage;
+  }
+  return paddedShareImage;
 }
 
 - (void)setTrailingButtonState:(TrailingButtonState)state {
@@ -958,10 +989,33 @@ const CGFloat kGeminiLiveCircleSize = 20.0;
         forControlEvents:UIControlEventTouchUpInside];
 }
 
+// Updates `kShareButtonGuide` to reference the trailing button when this
+// location bar is active and displaying an enabled Share button.
+- (void)updateShareButtonGuide {
+  if (!self.isViewLoaded || _textOnly) {
+    return;
+  }
+  BOOL isActive = _active || !IsChromeNextIaEnabled();
+  BOOL isShareButtonActive =
+      isActive && self.trailingButtonState == kShareButton &&
+      !self.hideShareButtonWhileOnIncognitoNTP && self.shareButtonEnabled;
+  UIView* trailingButton = self.locationBarSteadyView.trailingButton;
+  if (isShareButtonActive) {
+    [self.layoutGuideCenter referenceView:trailingButton
+                                underName:kShareButtonGuide];
+  } else if ([self.layoutGuideCenter
+                 referencedViewUnderName:kShareButtonGuide] == trailingButton) {
+    [self.layoutGuideCenter referenceView:nil underName:kShareButtonGuide];
+  }
+}
+
 // Updates the layout guides to point to the entrypoints in this toolbar.
 - (void)updateLayoutGuides {
-  if (!self.isViewLoaded) {
+  if (!self.isViewLoaded || _textOnly) {
     return;
+  }
+  if (IsChromeNextIaEnabled()) {
+    [self updateShareButtonGuide];
   }
   // The _active flag is only used when NextIA is enabled. When it is disabled,
   // the location bar should always be treated as active for layout guides.

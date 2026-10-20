@@ -20,6 +20,7 @@
 #include "content/browser/file_system_access/mock_file_system_access_permission_context.h"
 #include "content/browser/file_system_access/mock_file_system_access_permission_grant.h"
 #include "content/public/test/browser_task_environment.h"
+#include "net/base/schemeful_site.h"
 #include "storage/browser/blob/blob_storage_context.h"
 #include "storage/browser/quota/quota_manager_proxy.h"
 #include "storage/browser/test/test_file_system_context.h"
@@ -96,8 +97,9 @@ MATCHER_P2(PermissionStatusIs,
 
 }  // namespace
 
-class TestFileSystemAccessHandle : public FileSystemAccessHandleBase {
+class TestFileSystemAccessHandle final : public FileSystemAccessHandleBase {
  public:
+  using FileSystemAccessHandleBase::DoGetCloudIdentifiers;
   using FileSystemAccessHandleBase::GetRenamePermission;
   using FileSystemAccessHandleBase::RenamePermission;
 
@@ -229,9 +231,99 @@ TEST_P(FileSystemAccessHandleGetReadPermissionStatusTest, DoesReturnStatus) {
   EXPECT_EQ(PermissionStatus::GRANTED, handle.GetReadPermissionStatus());
 }
 
+// Verifies that `GetReadPermissionStatus()` reports `GRANTED` in a third-party
+// context when the underlying read grant holds `GRANTED` (e.g. from user drop
+// or transfer).
+TEST_P(FileSystemAccessHandleGetReadPermissionStatusTest,
+       ThirdPartyContext_GrantedWhenGrantIsGranted) {
+  const blink::StorageKey kThirdPartyStorageKey = blink::StorageKey::Create(
+      url::Origin::Create(GURL("https://example.com/")),
+      net::SchemefulSite(GURL("https://other.com/")),
+      blink::mojom::AncestorChainBit::kCrossSite);
+
+  auto context = is_worker()
+                     ? FileSystemAccessManagerImpl::BindingContext(
+                           kThirdPartyStorageKey, kTestURL, kWorkerProcessId)
+                     : FileSystemAccessManagerImpl::BindingContext(
+                           kThirdPartyStorageKey, kTestURL, kFrameId);
+  TestFileSystemAccessHandle handle(
+      manager_.get(), context,
+      FileSystemURL::CreateForTest(kThirdPartyStorageKey,
+                                   storage::kFileSystemTypeLocal,
+                                   base::FilePath::FromUTF8Unsafe("/test")),
+      handle_state_);
+
+  EXPECT_CALL(*read_grant_, GetStatus())
+      .WillRepeatedly(testing::Return(PermissionStatus::GRANTED));
+  EXPECT_EQ(handle.GetReadPermissionStatus(), PermissionStatus::GRANTED);
+}
+
+// Verifies that `GetReadPermissionStatus()` reports `DENIED` in a third-party
+// context when the underlying read grant is `ASK` or `DENIED`.
+TEST_P(FileSystemAccessHandleGetReadPermissionStatusTest,
+       ThirdPartyContext_DeniedWhenGrantNotGranted) {
+  const blink::StorageKey kThirdPartyStorageKey = blink::StorageKey::Create(
+      url::Origin::Create(GURL("https://example.com/")),
+      net::SchemefulSite(GURL("https://other.com/")),
+      blink::mojom::AncestorChainBit::kCrossSite);
+
+  auto context = is_worker()
+                     ? FileSystemAccessManagerImpl::BindingContext(
+                           kThirdPartyStorageKey, kTestURL, kWorkerProcessId)
+                     : FileSystemAccessManagerImpl::BindingContext(
+                           kThirdPartyStorageKey, kTestURL, kFrameId);
+  TestFileSystemAccessHandle handle(
+      manager_.get(), context,
+      FileSystemURL::CreateForTest(kThirdPartyStorageKey,
+                                   storage::kFileSystemTypeLocal,
+                                   base::FilePath::FromUTF8Unsafe("/test")),
+      handle_state_);
+
+  EXPECT_CALL(*read_grant_, GetStatus())
+      .WillOnce(testing::Return(PermissionStatus::ASK))
+      .WillOnce(testing::Return(PermissionStatus::DENIED));
+  EXPECT_EQ(handle.GetReadPermissionStatus(), PermissionStatus::DENIED);
+  EXPECT_EQ(handle.GetReadPermissionStatus(), PermissionStatus::DENIED);
+}
+
 INSTANTIATE_TEST_SUITE_P(
     All,
     FileSystemAccessHandleGetReadPermissionStatusTest,
+    testing::ValuesIn(kTestContextParams),
+    [](const testing::TestParamInfo<TestContextParam>& info) {
+      return info.param.test_name;
+    });
+
+class FileSystemAccessHandleCheckReadAccessTest
+    : public FileSystemAccessHandleParamTestBase {};
+
+TEST_P(FileSystemAccessHandleCheckReadAccessTest, AllowedWhenGranted) {
+  auto handle = CreateTestHandle();
+
+  EXPECT_CALL(*read_grant_, GetStatus())
+      .WillOnce(testing::Return(PermissionStatus::GRANTED));
+  EXPECT_TRUE(handle.CheckReadAccess().has_value());
+}
+
+TEST_P(FileSystemAccessHandleCheckReadAccessTest, DeniedWhenNotGranted) {
+  auto handle = CreateTestHandle();
+
+  EXPECT_CALL(*read_grant_, GetStatus())
+      .WillOnce(testing::Return(PermissionStatus::ASK));
+  auto result = handle.CheckReadAccess();
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error()->status, FileSystemAccessStatus::kPermissionDenied);
+
+  EXPECT_CALL(*read_grant_, GetStatus())
+      .WillOnce(testing::Return(PermissionStatus::DENIED));
+  result = handle.CheckReadAccess();
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error()->status, FileSystemAccessStatus::kPermissionDenied);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    All,
+    FileSystemAccessHandleCheckReadAccessTest,
     testing::ValuesIn(kTestContextParams),
     [](const testing::TestParamInfo<TestContextParam>& info) {
       return info.param.test_name;
@@ -420,6 +512,154 @@ TEST_P(FileSystemAccessDoRequestReadPermissionTest, AlreadyDenied) {
       DoRequestPermission(handle, FileSystemAccessPermissionMode::kRead),
       PermissionStatusIs(FileSystemAccessStatus::kOk,
                          PermissionStatus::DENIED));
+}
+
+// Verifies that `DoRequestPermission()` rejects read access requests for a
+// handle bound to a third-party context, even when the underlying permission
+// grant holds status `GRANTED`. Dispatches no permission prompt requests to the
+// frame and returns status `PermissionStatus::DENIED` with error
+// `kSecurityError`.
+TEST_P(FileSystemAccessDoRequestReadPermissionTest,
+       ThirdPartyContext_ReadPermissionBlocked) {
+  const blink::StorageKey kThirdPartyStorageKey = blink::StorageKey::Create(
+      url::Origin::Create(GURL("https://example.com/")),
+      net::SchemefulSite(GURL("https://other.com/")),
+      blink::mojom::AncestorChainBit::kCrossSite);
+
+  auto context = is_worker()
+                     ? FileSystemAccessManagerImpl::BindingContext(
+                           kThirdPartyStorageKey, kTestURL, kWorkerProcessId)
+                     : FileSystemAccessManagerImpl::BindingContext(
+                           kThirdPartyStorageKey, kTestURL, kFrameId);
+  TestFileSystemAccessHandle handle(
+      manager_.get(), context,
+      FileSystemURL::CreateForTest(kThirdPartyStorageKey,
+                                   storage::kFileSystemTypeLocal,
+                                   base::FilePath::FromUTF8Unsafe("/test")),
+      handle_state_);
+
+  EXPECT_CALL(*read_grant_, GetStatus())
+      .WillRepeatedly(testing::Return(PermissionStatus::GRANTED));
+
+  // No permission prompt requests should be dispatched to the frame.
+  EXPECT_CALL(*read_grant_,
+              RequestPermission_(testing::_, testing::_, testing::_))
+      .Times(0);
+  EXPECT_CALL(*write_grant_,
+              RequestPermission_(testing::_, testing::_, testing::_))
+      .Times(0);
+
+  // In an unfixed state, `DoRequestPermission()` checks only whether the active
+  // grant status differs from `ASK`. When the status is `GRANTED` (inherited
+  // from a first-party origin), read access is permitted without evaluating the
+  // third-party embedding hierarchy.
+  EXPECT_THAT(
+      DoRequestPermission(handle, FileSystemAccessPermissionMode::kRead),
+      PermissionStatusIs(FileSystemAccessStatus::kSecurityError,
+                         PermissionStatus::DENIED));
+}
+
+// Verifies that `GetReadPermissionStatus()` returns `PermissionStatus::DENIED`
+// for a non-drag-and-drop handle in a third-party context holding a denied
+// grant.
+TEST_P(FileSystemAccessDoRequestReadPermissionTest,
+       GetReadPermissionStatus_ThirdPartyContext_Blocked) {
+  const blink::StorageKey kThirdPartyStorageKey = blink::StorageKey::Create(
+      url::Origin::Create(GURL("https://example.com/")),
+      net::SchemefulSite(GURL("https://other.com/")),
+      blink::mojom::AncestorChainBit::kCrossSite);
+
+  auto context = is_worker()
+                     ? FileSystemAccessManagerImpl::BindingContext(
+                           kThirdPartyStorageKey, kTestURL, kWorkerProcessId)
+                     : FileSystemAccessManagerImpl::BindingContext(
+                           kThirdPartyStorageKey, kTestURL, kFrameId);
+  auto deny_grant = base::MakeRefCounted<
+      testing::StrictMock<MockFileSystemAccessPermissionGrant>>();
+  FileSystemAccessManagerImpl::SharedHandleState deny_state(deny_grant,
+                                                            write_grant_);
+  TestFileSystemAccessHandle handle(
+      manager_.get(), context,
+      FileSystemURL::CreateForTest(kThirdPartyStorageKey,
+                                   storage::kFileSystemTypeLocal,
+                                   base::FilePath::FromUTF8Unsafe("/test")),
+      deny_state);
+
+  EXPECT_CALL(*deny_grant, GetStatus())
+      .WillRepeatedly(testing::Return(PermissionStatus::DENIED));
+
+  EXPECT_EQ(handle.GetReadPermissionStatus(), PermissionStatus::DENIED);
+}
+
+// Verifies that `GetReadPermissionStatus()` returns `GRANTED` in a third-party
+// context if the handle originated from a drag-and-drop operation.
+TEST_P(FileSystemAccessDoRequestReadPermissionTest,
+       GetReadPermissionStatus_ThirdPartyContext_DragAndDrop_Allowed) {
+  const blink::StorageKey kThirdPartyStorageKey = blink::StorageKey::Create(
+      url::Origin::Create(GURL("https://example.com/")),
+      net::SchemefulSite(GURL("https://other.com/")),
+      blink::mojom::AncestorChainBit::kCrossSite);
+
+  auto context = is_worker()
+                     ? FileSystemAccessManagerImpl::BindingContext(
+                           kThirdPartyStorageKey, kTestURL, kWorkerProcessId)
+                     : FileSystemAccessManagerImpl::BindingContext(
+                           kThirdPartyStorageKey, kTestURL, kFrameId);
+  TestFileSystemAccessHandle handle(
+      manager_.get(), context,
+      FileSystemURL::CreateForTest(kThirdPartyStorageKey,
+                                   storage::kFileSystemTypeLocal,
+                                   base::FilePath::FromUTF8Unsafe("/test")),
+      FileSystemAccessManagerImpl::SharedHandleState(read_grant_,
+                                                     write_grant_));
+
+  EXPECT_CALL(*read_grant_, GetStatus())
+      .WillRepeatedly(testing::Return(PermissionStatus::GRANTED));
+
+  EXPECT_EQ(handle.GetReadPermissionStatus(), PermissionStatus::GRANTED);
+}
+
+// Verifies that `DoGetCloudIdentifiers()` returns `kSecurityError` for a
+// handle bound to a third-party context without active read grant.
+TEST_P(FileSystemAccessDoRequestReadPermissionTest,
+       DoGetCloudIdentifiers_ThirdPartyContext_SecurityError) {
+  base::test::ScopedFeatureList features;
+  features.InitAndEnableFeature(
+      blink::features::kFileSystemAccessGetCloudIdentifiers);
+
+  const blink::StorageKey kThirdPartyStorageKey = blink::StorageKey::Create(
+      url::Origin::Create(GURL("https://example.com/")),
+      net::SchemefulSite(GURL("https://other.com/")),
+      blink::mojom::AncestorChainBit::kCrossSite);
+
+  auto context = is_worker()
+                     ? FileSystemAccessManagerImpl::BindingContext(
+                           kThirdPartyStorageKey, kTestURL, kWorkerProcessId)
+                     : FileSystemAccessManagerImpl::BindingContext(
+                           kThirdPartyStorageKey, kTestURL, kFrameId);
+  auto deny_grant = base::MakeRefCounted<
+      testing::StrictMock<MockFileSystemAccessPermissionGrant>>();
+  FileSystemAccessManagerImpl::SharedHandleState deny_state(deny_grant,
+                                                            write_grant_);
+  TestFileSystemAccessHandle handle(
+      manager_.get(), context,
+      FileSystemURL::CreateForTest(kThirdPartyStorageKey,
+                                   storage::kFileSystemTypeLocal,
+                                   base::FilePath::FromUTF8Unsafe("/test")),
+      deny_state);
+
+  EXPECT_CALL(*deny_grant, GetStatus())
+      .WillRepeatedly(testing::Return(PermissionStatus::DENIED));
+
+  base::test::TestFuture<
+      blink::mojom::FileSystemAccessErrorPtr,
+      std::vector<blink::mojom::FileSystemAccessCloudIdentifierPtr>>
+      future;
+  handle.DoGetCloudIdentifiers(
+      FileSystemAccessPermissionContext::HandleType::kFile,
+      future.GetCallback());
+  EXPECT_EQ(future.Get<0>()->status,
+            blink::mojom::FileSystemAccessStatus::kSecurityError);
 }
 
 class FileSystemAccessDoRequestReadWritePermissionTest
@@ -1094,6 +1334,164 @@ TEST_P(FileSystemAccessDoRequestWritePermissionTest, AlreadyDenied) {
                          PermissionStatus::DENIED));
 }
 
+// Verifies that `DoRequestPermission()` rejects write access requests for a
+// handle bound to a third-party context, even when the underlying permission
+// grant holds status `GRANTED`. Dispatches no permission prompt requests to the
+// frame and returns status `PermissionStatus::DENIED` with error
+// `kSecurityError`.
+TEST_P(FileSystemAccessDoRequestWritePermissionTest, ThirdPartyContextBlocked) {
+  base::test::ScopedFeatureList features;
+  features.InitAndEnableFeature(blink::features::kFileSystemAccessWriteMode);
+
+  const blink::StorageKey kThirdPartyStorageKey = blink::StorageKey::Create(
+      url::Origin::Create(GURL("https://example.com/")),
+      net::SchemefulSite(GURL("https://other.com/")),
+      blink::mojom::AncestorChainBit::kCrossSite);
+
+  auto context = is_worker()
+                     ? FileSystemAccessManagerImpl::BindingContext(
+                           kThirdPartyStorageKey, kTestURL, kWorkerProcessId)
+                     : FileSystemAccessManagerImpl::BindingContext(
+                           kThirdPartyStorageKey, kTestURL, kFrameId);
+  TestFileSystemAccessHandle handle(
+      manager_.get(), context,
+      FileSystemURL::CreateForTest(kThirdPartyStorageKey,
+                                   storage::kFileSystemTypeLocal,
+                                   base::FilePath::FromUTF8Unsafe("/test")),
+      handle_state_);
+
+  EXPECT_CALL(*write_grant_, GetStatus())
+      .WillRepeatedly(testing::Return(PermissionStatus::GRANTED));
+
+  // No permission prompt requests should be dispatched to the frame.
+  EXPECT_CALL(*read_grant_,
+              RequestPermission_(testing::_, testing::_, testing::_))
+      .Times(0);
+  EXPECT_CALL(*write_grant_,
+              RequestPermission_(testing::_, testing::_, testing::_))
+      .Times(0);
+
+  // In an unfixed state, `DoRequestPermission()` checks only whether the active
+  // write grant status differs from `ASK`, skipping third-party ancestor checks
+  // and allowing cross-origin frames to modify local files.
+  EXPECT_THAT(
+      DoRequestPermission(handle, FileSystemAccessPermissionMode::kWrite),
+      PermissionStatusIs(FileSystemAccessStatus::kSecurityError,
+                         PermissionStatus::DENIED));
+}
+
+// Verifies that operational handle write operations invoked via
+// `RunWithPermission()` are blocked for a handle bound to a third-party
+// context, routing to the failure callback with `kSecurityError` instead of
+// executing the success callback.
+TEST_P(FileSystemAccessDoRequestWritePermissionTest,
+       RunWithPermission_ThirdPartyContext_Blocked) {
+  base::test::ScopedFeatureList features;
+  features.InitAndEnableFeature(blink::features::kFileSystemAccessWriteMode);
+
+  const blink::StorageKey kThirdPartyStorageKey = blink::StorageKey::Create(
+      url::Origin::Create(GURL("https://example.com/")),
+      net::SchemefulSite(GURL("https://other.com/")),
+      blink::mojom::AncestorChainBit::kCrossSite);
+
+  auto context = is_worker()
+                     ? FileSystemAccessManagerImpl::BindingContext(
+                           kThirdPartyStorageKey, kTestURL, kWorkerProcessId)
+                     : FileSystemAccessManagerImpl::BindingContext(
+                           kThirdPartyStorageKey, kTestURL, kFrameId);
+  TestFileSystemAccessHandle handle(
+      manager_.get(), context,
+      FileSystemURL::CreateForTest(kThirdPartyStorageKey,
+                                   storage::kFileSystemTypeLocal,
+                                   base::FilePath::FromUTF8Unsafe("/test")),
+      handle_state_);
+
+  EXPECT_CALL(*write_grant_, GetStatus())
+      .WillRepeatedly(testing::Return(PermissionStatus::GRANTED));
+
+  base::test::TestFuture<bool> success_future;
+  base::test::TestFuture<blink::mojom::FileSystemAccessErrorPtr, bool>
+      failure_future;
+
+  handle.RunWithPermission(blink::mojom::FileSystemAccessPermissionMode::kWrite,
+                           success_future.GetCallback(),
+                           failure_future.GetCallback(), true);
+
+  // In an unfixed state, `RunWithPermission()` checks only whether the write
+  // grant status differs from `ASK`. When `GRANTED`, it directly invokes the
+  // success callback, allowing third-party contexts to write without
+  // validation.
+  EXPECT_FALSE(success_future.IsReady())
+      << "RunWithPermission unexpectedly executed success callback in "
+         "third-party context";
+  ASSERT_TRUE(failure_future.IsReady())
+      << "RunWithPermission did not invoke failure callback in third-party "
+         "context";
+  EXPECT_EQ(failure_future.Get<0>()->status,
+            blink::mojom::FileSystemAccessStatus::kSecurityError);
+}
+
+// Verifies that `GetWritePermissionStatus()` returns `DENIED` in a third-party
+// context, even when the underlying permission grant holds status `GRANTED`.
+TEST_P(FileSystemAccessDoRequestWritePermissionTest,
+       GetWritePermissionStatus_ThirdPartyContext_Blocked) {
+  base::test::ScopedFeatureList features;
+  features.InitAndEnableFeature(blink::features::kFileSystemAccessWriteMode);
+
+  const blink::StorageKey kThirdPartyStorageKey = blink::StorageKey::Create(
+      url::Origin::Create(GURL("https://example.com/")),
+      net::SchemefulSite(GURL("https://other.com/")),
+      blink::mojom::AncestorChainBit::kCrossSite);
+
+  auto context = is_worker()
+                     ? FileSystemAccessManagerImpl::BindingContext(
+                           kThirdPartyStorageKey, kTestURL, kWorkerProcessId)
+                     : FileSystemAccessManagerImpl::BindingContext(
+                           kThirdPartyStorageKey, kTestURL, kFrameId);
+  TestFileSystemAccessHandle handle(
+      manager_.get(), context,
+      FileSystemURL::CreateForTest(kThirdPartyStorageKey,
+                                   storage::kFileSystemTypeLocal,
+                                   base::FilePath::FromUTF8Unsafe("/test")),
+      handle_state_);
+
+  EXPECT_CALL(*write_grant_, GetStatus())
+      .WillRepeatedly(testing::Return(PermissionStatus::GRANTED));
+
+  EXPECT_EQ(handle.GetWritePermissionStatus(), PermissionStatus::DENIED);
+}
+
+// Verifies that `GetWritePermissionStatus()` returns `DENIED` in a third-party
+// context even if the handle originated from a drag-and-drop operation.
+TEST_P(FileSystemAccessDoRequestWritePermissionTest,
+       GetWritePermissionStatus_ThirdPartyContext_DragAndDrop_Blocked) {
+  base::test::ScopedFeatureList features;
+  features.InitAndEnableFeature(blink::features::kFileSystemAccessWriteMode);
+
+  const blink::StorageKey kThirdPartyStorageKey = blink::StorageKey::Create(
+      url::Origin::Create(GURL("https://example.com/")),
+      net::SchemefulSite(GURL("https://other.com/")),
+      blink::mojom::AncestorChainBit::kCrossSite);
+
+  auto context = is_worker()
+                     ? FileSystemAccessManagerImpl::BindingContext(
+                           kThirdPartyStorageKey, kTestURL, kWorkerProcessId)
+                     : FileSystemAccessManagerImpl::BindingContext(
+                           kThirdPartyStorageKey, kTestURL, kFrameId);
+  TestFileSystemAccessHandle handle(
+      manager_.get(), context,
+      FileSystemURL::CreateForTest(kThirdPartyStorageKey,
+                                   storage::kFileSystemTypeLocal,
+                                   base::FilePath::FromUTF8Unsafe("/test")),
+      FileSystemAccessManagerImpl::SharedHandleState(read_grant_,
+                                                     write_grant_));
+
+  EXPECT_CALL(*write_grant_, GetStatus())
+      .WillRepeatedly(testing::Return(PermissionStatus::GRANTED));
+
+  EXPECT_EQ(handle.GetWritePermissionStatus(), PermissionStatus::DENIED);
+}
+
 class FileSystemAccessDoGetPermissionStatusTest
     : public FileSystemAccessHandleParamTestBase {
  public:
@@ -1613,7 +2011,8 @@ class FileSystemAccessHandleGetRenamePermissionTest
                     kTestStorageKey.origin(),
                     testing::Field(&content::PathInfo::path, dest_url.path()),
                     HandleType::kFile,
-                    FileSystemAccessPermissionContext::UserAction::kNone))
+                    FileSystemAccessPermissionContext::AccessTrigger::
+                        kProgrammaticRead))
         .WillOnce(testing::Return(target_write_grant));
 
     if (parent_status.has_value()) {
@@ -1621,13 +2020,14 @@ class FileSystemAccessHandleGetRenamePermissionTest
           testing::NiceMock<MockFileSystemAccessPermissionGrant>>();
       ON_CALL(*parent_write_grant, GetStatus())
           .WillByDefault(testing::Return(*parent_status));
-      EXPECT_CALL(permission_context_,
-                  GetWritePermissionGrant(
-                      kTestStorageKey.origin(),
-                      testing::Field(&content::PathInfo::path,
-                                     dest_url.path().DirName()),
-                      HandleType::kDirectory,
-                      FileSystemAccessPermissionContext::UserAction::kNone))
+      EXPECT_CALL(
+          permission_context_,
+          GetWritePermissionGrant(kTestStorageKey.origin(),
+                                  testing::Field(&content::PathInfo::path,
+                                                 dest_url.path().DirName()),
+                                  HandleType::kDirectory,
+                                  FileSystemAccessPermissionContext::
+                                      AccessTrigger::kProgrammaticRead))
           .WillOnce(testing::Return(parent_write_grant));
     } else {
       EXPECT_CALL(permission_context_,
@@ -1803,6 +2203,229 @@ TEST_F(FileSystemAccessHandleGetRenamePermissionTest,
                                        dest_url),
             TestFileSystemAccessHandle::RenamePermission::
                 kAllowRenameWithoutOverwrite);
+}
+
+
+class FileSystemAccessHandleDoRequestPermissionLifecycleTest
+    : public FileSystemAccessDoRequestPermissionTestBase {
+ protected:
+  bool is_worker() const override { return false; }
+};
+
+// Tests that `DoRequestPermission()` does not encounter a UAF when
+// `kFileSystemAccessWriteMode` is enabled and the handle is destroyed during
+// the first grant's `RequestPermission()` call. Verifies that the second grant
+// request is not invoked and the completion callback is dropped without
+// executing.
+TEST_F(FileSystemAccessHandleDoRequestPermissionLifecycleTest,
+       HandleDestroyedDuringFirstGrantRequest_WriteModeEnabled) {
+  base::test::ScopedFeatureList features;
+  features.InitAndEnableFeature(blink::features::kFileSystemAccessWriteMode);
+
+  auto handle = std::make_unique<TestFileSystemAccessHandle>(
+      manager_.get(),
+      FileSystemAccessManagerImpl::BindingContext(kTestStorageKey, kTestURL,
+                                                  kFrameId),
+      FileSystemURL::CreateForTest(kTestStorageKey,
+                                   storage::kFileSystemTypeTest,
+                                   base::FilePath::FromUTF8Unsafe("/test")),
+      handle_state_);
+
+  EXPECT_CALL(*read_grant_, GetStatus())
+      .WillRepeatedly(testing::Return(PermissionStatus::ASK));
+  EXPECT_CALL(*write_grant_, GetStatus())
+      .WillRepeatedly(testing::Return(PermissionStatus::ASK));
+
+  // Simulates the handle being destroyed (e.g. pipe disconnect) during the
+  // first grant request.
+  EXPECT_CALL(*read_grant_,
+              RequestPermission_(kFrameId, UserActivationState::kRequired, _))
+      .WillOnce(
+          [&](GlobalRenderFrameHostId, UserActivationState,
+              base::OnceCallback<void(
+                  FileSystemAccessPermissionGrant::PermissionRequestOutcome)>&
+                  cb) {
+            handle.reset();
+            std::move(cb).Run(FileSystemAccessPermissionGrant::
+                                  PermissionRequestOutcome::kUserGranted);
+          });
+
+  // Because the handle is destroyed, the subsequent write grant request should
+  // not be invoked on a dangling handle.
+  EXPECT_CALL(*write_grant_,
+              RequestPermission_(testing::_, testing::_, testing::_))
+      .Times(0);
+
+  base::test::TestFuture<blink::mojom::FileSystemAccessErrorPtr,
+                         PermissionStatus>
+      future;
+  handle->DoRequestPermission(FileSystemAccessPermissionMode::kReadWrite,
+                              future.GetCallback());
+  EXPECT_FALSE(future.IsReady());
+}
+
+// Tests that `DoRequestPermission()` does not encounter a UAF when
+// `kFileSystemAccessWriteMode` is disabled and the handle is destroyed during
+// the first grant's `RequestPermission()` call. Verifies that the second grant
+// request is not invoked and the completion callback is dropped without
+// executing.
+TEST_F(FileSystemAccessHandleDoRequestPermissionLifecycleTest,
+       HandleDestroyedDuringFirstGrantRequest_WriteModeDisabled) {
+  base::test::ScopedFeatureList features;
+  features.InitAndDisableFeature(blink::features::kFileSystemAccessWriteMode);
+
+  auto handle = std::make_unique<TestFileSystemAccessHandle>(
+      manager_.get(),
+      FileSystemAccessManagerImpl::BindingContext(kTestStorageKey, kTestURL,
+                                                  kFrameId),
+      FileSystemURL::CreateForTest(kTestStorageKey,
+                                   storage::kFileSystemTypeTest,
+                                   base::FilePath::FromUTF8Unsafe("/test")),
+      handle_state_);
+
+  EXPECT_CALL(*read_grant_, GetStatus())
+      .WillRepeatedly(testing::Return(PermissionStatus::ASK));
+  EXPECT_CALL(*write_grant_, GetStatus())
+      .WillRepeatedly(testing::Return(PermissionStatus::ASK));
+
+  // Simulates the handle being destroyed (e.g. pipe disconnect) during the
+  // first grant request.
+  EXPECT_CALL(*read_grant_,
+              RequestPermission_(kFrameId, UserActivationState::kRequired, _))
+      .WillOnce(
+          [&](GlobalRenderFrameHostId, UserActivationState,
+              base::OnceCallback<void(
+                  FileSystemAccessPermissionGrant::PermissionRequestOutcome)>&
+                  cb) {
+            handle.reset();
+            std::move(cb).Run(FileSystemAccessPermissionGrant::
+                                  PermissionRequestOutcome::kUserGranted);
+          });
+
+  // Because the handle is destroyed, the subsequent write grant request should
+  // not be invoked on a dangling handle.
+  EXPECT_CALL(*write_grant_,
+              RequestPermission_(testing::_, testing::_, testing::_))
+      .Times(0);
+
+  base::test::TestFuture<blink::mojom::FileSystemAccessErrorPtr,
+                         PermissionStatus>
+      future;
+  handle->DoRequestPermission(FileSystemAccessPermissionMode::kReadWrite,
+                              future.GetCallback());
+  EXPECT_FALSE(future.IsReady());
+}
+
+// Tests that `DoRequestPermission()` does not encounter a UAF when
+// `kFileSystemAccessWriteMode` is enabled and the handle is destroyed during
+// the second grant's `RequestPermission()` call. Verifies that the completion
+// callback is dropped without executing.
+TEST_F(FileSystemAccessHandleDoRequestPermissionLifecycleTest,
+       HandleDestroyedDuringSecondGrantRequest_WriteModeEnabled) {
+  base::test::ScopedFeatureList features;
+  features.InitAndEnableFeature(blink::features::kFileSystemAccessWriteMode);
+
+  auto handle = std::make_unique<TestFileSystemAccessHandle>(
+      manager_.get(),
+      FileSystemAccessManagerImpl::BindingContext(kTestStorageKey, kTestURL,
+                                                  kFrameId),
+      FileSystemURL::CreateForTest(kTestStorageKey,
+                                   storage::kFileSystemTypeTest,
+                                   base::FilePath::FromUTF8Unsafe("/test")),
+      handle_state_);
+
+  EXPECT_CALL(*read_grant_, GetStatus())
+      .WillRepeatedly(testing::Return(PermissionStatus::ASK));
+  EXPECT_CALL(*write_grant_, GetStatus())
+      .WillRepeatedly(testing::Return(PermissionStatus::ASK));
+
+  EXPECT_CALL(*read_grant_,
+              RequestPermission_(kFrameId, UserActivationState::kRequired, _))
+      .WillOnce(
+          [](GlobalRenderFrameHostId, UserActivationState,
+             base::OnceCallback<void(
+                 FileSystemAccessPermissionGrant::PermissionRequestOutcome)>&
+                 cb) {
+            std::move(cb).Run(FileSystemAccessPermissionGrant::
+                                  PermissionRequestOutcome::kUserGranted);
+          });
+
+  // Simulates the handle being destroyed (e.g. pipe disconnect) during the
+  // second grant request.
+  EXPECT_CALL(*write_grant_,
+              RequestPermission_(kFrameId, UserActivationState::kRequired, _))
+      .WillOnce(
+          [&](GlobalRenderFrameHostId, UserActivationState,
+              base::OnceCallback<void(
+                  FileSystemAccessPermissionGrant::PermissionRequestOutcome)>&
+                  cb) {
+            handle.reset();
+            std::move(cb).Run(FileSystemAccessPermissionGrant::
+                                  PermissionRequestOutcome::kUserGranted);
+          });
+
+  base::test::TestFuture<blink::mojom::FileSystemAccessErrorPtr,
+                         PermissionStatus>
+      future;
+  handle->DoRequestPermission(FileSystemAccessPermissionMode::kReadWrite,
+                              future.GetCallback());
+  EXPECT_FALSE(future.IsReady());
+}
+
+// Tests that `DoRequestPermission()` does not encounter a UAF when
+// `kFileSystemAccessWriteMode` is disabled and the handle is destroyed during
+// the second grant's `RequestPermission()` call. Verifies that the completion
+// callback is dropped without executing.
+TEST_F(FileSystemAccessHandleDoRequestPermissionLifecycleTest,
+       HandleDestroyedDuringSecondGrantRequest_WriteModeDisabled) {
+  base::test::ScopedFeatureList features;
+  features.InitAndDisableFeature(blink::features::kFileSystemAccessWriteMode);
+
+  auto handle = std::make_unique<TestFileSystemAccessHandle>(
+      manager_.get(),
+      FileSystemAccessManagerImpl::BindingContext(kTestStorageKey, kTestURL,
+                                                  kFrameId),
+      FileSystemURL::CreateForTest(kTestStorageKey,
+                                   storage::kFileSystemTypeTest,
+                                   base::FilePath::FromUTF8Unsafe("/test")),
+      handle_state_);
+
+  EXPECT_CALL(*read_grant_, GetStatus())
+      .WillRepeatedly(testing::Return(PermissionStatus::ASK));
+  EXPECT_CALL(*write_grant_, GetStatus())
+      .WillRepeatedly(testing::Return(PermissionStatus::ASK));
+
+  EXPECT_CALL(*read_grant_,
+              RequestPermission_(kFrameId, UserActivationState::kRequired, _))
+      .WillOnce(
+          [](GlobalRenderFrameHostId, UserActivationState,
+             base::OnceCallback<void(
+                 FileSystemAccessPermissionGrant::PermissionRequestOutcome)>&
+                 cb) {
+            std::move(cb).Run(FileSystemAccessPermissionGrant::
+                                  PermissionRequestOutcome::kUserGranted);
+          });
+
+  // Simulates the handle being destroyed (e.g. pipe disconnect) during the
+  // second grant request.
+  EXPECT_CALL(*write_grant_,
+              RequestPermission_(kFrameId, UserActivationState::kRequired, _))
+      .WillOnce(
+          [&](GlobalRenderFrameHostId, UserActivationState,
+              base::OnceCallback<void(
+                  FileSystemAccessPermissionGrant::PermissionRequestOutcome)>&
+                  cb) {
+            handle.reset();
+            std::move(cb).Run(FileSystemAccessPermissionGrant::
+                                  PermissionRequestOutcome::kUserGranted);
+          });
+
+  base::test::TestFuture<blink::mojom::FileSystemAccessErrorPtr,
+                         PermissionStatus>
+      future;
+  handle->DoRequestPermission(FileSystemAccessPermissionMode::kReadWrite,
+                              future.GetCallback());
+  EXPECT_FALSE(future.IsReady());
 }
 
 }  // namespace content

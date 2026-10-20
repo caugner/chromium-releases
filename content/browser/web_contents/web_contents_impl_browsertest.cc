@@ -57,6 +57,7 @@
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/browser/renderer_host/render_widget_host_view_child_frame.h"
 #include "content/browser/renderer_host/text_input_manager.h"
+#include "content/browser/service_worker/service_worker_client_utils.h"
 #include "content/browser/site_info.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/browser/surface_embed/surface_embed_connector_impl.h"
@@ -100,7 +101,6 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
-#include "content/public/test/fenced_frame_test_util.h"
 #include "content/public/test/mock_client_hints_controller_delegate.h"
 #include "content/public/test/mock_web_contents_observer.h"
 #include "content/public/test/navigation_handle_observer.h"
@@ -136,6 +136,7 @@
 #include "third_party/blink/public/common/client_hints/client_hints.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/page/page_zoom.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
 #include "third_party/blink/public/mojom/frame/fullscreen.mojom.h"
 #include "third_party/blink/public/mojom/frame/lifecycle.mojom.h"
@@ -590,9 +591,11 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest, OpenURLSubframe) {
 
   // Navigate with the subframe's FrameTreeNode ID.
   const GURL url(embedded_test_server()->GetURL("/title1.html"));
-  OpenURLParams params(url, Referrer(), frame_tree_node_id,
-                       WindowOpenDisposition::CURRENT_TAB,
-                       ui::PAGE_TRANSITION_LINK, true);
+  OpenURLParams params = OpenURLParams::CreateRendererInitiated(
+      url, WindowOpenDisposition::CURRENT_TAB, ui::PAGE_TRANSITION_LINK,
+      Referrer(),
+      wc->GetPrimaryMainFrame()->GetCurrentInitiatorNavigationState(),
+      /*started_from_context_menu=*/false, frame_tree_node_id);
   params.initiator_origin = wc->GetPrimaryMainFrame()->GetLastCommittedOrigin();
   shell()->web_contents()->OpenURL(params, /*navigation_handle_callback=*/{});
 
@@ -617,9 +620,11 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest, OpenURLNonExistentSubframe) {
 
   // Navigate with the invalid FrameTreeNode ID.
   const GURL url(embedded_test_server()->GetURL("/title2.html"));
-  OpenURLParams params(url, Referrer(), frame_tree_node_id,
-                       WindowOpenDisposition::CURRENT_TAB,
-                       ui::PAGE_TRANSITION_LINK, true);
+  OpenURLParams params = OpenURLParams::CreateRendererInitiated(
+      url, WindowOpenDisposition::CURRENT_TAB, ui::PAGE_TRANSITION_LINK,
+      Referrer(),
+      wc->GetPrimaryMainFrame()->GetCurrentInitiatorNavigationState(),
+      /*started_from_context_menu=*/false, frame_tree_node_id);
   params.initiator_origin = wc->GetPrimaryMainFrame()->GetLastCommittedOrigin();
   WebContents* new_web_contents = shell()->web_contents()->OpenURL(
       params, /*navigation_handle_callback=*/{});
@@ -628,6 +633,90 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest, OpenURLNonExistentSubframe) {
   EXPECT_EQ(new_web_contents, nullptr);
   NavigationController* controller = &shell()->web_contents()->GetController();
   EXPECT_EQ(controller->GetPendingEntry(), nullptr);
+}
+
+namespace {
+
+// Crashes the renderer process of `frame_tree_node`, then navigates it to `url`
+// through `service_worker_client_utils::NavigateClient()`, which is what a
+// ServiceWorker's WindowClient.navigate() runs. This calls
+// WebContentsImpl::OpenURL() with the crashed RenderFrameHost as the source
+// RenderFrameHost. Checks that the navigation works even if the source
+// RenderFrameHost is deleted synchronously during OpenURL(). See
+// https://crbug.com/569408568.
+void NavigateCrashedFrameFromServiceWorker(WebContentsImpl* web_contents,
+                                           FrameTreeNode* frame_tree_node,
+                                           const GURL& url) {
+  RenderFrameHostImpl* rfh = frame_tree_node->current_frame_host();
+  base::WeakPtr<RenderFrameHostImpl> weak_rfh = rfh->GetWeakPtr();
+  RenderProcessHostWatcher exit_observer(
+      rfh->GetProcess(), RenderProcessHostWatcher::WATCH_FOR_PROCESS_EXIT);
+  rfh->GetProcess()->Shutdown(0);
+  exit_observer.Wait();
+  ASSERT_TRUE(weak_rfh);
+  EXPECT_FALSE(rfh->IsRenderFrameLive());
+
+  const url::Origin sw_origin = rfh->GetLastCommittedOrigin();
+  service_worker_client_utils::NavigateClient(
+      url, sw_origin.GetURL().Resolve("/sw.js"),
+      blink::StorageKey::CreateFirstParty(sw_origin), rfh->GetGlobalId(),
+      rfh->BuildClientSecurityState(),
+      /*service_worker_policy_container_host=*/nullptr,
+      /*context=*/nullptr, base::DoNothing());
+
+  if (ShouldSkipEarlyCommitPendingForCrashedFrame()) {
+    // The crashed RenderFrameHost is kept until the navigation commits.
+    EXPECT_TRUE(weak_rfh);
+  } else {
+    // Starting the navigation performs an early RenderFrameHost swap for the
+    // crashed frame, which synchronously deletes the crashed RenderFrameHost
+    // while it's still the source RenderFrameHost in OpenURL().
+    EXPECT_FALSE(weak_rfh);
+  }
+  EXPECT_TRUE(WaitForLoadStop(web_contents));
+  EXPECT_EQ(url, frame_tree_node->current_frame_host()->GetLastCommittedURL());
+}
+
+}  // namespace
+
+// In practice, this can be triggered by a b.com ServiceWorker calling
+// WindowClient.navigate() on its client b.com subframe after the subframe's
+// renderer process crashed, but before the client's ServiceWorkerClient is torn
+// down. The test calls NavigateClient() directly to avoid depending on that
+// race.
+IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
+                       OpenURLCrashedSubframeEarlySwap) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  if (!AreAllSitesIsolatedForTesting()) {
+    IsolateOriginsForTesting(embedded_test_server(), shell()->web_contents(),
+                             {"b.com"});
+  }
+
+  ASSERT_TRUE(NavigateToURL(
+      shell(), embedded_test_server()->GetURL(
+                   "a.com", "/cross_site_iframe_factory.html?a(b)")));
+  WebContentsImpl* wc = static_cast<WebContentsImpl*>(shell()->web_contents());
+  FrameTreeNode* root = wc->GetPrimaryFrameTree().root();
+  ASSERT_EQ(1u, root->child_count());
+  FrameTreeNode* child_node = root->child_at(0);
+  ASSERT_NE(child_node->current_frame_host()->GetProcess(),
+            wc->GetPrimaryMainFrame()->GetProcess());
+
+  NavigateCrashedFrameFromServiceWorker(
+      wc, child_node, embedded_test_server()->GetURL("b.com", "/title1.html"));
+}
+
+// Same as above, but for a crashed main frame.
+IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
+                       OpenURLCrashedMainFrameEarlySwap) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  ASSERT_TRUE(NavigateToURL(
+      shell(), embedded_test_server()->GetURL("a.com", "/title1.html")));
+  WebContentsImpl* wc = static_cast<WebContentsImpl*>(shell()->web_contents());
+
+  NavigateCrashedFrameFromServiceWorker(
+      wc, wc->GetPrimaryFrameTree().root(),
+      embedded_test_server()->GetURL("a.com", "/title2.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
@@ -4405,6 +4494,139 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest, RejectFullscreenIfBlocked) {
 
   std::u16string title = title_watcher.WaitAndGetTitle();
   ASSERT_EQ(title, u"onfullscreenerror");
+}
+
+IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
+                       XrOverlayWaiverRespectsFullscreenCooldown) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  WebContentsImpl* web_contents =
+      static_cast<WebContentsImpl*>(shell()->web_contents());
+  TestWCDelegateForDialogsAndFullscreen test_delegate(web_contents);
+
+  GURL url = embedded_test_server()->GetURL("a.com", "/title1.html");
+  EXPECT_TRUE(NavigateToURL(shell(), url));
+  RenderFrameHostImpl* main_frame = web_contents->GetPrimaryMainFrame();
+
+  // Precondition: the frame has no transient user activation.
+  EXPECT_FALSE(main_frame->HasTransientUserActivation());
+
+  // Simulate exiting fullscreen, which records the exit timestamp and starts
+  // the post-exit cooldown.
+  web_contents->ExitFullscreenMode(/*will_cause_resize=*/false);
+
+  // The cooldown is now active: transient activation is required.
+  EXPECT_TRUE(web_contents->IsTransientActivationRequiredForHtmlFullscreen(
+      main_frame, /*is_xr_overlay=*/false));
+
+  // Baseline: with cooldown active and no XR overlay setup, entering fullscreen
+  // without user activation is rejected.
+  {
+    base::test::TestFuture<bool> future;
+    auto options = blink::mojom::FullscreenOptions::New();
+    main_frame->EnterFullscreen(std::move(options), future.GetCallback());
+    EXPECT_FALSE(future.Get());
+    EXPECT_FALSE(test_delegate.IsFullscreenForTabOrPending(web_contents));
+  }
+
+  EXPECT_FALSE(main_frame->HasTransientUserActivation());
+
+  // Setup XR overlay timestamp.
+  main_frame->SetIsXrOverlaySetup();
+
+  // Fullscreen requests during cooldown without transient user activation must
+  // still be rejected, even if XR overlay setup occurred.
+  {
+    base::test::TestFuture<bool> future;
+    auto options = blink::mojom::FullscreenOptions::New();
+    options->is_xr_overlay = true;
+    main_frame->EnterFullscreen(std::move(options), future.GetCallback());
+    EXPECT_FALSE(future.Get());
+    EXPECT_FALSE(test_delegate.IsFullscreenForTabOrPending(web_contents));
+  }
+
+  {
+    base::test::TestFuture<bool> future;
+    auto options = blink::mojom::FullscreenOptions::New();
+    options->is_xr_overlay = false;
+    main_frame->EnterFullscreen(std::move(options), future.GetCallback());
+    EXPECT_FALSE(future.Get());
+    EXPECT_FALSE(test_delegate.IsFullscreenForTabOrPending(web_contents));
+  }
+
+  // When legitimate transient user activation is provided during cooldown,
+  // entering fullscreen succeeds.
+  main_frame->UpdateUserActivationState(
+      blink::mojom::UserActivationUpdateType::kNotifyActivation,
+      blink::mojom::UserActivationNotificationType::kInteraction);
+  EXPECT_TRUE(main_frame->HasTransientUserActivation());
+
+  {
+    base::test::TestFuture<bool> future;
+    auto options = blink::mojom::FullscreenOptions::New();
+    main_frame->EnterFullscreen(std::move(options), future.GetCallback());
+    EXPECT_TRUE(future.Get());
+    EXPECT_TRUE(test_delegate.IsFullscreenForTabOrPending(web_contents));
+  }
+}
+
+IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
+                       XrOverlayWaiverRequiresVerifiedXrSetup) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  WebContentsImpl* web_contents =
+      static_cast<WebContentsImpl*>(shell()->web_contents());
+  TestWCDelegateForDialogsAndFullscreen test_delegate(web_contents);
+
+  GURL url = embedded_test_server()->GetURL("a.com", "/title1.html");
+  EXPECT_TRUE(NavigateToURL(shell(), url));
+  RenderFrameHostImpl* main_frame = web_contents->GetPrimaryMainFrame();
+
+  // Precondition: cooldown is inactive and frame has no user activation.
+  EXPECT_FALSE(main_frame->HasTransientUserActivation());
+  EXPECT_TRUE(web_contents->IsTransientActivationRequiredForHtmlFullscreen(
+      main_frame, /*is_xr_overlay=*/false));
+
+  // Requesting is_xr_overlay without actual XR overlay setup is rejected.
+  {
+    base::test::TestFuture<bool> future;
+    auto options = blink::mojom::FullscreenOptions::New();
+    options->is_xr_overlay = true;
+    main_frame->EnterFullscreen(std::move(options), future.GetCallback());
+    EXPECT_FALSE(future.Get());
+    EXPECT_FALSE(test_delegate.IsFullscreenForTabOrPending(web_contents));
+  }
+
+  // Setup XR overlay timestamp.
+  main_frame->SetIsXrOverlaySetup();
+
+  // With verified XR setup and is_xr_overlay=true, transient activation is
+  // waived.
+  EXPECT_FALSE(web_contents->IsTransientActivationRequiredForHtmlFullscreen(
+      main_frame, /*is_xr_overlay=*/true));
+
+  // But a standard fullscreen request (is_xr_overlay=false) still requires
+  // activation.
+  EXPECT_TRUE(web_contents->IsTransientActivationRequiredForHtmlFullscreen(
+      main_frame, /*is_xr_overlay=*/false));
+
+  // Requesting standard fullscreen without activation fails despite XR setup.
+  {
+    base::test::TestFuture<bool> future;
+    auto options = blink::mojom::FullscreenOptions::New();
+    options->is_xr_overlay = false;
+    main_frame->EnterFullscreen(std::move(options), future.GetCallback());
+    EXPECT_FALSE(future.Get());
+    EXPECT_FALSE(test_delegate.IsFullscreenForTabOrPending(web_contents));
+  }
+
+  // Requesting with is_xr_overlay=true succeeds without transient activation.
+  {
+    base::test::TestFuture<bool> future;
+    auto options = blink::mojom::FullscreenOptions::New();
+    options->is_xr_overlay = true;
+    main_frame->EnterFullscreen(std::move(options), future.GetCallback());
+    EXPECT_TRUE(future.Get());
+    EXPECT_TRUE(test_delegate.IsFullscreenForTabOrPending(web_contents));
+  }
 }
 
 // Regression test for https://crbug.com/855018.
@@ -8473,12 +8695,13 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
 
   EXPECT_FALSE(web_contents->ShouldIgnoreUnresponsiveRenderer());
   web_contents->IsClipboardPasteAllowedByPolicy(
-      ClipboardEndpoint(ui::DataTransferEndpoint(GURL("https://google.com"))),
-      ClipboardEndpoint(ui::DataTransferEndpoint(GURL("https://google.com")),
-                        base::BindLambdaForTesting([web_contents] {
-                          return web_contents->GetBrowserContext();
-                        }),
-                        *web_contents->GetPrimaryMainFrame()),
+      ClipboardEndpoint::ForOutsideChrome(
+          ui::DataTransferEndpoint(GURL("https://google.com"))),
+      ClipboardEndpoint::ForFrame(
+          ui::DataTransferEndpoint(GURL("https://google.com")),
+          base::BindLambdaForTesting(
+              [web_contents] { return web_contents->GetBrowserContext(); }),
+          *web_contents->GetPrimaryMainFrame()),
       {.format_type = ui::ClipboardFormatType::PlainTextType()},
       clipboard_paste_data,
       base::BindLambdaForTesting(

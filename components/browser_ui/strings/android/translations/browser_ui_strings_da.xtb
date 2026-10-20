@@ -47,6 +47,7 @@
 <translation id="1464044141348608623">Tillad ikke, at websites ved, hvornår du aktivt bruger din enhed</translation>
 <translation id="146867109637325312">{COUNT,plural, =1{<ph name="SITE_COUNT" /> website}one{<ph name="SITE_COUNT" /> website}other{<ph name="SITE_COUNT" /> websites}}</translation>
 <translation id="1476700086976862423">Sepia temafarve</translation>
+<translation id="1497214680865404175">Billede uploadet af bruger</translation>
 <translation id="1500473259453106018">Skjul kortet Vis prisfald på faner</translation>
 <translation id="1508931164824684991">Websites kan anvende JavaScript</translation>
 <translation id="1510341833810331442">Websites har ikke tilladelse til at gemme data på din enhed</translation>
@@ -455,7 +456,7 @@
 <translation id="5668843533782548925">Websites er langsommere, men mere sikre</translation>
 <translation id="5677928146339483299">Blokeret</translation>
 <translation id="5679089750838794164">Chrome kan nu vise dig forslag i andre apps baseret på dine browserdata, f.eks. din seneste browserhistorik. Disse data behandles på sikker vis på din enhed. Du kan til enhver tid deaktivere dette i Chrome-indstillingerne.</translation>
-<translation id="5689516760719285838">Placering</translation>
+<translation id="5689516760719285838">Lokation</translation>
 <translation id="5690795753582697420">Kameraet er deaktiveret i Android-indstillingerne</translation>
 <translation id="5700761515355162635">Tredjepartscookies er tilladt</translation>
 <translation id="5706552988683188916">Denne handling sletter cookies og andre websitedata for <ph name="WEBSITE" /></translation>

@@ -32,10 +32,16 @@ import org.robolectric.annotation.Config;
 
 import org.chromium.base.TimeUtils;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.util.Features.DisableFeatures;
+import org.chromium.base.test.util.Features.EnableFeatures;
+import org.chromium.base.test.util.HistogramWatcher;
 import org.chromium.build.annotations.Nullable;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.omnibox.fusebox.FuseboxMetrics.FuseboxAttachmentButtonType;
+import org.chromium.chrome.browser.omnibox.fusebox.FuseboxMetrics.FuseboxTabAttachStartFailureReason;
 import org.chromium.chrome.browser.omnibox.styles.OmniboxResourceProvider;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.utilities.TabLoadingService;
 import org.chromium.content_public.browser.RenderWidgetHostView;
 import org.chromium.content_public.browser.WebContents;
 
@@ -46,6 +52,9 @@ public class FuseboxAttachmentUnitTest {
     private static final String CAPTURE_TOKEN = "capture_token";
     private static final String CACHE_TOKEN = "cache_token";
     private static final int TAB_ID = 1;
+    private static final String OPTIMIZATION_CANCEL_ON_DESELECTION =
+            ChromeFeatureList.ON_DEMAND_BACKGROUND_TAB_CONTEXT_CAPTURE_OPTIMIZATION
+                    + ":cancel_load_on_deselection/true";
 
     @Rule
     public final MockitoRule mMockitoRule = MockitoJUnit.rule().strictness(Strictness.STRICT_STUBS);
@@ -54,6 +63,7 @@ public class FuseboxAttachmentUnitTest {
     @Mock private ComposeboxQueryControllerBridge mBridge;
     @Mock private WebContents mWebContents;
     @Mock private RenderWidgetHostView mRenderWidgetHostView;
+    @Mock private TabLoadingService mTabLoadingService;
 
     private Resources mResources;
     private Bitmap mBitmap;
@@ -63,6 +73,7 @@ public class FuseboxAttachmentUnitTest {
         mResources = ApplicationProvider.getApplicationContext().getResources();
         mBitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888);
         OmniboxResourceProvider.setTabFaviconFactory((tab) -> mBitmap);
+        TabLoadingService.setInstanceForTesting(mTabLoadingService);
 
         lenient().when(mTab.getTitle()).thenReturn("Tab Title");
         lenient().when(mTab.getId()).thenReturn(TAB_ID);
@@ -115,11 +126,13 @@ public class FuseboxAttachmentUnitTest {
                         FuseboxAttachmentButtonType.TAB_PICKER,
                         /* isSuggestedTab= */ false);
         when(mBridge.addTabContext(mTab, /* isSuggestedTab= */ false)).thenReturn(null);
+        var watcher = expectStartFailure(FuseboxTabAttachStartFailureReason.UPLOAD_REJECTED);
 
         boolean result = attachment.uploadToBackend(mBridge, /* bypassTabCacheThisTime= */ false);
 
         assertFalse(result);
         verify(mBridge).addTabContext(mTab, /* isSuggestedTab= */ false);
+        watcher.assertExpected();
     }
 
     @Test
@@ -132,6 +145,8 @@ public class FuseboxAttachmentUnitTest {
                         mResources,
                         FuseboxAttachmentButtonType.TAB_PICKER,
                         /* isSuggestedTab= */ false);
+        var watcher =
+                expectStartFailure(FuseboxTabAttachStartFailureReason.FRESH_REQUIRED_TAB_NOT_LIVE);
 
         // Force fetch is true, but capture not allowed and tab not active.
         boolean result = attachment.uploadToBackend(mBridge, /* bypassTabCacheThisTime= */ true);
@@ -139,6 +154,7 @@ public class FuseboxAttachmentUnitTest {
         assertFalse(result);
         verify(mBridge, never()).addTabContext(any(), anyBoolean());
         verify(mBridge, never()).addTabContextFromCache(anyLong(), anyBoolean());
+        watcher.assertExpected();
     }
 
     @Test
@@ -218,9 +234,11 @@ public class FuseboxAttachmentUnitTest {
         when(mBridge.addTabContextFromCache(TAB_ID, /* isSuggestedTab= */ false))
                 .thenReturn(CACHE_TOKEN);
         assertTrue(attachment.uploadToBackend(mBridge, /* bypassTabCacheThisTime= */ false));
+        var watcher = expectNoStartFailure();
 
         assertFalse(attachment.retryUpload(mBridge));
         assertEquals(CACHE_TOKEN, attachment.getToken());
+        watcher.assertExpected();
     }
 
     private FuseboxAttachment createDriveAttachment(@Nullable String resourceKey) {
@@ -253,5 +271,135 @@ public class FuseboxAttachmentUnitTest {
 
         assertFalse(attachment.uploadToBackend(mBridge, /* bypassTabCacheThisTime= */ false));
         assertFalse(attachment.hasToken());
+    }
+
+    @Test
+    @EnableFeatures(OPTIMIZATION_CANCEL_ON_DESELECTION)
+    public void removeFromBackend_tabAttachment_cancelsLoadWhenEnabled() {
+        FuseboxAttachment attachment =
+                FuseboxAttachment.forTab(
+                        mTab,
+                        /* bypassTabCache= */ false,
+                        mResources,
+                        FuseboxAttachmentButtonType.TAB_PICKER,
+                        /* isSuggestedTab= */ false);
+
+        attachment.removeFromBackend(mBridge);
+
+        verify(mTabLoadingService).cancelLoadIfNeeded(mTab);
+    }
+
+    @Test
+    @DisableFeatures(ChromeFeatureList.ON_DEMAND_BACKGROUND_TAB_CONTEXT_CAPTURE_OPTIMIZATION)
+    public void removeFromBackend_tabAttachment_doesNotCancelLoadWhenDisabled() {
+        FuseboxAttachment attachment =
+                FuseboxAttachment.forTab(
+                        mTab,
+                        /* bypassTabCache= */ false,
+                        mResources,
+                        FuseboxAttachmentButtonType.TAB_PICKER,
+                        /* isSuggestedTab= */ false);
+
+        attachment.removeFromBackend(mBridge);
+
+        verify(mTabLoadingService, never()).cancelLoadIfNeeded(any());
+    }
+
+    @Test
+    @EnableFeatures(OPTIMIZATION_CANCEL_ON_DESELECTION)
+    public void removeFromBackend_suggestedTabAttachment_doesNotCancelLoad() {
+        FuseboxAttachment attachment =
+                FuseboxAttachment.forTab(
+                        mTab,
+                        /* bypassTabCache= */ false,
+                        mResources,
+                        FuseboxAttachmentButtonType.SUGGESTED_TAB,
+                        /* isSuggestedTab= */ true);
+
+        attachment.removeFromBackend(mBridge);
+
+        verify(mTabLoadingService, never()).cancelLoadIfNeeded(any());
+    }
+
+    @Test
+    public void uploadToBackend_inactiveTabCacheMiss_recordsCacheUnavailableTabNotLive() {
+        setTabActive(false);
+        when(mBridge.addTabContextFromCache(TAB_ID, /* isSuggestedTab= */ false)).thenReturn(null);
+        var watcher =
+                expectStartFailure(
+                        FuseboxTabAttachStartFailureReason.CACHE_UNAVAILABLE_TAB_NOT_LIVE);
+
+        assertFalse(
+                createTabPickerAttachment()
+                        .uploadToBackend(mBridge, /* bypassTabCacheThisTime= */ false));
+        watcher.assertExpected();
+    }
+
+    @Test
+    public void uploadToBackend_driveRejected_doesNotRecordTabStartFailure() {
+        FuseboxAttachment attachment = createDriveAttachment(/* resourceKey= */ null);
+        when(mBridge.addDriveFile(any(), any(), any(), any())).thenReturn(null);
+        var watcher = expectNoStartFailure();
+
+        assertFalse(attachment.uploadToBackend(mBridge, /* bypassTabCacheThisTime= */ false));
+        watcher.assertExpected();
+    }
+
+    @Test
+    public void retryUpload_afterSuccess_resetsCompleteButKeepsSucceeded() {
+        FuseboxAttachment attachment = createCachedTabAttachment();
+        attachment.markUploadSucceeded();
+        setTabActive(true);
+        when(mBridge.addTabContext(mTab, /* isSuggestedTab= */ false)).thenReturn(CAPTURE_TOKEN);
+
+        assertTrue(attachment.retryUpload(mBridge));
+        assertFalse(attachment.isUploadComplete());
+        assertTrue(attachment.hasUploadSucceeded());
+    }
+
+    @Test
+    public void retryUpload_rejectedAfterSuccess_leavesUploadComplete() {
+        FuseboxAttachment attachment = createCachedTabAttachment();
+        attachment.markUploadSucceeded();
+
+        // Inactive tab cannot do the forced fresh fetch a retry requires.
+        assertFalse(attachment.retryUpload(mBridge));
+        assertTrue(attachment.isUploadComplete());
+    }
+
+    private FuseboxAttachment createTabPickerAttachment() {
+        return FuseboxAttachment.forTab(
+                mTab,
+                /* bypassTabCache= */ false,
+                mResources,
+                FuseboxAttachmentButtonType.TAB_PICKER,
+                /* isSuggestedTab= */ false);
+    }
+
+    /** Creates an attachment for an inactive tab whose upload started from the tab cache. */
+    private FuseboxAttachment createCachedTabAttachment() {
+        setTabActive(false);
+        when(mBridge.addTabContextFromCache(TAB_ID, /* isSuggestedTab= */ false))
+                .thenReturn(CACHE_TOKEN);
+        FuseboxAttachment attachment = createTabPickerAttachment();
+        assertTrue(attachment.uploadToBackend(mBridge, /* bypassTabCacheThisTime= */ false));
+        return attachment;
+    }
+
+    private static HistogramWatcher expectStartFailure(
+            @FuseboxTabAttachStartFailureReason int reason) {
+        return HistogramWatcher.newBuilder()
+                .expectIntRecord(
+                        FuseboxMetrics.TAB_ATTACHMENT_START_FAILURE_REASON_HISTOGRAM, reason)
+                .expectIntRecord(
+                        FuseboxMetrics.TAB_ATTACHMENT_START_FAILURE_REASON_HISTOGRAM + ".TabPicker",
+                        reason)
+                .build();
+    }
+
+    private static HistogramWatcher expectNoStartFailure() {
+        return HistogramWatcher.newBuilder()
+                .expectNoRecords(FuseboxMetrics.TAB_ATTACHMENT_START_FAILURE_REASON_HISTOGRAM)
+                .build();
     }
 }

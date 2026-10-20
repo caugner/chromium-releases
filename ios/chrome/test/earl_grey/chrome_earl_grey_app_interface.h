@@ -292,8 +292,28 @@ enum class TipsNotificationType;
 // windows.
 + (void)openSettingsInWindowWithNumber:(int)windowNumber;
 
+// Shows the tab switcher directly (not via the UI) in the window with the
+// given number.
++ (void)showTabSwitcherInWindowWithNumber:(int)windowNumber;
+
 // Returns the interface orientation of the scene.
 + (UIInterfaceOrientation)interfaceOrientation;
+
+// Returns YES if running on an iPhone Duo simulator.
++ (BOOL)isDuoSimulator;
+
+// Sends a simulated hinge angle event (0.0 = Closed, 130.0 = Book,
+// 180.0 = Open).
++ (BOOL)dispatchSimulatedDuoHingeAngle:(double)angleInDegrees;
+
+// Returns YES if the window and hinge posture match `angleInDegrees`.
++ (BOOL)isSimulatedDuoHingePostureSettled:(double)angleInDegrees;
+
+// Sends a simulated device orientation event.
++ (BOOL)dispatchSimulatedDuoOrientation:(UIDeviceOrientation)orientation;
+
+// Returns YES if the scene and window orientation match `orientation`.
++ (BOOL)isSimulatedDuoOrientationSettled:(UIDeviceOrientation)orientation;
 
 #pragma mark - WebState Utilities (EG2)
 
@@ -458,6 +478,10 @@ enum class TipsNotificationType;
 // GUID.
 + (BOOL)hasSendTabToSelfEntryWithGUID:(NSString*)guid;
 
+// Checks if the local Send Tab To Self model is ready and contains a target
+// device with the given `deviceName`.
++ (BOOL)hasSendTabToSelfTargetDevice:(NSString*)deviceName;
+
 // Returns the generated text fragment for the given URL, or nil if no entry
 // exists or no fragment is set.
 + (NSString*)textFragmentForSendTabToSelfEntryWithURL:(NSString*)URL;
@@ -479,9 +503,6 @@ enum class TipsNotificationType;
 // (depending on `expectPresent`), return YES. If the present status of `spec`
 // is not what is expected, or there is an error, return NO.
 + (BOOL)isURL:(NSString*)spec presentOnClient:(BOOL)expectPresent;
-
-// Triggers a sync cycle for a `type`.
-+ (void)triggerSyncCycleForType:(syncer::DataType)type;
 
 // Injects user demographics into the fake sync server. `rawBirthYear` is the
 // true birth year, pre-noise, and the gender corresponds to the proto enum
@@ -620,6 +641,8 @@ enum class TipsNotificationType;
 // Returns whether overflow menu refactoring on the NTP is enabled.
 + (BOOL)isOverflowMenuNTPRefactorEnabled;
 
+// Returns whether the Pinned Tabs feature is enabled.
++ (BOOL)isPinnedTabsEnabled;
 
 #pragma mark - ContentSettings
 

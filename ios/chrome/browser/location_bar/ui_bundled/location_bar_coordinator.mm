@@ -170,6 +170,8 @@ struct AIHubBadgeActiveWindowsData : public base::SupportsUserData::Data {
 
   // Whether this coordinator is for a text-only location bar.
   BOOL _textOnly;
+  // Whether this location bar is currently active.
+  BOOL _active;
 }
 // Whether the coordinator is started.
 @property(nonatomic, assign, getter=isStarted) BOOL started;
@@ -231,11 +233,20 @@ struct AIHubBadgeActiveWindowsData : public base::SupportsUserData::Data {
   return self.viewController.steadyViewLayoutGuide;
 }
 
+- (void)setContentSizeDelegate:
+    (id<LocationBarContentSizeDelegate>)contentSizeDelegate {
+  _contentSizeDelegate = contentSizeDelegate;
+  // The view controller only exists once started; `start` re-applies the
+  // delegate for the case where it was set before.
+  self.viewController.contentSizeDelegate = contentSizeDelegate;
+}
+
 - (instancetype)initWithBrowser:(Browser*)browser textOnly:(BOOL)textOnly {
   CHECK(browser);
   self = [super initWithBaseViewController:nil browser:browser];
   if (self) {
     _textOnly = textOnly;
+    _active = YES;
   }
   return self;
 }
@@ -261,7 +272,11 @@ struct AIHubBadgeActiveWindowsData : public base::SupportsUserData::Data {
 
   self.viewController =
       [[LocationBarViewController alloc] initWithTextOnly:_textOnly];
+  if (IsLocationBarPerformanceImprovementsEnabled()) {
+    self.viewController.active = _active;
+  }
   self.viewController.incognito = isIncognito;
+  self.viewController.contentSizeDelegate = _contentSizeDelegate;
   _prefService = self.profile->GetPrefs();
   self.viewController.profilePrefs = _prefService;
   self.viewController.delegate = self;
@@ -317,122 +332,8 @@ struct AIHubBadgeActiveWindowsData : public base::SupportsUserData::Data {
         [self.omniboxCoordinator offsetProvider];
   }
 
-  if (IsPageActionMenuEnabled() || IsProactiveSuggestionsFrameworkEnabled() ||
-      IsLocationBarBadgeMigrationEnabled()) {
-    self.locationBarBadgeCoordinator = [[LocationBarBadgeCoordinator alloc]
-        initWithBaseViewController:self.viewController
-                           browser:self.browser];
-    self.locationBarBadgeCoordinator.delegate = self;
-    [self.locationBarBadgeCoordinator start];
-    // TODO (crbug.com/429140788): Remove after migration when this view is
-    // permanently shown.
-    self.locationBarBadgeCoordinator.viewController.visibilityDelegate =
-        self.viewController.contextualEntrypointVisibilityDelegate;
-
-    [self.viewController
-        addChildViewController:self.locationBarBadgeCoordinator.viewController];
-    // TODO(crbug.com/469528076): After migration, refactor to
-    // setLocationBarBadgeView and set it in LocationBarSteadyView.
-    [self.viewController
-        setContextualPanelEntrypointView:self.locationBarBadgeCoordinator
-                                             .viewController.view];
-    [self.locationBarBadgeCoordinator.viewController
-        didMoveToParentViewController:self.viewController];
-  } else {
-    self.contextualPanelEntrypointCoordinator =
-        [[ContextualPanelEntrypointCoordinator alloc]
-            initWithBaseViewController:self.viewController
-                               browser:self.browser];
-    self.contextualPanelEntrypointCoordinator.delegate = self;
-    self.contextualPanelEntrypointCoordinator.visibilityDelegate =
-        self.viewController.contextualEntrypointVisibilityDelegate;
-    [self.contextualPanelEntrypointCoordinator start];
-    [self.viewController
-        addChildViewController:self.contextualPanelEntrypointCoordinator
-                                   .viewController];
-    [self.viewController
-        setContextualPanelEntrypointView:
-            self.contextualPanelEntrypointCoordinator.viewController.view];
-    [self.contextualPanelEntrypointCoordinator.viewController
-        didMoveToParentViewController:self.viewController];
-  }
-
-  self.readerModeChipCoordinator = [[ReaderModeChipCoordinator alloc]
-      initWithBaseViewController:self.viewController
-                         browser:self.browser];
-  if (!IsLocationBarBadgeMigrationEnabled()) {
-    self.readerModeChipCoordinator.visibilityDelegate =
-        self.viewController.readerModeChipVisibilityDelegate;
-  }
-  [self.readerModeChipCoordinator start];
-  [self.viewController
-      setReaderModeChipView:self.readerModeChipCoordinator.viewController.view];
-
-  // Create button factory that wil be used by the ViewController to get
-  // BadgeButtons for a BadgeType.
-  BadgeButtonFactory* buttonFactory = [[BadgeButtonFactory alloc] init];
-  buttonFactory.incognito = isIncognito;
-  self.badgeViewController =
-      [[BadgeViewController alloc] initWithButtonFactory:buttonFactory];
-  self.badgeViewController.layoutGuideCenter =
-      LayoutGuideCenterForBrowser(self.browser);
-  if (!IsLocationBarBadgeMigrationEnabled()) {
-    self.badgeViewController.visibilityDelegate =
-        [self.viewController badgeViewVisibilityDelegate];
-  }
-  [self.viewController addChildViewController:self.badgeViewController];
-  [self.viewController setBadgeView:self.badgeViewController.view];
-  [self.badgeViewController didMoveToParentViewController:self.viewController];
-  // Create BadgeMediator and set the viewController as its consumer.
-  OverlayPresenter* overlayPresenter = OverlayPresenter::FromBrowser(
-      self.browser, OverlayModality::kInfobarBanner);
-  self.badgeMediator =
-      [[BadgeMediator alloc] initWithWebStateList:self.webStateList
-                                 overlayPresenter:overlayPresenter];
-  self.badgeMediator.consumer = self.badgeViewController;
-  // TODO(crbug.com/40670043): Use HandlerForProtocol after commands protocol
-  // clean up.
-  self.badgeMediator.dispatcher =
-      static_cast<id<BrowserCoordinatorCommands, LocationBarBadgeCommands>>(
-          self.browser->GetCommandDispatcher());
-  buttonFactory.delegate = self.badgeMediator;
-
-  if (!IsFullscreenRefactoringEnabled()) {
-    FullscreenController* fullscreenController =
-        FullscreenController::FromBrowser(self.browser);
-    _badgeFullscreenUIUpdater = std::make_unique<FullscreenUIUpdater>(
-        fullscreenController, self.badgeViewController);
-  }
-
-  // Create incognito badge view controller and mediator for an incognito
-  // profile.
-  if (isIncognito && !IsChromeNextIaEnabled()) {
-    self.incognitoBadgeViewController = [[IncognitoBadgeViewController alloc]
-        initWithButtonFactory:buttonFactory];
-    if (!IsLocationBarBadgeMigrationEnabled()) {
-      self.incognitoBadgeViewController.visibilityDelegate =
-          [self.viewController incognitoBadgeViewVisibilityDelegate];
-      [self.viewController
-          addChildViewController:self.incognitoBadgeViewController];
-      [self.viewController
-          setIncognitoBadgeView:self.incognitoBadgeViewController.view];
-      [self.incognitoBadgeViewController
-          didMoveToParentViewController:self.viewController];
-    } else {
-      [self.locationBarBadgeCoordinator
-          addIncognitoBadgeViewController:self.incognitoBadgeViewController];
-    }
-
-    self.incognitoBadgeMediator =
-        [[IncognitoBadgeMediator alloc] initWithWebStateList:self.webStateList];
-    self.incognitoBadgeMediator.consumer = self.incognitoBadgeViewController;
-
-    if (!IsFullscreenRefactoringEnabled()) {
-      _incognitoBadgeFullscreenUIUpdater =
-          std::make_unique<FullscreenUIUpdater>(
-              FullscreenController::FromBrowser(self.browser),
-              self.incognitoBadgeViewController);
-    }
+  if (!_textOnly) {
+    [self setUpBadges];
   }
 
   UrlLoadingBrowserAgent* URLLoading =
@@ -443,6 +344,9 @@ struct AIHubBadgeActiveWindowsData : public base::SupportsUserData::Data {
       initWithURLLoadingBrowsingAgent:URLLoading
                 aimEligibilityService:aimEligibilityService
                           isIncognito:isIncognito];
+  if (IsLocationBarPerformanceImprovementsEnabled()) {
+    self.mediator.active = _active;
+  }
   self.mediator.templateURLService =
       ios::TemplateURLServiceFactory::GetForProfile(self.profile);
   self.mediator.consumer = self.viewController;
@@ -455,6 +359,9 @@ struct AIHubBadgeActiveWindowsData : public base::SupportsUserData::Data {
 
   self.steadyViewMediator = [[LocationBarSteadyViewMediator alloc]
       initWithLocationBarModel:[self locationBarModel]];
+  if (IsLocationBarPerformanceImprovementsEnabled()) {
+    self.steadyViewMediator.active = _active;
+  }
   self.steadyViewMediator.webStateList = self.browser->GetWebStateList();
   self.steadyViewMediator.webContentAreaOverlayPresenter =
       OverlayPresenter::FromBrowser(self.browser,
@@ -533,6 +440,7 @@ struct AIHubBadgeActiveWindowsData : public base::SupportsUserData::Data {
   self.incognitoBadgeMediator = nil;
   self.incognitoBadgeViewController = nil;
 
+  self.viewController.dispatcher = nil;
   self.viewController.geminiHandler = nil;
   self.viewController = nil;
   [self.mediator disconnect];
@@ -605,8 +513,12 @@ struct AIHubBadgeActiveWindowsData : public base::SupportsUserData::Data {
 }
 
 - (void)setLocationBarActive:(BOOL)active {
+  _active = active;
   [self.badgeMediator setActive:active];
   self.mediator.active = active;
+  if (IsLocationBarPerformanceImprovementsEnabled()) {
+    self.steadyViewMediator.active = active;
+  }
   [self.locationBarBadgeCoordinator setActive:active];
   self.viewController.active = active;
 }
@@ -879,6 +791,10 @@ struct AIHubBadgeActiveWindowsData : public base::SupportsUserData::Data {
   [self.viewController setCustomLeadingViewType:type];
 }
 
+- (void)hideBadgeForType:(LocationBarBadgeType)type {
+  [self.locationBarBadgeCoordinator hideBadgeForType:type];
+}
+
 - (void)togglePageActionMenuEntryPointHighlight:(BOOL)highlight {
   [self.viewController.pageActionMenuEntryPointHandler
       toggleEntryPointHighlight:highlight];
@@ -919,7 +835,10 @@ struct AIHubBadgeActiveWindowsData : public base::SupportsUserData::Data {
     [self.omniboxCoordinator updateOmniboxState];
   }
   [self.viewController updateLocationText:text clipTail:clipTail];
-  [self.viewController updateForNTP:NO];
+  if (!IsLocationBarPerformanceImprovementsEnabled() ||
+      !IsVisibleURLNewTabPage(self.webState)) {
+    [self.viewController updateForNTP:NO];
+  }
   [self.mediator locationUpdated];
 }
 
@@ -1014,6 +933,135 @@ struct AIHubBadgeActiveWindowsData : public base::SupportsUserData::Data {
     return _locationBarModel->GetPageClassification(isPrefetch);
   }
   return metrics::OmniboxEventProto::INVALID_SPEC;
+}
+
+// Sets up the badge and entrypoint coordinators and view controllers.
+- (void)setUpBadges {
+  BOOL isIncognito = self.isOffTheRecord;
+
+  if (IsPageActionMenuEnabled() || IsProactiveSuggestionsFrameworkEnabled() ||
+      IsLocationBarBadgeMigrationEnabled()) {
+    self.locationBarBadgeCoordinator = [[LocationBarBadgeCoordinator alloc]
+        initWithBaseViewController:self.viewController
+                           browser:self.browser];
+    self.locationBarBadgeCoordinator.delegate = self;
+    [self.locationBarBadgeCoordinator start];
+    if (IsLocationBarPerformanceImprovementsEnabled()) {
+      [self.locationBarBadgeCoordinator setActive:_active];
+    }
+    // TODO (crbug.com/429140788): Remove after migration when this view is
+    // permanently shown.
+    self.locationBarBadgeCoordinator.viewController.visibilityDelegate =
+        self.viewController.contextualEntrypointVisibilityDelegate;
+
+    [self.viewController
+        addChildViewController:self.locationBarBadgeCoordinator.viewController];
+    // TODO(crbug.com/469528076): After migration, refactor to
+    // setLocationBarBadgeView and set it in LocationBarSteadyView.
+    [self.viewController
+        setContextualPanelEntrypointView:self.locationBarBadgeCoordinator
+                                             .viewController.view];
+    [self.locationBarBadgeCoordinator.viewController
+        didMoveToParentViewController:self.viewController];
+  } else {
+    self.contextualPanelEntrypointCoordinator =
+        [[ContextualPanelEntrypointCoordinator alloc]
+            initWithBaseViewController:self.viewController
+                               browser:self.browser];
+    self.contextualPanelEntrypointCoordinator.delegate = self;
+    self.contextualPanelEntrypointCoordinator.visibilityDelegate =
+        self.viewController.contextualEntrypointVisibilityDelegate;
+    [self.contextualPanelEntrypointCoordinator start];
+    [self.viewController
+        addChildViewController:self.contextualPanelEntrypointCoordinator
+                                   .viewController];
+    [self.viewController
+        setContextualPanelEntrypointView:
+            self.contextualPanelEntrypointCoordinator.viewController.view];
+    [self.contextualPanelEntrypointCoordinator.viewController
+        didMoveToParentViewController:self.viewController];
+  }
+
+  self.readerModeChipCoordinator = [[ReaderModeChipCoordinator alloc]
+      initWithBaseViewController:self.viewController
+                         browser:self.browser];
+  if (!IsLocationBarBadgeMigrationEnabled()) {
+    self.readerModeChipCoordinator.visibilityDelegate =
+        self.viewController.readerModeChipVisibilityDelegate;
+  }
+  [self.readerModeChipCoordinator start];
+  [self.viewController
+      setReaderModeChipView:self.readerModeChipCoordinator.viewController.view];
+
+  // Create button factory that wil be used by the ViewController to get
+  // BadgeButtons for a BadgeType.
+  BadgeButtonFactory* buttonFactory = [[BadgeButtonFactory alloc] init];
+  buttonFactory.incognito = isIncognito;
+  self.badgeViewController =
+      [[BadgeViewController alloc] initWithButtonFactory:buttonFactory];
+  self.badgeViewController.layoutGuideCenter =
+      LayoutGuideCenterForBrowser(self.browser);
+  if (!IsLocationBarBadgeMigrationEnabled()) {
+    self.badgeViewController.visibilityDelegate =
+        [self.viewController badgeViewVisibilityDelegate];
+  }
+  [self.viewController addChildViewController:self.badgeViewController];
+  [self.viewController setBadgeView:self.badgeViewController.view];
+  [self.badgeViewController didMoveToParentViewController:self.viewController];
+  // Create BadgeMediator and set the viewController as its consumer.
+  OverlayPresenter* overlayPresenter = OverlayPresenter::FromBrowser(
+      self.browser, OverlayModality::kInfobarBanner);
+  self.badgeMediator =
+      [[BadgeMediator alloc] initWithWebStateList:self.webStateList
+                                 overlayPresenter:overlayPresenter];
+  if (IsLocationBarPerformanceImprovementsEnabled()) {
+    [self.badgeMediator setActive:_active];
+  }
+  self.badgeMediator.consumer = self.badgeViewController;
+  // TODO(crbug.com/40670043): Use HandlerForProtocol after commands protocol
+  // clean up.
+  self.badgeMediator.dispatcher =
+      static_cast<id<BrowserCoordinatorCommands, LocationBarBadgeCommands>>(
+          self.browser->GetCommandDispatcher());
+  buttonFactory.delegate = self.badgeMediator;
+
+  if (!IsFullscreenRefactoringEnabled()) {
+    FullscreenController* fullscreenController =
+        FullscreenController::FromBrowser(self.browser);
+    _badgeFullscreenUIUpdater = std::make_unique<FullscreenUIUpdater>(
+        fullscreenController, self.badgeViewController);
+  }
+
+  // Create incognito badge view controller and mediator for an incognito
+  // profile.
+  if (isIncognito && !IsChromeNextIaEnabled()) {
+    self.incognitoBadgeViewController = [[IncognitoBadgeViewController alloc]
+        initWithButtonFactory:buttonFactory];
+    if (!IsLocationBarBadgeMigrationEnabled()) {
+      self.incognitoBadgeViewController.visibilityDelegate =
+          [self.viewController incognitoBadgeViewVisibilityDelegate];
+      [self.viewController
+          addChildViewController:self.incognitoBadgeViewController];
+      [self.viewController
+          setIncognitoBadgeView:self.incognitoBadgeViewController.view];
+      [self.incognitoBadgeViewController
+          didMoveToParentViewController:self.viewController];
+    } else {
+      [self.locationBarBadgeCoordinator
+          addIncognitoBadgeViewController:self.incognitoBadgeViewController];
+    }
+
+    self.incognitoBadgeMediator =
+        [[IncognitoBadgeMediator alloc] initWithWebStateList:self.webStateList];
+    self.incognitoBadgeMediator.consumer = self.incognitoBadgeViewController;
+
+    if (!IsFullscreenRefactoringEnabled()) {
+      _incognitoBadgeFullscreenUIUpdater =
+          std::make_unique<FullscreenUIUpdater>(
+              FullscreenController::FromBrowser(self.browser),
+              self.incognitoBadgeViewController);
+    }
+  }
 }
 
 - (void)setUpDragAndDrop {

@@ -6,6 +6,7 @@
 
 #include "base/android/jni_android.h"
 #include "base/feature_list.h"
+#include "base/functional/callback_helpers.h"
 #include "base/notimplemented.h"
 #include "base/notreached.h"
 #include "base/scoped_observation.h"
@@ -123,7 +124,7 @@ void GlicSidePanelUi::Show(const ShowOptions& options) {
     return;
   }
   panel_state_.kind = mojom::PanelStateKind::kAttached;
-  delegate_->NotifyPanelStateChanged();
+  delegate_->UpdatePanelState();
   delegate_->host().FloatingPanelCanAttachChanged(false);
   panel_visibility_dependent_hotkey_manager_->InitializeAccelerators();
   panel_focus_dependent_hotkey_manager_->InitializeAccelerators();
@@ -197,21 +198,6 @@ void GlicSidePanelUi::SwitchConversation(
                                 std::move(info), std::move(callback));
 }
 
-void GlicSidePanelUi::CaptureScreenshot(
-    glic::mojom::WebClientHandler::CaptureScreenshotCallback callback) {
-  if (!tab_) {
-    std::move(callback).Run(nullptr);
-    return;
-  }
-  if (!screenshot_capturer_) {
-    screenshot_capturer_ = GlicScreenshotCapturer::Create();
-  }
-  auto* browser_window = tab_->GetBrowserWindowInterface();
-  CHECK(browser_window);
-  screenshot_capturer_->CaptureScreenshot(
-      browser_window->GetWindow()->GetNativeWindow(), std::move(callback));
-}
-
 bool GlicSidePanelUi::IsShowing() const {
   return GlicSidePanelCoordinator::IsShowing(tab_.get());
 }
@@ -260,6 +246,13 @@ void GlicSidePanelUi::OnBrowserDeactivated(BrowserWindowInterface* browser) {
   }
   if (tab_ && tab_->GetBrowserWindowInterface() == browser) {
     delegate_->OnEmbedderWindowActivationChanged(false);
+    // Voice input is a foreground-only interaction on Android. When another
+    // app or system UI (e.g. an incoming call screen) takes over, the web
+    // client does not get a reliable signal to stop listening, so ask it
+    // explicitly.
+    if (base::FeatureList::IsEnabled(features::kGlicVoice)) {
+      delegate_->host().StopMicrophone(base::DoNothing());
+    }
   }
 }
 
@@ -293,13 +286,19 @@ EmbedderCloseReason MapStateToCloseReason(
 void GlicSidePanelUi::SidePanelStateChanged(
     GlicSidePanelCoordinator::State state) {
   if (state != GlicSidePanelCoordinator::State::kShown && tab_) {
+    // The panel is no longer in front of the user, so it must not keep
+    // listening.
+    if (base::FeatureList::IsEnabled(features::kGlicVoice)) {
+      delegate_->host().StopMicrophone(base::DoNothing());
+    }
+
     GlicInstanceMetrics::CloseReason reason =
         state == GlicSidePanelCoordinator::State::kBackgrounded
             ? GlicInstanceMetrics::CloseReason::kTabSwitched
             : GlicInstanceMetrics::CloseReason::kExplicitlyClosed;
     instance_metrics_->OnSidePanelClosed(tab_.get(), reason);
     panel_state_.kind = mojom::PanelStateKind::kHidden;
-    delegate_->NotifyPanelStateChanged();
+    delegate_->UpdatePanelState();
 
     // NOTE: `this` will be destroyed after this call.
     delegate_->DidCloseFor(SidePanelEmbedderKey{*tab_},

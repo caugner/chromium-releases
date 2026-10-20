@@ -23,9 +23,19 @@ import {NodeStore} from './node_store.js';
 import {removeExtraneousElementsFrom} from './readability_content_processing.js';
 import {ReadabilityImageClassifier} from './readability_image_classifier.js';
 
+// Sanitizer options for distilled HTML rendered in Reading mode.
 const READABILITY_SET_HTML_OPTIONS: SetHtmlOptions = {
   sanitizer: {
-    removeElements: ['style', 'meta', 'template'],
+    removeElements: [
+      'dialog',
+      'link',
+      'meta',
+      'style',
+      'template',
+      // Also remove <style> elements inside <svg>, which use the SVG namespace.
+      {name: 'style', namespace: 'http://www.w3.org/2000/svg'},
+    ],
+    removeAttributes: ['class', 'data-link', 'popover', 'style'],
   },
 };
 
@@ -72,7 +82,12 @@ const READABILITY_TAG_TO_RM_TAG: Map<string, string> = new Map([
   ['button', 'div'],
   ['details', 'div'],
   ['mark', 'div'],
+  ['i', 'b'],
+  ['em', 'b'],
 ]);
+
+const READABILITY_REPLACED_ELEMENTS_SELECTOR =
+    [...READABILITY_TAG_TO_RM_TAG.keys(), ':not(:defined)'].join(',');
 
 export interface ContentListener {
   // Called when the current state changes between the different ContentTypes.
@@ -299,11 +314,12 @@ export class ContentController {
       }
 
       // Replace tags that shouldn't be interactive or have special behavior
-      // in reading mode. This is similar to what happens in `buildSubtree_`
-      // for Screen2x.
-      for (const [tag, replacement] of READABILITY_TAG_TO_RM_TAG) {
-        const elements = contentContainer.querySelectorAll(tag);
-        for (const element of elements) {
+      // in reading mode, and unwrap any custom elements defined in the Reading
+      // Mode WebUI before connecting to the shadow root.
+      for (const element of contentContainer.querySelectorAll(
+               READABILITY_REPLACED_ELEMENTS_SELECTOR)) {
+        const replacement = READABILITY_TAG_TO_RM_TAG.get(element.localName);
+        if (replacement) {
           const replacementEl = document.createElement(replacement);
           while (element.firstChild) {
             replacementEl.appendChild(element.firstChild);
@@ -312,6 +328,8 @@ export class ContentController {
             replacementEl.setAttribute(attr.name, attr.value);
           }
           element.replaceWith(replacementEl);
+        } else if (customElements.get(element.localName)) {
+          element.replaceWith(...element.childNodes);
         }
       }
 
@@ -812,8 +830,18 @@ export class ContentController {
         colorSpaceConversion: 'none',
         premultiplyAlpha: 'premultiply',
       });
-      context.drawImage(bitmap, 0, 0);
-      this.listeners_.forEach(l => l.onContentChange());
+      try {
+        // Return early if content was cleared or redistilled while the image
+        // was decoding. Otherwise, listeners would be notified to recalculate
+        // text positions for unchanged content.
+        if (this.nodeStore_.getDomNode(nodeId) !== element) {
+          return;
+        }
+        context.drawImage(bitmap, 0, 0);
+        this.listeners_.forEach(l => l.onContentChange());
+      } finally {
+        bitmap.close();
+      }
     }
   }
 
