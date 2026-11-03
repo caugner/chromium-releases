@@ -54,7 +54,7 @@ if [[ ! -d "$releases_dir/.git" ]]; then
   exit 1
 fi
 
-latest_milestone=$(git -C "$releases_dir" log -1 --format=%s | sed -nE 's/^release: Chromium ([0-9]+)\..*/\1/p')
+latest_milestone=$(git -C "$releases_dir" log -1 --format=%s | sed -nE 's/^release: Chromium ([0-9]+)(\.0.*| \(.*\))$/\1/p')
 if [[ -z "$start_arg" ]]; then
   if [[ -z "$latest_milestone" ]]; then
     echo "Could not determine the latest release from the releases branch." >&2
