@@ -54,7 +54,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/app_menu_model.h"
 #include "chrome/browser/ui/ui_features.h"
-#include "chrome/browser/ui/views/bookmarks/bookmark_menu_delegate.h"
+#include "chrome/browser/ui/views/bookmarks/app_menu_bookmark_delegate.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/frame/app_menu_button.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -884,6 +884,13 @@ class AppMenu::ZoomView : public AppMenuView, public views::WidgetObserver {
       if (zoom_controller) {
         zoom = zoom_controller->GetZoomPercent();
       }
+    }
+    if (!on_construction && zoom_percent_ == zoom) {
+      return;
+    }
+    zoom_percent_ = zoom;
+
+    if (contents) {
       increment_button_->SetEnabled(zoom < contents->GetMaximumZoomPercent());
       decrement_button_->SetEnabled(zoom > contents->GetMinimumZoomPercent());
     }
@@ -955,6 +962,9 @@ class AppMenu::ZoomView : public AppMenuView, public views::WidgetObserver {
   // instead. This value is cached because is depends on multiple calls to
   // gfx::GetStringWidth(...) which are expensive.
   mutable std::optional<int> zoom_label_max_width_;
+
+  // Current zoom percent for the active tab.
+  std::optional<int> zoom_percent_;
 };
 
 BEGIN_METADATA(AppMenu, ZoomView)
@@ -1272,7 +1282,6 @@ bool AppMenu::IsCommandEnabled(int command_id) const {
     return true;
   }
 
-
   if (IsTabGroupsCommand(command_id)) {
     return stg_everything_menu_->ShouldEnableCommand(command_id);
   }
@@ -1282,7 +1291,7 @@ bool AppMenu::IsCommandEnabled(int command_id) const {
     return true;
   }
 
-  if (command_id == AppMenuModel::kSkillsMenuPlaceholder) {
+  if (command_id == AppMenuModel::kSkillsAndExtensionsMenuPlaceholder) {
     return true;
   }
 
@@ -1303,6 +1312,10 @@ bool AppMenu::IsCommandEnabled(int command_id) const {
   // The child views of these items enabled state updates appropriately.
   if (command_id == AppMenuModel::kEditMenuPlaceholder ||
       command_id == AppMenuModel::kZoomMenuPlaceholder) {
+    return true;
+  }
+
+  if (command_id == AppMenuModel::kContextualTasksMenuPlaceholder) {
     return true;
   }
 
@@ -1343,7 +1356,6 @@ void AppMenu::ExecuteCommand(int command_id, int mouse_event_flags) {
     return;
   }
 
-
   const Entry& entry = command_id_to_entry_.find(command_id)->second;
   return entry.first->ActivatedAt(entry.second, mouse_event_flags);
 }
@@ -1362,7 +1374,6 @@ bool AppMenu::GetAccelerator(int command_id,
 
     return false;
   }
-
 
   if (IsTabGroupsCommand(command_id)) {
     return false;
@@ -1406,6 +1417,14 @@ void AppMenu::WillShowMenu(MenuItemView* menu) {
           tab_groups::STGEverythingMenu::MenuContext::kAppMenu);
       stg_everything_menu_->PopulateMenu(menu);
     }
+  } else if (menu->GetCommand() ==
+             AppMenuModel::kSkillsAndExtensionsMenuPlaceholder) {
+    DEPRECATED_UMA_HISTOGRAM_MEDIUM_TIMES(
+        "WrenchMenu.TimeToAction.ShowSkillsAndExtensions",
+        menu_opened_timer_.Elapsed());
+    UMA_HISTOGRAM_ENUMERATION("WrenchMenu.MenuAction",
+                              MENU_ACTION_SHOW_SKILLS_AND_EXTENSIONS,
+                              LIMIT_MENU_ACTION);
   } else if (IsTabGroupsCommand(menu->GetCommand())) {
     stg_everything_menu_->PopulateTabGroupSubMenu(menu);
   } else if (menu == bookmark_menu_) {
@@ -1548,9 +1567,10 @@ void AppMenu::OnGlobalErrorsChanged() {
   }
 }
 
-views::View* AppMenu::GetZoomAppMenuViewForTest() {
+// static
+views::View* AppMenu::GetZoomAppMenuViewForTest(views::MenuItemView* root) {
   std::optional<int> zoom_view_command_id = AppMenuModel::kZoomMenuPlaceholder;
-  auto* menu_item = root_->GetMenuItemByID(zoom_view_command_id.value());
+  auto* menu_item = root->GetMenuItemByID(zoom_view_command_id.value());
   DCHECK(menu_item);
 
   for (views::View* child : menu_item->children()) {
@@ -1765,7 +1785,7 @@ void AppMenu::CreateBookmarkMenu() {
   // TODO(oshima): Replace with views only API.
   views::Widget* parent = views::Widget::GetWidgetForNativeWindow(
       browser_->GetWindow()->GetNativeWindow());
-  bookmark_menu_delegate_ = std::make_unique<BookmarkMenuDelegate>(
+  bookmark_menu_delegate_ = std::make_unique<AppMenuBookmarkDelegate>(
       browser_, parent, this, BookmarkLaunchLocation::kAppMenu);
   bookmark_menu_delegate_->BuildFullMenu(bookmark_menu_);
 }
